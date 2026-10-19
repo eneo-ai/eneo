@@ -147,6 +147,8 @@ class AIBuilderErrorCode(StrEnum):
     )
     BAD_REQUEST = "bad_request"
     BUILDER_ATTACHMENT_UNAVAILABLE = "builder_attachment_unavailable"
+    CLASSIFICATION_OUTPUT_LIMIT = "classification_output_limit"
+    CLASSIFICATION_UNREADABLE_REPLY = "classification_unreadable_reply"
     EDIT_SESSION_FLOW_REQUIRED = "edit_session_flow_required"
     FLOW_IS_PUBLISHED = "flow_is_published"
     FLOW_NOT_PUBLISHED = "flow_not_published"
@@ -1131,6 +1133,18 @@ AI_BUILDER_ERROR_REGISTRY: _AIBuilderErrorRegistry = MappingProxyType(
             default_phase=AIBuilderErrorPhase.PLANNER,
         ),
         AIBuilderErrorCode.PLANNER_UPSTREAM_ERROR: _entry(
+            category=AIBuilderErrorCategory.UPSTREAM,
+            http_status=502,
+            eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            default_phase=AIBuilderErrorPhase.PLANNER,
+        ),
+        AIBuilderErrorCode.CLASSIFICATION_OUTPUT_LIMIT: _entry(
+            category=AIBuilderErrorCategory.UPSTREAM,
+            http_status=502,
+            eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            default_phase=AIBuilderErrorPhase.PLANNER,
+        ),
+        AIBuilderErrorCode.CLASSIFICATION_UNREADABLE_REPLY: _entry(
             category=AIBuilderErrorCategory.UPSTREAM,
             http_status=502,
             eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,

@@ -11,7 +11,7 @@ from dataclasses import field as dataclass_field
 from typing import Any, Literal, NamedTuple, TypeGuard, assert_never, cast, get_args
 from uuid import UUID
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from eneo.flows.ai_builder.ai_builder_canonicalization import canonical_question_id
 from eneo.flows.ai_builder.ai_builder_new_step_models import MAX_STRUCTURED_FIELD_DEPTH
@@ -92,6 +92,53 @@ SlotClassificationRejectReason = Literal[
     "checkpoint_speaker_naming_not_boolean",
     "checkpoint_duplicate_producer",
 ]
+# Why a reply that never reached the parser carried no reading: the strict tool
+# call is not the one the request asked for, or the reply is not text.
+SlotClassificationTransportRejectReason = Literal[
+    "tool_calls_malformed",
+    "tool_call_count",
+    "tool_call_unknown",
+    "tool_arguments_not_text",
+    "content_not_text",
+]
+# What a reply without a reading was, in the vocabulary of the turn's error.
+SlotClassificationReadingFailureReason = Literal[
+    "output_limit", "no_content", "invalid_reply"
+]
+_UNREAD_OUTCOME_BY_REASON: Mapping[
+    SlotClassificationReadingFailureReason, SlotClassificationReplyOutcome
+] = {
+    "output_limit": "output_limit_exceeded",
+    "no_content": "no_content",
+    "invalid_reply": "parse_failed",
+}
+
+
+class SlotClassificationReadingFailure(BaseModel):
+    """Why a classification reply carried no reading, with the facts of the
+    call that got it. Kept on each message the reading left unread, so a later
+    turn reports the cause that message recorded."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    reason: SlotClassificationReadingFailureReason
+    # The reply's refusal, parser's or transport's; only an invalid reply has one.
+    reject: (
+        SlotClassificationRejectReason | SlotClassificationTransportRejectReason | None
+    ) = None
+    # The output cap the call was sent with, which a cut-off reply reached.
+    output_cap_tokens: int | None = Field(default=None, ge=1)
+    request_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def _carries_only_its_reasons_facts(self) -> SlotClassificationReadingFailure:
+        if (self.reject is not None and self.reason != "invalid_reply") or (
+            (self.output_cap_tokens is None) == (self.reason == "output_limit")
+        ):
+            raise ValueError("A reading failure carries exactly its reason's facts")
+        return self
+
+
 SlotClassificationDiagnosticCode = Literal[
     "slot_outcome_duplicate",
     "slot_outcome_malformed",
@@ -471,6 +518,8 @@ class SlotClassificationResult:
 class SlotClassificationAttempt:
     outcome: SlotClassificationAttemptOutcome
     result: SlotClassificationResult | None = None
+    # Set by the classifier on every reply without a reading.
+    failure: SlotClassificationReadingFailure | None = None
 
     def __post_init__(self) -> None:
         if (self.outcome == "resolved") != (self.result is not None):
@@ -478,6 +527,17 @@ class SlotClassificationAttempt:
                 "Resolved slot classification attempts require a result; "
                 "other outcomes must not carry one"
             )
+        if (
+            self.failure is not None
+            and _UNREAD_OUTCOME_BY_REASON[self.failure.reason] != self.outcome
+        ):
+            raise ValueError("A reading failure belongs to the outcome it names")
+
+    @classmethod
+    def unread(
+        cls, failure: SlotClassificationReadingFailure
+    ) -> SlotClassificationAttempt:
+        return cls(outcome=_UNREAD_OUTCOME_BY_REASON[failure.reason], failure=failure)
 
 
 @dataclass(frozen=True, slots=True)

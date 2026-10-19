@@ -85,6 +85,10 @@ class PlannerCallRecordMetadata(BaseModel):
     # What a classification call's reply was; with an unread first reply the
     # turn holds the reply of the ask that followed it as the next record.
     classification_outcome: SlotClassificationReplyOutcome | None = None
+    # The provider's finish reason for a classification call's reply (one of
+    # the published reasons, or `other`); a proposal call reports its own at
+    # turn level, as `planner_telemetry.finish_reason`.
+    finish_reason: str | None = None
 
 
 class _PersistedPlannerTelemetry(BaseModel):

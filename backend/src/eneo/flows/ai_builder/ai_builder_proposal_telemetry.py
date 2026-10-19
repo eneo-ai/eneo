@@ -249,6 +249,7 @@ class ProposalCallRecord:
     max_gap_ms: int | None = None
     provider_elapsed_ms: int | None = None
     classification_outcome: SlotClassificationReplyOutcome | None = None
+    finish_reason: str | None = None
 
 
 def _call_record_metadata(record: ProposalCallRecord) -> PlannerCallRecordMetadata:
@@ -287,6 +288,7 @@ def _call_record_metadata(record: ProposalCallRecord) -> PlannerCallRecordMetada
         max_gap_ms=record.max_gap_ms,
         provider_elapsed_ms=record.provider_elapsed_ms,
         classification_outcome=record.classification_outcome,
+        finish_reason=record.finish_reason,
     )
 
 
@@ -430,9 +432,14 @@ class ProposalTurnTelemetry:
         )
 
     def record_classification_outcome(
-        self, *, attempt: int, outcome: SlotClassificationReplyOutcome
+        self,
+        *,
+        attempt: int,
+        outcome: SlotClassificationReplyOutcome,
+        finish_reason: str | None,
     ) -> None:
-        """Record what the reply of the classification call ``attempt`` was."""
+        """Record what the reply of the classification call ``attempt`` was,
+        and the finish reason the provider gave it."""
 
         index = attempt - 1
         if not 0 <= index < len(self.call_records):
@@ -440,7 +447,11 @@ class ProposalTurnTelemetry:
         record = self.call_records[index]
         if record.call_kind != "slot_classification":
             raise ValueError("Only a classification call has a classification outcome")
-        self.call_records[index] = replace(record, classification_outcome=outcome)
+        self.call_records[index] = replace(
+            record,
+            classification_outcome=outcome,
+            finish_reason=_published_finish_reason(finish_reason),
+        )
 
     def start_attempt(
         self,

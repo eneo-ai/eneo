@@ -147,8 +147,26 @@ included), `provider_elapsed_ms`, and, on a failed call, `local_deadline`
 (`silence` or `ceiling` when Eneo's own timer expired, absent for an SDK or
 gateway timeout). A requirement-classification call record also carries
 `classification_outcome`, what its reply was (`resolved`, `no_content`,
-`parse_failed`, `output_limit_exceeded`). A reply cut off at the output cap,
-empty or unparsable is not sent again: the turn continues without that reading.
+`parse_failed`, `output_limit_exceeded`), and the reply's `finish_reason`. A
+reply cut off at the output cap, empty or unparsable is not sent again. The
+turn's own user message, when that reading covered it, is marked `unread`,
+with `reading_failure` beside the status: the reason (`output_limit`, `no_content`, `invalid_reply`),
+for an invalid reply why it was refused (the parser's reason, or the reply's
+shape: tool calls, tool name, arguments or content not text), for a cut-off
+reply the call's output cap, and the request id. No other message changes: one
+already unread stays unread, and an earlier message without a status is not
+held by this reading, since such text was either built on or its own turn
+already ended in a typed error the user saw. While any message is unread,
+the Builder plans nothing: once its own reading is stored, the turn ends
+without an answer in a committed typed error
+(`classification_output_limit` or `classification_unreadable_reply`, category
+`upstream`) whose details name the newest unread message and take its recorded
+reason, cap and request id; a message marked unread without that record reads
+as reason `unknown`. Every later reading takes in all unread text again, so the
+target only decides which text a resend makes the newest request: the user's
+latest instruction, never one it superseded. Such a turn's call telemetry is stored on its user message.
+A reading that receives the message whole settles it and drops the record, as
+does a whole reading of the same text sent again.
 One owner ends an attempt on a provider failure: it
 records the failure on the pending call and closes the attempt in the same step,
 so a failed call is never completed afterwards, and it refuses to fail a turn

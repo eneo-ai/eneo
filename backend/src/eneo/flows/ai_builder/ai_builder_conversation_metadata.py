@@ -86,6 +86,8 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationDiagnosticCode,
     SlotClassificationEvidenceLevel,
     SlotClassificationInput,
+    SlotClassificationReadingFailure,
+    SlotClassificationReadingFailureReason,
     SlotClassificationResult,
     SlotClassificationSource,
     SlotClassificationSourceKind,
@@ -148,6 +150,7 @@ ASSISTANT_QUESTION_ID_METADATA_KEY = "question_id"
 ASSISTANT_QUESTION_INDEX_METADATA_KEY = "question_index"
 SLOT_CLASSIFICATION_METADATA_KEY = "slot_classification"
 TEXT_STATUS_METADATA_KEY = "text_status"
+READING_FAILURE_METADATA_KEY = "reading_failure"
 NAMED_CONTENT_FIELDS_EDIT_METADATA_KEY = "named_content_fields_edit"
 REOPEN_QUESTION_METADATA_KEY = "reopen_question"
 PROVIDER_TOOL_CALL_ID_MAX_LENGTH = 64
@@ -2182,11 +2185,10 @@ def slot_classification_from_metadata(
         return None
 
 
-# Why text the user wrote cannot be built on yet: it was never read, or its
-# reading carried a checkpoint conflict only the user can settle.
-UnsettledUserText: TypeAlias = Literal["unread"] | CheckpointUpdateDiagnosticCode
-# A user message's durable reading status, kept on the message itself.
-TextStatus: TypeAlias = Literal["settled"] | UnsettledUserText
+# A user message's durable reading status, kept on the message itself: read
+# and settled, never read, or read with a checkpoint conflict only the user can
+# settle.
+TextStatus: TypeAlias = Literal["settled", "unread"] | CheckpointUpdateDiagnosticCode
 _TEXT_STATUSES: frozenset[str] = frozenset(
     ("settled", "unread", *get_args(CheckpointUpdateDiagnosticCode))
 )
@@ -2199,9 +2201,54 @@ def text_status_from_metadata(metadata: object) -> TextStatus | None:
 
 
 def metadata_with_text_status(
-    metadata: FlowPersistedJsonObject | None, status: TextStatus
+    metadata: FlowPersistedJsonObject | None,
+    status: TextStatus,
+    *,
+    reading_failure: SlotClassificationReadingFailure | None = None,
 ) -> FlowPersistedJsonObject:
-    return {**(metadata or {}), TEXT_STATUS_METADATA_KEY: status}
+    """The message's metadata with its new status. A message left unread keeps
+    why, as `reading_failure` beside the status; any other status drops it,
+    whatever the caller passed. The status itself stays a plain string for
+    every reader of it."""
+
+    updated = {
+        key: value
+        for key, value in (metadata or {}).items()
+        if key != READING_FAILURE_METADATA_KEY
+    }
+    updated[TEXT_STATUS_METADATA_KEY] = status
+    if status == "unread" and reading_failure is not None:
+        updated[READING_FAILURE_METADATA_KEY] = reading_failure.model_dump(
+            mode="json", exclude_none=True
+        )
+    return updated
+
+
+def reading_failure_from_metadata(
+    metadata: object,
+) -> SlotClassificationReadingFailure | None:
+    """Why an unread message was not read, or None when it recorded no reason
+    (an older build wrote the status alone) or the record no longer reads."""
+
+    metadata_map = _metadata_mapping(metadata)
+    raw = metadata_map.get(READING_FAILURE_METADATA_KEY) if metadata_map else None
+    if raw is None:
+        return None
+    try:
+        return SlotClassificationReadingFailure.model_validate(raw)
+    except ValidationError as error:
+        _warn_invalid_persisted_metadata(READING_FAILURE_METADATA_KEY, error)
+        return None
+
+
+UnreadReason: TypeAlias = SlotClassificationReadingFailureReason | Literal["unknown"]
+
+
+def unread_reason(failure: SlotClassificationReadingFailure | None) -> UnreadReason:
+    """An unread message's recorded reason; `unknown`, never a guess, when it
+    recorded none."""
+
+    return failure.reason if failure is not None else "unknown"
 
 
 def text_status_changes(
@@ -2214,10 +2261,13 @@ def text_status_changes(
     each user message it covers. Recorded where the classification is stored,
     with `planning_state` the state planning builds from it and commits.
 
-    A reply with no reading leaves each covered message unread unless it
-    already has a status; a failed reading never undoes a settled message. A
-    resolved reading settles each unread message it received whole (a prefix
-    packed under budget pressure reads nothing). When it reads the latest
+    A reply with no reading leaves the latest message unread when it covered
+    it and the message has no status yet. It changes no other message: one
+    already unread stays unread, a settled one stays settled, and an earlier
+    one without a status is not held by it: such text was either built on, or
+    its own turn already ended in a typed error the user saw. A resolved
+    reading settles each unread message it received whole (a prefix packed
+    under budget pressure reads nothing). When it reads the latest
     message whole, that message is the user's answer to what they were told:
     it settles earlier unread copies of the same text, and earlier naming
     conflicts only when planning took from it a transcript review that answers
@@ -2240,9 +2290,12 @@ def text_status_changes(
     ]
     changes: dict[str, TextStatus] = {}
     if classification.outcome in UNREAD_CLASSIFICATION_OUTCOMES:
-        for message_id, _truncated in covered:
-            if statuses.get(message_id) is None:
-                changes[message_id] = "unread"
+        if (
+            current_message_id is not None
+            and statuses[current_message_id] is None
+            and any(message_id == current_message_id for message_id, _ in covered)
+        ):
+            changes[current_message_id] = "unread"
         return changes
     if classification.outcome != "resolved" or current_message_id is None:
         return changes
@@ -2303,21 +2356,40 @@ def _transcript_review_decided(
     )
 
 
-def unsettled_user_text(
+def newest_unread_user_message(
     conversation: Sequence[ConversationMessage],
-) -> UnsettledUserText | None:
-    """Whether text the user wrote still waits to be read or settled, and why."""
+) -> ConversationMessage | None:
+    """The latest user message no reading has received whole: the one the
+    unread error names, and the one to send again. Every later reading takes
+    in all unread text again, so this choice only decides which text a resend
+    makes the newest request: the user's latest instruction, never one it
+    superseded."""
 
-    unsettled = [
-        status
-        for message in conversation
-        if message.role == "user"
-        and (status := text_status_from_metadata(message.metadata))
-        not in {None, "settled"}
-    ]
-    if "unread" in unsettled:
-        return "unread"
-    return cast(UnsettledUserText | None, next(iter(unsettled), None))
+    return next(
+        (
+            message
+            for message in reversed(conversation)
+            if message.role == "user"
+            and text_status_from_metadata(message.metadata) == "unread"
+        ),
+        None,
+    )
+
+
+def unsettled_text_conflict(
+    conversation: Sequence[ConversationMessage],
+) -> CheckpointUpdateDiagnosticCode | None:
+    """The checkpoint conflict in text the user wrote that only they can settle."""
+
+    for message in conversation:
+        status = (
+            text_status_from_metadata(message.metadata)
+            if message.role == "user"
+            else None
+        )
+        if status is not None and status != "settled" and status != "unread":
+            return status
+    return None
 
 
 def metadata_with_slot_classification(
@@ -2602,12 +2674,15 @@ def latest_user_edit_intent(
     """
 
     for message in reversed(conversation):
-        if message.role != "user":
-            continue
-        metadata_map = _metadata_mapping(message.metadata)
-        raw = metadata_map.get(EDIT_INTENT_METADATA_KEY) if metadata_map else None
-        return raw if raw in get_args(AIBuilderStepEditIntent) else None
+        if message.role == "user":
+            return edit_intent_from_metadata(message.metadata)
     return None
+
+
+def edit_intent_from_metadata(metadata: object) -> AIBuilderStepEditIntent | None:
+    metadata_map = _metadata_mapping(metadata)
+    raw = metadata_map.get(EDIT_INTENT_METADATA_KEY) if metadata_map else None
+    return raw if raw in get_args(AIBuilderStepEditIntent) else None
 
 
 def review_reference_kind(metadata: object) -> str | None:

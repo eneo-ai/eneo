@@ -112,7 +112,6 @@ from eneo.flows.ai_builder.ai_builder_error_contract import (
     build_ai_builder_error,
 )
 from eneo.flows.ai_builder.ai_builder_event_models import RequirementsSummaryPayload
-from eneo.flows.ai_builder.ai_builder_non_plan_outcome import unsettled_text_answer
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
 from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     CompiledProposal,
@@ -276,6 +275,27 @@ def _classifier_reading_nothing() -> AbstractContextManager[AsyncMock]:
                 outcome="resolved", result=SlotClassificationResult()
             )
         ),
+    )
+
+
+def _reading_nothing_response() -> MagicMock:
+    """A classifier reply that finds nothing in the message, for tests about
+    the turn rather than its reading: a reply that is no reading would leave
+    the message unread and end the turn in that error."""
+
+    return _make_llm_response(
+        content=json.dumps(
+            {
+                "slots": [],
+                "file_roles": [],
+                "checkpoint_updates": [],
+                "form_intake": None,
+                "named_result_evidence": None,
+                "example_output_constraints": None,
+                "schema_direction": None,
+                "secondary_obligations": [],
+            }
+        )
     )
 
 
@@ -2358,7 +2378,7 @@ async def test_ai_builder_message_and_attachments_are_committed_before_first_pro
                 state=row[4],
                 attachment_ids=attachment_ids,
             )
-        return _make_llm_response(content="Jag kan använda referensmaterialet.")
+        return _reading_nothing_response()
 
     with patch(
         "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
@@ -2465,9 +2485,7 @@ async def test_ai_builder_same_turn_key_replays_without_provider_or_duplicates(
         space_id=space_id,
     )
     client_turn_id = uuid4()
-    completion = AsyncMock(
-        return_value=_make_llm_response(content="Jag kan hjälpa dig bygga flödet.")
-    )
+    completion = AsyncMock(return_value=_reading_nothing_response())
 
     with patch(
         "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
@@ -2661,9 +2679,7 @@ async def test_ai_builder_disconnect_after_committed_event_replays_without_provi
         space_id=space_id,
     )
     client_turn_id = uuid4()
-    completion = AsyncMock(
-        return_value=_make_llm_response(content="Jag kan hjälpa dig bygga flödet.")
-    )
+    completion = AsyncMock(return_value=_reading_nothing_response())
 
     with patch(
         "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
@@ -2779,9 +2795,7 @@ async def test_ai_builder_latest_turn_replay_and_conflict_survive_compaction(
         )
 
     client_turn_id = uuid4()
-    completion = AsyncMock(
-        return_value=_make_llm_response(content="Jag kan hjälpa dig bygga flödet.")
-    )
+    completion = AsyncMock(return_value=_reading_nothing_response())
     with patch(
         "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
         new=completion,
@@ -2856,9 +2870,7 @@ async def test_ai_builder_same_turn_key_rejects_different_request_before_provide
         space_id=space_id,
     )
     client_turn_id = uuid4()
-    completion = AsyncMock(
-        return_value=_make_llm_response(content="Jag kan hjälpa dig bygga flödet.")
-    )
+    completion = AsyncMock(return_value=_reading_nothing_response())
 
     with patch(
         "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
@@ -3083,27 +3095,58 @@ async def test_ai_builder_known_provider_rejection_commits_and_replays_without_r
             # The rejected turn's message was accepted without a classification
             # and nothing is cached for a rejected attempt, so the new turn reads
             # the conversation again. Prose is not a reading of the message, so
-            # the user is asked to send it again and no proposal call follows.
+            # the turn ends in its typed error and no proposal call follows.
             assert request_kinds == ["slot_classification", "slot_classification"]
             assert completion.await_count == calls_after_rejection + 1
             assert [
                 event["event"]
                 for event in new_turn_events
                 if event["event"] != "status"
-            ] == ["text", "usage", "done"], _builder_event_outline(new_turn_events)
-            assert next(
-                event["data"] for event in new_turn_events if event["event"] == "text"
-            ) == {"text": unsettled_text_answer("unread", ui_language="sv")}
+            ] == ["error", "done"], _builder_event_outline(new_turn_events)
+            unread_error = cast(
+                dict[str, Any],
+                next(
+                    event["data"]
+                    for event in new_turn_events
+                    if event["event"] == "error"
+                ),
+            )
+            assert unread_error["code"] == "classification_unreadable_reply"
+            assert unread_error["details"]["reason"] == "invalid_reply"
 
+            # Mutant: the turn is completed before its error is stored, so the
+            # error write loses the lease and the reload shows no failure.
             new_turn_session = await client.get(
                 f"/api/v1/flows/ai-builder/sessions/{session_id}",
                 headers={"Authorization": f"Bearer {bearer_token}"},
             )
             assert new_turn_session.status_code == 200, new_turn_session.text
-            new_latest_turn = new_turn_session.json()["latest_turn"]
+            reloaded = new_turn_session.json()
+            new_latest_turn = reloaded["latest_turn"]
             assert new_latest_turn["client_turn_id"] == str(new_turn_id)
             assert new_latest_turn["state"] == "committed"
-            assert new_latest_turn["error"] is None
+            persisted_unread_error = cast(dict[str, Any], new_latest_turn["error"])
+            assert {
+                key: value
+                for key, value in persisted_unread_error.items()
+                if key != "diagnostic_context"
+            } == {
+                key: value
+                for key, value in unread_error.items()
+                if key != "diagnostic_context"
+            }
+            unread = [
+                message
+                for message in reloaded["conversation"]
+                if message.get("reading") is not None
+            ]
+            # Only the new turn's copy is unread: its reading was not text. The
+            # rejected turn's copy was never read, and that turn already ended
+            # in its own typed error, so this reading does not hold it.
+            assert [item["message_id"] for item in unread] == [
+                unread_error["details"]["unread_message_id"]
+            ]
+            assert unread[0]["reading"]["resend"]["message"] == message
 
 
 @pytest.mark.integration
@@ -3169,7 +3212,7 @@ async def test_ai_builder_unknown_provider_outcome_requires_explicit_acknowledge
     completion = AsyncMock(
         side_effect=[
             provider_error,
-            _make_llm_response(content="Jag kan hjälpa dig bygga flödet."),
+            _reading_nothing_response(),
         ]
     )
 
@@ -3288,9 +3331,7 @@ async def test_ai_builder_pre_provider_failure_resumes_same_durable_turn(
         space_id=space_id,
     )
     client_turn_id = uuid4()
-    completion = AsyncMock(
-        return_value=_make_llm_response(content="Jag kan hjälpa dig bygga flödet.")
-    )
+    completion = AsyncMock(return_value=_reading_nothing_response())
 
     with patch(
         "eneo.flows.ai_builder.ai_builder_service.litellm.acompletion",
@@ -5022,7 +5063,7 @@ async def test_a_healthy_provider_call_outlives_ownership_probes_and_completes(
 
     async def answers_after_several_probes(**_: object) -> object:
         await asyncio.wait_for(several_probes_answered.wait(), timeout=30)
-        return _make_llm_response(content="Jag kan hjälpa dig bygga flödet.")
+        return _reading_nothing_response()
 
     completion = AsyncMock(side_effect=answers_after_several_probes)
     with (

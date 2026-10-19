@@ -224,6 +224,20 @@ model's context window, the server commits
 or select a model with a larger context window. A same-key replay returns the
 committed error without provider work or duplicate-spend acknowledgement.
 
+Before planning, the Builder reads each message. When that reading's reply
+reaches the call's output limit, is empty, or is not in the required format,
+the message stays unread and the turn ends with the committed error
+`classification_output_limit` or `classification_unreadable_reply`. While a
+message is unread, every later turn that reaches planning ends with such an
+error, a click on an option included. The error's details name the newest
+unread message (`unread_message_id`), why it was not read (`reason`:
+`output_limit`, `no_content`, `invalid_reply`, or `unknown` when no reason was
+recorded), the call's `output_cap_tokens` for an output limit, and whether it
+is an earlier message than the turn's own (`held_turn`). In the session response, an unread user
+message carries `reading` with the same reason and a `resend` request: the
+message text with its edit or review scope. Send it as a new turn with a new
+`client_turn_id`; a reading that receives it whole settles the earlier copy.
+
 Timeouts, connection failures, provider `5xx` responses, and unknown failures are
 ambiguous. They leave the turn in `provider_outcome_unknown`; never retry them
 automatically. The only same-turn retry path is the exact persisted

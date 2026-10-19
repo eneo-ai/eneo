@@ -8,7 +8,7 @@ from collections.abc import Collection, Iterable, Mapping
 from dataclasses import replace
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn, TypedDict, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn, TypedDict, cast
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
@@ -69,10 +69,13 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationAttemptOutcome,
     SlotClassificationBias,
     SlotClassificationInput,
+    SlotClassificationReadingFailure,
+    SlotClassificationReadingFailureReason,
     SlotClassificationRejectReason,
     SlotClassificationReplyOutcome,
     SlotClassificationResult,
     SlotClassificationSource,
+    SlotClassificationTransportRejectReason,
     normalize_slot_classification_values,
     slot_classification_input_is_valid,
     slot_classification_json_schema,
@@ -383,29 +386,54 @@ async def classify_slots(
         usage_tracker.complete_call(call=call, usage=usage, timing=timing.value)
 
     finish_reason = response.choices[0].finish_reason if response.choices else None
-    refused: SlotClassificationAttempt | None = None
+    if not isinstance(finish_reason, str):
+        finish_reason = None
+
+    def unread(
+        reason: SlotClassificationReadingFailureReason,
+        reject: SlotClassificationRejectReason
+        | SlotClassificationTransportRejectReason
+        | None = None,
+    ) -> SlotClassificationAttempt:
+        return SlotClassificationAttempt.unread(
+            SlotClassificationReadingFailure(
+                reason=reason,
+                reject=reject,
+                output_cap_tokens=(
+                    request_budget.provider_output_cap_tokens
+                    if reason == "output_limit"
+                    else None
+                ),
+                request_id=(
+                    usage_tracker.request_id if usage_tracker is not None else None
+                ),
+            )
+        )
+
+    refusal: _ReplyRefusal | None = None
     if transport is SlotClassificationTransport.STRICT_TOOL and response.choices:
         arguments = _slot_classification_tool_arguments(response.choices[0].message)
-        if isinstance(arguments, SlotClassificationAttempt):
-            refused = arguments
+        if isinstance(arguments, _ReplyRefusal):
+            refusal = arguments
         else:
             content = arguments
     text = content if isinstance(content, str) else ""
     if finish_reason == "length":
-        refused = SlotClassificationAttempt(outcome="output_limit_exceeded")
-    elif refused is None and not text.strip():
-        refused = SlotClassificationAttempt(
-            outcome="no_content"
+        refusal = _ReplyRefusal("output_limit")
+    elif refusal is None and not text.strip():
+        refusal = (
+            _ReplyRefusal("no_content")
             if content is None or isinstance(content, str)
-            else "parse_failed"
+            else _ReplyRefusal("invalid_reply", "content_not_text")
         )
+    refused = unread(*refusal) if refusal is not None else None
 
     _capture_raw_classifier_response(
         text,
         slot_names=slot_names,
         model=litellm_model,
         outcome=refused.outcome if refused is not None else None,
-        finish_reason=finish_reason if isinstance(finish_reason, str) else None,
+        finish_reason=finish_reason,
     )
     if refused is not None:
         attempt = refused
@@ -421,9 +449,7 @@ async def classify_slots(
                     cached=False,
                 ),
                 "outcome": refused.outcome,
-                "finish_reason": finish_reason
-                if isinstance(finish_reason, str)
-                else None,
+                "finish_reason": finish_reason,
                 "content_chars": len(text),
                 "max_tokens": completion_kwargs["max_tokens"],
                 "reasoning_effort": completion_kwargs.get("reasoning_effort"),
@@ -465,12 +491,16 @@ async def classify_slots(
                     ),
                 },
             )
-            attempt = SlotClassificationAttempt(outcome="parse_failed")
+            attempt = unread(
+                "invalid_reply", reject_reasons[0] if reject_reasons else None
+            )
         else:
             attempt = SlotClassificationAttempt(outcome="resolved", result=result)
     if call is not None and usage_tracker is not None:
         usage_tracker.record_classification_outcome(
-            attempt=call.attempt, outcome=_reply_outcome(attempt)
+            attempt=call.attempt,
+            outcome=_reply_outcome(attempt),
+            finish_reason=finish_reason,
         )
 
     result = attempt.result
@@ -512,31 +542,36 @@ def _reply_outcome(
     return outcome
 
 
-def _slot_classification_tool_arguments(
-    message: Any,
-) -> str | SlotClassificationAttempt:
+class _ReplyRefusal(NamedTuple):
+    """A reply refused before the parser read it."""
+
+    reason: SlotClassificationReadingFailureReason
+    reject: SlotClassificationTransportRejectReason | None = None
+
+
+def _slot_classification_tool_arguments(message: Any) -> str | _ReplyRefusal:
     tool_calls = getattr(message, "tool_calls", None)
     if tool_calls is None:
-        return SlotClassificationAttempt(outcome="no_content")
+        return _ReplyRefusal("no_content")
     if not isinstance(tool_calls, (list, tuple)):
-        return SlotClassificationAttempt(outcome="parse_failed")
+        return _ReplyRefusal("invalid_reply", "tool_calls_malformed")
     calls = cast(list[object] | tuple[object, ...], tool_calls)
     if not calls:
-        return SlotClassificationAttempt(outcome="no_content")
+        return _ReplyRefusal("no_content")
     if len(calls) != 1:
-        return SlotClassificationAttempt(outcome="parse_failed")
+        return _ReplyRefusal("invalid_reply", "tool_call_count")
     tool_call = calls[0]
     function = getattr(tool_call, "function", None)
     if (
         getattr(tool_call, "type", None) != "function"
         or getattr(function, "name", None) != SLOT_CLASSIFICATION_TOOL_NAME
     ):
-        return SlotClassificationAttempt(outcome="parse_failed")
+        return _ReplyRefusal("invalid_reply", "tool_call_unknown")
     arguments = getattr(function, "arguments", None)
     if arguments is None or (isinstance(arguments, str) and not arguments.strip()):
-        return SlotClassificationAttempt(outcome="no_content")
+        return _ReplyRefusal("no_content")
     if not isinstance(arguments, str):
-        return SlotClassificationAttempt(outcome="parse_failed")
+        return _ReplyRefusal("invalid_reply", "tool_arguments_not_text")
     return arguments
 
 

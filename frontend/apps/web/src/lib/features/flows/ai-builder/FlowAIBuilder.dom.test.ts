@@ -3952,6 +3952,39 @@ describe("FlowAIBuilder conversation screen", () => {
     return await screen.findByRole("heading", { name: m.ai_builder_conversation_title() });
   };
 
+  it("marks an unread message in the transcript and sends it again from there", async () => {
+    const reading = { status: "unread", reason: "no_content", resend: { message: "Build a flow" } };
+    const { stream, calls } = makeStream();
+    const session = makeSession({ session_id: "s-unread" });
+    // The server settles the message once the resend's reading receives it.
+    Object.defineProperty(session, "conversation", {
+      enumerable: true,
+      get: () =>
+        calls.length === 0
+          ? [userMessage("u1", "Build a flow", { reading })]
+          : [userMessage("u1", "Build a flow"), userMessage("u2", "Build a flow")]
+    });
+    const { fetch } = makeFetch({ sessions: [session] });
+    const { service } = renderShell({ fetch, stream, resumeSessionId: "s-unread" });
+    await screen.findByRole("button", {
+      name: new RegExp(escape(m.ai_builder_conversation_button()))
+    });
+
+    await openConversation();
+
+    // Mutants: an unread message carries no marker, its button sends while
+    // the composer's model cannot run a turn or sends nothing, or the
+    // delivered resend leaves the marker the server settled.
+    expect(screen.getByText(m.ai_builder_message_not_read())).toBeTruthy();
+    service().seedState({ modelLoadStatus: "failed" });
+    await waitFor(() => expect(button(m.ai_builder_message_send_again()).disabled).toBe(true));
+    service().seedState({ modelLoadStatus: "loaded" });
+    await fireEvent.click(button(m.ai_builder_message_send_again()));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({ message: "Build a flow" });
+    await waitFor(() => expect(screen.queryByText(m.ai_builder_message_not_read())).toBeNull());
+  });
+
   it("replaces the phase screen with the transcript and goes back again", async () => {
     const { fetch } = makeFetch();
     renderShell({ fetch, stream: makeStream().stream });
@@ -5059,6 +5092,51 @@ describe("FlowAIBuilder turn recovery", () => {
     });
   });
 
+  it("sends the unread message again from the chat alert", async () => {
+    const reading = {
+      status: "unread",
+      reason: "output_limit",
+      output_cap_tokens: 2048,
+      resend: { message: "Build a flow" }
+    };
+    const [, committed] = turnSession("processing");
+    const session = {
+      ...committed!,
+      conversation: [userMessage("u1", "Build a flow", { reading })],
+      latest_turn: {
+        ...committed!.latest_turn,
+        error: {
+          schema_version: 2,
+          code: "classification_output_limit",
+          category: "upstream",
+          message: "The reading reply reached its output limit.",
+          phase: "planner",
+          eneo_error_code: 9024,
+          request_id: "req-1",
+          details: { unread_message_id: "u1", reason: "output_limit", held_turn: false }
+        }
+      }
+    };
+    const { fetch } = makeFetch({ sessions: [session] });
+    const { stream, calls } = makeStream();
+    const { service } = renderShell({ fetch, stream, resumeSessionId: "s-turn" });
+
+    expect(
+      await screen.findByText(m.ai_builder_failure_heading_classification_output_limit())
+    ).toBeTruthy();
+    // Mutants: the chat alert offers only dismiss, replays the latest turn, or
+    // offers the resend while the composer's model cannot run a turn.
+    service().seedState({ modelLoadStatus: "failed" });
+    const resend = { name: m.ai_builder_failure_action_resend_unread() };
+    await waitFor(() => expect(screen.queryByRole("button", resend)).toBeNull());
+    service().seedState({ modelLoadStatus: "loaded" });
+    await fireEvent.click(await screen.findByRole("button", resend));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.body).toMatchObject({ message: "Build a flow" });
+    expect(calls[0]!.body.client_turn_id).not.toBe(TURN_ID);
+  });
+
   it("observes a failed reconciliation on the chat surface, once", async () => {
     // The refresh of a turn still processing fails: the alert shows that
     // failure, and the observation names the chat surface and the class shown.
@@ -5212,6 +5290,58 @@ describe("FlowAIBuilder composer drafts", () => {
     await waitFor(() => expect(calls).toHaveLength(1));
     await waitFor(() => expect(textbox().value).toBe("Får inte försvinna"));
     expect(draftRecord("s-1")?.text).toBe("Får inte försvinna");
+  });
+
+  it("lets the draft go when the server keeps the unread message for its own resend", async () => {
+    // Mutant: a turn that failed to read the message restores the draft as if
+    // the message were lost, inviting a second copy beside its resend.
+    const error = {
+      schema_version: 2,
+      code: "classification_unreadable_reply",
+      category: "upstream",
+      message: "The reply reading a user message carried no content.",
+      phase: "planner",
+      eneo_error_code: 9024,
+      request_id: "req-1",
+      details: { unread_message_id: "u1", reason: "no_content", held_turn: false }
+    };
+    const { stream, calls } = makeStream(() => [{ event: "error", data: JSON.stringify(error) }]);
+    const answered = [userMessage("u0", "Bygg ett flöde"), assistantMessage("a0", "Berätta mer.")];
+    const reading = { status: "unread", reason: "no_content", resend: { message: "Byt steg två" } };
+    const kept = makeSession({
+      session_id: "s-kept",
+      conversation: [...answered, userMessage("u1", "Byt steg två", { reading })]
+    });
+    // The read-back names the turn this send claimed.
+    Object.defineProperty(kept, "latest_turn", {
+      enumerable: true,
+      get: () => ({
+        client_turn_id: calls[0]?.body.client_turn_id,
+        state: "committed",
+        user_message_id: "u1",
+        error,
+        requires_duplicate_provider_spend_acknowledgement: false
+      })
+    });
+    const before = makeSession({ session_id: "s-kept", conversation: answered });
+    const { fetch } = makeFetch({ sessions: [[before, kept]] });
+    const { service } = renderShell({ fetch, stream, resumeSessionId: "s-kept" });
+    // The transcript's composer stays mounted through the turn.
+    await fireEvent.click(
+      await screen.findByRole("button", {
+        name: new RegExp(escape(m.ai_builder_conversation_button()))
+      })
+    );
+    await screen.findByRole("heading", { name: m.ai_builder_conversation_title() });
+
+    await fireEvent.input(textbox(), { target: { value: "Byt steg två" } });
+    await fireEvent.click(button(m.ai_builder_send()));
+
+    await waitFor(() => expect(calls).toHaveLength(1));
+    await waitFor(() => expect(service().streamState).toBe("failed"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(textbox().value).toBe("");
+    expect(draftRecord("s-kept")).toBeNull();
   });
 
   it("never leaks a draft across a live session switch (A→B→A)", async () => {

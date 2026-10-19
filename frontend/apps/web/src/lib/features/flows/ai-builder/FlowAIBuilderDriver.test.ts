@@ -4345,6 +4345,78 @@ describe("FlowAIBuilderDriver send outcome contract", () => {
     });
   });
 
+  const reading = { status: "unread", reason: "no_content", resend: { message: "Hej" } } as const;
+
+  // Mutants: a turn that failed with nothing unread counts as kept (a
+  // rejected turn's message is held too, without a reading), only the turn's
+  // own unread message counts (a held turn whose message was read restores the
+  // draft), the read-back's message or an earlier turn is taken for this
+  // request's, or a kept message still counts as failed. Gate it1 F1: a stream
+  // that breaks after its error event decided the same rows as `failed`.
+  it.each(
+    (
+      [
+        ["this turn's message is unread", "saved_unread", true, "u1", "u1"],
+        ["an earlier message is unread", "saved_unread", true, "u1", "u0"],
+        ["no message is unread", "failed", true, "u1", null],
+        ["the read-back lacks this turn's message", "failed", true, "u9", "u0"],
+        ["an earlier turn was read back", "failed", false, "u1", "u1"]
+      ] as const
+    ).flatMap((row) => (["closes", "breaks"] as const).map((ending) => [...row, ending] as const))
+  )(
+    "after an error event, when %s, returns '%s' (own turn %s, %s, unread %s; stream %s)",
+    async (_case, outcome, own, userMessageId, unreadId, ending) => {
+      let sentTurnId = "";
+      const { driver } = makeDriver({
+        streamImpl: vi.fn(async (_path, init, handlers) => {
+          sentTurnId = init.requestBody["application/json"].client_turn_id;
+          handlers.onMessage?.(
+            { id: "", event: "error", data: publicError },
+            new AbortController()
+          );
+          if (ending === "breaks") throw new TypeError("network error");
+          completeStream(handlers);
+        }),
+        fetchImpl: vi.fn(async () =>
+          makeSession({
+            latest_turn: {
+              client_turn_id: own ? sentTurnId : "earlier-turn",
+              state: "committed",
+              user_message_id: userMessageId,
+              error: null,
+              requires_duplicate_provider_spend_acknowledgement: false
+            },
+            conversation: ["u0", "u1"].map((id) => ({
+              message_id: id,
+              role: "user" as const,
+              content: "Hej",
+              reading: id === unreadId ? reading : null
+            }))
+          })
+        )
+      });
+      driver.seedState({ session: makeSession() });
+      expect(await driver.sendMessage("Hej")).toBe(outcome);
+    }
+  );
+
+  // Mutant: a turn sent while a message showed unread leaves no fence when
+  // its read-back fails, so the stale marker can send the message again.
+  it("fences the session when the read-back after a turn that showed a message unread fails", async () => {
+    const { driver } = makeDriver({
+      streamImpl: vi.fn(async (_path, _init, handlers) => completeStream(handlers)),
+      fetchImpl: vi.fn().mockRejectedValue(new TypeError("Failed to fetch"))
+    });
+    driver.seedState({
+      session: makeSession({
+        conversation: [{ message_id: "u1", role: "user", content: "Hej", reading }]
+      })
+    });
+
+    expect(await driver.sendMessage("Något annat")).toBe("delivered");
+    expect(driver.canStartNewTurn).toBe(false);
+  });
+
   it("returns 'failed' when the transport throws", async () => {
     const { driver } = seeded(
       vi.fn(async () => {

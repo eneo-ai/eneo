@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, TypeAlias, cast
 from uuid import UUID
 
@@ -143,6 +143,9 @@ from eneo.flows.ai_builder.ai_builder_settings import (
     AIBuilderPlannedRequestBudget,
     AIBuilderRequestBudget,
 )
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    SlotClassificationReadingFailure,
+)
 from eneo.flows.ai_builder.ai_builder_tool_catalog import (
     AIBuilderToolCatalogNotOffered,
     AIBuilderToolCatalogProjection,
@@ -253,6 +256,11 @@ class _PreparedBase:
     requirements_state: RequirementsState
     ui_language: str | None
     slot_classification_metadata: SlotClassificationMetadata | None
+    # Why this turn's reading reply carried no reading; the planner keeps it
+    # on each message that reading left unread.
+    reading_failure: SlotClassificationReadingFailure | None = field(
+        default=None, kw_only=True
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -384,6 +392,7 @@ async def prepare_planner_request(
         schema_direction_pending = acknowledged_context.schema_direction_pending
         control_schema_candidates = acknowledged_context.schema_candidates
         slot_classification_metadata = None
+        reading_failure = None
         requirements_disclosure = acknowledged_disclosure
     else:
         discovery_runtime = await build_discovery_runtime_result(
@@ -416,6 +425,7 @@ async def prepare_planner_request(
         schema_direction_pending = discovery_runtime.schema_direction_pending
         control_schema_candidates = discovery_runtime.schema_candidates
         slot_classification_metadata = discovery_runtime.slot_classification_metadata
+        reading_failure = discovery_runtime.reading_failure
         requirements_disclosure = build_requirements_disclosure(
             rebuilt_planning_state,
             ui_language=ui_language,
@@ -496,6 +506,7 @@ async def prepare_planner_request(
             requirements_state=requirements_state,
             ui_language=ui_language,
             slot_classification_metadata=slot_classification_metadata,
+            reading_failure=reading_failure,
             discovery_analysis=discovery_analysis,
             server_decision=turn_control.decision,
             planning_state=rebuilt_planning_state,
@@ -509,7 +520,7 @@ async def prepare_planner_request(
 
     assert isinstance(turn_control.decision, GenerateProposal)
     try:
-        return build_proposal_prepared(
+        proposal = build_proposal_prepared(
             requirements_state=requirements_state,
             ui_language=ui_language,
             slot_classification_metadata=slot_classification_metadata,
@@ -538,9 +549,11 @@ async def prepare_planner_request(
             requirements_state=requirements_state,
             ui_language=ui_language,
             slot_classification_metadata=slot_classification_metadata,
+            reading_failure=reading_failure,
             error=error,
             planning_state=rebuilt_planning_state,
         )
+    return replace(proposal, reading_failure=reading_failure)
 
 
 def _acknowledged_disclosure(

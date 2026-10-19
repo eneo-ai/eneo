@@ -79,6 +79,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
     SlotClassificationInput,
+    SlotClassificationReadingFailure,
     SlotClassificationResult,
     SlotClassificationSource,
     parse_slot_classification_response,
@@ -1588,16 +1589,34 @@ def _classification_outcomes(tracker: ProposalTurnTelemetry) -> list[str | None]
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("first_reply", "first_outcome"),
+    ("first_reply", "first_outcome", "reason", "reject", "finish_reason"),
     [
-        (lambda: _make_response(""), "no_content"),
-        (lambda: _make_response("{not-json"), "parse_failed"),
+        (lambda: _make_response(""), "no_content", "no_content", None, None),
+        (
+            lambda: _make_response("{not-json"),
+            "parse_failed",
+            "invalid_reply",
+            "json_invalid",
+            None,
+        ),
+        # Mutant: content that is not text is filed under a parser reason.
+        (
+            lambda: _make_response(["not", "text"]),
+            "parse_failed",
+            "invalid_reply",
+            "content_not_text",
+            None,
+        ),
         # Mutant: a reply cut off at the output limit is sent again.
-        (_cut_off_response, "output_limit_exceeded"),
+        (_cut_off_response, "output_limit_exceeded", "output_limit", None, "length"),
     ],
 )
 async def test_a_reply_without_a_reading_is_not_sent_again(
-    first_reply: Any, first_outcome: str
+    first_reply: Any,
+    first_outcome: str,
+    reason: str,
+    reject: str | None,
+    finish_reason: str | None,
 ) -> None:
     client = AsyncMock()
     client.acompletion.side_effect = [
@@ -1613,11 +1632,26 @@ async def test_a_reply_without_a_reading_is_not_sent_again(
         allowed_slot_values={},
         tenant_id=uuid4(),
         usage_tracker=tracker,
+        # The room the request leaves, not the model's maximum, caps the call.
+        max_input_tokens=20_000,
+        max_output_tokens=19_000,
     )
 
     assert attempt.outcome == first_outcome
     assert client.acompletion.await_count == 1
     assert _classification_outcomes(tracker) == [first_outcome]
+    assert client.acompletion.await_args_list[0].kwargs["max_tokens"] < 19_000
+    # Mutants: the failure loses its reason, the call's own output cap (not the
+    # model's maximum) or the reading call's request id; the call record drops
+    # the finish reason.
+    cap = client.acompletion.await_args_list[0].kwargs["max_tokens"]
+    assert attempt.failure == SlotClassificationReadingFailure(
+        reason=reason,
+        reject=reject,
+        output_cap_tokens=cap if reason == "output_limit" else None,
+        request_id="req-classifier",
+    )
+    assert [record.finish_reason for record in tracker.call_records] == [finish_reason]
 
 
 def _connection_reset() -> APIConnectionError:
@@ -7447,28 +7481,31 @@ async def test_strict_classifier_outbound_schema_preserves_classification_shapes
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("case", "expected"),
+    ("case", "expected", "reject"),
     [
-        ("no_choices", "no_content"),
-        ("no_calls", "no_content"),
-        ("null_calls", "no_content"),
-        ("several_calls", "parse_failed"),
-        ("malformed_calls", "parse_failed"),
-        ("wrong_name", "parse_failed"),
-        ("wrong_type", "parse_failed"),
-        ("missing_function", "parse_failed"),
-        ("null_arguments", "no_content"),
-        ("blank_arguments", "no_content"),
-        ("non_string_arguments", "parse_failed"),
-        ("invalid_json", "parse_failed"),
-        ("empty_object", "parse_failed"),
-        ("refusal", "no_content"),
-        ("truncated", "output_limit_exceeded"),
+        ("no_choices", "no_content", None),
+        ("no_calls", "no_content", None),
+        ("null_calls", "no_content", None),
+        # Mutant: a strict reply of the wrong shape is filed under a parser
+        # reason, or under none.
+        ("several_calls", "parse_failed", "tool_call_count"),
+        ("malformed_calls", "parse_failed", "tool_calls_malformed"),
+        ("wrong_name", "parse_failed", "tool_call_unknown"),
+        ("wrong_type", "parse_failed", "tool_call_unknown"),
+        ("missing_function", "parse_failed", "tool_call_unknown"),
+        ("null_arguments", "no_content", None),
+        ("blank_arguments", "no_content", None),
+        ("non_string_arguments", "parse_failed", "tool_arguments_not_text"),
+        ("invalid_json", "parse_failed", "json_invalid"),
+        ("empty_object", "parse_failed", "no_contract_keys"),
+        ("refusal", "no_content", None),
+        ("truncated", "output_limit_exceeded", None),
     ],
 )
 async def test_strict_classifier_failed_response_is_recorded_and_not_cached(
     case: str,
     expected: str,
+    reject: str | None,
 ) -> None:
     valid = json.dumps({**_VALID_CLASSIFICATION_RESPONSE, "slots": {}})
     response = _classification_tool_response(valid)
@@ -7524,6 +7561,8 @@ async def test_strict_classifier_failed_response_is_recorded_and_not_cached(
         attempt = await classify_slots(**kwargs)
         assert attempt.outcome == expected
         assert attempt.result is None
+        assert attempt.failure is not None
+        assert attempt.failure.reject == reject
         assert parser.call_count == (
             1 if case in {"invalid_json", "empty_object"} else 0
         )

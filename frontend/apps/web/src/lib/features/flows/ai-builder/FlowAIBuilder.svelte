@@ -1054,7 +1054,7 @@
       {:else if screen === "findings" && service.failureRepair.status !== "closed"}
         <BuilderRepairScreen
           repair={service.failureRepair}
-          disabled={!service.canSendMessage || service.modelSendBlock !== null}
+          disabled={!service.canSendTurn}
           onprepare={prepareChangeFromFinding}
           onclose={() => service.closeFailureRepair()}
           onretry={(target) => void service.openFailureRepair(target)}
@@ -1063,7 +1063,7 @@
         <BuilderFindingsScreen
           review={service.review}
           suggestions={service.suggestions}
-          disabled={!service.canSendMessage || service.modelSendBlock !== null}
+          disabled={!service.canSendTurn}
           onprepare={prepareChangeFromFinding}
           onsuggest={() => void service.requestSuggestions()}
           onclose={() => service.closeReview()}

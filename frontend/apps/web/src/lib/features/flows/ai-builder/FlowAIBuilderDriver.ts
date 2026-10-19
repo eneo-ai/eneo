@@ -52,6 +52,7 @@ import type {
   AIBuilderStreamEvent,
   AIBuilderTurnState,
   AIBuilderTurnRecoveryState,
+  AIBuilderUnreadMessageResend,
   AIBuilderUsageEventData,
   ApplyError,
   ApplyResult,
@@ -1077,6 +1078,34 @@ export class FlowAIBuilderDriver {
     );
   }
 
+  /** The server's resend of a message no reading has received: its words and
+   *  scope as the server recorded them on it. Null for a message the loaded
+   *  conversation does not hold; the caller fetches the session instead. */
+  unreadResend(messageId: string): AIBuilderUnreadMessageResend | null {
+    return (
+      this.#state.session?.conversation?.find((message) => message.message_id === messageId)
+        ?.reading?.resend ?? null
+    );
+  }
+
+  /** Whether the failed turn left this request's message saved while unread
+   *  text holds the session: the read-back names the turn claimed under this
+   *  id, holds its message, and shows a message with the server's resend (the
+   *  turn's own, or the earlier one that held it). The message is then in the
+   *  transcript and the unread text has its own resend. A turn that failed
+   *  with nothing unread (a provider rejection) restores the draft, and a
+   *  request refused before its turn was claimed leaves an earlier turn here. */
+  #savedWithUnreadText(clientTurnId: string): boolean {
+    const session = this.#state.session;
+    const turn = session?.latest_turn;
+    if (turn?.client_turn_id !== clientTurnId) return false;
+    const conversation = session?.conversation ?? [];
+    return (
+      conversation.some((message) => message.message_id === turn.user_message_id) &&
+      conversation.some((message) => message.reading != null)
+    );
+  }
+
   /** The planner controls as a request carries them: always the model the
    *  composer shows, chosen or default. The server runs exactly that model or
    *  refuses with a reason; an omitted id would let it resolve a default the
@@ -1152,6 +1181,9 @@ export class FlowAIBuilderDriver {
     // session's latest_plan_id decide whether the plan is still the truth.
     const planBeforeTurn = this.#state.currentPlan;
     const sessionHadProjectedScope = this.#state.session?.edit_scope != null;
+    const sessionHeldUnread = (this.#state.session?.conversation ?? []).some(
+      (message) => message.reading != null
+    );
     if (planBeforeTurn) {
       this.#state.applyResult = null;
     }
@@ -1166,6 +1198,7 @@ export class FlowAIBuilderDriver {
     let receivedStreamError = false;
     let streamContractFailure: AIBuilderStreamContractError | null = null;
     let receivedDone = false;
+    let refreshedAfterStream = false;
     let settledStreamState: AIBuilderStreamState = "failed";
 
     try {
@@ -1298,13 +1331,18 @@ export class FlowAIBuilderDriver {
         requestBody.edit_context != null ||
         requestBody.review_context != null ||
         sessionHadProjectedScope;
-      if (scopeSettledOnServer) this.#requiresAuthoritativeRefresh = true;
+      // Any turn may settle a message the screen shows unread (a resend, or
+      // text whose reading receives it whole), and only the server knows: the
+      // turn reads the session back the same way, so a stale marker never
+      // offers a settled message again.
+      if (scopeSettledOnServer || sessionHeldUnread) this.#requiresAuthoritativeRefresh = true;
       const shouldRefreshAfterStream =
         !receivedDone ||
         isRetry ||
         receivedStreamError ||
         reviewTurnWithoutPlanEvent ||
         scopeSettledOnServer ||
+        sessionHeldUnread ||
         (requestBody.file_ids && requestBody.file_ids.length > 0) ||
         (!receivedUsageEvent && this.#state.currentPlan !== null) ||
         // A question we refused to append has to be settled against the
@@ -1315,7 +1353,9 @@ export class FlowAIBuilderDriver {
         (requestBody.question_answer?.kind === "structured_question_answer" &&
           !receivedDurableStreamEvent);
       if (shouldRefreshAfterStream && !abortController.signal.aborted) {
-        await this.#refreshSession(owner, { attemptedClientTurnId: requestBody.client_turn_id });
+        refreshedAfterStream = await this.#refreshSession(owner, {
+          attemptedClientTurnId: requestBody.client_turn_id
+        });
       }
       // A turn that read run evidence raised the conversation's floor on the
       // server; the composer's list follows it.
@@ -1341,7 +1381,10 @@ export class FlowAIBuilderDriver {
         this.#state.reviewNote = assistantText.trim();
         this.#notify();
       }
-      return receivedDone && !receivedStreamError ? "delivered" : "failed";
+      if (receivedDone && !receivedStreamError) return "delivered";
+      return refreshedAfterStream && this.#savedWithUnreadText(requestBody.client_turn_id)
+        ? "saved_unread"
+        : "failed";
     } catch (e) {
       if (
         ownsCurrentStream() &&
@@ -1354,7 +1397,14 @@ export class FlowAIBuilderDriver {
           fallbackMessage: m.ai_builder_error_fallback_stream()
         });
         this.#notify();
-        await this.#refreshSession(owner, { attemptedClientTurnId: requestBody.client_turn_id });
+        // A broken stream does not say whether the server kept the message;
+        // the read-back does, under the same rule as a stream that ended.
+        const refreshed = await this.#refreshSession(owner, {
+          attemptedClientTurnId: requestBody.client_turn_id
+        });
+        if (refreshed && this.#savedWithUnreadText(requestBody.client_turn_id)) {
+          return "saved_unread";
+        }
       }
       return "failed";
     } finally {
@@ -2113,6 +2163,7 @@ export class FlowAIBuilderDriver {
           role: "user",
           content: message.content ?? "",
           questionAnswer,
+          ...(message.reading ? { unreadMessageId: message.message_id } : {}),
           metadata: this.#metadataFromPublicUserMessage(message),
           timestamp: this.#parseTimestamp(message.timestamp)
         });

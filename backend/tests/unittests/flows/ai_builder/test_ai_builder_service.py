@@ -49,6 +49,7 @@ from eneo.completion_models.infrastructure.completion_service import (
 )
 from eneo.files.file_models import File, FileType
 from eneo.flows.ai_builder import ai_builder_discovery_runtime as discovery_runtime
+from eneo.flows.ai_builder.ai_builder_api_models import SendMessageRequest
 from eneo.flows.ai_builder.ai_builder_architecture_commit import (
     finalize_architecture_commit,
 )
@@ -64,9 +65,13 @@ from eneo.flows.ai_builder.ai_builder_conversation_compaction import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
+    metadata_for_user_message,
+    metadata_with_text_status,
+    reading_failure_from_metadata,
     requirements_summary_from_metadata,
     requirements_summary_to_metadata,
     slot_classification_from_metadata,
+    text_status_from_metadata,
 )
 from eneo.flows.ai_builder.ai_builder_discovery_flow_defaults import FlowWithStepPrompts
 from eneo.flows.ai_builder.ai_builder_domain_models import (
@@ -91,7 +96,9 @@ from eneo.flows.ai_builder.ai_builder_event_models import (
 from eneo.flows.ai_builder.ai_builder_events import (
     encode_ai_builder_stream_event,
 )
+from eneo.flows.ai_builder.ai_builder_flow_review import AIBuilderReviewContext
 from eneo.flows.ai_builder.ai_builder_non_plan_outcome import unsettled_text_answer
+from eneo.flows.ai_builder.ai_builder_plan_edit_context import AIBuilderPlanEditContext
 from eneo.flows.ai_builder.ai_builder_plan_lifecycle import AIBuilderPlanLifecycle
 from eneo.flows.ai_builder.ai_builder_planner_request_preparation import (
     conversation_message_to_llm_message,
@@ -121,8 +128,13 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     CheckpointUpdateDiagnostic,
     SlotClassificationAttempt,
     SlotClassificationInput,
+    SlotClassificationReadingFailure,
     SlotClassificationResult,
     parse_slot_classification_response,
+)
+from eneo.flows.ai_builder.ai_builder_telemetry import (
+    PLANNER_TELEMETRY_KEY,
+    summarize_session_telemetry,
 )
 from eneo.flows.ai_builder.ai_builder_tool_names import PROPOSE_FLOW_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_turn_controller import (
@@ -138,6 +150,7 @@ from eneo.flows.ai_builder.planning_state_builder import (
     build_planning_state_from_conversation,
     complete_planning_state,
 )
+from eneo.flows.api.flow_ai_builder_router import _to_public_conversation
 from eneo.flows.assistant_authoring_snapshot import AssistantAuthoringSnapshot
 from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_authoring_spec import (
@@ -2426,6 +2439,14 @@ def _stored(
     return stored
 
 
+def _unread_error(events: list[dict[str, str]]) -> dict[str, Any]:
+    """The typed error a turn held by unread text ends with; nothing is
+    answered beside it."""
+
+    assert [event["event"] for event in events] == [SSE_EVENT_ERROR, SSE_EVENT_DONE]
+    return cast(dict[str, Any], json.loads(events[0]["data"]))
+
+
 def _compacted_past_the_message_limit(
     conversation: list[ConversationMessage],
 ) -> list[ConversationMessage]:
@@ -2489,16 +2510,28 @@ class TestUnreadMessage:
 
     @pytest.mark.anyio
     @pytest.mark.parametrize(
-        ("classifier_response", "outcome"),
+        ("classifier_response", "outcome", "code", "reason"),
         [
-            (_output_limit_response, "output_limit_exceeded"),
-            (_parse_failed_response, "parse_failed"),
+            (
+                _output_limit_response,
+                "output_limit_exceeded",
+                "classification_output_limit",
+                "output_limit",
+            ),
+            (
+                _parse_failed_response,
+                "parse_failed",
+                "classification_unreadable_reply",
+                "invalid_reply",
+            ),
         ],
     )
-    async def test_an_unread_revision_is_answered_instead_of_proposed(
+    async def test_an_unread_revision_ends_in_its_typed_error_instead_of_a_plan(
         self,
         classifier_response: Any,
         outcome: str,
+        code: str,
+        reason: str,
         unset_mapped_deployment_default: None,
     ) -> None:
         acompletion = _classifier_or_proposal_responses(classifier_response())
@@ -2510,30 +2543,55 @@ class TestUnreadMessage:
             planning_state=_make_committed_planning_state(),
         )
 
-        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
-        assert json.loads(events[0]["data"])["text"] == unsettled_text_answer(
-            "unread", ui_language="sv"
-        )
+        error = _unread_error(events)
         repo.create_plan.assert_not_awaited()
         assert not [
             call for call in acompletion.await_args_list if call.kwargs.get("tools")
         ]
         assert acompletion.await_count == 1
         committed = repo.commit_turn.await_args.kwargs
-        user_message, answer = committed["new_messages"]
+        # Mutant: a generic assistant answer is stored beside the error.
+        [user_message] = committed["new_messages"]
         assert user_message.content == _NAMING_REQUEST
         classification = slot_classification_from_metadata(user_message.metadata)
         assert classification is not None
         assert classification.outcome == outcome
-        assert answer.role == "assistant"
-        assert answer.content == unsettled_text_answer("unread", ui_language="sv")
+        # Mutants: the error names another cause or message, or the turn is
+        # completed without it (invisible to the failure ledger).
+        cap = acompletion.await_args_list[0].kwargs["max_tokens"]
+        assert (error["code"], error["category"]) == (code, "upstream")
+        assert {
+            key: error["details"].get(key)
+            for key in (
+                "unread_message_id",
+                "reason",
+                "output_cap_tokens",
+                "held_turn",
+                "origin_request_id",
+            )
+        } == {
+            "unread_message_id": user_message.message_id,
+            "reason": reason,
+            "output_cap_tokens": cap if reason == "output_limit" else None,
+            "held_turn": False,
+            "origin_request_id": error["request_id"],
+        }
+        repo.complete_session_turn.assert_awaited_once()
+        assert (
+            repo.complete_session_turn.await_args.kwargs["error"].model_dump(
+                mode="json", exclude_none=True
+            )
+            == error
+        )
+        # Mutant: the plan this revision did not replace stops being approvable.
+        repo.restore_awaiting_approval_after_answered_turn.assert_awaited_once()
         # Every answer the user already gave is still the state's.
         committed_slots = committed["planning_state"].resolved_slots
         for name, slot in _make_committed_planning_state().resolved_slots.items():
             assert committed_slots[name].value == slot.value
 
     @pytest.mark.anyio
-    async def test_an_unread_first_message_is_answered_instead_of_questioned(
+    async def test_an_unread_first_message_ends_in_its_error_instead_of_a_question(
         self,
     ) -> None:
         # The observed turn: the reading failed and discovery asked what the
@@ -2548,10 +2606,7 @@ class TestUnreadMessage:
             ),
         )
 
-        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
-        assert json.loads(events[0]["data"])["text"] == unsettled_text_answer(
-            "unread", ui_language="sv"
-        )
+        assert _unread_error(events)["code"] == "classification_output_limit"
         repo.create_plan.assert_not_awaited()
 
     @pytest.mark.anyio
@@ -2578,14 +2633,18 @@ class TestUnreadMessage:
             planning_state=_make_committed_planning_state(),
         )
 
-        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
-        assert json.loads(events[0]["data"])["text"] == unsettled_text_answer(
-            "unread", ui_language="sv"
-        )
+        # Mutant: the held click is named as the message to send again.
+        error = _unread_error(events)
+        assert error["details"]["unread_message_id"] == unread_turn[0].message_id
+        assert error["details"]["held_turn"] is True
         repo.create_plan.assert_not_awaited()
         assert not [
             call for call in acompletion.await_args_list if call.kwargs.get("tools")
         ]
+        # The click stays recorded as the user's answer.
+        [click] = repo.commit_turn.await_args.kwargs["new_messages"]
+        assert click.metadata is not None
+        assert click.metadata["requirements_confirmed"] is True
 
     @pytest.mark.anyio
     async def test_sending_the_unread_request_again_reads_it(
@@ -2601,7 +2660,7 @@ class TestUnreadMessage:
         unread_turn = unread_repo.commit_turn.await_args.kwargs["new_messages"]
 
         with _classifier_reads_nothing():
-            events, _repo = await self._send(
+            events, repo = await self._send(
                 conversation=[*card, *unread_turn],
                 acompletion=AsyncMock(),
                 message=_NAMING_REQUEST,
@@ -2609,12 +2668,16 @@ class TestUnreadMessage:
             )
 
         # The reading covers the earlier message too, so the turn goes on.
-        assert unsettled_text_answer("unread", ui_language="sv") not in [
-            json.loads(event["data"]).get("text")
-            for event in events
-            if event["event"] == SSE_EVENT_TEXT
-        ]
+        assert SSE_EVENT_ERROR not in [event["event"] for event in events]
         assert SSE_EVENT_REQUIREMENTS_SUMMARY in [event["event"] for event in events]
+        # Mutant: the settled copy keeps its failed reading's facts.
+        [earlier] = [
+            message
+            for message in _stored([*card, *unread_turn], repo)
+            if message.message_id == unread_turn[0].message_id
+        ]
+        assert text_status_from_metadata(earlier.metadata) == "settled"
+        assert reading_failure_from_metadata(earlier.metadata) is None
 
     @pytest.mark.anyio
     async def test_a_truncated_reading_of_an_unread_request_does_not_settle_it(
@@ -2642,14 +2705,11 @@ class TestUnreadMessage:
                 planning_state=_make_committed_planning_state(),
             )
 
-        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
-        assert json.loads(events[0]["data"])["text"] == unsettled_text_answer(
-            "unread", ui_language="sv"
-        )
-        conversation = [
-            *conversation,
-            *repo.commit_turn.await_args.kwargs["new_messages"],
-        ]
+        _unread_error(events)
+        [held_message] = repo.commit_turn.await_args.kwargs["new_messages"]
+        # Mutant: a held turn that made no provider call leaves a call record.
+        assert PLANNER_TELEMETRY_KEY not in (held_message.metadata or {})
+        conversation = [*conversation, held_message]
 
         # Sending the same text again reads it, however short the older copy.
         with _classifier_reads_nothing(), _older_text_packed_to_one_character():
@@ -2704,10 +2764,16 @@ class TestUnreadMessage:
             planning_state=_make_committed_planning_state(),
         )
 
-        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
-        assert json.loads(events[0]["data"])["text"] == unsettled_text_answer(
-            unsettled, ui_language="sv"
-        )
+        if unsettled == "unread":
+            assert _unread_error(events)["code"] == "classification_output_limit"
+        else:
+            assert [event["event"] for event in events] == [
+                SSE_EVENT_TEXT,
+                SSE_EVENT_DONE,
+            ]
+            assert json.loads(events[0]["data"])["text"] == unsettled_text_answer(
+                "speaker_naming_without_edit", ui_language="sv"
+            )
         repo.create_plan.assert_not_awaited()
 
     @pytest.mark.anyio
@@ -2969,15 +3035,17 @@ class TestUnreadMessage:
     async def test_an_option_click_waits_for_older_text_it_could_not_read(
         self,
     ) -> None:
-        # A degraded conversation can hold free text no classification has read.
+        # Older text an earlier reading left unread holds the click turn too.
         # The click turn tries to read it; when that fails, the click is not
         # taken past it (gate it4: the click used to go on to the next question).
+        # A message an older build left unread has no recorded cause.
+        older = ConversationMessage(
+            role="user",
+            content="Bygg ett flöde som sammanfattar dokument",
+            metadata=metadata_with_text_status({"ui_language": "sv"}, "unread"),
+        )
         conversation = [
-            ConversationMessage(
-                role="user",
-                content="Bygg ett flöde som sammanfattar dokument",
-                metadata={"ui_language": "sv"},
-            ),
+            older,
             ConversationMessage(
                 role="assistant",
                 content="Hur många dokument per körning?",
@@ -3000,10 +3068,196 @@ class TestUnreadMessage:
         )
 
         acompletion.assert_awaited_once()
-        assert [event["event"] for event in events] == [SSE_EVENT_TEXT, SSE_EVENT_DONE]
-        assert json.loads(events[0]["data"])["text"] == unsettled_text_answer(
-            "unread", ui_language="sv"
+        # Mutant: a legacy unread message is given a cause it never recorded.
+        details = _unread_error(events)["details"]
+        assert {
+            key: details.get(key)
+            for key in ("unread_message_id", "reason", "held_turn", "output_cap_tokens")
+        } == {
+            "unread_message_id": older.message_id,
+            "reason": "unknown",
+            "held_turn": True,
+            "output_cap_tokens": None,
+        }
+        assert "origin_request_id" not in details
+
+    @pytest.mark.anyio
+    async def test_the_newest_unread_message_names_the_error(
+        self, unset_mapped_deployment_default: None
+    ) -> None:
+        # Every later reading takes in all unread text again, so the error's
+        # target only decides which text a resend makes the newest request: the
+        # user's latest instruction, never one it superseded.
+        # Mutants: the error names the oldest unread message, or takes its
+        # code, cap or origin from another message's record.
+        card = _make_answered_card_conversation()
+        _events, repo = await self._send(
+            conversation=card,
+            acompletion=AsyncMock(return_value=_output_limit_response()),
+            message=_NAMING_REQUEST,
+            planning_state=_make_committed_planning_state(),
         )
+
+        events, repo = await self._send(
+            conversation=_stored(card, repo),
+            acompletion=AsyncMock(return_value=_parse_failed_response()),
+            message="Gör sammanfattningen kortare.",
+            planning_state=_make_committed_planning_state(),
+        )
+
+        error = _unread_error(events)
+        [newest] = repo.commit_turn.await_args.kwargs["new_messages"]
+        assert error["code"] == "classification_unreadable_reply"
+        assert {
+            key: error["details"].get(key)
+            for key in (
+                "unread_message_id",
+                "reason",
+                "output_cap_tokens",
+                "held_turn",
+                "origin_request_id",
+            )
+        } == {
+            "unread_message_id": newest.message_id,
+            "reason": "invalid_reply",
+            "output_cap_tokens": None,
+            "held_turn": False,
+            "origin_request_id": error["request_id"],
+        }
+
+    @pytest.mark.anyio
+    @pytest.mark.parametrize("click", [False, True], ids=["text", "click"])
+    async def test_a_failed_reading_leaves_earlier_text_planning_built_on_alone(
+        self, click: bool, unset_mapped_deployment_default: None
+    ) -> None:
+        # Adversary P2-1: a failed reading made every earlier status-less message
+        # unread, so the error offered an instruction planning had built on as
+        # the newest request. A click's label is no text the reading received.
+        # Mutants: a failed reading marks each status-less message it covered,
+        # or the turn's own message when the reading never received it.
+        earlier = ConversationMessage(
+            role="user", content="Bygg ett flöde som sammanfattar dokument"
+        )
+        conversation = [
+            earlier,
+            ConversationMessage(
+                role="assistant",
+                content="Hur många dokument per körning?",
+                metadata={"question_id": "document_material_scope"},
+            ),
+        ]
+
+        events, repo = await self._send(
+            conversation=conversation,
+            acompletion=AsyncMock(return_value=_parse_failed_response()),
+            message="Ett huvuddokument per körning" if click else "Två steg räcker.",
+            question_answer={
+                "question_id": "document_material_scope",
+                "selected_option_ids": ["single_document_case"],
+                "selected_values": ["single_document_case"],
+                "ui_language": "sv",
+            }
+            if click
+            else None,
+        )
+
+        statuses = {
+            message.message_id: text_status_from_metadata(message.metadata)
+            for message in _stored(conversation, repo)
+        }
+        assert statuses[earlier.message_id] is None
+        if click:
+            assert SSE_EVENT_ERROR not in [event["event"] for event in events]
+            return
+        details = _unread_error(events)["details"]
+        assert details["held_turn"] is False
+        assert statuses[details["unread_message_id"]] == "unread"
+
+    @pytest.mark.anyio
+    async def test_a_failed_reading_turn_counts_its_calls_once(
+        self, unset_mapped_deployment_default: None
+    ) -> None:
+        # Mutants: the failed turn's classifier call is never counted, or is
+        # counted again by the turn after it.
+        card = _make_answered_card_conversation()
+        _events, repo = await self._send(
+            conversation=card,
+            acompletion=AsyncMock(return_value=_output_limit_response()),
+            message=_NAMING_REQUEST,
+            planning_state=_make_committed_planning_state(),
+        )
+        conversation = _stored(card, repo)
+        with _classifier_reads_nothing():
+            _events, repo = await self._send(
+                conversation=conversation,
+                acompletion=AsyncMock(),
+                message=_NAMING_REQUEST,
+                planning_state=_make_committed_planning_state(),
+            )
+
+        telemetry = summarize_session_telemetry(_stored(conversation, repo))
+        assert telemetry is not None
+        assert (
+            telemetry["llm_calls_made_total"],
+            telemetry["planner_request_count"],
+        ) == (1, 2)
+
+    @pytest.mark.parametrize("recorded", [True, False], ids=["recorded", "legacy"])
+    def test_an_unread_message_offers_its_own_scoped_resend(
+        self, recorded: bool
+    ) -> None:
+        # Mutants: the resend widens a step-scoped edit (scope or intent
+        # dropped), replays a consumed answer, or carries a shape the send
+        # path refuses; a legacy message is given a cause it never recorded.
+        edit_context = AIBuilderPlanEditContext(
+            scope="step", plan_id=uuid4(), target_plan_step_ref="step_b"
+        )
+        review_context = AIBuilderReviewContext(
+            flow_version=3, definition_checksum="checksum", finding_ids=["f-1"]
+        )
+        message = ConversationMessage(
+            role="user",
+            content=_NAMING_REQUEST,
+            metadata=metadata_with_text_status(
+                metadata_for_user_message(
+                    question_answer={
+                        "question_id": "terminal_output",
+                        "selected_option_ids": ["structured_json"],
+                        "selected_values": ["structured_json"],
+                    },
+                    file_ids=[uuid4()],
+                    edit_context=edit_context,
+                    edit_intent="input",
+                    review_context=review_context,
+                    review_evidence_level=2,
+                ),
+                "unread",
+                reading_failure=(
+                    SlotClassificationReadingFailure(
+                        reason="output_limit",
+                        output_cap_tokens=4096,
+                        request_id="req-1",
+                    )
+                    if recorded
+                    else None
+                ),
+            ),
+        )
+
+        [public] = _to_public_conversation([message])
+
+        assert public.reading is not None
+        assert (public.reading.reason, public.reading.output_cap_tokens) == (
+            ("output_limit", 4096) if recorded else ("unknown", None)
+        )
+        resend = public.reading.resend.model_dump(mode="json", exclude_none=True)
+        assert resend == {
+            "message": _NAMING_REQUEST,
+            "edit_context": edit_context.to_metadata(),
+            "edit_intent": "input",
+            "review_context": review_context.to_metadata(),
+        }
+        SendMessageRequest.model_validate({**resend, "client_turn_id": str(uuid4())})
 
 
 class TestApprovePlan:

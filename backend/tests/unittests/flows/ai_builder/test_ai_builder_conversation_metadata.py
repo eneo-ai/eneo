@@ -60,6 +60,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationDiagnostic,
     SlotClassificationDiagnosticCode,
     SlotClassificationInput,
+    SlotClassificationReadingFailure,
     SlotClassificationResult,
     SlotClassificationSource,
 )
@@ -1625,3 +1626,18 @@ def test_run_failure_reference_is_inherited_with_floor_and_step_scope():
     assert scope.step_refs == frozenset({"existing_step_2"})
     assert scope.removable_step_refs == frozenset()
     assert not scope.may_add
+
+
+def test_only_an_unread_status_keeps_why_its_message_was_not_read() -> None:
+    # Mutant: a status other than unread keeps a reading failure its caller
+    # passed, so a settled message still reports why it was not read.
+    failure = SlotClassificationReadingFailure(reason="no_content", request_id="r-1")
+    unread = metadata_module.metadata_with_text_status(
+        None, "unread", reading_failure=failure
+    )
+    settled = metadata_module.metadata_with_text_status(
+        unread, "settled", reading_failure=failure
+    )
+
+    assert metadata_module.reading_failure_from_metadata(unread) == failure
+    assert metadata_module.reading_failure_from_metadata(settled) is None

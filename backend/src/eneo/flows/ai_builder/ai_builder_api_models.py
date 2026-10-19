@@ -27,6 +27,7 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     RequirementsConfirmationMetadata,
     SlotClassificationMetadata,
     StructuredQuestionAnswerMetadata,
+    UnreadReason,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderTurnState,
@@ -333,6 +334,49 @@ class AIBuilderAttachmentWarning(BaseModel):
     )
 
 
+class AIBuilderUnreadMessageResend(BaseModel):
+    """The request that sends an unread message again, from what the server
+    recorded on that message: its words and the scope it was sent with. The
+    client adds a new `client_turn_id` and the model, reasoning effort and
+    language it shows now. An answer to a question is never part of it: the
+    turn that carried the answer already recorded it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    message: str
+    edit_context: AIBuilderEditContext | None = None
+    edit_intent: AIBuilderStepEditIntent | None = None
+    review_context: AIBuilderReviewReference | None = None
+
+
+class AIBuilderMessageReading(BaseModel):
+    """A user message no reading has received whole yet. While one is unread,
+    every later turn that reaches planning ends in a typed error naming the
+    newest unread message. A reading that receives a message whole settles it:
+    its resend's, or that of any later message whose reading covers it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal["unread"] = "unread"
+    reason: UnreadReason = Field(
+        description=(
+            "Why the reading of the message failed: `output_limit` (the reply "
+            "reached the call's output limit), `no_content` (the reply was "
+            "empty), `invalid_reply` (the reply was not in the required "
+            "format), or `unknown` (the message was left unread without a "
+            "recorded reason)."
+        )
+    )
+    output_cap_tokens: int | None = Field(
+        default=None,
+        description=(
+            "The output limit of the call whose reply reached it; only with "
+            "`output_limit`."
+        ),
+    )
+    resend: AIBuilderUnreadMessageResend
+
+
 class AIBuilderConversationMessage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -353,6 +397,13 @@ class AIBuilderConversationMessage(BaseModel):
             "cannot be used (the tool, its server and the typed reason), or a "
             "request for a tool the Builder could not match to one it may use "
             "(`kind` request_unresolved, the person's words only)."
+        ),
+    )
+    reading: AIBuilderMessageReading | None = Field(
+        default=None,
+        description=(
+            "On a user message that has not been read: why, and the request "
+            "that sends it again. Absent once a reading received it."
         ),
     )
 
@@ -492,6 +543,8 @@ class AIBuilderClientErrorPresentation(enum.StrEnum):
     REQUEST_BUDGET_EXHAUSTED = "request_budget_exhausted"
     OUTPUT_TOO_LONG = "output_too_long"
     INVALID_PROPOSAL = "invalid_proposal"
+    CLASSIFICATION_OUTPUT_LIMIT = "classification_output_limit"
+    CLASSIFICATION_UNREADABLE_REPLY = "classification_unreadable_reply"
     OTHER = "other"
 
 

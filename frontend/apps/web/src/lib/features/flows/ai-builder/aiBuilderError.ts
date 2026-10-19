@@ -257,6 +257,17 @@ const ERROR_COPY: Record<AIBuilderErrorCode, ErrorCopy> = {
     return null;
   },
   builder_attachment_unavailable: () => m.ai_builder_error_attachment_unavailable(),
+  classification_output_limit: () => m.ai_builder_error_classification_output_limit(),
+  classification_unreadable_reply: (error) => {
+    switch (error.details.reason) {
+      case "no_content":
+        return m.ai_builder_error_classification_no_content();
+      case "invalid_reply":
+        return m.ai_builder_error_classification_invalid_reply();
+      default:
+        return m.ai_builder_error_classification_reason_unknown();
+    }
+  },
   edit_session_flow_required: () => m.ai_builder_error_edit_needs_flow(),
   flow_is_published: () => m.ai_builder_error_flow_is_published(),
   flow_not_published: () => m.ai_builder_error_flow_not_published(),

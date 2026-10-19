@@ -1229,7 +1229,22 @@ async def _run_child(command: _ChildCommand) -> NoReturn:
 
     async def fake_completion(**_kwargs: object) -> MagicMock:
         _record_marker(command.marker_path, f"provider_call:{command.mode.value}")
-        return _make_llm_response()
+        # A classifier reply that finds nothing, so the committed turn ends
+        # without the unread-message error.
+        return _make_llm_response(
+            content=json.dumps(
+                {
+                    "slots": [],
+                    "file_roles": [],
+                    "checkpoint_updates": [],
+                    "form_intake": None,
+                    "named_result_evidence": None,
+                    "example_output_constraints": None,
+                    "schema_direction": None,
+                    "secondary_obligations": [],
+                }
+            )
+        )
 
     async def exit_before_provider(
         _repo: AIBuilderRepository, **_kwargs: object

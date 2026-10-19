@@ -1128,6 +1128,9 @@
       case "retry_new_turn":
         await service.resendLatestTurn();
         return;
+      case "resend_unread":
+        await service.resendUnreadMessage(action.messageId);
+        return;
       case "clarify":
         (onclarify ?? onshowconversation)?.();
         return;

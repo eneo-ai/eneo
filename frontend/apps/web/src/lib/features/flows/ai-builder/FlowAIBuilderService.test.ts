@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
+import { getLocale } from "$lib/paraglide/runtime";
 
 import { FlowAIBuilderService } from "./FlowAIBuilderService.svelte.ts";
 import type {
@@ -938,5 +939,80 @@ describe("FlowAIBuilderService", () => {
     });
 
     expect(service.hasSeenPlanInSession).toBe(true);
+  });
+
+  // Mutants: the step scope or its part is dropped (the edit widens), the
+  // planner is the one the failed turn ran, the turn id is reused, or the
+  // resend skips what the service settles after a send (a delivered repair
+  // handoff leaves its panel open).
+  it("sends an unread message again with its own scope under the planner chosen now, settled like a send", async () => {
+    const reference = {
+      kind: "run_failure",
+      flow_version: 1,
+      definition_checksum: "sum-1",
+      run_id: "run-1",
+      step_order: 2
+    } as const;
+    const resend = {
+      message: "Läs bara bilagan",
+      edit_context: {
+        kind: "proposed_plan",
+        scope: "step",
+        plan_id: "22222222-2222-4222-8222-222222222222",
+        target_plan_step_ref: "step_b"
+      },
+      edit_intent: "input",
+      review_context: reference
+    } as const;
+    const unread = { message_id: "u1", role: "user", content: resend.message } as const;
+    const reading = { status: "unread", reason: "no_content", resend } as const;
+    const stream = vi.fn(async (_path, _init, handlers) => {
+      handlers.onMessage?.({ id: "", event: "done", data: "" }, new AbortController());
+      handlers.onClose?.();
+    });
+    const fetch = vi.fn(async (route: string) =>
+      route.endsWith("/models")
+        ? { models: [], default_model_id: null }
+        : makeSession({ conversation: [unread] })
+    );
+    const service = new FlowAIBuilderService(
+      { client: { fetch, stream } } as never,
+      "space-1",
+      "flow-1"
+    );
+    const ready = { provider: "openai", availability: { state: "ready" as const } };
+    service.seedState({
+      session: makeSession({ conversation: [{ ...unread, reading }] }),
+      availableModels: [
+        { id: "model-low", name: "Low", ...ready },
+        { id: "new-model", name: "New", ...ready }
+      ],
+      defaultModelId: "model-low",
+      modelLoadStatus: "loaded"
+    });
+    service.failureRepair = {
+      status: "ready",
+      launch: {
+        reference,
+        evidence_classification_level: 2,
+        step_number: 2,
+        step_name: null,
+        attempt_no: 1,
+        error_code: "typed_io_output_parse_failed"
+      }
+    };
+    service.selectModel("new-model");
+
+    expect(await service.resendUnreadMessage("not-loaded")).toBe("not_started");
+    expect(stream).not.toHaveBeenCalled();
+    expect(await service.resendUnreadMessage("u1")).toBe("delivered");
+
+    expect(stream.mock.calls[0]?.[1].requestBody["application/json"]).toEqual({
+      client_turn_id: expect.any(String),
+      ui_language: getLocale(),
+      model_id: "new-model",
+      ...resend
+    });
+    expect(service.failureRepair).toEqual({ status: "closed" });
   });
 });

@@ -25,9 +25,10 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     metadata_for_user_message,
     metadata_with_slot_classification,
     metadata_with_text_status,
+    newest_unread_user_message,
     requirements_confirmation_from_question_answer,
     text_status_changes,
-    unsettled_user_text,
+    unsettled_text_conflict,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderTurnState,
@@ -60,6 +61,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review import (
 )
 from eneo.flows.ai_builder.ai_builder_non_plan_outcome import (
     ambiguous_saved_structured_reviews_answer,
+    commit_unread_text_turn,
     persist_non_plan_turn,
     saved_steps_not_editable_answer,
     stale_saved_step_revision_message,
@@ -313,9 +315,9 @@ class AIBuilderPlanner:
     ) -> None:
         """Store what reading the turn paid for, whatever the turn answers.
 
-        The classification boundary: every user message the reading covered
-        keeps its reading status, older ones included, so a later turn does not
-        read the same text again.
+        The classification boundary: every user message whose status the
+        reading moved keeps it, older ones a whole reading settled included,
+        so a later turn does not read the same text again.
         """
 
         user_message.metadata = metadata_with_slot_classification(
@@ -332,7 +334,9 @@ class AIBuilderPlanner:
         ]
         for covered in restated:
             covered.metadata = metadata_with_text_status(
-                covered.metadata, status_changes[covered.message_id]
+                covered.metadata,
+                status_changes[covered.message_id],
+                reading_failure=prepared_request.reading_failure,
             )
         await self.repo.append_session_messages(
             session_id=session_id,
@@ -806,11 +810,36 @@ class AIBuilderPlanner:
                 lease=lease,
             )
 
-            unsettled = unsettled_user_text(conversation)
-            if unsettled is not None:
-                # Whatever this turn carries, a click or new text, deciding
-                # anything now would build on text the user wrote that is
-                # unread or unsettled.
+            # Whatever this turn carries, a click or new text, deciding anything
+            # now would build on text the user wrote that is unread or unsettled.
+            unread = newest_unread_user_message(conversation)
+            if unread is not None:
+                try:
+                    unread_error = await commit_unread_text_turn(
+                        repo=self.repo,
+                        turn=turn,
+                        conversation=conversation,
+                        new_messages_start=new_messages_start,
+                        target=unread,
+                        usage_tracker=usage_tracker,
+                        planning_state=prepared_request.planning_state,
+                        flow=flow,
+                        request_id=request_id,
+                    )
+                except PlanningStatePayloadTooLargeError as error:
+                    yield await self._complete_planning_state_payload_too_large(
+                        turn=turn,
+                        error=error,
+                        request_id=request_id,
+                        usage_tracker=usage_tracker,
+                    )
+                    yield build_done_event()
+                    return
+                yield unread_error
+                yield build_done_event()
+                return
+            conflict = unsettled_text_conflict(conversation)
+            if conflict is not None:
                 try:
                     events = await persist_non_plan_turn(
                         repo=self.repo,
@@ -818,7 +847,7 @@ class AIBuilderPlanner:
                         conversation=conversation,
                         new_messages_start=new_messages_start,
                         message=unsettled_text_answer(
-                            unsettled, ui_language=ui_language
+                            conflict, ui_language=ui_language
                         ),
                         base_assistant_metadata=build_assistant_message_metadata(
                             conversation

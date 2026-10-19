@@ -1203,20 +1203,29 @@ def test_each_classification_call_persists_its_own_outcome() -> None:
     telemetry = ProposalTurnTelemetry(
         request_id="req-class", model="private-model", target_kind=TargetKind.CREATE
     )
-    for outcome in ("output_limit_exceeded", "resolved"):
+    for outcome, finish_reason in (
+        ("output_limit_exceeded", "length"),
+        ("resolved", "provider-specific"),
+    ):
         call = telemetry.begin_call(call_kind="slot_classification")
         telemetry.complete_call(
             call=call, usage=CompletionTokenUsage(900, 40, 940, source="provider")
         )
-        telemetry.record_classification_outcome(attempt=call.attempt, outcome=outcome)
+        telemetry.record_classification_outcome(
+            attempt=call.attempt, outcome=outcome, finish_reason=finish_reason
+        )
 
     read = planner_call_records_from_metadata(
         {"planner_telemetry": telemetry.build_planner_telemetry()}
     )
 
-    assert [(r.attempt, r.classification_outcome) for r in read.records] == [
-        (1, "output_limit_exceeded"),
-        (2, "resolved"),
+    # Mutant: the stored call record drops the finish reason, or stores a
+    # provider's own word instead of the published set.
+    assert [
+        (r.attempt, r.classification_outcome, r.finish_reason) for r in read.records
+    ] == [
+        (1, "output_limit_exceeded", "length"),
+        (2, "resolved", "other"),
     ]
     assert read.skipped == 0
 
@@ -1229,12 +1238,16 @@ def test_a_classification_outcome_belongs_to_a_classification_call_only() -> Non
 
     with pytest.raises(ValueError):
         telemetry.record_classification_outcome(
-            attempt=call.attempt, outcome="resolved"
+            attempt=call.attempt, outcome="resolved", finish_reason=None
         )
     with pytest.raises(ValueError):
-        telemetry.record_classification_outcome(attempt=2, outcome="resolved")
+        telemetry.record_classification_outcome(
+            attempt=2, outcome="resolved", finish_reason=None
+        )
     with pytest.raises(ValueError):
-        telemetry.record_classification_outcome(attempt=0, outcome="resolved")
+        telemetry.record_classification_outcome(
+            attempt=0, outcome="resolved", finish_reason=None
+        )
 
 
 @pytest.mark.parametrize("stored", ["skipped_context_budget", "bogus", 3, []])

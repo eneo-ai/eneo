@@ -38,6 +38,7 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     AIBuilderClassifierDiagnostic,
     AIBuilderClassifierDiagnosticsResponse,
     AIBuilderConversationMessage,
+    AIBuilderMessageReading,
     AIBuilderProposalAttemptDiagnostic,
     AIBuilderProposalTelemetryDiagnosticsResponse,
     AIBuilderProposalTurnDiagnostic,
@@ -45,6 +46,7 @@ from eneo.flows.ai_builder.ai_builder_api_models import (
     AIBuilderRunFailureLaunchResponse,
     AIBuilderSessionEditScope,
     AIBuilderTurnLifecycleResponse,
+    AIBuilderUnreadMessageResend,
     ApplyPlanRequest,
     ApplyResultResponse,
     CreateSessionRequest,
@@ -74,13 +76,19 @@ from eneo.flows.ai_builder.ai_builder_context import (
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     conversation_acts_on_a_review,
     conversation_evidence_floor,
+    edit_context_from_metadata,
+    edit_intent_from_metadata,
     named_content_fields_edit_from_metadata,
     question_answer_from_metadata,
+    reading_failure_from_metadata,
     requirements_confirmation_from_metadata,
     requirements_summary_from_metadata,
+    review_context_from_metadata,
     slot_classification_from_metadata,
     structured_question_payload_from_tool_arguments,
+    text_status_from_metadata,
     tool_calls_from_message,
+    unread_reason,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import (
     BuilderPlan,
@@ -707,6 +715,28 @@ def _to_public_user_message(
         ),
         named_content_fields_edit=named_content_fields_edit_from_metadata(
             message.metadata
+        ),
+        reading=_message_reading(message),
+    )
+
+
+def _message_reading(message: ConversationMessage) -> AIBuilderMessageReading | None:
+    """Why an unread user message is unread, and the request that sends it
+    again, built only from what that message recorded."""
+
+    if text_status_from_metadata(message.metadata) != "unread":
+        return None
+    failure = reading_failure_from_metadata(message.metadata)
+    return AIBuilderMessageReading(
+        reason=unread_reason(failure),
+        output_cap_tokens=failure.output_cap_tokens if failure is not None else None,
+        resend=AIBuilderUnreadMessageResend(
+            message=message.content or "",
+            edit_context=edit_context_from_metadata(message.metadata),
+            edit_intent=edit_intent_from_metadata(message.metadata),
+            # Serialized as the request type: the evidence level the server
+            # resolved for the turn is not part of what a client sends.
+            review_context=review_context_from_metadata(message.metadata),
         ),
     )
 

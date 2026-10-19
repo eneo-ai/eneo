@@ -30,6 +30,10 @@
     interactionDisabled?: boolean;
     /** An edit session: the summary is about a change, not a new task. */
     isEdit?: boolean;
+    /** Sends a user message no reading has received again; set only on one. */
+    onResendUnread?: () => void;
+    /** The session accepts no new message right now. */
+    resendDisabled?: boolean;
   }
 
   let {
@@ -46,7 +50,9 @@
     onQuestionAnswer = undefined,
     onEditAnswer = undefined,
     interactionDisabled = false,
-    isEdit = false
+    isEdit = false,
+    onResendUnread = undefined,
+    resendDisabled = false
   }: Props = $props();
 </script>
 
@@ -65,6 +71,20 @@
           <p class="text-[0.9375rem] leading-relaxed whitespace-pre-wrap">{content}</p>
         </div>
       </div>
+      {#if onResendUnread}
+        <div class="text-secondary mt-1 flex items-center justify-end gap-2 text-xs">
+          <span>{m.ai_builder_message_not_read()}</span>
+          <Button
+            variant="link"
+            size="xs"
+            class="text-accent-stronger h-auto p-0 font-semibold"
+            disabled={resendDisabled}
+            onclick={onResendUnread}
+          >
+            {m.ai_builder_message_send_again()}
+          </Button>
+        </div>
+      {/if}
     {/if}
   {:else}
     <div class="assistant-message">

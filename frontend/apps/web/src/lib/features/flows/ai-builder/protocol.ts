@@ -151,6 +151,11 @@ export interface AIBuilderCarriedRequest {
 
 export type AIBuilderConversationMessage = GeneratedAIBuilderConversationMessage;
 
+/** The server's resend of an unread user message: its words and scope. */
+export type AIBuilderUnreadMessageResend = NonNullable<
+  AIBuilderConversationMessage["reading"]
+>["resend"];
+
 export type AIBuilderAttachmentFile = GeneratedAIBuilderAttachmentFile;
 
 export type AIBuilderSession = Omit<GeneratedAIBuilderSessionResponse, "telemetry"> & {
@@ -286,8 +291,11 @@ export type RequirementsSummary = Extract<
 
 export type AIBuilderPhase = "discovering" | "confirming" | "building" | "reviewing";
 
-/** The composer may discard its draft only after confirmed delivery. */
-export type AIBuilderSendOutcome = "delivered" | "failed" | "not_started";
+/** The composer may discard its draft only after confirmed delivery, or when
+ *  the turn failed but the server saved the message while unread text holds
+ *  the session (`saved_unread`): the message is in the transcript, and the
+ *  unread text has the server's own resend. */
+export type AIBuilderSendOutcome = "delivered" | "saved_unread" | "failed" | "not_started";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -300,6 +308,8 @@ export interface ChatMessage {
   /** Typed structured-question answer carried by a user message; set at the
    *  hydration/optimistic boundary so views never parse metadata dicts. */
   questionAnswer?: PersistedStructuredQuestionAnswerMetadata;
+  /** The server's id of a user message no reading has received yet. */
+  unreadMessageId?: string;
   metadata?: Record<string, unknown>;
   timestamp: number;
 }
@@ -767,6 +777,8 @@ const aiBuilderErrorCodes = [
   "ai_builder_plan_resource_bindings_missing",
   "bad_request",
   "builder_attachment_unavailable",
+  "classification_output_limit",
+  "classification_unreadable_reply",
   "edit_session_flow_required",
   "flow_is_published",
   "flow_not_published",

@@ -44,6 +44,7 @@ import type {
   AIBuilderEditContext,
   AIBuilderPhase,
   AIBuilderSavedFlowStepScope,
+  AIBuilderStepIntent,
   AIBuilderStepScopePresentation,
   AIBuilderSendOutcome,
   AIBuilderSession,
@@ -377,6 +378,13 @@ export class FlowAIBuilderService {
     return this.#driver.modelSendBlock;
   }
 
+  /** Whether a turn may be sent now: the session takes one and the model the
+   *  composer shows can run it. The one gate of every control that sends a
+   *  turn, the composer's and an unread message's resend alike. */
+  get canSendTurn(): boolean {
+    return this.canSendMessage && this.modelSendBlock === null;
+  }
+
   /** The sentence shown wherever a turn would start, or null when one may. */
   get modelSendBlockMessage(): string | null {
     return modelSendBlockMessage(this.modelSendBlock, {
@@ -612,6 +620,45 @@ export class FlowAIBuilderService {
       launch?.intent && editContext && scopeKey(editContext) === scopeKey(launch.editContext)
         ? launch.intent
         : null;
+    return await this.#send(
+      message,
+      questionAnswer,
+      fileIds,
+      editContext,
+      reviewContext,
+      editIntent
+    );
+  }
+
+  /** A message no reading has received, sent again as a new turn: its words
+   *  and scope as the server recorded them on it, under the planner the
+   *  composer shows now. One the loaded conversation does not hold is not
+   *  sent; the caller fetches the session instead. */
+  async resendUnreadMessage(messageId: string): Promise<AIBuilderSendOutcome> {
+    const resend = this.#driver.unreadResend(messageId);
+    if (!resend) return "not_started";
+    return await this.#send(
+      resend.message,
+      undefined,
+      undefined,
+      resend.edit_context,
+      resend.review_context,
+      resend.edit_intent
+    );
+  }
+
+  /** Every send, the composer's and a resend's, with what it settles here
+   *  besides the conversation: a send with a review context closes the open
+   *  review panel, or on delivery the open repair panel, and a step scope the
+   *  server refused is cleared. */
+  async #send(
+    message: string,
+    questionAnswer: StructuredQuestionAnswerMetadata | undefined,
+    fileIds: string[] | undefined,
+    editContext: AIBuilderEditContext | null | undefined,
+    reviewContext: AIBuilderReviewReference | null | undefined,
+    editIntent: AIBuilderStepIntent | null | undefined
+  ): Promise<AIBuilderSendOutcome> {
     const outcome = await this.#driver.sendMessage(
       message,
       questionAnswer,
@@ -661,7 +708,11 @@ export class FlowAIBuilderService {
       this.#state.streamState !== "streaming" &&
       this.#state.pendingOperation === null,
     turnActive: this.latestTurnState === "open" || this.latestTurnState === "processing",
-    replayModel: this.#replayModel
+    replayModel: this.#replayModel,
+    unreadMessageIds: (this.#state.session?.conversation ?? [])
+      .filter((message) => message.reading)
+      .map((message) => message.message_id),
+    canSendTurn: this.canSendTurn
   });
 
   /** The failure on screen (or the one given) was displayed here. */

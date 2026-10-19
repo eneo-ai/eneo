@@ -110,6 +110,10 @@
         requirementsActive={message.requirementsSummary
           ? service.isLatestRequirementsSummary(message.requirementsSummary)
           : false}
+        onResendUnread={message.unreadMessageId
+          ? () => void service.resendUnreadMessage(message.unreadMessageId!)
+          : undefined}
+        resendDisabled={!service.canSendTurn}
       />
     {/each}
     {#if service.isStreaming && service.messages[service.messages.length - 1]?.role === "user"}

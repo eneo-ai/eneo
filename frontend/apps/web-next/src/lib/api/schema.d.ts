@@ -12009,6 +12009,8 @@ export interface components {
       | "request_budget_exhausted"
       | "output_too_long"
       | "invalid_proposal"
+      | "classification_output_limit"
+      | "classification_unreadable_reply"
       | "other";
     /**
      * AIBuilderClientErrorSurface
@@ -12025,6 +12027,8 @@ export interface components {
       named_content_fields_edit?: components["schemas"]["NamedContentFieldsEditRequest"] | null;
       question?: components["schemas"]["StructuredQuestionPayload"] | null;
       question_answer?: components["schemas"]["StructuredQuestionAnswerMetadata"] | null;
+      /** @description On a user message that has not been read: why, and the request that sends it again. Absent once a reading received it. */
+      reading?: components["schemas"]["AIBuilderMessageReading"] | null;
       requirements_confirmation?: components["schemas"]["RequirementsConfirmationMetadata"] | null;
       requirements_summary?: components["schemas"]["RequirementsSummaryPayload"] | null;
       /**
@@ -12096,6 +12100,8 @@ export interface components {
       | "ai_builder_plan_resource_bindings_missing"
       | "bad_request"
       | "builder_attachment_unavailable"
+      | "classification_output_limit"
+      | "classification_unreadable_reply"
       | "edit_session_flow_required"
       | "flow_is_published"
       | "flow_not_published"
@@ -12182,6 +12188,32 @@ export interface components {
       | "requirements"
       | "router"
       | "self_correction";
+    /**
+     * AIBuilderMessageReading
+     * @description A user message no reading has received whole yet. While one is unread,
+     *     every later turn that reaches planning ends in a typed error naming the
+     *     newest unread message. A reading that receives a message whole settles it:
+     *     its resend's, or that of any later message whose reading covers it.
+     */
+    AIBuilderMessageReading: {
+      /**
+       * Output Cap Tokens
+       * @description The output limit of the call whose reply reached it; only with `output_limit`.
+       */
+      output_cap_tokens?: number | null;
+      /**
+       * Reason
+       * @description Why the reading of the message failed: `output_limit` (the reply reached the call's output limit), `no_content` (the reply was empty), `invalid_reply` (the reply was not in the required format), or `unknown` (the message was left unread without a recorded reason).
+       */
+      reason: ("output_limit" | "no_content" | "invalid_reply") | "unknown";
+      resend: components["schemas"]["AIBuilderUnreadMessageResend"];
+      /**
+       * Status
+       * @default unread
+       * @constant
+       */
+      status?: "unread";
+    };
     /** AIBuilderModelCapacityTooSmall */
     AIBuilderModelCapacityTooSmall: {
       /**
@@ -12515,6 +12547,35 @@ export interface components {
        * Format: uuid
        */
       user_message_id: string;
+    };
+    /**
+     * AIBuilderUnreadMessageResend
+     * @description The request that sends an unread message again, from what the server
+     *     recorded on that message: its words and the scope it was sent with. The
+     *     client adds a new `client_turn_id` and the model, reasoning effort and
+     *     language it shows now. An answer to a question is never part of it: the
+     *     turn that carried the answer already recorded it.
+     */
+    AIBuilderUnreadMessageResend: {
+      /** Edit Context */
+      edit_context?:
+        | (
+            | components["schemas"]["AIBuilderPlanEditContext"]
+            | components["schemas"]["AIBuilderSavedFlowStepEditContext"]
+          )
+        | null;
+      /** Edit Intent */
+      edit_intent?: ("instruction" | "input" | "answer") | null;
+      /** Message */
+      message: string;
+      /** Review Context */
+      review_context?:
+        | (
+            | components["schemas"]["AIBuilderReviewContext"]
+            | components["schemas"]["AIBuilderSuggestionContext"]
+            | components["schemas"]["AIBuilderRunFailureContext"]
+          )
+        | null;
     };
     /** AIBuilderUsageEvent */
     AIBuilderUsageEvent: {

@@ -49,7 +49,9 @@ const committed: FailureRecoveryCapabilities = {
   canResend: true,
   canStartNewTurn: true,
   turnActive: false,
-  replayModel: null
+  replayModel: null,
+  unreadMessageIds: [],
+  canSendTurn: true
 };
 const generation: FailurePresentationContext = {
   surface: "generation",
@@ -645,6 +647,101 @@ describe("describeFailure", () => {
       kind: "start_fresh",
       label: m.ai_builder_start_fresh(),
       records: "start_fresh_requested"
+    });
+  });
+
+  describe("a message the Builder could not interpret", () => {
+    const unread = (code: AIBuilderError["code"], details: AIBuilderError["details"]) =>
+      error({
+        code,
+        details: { unread_message_id: "u-1", held_turn: false, ...details }
+      });
+    const loaded: FailureRecoveryCapabilities = {
+      ...committed,
+      unreadMessageIds: ["u-1"]
+    };
+
+    // Mutants: a reason gets another reason's words, the call's limit is
+    // dropped, or the chat surface offers only dismiss.
+    it.each([
+      [
+        "classification_output_limit",
+        { reason: "output_limit", output_cap_tokens: 2048 },
+        m.ai_builder_failure_heading_classification_output_limit(),
+        `${m.ai_builder_error_classification_output_limit()} ${m.ai_builder_failure_call_output_limit({ tokens: 2048 })}`
+      ],
+      [
+        "classification_unreadable_reply",
+        { reason: "no_content" },
+        m.ai_builder_failure_heading_classification_unreadable(),
+        m.ai_builder_error_classification_no_content()
+      ],
+      [
+        "classification_unreadable_reply",
+        { reason: "unknown" },
+        m.ai_builder_failure_heading_classification_unreadable(),
+        m.ai_builder_error_classification_reason_unknown()
+      ]
+    ] as const)("names %s (%o) and sends that message again", (code, details, heading, cause) => {
+      for (const context of [chat, generation]) {
+        const presentation = present({
+          error: unread(code, details),
+          latestTurn: turn("committed"),
+          capabilities: loaded,
+          context
+        });
+        expect(presentation.kind).toBe(code);
+        expect(presentation.heading).toBe(heading);
+        expect(presentation.consequence.startsWith(cause)).toBe(true);
+        expect(presentation.primary).toEqual({
+          kind: "resend_unread",
+          label: m.ai_builder_failure_action_resend_unread(),
+          records: "resend_requested",
+          messageId: "u-1"
+        });
+        expect(presentation.secondary).toBeNull();
+      }
+    });
+
+    it("says a held turn waits for an earlier message, and fetches it when it is not loaded", () => {
+      const held = unread("classification_unreadable_reply", {
+        reason: "invalid_reply",
+        held_turn: true
+      });
+      const presentation = present({
+        error: held,
+        latestTurn: turn("committed"),
+        capabilities: loaded,
+        context: chat
+      });
+      // Mutant: the alert reads as if the click itself was not interpreted.
+      expect(presentation.consequence).toBe(
+        `${m.ai_builder_failure_held_unread()} ${m.ai_builder_error_classification_invalid_reply()}`
+      );
+      expect(presentation.primary).toMatchObject({
+        kind: "resend_unread",
+        label: m.ai_builder_failure_action_resend_held()
+      });
+      // Mutant: a target outside the loaded conversation falls back to the
+      // composer or to the latest turn's retained request.
+      expect(
+        present({
+          error: held,
+          latestTurn: turn("committed"),
+          capabilities: committed,
+          context: chat
+        }).primary?.kind
+      ).toBe("refresh");
+      // Mutant: the resend is offered while the composer's model cannot run
+      // a turn, so the click does nothing; the composer says why.
+      expect(
+        present({
+          error: held,
+          latestTurn: turn("committed"),
+          capabilities: { ...loaded, canSendTurn: false },
+          context: chat
+        }).primary
+      ).toBeNull();
     });
   });
 });

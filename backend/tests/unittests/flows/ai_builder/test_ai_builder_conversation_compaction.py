@@ -17,11 +17,12 @@ from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     SlotClassificationSourceMetadata,
     metadata_with_slot_classification,
     metadata_with_text_status,
+    newest_unread_user_message,
     question_response_from_metadata,
+    reading_failure_from_metadata,
     slot_classification_from_metadata,
     slot_classification_metadata_from_attempt,
     text_status_changes,
-    unsettled_user_text,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
 from eneo.flows.ai_builder.ai_builder_edit_scope import build_active_request_window
@@ -51,6 +52,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     ResolvedSlotClassificationOutcome,
     SlotClassificationAttempt,
     SlotClassificationInput,
+    SlotClassificationReadingFailure,
     SlotClassificationResult,
     SlotClassificationSource,
 )
@@ -874,12 +876,19 @@ def test_exact_limits_do_not_mark_classifier_diagnostics_degraded() -> None:
 
 
 @pytest.mark.parametrize("limit", ["count", "bytes"])
-def test_compaction_keeps_unread_text_with_its_status(limit: str) -> None:
+@pytest.mark.parametrize("recorded", [True, False], ids=["recorded", "legacy"])
+def test_compaction_keeps_unread_text_with_its_status(
+    limit: str, recorded: bool
+) -> None:
     # gate it5 P1: compaction dropped unread text and what said it was unread,
-    # so the next turn went on as if it had been read.
+    # so the next turn went on as if it had been read. A legacy unread message
+    # (no reading facts) is held the same way.
     unread = ConversationMessage(role="user", content="Jag vill namnge talarna.")
+    failure = SlotClassificationReadingFailure(
+        reason="output_limit", output_cap_tokens=2048, request_id="req-1"
+    )
     failed = slot_classification_metadata_from_attempt(
-        SlotClassificationAttempt(outcome="output_limit_exceeded"),
+        SlotClassificationAttempt(outcome="output_limit_exceeded", failure=failure),
         prompt_hash="a" * 64,
         classification_input=SlotClassificationInput(
             sources=(
@@ -900,7 +909,11 @@ def test_compaction_keeps_unread_text_with_its_status(limit: str) -> None:
     ).items()
     assert (message_id, status) == (unread.message_id, "unread")
     unread = unread.model_copy(
-        update={"metadata": metadata_with_text_status(None, status)}
+        update={
+            "metadata": metadata_with_text_status(
+                None, status, reading_failure=failure if recorded else None
+            )
+        }
     )
     later = [
         _msg("assistant", content=f"Svar {index}. " + "x" * 2_000)
@@ -917,8 +930,10 @@ def test_compaction_keeps_unread_text_with_its_status(limit: str) -> None:
     )
 
     assert len(compacted) < 71
-    assert compacted[0].message_id == unread.message_id
-    assert unsettled_user_text(compacted) == "unread"
+    assert newest_unread_user_message(compacted) == unread
+    assert reading_failure_from_metadata(compacted[0].metadata) == (
+        failure if recorded else None
+    )
 
 
 def test_compaction_keeps_latest_requirements_summary_even_if_old() -> None:

@@ -86,6 +86,9 @@
       case "retry_same_turn_acknowledged":
         await service.acknowledgeAndRetryLatestTurn();
         return;
+      case "resend_unread":
+        await service.resendUnreadMessage(action.messageId);
+        return;
       case "refresh":
         await handleTurnRefresh();
         return;

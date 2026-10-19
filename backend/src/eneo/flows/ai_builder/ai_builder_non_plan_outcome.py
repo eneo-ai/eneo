@@ -1,13 +1,14 @@
-"""Turns that answer the user without proposing a plan.
+"""Turns that end without proposing a plan.
 
 The model can decline a change the edit contract cannot carry — a step's
 model lives in the step editor and nowhere else. The server answers instead
 of planning when it knows no plan can be made this turn: a scoped revision
 the model cannot satisfy, a selected step that changed under the proposal,
-an edit only the user can fix, or text the user wrote that could not be
-read. Each owns its user-visible sentence here, and each is stored like an
-accepted proposal, so the conversation records what was asked and what was
-answered.
+an edit only the user can fix, or text the user wrote whose reading holds a
+conflict only they can settle. Each owns its user-visible sentence here, and
+each is stored like an accepted proposal, so the conversation records what
+was asked and what was answered. Text no reading has received ends the turn
+in a typed error instead, with no answer: the cause is the message's own.
 """
 
 from __future__ import annotations
@@ -23,10 +24,19 @@ from eneo.flows.ai_builder.ai_builder_architecture_errors import (
 )
 from eneo.flows.ai_builder.ai_builder_conversation_metadata import (
     PersistedAssistantToolCall,
-    UnsettledUserText,
+    UnreadReason,
     make_persisted_assistant_tool_call,
+    reading_failure_from_metadata,
+    unread_reason,
 )
 from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
+from eneo.flows.ai_builder.ai_builder_error_contract import (
+    AIBuilderErrorCode,
+    AIBuilderErrorEvent,
+    AIBuilderErrorPhase,
+    build_ai_builder_error_event,
+    with_ai_builder_call_evidence,
+)
 from eneo.flows.ai_builder.ai_builder_event_models import (
     AIBuilderStreamEvent,
     AIBuilderToolGuidance,
@@ -49,6 +59,9 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
 )
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_session_turn import SessionSendTurn
+from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
+    CheckpointUpdateDiagnosticCode,
+)
 from eneo.flows.ai_builder.ai_builder_tool_names import DECLINE_FLOW_CHANGE_TOOL_NAME
 from eneo.flows.ai_builder.ai_builder_tools import ProposalToolSchema
 from eneo.flows.ai_builder.planning_state import PlanningState
@@ -467,21 +480,7 @@ def stale_saved_step_revision_message(*, ui_language: str | None) -> str:
     ]
 
 
-# The unread answer holds on the turn that could not read the text and on any
-# later turn (a click included) that waits for it to be sent again. Whatever
-# left it unread (an empty, cut-off, filtered or unparsable reply), the text is
-# not at fault, and a later turn cannot tell which it was.
-_UNSETTLED_TEXT_ANSWERS: Final[dict[UnsettledUserText, dict[str, str]]] = {
-    "unread": {
-        "sv": (
-            "Något gick fel när jag läste ditt meddelande den här gången. "
-            "Skicka det igen, så fortsätter vi."
-        ),
-        "en": (
-            "Something went wrong while I was reading your message this time. "
-            "Please send it again, and we'll continue."
-        ),
-    },
+_UNSETTLED_TEXT_ANSWERS: Final[dict[CheckpointUpdateDiagnosticCode, dict[str, str]]] = {
     "speaker_naming_without_edit": {
         "sv": (
             "Jag är osäker på hur transkriptet ska granskas: ska den som granskar "
@@ -498,13 +497,104 @@ _UNSETTLED_TEXT_ANSWERS: Final[dict[UnsettledUserText, dict[str, str]]] = {
 
 
 def unsettled_text_answer(
-    unsettled: UnsettledUserText, *, ui_language: str | None
+    conflict: CheckpointUpdateDiagnosticCode, *, ui_language: str | None
 ) -> str:
-    """What the user is told while text they wrote cannot be built on yet."""
+    """What the user is told while a conflict in text they wrote waits for them."""
 
-    return _UNSETTLED_TEXT_ANSWERS[unsettled][
+    return _UNSETTLED_TEXT_ANSWERS[conflict][
         "en" if uses_english(ui_language) else "sv"
     ]
+
+
+_UNREAD_TEXT_MESSAGES: Final[dict[UnreadReason, str]] = {
+    "output_limit": "The reply reading a user message reached its output limit.",
+    "no_content": "The reply reading a user message carried no content.",
+    "invalid_reply": "The reply reading a user message had the wrong format.",
+    "unknown": "A user message has not been read; no reason was recorded.",
+}
+
+
+def unread_text_error(
+    target: ConversationMessage, *, current_message_id: str, request_id: str
+) -> AIBuilderErrorEvent:
+    """The error of a turn that `target`, the newest unread user message, holds.
+
+    Code, reason, cap and origin come only from what `target` recorded, so a
+    later turn (a click included) reports the cause of the message to send
+    again, never its own reading. A message an older build left unread
+    recorded no cause: `unknown`, with no cap and no origin.
+    """
+
+    failure = reading_failure_from_metadata(target.metadata)
+    reason = unread_reason(failure)
+    details = {
+        "unread_message_id": target.message_id,
+        "reason": reason,
+        "output_cap_tokens": failure.output_cap_tokens if failure is not None else None,
+        "held_turn": target.message_id != current_message_id,
+        "origin_request_id": failure.request_id if failure is not None else None,
+    }
+    return build_ai_builder_error_event(
+        message=_UNREAD_TEXT_MESSAGES[reason],
+        code=(
+            AIBuilderErrorCode.CLASSIFICATION_OUTPUT_LIMIT
+            if reason == "output_limit"
+            else AIBuilderErrorCode.CLASSIFICATION_UNREADABLE_REPLY
+        ),
+        phase=AIBuilderErrorPhase.PLANNER,
+        request_id=request_id,
+        details={key: value for key, value in details.items() if value is not None},
+    )
+
+
+async def commit_unread_text_turn(
+    *,
+    repo: AIBuilderRepository,
+    turn: SessionSendTurn,
+    conversation: list[ConversationMessage],
+    new_messages_start: int,
+    target: ConversationMessage,
+    usage_tracker: ProposalTurnTelemetry,
+    planning_state: PlanningState,
+    flow: "Flow | None",
+    request_id: str,
+) -> AIBuilderErrorEvent:
+    """End a turn that unread text holds with its typed error and no answer.
+
+    With no assistant message, the turn's user message carries the call
+    telemetry of a turn that made provider calls, summed before it is on the
+    message so each call counts once; a held turn that made none stores none,
+    like every server-ended turn. The plan the turn did not replace goes back to being approvable,
+    the messages and planning state are committed without completing the
+    turn, and the turn is then completed once, with the error, so a reload
+    shows the same failure.
+    """
+
+    user_message = conversation[new_messages_start]
+    if usage_tracker.llm_calls_made > 0:
+        user_message.metadata = assistant_metadata_with_usage(
+            conversation=conversation,
+            base_metadata=user_message.metadata,
+            usage_tracker=usage_tracker,
+        )
+    event = with_ai_builder_call_evidence(
+        unread_text_error(
+            target,
+            current_message_id=user_message.message_id,
+            request_id=request_id,
+        ),
+        usage_tracker.failed_turn_details(),
+    )
+    await repo.restore_awaiting_approval_after_answered_turn(turn=turn)
+    await repo.commit_turn(
+        turn=turn,
+        new_messages=conversation[new_messages_start:],
+        flow=flow,
+        planning_state=planning_state,
+        complete_turn=False,
+    )
+    await repo.complete_session_turn(turn=turn, error=event.data)
+    return event
 
 
 _NON_PLAN_OUTCOME_KEY: Final = "non_plan_outcome"

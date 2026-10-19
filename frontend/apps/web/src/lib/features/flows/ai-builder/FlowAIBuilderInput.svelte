@@ -242,8 +242,7 @@
   );
   const canSubmit = $derived(
     (inputValue.trim().length > 0 || completedUploads.length > 0 || restoredFiles.length > 0) &&
-      service.canSendMessage &&
-      service.modelSendBlock === null &&
+      service.canSendTurn &&
       !$isUploading &&
       !overLimit &&
       !stepScopeMissing
@@ -311,8 +310,7 @@
     ];
     if (
       (!trimmed && uploadedFileIds.length === 0) ||
-      !service.canSendMessage ||
-      service.modelSendBlock !== null ||
+      !service.canSendTurn ||
       $isUploading ||
       overLimit ||
       stepScopeMissing
@@ -320,8 +318,9 @@
       return;
     }
     if (!activeDraftSessionId) return;
-    // Optimistic clear for chat feel; anything but a confirmed delivery puts
-    // the draft back, so failed submissions never discard the user's text.
+    // Optimistic clear for chat feel; anything but a confirmed delivery, or a
+    // message the server kept unread with its own resend, puts the draft back,
+    // so failed submissions never discard the user's text.
     // The submission is owned by the session that sent it: a late outcome can
     // only mutate that session's record, never whichever session is showing.
     const submitted: PendingSubmission = {
@@ -346,7 +345,7 @@
       return;
     }
     pendingSubmission = null;
-    if (outcome === "delivered") {
+    if (outcome === "delivered" || outcome === "saved_unread") {
       scopeRequired = false;
       clearComposerDraft(submitted.sessionId);
       if (activeDraftSessionId === submitted.sessionId) {

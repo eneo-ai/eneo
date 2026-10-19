@@ -41,6 +41,11 @@ export interface FailureRecoveryCapabilities {
    *  when they are the same (or the retained request named none). A replay
    *  keeps its retained request, so the button has to say which model runs. */
   replayModel: string | "previous" | null;
+  /** The unread user messages of the loaded conversation, which can be sent again. */
+  unreadMessageIds: readonly string[];
+  /** A turn may be sent now on the model the composer shows (the composer's
+   *  own send gate). */
+  canSendTurn: boolean;
 }
 
 export interface FailurePresentationContext {
@@ -54,18 +59,23 @@ export type FailureActionKind =
   | "retry_same_turn"
   | "retry_same_turn_acknowledged"
   | "retry_new_turn"
+  | "resend_unread"
   | "clarify"
   | "attach_template"
   | "refresh"
   | "start_fresh"
   | "dismiss";
 
-export interface FailureAction {
-  kind: FailureActionKind;
+interface FailureActionBase {
   label: string;
   /** What the observation records when the user chooses this control. */
   records: AIBuilderClientErrorFirstAction;
 }
+
+export type FailureAction =
+  | (FailureActionBase & { kind: Exclude<FailureActionKind, "resend_unread"> })
+  /** Sends the named unread message again, from what the server recorded on it. */
+  | (FailureActionBase & { kind: "resend_unread"; messageId: string });
 
 export interface FailurePresentation {
   kind: FailureKind;
@@ -75,6 +85,20 @@ export interface FailurePresentation {
   secondary: FailureAction | null;
   /** Null when the server retained a turn state but no error payload. */
   technical: { code: string; requestId: string | null } | null;
+}
+
+/** The unread message a held session waits for, as the server named it. */
+interface UnreadTarget {
+  messageId: string;
+  /** The message is an earlier one, not this turn's own. */
+  held: boolean;
+}
+
+function unreadTarget(error: AIBuilderError): UnreadTarget | null {
+  const messageId = error.details.unread_message_id;
+  return typeof messageId === "string"
+    ? { messageId, held: error.details.held_turn === true }
+    : null;
 }
 
 const INVALID_PROPOSAL_CODES: ReadonlySet<string> = new Set([
@@ -176,6 +200,8 @@ export function classifyFailure(
   if (error.details.provider_disposition === "known_rejection") return "provider_rejected";
   if (error.code === "planner_context_limit_exceeded") return "request_budget_exhausted";
   if (error.code === "planner_output_too_long") return "output_too_long";
+  if (error.code === "classification_output_limit") return "classification_output_limit";
+  if (error.code === "classification_unreadable_reply") return "classification_unreadable_reply";
   if (INVALID_PROPOSAL_CODES.has(error.code)) return "invalid_proposal";
   return "other";
 }
@@ -254,6 +280,10 @@ function heading(kind: FailureKind, surface: FailureSurface): string {
       return m.ai_builder_failure_heading_output_too_long();
     case "invalid_proposal":
       return m.ai_builder_failure_heading_invalid_proposal();
+    case "classification_output_limit":
+      return m.ai_builder_failure_heading_classification_output_limit();
+    case "classification_unreadable_reply":
+      return m.ai_builder_failure_heading_classification_unreadable();
     case "other":
       // The one class this client cannot name; only the generation surface
       // knows which operation failed.
@@ -295,6 +325,19 @@ function cause(
       return m.ai_builder_failure_cause_output_too_long();
     case "invalid_proposal":
       return m.ai_builder_failure_cause_invalid_proposal();
+    case "classification_output_limit":
+    case "classification_unreadable_reply": {
+      if (!error) return m.ai_builder_error_fallback_generic();
+      // A held turn's own message was not the one left unread.
+      const cap = error.details.output_cap_tokens;
+      return [
+        unreadTarget(error)?.held ? m.ai_builder_failure_held_unread() : null,
+        aiBuilderErrorText(error),
+        typeof cap === "number" ? m.ai_builder_failure_call_output_limit({ tokens: cap }) : null
+      ]
+        .filter((part) => part !== null)
+        .join(" ");
+    }
     case "other":
       // The code's words, or which operation failed; never the server's prose.
       return error ? aiBuilderErrorText(error) : m.ai_builder_error_fallback_generic();
@@ -331,6 +374,14 @@ const action = {
     kind: "retry_new_turn",
     label: m.ai_builder_turn_retry(),
     records: "resend_requested"
+  }),
+  resendUnread: (target: UnreadTarget): FailureAction => ({
+    kind: "resend_unread",
+    label: target.held
+      ? m.ai_builder_failure_action_resend_held()
+      : m.ai_builder_failure_action_resend_unread(),
+    records: "resend_requested",
+    messageId: target.messageId
   }),
   clarify: (kind: FailureKind): FailureAction => ({
     kind: "clarify",
@@ -371,7 +422,8 @@ function actionsFor(
   special: boolean,
   capabilities: FailureRecoveryCapabilities,
   context: FailurePresentationContext,
-  problem: ActionableProblem | null = null
+  problem: ActionableProblem | null = null,
+  unread: UnreadTarget | null = null
 ): Actions {
   const chat = context.surface === "chat";
   if (context.offersStartFresh) return { primary: action.startFresh(), secondary: null };
@@ -392,6 +444,20 @@ function actionsFor(
   // only honest step is to fetch the state.
   if (capabilities.turnActive || !capabilities.canStartNewTurn) {
     return { primary: action.refresh(), secondary: null };
+  }
+  // Unread text holds every turn, on either surface, until a reading receives
+  // it whole: its resend's, or that of a later message that covers it. The
+  // resend is offered for a loaded message; any other is fetched first.
+  if (kind === "classification_output_limit" || kind === "classification_unreadable_reply") {
+    if (!unread || !capabilities.unreadMessageIds.includes(unread.messageId)) {
+      return { primary: action.refresh(), secondary: null };
+    }
+    // Offered only when the composer could send it: under a model it cannot
+    // run, the composer says why and the alert offers nothing that would not.
+    return {
+      primary: capabilities.canSendTurn ? action.resendUnread(unread) : null,
+      secondary: null
+    };
   }
   // The chat surface shows failures of any operation; it offers no resend and
   // no reword of the plan there, only the way to acknowledge the message.
@@ -456,7 +522,14 @@ export function describeFailure({
     kind,
     heading: words.heading,
     consequence: `${words.cause}${preserved}`,
-    ...actionsFor(kind, special !== null, capabilities, context, problem),
+    ...actionsFor(
+      kind,
+      special !== null,
+      capabilities,
+      context,
+      problem,
+      error ? unreadTarget(error) : null
+    ),
     technical: error ? { code: error.code, requestId: error.request_id } : null
   };
 }

@@ -74,6 +74,7 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationAttempt,
     SlotClassificationBias,
     SlotClassificationInput,
+    SlotClassificationReadingFailure,
     SlotClassificationResult,
     SlotClassificationSource,
 )
@@ -121,6 +122,9 @@ class RuntimeDiscoveryContext:
     planning_state: PlanningState
     slot_classification_result: SlotClassificationResult | None = None
     slot_classification_metadata: SlotClassificationMetadata | None = None
+    # Why the reading's reply carried no reading, for the text-status owner;
+    # never part of the stored classification.
+    reading_failure: SlotClassificationReadingFailure | None = None
     schema_candidates: tuple[DeclaredSchemaCandidate, ...] = ()
     schema_direction_pending: bool = False
 
@@ -130,6 +134,7 @@ class DiscoveryRuntimeResult:
     discovery_analysis: DiscoveryAnalysis
     planning_state: PlanningState
     slot_classification_metadata: SlotClassificationMetadata | None = None
+    reading_failure: SlotClassificationReadingFailure | None = None
     schema_candidates: tuple[DeclaredSchemaCandidate, ...] = ()
     schema_direction_pending: bool = False
 
@@ -526,6 +531,7 @@ def _complete_runtime_discovery_context(
     schema_direction_pending: bool,
     slot_classification_result: SlotClassificationResult | None = None,
     slot_classification_metadata: SlotClassificationMetadata | None = None,
+    reading_failure: SlotClassificationReadingFailure | None = None,
 ) -> RuntimeDiscoveryContext:
     # Every path ends here, classified or not, so every path takes the policy
     # defaults. Classification can name the terminal output, the template
@@ -544,6 +550,7 @@ def _complete_runtime_discovery_context(
         planning_state=state,
         slot_classification_result=slot_classification_result,
         slot_classification_metadata=slot_classification_metadata,
+        reading_failure=reading_failure,
         schema_candidates=schema_candidates,
         schema_direction_pending=schema_direction_pending,
     )
@@ -797,6 +804,7 @@ async def build_runtime_discovery_context(
                 model=completion_model_route.litellm_model,
                 provider=provider,
             ),
+            reading_failure=attempt.failure,
             persisted_planning_state=persisted_planning_state,
             attached_file_ids=attached_file_ids,
         )
@@ -1055,6 +1063,7 @@ async def build_discovery_runtime_result(
         discovery_analysis=analysis,
         planning_state=context.planning_state,
         slot_classification_metadata=context.slot_classification_metadata,
+        reading_failure=context.reading_failure,
         schema_candidates=context.schema_candidates,
         schema_direction_pending=context.schema_direction_pending,
     )
