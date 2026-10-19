@@ -184,8 +184,12 @@
   const isBuiltin = $derived(builtinAvailable && http_auth_type === "internal");
   // A bundled tool runtime server: its connection comes from the deployment.
   const isBundled = $derived(http_auth_type === "bundled");
-  // Shown before submit; the backend refuses the same combination.
-  const credentialOverPlainHttp = $derived(sendsCredentialOverPlainHttp(http_auth_type, http_url));
+  // Shown before submit; the backend refuses the same combination. A built-in
+  // provider's URL is never submitted (the backend sets its own endpoint), so a
+  // URL left over from the external source must not block saving it.
+  const credentialOverPlainHttp = $derived(
+    !isBuiltin && sendsCredentialOverPlainHttp(http_auth_type, http_url)
+  );
   const submitLabel = $derived(
     !isEditMode && isBuiltin && activateOnSave
       ? m.tools_save_activate()
