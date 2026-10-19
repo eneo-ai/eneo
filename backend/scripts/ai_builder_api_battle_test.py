@@ -5867,7 +5867,10 @@ def _run_case_session(
     )
     interactions.append(first)
 
-    answered_requirement_versions: set[str] = set()
+    # A card is answered once per showing: the Builder may show the same
+    # requirements version again (a new instance_token) after a question it
+    # asked, and that showing needs its own confirmation.
+    answered_card_showings: set[tuple[str, str]] = set()
     pending_correction = (
         case.script.message
         if case.script is not None and case.script.kind == "correction"
@@ -5897,9 +5900,7 @@ def _run_case_session(
         ):
             # The scripted correction answers the first card as ordinary
             # text; only a later card is judged and confirmed.
-            answered_requirement_versions.add(
-                str(corrected_card.get("requirements_version") or "")
-            )
+            answered_card_showings.add(_card_showing(corrected_card))
             correction, pending_correction = pending_correction, None
             return send(correction, None)
         if (
@@ -5907,8 +5908,8 @@ def _run_case_session(
             and (requirements_summary := _latest_requirements_summary(current))
             is not None
         ):
-            version = str(requirements_summary.get("requirements_version") or "")
-            if version and version not in answered_requirement_versions:
+            showing = _card_showing(requirements_summary)
+            if showing[0] and showing not in answered_card_showings:
                 card_fields = requirements_summary.get("named_content_fields")
                 named_result_check = _pre_confirmation_check(
                     case.expected or {}, card_fields
@@ -5937,7 +5938,7 @@ def _run_case_session(
                         # Do not confirm a disclosure that violates the case
                         # contract; the quality report records why.
                         return None
-                answered_requirement_versions.add(version)
+                answered_card_showings.add(showing)
                 return send(
                     CONFIRM_MESSAGE,
                     _requirements_confirmation_payload(
@@ -8011,6 +8012,17 @@ def _requirements_confirmation_payload(
         payload["requirements_version"] = version
     payload.update(_shown_instance(requirements_summary))
     return payload
+
+
+def _card_showing(card: Mapping[str, Any]) -> tuple[str, str]:
+    """A requirements card's version and the showing's instance token (empty
+    for a showing from before tokens)."""
+
+    token = card.get("instance_token")
+    return (
+        str(card.get("requirements_version") or ""),
+        token if isinstance(token, str) else "",
+    )
 
 
 def _shown_instance(shown: Mapping[str, Any]) -> JsonObject:
