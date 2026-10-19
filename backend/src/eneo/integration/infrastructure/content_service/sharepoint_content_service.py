@@ -347,6 +347,8 @@ class SharePointContentService:
                 access_token_provider=access_token_provider,
             )
             await self._progress.set_phase("finishing", stats)
+            if not sync_results.refused_access(stats):
+                await self._index.remove_refused(integration_knowledge, stats)
             retries_recorded = await self._settle_failures(
                 resolved_integration_knowledge_id,
                 stats,
@@ -1241,6 +1243,8 @@ class SharePointContentService:
         stats = delta_pass.stats
         pending_change_keys = delta_pass.pending_change_keys
 
+        if not sync_results.refused_access(stats):
+            await self._index.remove_refused(integration_knowledge, stats)
         await self._settle_failures(
             integration_knowledge.id,
             stats,

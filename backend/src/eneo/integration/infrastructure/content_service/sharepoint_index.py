@@ -12,7 +12,13 @@ from uuid import UUID
 import aiohttp
 
 from eneo.info_blobs.info_blob import InfoBlobAdd, InfoBlobUpdate, SourceMetadataEntry
-from eneo.integration.domain.skip_reasons import error_skipped, skipped, skipped_by_code
+from eneo.integration.domain.skip_reasons import (
+    SkipReasonCode,
+    classify_skip_reason,
+    error_skipped,
+    skipped,
+    skipped_by_code,
+)
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     MissingDownloadUrlError,
     SharePointContentClient,
@@ -67,6 +73,9 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 NO_DOWNLOAD_REASON = "SharePoint offers no download for this item"
+# Verdicts about the file itself: its indexed copy no longer stands for it.
+# The value names the removal in logs and in a failed removal's reason.
+_REMOVING_VERDICTS: dict[SkipReasonCode, str] = {"password_protected": "encrypted"}
 
 
 class SharePointIndex:
@@ -84,12 +93,29 @@ class SharePointIndex:
         # None is a failed read; an empty catalog is a successful empty read.
         # Both are cached for the lifetime of this sync service, once per drive.
         self._column_catalogs: dict[str, SharePointColumnCatalog | None] = {}
+        # Item ids that may be indexed, per knowledge: read once, kept current
+        # by this writer. A superset is fine; it only saves a delete that
+        # cannot match.
+        self._maybe_indexed: dict[UUID, set[str]] = {}
 
     async def list_items(self, knowledge_id: UUID) -> list[tuple[UUID, str]]:
         """Indexed blob/item identities without loading text or embeddings."""
         return await self.info_blob_service.repo.get_sharepoint_item_ids_for_integration_knowledge(
             integration_knowledge_id=knowledge_id
         )
+
+    async def _may_be_indexed(self, knowledge_id: UUID, item_id: str) -> bool:
+        known = self._maybe_indexed.get(knowledge_id)
+        if known is None:
+            try:
+                indexed = await self.list_items(knowledge_id)
+            except Exception as exc:
+                logger.warning("Could not read the indexed SharePoint items: %s", exc)
+                return True
+            known = self._maybe_indexed[knowledge_id] = {
+                indexed_id for _, indexed_id in indexed
+            }
+        return item_id in known
 
     async def _column_catalog(
         self, client: SharePointContentClient, drive_id: Optional[str]
@@ -292,6 +318,8 @@ class SharePointIndex:
             embedding_model=integration_knowledge.embedding_model,
         )
 
+        if sharepoint_item_id and integration_knowledge.id in self._maybe_indexed:
+            self._maybe_indexed[integration_knowledge.id].add(sharepoint_item_id)
         new_blob_size = safe_int(getattr(info_blob, "size", 0))
         await self._adjust_size(
             integration_knowledge, new_blob_size - previous_blob_size
@@ -343,6 +371,7 @@ class SharePointIndex:
                 # still carries the document's name.
                 sync_results.record_change(stats, blob.title or item_name, "deleted")
 
+            self._maybe_indexed.get(integration_knowledge_id, set()).discard(item_id)
             deleted_count = len(valid_deleted_blobs)
             if deleted_count:
                 logger.info(
@@ -428,7 +457,32 @@ class SharePointIndex:
         integration_knowledge_id: UUID,
         stats: SyncStats,
     ) -> None:
-        """Count a file that yielded no text; drop the local copy only for a positive no-text result."""
+        """Count a file that yielded no text; drop the local copy for a verdict about the file.
+
+        A completed parse without text, or a verdict in ``_REMOVING_VERDICTS``,
+        says the indexed copy no longer stands for the file. Anything else (a
+        parser error, a cut-off download, a limit) says nothing about it and
+        keeps the copy.
+        """
+        verdict = (
+            _REMOVING_VERDICTS.get(classify_skip_reason(skip_reason)[0])
+            if skip_reason
+            else None
+        )
+        if item_id and skip_reason and verdict:
+            if await self._may_be_indexed(integration_knowledge_id, item_id):
+                deleted = await self.remove(
+                    item_id=item_id,
+                    item_name=item_name,
+                    integration_knowledge=integration_knowledge,
+                    integration_knowledge_id=integration_knowledge_id,
+                    stats=stats,
+                    reason=verdict,
+                )
+                if deleted is None:
+                    return
+            sync_results.count_skip(stats, skipped(item_name, skip_reason))
+            return
         if item_id and skip_reason in NO_TEXT_REASONS:
             await self._remove_empty(
                 item_id=item_id,
@@ -443,6 +497,28 @@ class SharePointIndex:
             sync_results.count_skip(stats, skipped(item_name, skip_reason))
         else:
             stats["skipped_items"] += 1
+
+    async def remove_refused(
+        self, integration_knowledge: "IntegrationKnowledge", stats: SyncStats
+    ) -> None:
+        """Drop the indexed copies of files whose download was refused (403).
+
+        Called at the end of a pass that ``sharepoint_results.refused_access``
+        did not put down to the identity: a refusal among downloads that work
+        is about the file (a sensitivity label, broken inheritance), and what
+        Eneo may no longer read must not stay answerable. The refusal itself
+        was counted as the file's skip when it came.
+        """
+        for item_id, item_name in stats.pop("refused_downloads", {}).items():
+            if await self._may_be_indexed(integration_knowledge.id, item_id):
+                await self.remove(
+                    item_id=item_id,
+                    item_name=item_name,
+                    integration_knowledge=integration_knowledge,
+                    integration_knowledge_id=integration_knowledge.id,
+                    stats=stats,
+                    reason="access-refused",
+                )
 
     async def index_file(
         self,
@@ -572,6 +648,7 @@ class SharePointIndex:
                 raise
             if e.status == 403:
                 stats["download_forbidden"] = stats.get("download_forbidden", 0) + 1
+                stats.setdefault("refused_downloads", {})[item_id] = item_name
             logger.warning(
                 "File %s (item_id=%s) is gone or not accessible: %s",
                 item_name,

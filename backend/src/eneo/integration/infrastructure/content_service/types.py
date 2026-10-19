@@ -70,6 +70,8 @@ class SyncStats(TypedDict):
     # Per-pass bookkeeping; never part of a summary.
     download_attempts: NotRequired[int]
     download_forbidden: NotRequired[int]
+    # Item id -> name of each file whose download was refused (403).
+    refused_downloads: NotRequired[dict[str, str]]
     # Item id -> indexes into skipped_details of the failures that name it.
     failures_by_item: NotRequired[dict[str, list[int]]]
     skipped_total: NotRequired[int]

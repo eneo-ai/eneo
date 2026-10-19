@@ -45,12 +45,14 @@ class SyncItemsFailed(Exception):
 
 
 class SyncAccessDenied(SyncItemsFailed):
-    """Every download of the pass was refused (HTTP 403).
+    """Every download of the pass was refused (HTTP 403), and enough of them.
 
-    One refusal among successes is about that file (a sensitivity label, a
-    broken-inheritance folder) and the pass moves past it. When nothing could
-    be downloaded the problem is the identity (a conditional access policy, a
-    changed Sites.Selected grant), so the pass fails and keeps its token.
+    A refusal among successes, or one of a handful, is about that file (a
+    sensitivity label, a broken-inheritance folder): its indexed copy goes and
+    the pass moves past it. When nothing of a meaningful number could be
+    downloaded the problem is the identity (a conditional access policy, a
+    changed Sites.Selected grant), so nothing is removed and the pass fails
+    and keeps its token. See ``refused_access``.
     """
 
     def __init__(
@@ -235,16 +237,34 @@ def initialize_stats() -> SyncStats:
     }
 
 
+# Fewer refused downloads than this say nothing about the identity, even when
+# nothing else could be downloaded: one restricted file must not hold a pass.
+_MIN_REFUSALS_FOR_ACCESS_PROBLEM = 3
+
+
+def refused_access(stats: SyncStats) -> int:
+    """How many downloads were refused when that says the identity lost access, else 0.
+
+    Every download of the pass refused, and at least
+    ``_MIN_REFUSALS_FOR_ACCESS_PROBLEM`` of them.
+    """
+    attempts = stats.get("download_attempts", 0)
+    if (
+        attempts >= _MIN_REFUSALS_FOR_ACCESS_PROBLEM
+        and stats.get("download_forbidden", 0) == attempts
+    ):
+        return attempts
+    return 0
+
+
 def summarize_pass(stats: SyncStats) -> tuple[SyncStats, int]:
-    """The pass summary, and how many downloads were refused if all of them were.
+    """The pass summary, and how many downloads were refused if ``refused_access``.
 
     Refusals were counted as file-level skips as they came; once the pass
-    shows they were the only outcome they become its failures.
+    shows they are about the identity they become its failures.
     """
-    forbidden = 0
-    attempts = stats.get("download_attempts", 0)
-    if attempts and stats.get("download_forbidden", 0) == attempts:
-        forbidden = attempts
+    forbidden = refused_access(stats)
+    if forbidden:
         stats["failed_items"] = stats.get("failed_items", 0) + forbidden
     return build_summary_stats(stats), forbidden
 

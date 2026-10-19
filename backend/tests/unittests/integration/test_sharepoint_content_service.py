@@ -63,6 +63,7 @@ from eneo.integration.infrastructure.content_service.utils import (
     EMPTY_CONTENT_REASON,
     NO_TEXT_LAYER_REASON,
     NO_TEXT_REASONS,
+    PASSWORD_PROTECTED_REASON,
     ExtractionResult,
     extract_sharepoint_content,
 )
@@ -5249,21 +5250,22 @@ class TestDeltaExtractionOutcomes:
             {"file": "scan.pdf", "reason": expected_reason, "retry": True}
         ]
 
-    @pytest.mark.parametrize("every_download_refused", [False, True])
-    async def test_a_refusal_is_about_the_file_unless_every_download_was_refused(
-        self, service, mock_dependencies, mock_oauth_token, every_download_refused
+    async def _run_refusals(
+        self, service, mock_dependencies, mock_oauth_token, outcomes
     ):
-        """One 403 among successes names a file; a pass in which nothing could be
-        downloaded names the identity, so it fails and keeps its token."""
+        """One file per outcome, all of them indexed before the pass."""
         ik = _real_integration_knowledge(delta_token="token-1")
         mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
         mock_dependencies["integration_knowledge_repo"].one.return_value = ik
-        second = (
-            _http_error(403, "Forbidden")
-            if every_download_refused
-            else ExtractionResult.ok("Body")
+        item_ids = [f"item-{index}" for index in range(len(outcomes))]
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[(uuid4(), item_id) for item_id in item_ids]
         )
-
+        delete = repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[MagicMock(size=0, title="indexed copy")]
+        )
+        failure = None
         with (
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
@@ -5275,49 +5277,154 @@ class TestDeltaExtractionOutcomes:
                 get_delta_changes=AsyncMock(
                     return_value=(
                         [
-                            _delta_file("item-1", "a.docx"),
-                            _delta_file("item-2", "b.docx"),
+                            _delta_file(item_id, f"{item_id}.docx")
+                            for item_id in item_ids
                         ],
                         "token-2",
                     )
                 ),
-                get_file_extraction_by_id=AsyncMock(
-                    side_effect=[_http_error(403, "Forbidden"), second]
-                ),
+                get_file_extraction_by_id=AsyncMock(side_effect=outcomes),
             )
-            failure = None
             try:
                 await service.process_delta_changes(
                     token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
                 )
             except SyncAccessDenied as exc:
                 failure = exc
+        removed = [call.kwargs["sharepoint_item_id"] for call in delete.await_args_list]
+        return ik, removed, failure
 
+    @pytest.mark.parametrize(
+        "outcomes",
+        [
+            pytest.param([_http_error(403, "Forbidden")], id="the-only-download"),
+            pytest.param(
+                [_http_error(403, "Forbidden"), ExtractionResult.ok("Body")],
+                id="among-successes",
+            ),
+            pytest.param(
+                [_http_error(403, "Forbidden"), _http_error(403, "Forbidden")],
+                id="two-of-two",
+            ),
+        ],
+    )
+    async def test_a_refused_download_removes_the_indexed_copy_and_advances(
+        self, service, mock_dependencies, mock_oauth_token, outcomes
+    ):
+        """What Eneo may no longer read must not stay answerable, and one
+        restricted file must not hold the token back."""
+        ik, removed, failure = await self._run_refusals(
+            service, mock_dependencies, mock_oauth_token, outcomes
+        )
+
+        refused = [
+            f"item-{index}"
+            for index, outcome in enumerate(outcomes)
+            if isinstance(outcome, Exception)
+        ]
+        assert failure is None
+        assert removed == refused
+        assert ik.delta_token == "token-2"
+        assert ik.last_sync_status == "success"
+        assert ik.last_sync_summary["files_deleted"] == len(refused)
+        assert "failed_items" not in ik.last_sync_summary
         sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
-        if every_download_refused:
-            assert str(failure) == (
-                "SharePoint refused all 2 downloads (HTTP 403); check the "
-                "integration's access to this library, the next sync retries them"
+        assert {"file": "item-0.docx", "reason": "Error: HTTP 403 Forbidden"} in (
+            _reasons(sync_log.metadata["skipped_details"])
+        )
+
+    async def test_every_download_of_several_refused_is_about_the_identity(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        """A pass in which nothing of three could be downloaded names the
+        identity: nothing is removed and the pass keeps its token."""
+        ik, removed, failure = await self._run_refusals(
+            service,
+            mock_dependencies,
+            mock_oauth_token,
+            [_http_error(403, "Forbidden")] * 3,
+        )
+
+        assert str(failure) == (
+            "SharePoint refused all 3 downloads (HTTP 403); check the "
+            "integration's access to this library, the next sync retries them"
+        )
+        assert removed == []
+        assert ik.delta_token == "token-1"
+        assert ik.last_sync_status == "error"
+        assert ik.last_sync_summary["failed_items"] == 3
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert sync_log.status == "error"
+        assert sync_log.metadata["changes_detected"] == 3
+
+    async def test_an_encrypted_file_loses_its_indexed_copy(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        """A sensitivity label with encryption leaves a file Eneo cannot read."""
+        ik, removed, failure = await self._run_refusals(
+            service,
+            mock_dependencies,
+            mock_oauth_token,
+            [ExtractionResult.error(PASSWORD_PROTECTED_REASON)],
+        )
+
+        assert failure is None
+        assert removed == ["item-0"]
+        assert ik.delta_token == "token-2"
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
+            {"file": "item-0.docx", "reason": "Error: Password-protected file"}
+        ]
+        assert sync_log.metadata["changed_details"] == [
+            {"file": "indexed copy", "change": "deleted"}
+        ]
+
+    async def test_a_full_sync_removes_a_file_it_may_no_longer_download(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        """The file is still listed, so only the refusal says it is closed."""
+        ik = _real_integration_knowledge(delta_token=None)
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        repo = mock_dependencies["info_blob_service"].repo
+        repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+            return_value=[(uuid4(), "secret"), (uuid4(), "open")]
+        )
+        delete = repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
+            return_value=[MagicMock(size=0, title="secret.docx")]
+        )
+        files = [
+            {
+                **_delta_file(item_id, f"{item_id}.docx"),
+                "parentReference": {"driveId": "drive-456", "siteId": "site-123"},
+            }
+            for item_id in ("secret", "open")
+        ]
+        with (
+            patch(
+                "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+            ) as mock_client_class,
+            patch.object(service._index, "upsert", AsyncMock(return_value="unchanged")),
+        ):
+            _mock_graph_client(
+                mock_client_class,
+                get_drive_root_children=AsyncMock(return_value=files),
+                get_file_extraction_by_id=AsyncMock(
+                    side_effect=[
+                        _http_error(403, "Forbidden"),
+                        ExtractionResult.ok("Body"),
+                    ]
+                ),
             )
-            assert ik.delta_token == "token-1"
-            assert ik.last_sync_status == "error"
-            assert ik.last_sync_error == str(failure)
-            assert ik.last_sync_summary["skipped_items"] == 2
-            assert ik.last_sync_summary["failed_items"] == 2
-            assert sync_log.status == "error"
-            assert sync_log.metadata["changes_detected"] == 2
-        else:
-            assert failure is None
-            assert ik.delta_token == "token-2"
-            assert ik.last_sync_status == "success"
-            assert ik.last_sync_summary["files_processed"] == 1
-            assert ik.last_sync_summary["skipped_items"] == 1
-            assert "failed_items" not in ik.last_sync_summary
-            assert sync_log.status == "success"
-        assert _reasons(sync_log.metadata["skipped_details"])[0] == {
-            "file": "a.docx",
-            "reason": "Error: HTTP 403 Forbidden",
-        }
+            await service.pull_content(
+                token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            )
+
+        delete.assert_awaited_once_with(
+            sharepoint_item_id="secret", integration_knowledge_id=ik.id
+        )
+        assert ik.last_sync_status == "success"
+        assert ik.delta_token == "delta-token"
 
     async def test_a_stale_copy_that_cannot_be_removed_fails_the_item_once_uncached(
         self, service, mock_dependencies, mock_oauth_token
