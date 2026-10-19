@@ -33,6 +33,7 @@
     buildSpeakerRows,
     effectiveSpeakerNames,
     speakerNamesFromRows,
+    withProposalSupport,
     type SpeakerConfidence
   } from "$lib/features/flows/speakerMappingReview";
   import type { TranscriptCorrectionsController } from "$lib/features/flows/transcriptCorrectionsController.svelte";
@@ -257,6 +258,16 @@
       showsPersonNames ? (correctionsController?.speakerNames ?? {}) : {}
     )
   );
+  // Each speaker named as the transcript below shows it, presented by the rule
+  // the step's mapping stores a person's names by: the step's confidence and
+  // evidence stay with the name it stores, a name a person gave later is
+  // certain and one they cleared unknown.
+  const shownSpeakerRows = $derived(
+    withProposalSupport(
+      speakerMapping.map((row) => ({ ...row, name: transcriptSpeakerNames[row.label] ?? null })),
+      speakerMapping
+    )
+  );
   const transcriptSegments = $derived.by(() => {
     if (!transcriptContext || !outputText) return null;
     const parsed = parseTranscript(outputText);
@@ -372,26 +383,19 @@
                   {m.flow_step_speaker_mapping_section()}
                 </h4>
                 <ul class="divide-default mt-1.5 divide-y rounded-lg border p-0">
-                  {#each speakerMapping as row (row.label)}
-                    <!-- The name the transcript below shows, a person's over the step's. -->
-                    {@const name = transcriptSpeakerNames[row.label] ?? null}
+                  {#each shownSpeakerRows as row (row.label)}
                     <li class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 px-3 py-2">
                       <span class="text-secondary text-xs">{speakerRowLabel(row.label)}</span>
-                      <span class="text-sm font-medium" class:text-secondary={name === null}>
-                        {name ?? m.flow_run_transcript_unknown_speaker()}
+                      <span class="text-sm font-medium" class:text-secondary={row.name === null}>
+                        {row.name ?? m.flow_run_transcript_unknown_speaker()}
                       </span>
-                      <!-- The row's confidence and evidence are for the name the step
-                           stores, not for one a person gave or cleared later with
-                           the transcript corrections. -->
-                      {#if name === (stepSpeakerNames[row.label] ?? null)}
-                        <Badge variant="outline" class="text-xs">
-                          {confidenceText(row.confidence)}
-                        </Badge>
-                        {#if row.evidence}
-                          <span class="text-secondary basis-full text-xs text-pretty sm:basis-auto">
-                            {row.evidence}
-                          </span>
-                        {/if}
+                      <Badge variant="outline" class="text-xs">
+                        {confidenceText(row.confidence)}
+                      </Badge>
+                      {#if row.evidence}
+                        <span class="text-secondary basis-full text-xs text-pretty sm:basis-auto">
+                          {row.evidence}
+                        </span>
                       {/if}
                     </li>
                   {/each}

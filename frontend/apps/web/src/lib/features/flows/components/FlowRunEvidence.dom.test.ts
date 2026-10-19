@@ -348,22 +348,21 @@ describe("FlowRunEvidence", () => {
     expect(turn(1, "Jo tack.")).not.toContain("Bertil");
   });
 
-  it("does not present the step's support for a name as support for a person's change", async () => {
+  it("presents a person's change after the run as a review stores it", async () => {
     const { rows } = await openNamingStep();
     const [cleared, renamed, kept] = rows;
-    const confidences = [
-      m.flow_run_review_speakers_confidence_high(),
-      m.flow_run_review_speakers_confidence_medium(),
-      m.flow_run_review_speakers_confidence_low()
-    ];
+    const high = m.flow_run_review_speakers_confidence_high();
+    const low = m.flow_run_review_speakers_confidence_low();
 
-    // The step's confidence and evidence were for Anna and Bo.
-    for (const row of [cleared, renamed]) {
-      for (const confidence of confidences) expect(row).not.toContain(confidence);
-    }
+    // The step's confidence and evidence were for Anna and Bo. A name a person
+    // clears leaves an unknown speaker; one they give is certain.
     expect(cleared).toContain(m.flow_run_transcript_unknown_speaker());
+    expect(cleared).toContain(low);
+    expect(cleared).not.toContain(high);
     expect(cleared).not.toContain("Presenterar sig som Anna.");
     expect(renamed).toContain("Bertil");
+    expect(renamed).toContain(high);
+    expect(renamed).not.toContain(m.flow_run_review_speakers_confidence_medium());
     expect(renamed).not.toContain("Tilltalas som Bo.");
 
     // A name nobody changed keeps them.

@@ -133,8 +133,9 @@ export function keptProposal(
 }
 
 /**
- * `rows` as the server stores a review of `proposed`, the step's own rows
- * (the backend's `mapping_with_proposal_support`): a row keeps the step's
+ * `rows` as the server stores a person's names over `proposed`, the step's
+ * own rows (the backend's `mapping_with_proposal_support` at review, and
+ * `mapping_with_names` for names given after the run): a row keeps the step's
  * confidence and evidence while it names its speaker as the step did. A name
  * a person gives instead is as certain as a name gets, one they clear leaves
  * the speaker unknown, and neither keeps the step's evidence.

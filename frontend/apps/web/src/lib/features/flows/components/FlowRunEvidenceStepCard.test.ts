@@ -385,6 +385,70 @@ describe("FlowRunEvidenceStepCard", () => {
     expect(downstream).not.toContain("Gunnar Ek");
   });
 
+  it("presents a name a person gave or cleared after the run as a review stores it", () => {
+    // The card's speaker list; its raw output below shows what the step stored.
+    const speakerList = (speakerNames: Record<string, string | null>) => {
+      const html = renderCard(
+        false,
+        {
+          ...result,
+          step_id: "00000000-0000-0000-0000-000000000009",
+          step_order: 2,
+          output_payload_json: {
+            text: "[00:00:00 - 00:00:04] Anna: Hej Gunnar.\n[00:00:05 - 00:00:09] Bo: Jo tack.",
+            speaker_mapping: {
+              inventory: [
+                { label: "SPEAKER_00", line_count: 1, samples: ["Hej Gunnar."] },
+                { label: "SPEAKER_01", line_count: 1, samples: ["Jo tack."] }
+              ]
+            },
+            structured: {
+              speakers: [
+                {
+                  label: "SPEAKER_00",
+                  name: "Anna",
+                  confidence: "medium",
+                  evidence: "Presenterar sig som Anna."
+                },
+                {
+                  label: "SPEAKER_01",
+                  name: "Bo",
+                  confidence: "medium",
+                  evidence: "Tilltalas som Bo."
+                }
+              ]
+            }
+          } as unknown as FlowRunStep["output_payload_json"]
+        },
+        rawContext,
+        null,
+        null,
+        { correctionsController: named(speakerNames) }
+      );
+      const start = html.indexOf(`>${m.flow_step_speaker_mapping_section()}</h4>`);
+      expect(start).toBeGreaterThan(-1);
+      return html.slice(start, html.indexOf("</ul>", start));
+    };
+    const count = (html: string, text: string) => html.split(text).length - 1;
+    const medium = m.flow_run_review_speakers_confidence_medium();
+
+    // A name a person gives is certain; the step's evidence was for Anna.
+    const renamed = speakerList({ SPEAKER_00: "Bertil" });
+    expect(renamed).toContain("Bertil");
+    expect(count(renamed, m.flow_run_review_speakers_confidence_high())).toBe(1);
+    expect(renamed).not.toContain("Presenterar sig som Anna.");
+    // The name nobody changed keeps the step's support.
+    expect(count(renamed, medium)).toBe(1);
+    expect(renamed).toContain("Tilltalas som Bo.");
+
+    // A name a person clears leaves an unknown speaker, as the step leaves one.
+    const cleared = speakerList({ SPEAKER_01: null });
+    expect(cleared).toContain(m.flow_run_transcript_unknown_speaker());
+    expect(count(cleared, m.flow_run_review_speakers_confidence_low())).toBe(1);
+    expect(cleared).not.toContain("Tilltalas som Bo.");
+    expect(count(cleared, medium)).toBe(1);
+  });
+
   it("shows a downstream document as authored when it only quotes transcript lines", () => {
     const html = renderCard(
       false,
