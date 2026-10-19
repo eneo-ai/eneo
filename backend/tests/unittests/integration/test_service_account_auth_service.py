@@ -333,7 +333,7 @@ async def test_refresh_refusals_are_logged_without_the_body(service, mock_tenant
     logged = [str(call.args[0]) % call.args[1:] for call in log.error.call_args_list]
     assert logged == [
         f"Service account token refresh failed for tenant {mock_tenant_app.tenant_id}: "
-        "AADSTS7000215: Invalid client secret provided."
+        "invalid_client AADSTS7000215"
     ]
 
 

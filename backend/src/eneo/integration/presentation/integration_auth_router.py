@@ -65,7 +65,9 @@ async def gen_url(
             "model": GeneralError,
             "description": "Bad request; `code` is `oauth_code_rejected` when the "
             "identity provider refuses the code (expired, already used or issued "
-            "for another redirect URI). The state is spent; start the sign-in again.",
+            "for another redirect URI; the state is spent, start the sign-in "
+            "again) and `oauth_client_rejected` when it refuses the app's client "
+            "ID or secret, which an administrator must fix.",
         },
     },
 )

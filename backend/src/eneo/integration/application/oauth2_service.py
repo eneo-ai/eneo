@@ -7,7 +7,10 @@ from eneo.integration.domain.entities.oauth_token import OauthToken
 from eneo.integration.domain.entities.user_integration import UserIntegration
 from eneo.integration.infrastructure.auth_service.base_auth_service import (
     TokenResponse,
-    rejected_code,
+    token_exchange_rejection,
+)
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    loggable_token_reason,
 )
 from eneo.integration.infrastructure.oauth_state_store import OauthStateStore
 from eneo.integration.presentation.models import IntegrationType
@@ -223,14 +226,17 @@ class Oauth2Service:
     async def _exchange(
         exchange: "Awaitable[TokenResponse | None]",
     ) -> "TokenResponse | None":
-        """The token response; a refused code is the caller's 400, not a 500."""
+        """The token response; a refused code or app is the caller's 400, not
+        a 500."""
         try:
             return await exchange
         except httpx.HTTPStatusError as exc:
-            rejection = rejected_code(exc)
+            rejection = token_exchange_rejection(exc)
             if rejection is None:
                 raise
             logger.warning(
-                "OAuth code exchange refused with HTTP %s", exc.response.status_code
+                "OAuth code exchange refused with HTTP %s: %s",
+                exc.response.status_code,
+                loggable_token_reason(exc),
             )
             raise rejection from exc

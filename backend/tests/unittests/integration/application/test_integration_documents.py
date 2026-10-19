@@ -359,6 +359,31 @@ def test_skipped_documents_reads_the_sync_log(metadata, completed_at, expected):
     assert skipped_documents(log).model_dump() == expected
 
 
+@pytest.mark.parametrize(
+    "metadata, total, truncated",
+    [
+        ({"skipped_details": None, "skipped_total": None}, 0, False),
+        ({"skipped_details": "a.pdf", "skipped_total": "abc"}, 0, False),
+        ({"skipped_details": [], "skipped_total": [], "skipped_items": 4}, 4, False),
+        ({"skipped_truncated": "maybe", "skipped_total": 3}, 3, False),
+    ],
+    ids=["nulls", "text", "list-for-count", "text-for-flag"],
+)
+def test_skipped_documents_of_a_row_another_release_wrote(metadata, total, truncated):
+    """The Skipped view read the stored JSON as it came and failed with a 500."""
+    log = SyncLog(
+        integration_knowledge_id=uuid4(),
+        sync_type="full",
+        status="success",
+        started_at=datetime(2026, 10, 13, 7, tzinfo=timezone.utc),
+        metadata=metadata,
+    )
+
+    served = skipped_documents(log)
+
+    assert (served.items, served.total, served.truncated) == ([], total, truncated)
+
+
 def test_served_sync_log_tolerates_a_skipped_item_without_a_name():
     """Older syncs stored an unnamed item as a null file."""
     log = presentation.SyncLog(

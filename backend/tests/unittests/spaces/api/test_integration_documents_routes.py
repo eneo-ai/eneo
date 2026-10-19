@@ -25,6 +25,7 @@ from eneo.integration.domain.entities.integration_knowledge import (
 from eneo.integration.domain.entities.sync_log import SyncLog
 from eneo.integration.domain.repositories.integration_knowledge_repo import (
     IntegrationKnowledgeLocation,
+    IntegrationKnowledgeSyncingError,
 )
 from eneo.integration.domain.skip_reasons import NO_TEXT_LAYER_REASON
 from eneo.integration.infrastructure.auth_service.org_token_provider import (
@@ -854,3 +855,66 @@ async def test_a_rename_to_a_blank_or_overlong_name_is_refused(
     assert response.status_code == 422, response.text
     api.knowledge_repo.rename.assert_not_awaited()
     api.knowledge_repo.rename_wrapper.assert_not_awaited()
+
+
+async def test_a_batch_the_caller_may_not_import_into_is_refused_whole(documents_api):
+    """A viewer got a 202 with every item reported failed."""
+    api = documents_api
+    api.knowledge_repo.add = AsyncMock()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=api.app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            f"/spaces/{api.space.id}/knowledge/integrations/add/{uuid4()}/batch/",
+            json={
+                "embedding_model": {"id": str(uuid4())},
+                "items": [
+                    {
+                        "name": "Protokoll",
+                        "url": "https://contoso.sharepoint.com/sites/KS",
+                        "key": "contoso.sharepoint.com,site,web",
+                    }
+                ],
+            },
+        )
+
+    assert response.status_code == 403, response.text
+    api.knowledge_repo.add.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "method, route, body",
+    [
+        pytest.param("PATCH", "{id}/", {"name": "Protokoll KS"}, id="rename"),
+        pytest.param("DELETE", "remove/{id}/", None, id="delete"),
+    ],
+)
+async def test_a_change_to_a_syncing_source_is_a_409(
+    documents_api, method, route, body
+):
+    api = documents_api
+    api.user.roles = [
+        RoleInDB(
+            id=uuid4(),
+            name="Importer",
+            tenant_id=api.user.tenant_id,
+            permissions=[Permission.INTEGRATIONS],
+        )
+    ]
+    api.space.members[api.user.id].role = SpaceRoleValue.ADMIN
+    api.knowledge.user_integration.auth_type = "user_oauth"
+    api.knowledge.sharepoint_subscription_id = None
+    api.knowledge_repo.rename.side_effect = IntegrationKnowledgeSyncingError()
+    api.knowledge_repo.remove.side_effect = IntegrationKnowledgeSyncingError()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=api.app), base_url="http://test"
+    ) as client:
+        response = await client.request(
+            method, api.change_url(route, api.knowledge.id), json=body
+        )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["code"] == "integration_knowledge_syncing"
+    assert "try again" in response.json()["message"]

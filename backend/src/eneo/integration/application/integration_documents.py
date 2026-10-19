@@ -10,6 +10,7 @@ from eneo.integration.presentation.models import (
     IntegrationDocumentItem,
     IntegrationSkippedDocument,
     IntegrationSkippedDocuments,
+    served_sync_metadata,
 )
 
 if TYPE_CHECKING:
@@ -179,15 +180,11 @@ def document_items(
 def skipped_documents(sync_log: SyncLog | None) -> IntegrationSkippedDocuments:
     if sync_log is None:
         return IntegrationSkippedDocuments(items=[], total=0, truncated=False)
-    metadata = sync_log.metadata
-    # Stored JSON: anything but a mapping is not a detail.
-    details = cast(list[object], metadata.get("skipped_details", []))
+    # Read like the sync history, so a value of another shape is left out.
+    metadata = served_sync_metadata(sync_log.metadata)
+    details = cast(list[dict[str, object]], metadata.get("skipped_details", []))
     return IntegrationSkippedDocuments(
-        items=[
-            IntegrationSkippedDocument.model_validate(detail)
-            for detail in details
-            if isinstance(detail, dict)
-        ],
+        items=[IntegrationSkippedDocument.model_validate(detail) for detail in details],
         total=int(
             metadata.get("skipped_total", metadata.get("skipped_items", len(details)))
         ),

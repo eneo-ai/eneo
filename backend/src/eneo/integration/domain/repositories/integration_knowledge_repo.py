@@ -37,6 +37,19 @@ class IntegrationKnowledgeLocation:
     resource_type: str | None
 
 
+class IntegrationKnowledgeSyncingError(Exception):
+    """A change to an item waited too long for the row a running sync holds.
+
+    A sync holds its row until it commits, which can take hours, so a rename
+    or delete answers at once instead of holding the request open.
+    """
+
+    code = "integration_knowledge_syncing"
+
+    def __init__(self) -> None:
+        super().__init__("The source is syncing; try again when the sync has finished.")
+
+
 class SyncStateFields(TypedDict, total=False):
     """The columns a sync pass owns; nothing a user edits (name, wrapper) is here."""
 
@@ -95,7 +108,9 @@ class IntegrationKnowledgeRepository(ABC):
         ...
 
     @abstractmethod
-    async def remove(self, id: "UUID") -> None: ...
+    async def remove(self, id: "UUID") -> None:
+        """Raises ``IntegrationKnowledgeSyncingError`` while a sync holds the row."""
+        ...
 
     @abstractmethod
     async def update(self, obj: "IntegrationKnowledge") -> "IntegrationKnowledge": ...
@@ -104,13 +119,16 @@ class IntegrationKnowledgeRepository(ABC):
     async def rename(self, id: "UUID", name: str) -> None:
         """Write only ``name``, so a sync running meanwhile keeps its state.
 
-        The row lock a running sync holds still makes this wait for its commit.
+        Raises ``IntegrationKnowledgeSyncingError`` while a sync holds the row.
         """
         ...
 
     @abstractmethod
     async def rename_wrapper(self, ids: "Sequence[UUID]", wrapper_name: str) -> None:
-        """Write only ``wrapper_name`` on every item in ``ids``."""
+        """Write only ``wrapper_name`` on every item in ``ids``.
+
+        Raises ``IntegrationKnowledgeSyncingError`` while a sync holds a row.
+        """
         ...
 
     @abstractmethod

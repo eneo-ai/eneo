@@ -28,8 +28,10 @@ from eneo.integration.application.integration_knowledge_service import (
 from eneo.integration.application.user_integration_service import (
     AuthorizedIntegration,
 )
+from eneo.integration.domain.repositories.integration_knowledge_repo import (
+    IntegrationKnowledgeSyncingError,
+)
 from eneo.integration.infrastructure.auth_service.org_token_provider import (
-    CREDENTIALS_INVALID_MESSAGE,
     SharePointCredentialsInvalidError,
 )
 from eneo.integration.presentation.models import IntegrationType
@@ -114,6 +116,33 @@ async def setup(db_container, admin_user, embedding_model_factory) -> Setup:
             connection=connection.id,
         )
     return built
+
+
+class _Dispatches:
+    """Jobs handed to the worker; the hand-over waits for the commit."""
+
+    def __init__(self) -> None:
+        self.knowledge_ids: list[UUID] = []
+        self._changed = asyncio.Event()
+
+    async def record(self, task, job_id, params) -> None:
+        self.knowledge_ids.append(params.integration_knowledge_id)
+        self._changed.set()
+
+    async def wait_for(self, count: int) -> None:
+        async def reached() -> None:
+            while len(self.knowledge_ids) < count:
+                self._changed.clear()
+                await self._changed.wait()
+
+        await asyncio.wait_for(reached(), timeout=5)
+
+
+@pytest.fixture
+def dispatches(monkeypatch) -> _Dispatches:
+    recorder = _Dispatches()
+    monkeypatch.setattr("eneo.jobs.job_manager.job_manager.enqueue", recorder.record)
+    return recorder
 
 
 def _service(container, *, job_service, organization_token=None):
@@ -238,6 +267,88 @@ async def test_a_batch_item_that_fails_after_its_write_leaves_nothing(
         )
 
 
+async def test_jobs_reach_the_worker_only_after_the_commit_and_only_for_kept_items(
+    db_container, setup, dispatches
+):
+    async with db_container() as container:
+        service = _service(
+            container, job_service=_jobs(None, RuntimeError("queue down"), None)
+        )
+        results = await service.create_space_integration_knowledge_batch(
+            user_integration_id=setup.connection,
+            embedding_model_id=setup.embedding_model,
+            space_id=setup.personal_space,
+            items=_items("Budget", "Protokoll", "Rutiner"),
+        )
+        await asyncio.sleep(0.05)
+        assert dispatches.knowledge_ids == []
+
+    await dispatches.wait_for(2)
+    assert dispatches.knowledge_ids == [
+        results[0]["integration_knowledge_id"],
+        results[2]["integration_knowledge_id"],
+    ]
+
+
+async def test_a_rolled_back_request_hands_no_job_to_the_worker(
+    db_container, setup, dispatches
+):
+    with pytest.raises(RuntimeError, match="request failed"):
+        async with db_container() as container:
+            service = _service(container, job_service=container.job_service())
+            await service.create_space_integration_knowledge(
+                user_integration_id=setup.connection,
+                name="Budget",
+                embedding_model_id=setup.embedding_model,
+                space_id=setup.personal_space,
+                **{
+                    key: value
+                    for key, value in _items("Budget")[0].items()
+                    if key != "name"
+                },
+            )
+            raise RuntimeError("request failed")
+
+    await asyncio.sleep(0.05)
+    assert dispatches.knowledge_ids == []
+
+
+async def test_a_resync_survives_a_database_error_in_its_subscription_step(
+    db_container, setup, dispatches
+):
+    """The error was swallowed but left the transaction aborted, so queueing
+    the job failed and the resync was a 500."""
+    async with db_container() as container:
+        knowledge = IntegrationKnowledge(
+            name="Protokoll",
+            url="https://contoso.sharepoint.com/sites/KS/Protokoll",
+            space_id=setup.personal_space,
+            tenant_id=container.user().tenant_id,
+            embedding_model_id=setup.embedding_model,
+            user_integration_id=setup.connection,
+            site_id="contoso.sharepoint.com,site,web",
+            resource_type="site",
+        )
+        container.session().add(knowledge)
+        await container.session().flush()
+        knowledge_id = knowledge.id
+
+    async with db_container() as container:
+        service = _service(container, job_service=container.job_service())
+
+        async def failing_ensure(**_):
+            await container.session().execute(sa.text("SELECT 1/0"))
+
+        subscriptions = service.sharepoint_subscription_service
+        subscriptions.ensure_subscription_for_site.side_effect = failing_ensure
+        job = await service.trigger_full_sync(setup.personal_space, knowledge_id)
+
+    await dispatches.wait_for(1)
+    assert dispatches.knowledge_ids == [knowledge_id]
+    async with db_container() as container:
+        assert await container.job_service().get_job(job.id)
+
+
 async def test_a_failed_item_in_the_organization_space_loses_its_distribution(
     db_container, setup
 ):
@@ -262,23 +373,21 @@ async def test_a_failed_item_in_the_organization_space_loses_its_distribution(
 
 
 async def test_refused_organization_credentials_write_no_item(db_container, setup):
-    async with db_container() as container:
-        job_service = _jobs()
-        service = _service(
-            container,
-            job_service=job_service,
-            organization_token=SharePointCredentialsInvalidError("invalid_client"),
-        )
-        results = await service.create_space_integration_knowledge_batch(
-            user_integration_id=setup.connection,
-            embedding_model_id=setup.embedding_model,
-            space_id=setup.organization_space,
-            items=_items("Budget", "Protokoll", "Rutiner"),
-        )
+    job_service = _jobs()
+    with pytest.raises(SharePointCredentialsInvalidError):
+        async with db_container() as container:
+            service = _service(
+                container,
+                job_service=job_service,
+                organization_token=SharePointCredentialsInvalidError("invalid_client"),
+            )
+            await service.create_space_integration_knowledge_batch(
+                user_integration_id=setup.connection,
+                embedding_model_id=setup.embedding_model,
+                space_id=setup.organization_space,
+                items=_items("Budget", "Protokoll", "Rutiner"),
+            )
 
-    assert [(result["status"], result["error"]) for result in results] == [
-        ("failed", CREDENTIALS_INVALID_MESSAGE)
-    ] * 3
     job_service.queue_job.assert_not_awaited()
     async with db_container() as container:
         assert await _stored(container, setup.organization_space) == ([], [])
@@ -364,3 +473,82 @@ async def test_a_rename_during_a_sync_keeps_what_the_sync_wrote(db_container, se
         "success",
         {"files_processed": 12},
     )
+
+
+async def _held_by_a_sync(db_container, setup, monkeypatch):
+    """An item and a sync's open transaction holding its row, with a short
+    lock timeout for the change under test."""
+    monkeypatch.setattr(
+        "eneo.integration.infrastructure.repo_impl.integration_knowledge_repo_impl."
+        "ROW_LOCK_TIMEOUT",
+        "300ms",
+    )
+    async with db_container() as container:
+        knowledge = IntegrationKnowledge(
+            name="Protokoll",
+            original_name="Protokoll",
+            url="https://contoso.sharepoint.com/sites/KS/Protokoll",
+            space_id=setup.personal_space,
+            tenant_id=container.user().tenant_id,
+            embedding_model_id=setup.embedding_model,
+            user_integration_id=setup.connection,
+            wrapper_id=uuid4(),
+            wrapper_name="Kommunstyrelsen",
+        )
+        container.session().add(knowledge)
+        await container.session().flush()
+        return knowledge.id, knowledge.wrapper_id
+
+
+@pytest.mark.parametrize("change", ["rename", "rename_wrapper", "delete"])
+async def test_a_change_to_a_syncing_source_answers_at_once(
+    db_container, setup, monkeypatch, change
+):
+    """The change used to hold its request open until the sync committed."""
+    knowledge_id, wrapper_id = await _held_by_a_sync(db_container, setup, monkeypatch)
+
+    async with db_container() as sync:
+        await sync.integration_knowledge_repo().update_sync_state(
+            knowledge_id, last_sync_status="success"
+        )
+        with pytest.raises(IntegrationKnowledgeSyncingError):
+            async with db_container() as request:
+                service = request.integration_knowledge_service()
+                async with asyncio.timeout(5):
+                    if change == "rename":
+                        await service.update_knowledge_name(
+                            setup.personal_space, knowledge_id, "Protokoll KS"
+                        )
+                    elif change == "rename_wrapper":
+                        await service.update_wrapper_name(
+                            setup.personal_space, wrapper_id, "KS"
+                        )
+                    else:
+                        await service.remove_knowledge(
+                            setup.personal_space, knowledge_id
+                        )
+
+    async with db_container() as container:
+        row = (
+            await container.session().execute(
+                sa.select(
+                    IntegrationKnowledge.name, IntegrationKnowledge.wrapper_name
+                ).where(IntegrationKnowledge.id == knowledge_id)
+            )
+        ).one()
+    assert tuple(row) == ("Protokoll", "Kommunstyrelsen")
+
+
+async def test_a_change_after_the_sync_restores_the_lock_timeout(
+    db_container, setup, monkeypatch
+):
+    knowledge_id, _ = await _held_by_a_sync(db_container, setup, monkeypatch)
+
+    async with db_container() as request:
+        before = await request.session().scalar(sa.text("SHOW lock_timeout"))
+        await request.integration_knowledge_service().update_knowledge_name(
+            setup.personal_space, knowledge_id, "Protokoll KS"
+        )
+        after = await request.session().scalar(sa.text("SHOW lock_timeout"))
+
+    assert after == before

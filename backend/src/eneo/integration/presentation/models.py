@@ -1,7 +1,18 @@
 from collections.abc import Mapping
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Generic, Literal, Optional, TypeVar, cast, get_type_hints
+from typing import (
+    Any,
+    Dict,
+    Generic,
+    Literal,
+    Optional,
+    TypeVar,
+    cast,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 from uuid import UUID, uuid4
 
 from pydantic import (
@@ -105,33 +116,43 @@ def _visible_detail(detail: object) -> object:
     return {**entry, **_visible_skip(entry)}
 
 
+_SYNC_METADATA_HINTS = get_type_hints(SyncMetadata)
 _SYNC_METADATA_TYPES = {
-    key: TypeAdapter(hint) for key, hint in get_type_hints(SyncMetadata).items()
+    key: TypeAdapter(hint)
+    for key, hint in _SYNC_METADATA_HINTS.items()
+    if get_origin(hint) is not list
+}
+# List keys are read entry by entry, so one odd entry loses only itself.
+_SYNC_METADATA_ENTRY_TYPES = {
+    key: TypeAdapter(get_args(hint)[0])
+    for key, hint in _SYNC_METADATA_HINTS.items()
+    if get_origin(hint) is list
 }
 
 
-def _readable_metadata(metadata: Dict[str, Any]) -> Dict[str, Any]:
-    """The values of ``metadata`` that have their declared type.
+def served_sync_metadata(metadata: object) -> Dict[str, Any]:
+    """A stored sync log's metadata as served: cleaned, and only the values
+    that have their declared type.
 
     A row another release wrote, with a null, an unknown key or a changed
     type, loses that value (or that list entry) instead of failing the
-    whole history response.
+    whole response.
     """
+    if not isinstance(metadata, dict):
+        return {}
     readable: Dict[str, Any] = {}
-    for key, value in metadata.items():
-        adapter = _SYNC_METADATA_TYPES.get(key)
-        if adapter is None or value is None:
-            continue
-        if isinstance(value, list):
-            entries = [
-                entry
-                for entry in cast(list[object], value)
-                if _validates(adapter, [entry])
-            ]
-            if entries or not value:
-                readable[key] = entries
-        elif _validates(adapter, value):
-            readable[key] = value
+    for key, value in _visible_summary(cast(Dict[str, Any], metadata)).items():
+        if key in _SYNC_METADATA_ENTRY_TYPES:
+            if isinstance(value, list):
+                entry_type = _SYNC_METADATA_ENTRY_TYPES[key]
+                readable[key] = [
+                    entry
+                    for entry in cast(list[object], value)
+                    if _validates(entry_type, entry)
+                ]
+        elif key in _SYNC_METADATA_TYPES and value is not None:
+            if _validates(_SYNC_METADATA_TYPES[key], value):
+                readable[key] = value
     return readable
 
 
@@ -435,9 +456,9 @@ class SyncLog(BaseModel):
     @field_validator("metadata", mode="before")
     @classmethod
     def _user_visible_metadata(cls, value: object) -> object:
-        if not isinstance(value, dict):
-            return value
-        return _readable_metadata(_visible_summary(cast(Dict[str, Any], value)))
+        if isinstance(value, dict):
+            return served_sync_metadata(cast(object, value))
+        return value
 
     @field_validator("error_message")
     @classmethod

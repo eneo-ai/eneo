@@ -1,7 +1,9 @@
-from collections.abc import Sequence
+from collections.abc import AsyncGenerator, Sequence
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Optional, cast
 
 import sqlalchemy as sa
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import selectinload
 from typing_extensions import Unpack, override
 
@@ -26,6 +28,7 @@ from eneo.integration.domain.repositories.integration_knowledge_repo import (
     IntegrationKnowledgeLocation,
     IntegrationKnowledgePlacement,
     IntegrationKnowledgeRepository,
+    IntegrationKnowledgeSyncingError,
     SyncStateFields,
 )
 from eneo.integration.infrastructure.mappers.integration_knowledge_mapper import (
@@ -45,6 +48,17 @@ if TYPE_CHECKING:
     from eneo.embedding_models.domain.embedding_model_repo import (
         EmbeddingModelRepository,
     )
+
+
+# A sync holds its row until it commits; a rename or delete waits this long.
+ROW_LOCK_TIMEOUT = "5s"
+_LOCK_NOT_AVAILABLE_SQLSTATE = "55P03"
+
+
+def _lock_not_available(error: DBAPIError) -> bool:
+    orig = error.orig
+    sqlstate = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    return sqlstate == _LOCK_NOT_AVAILABLE_SQLSTATE
 
 
 class IntegrationKnowledgeRepoImpl(
@@ -198,15 +212,41 @@ class IntegrationKnowledgeRepoImpl(
 
     @override
     async def remove(self, id: "UUID") -> None:
-        await self.delete(id=id)
+        async with self._bounded_wait_for_a_sync():
+            await self.delete(id=id)
 
     @override
     async def rename(self, id: "UUID", name: str) -> None:
-        await self._update_columns([id], name=name)
+        async with self._bounded_wait_for_a_sync():
+            await self._update_columns([id], name=name)
 
     @override
     async def rename_wrapper(self, ids: Sequence["UUID"], wrapper_name: str) -> None:
-        await self._update_columns(ids, wrapper_name=wrapper_name)
+        async with self._bounded_wait_for_a_sync():
+            await self._update_columns(ids, wrapper_name=wrapper_name)
+
+    @asynccontextmanager
+    async def _bounded_wait_for_a_sync(self) -> AsyncGenerator[None, None]:
+        """Wait at most ``ROW_LOCK_TIMEOUT`` for a row a sync holds.
+
+        On a timeout the transaction is aborted, so the setting is restored
+        only after a write that went through.
+        """
+        previous = await self.session.scalar(sa.text("SHOW lock_timeout"))
+        await self._set_lock_timeout(ROW_LOCK_TIMEOUT)
+        try:
+            yield
+        except DBAPIError as exc:
+            if _lock_not_available(exc):
+                raise IntegrationKnowledgeSyncingError() from exc
+            raise
+        await self._set_lock_timeout(str(previous))
+
+    async def _set_lock_timeout(self, value: str) -> None:
+        await self.session.execute(
+            sa.text("SELECT set_config('lock_timeout', :value, true)"),
+            {"value": value},
+        )
 
     @override
     async def link_subscription(self, id: "UUID", subscription_id: "UUID") -> bool:

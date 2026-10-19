@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, Awaitable
 from uuid import UUID
 
 from eneo.integration.domain.entities.integration_preview import IntegrationPreview
-from eneo.integration.infrastructure.graph_errors import user_facing_sharepoint_error
+from eneo.integration.infrastructure.graph_errors import user_facing_sharepoint_failure
 from eneo.main.exceptions import BadRequestException
 
 if TYPE_CHECKING:
@@ -66,7 +66,7 @@ class IntegrationPreviewService:
         except BadRequestException:
             raise
         except Exception as exc:
-            message = user_facing_sharepoint_error(exc)
-            if message is None:
+            failure = user_facing_sharepoint_failure(exc)
+            if failure is None:
                 raise
-            raise BadRequestException(message) from exc
+            raise failure from exc

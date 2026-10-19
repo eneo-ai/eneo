@@ -2,7 +2,7 @@
 
 import json
 from dataclasses import dataclass
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import httpx
@@ -431,11 +431,91 @@ async def test_a_refused_code_is_a_400_the_person_can_act_on(oauth_flow):
     flow.audit.log_async.assert_not_awaited()
 
 
-async def test_a_token_endpoint_outage_is_not_reported_as_a_refused_code(oauth_flow):
-    flow = oauth_flow
-    flow.provider.exchange_token.side_effect = _token_endpoint_error(
-        503, {"error": "temporarily_unavailable"}
+def _logged(log: MagicMock) -> str:
+    return " ".join(
+        str(call.args[0]) % call.args[1:] for call in log.warning.call_args_list
     )
+
+
+async def test_a_refused_app_is_a_400_for_an_administrator(oauth_flow, monkeypatch):
+    """A wrong or expired client secret is not fixed by signing in again."""
+    flow = oauth_flow
+    log = MagicMock()
+    monkeypatch.setattr("eneo.integration.application.oauth2_service.logger", log)
+    flow.provider.exchange_token.side_effect = _token_endpoint_error(
+        401,
+        {
+            "error": "invalid_client",
+            "error_description": "AADSTS7000215: Invalid client secret provided "
+            "for app '11111111-2222-3333-4444-555555555555'. Trace ID: 1f",
+        },
+    )
+    started = await flow.client.get(f"/integrations/auth/{flow.own.id}/url/")
+
+    response = await flow.client.post(
+        "/integrations/auth/callback/token/",
+        json={
+            "tenant_integration_id": str(flow.own.id),
+            "auth_code": "test-code",
+            "state": started.json()["state"],
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["code"] == "oauth_client_rejected"
+    assert "AADSTS7000215" in body["message"]
+    assert "administrator" in body["message"]
+    assert "11111111-2222" not in response.text
+    assert "invalid_client AADSTS7000215" in _logged(log)
+    assert "11111111-2222" not in _logged(log)
+
+
+async def test_a_refused_code_names_no_account(oauth_flow, monkeypatch):
+    flow = oauth_flow
+    log = MagicMock()
+    monkeypatch.setattr("eneo.integration.application.oauth2_service.logger", log)
+    flow.provider.exchange_token.side_effect = _token_endpoint_error(
+        400,
+        {
+            "error": "invalid_grant",
+            "error_description": "AADSTS50034: The user account "
+            "anna.svensson@sundsvall.se does not exist in the "
+            "1a2b3c4d-0000-1111-2222-333344445555 directory.",
+        },
+    )
+    started = await flow.client.get(f"/integrations/auth/{flow.own.id}/url/")
+
+    response = await flow.client.post(
+        "/integrations/auth/callback/token/",
+        json={
+            "tenant_integration_id": str(flow.own.id),
+            "auth_code": "test-code",
+            "state": started.json()["state"],
+        },
+    )
+
+    assert response.json()["code"] == "oauth_code_rejected"
+    assert "invalid_grant AADSTS50034" in _logged(log)
+    for text in (response.text, _logged(log)):
+        assert "anna.svensson" not in text
+        assert "1a2b3c4d" not in text
+
+
+@pytest.mark.parametrize(
+    "status, body",
+    [
+        (503, {"error": "temporarily_unavailable"}),
+        (429, {"error": "temporarily_unavailable"}),
+        (400, {"error": "invalid_request", "error_description": "AADSTS900144"}),
+    ],
+    ids=["outage", "throttled", "malformed-request"],
+)
+async def test_a_token_endpoint_outage_is_not_reported_as_a_refused_code(
+    oauth_flow, status, body
+):
+    flow = oauth_flow
+    flow.provider.exchange_token.side_effect = _token_endpoint_error(status, body)
     started = await flow.client.get(f"/integrations/auth/{flow.own.id}/url/")
 
     with pytest.raises(httpx.HTTPStatusError):

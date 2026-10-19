@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from eneo.integration.infrastructure.auth_service.base_auth_service import (
+    OAuthClientRejectedError,
     OAuthCodeRejectedError,
 )
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
@@ -134,3 +135,53 @@ async def test_a_refused_service_account_code_is_a_400_not_a_500(
     assert "AADSTS54005" in str(error.value)
     assert "Trace ID" not in str(error.value)
     tenant_app_service.configure_service_account.assert_not_awaited()
+
+
+async def test_a_refused_service_account_secret_is_its_own_400(
+    integration_access, test_settings, monkeypatch
+):
+    user = integration_access.user
+    set_settings(
+        test_settings.model_copy(
+            update={"sharepoint_webhook_client_state": "test-webhook-state"}
+        )
+    )
+    request = httpx.Request("POST", "https://login.microsoftonline.com/x/token")
+    provider = AsyncMock(spec=ServiceAccountAuthService)
+    provider.exchange_token.side_effect = httpx.HTTPStatusError(
+        "refused",
+        request=request,
+        response=httpx.Response(
+            401,
+            json={
+                "error": "invalid_client",
+                "error_description": "AADSTS7000215: Invalid client secret.",
+            },
+            request=request,
+        ),
+    )
+    monkeypatch.setattr(router, "ServiceAccountAuthService", lambda: provider)
+    stored = {
+        "tenant_id": str(user.tenant_id),
+        "user_id": str(user.id),
+        "client_id": "test-client",
+        "client_secret": "wrong-secret",
+        "tenant_domain": "example.onmicrosoft.com",
+    }
+    state_store = MagicMock()
+    state_store.peek = AsyncMock(return_value=stored)
+    state_store.pop = AsyncMock(return_value=stored)
+    monkeypatch.setattr(router, "_oauth_state_store", lambda container: state_store)
+    container = Container(
+        user=providers.Object(user),
+        tenant_sharepoint_app_service=providers.Object(AsyncMock()),
+    )
+
+    with pytest.raises(OAuthClientRejectedError) as error:
+        await router.service_account_auth_callback(
+            ServiceAccountAuthCallback(auth_code="code", state="test-state"),
+            container,
+        )
+
+    assert error.value.code == "oauth_client_rejected"
+    assert "AADSTS7000215" in str(error.value)

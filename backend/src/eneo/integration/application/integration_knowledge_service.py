@@ -20,6 +20,11 @@ from eneo.integration.presentation.models import (
     IntegrationType,
     SharepointContentTaskParam,
 )
+from eneo.integration.presentation.validation import (
+    KNOWLEDGE_NAME_LENGTH_REASON,
+    KNOWLEDGE_NAME_MAX_LENGTH,
+)
+from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import JobInDb, Task
 from eneo.main.exceptions import (
     BadRequestException,
@@ -65,6 +70,7 @@ if TYPE_CHECKING:
         SharePointSubscriptionService,
     )
     from eneo.jobs.job_service import JobService
+    from eneo.jobs.task_models import TaskParams
     from eneo.spaces.space import Space
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.users.user import UserInDB
@@ -118,6 +124,15 @@ class _ImportContext:
     token: "SimpleToken | OauthToken"
     token_id: UUID | None
     tenant_app_id: UUID | None
+
+
+@dataclass(frozen=True)
+class _PendingDispatch:
+    """A queued job row whose hand-over to the worker waits for the commit."""
+
+    task: Task
+    job_id: UUID
+    params: "TaskParams"
 
 
 def _failed_batch_item(
@@ -344,7 +359,7 @@ class IntegrationKnowledgeService:
             embedding_model_id=embedding_model_id,
             space_id=space_id,
         )
-        return await self._import(
+        knowledge, job, dispatch = await self._import(
             context,
             name=name,
             key=key,
@@ -356,6 +371,8 @@ class IntegrationKnowledgeService:
             wrapper_id=wrapper_id,
             wrapper_name=wrapper_name,
         )
+        self._dispatch_after_commit(dispatch)
+        return knowledge, job
 
     async def _prepare_import(
         self,
@@ -426,14 +443,18 @@ class IntegrationKnowledgeService:
         resource_type: str,
         wrapper_id: UUID | None,
         wrapper_name: str | None,
-    ) -> tuple[IntegrationKnowledge, "JobInDb"]:
-        """Write one item and queue its first sync.
+    ) -> tuple[IntegrationKnowledge, "JobInDb", _PendingDispatch]:
+        """Write one item and its first sync's job row.
 
-        Nothing after ``queue_job`` may raise: the job is enqueued at once, so a
-        rollback of the item would leave the worker a job for a missing row.
+        The job is not handed to the worker here: the caller dispatches it
+        once the item's writes are kept (``_dispatch_after_commit``), so an
+        item rolled back later never leaves the worker a job.
         """
         if not key:
             raise BadRequestException("Integration key is required")
+        name = name.strip()
+        if not name or len(name) > KNOWLEDGE_NAME_MAX_LENGTH:
+            raise BadRequestException(KNOWLEDGE_NAME_LENGTH_REASON)
 
         space = context.space
         user_integration = context.user_integration
@@ -471,23 +492,17 @@ class IntegrationKnowledgeService:
         if not is_sharepoint:
             if context.token_id is None:
                 raise BadRequestException("Confluence token ID is required")
-            job = await self.job_service.queue_job(
-                task=Task.PULL_CONFLUENCE_CONTENT,
-                name=name,
-                task_params=ConfluenceContentTaskParam(
-                    user_id=self.user.id,
-                    id=user_integration_id,
-                    token_id=context.token_id,
-                    space_key=key,
-                    integration_knowledge_id=knowledge.id,
-                ),
+            task = Task.PULL_CONFLUENCE_CONTENT
+            params: TaskParams = ConfluenceContentTaskParam(
+                user_id=self.user.id,
+                id=user_integration_id,
+                token_id=context.token_id,
+                space_key=key,
+                integration_knowledge_id=knowledge.id,
             )
-            return knowledge, job
-
-        job = await self.job_service.queue_job(
-            task=Task.PULL_SHAREPOINT_CONTENT,
-            name=name,
-            task_params=SharepointContentTaskParam(
+        else:
+            task = Task.PULL_SHAREPOINT_CONTENT
+            params = SharepointContentTaskParam(
                 user_id=self.user.id,
                 id=user_integration_id,
                 token_id=context.token_id,
@@ -498,12 +513,24 @@ class IntegrationKnowledgeService:
                 folder_id=folder_id,
                 folder_path=folder_path,
                 resource_type=resource_type,
-            ),
+            )
+        job = await self.job_service.queue_job(
+            task=task, name=name, task_params=params, enqueue=False
         )
-        await self._link_subscription_on_import(
-            context, knowledge, key=key, is_onedrive=resource_type == "onedrive"
-        )
-        return knowledge, job
+        if is_sharepoint:
+            await self._link_subscription_on_import(
+                context, knowledge, key=key, is_onedrive=resource_type == "onedrive"
+            )
+        return knowledge, job, _PendingDispatch(task, job.id, params)
+
+    def _dispatch_after_commit(self, dispatch: _PendingDispatch) -> None:
+        """Hand a queued job to the worker once the request commits; never
+        after a rollback. Must run outside any savepoint."""
+
+        async def enqueue() -> None:
+            await job_manager.enqueue(dispatch.task, dispatch.job_id, dispatch.params)
+
+        run_after_commit(self.space_repo.session, enqueue)
 
     async def _link_subscription_on_import(
         self,
@@ -568,8 +595,10 @@ class IntegrationKnowledgeService:
         """Create several items in one request; a failed item leaves nothing behind.
 
         Access, the embedding model and the token are checked once, before any
-        write; when that fails, every item fails. Each item is then written in
-        its own savepoint, so an item that fails part-way is rolled back alone.
+        write; when that fails, the request fails with that error and nothing
+        is written. Each item is then written in its own savepoint, so an item
+        that fails part-way is rolled back alone, and its job is dispatched
+        only after its savepoint is released.
         """
         normalized_wrapper_name = (
             wrapper_name.strip() if wrapper_name and wrapper_name.strip() else None
@@ -577,29 +606,17 @@ class IntegrationKnowledgeService:
         batch_wrapper_id = uuid4() if len(items) > 1 else None
         batch_wrapper_name = normalized_wrapper_name if batch_wrapper_id else None
 
-        try:
-            context = await self._prepare_import(
-                user_integration_id=user_integration_id,
-                embedding_model_id=embedding_model_id,
-                space_id=space_id,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Integration knowledge batch failed before any item was created: %s",
-                exc,
-                exc_info=True,
-            )
-            error = user_visible_error(exc)
-            return [
-                _failed_batch_item(index, item, error)
-                for index, item in enumerate(items)
-            ]
+        context = await self._prepare_import(
+            user_integration_id=user_integration_id,
+            embedding_model_id=embedding_model_id,
+            space_id=space_id,
+        )
 
         results: list[BatchIntegrationKnowledgeCreateResult] = []
         for index, item in enumerate(items):
             try:
                 async with self.space_repo.session.begin_nested():
-                    knowledge, job = await self._import(
+                    knowledge, job, dispatch = await self._import(
                         context,
                         name=item["name"],
                         key=item.get("key"),
@@ -620,6 +637,7 @@ class IntegrationKnowledgeService:
                 )
                 results.append(_failed_batch_item(index, item, user_visible_error(exc)))
                 continue
+            self._dispatch_after_commit(dispatch)
             results.append(
                 BatchIntegrationKnowledgeCreateResult(
                     index=index,
@@ -859,28 +877,31 @@ class IntegrationKnowledgeService:
         )
 
         if subscription_resource_id:
+            # A savepoint keeps a failed statement here from aborting the
+            # transaction the job is queued in.
             try:
-                sharepoint_token = _as_sharepoint_token(subscription_token)
-                subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
-                    user_integration_id=user_integration.id,
-                    site_id=subscription_resource_id,
-                    token=sharepoint_token,
-                    is_onedrive=is_onedrive,
-                )
-                subscription_db_id = (
-                    getattr(subscription, "id", None) if subscription else None
-                )
-                existing_subscription_db_id = getattr(
-                    knowledge, "sharepoint_subscription_id", None
-                )
-                if (
-                    subscription_db_id
-                    and existing_subscription_db_id != subscription_db_id
-                ):
-                    await self.integration_knowledge_repo.link_subscription(
-                        knowledge.id, subscription_db_id
+                async with self.space_repo.session.begin_nested():
+                    sharepoint_token = _as_sharepoint_token(subscription_token)
+                    subscription = await self.sharepoint_subscription_service.ensure_subscription_for_site(
+                        user_integration_id=user_integration.id,
+                        site_id=subscription_resource_id,
+                        token=sharepoint_token,
+                        is_onedrive=is_onedrive,
                     )
-                    knowledge.sharepoint_subscription_id = subscription_db_id
+                    subscription_db_id = (
+                        getattr(subscription, "id", None) if subscription else None
+                    )
+                    existing_subscription_db_id = getattr(
+                        knowledge, "sharepoint_subscription_id", None
+                    )
+                    if (
+                        subscription_db_id
+                        and existing_subscription_db_id != subscription_db_id
+                    ):
+                        await self.integration_knowledge_repo.link_subscription(
+                            knowledge.id, subscription_db_id
+                        )
+                        knowledge.sharepoint_subscription_id = subscription_db_id
             except Exception as exc:
                 logger.warning(
                     "Failed to ensure SharePoint subscription during full sync "
@@ -912,6 +933,7 @@ class IntegrationKnowledgeService:
                 folder_path=knowledge.folder_path,
                 resource_type=resource_type,
             ),
+            after_commit=True,
         )
 
         return job

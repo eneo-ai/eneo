@@ -26,7 +26,6 @@ from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.integration.infrastructure.auth_service.org_token_provider import (
-    CREDENTIALS_INVALID_MESSAGE,
     OrgTokenProvider,
     SharePointCredentialsInvalidError,
 )
@@ -1900,12 +1899,19 @@ class TestCreateSpaceIntegrationKnowledge:
 
 
 class _Savepoints:
-    """A session whose savepoints record whether they were released or rolled back."""
+    """A session whose savepoints record whether they were released or rolled
+    back; the ones numbered in ``fail_release`` (in opening order) fail at
+    RELEASE."""
 
     def __init__(self) -> None:
         self.outcomes: list[str] = []
+        self.fail_release: set[int] = set()
+        self._opened = 0
 
     def begin_nested(self):
+        number = self._opened
+        self._opened += 1
+
         @asynccontextmanager
         async def savepoint():
             try:
@@ -1913,6 +1919,9 @@ class _Savepoints:
             except BaseException:
                 self.outcomes.append("rolled back")
                 raise
+            if number in self.fail_release:
+                self.outcomes.append("release failed")
+                raise RuntimeError("Connection error")
             self.outcomes.append("released")
 
         return savepoint()
@@ -2064,6 +2073,72 @@ class TestCreateSpaceIntegrationKnowledgeBatch:
         assert batch.integration_knowledge_repo.add.await_count == 3
         assert batch.space_repo.session.outcomes.count("rolled back") == 1
 
+    async def test_a_job_is_dispatched_only_after_its_item_is_kept(
+        self, batch, monkeypatch
+    ):
+        """Enqueueing inside the savepoint left the worker a job for an item
+        whose RELEASE then failed."""
+        registered = []
+
+        def record(session, start):
+            batch.space_repo.session.outcomes.append("dispatch")
+            registered.append(start)
+
+        monkeypatch.setattr(
+            "eneo.integration.application.integration_knowledge_service."
+            "run_after_commit",
+            record,
+        )
+        # Each item opens its own savepoint and then one for its subscription.
+        batch.space_repo.session.fail_release = {2}
+
+        results = await self._create(batch, ["Protokoll", "Rutiner", "Budget"])
+
+        assert [result["status"] for result in results] == [
+            "created",
+            "failed",
+            "created",
+        ]
+        assert batch.space_repo.session.outcomes == [
+            "released",
+            "released",
+            "dispatch",
+            "released",
+            "release failed",
+            "released",
+            "released",
+            "dispatch",
+        ]
+        assert {
+            call.kwargs["enqueue"]
+            for call in batch.job_service.queue_job.await_args_list
+        } == {False}
+        enqueue = AsyncMock()
+        monkeypatch.setattr("eneo.jobs.job_manager.job_manager.enqueue", enqueue)
+        for start in registered:
+            await start()
+        assert [call.args[1] for call in enqueue.await_args_list] == [
+            results[0]["job"].id,
+            results[2]["job"].id,
+        ]
+
+    async def test_a_name_the_api_cannot_store_fails_only_its_item(self, batch):
+        """One long SharePoint name made the whole batch a 422."""
+        results = await self._create(
+            batch, ["  Protokoll  ", "x" * 256, "   ", "Budget"]
+        )
+
+        assert [(result["status"], result["error"]) for result in results] == [
+            ("created", None),
+            ("failed", "The name must be 1 to 255 characters long"),
+            ("failed", "The name must be 1 to 255 characters long"),
+            ("created", None),
+        ]
+        assert [
+            call.kwargs["obj"].name
+            for call in batch.integration_knowledge_repo.add.await_args_list
+        ] == ["Protokoll", "Budget"]
+
     async def test_a_database_failure_is_reported_without_sql(self, batch):
         batch.integration_knowledge_repo.add.side_effect = sa.exc.IntegrityError(
             "INSERT INTO integration_knowledge (name, url) VALUES (%(name)s, %(url)s)",
@@ -2077,22 +2152,22 @@ class TestCreateSpaceIntegrationKnowledgeBatch:
         assert results[0]["error"] == "Database error"
         assert batch.space_repo.session.outcomes == ["rolled back"]
 
-    async def test_a_missing_personal_token_fails_every_item_before_any_write(
+    async def test_a_missing_personal_token_fails_the_request_before_any_write(
         self, batch
     ):
+        """Every item reported the same failure with a 202 before."""
         batch.oauth_token_repo.one.side_effect = NotFoundException(
             "OauthToken not found"
         )
 
-        results = await self._create(batch, ["Protokoll", "Rutiner", "Budget"])
+        with pytest.raises(NotFoundException):
+            await self._create(batch, ["Protokoll", "Rutiner", "Budget"])
 
-        assert [result["status"] for result in results] == ["failed"] * 3
-        assert {result["error"] for result in results} == {"OauthToken not found"}
         batch.integration_knowledge_repo.add.assert_not_awaited()
         batch.job_service.queue_job.assert_not_awaited()
         assert batch.space_repo.session.outcomes == []
 
-    async def test_refused_organization_credentials_fail_every_item_before_any_write(
+    async def test_refused_organization_credentials_fail_the_request_before_any_write(
         self, batch
     ):
         user_integration = (
@@ -2109,10 +2184,9 @@ class TestCreateSpaceIntegrationKnowledgeBatch:
             SharePointCredentialsInvalidError("invalid_client")
         )
 
-        results = await self._create(batch, ["Protokoll", "Rutiner", "Budget"])
+        with pytest.raises(SharePointCredentialsInvalidError):
+            await self._create(batch, ["Protokoll", "Rutiner", "Budget"])
 
-        assert [result["status"] for result in results] == ["failed"] * 3
-        assert {result["error"] for result in results} == {CREDENTIALS_INVALID_MESSAGE}
         batch.integration_knowledge_repo.add.assert_not_awaited()
         batch.job_service.queue_job.assert_not_awaited()
         batch.oauth_token_repo.one.assert_not_awaited()
@@ -2175,6 +2249,7 @@ class TestTriggerFullSync:
 
         space_repo = AsyncMock()
         space_repo.one.return_value = space
+        space_repo.session = _Savepoints()
 
         oauth_token = MagicMock()
         oauth_token.id = uuid4()
@@ -2244,6 +2319,9 @@ class TestTriggerFullSync:
         )
         integration_knowledge_repo.update.assert_not_called()
         job_service.queue_job.assert_called_once()
+        # A worker that picked the job up before the commit would not see it.
+        assert job_service.queue_job.call_args.kwargs["after_commit"] is True
+        assert space_repo.session.outcomes == ["released"]
         task_params = job_service.queue_job.call_args.kwargs["task_params"]
         assert task_params.token_id == oauth_token.id
         assert task_params.tenant_app_id is None
@@ -2260,6 +2338,7 @@ class TestTriggerFullSync:
 
         space_repo = AsyncMock()
         space_repo.one.return_value = space
+        space_repo.session = _Savepoints()
 
         oauth_token = MagicMock()
         oauth_token.id = uuid4()
@@ -2312,6 +2391,8 @@ class TestTriggerFullSync:
         assert result == queued_job
         sharepoint_subscription_service.ensure_subscription_for_site.assert_called_once()
         job_service.queue_job.assert_called_once()
+        # The failure is rolled back to its savepoint before the job is queued.
+        assert space_repo.session.outcomes == ["rolled back"]
 
     async def test_trigger_full_sync_tenant_app_requires_admin_permission(
         self, actor, space, sharepoint_knowledge_tenant_app
@@ -2326,6 +2407,7 @@ class TestTriggerFullSync:
 
         space_repo = AsyncMock()
         space_repo.one.return_value = space
+        space_repo.session = _Savepoints()
 
         job_service = AsyncMock()
         tenant_sharepoint_app_repo = AsyncMock()
@@ -2384,6 +2466,7 @@ class TestTriggerFullSync:
 
         space_repo = AsyncMock()
         space_repo.one.return_value = space
+        space_repo.session = _Savepoints()
 
         actor_manager = MagicMock()
         actor_manager.get_space_actor_from_space.return_value = actor

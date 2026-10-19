@@ -7,6 +7,7 @@ import httpx
 
 from eneo.integration.domain.entities.tenant_sharepoint_app import TenantSharePointApp
 from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    loggable_token_reason,
     summarize_token_endpoint_error,
 )
 from eneo.observability.error_text import user_visible_error
@@ -154,7 +155,7 @@ class TenantAppAuthService:
                 logger.error(
                     "Failed to acquire token for app %s: %s",
                     app.id,
-                    summarize_token_endpoint_error(e),
+                    loggable_token_reason(e),
                 )
                 raise
             except httpx.HTTPError as e:
@@ -177,9 +178,12 @@ class TenantAppAuthService:
             logger.info(f"Credentials test successful for app {app.id}")
             return (True, None)
         except httpx.HTTPStatusError as e:
-            error_msg = summarize_token_endpoint_error(e)
-            logger.error(f"Credentials test failed for app {app.id}: {error_msg}")
-            return (False, error_msg)
+            logger.error(
+                "Credentials test failed for app %s: %s",
+                app.id,
+                loggable_token_reason(e),
+            )
+            return (False, summarize_token_endpoint_error(e))
         except Exception as e:
             logger.error(f"Credentials test failed for app {app.id}: {e}")
             return (False, user_visible_error(e))
