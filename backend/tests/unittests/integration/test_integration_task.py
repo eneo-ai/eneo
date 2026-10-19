@@ -164,20 +164,54 @@ async def test_holder_released_before_retry_so_the_marker_is_drained_now(
     fake_redis, service, container, params, monkeypatch
 ):
     fake_redis.store[LOCK_KEY] = "someone-else"
-    original_set = fake_redis.set
-
-    async def release_after_first_refusal(key, value, nx=False, ex=None):
-        acquired = await original_set(key, value, nx=nx, ex=ex)
-        if key == LOCK_KEY and not acquired:
-            fake_redis.store.pop(LOCK_KEY)
-        return acquired
-
-    monkeypatch.setattr(fake_redis, "set", release_after_first_refusal)
+    _release_after_first_refusal(fake_redis, monkeypatch)
 
     result = await delta_task(params, container)
 
     assert result == "Imported 1 file"
     service.process_delta_changes.assert_awaited_once()
+    assert PENDING_KEY not in fake_redis.store
+    assert LOCK_KEY not in fake_redis.store
+
+
+def _release_after_first_refusal(fake_redis, monkeypatch) -> None:
+    original_set = fake_redis.set
+
+    async def release(key, value, nx=False, ex=None):
+        acquired = await original_set(key, value, nx=nx, ex=ex)
+        if key == LOCK_KEY and not acquired:
+            fake_redis.store.pop(LOCK_KEY)
+        return acquired
+
+    monkeypatch.setattr(fake_redis, "set", release)
+
+
+async def test_a_pass_run_on_the_retried_lease_is_an_ordinary_recorded_one(
+    fake_redis, service, container, params, monkeypatch
+):
+    """No sync owns the lease the retry took, so nobody else records the pass."""
+    fake_redis.store[LOCK_KEY] = "someone-else"
+    _release_after_first_refusal(fake_redis, monkeypatch)
+
+    await delta_task(params, container)
+
+    assert service.process_delta_changes.await_args.kwargs["record_failure"] is True
+
+
+async def test_a_failing_pass_on_the_retried_lease_fails_the_job(
+    fake_redis, service, container, params, monkeypatch
+):
+    fake_redis.store[LOCK_KEY] = "someone-else"
+    _release_after_first_refusal(fake_redis, monkeypatch)
+    service.process_delta_changes.side_effect = RuntimeError("Graph 503")
+
+    with pytest.raises(integration_task.IntegrationSyncError, match="Graph 503"):
+        await delta_task(params, container)
+
+    service.process_delta_changes.assert_awaited_once()
+    assert service.process_delta_changes.await_args.kwargs["record_failure"] is True
+    # The failure is the knowledge's status and the kept token replays the
+    # change; a marker would only add an empty pass to the next sync.
     assert PENDING_KEY not in fake_redis.store
     assert LOCK_KEY not in fake_redis.store
 
