@@ -33,13 +33,25 @@ from eneo.integration.infrastructure.clients.sharepoint_content_client import (
 from eneo.integration.infrastructure.content_service import (
     sharepoint_content_service as content_service_module,
 )
+from eneo.integration.infrastructure.content_service import (
+    sharepoint_results as sync_results,
+)
+from eneo.integration.infrastructure.content_service import (
+    sharepoint_scope as scope_rules,
+)
+from eneo.integration.infrastructure.content_service.parsing import (
+    extract_text_from_canvas_layout,
+)
 from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
-    ScopeFolderUnavailable,
     SharePointContentService,
     SimpleSharePointToken,
+)
+from eneo.integration.infrastructure.content_service.sharepoint_results import (
     SyncAccessDenied,
     SyncItemsFailed,
-    extract_text_from_canvas_layout,
+)
+from eneo.integration.infrastructure.content_service.sharepoint_scope import (
+    ScopeFolderUnavailable,
 )
 from eneo.integration.infrastructure.content_service.utils import (
     EMPTY_CONTENT_REASON,
@@ -169,9 +181,7 @@ def mock_dependencies(mock_user, mock_integration_knowledge):
 
     integration_knowledge_repo.adjust_size = AsyncMock(side_effect=adjust_size)
     return {
-        "job_service": AsyncMock(),
         "oauth_token_repo": AsyncMock(),
-        "user_integration_repo": AsyncMock(),
         "user": mock_user,
         "info_blob_service": AsyncMock(),
         "integration_knowledge_repo": integration_knowledge_repo,
@@ -307,7 +317,7 @@ class TestInitializeStats:
 
     def test_returns_dict_with_all_stat_keys(self, service):
         """Returns dictionary with all required stat keys."""
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
         assert "files_processed" in stats
         assert "files_deleted" in stats
@@ -318,7 +328,7 @@ class TestInitializeStats:
 
     def test_all_stats_start_at_zero(self, service):
         """All stats are initialized to zero."""
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
         assert stats["files_processed"] == 0
         assert stats["files_deleted"] == 0
@@ -352,13 +362,13 @@ class TestProcessInfoBlobSizeAccounting:
 
         mock_integration_knowledge.size = 500
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text="New text",
             url="https://example.com",
             integration_knowledge=mock_integration_knowledge,
             sharepoint_item_id="item-123",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
         )
 
         assert mock_integration_knowledge.size == 530
@@ -390,13 +400,13 @@ class TestProcessInfoBlobSizeAccounting:
 
         mock_integration_knowledge.size = 500
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text="Unchanged text",
             url="https://example.com",
             integration_knowledge=mock_integration_knowledge,
             sharepoint_item_id="item-123",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
         )
 
         assert mock_integration_knowledge.size == 500
@@ -420,25 +430,25 @@ class TestProcessInfoBlobSizeAccounting:
         mock_dependencies[
             "info_blob_service"
         ].publish_info_blob_without_validation = AsyncMock(return_value=new_blob)
-        await service._process_info_blob(
+        await service._index.upsert(
             title="New",
             text="fresh text",
             url="https://example.com/new",
             integration_knowledge=copy_a,
             sharepoint_item_id="item-new",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
         )
 
         deleted_blob = MagicMock(size=40)
         repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
             return_value=[deleted_blob]
         )
-        await service._delete_local_sharepoint_item(
+        await service._index.remove(
             item_id="item-old",
             item_name="old.docx",
             integration_knowledge=copy_b,
             integration_knowledge_id=knowledge_id,
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
             reason="removed",
         )
 
@@ -452,7 +462,7 @@ class TestProcessInfoBlobSizeAccounting:
     ):
         import hashlib
 
-        from eneo.integration.infrastructure.content_service.sharepoint_content_service import (  # noqa: E501
+        from eneo.integration.infrastructure.content_service.parsing import (
             sanitize_text_for_db,
         )
 
@@ -476,13 +486,13 @@ class TestProcessInfoBlobSizeAccounting:
         ].publish_info_blob_without_validation = AsyncMock()
         mock_dependencies["integration_knowledge_repo"].update = AsyncMock()
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text=text,
             url="https://example.com",
             integration_knowledge=mock_integration_knowledge,
             sharepoint_item_id="item-123",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
         )
 
         # Unchanged content + metadata: no publication, no embedding,
@@ -500,7 +510,7 @@ class TestProcessInfoBlobSizeAccounting:
         without re-embedding."""
         import hashlib
 
-        from eneo.integration.infrastructure.content_service.sharepoint_content_service import (  # noqa: E501
+        from eneo.integration.infrastructure.content_service.parsing import (
             sanitize_text_for_db,
         )
 
@@ -523,13 +533,13 @@ class TestProcessInfoBlobSizeAccounting:
             "info_blob_service"
         ].publish_info_blob_without_validation = AsyncMock()
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="New name.docx",
             text=text,
             url="https://example.com/new",
             integration_knowledge=mock_integration_knowledge,
             sharepoint_item_id="item-123",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
         )
 
         # Metadata refreshed, but no replacement is published.
@@ -563,13 +573,13 @@ class TestProcessInfoBlobSizeAccounting:
         mock_dependencies["integration_knowledge_repo"].update = AsyncMock()
         mock_dependencies["info_blob_service"].repo.session.execute = AsyncMock()
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text="Brand new content",
             url="https://example.com",
             integration_knowledge=mock_integration_knowledge,
             sharepoint_item_id="item-123",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
         )
 
         mock_dependencies[
@@ -581,7 +591,7 @@ class TestProcessInfoBlobSizeAccounting:
     ):
         import hashlib
 
-        from eneo.integration.infrastructure.content_service.sharepoint_content_service import (  # noqa: E501
+        from eneo.integration.infrastructure.content_service.parsing import (
             sanitize_text_for_db,
         )
 
@@ -611,13 +621,13 @@ class TestProcessInfoBlobSizeAccounting:
             "info_blob_service"
         ].publish_info_blob_without_validation = AsyncMock(side_effect=publish)
 
-        await service._process_info_blob(
+        await service._index.upsert(
             title="Doc",
             text=text,
             url="https://example.com",
             integration_knowledge=mock_integration_knowledge,
             sharepoint_item_id="item-123",
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
         )
 
         assert upserted[0].content_hash == expected_hash
@@ -640,13 +650,13 @@ class TestProcessInfoBlobSizeAccounting:
         )
 
         with pytest.raises(RuntimeError, match="embedding service unavailable"):
-            await service._process_info_blob(
+            await service._index.upsert(
                 title="Doc",
                 text="Fresh content",
                 url="https://example.com",
                 integration_knowledge=mock_integration_knowledge,
                 sharepoint_item_id="item-123",
-                stats=service._initialize_stats(),
+                stats=sync_results.initialize_stats(),
             )
 
 
@@ -664,7 +674,7 @@ class TestBuildSummaryStats:
             "skipped_items": 4,
         }
 
-        summary = service._build_summary_stats(stats)
+        summary = sync_results.build_summary_stats(stats)
 
         assert summary["files_processed"] == 5
         assert summary["files_deleted"] == 2
@@ -677,7 +687,7 @@ class TestBuildSummaryStats:
         """Uses 0 for missing keys."""
         stats = {"files_processed": 10}
 
-        summary = service._build_summary_stats(stats)
+        summary = sync_results.build_summary_stats(stats)
 
         assert summary["files_processed"] == 10
         assert summary["files_deleted"] == 0
@@ -690,13 +700,13 @@ class TestBuildSummaryStats:
     def test_caps_details_but_keeps_true_skipped_count(
         self, service, detail_count, truncated
     ):
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
         stats["skipped_items"] = detail_count
         stats["skipped_details"] = [
             {"file": f"f{i}", "reason": "Unsupported"} for i in range(detail_count)
         ]
 
-        summary = service._build_summary_stats(stats)
+        summary = sync_results.build_summary_stats(stats)
 
         assert len(summary["skipped_details"]) == 50
         assert summary["skipped_total"] == detail_count
@@ -708,11 +718,11 @@ class TestBuildSummaryStats:
     def test_caps_changed_details_but_keeps_every_change_in_the_total(
         self, service, change_count, truncated
     ):
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
         for i in range(change_count):
-            service._count_outcome(stats, "added", f"f{i}.docx")
+            sync_results.count_outcome(stats, "added", f"f{i}.docx")
 
-        summary = service._build_summary_stats(stats)
+        summary = sync_results.build_summary_stats(stats)
 
         assert summary["changed_details"] == [
             {"file": f"f{i}.docx", "change": "added"} for i in range(50)
@@ -721,11 +731,11 @@ class TestBuildSummaryStats:
         assert summary["changed_truncated"] is truncated
 
     def test_carries_reconcile_warning_only_when_present(self, service):
-        stats = service._initialize_stats()
-        assert "reconcile_warning" not in service._build_summary_stats(stats)
+        stats = sync_results.initialize_stats()
+        assert "reconcile_warning" not in sync_results.build_summary_stats(stats)
         stats["reconcile_warning"] = "Orphan cleanup skipped"
         assert (
-            service._build_summary_stats(stats)["reconcile_warning"]
+            sync_results.build_summary_stats(stats)["reconcile_warning"]
             == "Orphan cleanup skipped"
         )
 
@@ -743,7 +753,7 @@ class TestFormatSummaryForJob:
             "skipped_items": 0,
         }
 
-        result = service._format_summary_for_job(summary)
+        result = sync_results.format_summary_for_job(summary)
 
         assert "Imported 5 files" in result
 
@@ -757,7 +767,7 @@ class TestFormatSummaryForJob:
             "skipped_items": 0,
         }
 
-        result = service._format_summary_for_job(summary)
+        result = sync_results.format_summary_for_job(summary)
 
         assert "1 file" in result
         assert "1 files" not in result
@@ -772,7 +782,7 @@ class TestFormatSummaryForJob:
             "skipped_items": 0,
         }
 
-        result = service._format_summary_for_job(summary)
+        result = sync_results.format_summary_for_job(summary)
 
         assert "3 deleted files" in result
 
@@ -786,7 +796,7 @@ class TestFormatSummaryForJob:
             "skipped_items": 0,
         }
 
-        result = service._format_summary_for_job(summary)
+        result = sync_results.format_summary_for_job(summary)
 
         assert "2 pages" in result
 
@@ -800,7 +810,7 @@ class TestFormatSummaryForJob:
             "skipped_items": 0,
         }
 
-        result = service._format_summary_for_job(summary)
+        result = sync_results.format_summary_for_job(summary)
 
         assert "10 folders scanned" in result
 
@@ -814,7 +824,7 @@ class TestFormatSummaryForJob:
             "skipped_items": 3,
         }
 
-        result = service._format_summary_for_job(summary)
+        result = sync_results.format_summary_for_job(summary)
 
         assert "3 items skipped" in result
 
@@ -828,7 +838,7 @@ class TestFormatSummaryForJob:
             "skipped_items": 0,
         }
 
-        result = service._format_summary_for_job(summary)
+        result = sync_results.format_summary_for_job(summary)
 
         assert "Imported 0 files" in result
 
@@ -842,7 +852,7 @@ class TestFormatSummaryForJob:
             "skipped_items": None,
         }
 
-        result = service._format_summary_for_job(summary)
+        result = sync_results.format_summary_for_job(summary)
 
         assert "Imported 0 files" in result
 
@@ -854,7 +864,7 @@ class TestIsItemInFolderScope:
         """Returns True when scope_folder_id is None."""
         item = {"id": "item-1", "parentReference": {"id": "some-parent"}}
 
-        result = service._is_item_in_folder_scope(item, scope_folder_id=None)
+        result = scope_rules.is_item_in_folder_scope(item, scope_folder_id=None)
 
         assert result is True
 
@@ -862,7 +872,7 @@ class TestIsItemInFolderScope:
         """Returns True when selected_item_type is site_root."""
         item = {"id": "item-1", "parentReference": {"id": "some-parent"}}
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item, scope_folder_id="folder-123", selected_item_type="site_root"
         )
 
@@ -872,7 +882,7 @@ class TestIsItemInFolderScope:
         """Returns True when selected_item_type is None (defaults to include all)."""
         item = {"id": "item-1", "parentReference": {"id": "some-parent"}}
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item, scope_folder_id="folder-123", selected_item_type=None
         )
 
@@ -882,7 +892,7 @@ class TestIsItemInFolderScope:
         """Returns True when item ID matches scope_folder_id for file type."""
         item = {"id": "file-123", "parentReference": {"id": "some-parent"}}
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item, scope_folder_id="file-123", selected_item_type="file"
         )
 
@@ -892,7 +902,7 @@ class TestIsItemInFolderScope:
         """Returns False when item ID doesn't match for file type."""
         item = {"id": "other-file", "parentReference": {"id": "some-parent"}}
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item, scope_folder_id="file-123", selected_item_type="file"
         )
 
@@ -902,7 +912,7 @@ class TestIsItemInFolderScope:
         """Returns True when item is direct child of scope folder."""
         item = {"id": "child-1", "parentReference": {"id": "folder-123"}}
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item, scope_folder_id="folder-123", selected_item_type="folder"
         )
 
@@ -917,7 +927,7 @@ class TestIsItemInFolderScope:
             "parentReference": {"id": "parent-folder"},
         }
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item, scope_folder_id="folder-123", selected_item_type="folder"
         )
 
@@ -928,7 +938,7 @@ class TestIsItemInFolderScope:
         item = {"id": "grandchild-1", "parentReference": {"id": "subfolder-1"}}
         known_subfolders = {"subfolder-1", "subfolder-2"}
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item,
             scope_folder_id="folder-123",
             selected_item_type="folder",
@@ -941,7 +951,7 @@ class TestIsItemInFolderScope:
         """Returns False when item is not in folder hierarchy."""
         item = {"id": "orphan-1", "parentReference": {"id": "other-folder"}}
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item, scope_folder_id="folder-123", selected_item_type="folder"
         )
 
@@ -957,7 +967,7 @@ class TestIsItemInFolderScope:
             },
         }
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item,
             scope_folder_id="folder-123",
             scope_folder_path="/Documents/My Files",
@@ -977,7 +987,7 @@ class TestIsItemInFolderScope:
             },
         }
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item,
             scope_folder_id="folder-123",
             scope_folder_path="/Dokument/Åäö",
@@ -997,7 +1007,7 @@ class TestIsItemInFolderScope:
             },
         }
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item,
             scope_folder_id="folder-123",
             # scope stored in NFC form
@@ -1017,7 +1027,7 @@ class TestIsItemInFolderScope:
             },
         }
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item,
             scope_folder_id="folder-123",
             scope_folder_path="/Documents/Reports",
@@ -1036,7 +1046,7 @@ class TestIsItemInFolderScope:
             },
         }
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item,
             scope_folder_id="folder-123",
             scope_folder_path="/Documents/Reports",
@@ -1055,7 +1065,7 @@ class TestIsItemInFolderScope:
             },
         }
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item,
             scope_folder_id="folder-123",
             scope_folder_path="/Documents/Reports",
@@ -1074,7 +1084,7 @@ class TestIsItemInFolderScope:
             },
         }
 
-        result = service._is_item_in_folder_scope(
+        result = scope_rules.is_item_in_folder_scope(
             item,
             scope_folder_id="folder-123",
             scope_folder_path="/Documents/Reports/",
@@ -1446,9 +1456,7 @@ class TestDeltaChangesProcessing:
             )
             mock_client_class.return_value = mock_client
 
-            with patch.object(
-                service, "_process_info_blob", AsyncMock()
-            ) as mock_process:
+            with patch.object(service._index, "upsert", AsyncMock()) as mock_process:
                 result = await service.process_delta_changes(
                     token_id=mock_oauth_token.id,
                     integration_knowledge_id=mock_integration_knowledge.id,
@@ -1581,7 +1589,7 @@ class TestDeltaChangesProcessing:
             mock_client_class.return_value = mock_client
 
             with patch.object(
-                service, "_delete_out_of_scope_folder_subtree", AsyncMock()
+                service._reconciliation, "remove_subtree", AsyncMock()
             ) as mock_delete_subtree:
                 result = await service.process_delta_changes(
                     token_id=mock_oauth_token.id,
@@ -1679,7 +1687,7 @@ class TestOneDriveFolderTraversal:
             resource_type="onedrive",
             integration_knowledge=MagicMock(id=uuid4()),
             client=mock_client,
-            stats=service._initialize_stats(),
+            stats=sync_results.initialize_stats(),
             folder_id="folder-456",
             processed_items=set(),
         )
@@ -1717,9 +1725,9 @@ class TestOneDriveFolderTraversal:
         mock_client.get_file_extraction_by_id.return_value = ExtractionResult.no_text(
             reason
         )
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
-        with patch.object(service, "_process_info_blob", AsyncMock()) as mock_process:
+        with patch.object(service._index, "upsert", AsyncMock()) as mock_process:
             await service._process_folder_results(
                 site_id="site-123",
                 drive_id="drive-123",
@@ -1811,9 +1819,9 @@ class TestOneDriveFolderTraversal:
             mock_client.get_file_extraction_by_id.side_effect = outcome
         else:
             mock_client.get_file_extraction_by_id.return_value = outcome
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
-        with patch.object(service, "_process_info_blob", AsyncMock()) as mock_process:
+        with patch.object(service._index, "upsert", AsyncMock()) as mock_process:
             await service._process_folder_results(
                 site_id="site-123",
                 drive_id="drive-123",
@@ -1870,10 +1878,10 @@ class TestOneDriveFolderTraversal:
                 header_only_xlsx_bytes(), XLSX_MIME, "names.xlsx"
             )
         )
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
         with patch.object(
-            service, "_process_info_blob", AsyncMock(return_value="added")
+            service._index, "upsert", AsyncMock(return_value="added")
         ) as mock_process:
             await service._process_folder_results(
                 site_id="site-123",
@@ -1921,8 +1929,8 @@ class TestFileExtraction:
         client = AsyncMock()
         client.get_file_extraction_by_id.return_value = ExtractionResult.ok("Body")
 
-        assert await service._extract_file(
-            client, "drive-1", "item-1", "Report.PDF", service._initialize_stats()
+        assert await service._index._extract_file(
+            client, "drive-1", "item-1", "Report.PDF", sync_results.initialize_stats()
         ) == ("Body", None)
         client.get_file_extraction_by_id.assert_awaited_once_with(
             drive_id="drive-1", item_id="item-1"
@@ -1973,8 +1981,8 @@ class TestFileExtraction:
         else:
             client.get_file_extraction_by_id.return_value = outcome
 
-        content, skip_reason = await service._extract_file(
-            client, "drive-1", "item-1", "Report.PDF", service._initialize_stats()
+        content, skip_reason = await service._index._extract_file(
+            client, "drive-1", "item-1", "Report.PDF", sync_results.initialize_stats()
         )
 
         assert (content, skip_reason) == (None, expected_reason)
@@ -1984,9 +1992,9 @@ class TestFileExtraction:
         self, service, mock_integration_knowledge
     ):
         client = AsyncMock()
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
-        await service._index_file(
+        await service._index.index_file(
             client=client,
             drive_id="drive-1",
             item={"name": "a.pdf", "file": {}},
@@ -2003,9 +2011,9 @@ class TestFileExtraction:
         self, service, mock_integration_knowledge
     ):
         client = AsyncMock()
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
-        await service._index_file(
+        await service._index.index_file(
             client=client,
             drive_id="drive-1",
             item={**self.ITEM, "name": "Old.DOC"},
@@ -2025,12 +2033,12 @@ class TestFileExtraction:
         self, service, mock_integration_knowledge
     ):
         with pytest.raises(ValueError, match="no-text reason"):
-            await service._delete_local_blob_for_unextractable_item(
+            await service._index._remove_empty(
                 item_id="item-1",
                 item_name="a.pdf",
                 integration_knowledge=mock_integration_knowledge,
                 integration_knowledge_id=mock_integration_knowledge.id,
-                stats=service._initialize_stats(),
+                stats=sync_results.initialize_stats(),
                 reason="Error: Corrupt or malformed file",
             )
 
@@ -2042,9 +2050,9 @@ class TestFileExtraction:
         ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
             return_value=[]
         )
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
-        await service._delete_local_blob_for_unextractable_item(
+        await service._index._remove_empty(
             item_id="item-1",
             item_name="scan.pdf",
             integration_knowledge=mock_integration_knowledge,
@@ -2065,9 +2073,9 @@ class TestFileExtraction:
         ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
             side_effect=RuntimeError("db down")
         )
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
-        await service._delete_local_blob_for_unextractable_item(
+        await service._index._remove_empty(
             item_id="item-1",
             item_name="scan.pdf",
             integration_knowledge=mock_integration_knowledge,
@@ -2494,8 +2502,8 @@ class TestOutOfScopeFolderSubtreeCleanup:
         content_client = AsyncMock()
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(
                 return_value=[
                     _descendant("child-1", "/Documents/Moved"),
@@ -2503,8 +2511,8 @@ class TestOutOfScopeFolderSubtreeCleanup:
                 ]
             ),
         ):
-            stats = service._initialize_stats()
-            await service._delete_out_of_scope_folder_subtree(
+            stats = sync_results.initialize_stats()
+            await service._reconciliation.remove_subtree(
                 content_client=content_client,
                 resource_type="site",
                 site_id="site-1",
@@ -2538,12 +2546,12 @@ class TestOutOfScopeFolderSubtreeCleanup:
         content_client = AsyncMock()
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(return_value=[_descendant("od-child", "/Moved")]),
         ) as mock_enum:
-            stats = service._initialize_stats()
-            await service._delete_out_of_scope_folder_subtree(
+            stats = sync_results.initialize_stats()
+            await service._reconciliation.remove_subtree(
                 content_client=content_client,
                 resource_type="onedrive",
                 site_id=None,
@@ -2581,9 +2589,7 @@ class TestOutOfScopeFolderSubtreeCleanup:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(
-                service, "_enumerate_authoritative_items", AsyncMock()
-            ) as enumerate_ids,
+            patch.object(scope_rules, "enumerate_items", AsyncMock()) as enumerate_ids,
         ):
             _mock_graph_client(
                 mock_client_class,
@@ -2610,9 +2616,9 @@ class TestOutOfScopeFolderSubtreeCleanup:
         content_client = AsyncMock()
         repo = mock_dependencies["info_blob_service"].repo
 
-        with patch.object(service, "_enumerate_authoritative_items") as mock_enum:
-            stats = service._initialize_stats()
-            await service._delete_out_of_scope_folder_subtree(
+        with patch.object(scope_rules, "enumerate_items") as mock_enum:
+            stats = sync_results.initialize_stats()
+            await service._reconciliation.remove_subtree(
                 content_client=content_client,
                 resource_type="site",
                 site_id="site-1",
@@ -2649,21 +2655,21 @@ class TestFullSyncReconciliation:
         )
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_item_ids",
+            service._reconciliation,
+            "_enumerate_item_ids",
             AsyncMock(return_value={"keep-1", "keep-2"}),
         ):
             with patch.object(
-                service, "_delete_local_sharepoint_item", AsyncMock(return_value=1)
+                service._index, "remove", AsyncMock(return_value=1)
             ) as mock_delete:
-                await service._reconcile_indexed_blobs(
+                await service._reconciliation.reconcile(
                     client=AsyncMock(),
                     integration_knowledge=ik,
                     resource_type="site",
                     site_id="site-1",
                     drive_id="drive-1",
                     folder_id=None,
-                    stats=service._initialize_stats(),
+                    stats=sync_results.initialize_stats(),
                 )
 
         assert mock_delete.await_count == 1
@@ -2687,16 +2693,18 @@ class TestFullSyncReconciliation:
         )
 
         with patch.object(
-            service, "_enumerate_authoritative_item_ids", AsyncMock(return_value=set())
+            service._reconciliation,
+            "_enumerate_item_ids",
+            AsyncMock(return_value=set()),
         ):
-            await service._reconcile_indexed_blobs(
+            await service._reconciliation.reconcile(
                 client=AsyncMock(),
                 integration_knowledge=ik,
                 resource_type="site",
                 site_id="site-1",
                 drive_id="drive-1",
                 folder_id=None,
-                stats=service._initialize_stats(),
+                stats=sync_results.initialize_stats(),
             )
 
         assert ik.size == 60
@@ -2711,21 +2719,19 @@ class TestFullSyncReconciliation:
         )
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_item_ids",
+            service._reconciliation,
+            "_enumerate_item_ids",
             AsyncMock(side_effect=Exception("throttled mid-listing")),
         ):
-            with patch.object(
-                service, "_delete_local_sharepoint_item", AsyncMock()
-            ) as mock_delete:
-                await service._reconcile_indexed_blobs(
+            with patch.object(service._index, "remove", AsyncMock()) as mock_delete:
+                await service._reconciliation.reconcile(
                     client=AsyncMock(),
                     integration_knowledge=ik,
                     resource_type="site",
                     site_id="site-1",
                     drive_id="drive-1",
                     folder_id=None,
-                    stats=service._initialize_stats(),
+                    stats=sync_results.initialize_stats(),
                 )
 
         mock_delete.assert_not_called()
@@ -2743,12 +2749,12 @@ class TestFullSyncReconciliation:
         )
 
         with patch.object(
-            service, "_enumerate_authoritative_item_ids", AsyncMock(return_value=set())
+            service._reconciliation,
+            "_enumerate_item_ids",
+            AsyncMock(return_value=set()),
         ):
-            with patch.object(
-                service, "_delete_local_sharepoint_item", AsyncMock()
-            ) as mock_delete:
-                await service._reconcile_indexed_blobs(
+            with patch.object(service._index, "remove", AsyncMock()) as mock_delete:
+                await service._reconciliation.reconcile(
                     client=AsyncMock(
                         get_item_metadata_batch=AsyncMock(return_value={})
                     ),
@@ -2757,7 +2763,7 @@ class TestFullSyncReconciliation:
                     site_id="site-1",
                     drive_id="drive-1",
                     folder_id=None,
-                    stats=service._initialize_stats(),
+                    stats=sync_results.initialize_stats(),
                 )
 
         mock_delete.assert_not_called()
@@ -2772,21 +2778,19 @@ class TestFullSyncReconciliation:
         )
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_item_ids",
+            service._reconciliation,
+            "_enumerate_item_ids",
             AsyncMock(return_value={"a", "b", "c"}),
         ):
-            with patch.object(
-                service, "_delete_local_sharepoint_item", AsyncMock()
-            ) as mock_delete:
-                await service._reconcile_indexed_blobs(
+            with patch.object(service._index, "remove", AsyncMock()) as mock_delete:
+                await service._reconciliation.reconcile(
                     client=AsyncMock(),
                     integration_knowledge=ik,
                     resource_type="site",
                     site_id="site-1",
                     drive_id="drive-1",
                     folder_id=None,
-                    stats=service._initialize_stats(),
+                    stats=sync_results.initialize_stats(),
                 )
 
         mock_delete.assert_not_called()
@@ -2840,7 +2844,7 @@ class TestFolderFullSyncRefreshesFolderPath:
 
             with (
                 patch.object(service, "_fetch_and_process_content", AsyncMock()),
-                patch.object(service, "_reconcile_indexed_blobs", AsyncMock()),
+                patch.object(service._reconciliation, "reconcile", AsyncMock()),
             ):
                 await service.pull_content(
                     token_id=mock_oauth_token.id,
@@ -2881,7 +2885,7 @@ class TestFolderFullSyncRefreshesFolderPath:
 
             with (
                 patch.object(service, "_fetch_and_process_content", AsyncMock()),
-                patch.object(service, "_reconcile_indexed_blobs", AsyncMock()),
+                patch.object(service._reconciliation, "reconcile", AsyncMock()),
             ):
                 await service.pull_content(
                     token_id=mock_oauth_token.id,
@@ -2906,7 +2910,7 @@ class TestEnumerateAuthoritativeItemIds:
         client.get_folder_items.return_value = [{"id": "file-2", "file": {}}]
         client.get_site_pages.return_value = {"value": [{"id": "page-1"}]}
 
-        result = await service._enumerate_authoritative_item_ids(
+        result = await service._reconciliation._enumerate_item_ids(
             client=client,
             resource_type="site",
             site_id="site-1",
@@ -2921,7 +2925,7 @@ class TestEnumerateAuthoritativeItemIds:
         client = AsyncMock()
         client.get_drive_root_children.return_value = [{"id": "od-file", "file": {}}]
 
-        result = await service._enumerate_authoritative_item_ids(
+        result = await service._reconciliation._enumerate_item_ids(
             client=client,
             resource_type="onedrive",
             site_id=None,
@@ -2939,7 +2943,7 @@ class TestEnumerateAuthoritativeItemIds:
         client.get_drive_root_children.side_effect = RuntimeError("graph throttled")
 
         with pytest.raises(RuntimeError):
-            await service._enumerate_authoritative_item_ids(
+            await service._reconciliation._enumerate_item_ids(
                 client=client,
                 resource_type="site",
                 site_id="site-1",
@@ -2979,10 +2983,10 @@ class TestProcessPages:
                 "webUrl": "https://x/real",
             },
         ]
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
         with patch.object(
-            service, "_process_info_blob", AsyncMock(return_value="added")
+            service._index, "upsert", AsyncMock(return_value="added")
         ) as process:
             await service._process_pages(
                 pages=[self._page("p-empty"), self._page("p-real")],
@@ -3006,10 +3010,10 @@ class TestProcessPages:
             RuntimeError("Graph 500"),
             {"title": "Real", "description": "Some text", "webUrl": "https://x"},
         ]
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
         with patch.object(
-            service, "_process_info_blob", AsyncMock(return_value="added")
+            service._index, "upsert", AsyncMock(return_value="added")
         ) as process:
             await service._process_pages(
                 pages=[self._page("p-bad"), self._page("p-real")],
@@ -3046,9 +3050,9 @@ class TestProcessInfoBlobEmptyText:
         publish = mock_dependencies[
             "info_blob_service"
         ].publish_info_blob_without_validation
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
-        outcome = await service._process_info_blob(
+        outcome = await service._index.upsert(
             title="Doc",
             text=text,
             url="https://example.com",
@@ -3056,7 +3060,7 @@ class TestProcessInfoBlobEmptyText:
             sharepoint_item_id="item-1",
             stats=stats,
         )
-        service._count_outcome(stats, outcome, "Doc")
+        sync_results.count_outcome(stats, outcome, "Doc")
 
         assert outcome == "empty"
         publish.assert_not_called()
@@ -3082,9 +3086,9 @@ class TestProcessInfoBlobEmptyText:
         delete = mock_dependencies[
             "info_blob_service"
         ].repo.delete_by_sharepoint_item_and_integration_knowledge
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
-        outcome = await service._process_info_blob(
+        outcome = await service._index.upsert(
             title="Start",
             text="\x00",
             url="https://example.com",
@@ -3092,7 +3096,7 @@ class TestProcessInfoBlobEmptyText:
             stats=stats,
             item_name="Start.aspx",
         )
-        service._count_outcome(stats, outcome, "Start.aspx", page=True)
+        sync_results.count_outcome(stats, outcome, "Start.aspx", page=True)
 
         assert outcome == "empty"
         delete.assert_not_called()
@@ -3112,9 +3116,9 @@ class TestProcessInfoBlobEmptyText:
         ].repo.delete_by_sharepoint_item_and_integration_knowledge = AsyncMock(
             side_effect=RuntimeError("503")
         )
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
-        outcome = await service._process_info_blob(
+        outcome = await service._index.upsert(
             title="Doc",
             text="\x00",
             url="https://example.com",
@@ -3122,7 +3126,7 @@ class TestProcessInfoBlobEmptyText:
             sharepoint_item_id="item-1",
             stats=stats,
         )
-        service._count_outcome(stats, outcome, "Doc")
+        sync_results.count_outcome(stats, outcome, "Doc")
 
         assert outcome == "failed"
         assert (stats["failed_items"], stats["skipped_items"]) == (1, 1)
@@ -3231,7 +3235,7 @@ class TestSyncStatus:
 
         async def index_then_fail(**kwargs):
             stats = kwargs["stats"]
-            service._count_outcome(stats, "added", "Beslut.pdf")
+            sync_results.count_outcome(stats, "added", "Beslut.pdf")
             stats["files_deleted"] += 1
             stats["skipped_items"] += 1
             stats["skipped_details"].append(
@@ -3281,9 +3285,7 @@ class TestSyncStatus:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(
-                service, "_process_info_blob", AsyncMock(return_value="added")
-            ),
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
             _mock_graph_client(
                 mock_client_class,
@@ -3476,9 +3478,7 @@ class TestSyncStatus:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(
-                service, "_process_info_blob", AsyncMock(return_value="added")
-            ),
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
             _mock_graph_client(
                 mock_client_class,
@@ -3640,9 +3640,7 @@ class TestSyncStatus:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(
-                service, "_process_info_blob", AsyncMock(return_value="added")
-            ),
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
             _mock_graph_client(
                 mock_client_class,
@@ -3734,7 +3732,7 @@ class TestSyncStatus:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(service, "_reconcile_indexed_blobs", refuse),
+            patch.object(service._reconciliation, "reconcile", refuse),
         ):
             _mock_graph_client(mock_client_class)
             await service.pull_content(
@@ -3788,9 +3786,7 @@ class TestDeltaBaseline:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(
-                service, "_process_info_blob", AsyncMock(return_value="added")
-            ),
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
             client = _mock_graph_client(
                 mock_client_class,
@@ -3832,12 +3828,14 @@ class TestReconcileWarnings:
         ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
             return_value=indexed
         )
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
         with patch.object(
-            service, "_enumerate_authoritative_item_ids", AsyncMock(return_value=set())
+            service._reconciliation,
+            "_enumerate_item_ids",
+            AsyncMock(return_value=set()),
         ):
-            await service._reconcile_indexed_blobs(
+            await service._reconciliation.reconcile(
                 client=AsyncMock(get_item_metadata_batch=AsyncMock(return_value={})),
                 integration_knowledge=ik,
                 resource_type="site",
@@ -3853,14 +3851,14 @@ class TestReconcileWarnings:
     async def test_enumeration_failure_is_recorded_in_stats(
         self, service, mock_dependencies, ik
     ):
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_item_ids",
+            service._reconciliation,
+            "_enumerate_item_ids",
             AsyncMock(side_effect=RuntimeError("throttled mid-listing")),
         ):
-            await service._reconcile_indexed_blobs(
+            await service._reconciliation.reconcile(
                 client=AsyncMock(),
                 integration_knowledge=ik,
                 resource_type="site",
@@ -3880,12 +3878,14 @@ class TestReconcileWarnings:
         ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
             return_value=[(uuid4(), "a")]
         )
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
 
         with patch.object(
-            service, "_enumerate_authoritative_item_ids", AsyncMock(return_value={"a"})
+            service._reconciliation,
+            "_enumerate_item_ids",
+            AsyncMock(return_value={"a"}),
         ):
-            await service._reconcile_indexed_blobs(
+            await service._reconciliation.reconcile(
                 client=AsyncMock(),
                 integration_knowledge=ik,
                 resource_type="site",
@@ -3915,18 +3915,16 @@ class TestReconcileAboveTheCap:
         ].repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
             return_value=[(uuid4(), item_id) for item_id in orphan_ids]
         )
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
         with (
             patch.object(
-                service,
-                "_enumerate_authoritative_item_ids",
+                service._reconciliation,
+                "_enumerate_item_ids",
                 AsyncMock(return_value=set()),
             ),
-            patch.object(
-                service, "_delete_local_sharepoint_item", AsyncMock(return_value=1)
-            ) as delete,
+            patch.object(service._index, "remove", AsyncMock(return_value=1)) as delete,
         ):
-            await service._reconcile_indexed_blobs(
+            await service._reconciliation.reconcile(
                 client=client,
                 integration_knowledge=ik,
                 resource_type="site",
@@ -4367,8 +4365,8 @@ class TestDeltaFolderScopeOrdering:
         }
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(return_value=descendants),
         ) as walk:
             await self._run_delta(
@@ -4472,8 +4470,8 @@ class TestDeltaFolderScopeOrdering:
         )
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(return_value=descendants),
         ) as enumerate_items:
             client, result = await self._run_delta(
@@ -4523,8 +4521,8 @@ class TestDeltaFolderScopeOrdering:
         )
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(side_effect=lambda **kw: subtree[kw["folder_id"]]),
         ):
             client, result = await self._run_delta(
@@ -4546,9 +4544,7 @@ class TestDeltaFolderScopeOrdering:
         be out of scope and have the whole drive enumerated for deletion."""
         changes = [{"id": "root-1", "name": "root", "root": {}, "folder": {}}]
 
-        with patch.object(
-            service, "_enumerate_authoritative_items", AsyncMock()
-        ) as enumerate_ids:
+        with patch.object(scope_rules, "enumerate_items", AsyncMock()) as enumerate_ids:
             _, result = await self._run_delta(
                 service, mock_dependencies, mock_oauth_token, folder_scoped, changes
             )
@@ -4573,8 +4569,8 @@ class TestDeltaFolderScopeOrdering:
 
         with (
             patch.object(
-                service,
-                "_enumerate_authoritative_items",
+                scope_rules,
+                "enumerate_items",
                 AsyncMock(side_effect=RuntimeError("throttled")),
             ),
             pytest.raises(SyncItemsFailed, match=ONE_FILE_FAILED),
@@ -4662,9 +4658,7 @@ class TestDeltaFolderScopeOrdering:
         ]
         self._indexed(mock_dependencies, "n-1")
 
-        with patch.object(
-            service, "_enumerate_authoritative_items", AsyncMock(return_value=[])
-        ):
+        with patch.object(scope_rules, "enumerate_items", AsyncMock(return_value=[])):
             client, result = await self._run_delta(
                 service,
                 mock_dependencies,
@@ -4874,8 +4868,8 @@ class TestDeltaFolderScopeOrdering:
         descendants = [_descendant("q-1", f"{q_path}/folder-q")]
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(return_value=descendants),
         ) as walk:
             client, _ = await self._run_delta(
@@ -4926,8 +4920,8 @@ class TestDeltaFolderScopeOrdering:
         }
         with (
             patch.object(
-                service,
-                "_enumerate_authoritative_items",
+                scope_rules,
+                "enumerate_items",
                 AsyncMock(return_value=[{"id": "x-1", "name": "one.docx"}]),
             ) as walk,
             patch.object(
@@ -4971,8 +4965,8 @@ class TestDeltaFolderScopeOrdering:
 
         with (
             patch.object(
-                service,
-                "_enumerate_authoritative_items",
+                scope_rules,
+                "enumerate_items",
                 AsyncMock(side_effect=[RuntimeError("throttled"), []]),
             ) as walk,
             patch.object(
@@ -5029,8 +5023,8 @@ class TestDeltaFolderScopeOrdering:
         descendants = [_descendant(f"z-{i}", "/Documents/Z") for i in (1, 2, 3)]
 
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(return_value=descendants),
         ) as walk:
             await self._run_delta(
@@ -5090,7 +5084,7 @@ class TestDeltaExtractionOutcomes:
                 get_file_extraction_by_id=extraction,
             )
             failure = None
-            with patch.object(service, "_process_info_blob", AsyncMock()) as process:
+            with patch.object(service._index, "upsert", AsyncMock()) as process:
                 try:
                     await service.process_delta_changes(
                         token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
@@ -5236,9 +5230,7 @@ class TestDeltaExtractionOutcomes:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(
-                service, "_process_info_blob", AsyncMock(return_value="added")
-            ),
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
             _mock_graph_client(
                 mock_client_class,
@@ -5475,7 +5467,7 @@ class TestSiteRootExtractionOutcomes:
                 ),
             )
             failure = None
-            with patch.object(service, "_process_info_blob", AsyncMock()) as process:
+            with patch.object(service._index, "upsert", AsyncMock()) as process:
                 try:
                     await service.pull_content(
                         token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
@@ -5756,9 +5748,7 @@ class TestSelectedItemTypePersistence:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch.object(
-                service, "_process_info_blob", AsyncMock(return_value="added")
-            ),
+            patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
             _mock_graph_client(
                 mock_client_class,
@@ -5849,8 +5839,8 @@ class TestSyncProgress:
                 ),
             )
             with patch.object(
-                progress_service,
-                "_process_info_blob",
+                progress_service._index,
+                "upsert",
                 AsyncMock(side_effect=["added", "unchanged", "added", "added"]),
             ):
                 await progress_service.pull_content(
@@ -5904,8 +5894,8 @@ class TestSyncProgress:
                 ),
             )
             with patch.object(
-                progress_service,
-                "_process_info_blob",
+                progress_service._index,
+                "upsert",
                 AsyncMock(side_effect=["added", "unchanged"]),
             ):
                 await progress_service.process_delta_changes(
@@ -6242,13 +6232,13 @@ class TestOutOfScopeNamesStayPrivate:
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
             patch.object(
-                service,
-                "_process_info_blob",
+                service._index,
+                "upsert",
                 AsyncMock(side_effect=["added", "added"]),
             ),
             patch.object(
-                service,
-                "_enumerate_authoritative_items",
+                scope_rules,
+                "enumerate_items",
                 AsyncMock(
                     return_value=[
                         {
@@ -6630,12 +6620,12 @@ class TestUserVisibleErrors:
         client = AsyncMock()
         client.get_drive_root_children.return_value = []
         client.get_site_pages.return_value = {"value": []}
-        stats = service._initialize_stats()
-        service.info_blob_service.repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
+        stats = sync_results.initialize_stats()
+        service._index.info_blob_service.repo.get_sharepoint_item_ids_for_integration_knowledge = AsyncMock(
             side_effect=_database_error()
         )
 
-        await service._reconcile_indexed_blobs(
+        await service._reconciliation.reconcile(
             client=client,
             integration_knowledge=mock_integration_knowledge,
             resource_type="site",
@@ -6645,8 +6635,8 @@ class TestUserVisibleErrors:
             stats=stats,
         )
         with patch.object(
-            service,
-            "_enumerate_authoritative_items",
+            scope_rules,
+            "enumerate_items",
             AsyncMock(side_effect=_refused()),
         ):
             await service._index_folder_subtree_entering_scope(
@@ -6689,7 +6679,7 @@ class TestUserVisibleErrors:
         ]
 
     def test_the_summary_cleans_whatever_text_reached_the_stats(self, service):
-        stats = service._initialize_stats()
+        stats = sync_results.initialize_stats()
         stats["skipped_items"] = 1
         stats["skipped_details"] = [
             {
@@ -6699,7 +6689,7 @@ class TestUserVisibleErrors:
         ]
         stats["reconcile_warning"] = f"Orphan cleanup skipped ({_SIGNED_URL})"
 
-        summary = service._build_summary_stats(stats)
+        summary = sync_results.build_summary_stats(stats)
 
         assert _reasons(summary["skipped_details"]) == [
             {"file": "a.docx", "reason": "Error: HTTP 403 Forbidden"}

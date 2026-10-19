@@ -1,4 +1,4 @@
-"""Stable, user-facing messages for SharePoint failures surfaced to people."""
+"""Graph failure classification and stable messages surfaced to people."""
 
 from __future__ import annotations
 
@@ -10,6 +10,9 @@ from eneo.integration.infrastructure.auth_service.org_token_provider import (
     CREDENTIALS_INVALID_MESSAGE,
     SharePointCredentialsInvalidError,
 )
+
+# A response about an individual item, not a transient Graph/network failure.
+ITEM_LEVEL_HTTP_STATUSES = frozenset({403, 404, 410})
 
 NO_SITE_ACCESS_MESSAGE = "Eneo has no access to this site"
 
