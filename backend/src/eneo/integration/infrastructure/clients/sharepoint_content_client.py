@@ -114,8 +114,9 @@ class IncompleteDownloadError(aiohttp.ClientPayloadError):
 class MissingDownloadUrlError(ValueError):
     """Graph returned the item without a download URL.
 
-    Transient (a file being uploaded or processed), so callers must not treat
-    it as a verdict about the file.
+    Either for good (some item kinds have no content stream) or for now (a
+    file being uploaded or processed), so callers must not treat it as a
+    verdict about the file's content.
     """
 
 

@@ -5144,6 +5144,10 @@ class TestDeltaExtractionOutcomes:
                 ValueError("SharePoint file 'x' exceeds max download size (1 > 0)"),
                 "File too large (exceeds 50 MB limit)",
             ),
+            (
+                MissingDownloadUrlError("No download URL available for file 'x'"),
+                "Error: SharePoint offers no download for this item",
+            ),
         ],
     )
     async def test_file_level_outcomes_keep_the_local_copy_and_advance(
@@ -5169,6 +5173,38 @@ class TestDeltaExtractionOutcomes:
             {"file": "scan.pdf", "reason": expected_reason}
         ]
 
+    async def test_a_onenote_notebook_is_skipped_without_a_download(
+        self, service, mock_dependencies, mock_oauth_token
+    ):
+        """Graph serves a notebook as a package: no folder facet, no download."""
+        ik = _real_integration_knowledge(delta_token="token-1")
+        mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+        mock_dependencies["integration_knowledge_repo"].one.return_value = ik
+        notebook = {
+            "id": "notebook-1",
+            "name": "Mötesanteckningar",
+            "package": {"type": "oneNote"},
+            "cTag": "ctag-notebook",
+            "parentReference": {"driveId": "drive-456"},
+        }
+        with patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
+        ) as mock_client_class:
+            client = _mock_graph_client(
+                mock_client_class,
+                get_delta_changes=AsyncMock(return_value=([notebook], "token-2")),
+            )
+            await service.process_delta_changes(
+                token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
+            )
+
+        client.get_file_extraction_by_id.assert_not_called()
+        assert ik.delta_token == "token-2"
+        sync_log = mock_dependencies["sync_log_repo"].add.call_args[0][0]
+        assert _reasons(sync_log.metadata["skipped_details"]) == [
+            {"file": "Mötesanteckningar", "reason": "Unsupported file type (OneNote)"}
+        ]
+
     @pytest.mark.parametrize(
         ("outcome", "expected_reason"),
         [
@@ -5183,10 +5219,6 @@ class TestDeltaExtractionOutcomes:
             (aiohttp.ClientConnectionError("reset"), "Error: Connection error"),
             (TimeoutError(), "Error: Request timed out"),
             (RuntimeError("Graph timeout"), "Error: Graph timeout"),
-            (
-                MissingDownloadUrlError("No download URL available for file 'x'"),
-                "Error: No download URL available for file 'x'",
-            ),
         ],
     )
     async def test_infrastructure_failures_keep_the_local_copy_and_the_token(

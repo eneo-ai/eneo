@@ -43,6 +43,7 @@ from eneo.integration.infrastructure.content_service.utils import (
     error_reason,
     file_too_large_reason,
     is_unextractable_content,
+    unsupported_package_reason,
 )
 from eneo.integration.infrastructure.graph_errors import ITEM_LEVEL_HTTP_STATUSES
 from eneo.main.config import get_settings
@@ -64,6 +65,8 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+NO_DOWNLOAD_REASON = "SharePoint offers no download for this item"
 
 
 class SharePointIndex:
@@ -485,7 +488,9 @@ class SharePointIndex:
                     stats["unchanged_items"] += 1
                     return
 
-            unsupported_reason = unsupported_file_reason(item_name)
+            unsupported_reason = unsupported_file_reason(
+                item_name
+            ) or unsupported_package_reason(item)
             if unsupported_reason:
                 sync_results.count_skip(stats, skipped(item_name, unsupported_reason))
                 return
@@ -537,9 +542,11 @@ class SharePointIndex:
         """``(text, None)`` or ``(None, skip_reason)`` for an outcome of the file itself.
 
         Graph or network trouble (5xx, throttling past its retries, connection
-        and timeout errors, an item served without a download URL, anything
-        unexpected) propagates: it says nothing about the file, so the caller
-        must not move past it.
+        and timeout errors, anything unexpected) propagates: it says nothing
+        about the file, so the caller must not move past it. An item served
+        without a download URL is skipped instead: Graph serves some items that
+        way for good, and one still being uploaded changes again when it is
+        done, so failing it would only hold the token back.
         """
         stats["download_attempts"] = stats.get("download_attempts", 0) + 1
         try:
@@ -547,7 +554,10 @@ class SharePointIndex:
                 drive_id=drive_id, item_id=item_id
             )
         except MissingDownloadUrlError:
-            raise
+            logger.warning(
+                "File %s (item_id=%s) has no download URL", item_name, item_id
+            )
+            return None, error_reason(NO_DOWNLOAD_REASON)
         except ValueError as e:
             if "exceeds max download size" in str(e):
                 return None, file_too_large_reason(

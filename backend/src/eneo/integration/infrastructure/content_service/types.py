@@ -47,6 +47,7 @@ class SharePointItem(TypedDict, total=False):
     deleted: bool | dict[str, Any]
     folder: dict[str, Any]
     file: dict[str, Any]
+    package: dict[str, Any]
     parentReference: GraphParentReference
     size: int
     title: str
