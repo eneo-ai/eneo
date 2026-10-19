@@ -166,6 +166,38 @@ describe("transcriptCorrectionsController speaker edits", () => {
   });
 });
 
+describe("transcriptCorrectionsController speaker names", () => {
+  const NAMES = { SPEAKER_00: "Anna", SPEAKER_01: null };
+
+  it("reads the stored names and never sends them, so a save keeps them", async () => {
+    const { controller, save } = makeController({
+      list: [correctionSet({ speaker_names: NAMES })]
+    });
+    await controller.load();
+
+    expect(controller.speakerNames).toEqual(NAMES);
+
+    save.mockImplementationOnce(async (args: Record<string, unknown>) =>
+      correctionSet({ revision: 2, occurrences: args.occurrences, speaker_names: NAMES })
+    );
+    await controller.saveLine(0, "Vi frågade Çagri om planen.", { suggest: false });
+
+    const body = save.mock.calls[0][0] as Record<string, unknown>;
+    expect(Object.keys(body)).not.toContain("speakerNames");
+    expect(Object.keys(body)).not.toContain("speaker_names");
+    expect(controller.speakerNames).toEqual(NAMES);
+  });
+
+  it("shows no names from a set anchored to a replaced transcript", async () => {
+    const { controller } = makeController({
+      list: [correctionSet({ stale: true, speaker_names: NAMES })]
+    });
+    await controller.load();
+
+    expect(controller.speakerNames).toEqual({});
+  });
+});
+
 it("sends v3 source hash and preserves same-label confirmation after reload", async () => {
   const segments = RAW_SEGMENTS.map((segment) => ({
     ...segment,

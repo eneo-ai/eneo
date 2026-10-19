@@ -69,6 +69,23 @@ export function speakerNamesFromRows(rows: readonly SpeakerMappingRow[]): Record
   return names;
 }
 
+/**
+ * The names a transcript shows: a speaker-naming step's (`base`) under a
+ * person's, kept with the transcript corrections. A string overrides, null
+ * removes the step's name and an absent label inherits it, the same rule as
+ * the backend's `effective_speaker_names`.
+ */
+export function effectiveSpeakerNames(
+  base: Readonly<Record<string, string>>,
+  overrides: Readonly<Record<string, string | null>>
+): Record<string, string> {
+  const names: Record<string, string> = {};
+  for (const [label, name] of Object.entries({ ...base, ...overrides })) {
+    if (typeof name === "string") names[label] = name;
+  }
+  return names;
+}
+
 function confidenceOf(value: unknown): SpeakerConfidence {
   return value === "high" || value === "medium" ? value : "low";
 }

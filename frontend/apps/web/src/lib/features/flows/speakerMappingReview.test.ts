@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildEditedMapping,
   buildSpeakerRows,
+  effectiveSpeakerNames,
   getSpeakerMappingInferNames,
   getSpeakerMappingParticipants,
   isSpeakerMappingCheckpoint
@@ -75,4 +76,29 @@ describe("speaker mapping review", () => {
       ]
     });
   });
+});
+
+describe("effective speaker names", () => {
+  const base = { SPEAKER_00: "Anna", SPEAKER_01: "Bo" };
+
+  // The same table as the backend's effective_speaker_names.
+  it.each([
+    // An absent label inherits the step's name.
+    [{}, { SPEAKER_00: "Anna", SPEAKER_01: "Bo" }],
+    // A string overrides it.
+    [{ SPEAKER_00: "Anna Berg" }, { SPEAKER_00: "Anna Berg", SPEAKER_01: "Bo" }],
+    // Null removes it: explicitly no name.
+    [{ SPEAKER_01: null }, { SPEAKER_00: "Anna" }],
+    // A label the step left unnamed is named; null on it changes nothing.
+    [
+      { SPEAKER_02: "Cecilia", SPEAKER_03: null },
+      { SPEAKER_00: "Anna", SPEAKER_01: "Bo", SPEAKER_02: "Cecilia" }
+    ]
+  ] as [Record<string, string | null>, Record<string, string>][])(
+    "puts a person's names over the step's (%j)",
+    (overrides, expected) => {
+      expect(effectiveSpeakerNames(base, overrides)).toEqual(expected);
+      expect(base).toEqual({ SPEAKER_00: "Anna", SPEAKER_01: "Bo" });
+    }
+  );
 });

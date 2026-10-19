@@ -1194,6 +1194,51 @@ describe("FlowRunReviewCheckpointPanel speaker mapping", () => {
     expect(screen.getByRole("button", { name: "00:00" }).hasAttribute("disabled")).toBe(false);
   });
 
+  it("puts the names kept with the corrections over the proposal", async () => {
+    const steps = vi.fn(async () => [
+      {
+        step_id: "step-0",
+        step_order: 1,
+        input_payload_json: {
+          transcription: {
+            file_ids: ["file-1"],
+            source: { attempt_no: 1 },
+            segments: [
+              { file_index: 0, start: 0, end: 4, speaker: "SPEAKER_00", text: "Hej." },
+              { file_index: 0, start: 5, end: 9, speaker: "SPEAKER_01", text: "Hallå." }
+            ]
+          }
+        }
+      }
+    ]);
+    const eneo = buildEneo({ activeCheckpoint: buildSpeakerCheckpoint(), steps });
+    eneo.flows.runs.transcriptCorrections.list = vi.fn(async () => [
+      {
+        flow_run_id: "run-1",
+        step_id: "step-0",
+        occurrences: [],
+        speaker_edits: [],
+        // Null clears the proposed "Anna"; Bo is named although nobody proposed him.
+        speaker_names: { SPEAKER_00: null, SPEAKER_01: "Bo Berg" },
+        revision: 1,
+        stale: false
+      }
+    ]) as never;
+
+    render(FlowRunReviewCheckpointPanel, {
+      props: { flowId: "flow-1", runId: "run-1", eneo: eneo as unknown as Eneo }
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText("Hallå.").closest("[data-turn-index]")?.textContent).toContain(
+        "Bo Berg"
+      )
+    );
+    const first = screen.getByText("Hej.").closest("[data-turn-index]")?.textContent;
+    expect(first).toContain("Talare 1");
+    expect(first).not.toContain("Anna");
+  });
+
   it("keeps the transcript visible and retries when audio context cannot be loaded", async () => {
     const steps = vi.fn().mockRejectedValueOnce(new Error("boom")).mockResolvedValueOnce([]);
     const eneo = buildEneo({

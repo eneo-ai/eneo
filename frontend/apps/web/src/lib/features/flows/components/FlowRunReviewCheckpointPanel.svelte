@@ -27,6 +27,7 @@
   import {
     buildEditedMapping,
     buildSpeakerRows,
+    effectiveSpeakerNames,
     getSpeakerMappingInferNames,
     getSpeakerMappingParticipants,
     getSpeakerMappingSourceStep,
@@ -126,7 +127,13 @@
   // live; the rendered text already has the saved names baked in.
   const isTranscriptReview = $derived(isSpeakerMapping || isPureTranscript(draftValueText));
   const transcriptSegments = $derived(storedSegments ?? parseTranscript(draftValueText));
-  const speakerNames = $derived(speakerNamesFromRows(speakerRows));
+  // A person's names, kept with the corrections, go over the draft mapping's.
+  const speakerNames = $derived(
+    effectiveSpeakerNames(
+      speakerNamesFromRows(speakerRows),
+      correctionsController?.speakerNames ?? {}
+    )
+  );
   const speakerParticipants = $derived(
     getSpeakerMappingParticipants(checkpoint?.current_payload_json)
   );

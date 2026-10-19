@@ -31,6 +31,7 @@
   } from "$lib/features/flows/transcriptSegments";
   import {
     buildSpeakerRows,
+    effectiveSpeakerNames,
     speakerNamesFromRows,
     type SpeakerConfidence
   } from "$lib/features/flows/speakerMappingReview";
@@ -230,7 +231,6 @@
   // not a mapping). Rendered once the step is done: the review that named the
   // speakers is gone by then, and raw JSON is not an answer to "who is who".
   const speakerMapping = $derived(buildSpeakerRows(result.output_payload_json ?? null));
-  const transcriptSpeakerNames = $derived(speakerNamesFromRows(speakerMapping));
   // The stored segments (word timings, corrections, speaker edits) belong to
   // the transcription step and to the speaker-mapping step whose text is that
   // transcript with names; those two cards render them, the mapping supplying
@@ -241,6 +241,14 @@
     transcriptContext !== null &&
       transcriptContext !== undefined &&
       (result.step_id === transcriptContext.stepId || speakerMapping.length > 0)
+  );
+  // The names a person gave, kept with the corrections, go over the mapping's,
+  // as in a transcript regeneration; they name the stored segments only.
+  const transcriptSpeakerNames = $derived(
+    effectiveSpeakerNames(
+      speakerNamesFromRows(speakerMapping),
+      ownsStoredSegments ? (correctionsController?.speakerNames ?? {}) : {}
+    )
   );
   const transcriptSegments = $derived.by(() => {
     if (!transcriptContext || !outputText) return null;
