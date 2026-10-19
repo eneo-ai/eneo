@@ -20,6 +20,12 @@ from eneo.database.tables.integration_table import IntegrationKnowledge
 from eneo.database.tables.spaces_table import Spaces
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
 from eneo.info_blobs.info_blob import InfoBlobAdd
+from eneo.integration.infrastructure.content_service import (
+    sharepoint_results as sync_results,
+)
+from eneo.integration.infrastructure.content_service.sharepoint_index import (
+    SharePointIndex,
+)
 
 _SESSION_LOCKS = sa.text(
     "SELECT count(*) FILTER (WHERE locktype = 'advisory') AS advisory, "
@@ -111,6 +117,56 @@ async def test_one_transaction_holds_no_lock_per_published_document(
         )
 
     assert published == 80
+    assert after_many.advisory == 0
+    assert after_many.total == after_few.total
+
+
+async def test_a_sync_holds_no_lock_per_indexed_or_removed_document(
+    db_container, user_integration_factory
+) -> None:
+    """The whole per-item path of a sync, savepoints included."""
+    async with db_container() as setup:
+        knowledge_id, _ = await _seed_knowledge(setup, user_integration_factory)
+
+    async with db_container() as container:
+        _with_fake_embeddings(container)
+        session = container.session()
+        knowledge = await container.integration_knowledge_repo().one(id=knowledge_id)
+        index = SharePointIndex(
+            container.info_blob_service(),
+            container.integration_knowledge_repo(),
+            container.user(),
+            None,
+        )
+        stats = sync_results.initialize_stats()
+
+        async def index_and_remove(item_ids: range) -> None:
+            for index_no in item_ids:
+                item_id = f"item-{index_no}"
+                await index.upsert(
+                    f"{item_id}.docx",
+                    f"Text of {item_id}",
+                    f"https://example.test/{item_id}.docx",
+                    knowledge,
+                    stats=stats,
+                    sharepoint_item_id=item_id,
+                )
+                if index_no % 2:
+                    await index.remove(
+                        item_id=item_id,
+                        item_name=f"{item_id}.docx",
+                        integration_knowledge=knowledge,
+                        integration_knowledge_id=knowledge.id,
+                        stats=stats,
+                        reason="removed",
+                    )
+
+        await index_and_remove(range(4))
+        after_few = (await session.execute(_SESSION_LOCKS)).one()
+        await index_and_remove(range(4, 80))
+        after_many = (await session.execute(_SESSION_LOCKS)).one()
+
+    assert stats.get("failed_items", 0) == 0
     assert after_many.advisory == 0
     assert after_many.total == after_few.total
 
