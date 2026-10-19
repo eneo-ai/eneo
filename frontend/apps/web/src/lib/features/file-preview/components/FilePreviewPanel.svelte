@@ -203,7 +203,7 @@
   // document is read-only: the version saved is the text as it stood when the
   // reader asked, and a keystroke meanwhile would be lost with the editor.
   const saver = $derived(file ? (saverOf?.(file) ?? null) : null);
-  let saving = $state(false);
+  const saving = $derived(preview.saving);
   // Only the whole document can be edited: a preview cut short would be saved
   // as the whole document, and the part beyond the cut lost.
   const whole = $derived(content?.kind === "markdown" && !content.truncated);
@@ -228,15 +228,15 @@
   let contentOf = $state<Record<string, FilePreviewContent>>({});
 
   async function saveAs(target: DocumentSaver, markdown: string) {
-    saving = true;
+    const request = preview.beginSave();
     try {
       const version = await target.save(markdown);
-      preview.saved(version, markdown);
+      request.apply(version, markdown);
       target.saved?.(version);
     } catch {
       toast.error(m.file_preview_save_failed());
     } finally {
-      saving = false;
+      request.finish();
     }
   }
 

@@ -429,6 +429,55 @@ it("a save settles a question about discarding edits that was still open", async
   expect(preview.shown).toBe(true);
 });
 
+it("shows a ready replacement when edits are undone to the saved text", async () => {
+  const preview = await existingPanel();
+  preview.setEdits(file.id, "Edited text");
+  preview.arrive(revision);
+  await vi.waitFor(() => expect(preview.replacementContent).not.toBeNull());
+  preview.finishReplacement(revision.id);
+  expect(preview.file).toEqual(file);
+
+  preview.setEdits(file.id, null);
+
+  expect(preview.file).toEqual(revision);
+  expect(preview.replacementFile).toBeNull();
+  expect(preview.editsOf(file)).toBeNull();
+  expect(preview.dirty).toBe(false);
+});
+
+it("waits for the replacement renderer if edits are undone before it is ready", async () => {
+  const preview = await existingPanel();
+  preview.setEdits(file.id, "Edited text");
+  preview.arrive(revision);
+  await vi.waitFor(() => expect(preview.replacementContent).not.toBeNull());
+
+  preview.setEdits(file.id, null);
+  expect(preview.file).toEqual(file);
+
+  preview.finishReplacement(revision.id);
+  expect(preview.file).toEqual(revision);
+});
+
+it("an older save cannot apply to a reopened file or clear a newer save", async () => {
+  const preview = await existingPanel();
+  const first = preview.beginSave();
+  expect(preview.saving).toBe(true);
+  preview.close();
+  expect(preview.saving).toBe(false);
+  preview.open(file);
+  const second = preview.beginSave();
+
+  expect(first.apply(revision, "Old save")).toBe(false);
+  first.finish();
+  expect(preview.saving).toBe(true);
+  expect(preview.file).toEqual(file);
+
+  expect(second.apply(revision, "Current save")).toBe(true);
+  second.finish();
+  expect(preview.file).toEqual(revision);
+  expect(preview.saving).toBe(false);
+});
+
 it("shows the document being written again when the reader asks, after closing it", () => {
   const preview = panel();
   preview.besideConversation = true;

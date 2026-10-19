@@ -35,7 +35,7 @@ export type PreviewCover = { leave: () => void };
 /** How a reader's edit of a document is kept: as the document's next version. */
 export type DocumentSaver = {
   save: (markdown: string) => Promise<PreviewFile>;
-  /** The panel now shows the saved version; whatever it replaced can go. */
+  /** The save succeeded; reconcile its replaced version after updating the preview if still current. */
   saved?: (version: PreviewFile) => void;
 };
 
@@ -103,12 +103,14 @@ export class FilePreview {
   replacementContent = $state.raw<PreviewContent | null>(null);
   replacementError = $state<"failed" | "too_large" | null>(null);
   #replacementHighlight: PreviewPassage | null = null;
+  #replacementReady = false;
 
   #clearReplacement() {
     this.replacementFile = null;
     this.replacementContent = null;
     this.replacementError = null;
     this.#replacementHighlight = null;
+    this.#replacementReady = false;
   }
 
   /**
@@ -116,8 +118,10 @@ export class FilePreview {
    * who is editing keeps the text in front of them; the replacement waits.
    */
   finishReplacement(id: string) {
-    if (this.dirty) return;
     if (this.replacementFile?.id !== id || !this.replacementContent) return;
+    this.#replacementReady = true;
+    if (this.dirty) return;
+    this.#releaseSave();
     this.file = this.replacementFile;
     this.content = this.replacementContent;
     this.highlight = this.#replacementHighlight;
@@ -145,6 +149,9 @@ export class FilePreview {
    * keystroke; what would lose them asks first.
    */
   dirty = $state(false);
+  /** Shared across panel remounts so a pending save keeps its document read-only. */
+  saving = $state(false);
+  #saveRequest: symbol | null = null;
   // The edited text itself, so an editor torn down and mounted again (the
   // layout crosses its breakpoint) shows the document as the reader left it.
   #edits: { fileId: string; text: string } | null = null;
@@ -197,6 +204,7 @@ export class FilePreview {
   setEdits(fileId: string, text: string | null) {
     this.#edits = text === null ? null : { fileId, text };
     this.dirty = text !== null;
+    if (text === null) this.#showReplacement();
   }
 
   /** The reader's unsaved text of `file`, for an editor that shows it afresh. */
@@ -207,6 +215,32 @@ export class FilePreview {
   #clearEdits() {
     this.#edits = null;
     this.dirty = false;
+    this.#releaseSave();
+  }
+
+  #releaseSave() {
+    this.#saveRequest = null;
+    this.saving = false;
+  }
+
+  /**
+   * A save belongs to the current editing session, even if its panel remounts.
+   * Leaving or discarding that session detaches its response from the preview.
+   */
+  beginSave() {
+    const request = Symbol("document-save");
+    this.#saveRequest = request;
+    this.saving = true;
+    return {
+      apply: (file: PreviewFile, markdown: string) => {
+        if (this.#saveRequest !== request) return false;
+        this.saved(file, markdown);
+        return true;
+      },
+      finish: () => {
+        if (this.#saveRequest === request) this.#releaseSave();
+      }
+    };
   }
 
   /** The reader let their edits go; a replacement that waited then shows. */
@@ -270,7 +304,7 @@ export class FilePreview {
   }
 
   #showReplacement() {
-    if (this.replacementFile && this.replacementContent) {
+    if (this.#replacementReady && this.replacementFile && this.replacementContent) {
       this.finishReplacement(this.replacementFile.id);
     }
   }
@@ -354,6 +388,7 @@ export class FilePreview {
     this.#abort?.abort();
     this.#clearReplacement();
     if (this.#holds(file)) return;
+    this.#releaseSave();
     this.file = file;
     void this.#load(file);
   }
@@ -446,6 +481,7 @@ export class FilePreview {
     if (this.draft) this.#finishedDrafts.add(this.draft.callId);
     const keepCurrent = !!this.file && !!this.content && this.status === "ready";
     if (!keepCurrent) {
+      this.#releaseSave();
       this.highlight = changed;
       this.file = file;
     }
@@ -496,6 +532,7 @@ export class FilePreview {
   }
 
   #close() {
+    this.#releaseSave();
     if (this.draft) this.#leftDraft = this.draft.callId;
     this.#abort?.abort();
     this.#abort = null;
