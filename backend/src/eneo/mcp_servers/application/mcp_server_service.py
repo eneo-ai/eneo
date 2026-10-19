@@ -735,21 +735,7 @@ class MCPServerService:
         except IntegrityError as e:
             _raise_for_integrity_error(e)
 
-        # Save discovered tools
-        for tool_def in tools:
-            tool = MCPServerTool(
-                mcp_server_id=mcp_server.id,
-                name=tool_def["name"],
-                title=tool_def.get("title"),
-                description=tool_def.get("description"),
-                input_schema=tool_def.get("input_schema"),
-                # Kept from the start so a tool its server offers to its view
-                # only is never offered to the model. A view itself is shown
-                # only after a sync has stored it and it has been approved.
-                meta=tool_def.get("meta"),
-                is_enabled_by_default=True,
-            )
-            await self.tool_repo.upsert_by_server_and_name(tool)
+        await self._accept_initial_catalog(mcp_server, tools)
 
         deactivated_server_ids = []
         if activate:
@@ -1304,6 +1290,33 @@ class MCPServerService:
                 )
             )
 
+    async def _accept_initial_catalog(
+        self, mcp_server: MCPServer, tool_defs: list[dict[str, Any]]
+    ) -> list[MCPServerTool]:
+        """Store a server's first catalog as its approved definitions.
+
+        Adding a server is the admin's acceptance of what it offers at that
+        moment; review is for what changes afterwards. The catalog may arrive
+        at the save, or at the first sync when the save could not list tools
+        yet, as for a server the admin had to connect to first.
+        """
+        tools: list[MCPServerTool] = []
+        for tool_def in tool_defs:
+            tool = MCPServerTool(
+                mcp_server_id=mcp_server.id,
+                name=tool_def["name"],
+                title=tool_def.get("title"),
+                description=tool_def.get("description"),
+                input_schema=tool_def.get("input_schema"),
+                # Kept from the start so a tool its server offers to its view
+                # only is never offered to the model. A view itself is shown
+                # only after a sync has stored it and it has been approved.
+                meta=tool_def.get("meta"),
+                is_enabled_by_default=True,
+            )
+            tools.append(await self.tool_repo.upsert_by_server_and_name(tool))
+        return tools
+
     async def _sync_discovered_tool_definitions(
         self, mcp_server: MCPServer, tool_defs: list[dict[str, Any]]
     ) -> ToolSyncResult:
@@ -1314,6 +1327,23 @@ class MCPServerService:
         display titles are applied only after that bounded operation succeeds.
         """
         existing_tools = await self.tool_repo.by_server(mcp_server.id)
+        if not existing_tools:
+            accepted = await self._accept_initial_catalog(mcp_server, tool_defs)
+            return ToolSyncResult(
+                connection=ConnectionResult(
+                    success=True, tools_discovered=len(tool_defs)
+                ),
+                new_tools=[
+                    ToolChange(
+                        tool=tool,
+                        change_type="new",
+                        current_description=tool.description,
+                        current_input_schema=tool.input_schema,
+                        current_meta=tool.meta,
+                    )
+                    for tool in accepted
+                ],
+            )
         existing_by_name = {tool.name: tool for tool in existing_tools}
         remote_names = {tool_def["name"] for tool_def in tool_defs}
 
