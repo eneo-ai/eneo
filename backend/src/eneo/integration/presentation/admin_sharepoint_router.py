@@ -15,8 +15,9 @@ from eneo.integration.domain.entities.sharepoint_subscription import (
 )
 from eneo.integration.domain.entities.user_integration import UserIntegration
 from eneo.integration.infrastructure.auth_service.base_auth_service import (
+    OAuthClientRejectedError,
     OAuthCodeRejectedError,
-    rejected_code,
+    token_exchange_rejection,
 )
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
@@ -1219,7 +1220,9 @@ async def restart_service_account_auth(
         201: {"description": "Service account successfully configured"},
         400: {
             "description": "Invalid state or auth code; `code` is "
-            "`oauth_code_rejected` when Microsoft refuses the code"
+            "`oauth_code_rejected` when Microsoft refuses the code (start the "
+            "sign-in again) and `oauth_client_rejected` when it refuses the "
+            "app's client ID or secret"
         },
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
@@ -1294,7 +1297,7 @@ async def service_account_auth_callback(
                 redirect_uri=stored_state.get("redirect_uri"),
             )
         except httpx.HTTPStatusError as exc:
-            rejection = rejected_code(exc)
+            rejection = token_exchange_rejection(exc)
             if rejection is None:
                 raise
             raise rejection from exc
@@ -1393,7 +1396,7 @@ async def service_account_auth_callback(
 
         return _to_app_public(app, encryption_service)
 
-    except (HTTPException, OAuthCodeRejectedError):
+    except (HTTPException, OAuthCodeRejectedError, OAuthClientRejectedError):
         raise
     except Exception:
         logger.error("Failed to complete service account OAuth", exc_info=True)

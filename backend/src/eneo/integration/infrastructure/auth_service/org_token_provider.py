@@ -9,6 +9,7 @@ subscription maintenance, admin tests) reports the same way.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Awaitable, Callable, Optional, Protocol, cast
 
@@ -95,16 +96,60 @@ def _error_body(exc: httpx.HTTPStatusError) -> dict[str, object]:
     return cast(dict[str, object], body) if isinstance(body, dict) else {}
 
 
+# Microsoft appends these to a description, on new lines or on the same line.
+_TRACE_SUFFIX = re.compile(r"\s*\b(?:Trace ID|Correlation ID|Timestamp):")
+_AADSTS_CODE = re.compile(r"\bAADSTS\d+\b")
+_OAUTH_ERROR = re.compile(r"^[a-z_]{1,64}$")
+
+
 def summarize_token_endpoint_error(exc: httpx.HTTPStatusError) -> str:
-    """Operator-facing reason without Microsoft's trace and correlation ids."""
+    """Operator-facing reason without Microsoft's trace and correlation ids.
+
+    The description can name accounts and directories, so it is stored for
+    administrators but never logged; log ``loggable_token_reason`` instead.
+    """
     body = _error_body(exc)
     description = body.get("error_description")
-    if isinstance(description, str) and description:
-        return description.split("\r\n")[0].split(" Trace ID:")[0].strip()
+    if isinstance(description, str) and description.strip():
+        first_line = description.strip().splitlines()[0]
+        return _TRACE_SUFFIX.split(first_line, maxsplit=1)[0].strip()
     code = body.get("error")
     if isinstance(code, str) and code:
         return code
     return f"HTTP {exc.response.status_code}"
+
+
+def token_endpoint_error(exc: httpx.HTTPStatusError) -> str | None:
+    """The OAuth ``error`` the token endpoint answered with, if any."""
+    code = _error_body(exc).get("error")
+    return code if isinstance(code, str) and _OAUTH_ERROR.match(code) else None
+
+
+def aadsts_code(exc: httpx.HTTPStatusError) -> str | None:
+    """Microsoft's AADSTS reference in the description, if any."""
+    description = _error_body(exc).get("error_description")
+    if not isinstance(description, str):
+        return None
+    match = _AADSTS_CODE.search(description)
+    return match.group(0) if match else None
+
+
+def loggable_token_reason(reason: "httpx.HTTPStatusError | str") -> str:
+    """A token-endpoint refusal named by its codes only, for logs.
+
+    Microsoft's descriptions can carry user names and directory ids.
+    """
+    if isinstance(reason, httpx.HTTPStatusError):
+        parts = [
+            part for part in (token_endpoint_error(reason), aadsts_code(reason)) if part
+        ]
+        return " ".join(parts) or f"HTTP {reason.response.status_code}"
+    codes = _AADSTS_CODE.findall(reason)
+    if codes:
+        return " ".join(codes)
+    if _OAUTH_ERROR.match(reason) or re.fullmatch(r"HTTP \d{3}", reason):
+        return reason
+    return "unrecognized reason"
 
 
 def describe_credential_failure(exc: BaseException) -> Optional[str]:
@@ -303,6 +348,6 @@ class OrgTokenProvider:
             "SharePoint credentials refused for tenant app %s (%s): %s",
             app.id,
             app.auth_method,
-            detail,
+            loggable_token_reason(detail),
         )
         await persist_auth_health(app, fallback_repo=self.tenant_app_repo)

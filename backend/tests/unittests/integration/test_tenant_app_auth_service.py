@@ -417,7 +417,7 @@ async def test_token_endpoint_refusals_are_logged_without_the_body(
     logged = [str(call.args[0]) % call.args[1:] for call in log.error.call_args_list]
     assert logged == [
         f"Failed to acquire token for app {mock_tenant_app.id}: "
-        "AADSTS7000215: Invalid client secret provided."
+        "invalid_client AADSTS7000215"
     ]
 
 
