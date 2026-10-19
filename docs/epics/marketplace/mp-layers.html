@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css">
+<style>
+.layer { display: grid; grid-template-columns: 150px 1fr 1fr; border: 1.5px solid #3a3f45; border-radius: 9px; overflow: hidden; margin-bottom: 8px; }
+.layer > div { padding: 10px 13px; min-width: 0; }
+.layer .name { border-right: 1.5px solid #3a3f45; }
+.layer .name b { display:block; font-size: 14.5px; line-height: 1.25; }
+.layer .name span { display:block; font-size: 11.5px; color:#57606a; margin-top: 2px; }
+.layer .does { border-right: 1.5px dashed #9aa1a9; }
+.layer p { margin: 0; font-size: 12.5px; line-height: 1.4; color: #2b3138; }
+.layer p b { font-size: 11.5px; letter-spacing: .02em; text-transform: uppercase; color: #57606a; display:block; margin-bottom: 2px; }
+.l1 { background:#f6f7f9; } .l2 { background:#f6f7f9; } .l3 { background:#e4f0fc; border-color:#2b6cc4; } .l4 { background:#e8f5ec; border-color:#2f7a3e; } .l5 { background:#fdf0dc; border-color:#c27a22; }
+.hint { display:flex; justify-content:space-between; font-size: 12px; color:#57606a; margin-top: 6px; }
+</style></head><body><div class="page">
+<h1>The Marketplace in five layers</h1>
+<p class="lead">One Hub run by Sundsvall. Each layer does one job and refuses one thing. Nothing reaches an Eneo instance unless a local person with the right permissions installs it.</p>
+
+<div class="layer l1">
+  <div class="name"><b>1. People and roles</b><span>who may do what</span></div>
+  <div class="does"><p><b>Does</b>Allowlisted e-mail domains sign in with a link. Admins assign organisations and roles: member, publisher, curator, admin. A publisher cannot approve their own release.</p></div>
+  <div><p><b>Never</b>No one is a publisher because of their e-mail address. Hub users and Eneo users are never the same identity.</p></div>
+</div>
+
+<div class="layer l2">
+  <div class="name"><b>2. The package</b><span>one envelope, five kinds</span></div>
+  <div class="does"><p><b>Does</b>Flow, Skill, Assistant, App, MCP definition. Prompts, settings, nested Skills and requirements travel. One versioned contract validates it in both code bases.</p></div>
+  <div><p><b>Never</b>No knowledge content, no credentials, no local IDs, no run history. A Skill never contains an MCP server.</p></div>
+</div>
+
+<div class="layer l3">
+  <div class="name"><b>3. The Hub</b><span>catalogue and review</span></div>
+  <div class="does"><p><b>Does</b>Stores immutable versions with a reviewed description, prerequisites and changelog. A curator approves. Yank stops new installs. Audit of who did what.</p></div>
+  <div><p><b>Never</b>Never calls an Eneo instance. Never changes a published version. Never deletes a local copy.</p></div>
+</div>
+
+<div class="layer l4">
+  <div class="name"><b>4. Eneo connector</b><span>browse, verify, hand over</span></div>
+  <div class="does"><p><b>Does</b>Connects with one token per instance, kept encrypted. Shows the complete content and the plan. Rechecks permissions and release state right before anything is created.</p></div>
+  <div><p><b>Never</b>Never creates resources itself; the kind's own installer does. Never shows the token to a browser. Never installs anyway.</p></div>
+</div>
+
+<div class="layer l5">
+  <div class="name"><b>5. Your instance</b><span>local copies</span></div>
+  <div class="does"><p><b>Does</b>Creates a new copy in the chosen space with a receipt: listing, version, digest, who installed. Shows origin, newer-version notices and withdrawal warnings.</p></div>
+  <div><p><b>Never</b>Never auto-updates or merges. Keeps working when the Hub is down.</p></div>
+</div>
+
+<div class="hint"><span>↑ decides who and what</span><span>↓ decides how, and refuses when it cannot</span></div>
+</div></body></html>
