@@ -224,10 +224,10 @@ describe("FlowRunEvidenceStepCard", () => {
     expect(html).toContain(m.flow_run_review_speakers_confidence_low());
   });
 
-  // Presentation only. The review checkpoint stores a name the reviewer
-  // changed or cleared without the step's support, which its tests and the
-  // review panel's DOM test hold; these rows are typed as it stores them.
-  it("shows a row stored without the step's support as low confidence, without evidence", () => {
+  // Presentation only. The review checkpoint stores a name the reviewer gave
+  // with high confidence and one they cleared with low, both without
+  // evidence, which its tests hold; these rows are typed as it stores them.
+  it("shows a name a person gave as certain and a cleared one as unknown, without evidence", () => {
     const renderMapping = (speakers: Record<string, unknown>[]) =>
       renderCard(false, {
         ...result,
@@ -256,26 +256,24 @@ describe("FlowRunEvidenceStepCard", () => {
     };
     const proposed = renderMapping([anna, bo]);
     // What approval stores once the reviewer named Anna's speaker Bertil and
-    // cleared Bo's: no support of the step's, which was for Anna and Bo.
+    // cleared Bo's.
     const approved = renderMapping([
-      { ...anna, name: "Bertil", confidence: "low", evidence: "" },
+      { ...anna, name: "Bertil", confidence: "high", evidence: "" },
       { ...bo, name: null, confidence: "low", evidence: "" }
     ]);
+    const count = (html: string, text: string) => html.split(text).length - 1;
 
-    for (const support of [
-      m.flow_run_review_speakers_confidence_high(),
-      m.flow_run_review_speakers_confidence_medium(),
-      anna.evidence,
-      bo.evidence
-    ]) {
-      expect(proposed).toContain(support);
-      expect(approved).not.toContain(support);
+    // The step's evidence was for Anna and Bo.
+    for (const evidence of [anna.evidence, bo.evidence]) {
+      expect(proposed).toContain(evidence);
+      expect(approved).not.toContain(evidence);
     }
     expect(approved).toContain("Bertil");
+    expect(count(approved, m.flow_run_review_speakers_confidence_high())).toBe(1);
+    expect(approved).not.toContain(m.flow_run_review_speakers_confidence_medium());
+    // Bo's speaker reads as any unknown speaker does.
     expect(approved).toContain(m.flow_run_transcript_unknown_speaker());
-    // Both rows read as the step's low confidence, without evidence: the
-    // card's presentation of a name the step's evidence does not support.
-    expect(approved.split(m.flow_run_review_speakers_confidence_low()).length - 1).toBe(2);
+    expect(count(approved, m.flow_run_review_speakers_confidence_low())).toBe(1);
   });
 
   // The transcription step's stored segments carry raw labels; which card may

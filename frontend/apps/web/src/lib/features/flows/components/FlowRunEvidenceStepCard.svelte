@@ -380,8 +380,9 @@
                       <span class="text-sm font-medium" class:text-secondary={name === null}>
                         {name ?? m.flow_run_transcript_unknown_speaker()}
                       </span>
-                      <!-- The step's confidence and evidence are for its own name, not
-                           for one a person changed or cleared. -->
+                      <!-- The row's confidence and evidence are for the name the step
+                           stores, not for one a person gave or cleared later with
+                           the transcript corrections. -->
                       {#if name === (stepSpeakerNames[row.label] ?? null)}
                         <Badge variant="outline" class="text-xs">
                           {confidenceText(row.confidence)}

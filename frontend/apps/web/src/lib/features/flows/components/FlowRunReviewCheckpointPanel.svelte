@@ -33,7 +33,6 @@
     getSpeakerMappingSourceStep,
     isSpeakerMappingCheckpoint,
     speakerNamesFromRows,
-    withProposalSupport,
     type SpeakerMappingRow
   } from "$lib/features/flows/speakerMappingReview";
   import { loadTranscriptSource, transcriptSourceRef } from "$lib/features/flows/transcriptSource";
@@ -141,6 +140,8 @@
   const speakerNamesInferred = $derived(
     getSpeakerMappingInferNames(checkpoint?.current_payload_json)
   );
+  // The review opens on the step's output: its proposal is the original payload.
+  const proposedSpeakerRows = $derived(buildSpeakerRows(checkpoint?.original_payload_json));
   // Reviewer edits not yet sent to the server.
   const speakerEditsPending = $derived(
     isSpeakerMapping &&
@@ -665,6 +666,7 @@
         {#if isSpeakerMapping}
           <SpeakerMappingReviewEditor
             rows={speakerRows}
+            proposed={proposedSpeakerRows}
             sampleAvailable={(label) =>
               transcriptSegments.some(
                 (s) =>
@@ -678,11 +680,7 @@
             participants={speakerParticipants}
             inferred={speakerNamesInferred}
             disabled={!canEdit || activeAction !== null}
-            onChange={(rows) =>
-              (speakerRows = withProposalSupport(
-                rows,
-                buildSpeakerRows(checkpoint?.original_payload_json)
-              ))}
+            onChange={(rows) => (speakerRows = rows)}
           />
         {:else}
           <p class="text-secondary text-sm">

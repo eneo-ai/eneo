@@ -6,10 +6,15 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as m from "$lib/paraglide/messages";
-  import type { SpeakerMappingRow } from "../speakerMappingReview";
+  import {
+    keptProposal,
+    withProposalSupport,
+    type SpeakerMappingRow
+  } from "../speakerMappingReview";
   import { speakerColorIndex } from "../transcriptSegments";
   let {
     rows,
+    proposed,
     participants,
     inferred = false,
     disabled = false,
@@ -18,6 +23,8 @@
     sampleAvailable = () => false
   }: {
     rows: SpeakerMappingRow[];
+    /** The step's own rows: the names it proposed, with its confidence and evidence. */
+    proposed: SpeakerMappingRow[];
     participants: string[];
     inferred?: boolean;
     disabled?: boolean;
@@ -50,6 +57,20 @@
 
   // One disclosure per row: a single flag would open every row at once.
   const whyOpen = new SvelteSet<string>();
+
+  /** The step's proposal beside the name it proposed: how sure it was, or that it had none. */
+  function proposalNote(row: SpeakerMappingRow): string {
+    if (!row.name) return ` · ${m.flow_transcript_editor_no_suggestion()}`;
+    const confidence =
+      row.confidence === "high"
+        ? m.flow_transcript_editor_confidence_high()
+        : row.confidence === "medium"
+          ? m.flow_transcript_editor_confidence_medium()
+          : m.flow_transcript_editor_confidence_low();
+    const fromConversation =
+      inferred && !participants.includes(row.name) ? m.flow_transcript_editor_inferred_name() : "";
+    return ` · ${m.flow_transcript_editor_confidence({ confidence })}${fromConversation}`;
+  }
 </script>
 
 <details class="border-default bg-primary min-w-0 rounded-xl border p-4" open>
@@ -66,6 +87,9 @@
     >{#each names as name (name)}<option value={name}></option>{/each}</datalist
   >
   {#each rows as row, index (row.label)}
+    <!-- Only the name the step proposed is its proposal: a name a person gave
+         or cleared is theirs, with none of the step's wording or reasoning. -->
+    {@const asProposed = keptProposal(row, proposed) !== undefined}
     <div
       class="border-default grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)_2.5rem] items-start gap-3 border-b py-5 last:border-b-0"
     >
@@ -84,8 +108,11 @@
           placeholder={m.flow_transcript_editor_name_placeholder()}
           oninput={(e) =>
             onChange(
-              rows.map((r) =>
-                r.label === row.label ? { ...r, name: e.currentTarget.value || null } : r
+              withProposalSupport(
+                rows.map((r) =>
+                  r.label === row.label ? { ...r, name: e.currentTarget.value || null } : r
+                ),
+                proposed
               )
             )}
         />
@@ -94,20 +121,7 @@
             row.lineCount,
             m.flow_transcript_editor_lines_one,
             m.flow_transcript_editor_lines
-          )} · {row.name
-            ? m.flow_transcript_editor_confidence({
-                confidence:
-                  row.confidence === "high"
-                    ? m.flow_transcript_editor_confidence_high()
-                    : row.confidence === "medium"
-                      ? m.flow_transcript_editor_confidence_medium()
-                      : m.flow_transcript_editor_confidence_low()
-              })
-            : m.flow_transcript_editor_no_suggestion()}{inferred &&
-          row.name &&
-          !participants.includes(row.name)
-            ? m.flow_transcript_editor_inferred_name()
-            : ""}
+          )}{asProposed ? proposalNote(row) : ""}
         </p>
         <details
           open={whyOpen.has(row.label)}
@@ -126,9 +140,9 @@
               aria-hidden="true"
             />{m.flow_transcript_editor_why()}</summary
           >
-          <p class="mt-2 leading-relaxed">
-            {row.evidence || m.flow_transcript_editor_no_evidence()}
-          </p>
+          {#if asProposed}<p class="mt-2 leading-relaxed">
+              {row.evidence || m.flow_transcript_editor_no_evidence()}
+            </p>{/if}
           {#each row.samples as sample, i (i)}<p
               class="mt-1 leading-relaxed [overflow-wrap:anywhere] italic"
             >

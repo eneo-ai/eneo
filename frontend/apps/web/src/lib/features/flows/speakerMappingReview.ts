@@ -120,20 +120,34 @@ export function buildSpeakerRows(payload: Payload): SpeakerMappingRow[] {
 }
 
 /**
- * `rows` as the server stores a review of `proposed`, the step's own rows: a
- * row keeps the step's confidence and evidence only while it names its
- * speaker as the step did. A name the reviewer changed or cleared is theirs.
+ * The step's own row for `row`'s speaker, out of `proposed`, while `row`
+ * names that speaker as the step did; undefined once a person named or
+ * cleared it otherwise.
+ */
+export function keptProposal(
+  row: SpeakerMappingRow,
+  proposed: readonly SpeakerMappingRow[]
+): SpeakerMappingRow | undefined {
+  const name = row.name?.trim() || null;
+  return proposed.find((proposal) => proposal.label === row.label && proposal.name === name);
+}
+
+/**
+ * `rows` as the server stores a review of `proposed`, the step's own rows
+ * (the backend's `mapping_with_proposal_support`): a row keeps the step's
+ * confidence and evidence while it names its speaker as the step did. A name
+ * a person gives instead is as certain as a name gets, one they clear leaves
+ * the speaker unknown, and neither keeps the step's evidence.
  */
 export function withProposalSupport(
   rows: readonly SpeakerMappingRow[],
   proposed: readonly SpeakerMappingRow[]
 ): SpeakerMappingRow[] {
-  const byLabel = new Map(proposed.map((row) => [row.label, row]));
   return rows.map((row): SpeakerMappingRow => {
-    const proposal = byLabel.get(row.label);
-    return proposal && proposal.name === (row.name?.trim() || null)
+    const proposal = keptProposal(row, proposed);
+    return proposal
       ? { ...row, confidence: proposal.confidence, evidence: proposal.evidence }
-      : { ...row, confidence: "low", evidence: "" };
+      : { ...row, confidence: row.name?.trim() ? "high" : "low", evidence: "" };
   });
 }
 

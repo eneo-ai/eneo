@@ -6,7 +6,8 @@ import {
   effectiveSpeakerNames,
   getSpeakerMappingInferNames,
   getSpeakerMappingParticipants,
-  isSpeakerMappingCheckpoint
+  isSpeakerMappingCheckpoint,
+  withProposalSupport
 } from "./speakerMappingReview";
 
 const payload = {
@@ -75,6 +76,25 @@ describe("speaker mapping review", () => {
         { label: "SPEAKER_01", name: "Okänd gäst", confidence: "low", evidence: "" }
       ]
     });
+  });
+
+  // The same rule as the backend's mapping_with_proposal_support.
+  it("keeps the step's support only with its own name; a person's name is certain", () => {
+    const proposed = buildSpeakerRows(payload);
+    const named = (names: (string | null)[]) =>
+      withProposalSupport(
+        proposed.map((row, index) => ({ ...row, name: names[index] })),
+        proposed
+      ).map(({ confidence, evidence }) => ({ confidence, evidence }));
+    const certain = { confidence: "high", evidence: "" };
+    const unknown = { confidence: "low", evidence: "" };
+
+    expect(named(["Bertil", " Okänd gäst "])).toEqual([certain, certain]);
+    expect(named([null, null])).toEqual([unknown, unknown]);
+    expect(named([" Anna ", ""])).toEqual([
+      { confidence: "high", evidence: "presenterar sig" },
+      unknown
+    ]);
   });
 });
 
