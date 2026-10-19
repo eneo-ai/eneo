@@ -46,9 +46,14 @@ function SpacesManager(data: SpacesManagerParams) {
   );
 
   // Function definitions --------------------------------------------------------
+  let navigationVersion = 0;
+  let refreshSequence = 0;
+  const refreshVersions = { applications: 0, knowledge: 0 };
+
   /** Will update the current space if a new space is passed in via page data */
   function watchPageData(data: { currentSpace: Space }) {
     if (data.currentSpace.id !== get(currentSpace).id) {
+      navigationVersion += 1;
       currentSpace.set(data.currentSpace);
     }
   }
@@ -66,25 +71,41 @@ function SpacesManager(data: SpacesManagerParams) {
 
   /** Re-reads the current space, or one part of it; false when the request failed. */
   async function refreshCurrentSpace(type?: "applications" | "knowledge"): Promise<boolean> {
-    let $currentSpace = get(currentSpace);
+    const requestedSpace = get(currentSpace);
+    const navigation = navigationVersion;
+    const request = ++refreshSequence;
+    if (type) refreshVersions[type] = request;
+    else {
+      refreshVersions.applications = request;
+      refreshVersions.knowledge = request;
+    }
+    const isCurrent = () =>
+      navigation === navigationVersion &&
+      requestedSpace.id === get(currentSpace).id &&
+      (type
+        ? refreshVersions[type] === request
+        : Object.values(refreshVersions).every((version) => version === request));
     try {
       if (type) {
         switch (type) {
           case "applications": {
-            const applications = await eneo.spaces.listApplications($currentSpace);
-            $currentSpace = { ...$currentSpace, applications };
+            const applications = await eneo.spaces.listApplications(requestedSpace);
+            if (!isCurrent()) return false;
+            currentSpace.update((space) => ({ ...space, applications }));
             break;
           }
           case "knowledge": {
-            const knowledge = await eneo.spaces.listKnowledge($currentSpace);
-            $currentSpace = { ...$currentSpace, knowledge };
+            const knowledge = await eneo.spaces.listKnowledge(requestedSpace);
+            if (!isCurrent()) return false;
+            currentSpace.update((space) => ({ ...space, knowledge }));
             break;
           }
         }
       } else {
-        $currentSpace = await eneo.spaces.get($currentSpace);
+        const space = await eneo.spaces.get(requestedSpace);
+        if (!isCurrent()) return false;
+        currentSpace.set(space);
       }
-      currentSpace.set($currentSpace);
       return true;
     } catch (e) {
       console.error("Error updating current space", e);
