@@ -73,7 +73,9 @@ export function FilePanel({
   const t = useTranslations();
   const locale = useLocale();
   const [downloading, setDownloading] = useState(false);
-  const [saving, setSaving] = useState(false);
+  // Shared through the panel, so a save in flight keeps its document
+  // read-only across a remount of the panel.
+  const saving = panel.saving;
   // The content components by file, for the document text the reader has edited.
   const [contents] = useState(() => new Map<string, FilePreviewContentHandle>());
 
@@ -112,7 +114,10 @@ export function FilePanel({
   // document is read-only: the version saved is the text as it stood when the
   // reader asked, and a keystroke meanwhile would be lost with the editor.
   const saver = file ? saverOf(file) : null;
-  const editable = !!saver && !!file && content?.kind === "markdown" && !draft && !later && !saving;
+  // Only the whole document can be edited: a preview cut short would be saved
+  // as the whole document, and the part beyond the cut lost.
+  const whole = content?.kind === "markdown" && !content.truncated;
+  const editable = !!saver && !!file && whole && !draft && !later && !saving;
   // What this version changed against the one before it, when asked for.
   const comparable = !!earlier && content?.kind === "markdown" && !draft;
   const comparing = comparable && panel.showChanges;
@@ -126,15 +131,17 @@ export function FilePanel({
   const previousMarkdown = comparing ? (previous.data ?? null) : null;
 
   async function saveAs(target: DocumentSaver, markdown: string) {
-    setSaving(true);
+    // The save belongs to the editing session it started in: a response that
+    // comes after the panel closed or another file opened applies to nothing.
+    const request = panel.beginSave();
     try {
       const version = await target.save(markdown);
-      panel.saved(version, markdown);
+      request.apply(version, markdown);
       target.saved?.(version);
     } catch {
       toast.error(t("file_preview_save_failed"));
     } finally {
-      setSaving(false);
+      request.finish();
     }
   }
 
@@ -148,9 +155,9 @@ export function FilePanel({
   // An older version is read, not edited; its text can be brought forward as
   // the newest version instead, as the reader's edit of the latest one.
   const restorer = latest ? saverOf(latest) : null;
-  const restorable = !!restorer && content?.kind === "markdown" && !draft;
+  const restorable = !!restorer && whole && !draft;
   async function restoreVersion() {
-    if (!restorer || content?.kind !== "markdown" || saving) return;
+    if (!restorer || !restorable || content?.kind !== "markdown" || saving) return;
     await saveAs(restorer, content.text);
   }
 

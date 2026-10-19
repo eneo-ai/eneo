@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 
 import { deriveActivity, modelName } from "./activity";
 import type { ActivityTab } from "./activity-panel";
+import type { DocumentDraft } from "./side-panel/document-draft";
 import { ActivityPill } from "./activity-pill";
 import type { TurnDurations } from "./activity-timings";
 import {
@@ -39,7 +40,7 @@ import {
   DocumentLinksProvider,
   useDocumentNameRemarkPlugins
 } from "./answer-links";
-import { DocumentLine, type DocumentLineKind } from "./document-line";
+import { DocumentLine, DraftLine, type DocumentLineKind } from "./document-line";
 import {
   isDocument,
   revisedFileId,
@@ -461,7 +462,8 @@ function AssistantMessage({
   feedback,
   canDebug,
   sessionId,
-  documents
+  documents,
+  draft
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -476,6 +478,7 @@ function AssistantMessage({
   canDebug: boolean;
   sessionId: string | null;
   documents: ConversationDocument[];
+  draft: DocumentDraft | null;
 }) {
   const panel = useSidePanel();
   const text = messageText(message);
@@ -590,6 +593,7 @@ function AssistantMessage({
         })}
         <McpImageStrip references={mcpReferences} />
         <McpAppFrames message={message} live={isStreaming} sessionId={sessionId} />
+        {draft && <DraftLine draft={draft} />}
         <GeneratedFiles message={message} documents={documents} />
         {hasText && !isStreaming && (
           <AnswerActions
@@ -632,7 +636,8 @@ export function ChatMessage({
   canDebug = false,
   sessionId = null,
   conversationFiles = NO_FILES,
-  documents = NO_DOCUMENTS
+  documents = NO_DOCUMENTS,
+  draft = null
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -653,6 +658,8 @@ export function ChatMessage({
   conversationFiles?: readonly PreviewFile[];
   /** The documents the assistant made in the conversation, so an answer can name them. */
   documents?: ConversationDocument[];
+  /** The document this answer is writing now, which the answer offers to show. */
+  draft?: DocumentDraft | null;
 }) {
   if (message.role === "user") {
     return <UserMessage message={message} conversationFiles={conversationFiles} />;
@@ -672,6 +679,7 @@ export function ChatMessage({
       canDebug={canDebug}
       sessionId={sessionId}
       documents={documents}
+      draft={draft}
     />
   );
 }

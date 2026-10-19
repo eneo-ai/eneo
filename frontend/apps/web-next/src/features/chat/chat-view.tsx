@@ -488,8 +488,8 @@ function ConversationView({
     () => (busy && last?.role === "assistant" ? messageGeneratedFiles(last) : []),
     [busy, last]
   );
-  useEffect(() => {
-    // The newest document being written: actual text as it arrives.
+  // The newest document being written: actual text as it arrives.
+  const liveDraft = useMemo(() => {
     for (let index = liveCalls.length - 1; index >= 0; index--) {
       const call = liveCalls[index]!;
       const draft = documentDraft(
@@ -497,12 +497,13 @@ function ConversationView({
         call.input,
         liveFiles.some((file) => file.toolCallId === call.toolCallId)
       );
-      if (draft) {
-        panel.write(draft);
-        return;
-      }
+      if (draft) return draft;
     }
-  }, [liveCalls, liveFiles, panel]);
+    return null;
+  }, [liveCalls, liveFiles]);
+  useEffect(() => {
+    if (liveDraft) panel.write(liveDraft);
+  }, [liveDraft, panel]);
   const arrivedFiles = useRef(new Set<string>());
   useEffect(() => {
     for (const file of liveFiles) {
@@ -1012,6 +1013,7 @@ function ConversationView({
                   canDebug={debugAvailable && sessionId !== null}
                   conversationFiles={allFiles}
                   documents={documents.documents}
+                  draft={streaming ? liveDraft : null}
                 />
               );
             })}

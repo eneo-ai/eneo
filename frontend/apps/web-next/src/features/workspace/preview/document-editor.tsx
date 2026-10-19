@@ -8,12 +8,21 @@ import { EditorContent, useEditor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import { TextQuote } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Ref
+} from "react";
 import { signedFileUrl } from "@/features/files/signed-file-url";
 import { browserApi } from "@/lib/api/browser";
 import { ANSWER_TEXT_CLASS } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
 import { changesBetween } from "./editor/changes";
+import { replaceContent } from "./editor/content";
 import { documentExtensions, withFinalNewline } from "./editor/extensions";
 import {
   cellSelectionQuote,
@@ -67,7 +76,9 @@ export type DocumentEditorProps = {
 const resolveImage = (fileId: string) =>
   signedFileUrl(browserApi, fileId, "inline").catch(() => undefined);
 
-const CONTENT = { contentType: "markdown", emitUpdate: false } as const;
+// Once the document is marked edited, a further keystroke is marked this
+// long after the last, since marking serialises the whole document.
+const EDIT_DELAY = 150;
 
 // The quote action floats over the selection, positioned within the editor so
 // it scrolls with the text and no transformed ancestor of the panel throws it off.
@@ -127,6 +138,8 @@ export function DocumentEditor({
   const applying = useRef(false);
   // Edits left by an earlier editor of this document, taken once at creation.
   const left = useRef(edits);
+  // A keystroke whose mark is still waiting, and the editor it was made in.
+  const pending = useRef<{ timer: number; editor: Editor } | null>(null);
   // Bumped when the document changed under the decorations, so they are placed again.
   const [rendered, setRendered] = useState(0);
   const callbacks = useRef({ onChange, onSave, onRender, onReady });
@@ -134,11 +147,34 @@ export function DocumentEditor({
     callbacks.current = { onChange, onSave, onRender, onReady };
   });
 
+  /**
+   * Compares the reader's text with the document as loaded, and tells of a
+   * difference. Reads only refs, so the editor's options and the handle can
+   * call it without depending on a render.
+   */
+  const noteEdit = useCallback((current: Editor) => {
+    pending.current = null;
+    const text = withFinalNewline(current.getMarkdown());
+    const changed = text !== baseline.current;
+    if (!changed && !dirty.current) return;
+    dirty.current = changed;
+    callbacks.current.onChange?.(changed ? text : null);
+  }, []);
+
+  /** Marks an edit that is still waiting, so whatever reads the mark reads it current. */
+  const flush = useCallback(() => {
+    const waiting = pending.current;
+    if (!waiting) return;
+    clearTimeout(waiting.timer);
+    if (waiting.editor.isDestroyed) pending.current = null;
+    else noteEdit(waiting.editor);
+  }, [noteEdit]);
+
   /** Puts `next` in `current` as the document the reader's text is compared with. */
   function apply(current: Editor, next: string) {
     applying.current = true;
     try {
-      current.commands.setContent(next, CONTENT);
+      replaceContent(current, next);
     } finally {
       applying.current = false;
     }
@@ -167,6 +203,7 @@ export function DocumentEditor({
         handleKeyDown: (_view, event) => {
           if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
             event.preventDefault();
+            flush();
             callbacks.current.onSave?.();
             return true;
           }
@@ -177,14 +214,19 @@ export function DocumentEditor({
       // mark compares text with the document as loaded, since the editor also
       // tidies a loaded document (a paragraph to type in after a final code
       // block) without changing what it says, and a reader cannot edit a
-      // document that is read-only.
+      // document that is read-only. The first keystroke is marked at once, so
+      // whatever guards unsaved edits sees them; a burst that follows is marked
+      // once, a moment after its last.
       onUpdate: ({ editor: current }) => {
         if (applying.current || baseline.current === null || !current.isEditable) return;
-        const text = withFinalNewline(current.getMarkdown());
-        const changed = text !== baseline.current;
-        if (!changed && !dirty.current) return;
-        dirty.current = changed;
-        callbacks.current.onChange?.(changed ? text : null);
+        if (pending.current) clearTimeout(pending.current.timer);
+        if (!dirty.current) noteEdit(current);
+        else {
+          pending.current = {
+            editor: current,
+            timer: window.setTimeout(() => noteEdit(current), EDIT_DELAY)
+          };
+        }
       }
     },
     []
@@ -201,7 +243,7 @@ export function DocumentEditor({
     if (left.current !== null) {
       applying.current = true;
       try {
-        editor.commands.setContent(left.current, CONTENT);
+        replaceContent(editor, left.current);
       } finally {
         applying.current = false;
       }
@@ -216,6 +258,9 @@ export function DocumentEditor({
   useEffect(() => {
     editor?.setEditable(editable, false);
   }, [editor, editable]);
+
+  // The last keystrokes still count: an editor torn down leaves its edits behind.
+  useEffect(() => () => flush());
 
   // New Markdown replaces the content once per frame; the whole document is
   // parsed, which is cheap for documents of the size the tools write.
@@ -251,15 +296,20 @@ export function DocumentEditor({
   useImperativeHandle(
     ref,
     () => ({
-      getMarkdown: () => (editor ? withFinalNewline(editor.getMarkdown()) : markdown),
+      getMarkdown: () => {
+        flush();
+        return editor ? withFinalNewline(editor.getMarkdown()) : markdown;
+      },
       reset: () => {
+        if (pending.current) clearTimeout(pending.current.timer);
+        pending.current = null;
         dirty.current = false;
         if (!editor) return;
         apply(editor, markdown);
         setRendered((count) => count + 1);
       }
     }),
-    [editor, markdown]
+    [editor, markdown, flush]
   );
 
   function quote() {

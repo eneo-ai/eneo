@@ -68,10 +68,12 @@ export class SidePanelStore {
   #opensByItself = true;
   // The draft the reader left for another file; it does not take the panel back.
   #leftDraft: string | null = null;
-  // A file has arrived for these calls. Late draft effects cannot take over
-  // either its download or its completed preview.
-  #finishedDrafts = new Set<string>();
+  // The file that has arrived for each of these calls. Late draft effects
+  // cannot take over either its download or its completed preview, and a
+  // draft the reader asked for after its file came shows that file instead.
+  #finishedDrafts = new Map<string, PreviewFile>();
   #replacementHighlight: PreviewPassage | null = null;
+  #replacementReady = false;
   #version = 0;
   #listeners = new Set<() => void>();
 
@@ -112,6 +114,9 @@ export class SidePanelStore {
    * keystroke; what would lose them asks first.
    */
   dirty = false;
+  /** A save is in flight; shared across panel remounts so the document stays read-only. */
+  saving = false;
+  #saveRequest: symbol | null = null;
   // The edited text itself, so an editor torn down and mounted again (the
   // layout crosses its breakpoint) shows the document as the reader left it.
   #edits: { fileId: string; text: string } | null = null;
@@ -249,6 +254,7 @@ export class SidePanelStore {
     this.#abort?.abort();
     this.#clearReplacement();
     if (this.#holds(file)) return this.#emit();
+    this.#releaseSave();
     this.file = file;
     this.#emit();
     void this.#load(file);
@@ -295,10 +301,45 @@ export class SidePanelStore {
       if (this.viewCallId !== null) this.#closeView();
       this.overview = null;
     }
+    this.#takeDraft(draft);
+  }
+
+  /**
+   * Shows the document being written because the reader asked for it: after
+   * closing the panel on it, or on a narrow screen, where it does not open
+   * by itself. A loaded document gives way; unsaved edits ask first.
+   */
+  showDraft(draft: DocumentDraft) {
+    if (this.#finishedDrafts.has(draft.callId)) return;
+    this.#guarded(() => {
+      // The reader may have been asked about their edits first, and the
+      // assistant written on meanwhile: the document, once it has come, is
+      // what they get to see, else the draft as it stands now.
+      const finished = this.#finishedDrafts.get(draft.callId);
+      if (finished) {
+        this.#open(finished);
+        return;
+      }
+      if (this.#leftDraft === draft.callId) this.#leftDraft = null;
+      this.openedByItself = false;
+      if (this.viewCallId !== null) this.#closeView();
+      this.overview = null;
+      this.#abort?.abort();
+      // A save still in flight was of the document the draft replaces.
+      this.#releaseSave();
+      this.#clearReplacement();
+      this.file = null;
+      this.content = null;
+      this.#takeDraft(this.draft?.callId === draft.callId ? this.draft : draft);
+    });
+  }
+
+  #takeDraft(draft: DocumentDraft) {
     if (this.draft?.callId !== draft.callId) {
       this.#abort?.abort();
       this.#clearReplacement();
       if (this.status !== "ready" || !this.content) {
+        this.#releaseSave();
         this.file = null;
         this.content = null;
       }
@@ -335,7 +376,12 @@ export class SidePanelStore {
    * point out in it: what an edit of the earlier version put in.
    */
   arrive(file: PreviewFile, changed: PreviewPassage | null = null, callId?: string | null) {
-    if ((callId && callId === this.#leftDraft) || this.#holds(file)) return;
+    if (this.#holds(file)) return;
+    if (callId && callId === this.#leftDraft) {
+      // Not shown, since the reader left its draft; but asked for, it is this file.
+      this.#finishedDrafts.set(callId, file);
+      return;
+    }
     if (!this.shown || this.viewCallId !== null) {
       const opens = this.besideConversation && this.#opensByItself;
       if (!opens || !this.canPreview(file)) return;
@@ -343,9 +389,13 @@ export class SidePanelStore {
       if (this.viewCallId !== null) this.#closeView();
       this.overview = null;
     }
-    if (this.draft) this.#finishedDrafts.add(this.draft.callId);
+    // The call that made the file is done, and so is the draft on show, which
+    // the file takes over whichever call it is from.
+    if (callId) this.#finishedDrafts.set(callId, file);
+    if (this.draft) this.#finishedDrafts.set(this.draft.callId, file);
     const keepCurrent = !!this.file && !!this.content && this.status === "ready";
     if (!keepCurrent) {
+      this.#releaseSave();
       this.highlight = changed;
       this.file = file;
     }
@@ -358,8 +408,10 @@ export class SidePanelStore {
    * who is editing keeps the text in front of them; the replacement waits.
    */
   finishReplacement(id: string) {
-    if (this.dirty) return;
     if (this.replacementFile?.id !== id || !this.replacementContent) return;
+    this.#replacementReady = true;
+    if (this.dirty) return;
+    this.#releaseSave();
     this.file = this.replacementFile;
     this.content = this.replacementContent;
     this.highlight = this.#replacementHighlight;
@@ -388,6 +440,7 @@ export class SidePanelStore {
     this.replacementContent = null;
     this.replacementError = null;
     this.#replacementHighlight = null;
+    this.#replacementReady = false;
   }
 
   async #load(file: PreviewFile, keepCurrent = false, changed: PreviewPassage | null = null) {
@@ -451,6 +504,8 @@ export class SidePanelStore {
   setEdits(fileId: string, text: string | null) {
     this.#edits = text === null ? null : { fileId, text };
     this.dirty = text !== null;
+    // Undone back to the saved text: a newer version that waited can show.
+    if (text === null) this.#showReplacement();
     this.#emit();
   }
 
@@ -462,6 +517,36 @@ export class SidePanelStore {
   #clearEdits() {
     this.#edits = null;
     this.dirty = false;
+    this.#releaseSave();
+  }
+
+  #releaseSave() {
+    this.#saveRequest = null;
+    this.saving = false;
+  }
+
+  /**
+   * A save belongs to the editing session it was started in, even if its
+   * panel remounts. Leaving or discarding that session detaches the save's
+   * response from the preview: `apply` then does nothing and says so.
+   */
+  beginSave() {
+    const request = Symbol("document-save");
+    this.#saveRequest = request;
+    this.saving = true;
+    this.#emit();
+    return {
+      apply: (file: PreviewFile, markdown: string) => {
+        if (this.#saveRequest !== request) return false;
+        this.saved(file, markdown);
+        return true;
+      },
+      finish: () => {
+        if (this.#saveRequest !== request) return;
+        this.#releaseSave();
+        this.#emit();
+      }
+    };
   }
 
   /** The reader let their edits go; a replacement that waited then shows. */
@@ -539,7 +624,7 @@ export class SidePanelStore {
   }
 
   #showReplacement() {
-    if (this.replacementFile && this.replacementContent) {
+    if (this.#replacementReady && this.replacementFile && this.replacementContent) {
       this.finishReplacement(this.replacementFile.id);
     }
   }
@@ -689,6 +774,7 @@ export class SidePanelStore {
   }
 
   #close() {
+    this.#releaseSave();
     if (this.draft) this.#leftDraft = this.draft.callId;
     this.#abort?.abort();
     this.#abort = null;

@@ -321,3 +321,136 @@ it("keeps the edited text for an editor that shows the document afresh", async (
   store.dropEdits();
   expect(store.editsOf(file)).toBeNull();
 });
+
+const markdownFile = { ...file, name: "report.md", mimetype: "text/markdown" };
+
+async function openDocument() {
+  const store = panel();
+  vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
+  store.open(markdownFile);
+  await vi.waitFor(() => expect(store.status).toBe("ready"));
+  return store;
+}
+
+it("shows the finished document, not the draft it was, when edits are let go after the draft was asked for", async () => {
+  const store = await openDocument();
+  store.setEdits(markdownFile.id, "# Edited\n");
+
+  store.showDraft(draft);
+  expect(store.pendingDiscard).not.toBeNull();
+  const finished = { ...markdownFile, id: "report-2" };
+  store.arrive(finished, null, draft.callId);
+  await vi.waitFor(() => expect(store.replacementContent).not.toBeNull());
+  store.finishReplacement(finished.id);
+  expect(store.file).toEqual(markdownFile);
+
+  store.pendingDiscard?.proceed();
+  await vi.waitFor(() => expect(store.status).toBe("ready"));
+  expect(store.file).toEqual(finished);
+  expect(store.draft).toBeNull();
+  expect(store.dirty).toBe(false);
+});
+
+it("shows the draft as it stands when edits are let go, not as it was when asked for", async () => {
+  const store = await openDocument();
+  store.setEdits(markdownFile.id, "# Edited\n");
+
+  store.showDraft(draft);
+  store.write({ ...draft, text: "Introduction and more" });
+  expect(store.file).toEqual(markdownFile);
+
+  store.pendingDiscard?.proceed();
+  expect(store.file).toBeNull();
+  expect(store.draft?.text).toBe("Introduction and more");
+});
+
+it("a save in flight no longer applies once a draft takes the panel", async () => {
+  const store = await openDocument();
+  const request = store.beginSave();
+  expect(store.saving).toBe(true);
+
+  store.showDraft(draft);
+  expect(store.saving).toBe(false);
+  expect(request.apply({ ...markdownFile, id: "report-2" }, "# Restored\n")).toBe(false);
+  expect(store.file).toBeNull();
+  expect(store.draft).toEqual(draft);
+});
+
+it("shows a ready replacement when edits are undone to the saved text", async () => {
+  const store = await openDocument();
+  store.setEdits(markdownFile.id, "Edited text");
+  const newer = { ...markdownFile, id: "report-2" };
+  store.arrive(newer);
+  await vi.waitFor(() => expect(store.replacementContent).not.toBeNull());
+  store.finishReplacement(newer.id);
+  expect(store.file).toEqual(markdownFile);
+
+  store.setEdits(markdownFile.id, null);
+
+  expect(store.file).toEqual(newer);
+  expect(store.replacementFile).toBeNull();
+  expect(store.editsOf(markdownFile)).toBeNull();
+  expect(store.dirty).toBe(false);
+});
+
+it("waits for the replacement renderer if edits are undone before it is ready", async () => {
+  const store = await openDocument();
+  store.setEdits(markdownFile.id, "Edited text");
+  const newer = { ...markdownFile, id: "report-2" };
+  store.arrive(newer);
+  await vi.waitFor(() => expect(store.replacementContent).not.toBeNull());
+
+  store.setEdits(markdownFile.id, null);
+  expect(store.file).toEqual(markdownFile);
+
+  store.finishReplacement(newer.id);
+  expect(store.file).toEqual(newer);
+});
+
+it("an older save cannot apply to a reopened file or clear a newer save", async () => {
+  const store = await openDocument();
+  const first = store.beginSave();
+  expect(store.saving).toBe(true);
+  store.close();
+  expect(store.saving).toBe(false);
+  store.open(markdownFile);
+  const second = store.beginSave();
+
+  expect(first.apply(revision, "Old save")).toBe(false);
+  first.finish();
+  expect(store.saving).toBe(true);
+  expect(store.file).toEqual(markdownFile);
+
+  expect(second.apply(revision, "Current save")).toBe(true);
+  second.finish();
+  expect(store.file).toEqual(revision);
+  expect(store.saving).toBe(false);
+});
+
+it("shows the document being written again when the reader asks, after closing it", () => {
+  const store = panel();
+  store.write(draft);
+  expect(store.draft?.callId).toBe("one");
+  store.close();
+  store.write({ ...draft, text: "More" });
+  expect(store.shown).toBe(false);
+
+  store.showDraft({ ...draft, text: "More" });
+
+  expect(store.draft?.text).toBe("More");
+  // The rest of the document follows into the panel again.
+  store.write({ ...draft, text: "More still" });
+  expect(store.draft?.text).toBe("More still");
+});
+
+it("shows the document being written on a narrow screen when the reader asks", () => {
+  const store = panel();
+  store.setBesideConversation(false);
+  store.write(draft);
+  expect(store.shown).toBe(false);
+
+  store.showDraft(draft);
+
+  expect(store.shown).toBe(true);
+  expect(store.draft?.callId).toBe("one");
+});

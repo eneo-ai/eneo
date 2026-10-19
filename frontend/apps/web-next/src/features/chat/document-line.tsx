@@ -9,6 +9,7 @@ import { previewKindOf } from "@/features/workspace/preview/preview-kind";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import type { DocumentDraft } from "./side-panel/document-draft";
 import { displayFileName } from "./side-panel/panel-contents-list";
 import type { GeneratedDocument } from "./side-panel/document-versions";
 import { useSidePanel } from "./side-panel/use-side-panel";
@@ -99,6 +100,51 @@ export function DocumentLine({ file, kind }: { file: GeneratedDocument; kind: Do
           onClick={() => void download()}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * The document the answer is writing now, as one line under it: "Skriver
+ * Projektplan". It opens the draft in the side panel, which is the way back
+ * to it after the reader closed the panel on it, and the way in on a narrow
+ * screen, where the panel does not open by itself.
+ */
+export function DraftLine({ draft }: { draft: DocumentDraft }) {
+  const t = useTranslations();
+  const panel = useSidePanel();
+  if (!panel) return null;
+  const name = draft.title || t("file_preview_untitled_document");
+  const previewing = panel.draft?.callId === draft.callId && panel.viewCallId === null;
+  const [before, after] = t("tool_document_writing", { name: "\u0000" }).split("\u0000");
+  return (
+    <div className="flex max-w-full items-center gap-2 text-sm">
+      <button
+        type="button"
+        aria-label={t("tool_step_show_draft", { name })}
+        aria-pressed={previewing}
+        onClick={() => panel.showDraft(draft)}
+        className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-w-0 items-center gap-2 text-start focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+      >
+        <span
+          aria-hidden="true"
+          className={cn(
+            "rounded-ax-inner flex size-[22px] shrink-0 items-center justify-center",
+            previewing ? "bg-ax-accent text-ax-on-accent" : "bg-ax-accent-muted text-ax-text-accent"
+          )}
+        >
+          <FileText className="size-[13px]" />
+        </span>
+        <span className="truncate">
+          {before}
+          <span
+            className={cn("font-semibold", previewing ? "text-ax-text-accent" : "text-ax-text")}
+          >
+            {name}
+          </span>
+          {after}
+        </span>
+      </button>
     </div>
   );
 }
