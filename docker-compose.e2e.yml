@@ -159,9 +159,12 @@ services:
     volumes: *e2e-backend-volumes
     networks: [e2e]
     healthcheck:
-      test: ["CMD", "task-execution-worker", "--check"]
+      # The check imports the worker the same way, so it needs the same time.
+      # A healthcheck does not inherit the command's PATH export, and this
+      # image installs the entrypoint only in the mounted venv.
+      test: ["CMD", "/workspace/backend/.venv/bin/task-execution-worker", "--check"]
       interval: 5s
-      timeout: 10s
+      timeout: 60s
       retries: 30
       start_period: 120s
 
@@ -209,9 +212,11 @@ services:
     volumes: *e2e-backend-volumes
     networks: [e2e]
     healthcheck:
+      # arq --check imports the whole worker module (about 10 s on a loaded
+      # host), so a 10 s timeout fails the check before the import ends.
       test: ["CMD", "bash", "-lc", "export PATH=/workspace/backend/.venv/bin:$$PATH && arq --check src.eneo.worker.arq.CrawlerWorkerSettings"]
       interval: 5s
-      timeout: 10s
+      timeout: 60s
       retries: 30
       start_period: 120s
 
