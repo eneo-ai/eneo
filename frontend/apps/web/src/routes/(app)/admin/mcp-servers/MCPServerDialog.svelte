@@ -5,6 +5,7 @@
 -->
 
 <script lang="ts">
+  import { browser } from "$app/environment";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -143,6 +144,10 @@
   let oauth_client_id = $state("");
   let oauth_client_secret = $state("");
   let oauth_scope = $state("");
+  // A pre-registered client that authenticates with Eneo's signing key
+  // (private_key_jwt) instead of a shared secret.
+  let oauth_private_key_jwt = $state(false);
+  const jwksUrl = $derived(browser ? `${window.location.origin}/api/v1/mcp-oauth/jwks.json` : "");
   const isOauth = $derived(http_auth_type === "oauth");
   // The acting admin's own connection to this server (or the shared one):
   // tools can only be synced through it, so the dialog offers it here.
@@ -407,6 +412,7 @@
     oauth_client_id = "";
     oauth_client_secret = "";
     oauth_scope = "";
+    oauth_private_key_jwt = false;
     errorMessage = "";
   });
 
@@ -485,6 +491,9 @@
         const config: Record<string, string> = {};
         if (oauth_client_id) config.client_id = oauth_client_id;
         if (oauth_client_secret) config.client_secret = oauth_client_secret;
+        if (oauth_client_id && oauth_private_key_jwt && !oauth_client_secret) {
+          config.client_auth_method = "private_key_jwt";
+        }
         if (oauth_scope) config.scope = oauth_scope;
         data.http_auth_config_schema = config;
       }
@@ -507,6 +516,7 @@
         oauth_client_id = "";
         oauth_client_secret = "";
         oauth_scope = "";
+        oauth_private_key_jwt = false;
         auth_scope = "per_user";
         security_classification = null;
         audience = "everyone";
@@ -1212,6 +1222,28 @@
                         </p>
                       {/if}
                     </div>
+                    {#if oauth_client_id && !oauth_client_secret}
+                      <div>
+                        <label for="mcp-oauth-private-key-jwt" class="flex items-start gap-2.5">
+                          <input
+                            id="mcp-oauth-private-key-jwt"
+                            type="checkbox"
+                            bind:checked={oauth_private_key_jwt}
+                            aria-describedby="mcp-oauth-private-key-jwt-hint"
+                            class="border-default text-accent-default ring-accent-default focus:ring-accent-default mt-0.5 h-4 w-4 rounded border shadow-sm focus:ring-2"
+                          />
+                          <span class="text-default text-sm font-medium"
+                            >{m.mcp_oauth_private_key_jwt()}</span
+                          >
+                        </label>
+                        <p
+                          id="mcp-oauth-private-key-jwt-hint"
+                          class="text-muted mt-1.5 pl-6.5 text-xs"
+                        >
+                          {m.mcp_oauth_private_key_jwt_hint({ url: jwksUrl })}
+                        </p>
+                      </div>
+                    {/if}
                     <div>
                       <label
                         for="mcp-oauth-scope"

@@ -20,6 +20,7 @@ from eneo.mcp_servers.domain.entities.mcp_oauth_connection import (
     IdpUserToken,
     MCPOAuthClientRegistration,
     MCPOAuthConnection,
+    MCPOAuthSigningKey,
 )
 from eneo.mcp_servers.domain.entities.mcp_server import (
     AUTH_SCOPE_SHARED,
@@ -28,6 +29,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
 )
 from eneo.mcp_servers.domain.repositories.mcp_oauth_repo import MCPOAuthRepository
 from eneo.mcp_servers.infrastructure.oauth.bearer_auth import MCPOAuthBearerAuth
+from eneo.mcp_servers.infrastructure.oauth.client_assertion import jwks_document
 from eneo.mcp_servers.infrastructure.oauth.discovery import OAuthChallenge
 from eneo.settings.encryption_service import EncryptionService
 from tests.unit.mcp_servers.infrastructure.oauth.fake_authorization_server import (
@@ -43,6 +45,7 @@ class FakeOAuthRepo(MCPOAuthRepository):
         self.connections: dict[tuple[UUID, Optional[UUID]], MCPOAuthConnection] = {}
         self.registrations: dict[tuple[UUID, str], MCPOAuthClientRegistration] = {}
         self.idp_tokens: dict[UUID, IdpUserToken] = {}
+        self.signing_keys: list[MCPOAuthSigningKey] = []
         self.saves = 0
 
     async def get_connection(self, *, mcp_server_id, user_id):
@@ -83,6 +86,19 @@ class FakeOAuthRepo(MCPOAuthRepository):
             registration
         )
         return registration
+
+    async def list_signing_keys(self):
+        return list(reversed(self.signing_keys))
+
+    async def save_signing_key(self, key):
+        for i, saved in enumerate(self.signing_keys):
+            if saved.kid == key.kid:
+                saved.retired_at = key.retired_at
+                return saved
+        if key.created_at is None:
+            key.created_at = datetime.now(timezone.utc)
+        self.signing_keys.append(key)
+        return key
 
     async def get_idp_token(self, *, user_id):
         return self.idp_tokens.get(user_id)
@@ -192,6 +208,32 @@ async def test_a_stale_token_is_refreshed_once_and_the_rotation_kept(monkeypatch
         vendor.token_requests[-1]["client_id"]
         == "https://eneo.example/api/v1/mcp-oauth/client.json"
     )
+
+
+async def test_a_stored_private_key_jwt_registration_signs_the_refresh(monkeypatch):
+    vendor = FakeAuthorizationServer(cimd=False, auth_methods=("private_key_jwt",))
+    vendor.live_refresh_tokens.add("refresh-0")
+    vendor.install(monkeypatch)
+    user = _user()
+    repo = FakeOAuthRepo()
+    vendor.client_jwks = lambda: jwks_document(repo.signing_keys)
+    server = _server(vendor, user)
+    repo.registrations[(server.id, vendor.issuer)] = MCPOAuthClientRegistration(
+        tenant_id=user.tenant_id,
+        mcp_server_id=server.id,
+        issuer=vendor.issuer,
+        client_id="dcr-client-1",
+        client_secret=None,
+        source="dcr",
+        registration_payload={"token_endpoint_auth_method": "private_key_jwt"},
+    )
+    repo.connections[(server.id, user.id)] = _connection(server, user.id, expires_in=10)
+
+    token = await _provider(repo, user).access_token_for(server)
+
+    assert token == "access-1"
+    assert vendor.assertions[-1]["iss"] == "dcr-client-1"
+    assert vendor.assertions[-1]["aud"] == f"{vendor.base}/oauth2/token"
 
 
 async def test_a_dead_refresh_token_needs_a_new_authorization(monkeypatch):

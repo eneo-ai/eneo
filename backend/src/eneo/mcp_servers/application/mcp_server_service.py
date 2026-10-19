@@ -21,6 +21,9 @@ from eneo.mcp_apps.application.view_snapshots import snapshot_app_views
 from eneo.mcp_apps.domain.csp import declared_domains
 from eneo.mcp_apps.domain.mcp_app_view import get_ui_resource_uri
 from eneo.mcp_servers.application.bundled_tools import forget_catalogs
+from eneo.mcp_servers.application.mcp_oauth_client_identity import (
+    CLIENT_AUTH_METHODS,
+)
 from eneo.mcp_servers.domain.credential_transport import (
     CREDENTIAL_TRANSPORT_REQUIREMENT,
     credential_transport_violation,
@@ -406,8 +409,8 @@ class MCPServerService:
             unknown = set(config or {}) - set(OAUTH_CONFIG_KEYS)
             if unknown:
                 raise BadRequestException(
-                    "OAuth servers accept only client_id, client_secret and "
-                    f"scope; unexpected: {sorted(unknown)}"
+                    "OAuth servers accept only client_id, client_secret, "
+                    f"client_auth_method and scope; unexpected: {sorted(unknown)}"
                 )
             for key in OAUTH_CONFIG_KEYS:
                 value = (config or {}).get(key)
@@ -423,6 +426,21 @@ class MCPServerService:
                 "client_id"
             ):
                 raise BadRequestException("client_secret requires a client_id")
+            method = (config or {}).get("client_auth_method")
+            if method is not None:
+                if method not in CLIENT_AUTH_METHODS:
+                    raise BadRequestException(
+                        "client_auth_method must be one of "
+                        f"{', '.join(CLIENT_AUTH_METHODS)}"
+                    )
+                if not (config or {}).get("client_id"):
+                    raise BadRequestException(
+                        "client_auth_method applies to a pre-registered client_id"
+                    )
+                if method != "none" and (config or {}).get("client_secret"):
+                    raise BadRequestException(
+                        "private_key_jwt replaces the client secret; leave it empty"
+                    )
             return
 
         token = (config or {}).get("token")

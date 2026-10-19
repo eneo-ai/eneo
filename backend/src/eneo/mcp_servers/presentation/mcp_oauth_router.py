@@ -2,8 +2,9 @@
 
 The connect flow (authorize-url, callback, disconnect) is per user for
 ``per_user`` servers and admin-only for ``shared`` ones; the service decides.
-The Client ID Metadata Document is public by nature: authorization servers
-fetch it to learn who Eneo is.
+The Client ID Metadata Documents and the JWKS are public by nature:
+authorization servers fetch them to learn who Eneo is and to verify its
+``private_key_jwt`` assertions.
 """
 
 from __future__ import annotations
@@ -32,7 +33,9 @@ from eneo.authentication.endpoint_access import (
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
+from eneo.mcp_servers.application.mcp_oauth_signing_keys import published_keys
 from eneo.mcp_servers.infrastructure.oauth import client_metadata
+from eneo.mcp_servers.infrastructure.oauth.client_assertion import jwks_document
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
@@ -106,6 +109,63 @@ async def get_client_metadata_document():
     return JSONResponse(
         document,
         headers={"Cache-Control": "public, max-age=3600"},
+        media_type="application/json",
+    )
+
+
+@router.get(
+    "/client-confidential.json",
+    response_model=dict[str, Any],
+    description=(
+        "Eneo's confidential OAuth Client ID Metadata Document: the identity "
+        "Eneo uses at authorization servers that accept private_key_jwt, "
+        "verified against the JWKS."
+    ),
+    responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="A Client ID Metadata Document is public by definition.",
+)
+async def get_confidential_client_metadata_document():
+    document = client_metadata.client_metadata_document(
+        get_settings(), confidential=True
+    )
+    if document is None:
+        raise NotFoundException(
+            "This deployment has no https public origin, so it has no "
+            "client metadata document; authorization servers use Dynamic "
+            "Client Registration instead."
+        )
+    return JSONResponse(
+        document,
+        headers={"Cache-Control": "public, max-age=3600"},
+        media_type="application/json",
+    )
+
+
+@router.get(
+    "/jwks.json",
+    response_model=dict[str, Any],
+    description=(
+        "Eneo's public signing keys (RFC 7517), against which authorization "
+        "servers verify its private_key_jwt client assertions."
+    ),
+    responses=responses.get_responses([]),
+)
+@endpoint_access(
+    authentication=Authentication.PUBLIC,
+    authorization=Authorization.PUBLIC,
+    reason="A JWKS holds public keys only and is public by definition.",
+)
+async def get_jwks(
+    container: Annotated[Container, Depends(get_container())],
+):
+    keys = await published_keys(container.mcp_oauth_repo())
+    return JSONResponse(
+        jwks_document(keys),
+        headers={"Cache-Control": "public, max-age=300"},
         media_type="application/json",
     )
 

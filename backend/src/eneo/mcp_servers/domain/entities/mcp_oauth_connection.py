@@ -106,6 +106,27 @@ class MCPOAuthClientRegistration:
 
 
 @dataclass
+class MCPOAuthSigningKey:
+    """One of the deployment's keys for ``private_key_jwt`` client assertions.
+
+    The newest key that is not retired signs; a retired key stays published
+    for a grace period so assertions it signed still verify.
+    """
+
+    kid: str
+    algorithm: str
+    private_key_pem: str
+    public_jwk: dict[str, Any]
+    created_at: Optional[datetime] = None
+    retired_at: Optional[datetime] = None
+    id: Optional[UUID] = None
+
+    @property
+    def is_retired(self) -> bool:
+        return self.retired_at is not None
+
+
+@dataclass
 class IdpUserToken:
     """The ID token a user received at login, kept for ID-JAG exchanges."""
 

@@ -4891,6 +4891,8 @@
   "mcp_oauth_client_id": "Klient-ID (förregistrerat)",
   "mcp_oauth_client_id_hint": "Lämna tomt så identifierar sig Eneo med sitt eget klientmetadatadokument, eller registrerar sig dynamiskt. Ange ett klient-ID bara om leverantören kräver förregistrering.",
   "mcp_oauth_client_secret": "Klienthemlighet",
+  "mcp_oauth_private_key_jwt": "Autentisera med Eneos signeringsnyckel (private_key_jwt)",
+  "mcp_oauth_private_key_jwt_hint": "Används i stället för en klienthemlighet. Registrera Eneos nyckeladress hos leverantören: {url}",
   "mcp_oauth_scope_override": "Behörigheter (scope)",
   "mcp_oauth_scope_override_hint": "Valfritt. Lämna tomt så begär Eneo de behörigheter servern anger. Mellanslagsseparerade.",
   "mcp_oauth_admin_connection_status": "Din anslutning",

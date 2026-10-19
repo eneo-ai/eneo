@@ -28,6 +28,12 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
+from eneo.mcp_servers.application.mcp_oauth_client_identity import (
+    credential_for_registration,
+    dcr_request_for,
+    resolve_client_credential,
+)
+from eneo.mcp_servers.application.mcp_oauth_signing_keys import current_signer
 from eneo.mcp_servers.application.mcp_oauth_token_provider import (
     MCPOAuthTokenProvider,
     connection_public_state,
@@ -42,6 +48,9 @@ from eneo.mcp_servers.infrastructure.oauth import client_metadata
 from eneo.mcp_servers.infrastructure.oauth.authorization_wait import (
     MCPOAuthAuthorizationWaiter,
 )
+from eneo.mcp_servers.infrastructure.oauth.client_assertion import (
+    ClientAssertionSigner,
+)
 from eneo.mcp_servers.infrastructure.oauth.discovery import (
     OAuthDiscoveryError,
     OAuthServerDiscovery,
@@ -50,7 +59,6 @@ from eneo.mcp_servers.infrastructure.oauth.discovery import (
 from eneo.mcp_servers.infrastructure.oauth.token_client import (
     ClientCredential,
     OAuthTokenError,
-    choose_client_auth_method,
     exchange_authorization_code,
     register_client,
     revoke_token,
@@ -133,55 +141,35 @@ class MCPOAuthService:
 
     # -- client identity ----------------------------------------------------
 
+    async def _signer(self) -> ClientAssertionSigner:
+        return await current_signer(self._repo)
+
     async def _client_for(
         self, server: MCPServer, discovery: OAuthServerDiscovery
     ) -> ClientCredential:
         """Pre-registered, then CIMD, then DCR, as the spec orders them."""
         config = dict(server.http_auth_config_schema or {})
-        client_id = config.get("client_id")
-        if isinstance(client_id, str) and client_id:
-            secret = config.get("client_secret")
-            if (
-                isinstance(secret, str)
-                and secret
-                and self._encryption.is_encrypted(secret)
-            ):
-                secret = self._encryption.decrypt(secret)
-            secret_str = secret if isinstance(secret, str) and secret else None
-            return ClientCredential(
-                client_id=client_id,
-                client_secret=secret_str,
-                auth_method=choose_client_auth_method(
-                    secret_str, discovery.token_endpoint_auth_methods
-                ),
-            )
-
-        cimd = client_metadata.client_metadata_url(self._settings)
-        if cimd is not None and discovery.supports_cimd:
-            return ClientCredential(
-                client_id=cimd, client_secret=None, auth_method="none"
-            )
-
-        # Registrations are bound to the issuer that made them: a changed
-        # authorization server means registering again.
-        registration = await self._repo.get_registration(
-            mcp_server_id=server.id, issuer=discovery.issuer
+        secret = config.get("client_secret")
+        if isinstance(secret, str) and secret and self._encryption.is_encrypted(secret):
+            config["client_secret"] = self._encryption.decrypt(secret)
+        credential = await resolve_client_credential(
+            mcp_server_id=server.id,
+            discovery=discovery,
+            settings=self._settings,
+            config=config,
+            repo=self._repo,
+            signer=self._signer,
         )
-        if registration is not None:
-            return ClientCredential(
-                client_id=registration.client_id,
-                client_secret=registration.client_secret,
-                auth_method=choose_client_auth_method(
-                    registration.client_secret, discovery.token_endpoint_auth_methods
-                ),
-            )
+        if credential is not None:
+            return credential
+
         if discovery.registration_endpoint is None:
             raise BadRequestException(
                 "The authorization server supports neither Client ID Metadata "
                 "Documents nor Dynamic Client Registration; an administrator "
                 "must enter a pre-registered client id for this server."
             )
-        request = client_metadata.dcr_registration_request(self._settings)
+        request = dcr_request_for(discovery, self._settings)
         if request is None:
             raise BadRequestException(
                 "PUBLIC_ORIGIN must be configured before Eneo can register as "
@@ -195,6 +183,16 @@ class MCPOAuthService:
             raise BadRequestException(str(exc)) from exc
         secret = payload.get("client_secret")
         secret_str = secret if isinstance(secret, str) and secret else None
+        # The method the client was registered with decides how it
+        # authenticates from now on, whether or not the server echoes it.
+        stored_payload = {
+            key: value
+            for key, value in payload.items()
+            if key not in ("client_secret", "registration_access_token")
+        }
+        stored_payload.setdefault(
+            "token_endpoint_auth_method", request["token_endpoint_auth_method"]
+        )
         registration = await self._repo.save_registration(
             MCPOAuthClientRegistration(
                 tenant_id=server.tenant_id,
@@ -203,20 +201,10 @@ class MCPOAuthService:
                 client_id=str(payload["client_id"]),
                 client_secret=secret_str,
                 source="dcr",
-                registration_payload={
-                    key: value
-                    for key, value in payload.items()
-                    if key not in ("client_secret", "registration_access_token")
-                },
+                registration_payload=stored_payload,
             )
         )
-        return ClientCredential(
-            client_id=registration.client_id,
-            client_secret=registration.client_secret,
-            auth_method=choose_client_auth_method(
-                registration.client_secret, discovery.token_endpoint_auth_methods
-            ),
-        )
+        return await credential_for_registration(registration, discovery, self._signer)
 
     # -- flow ---------------------------------------------------------------
 

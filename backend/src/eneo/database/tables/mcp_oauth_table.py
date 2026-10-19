@@ -18,6 +18,10 @@ requires.
 ``idp_user_tokens`` keeps the ID token a user received at login, which is the
 identity assertion the ID-JAG strategy exchanges at the IdP. It is written
 only for tenants whose federation config enables that strategy.
+
+``mcp_oauth_signing_keys`` holds the deployment's keys for ``private_key_jwt``
+client authentication: the private key as a Fernet envelope, the public key
+as the JWK the backend publishes.
 """
 
 from datetime import datetime
@@ -129,3 +133,14 @@ class IdpUserTokens(BasePublic):
     id_token_expires_at: Mapped[Optional[datetime]] = mapped_column(
         TIMESTAMP(timezone=True)
     )
+
+
+class MCPOAuthSigningKeys(BasePublic):
+    __tablename__ = "mcp_oauth_signing_keys"  # type: ignore[assignment]
+    __table_args__ = (UniqueConstraint("kid", name="uq_mcp_oauth_signing_keys_kid"),)
+
+    kid: Mapped[str] = mapped_column(Text, nullable=False)
+    algorithm: Mapped[str] = mapped_column(String, nullable=False)
+    private_key_ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    public_jwk: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    retired_at: Mapped[Optional[datetime]] = mapped_column(TIMESTAMP(timezone=True))

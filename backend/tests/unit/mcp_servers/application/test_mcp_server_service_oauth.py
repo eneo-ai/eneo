@@ -51,6 +51,29 @@ class TestAuthConfig:
                 OAUTH_AUTH_TYPE, {"client_secret": "s3cret"}
             )
 
+    def test_client_auth_method_names_how_a_pre_registered_client_signs_in(self):
+        MCPServerService._validate_auth_config(
+            OAUTH_AUTH_TYPE,
+            {"client_id": "pre", "client_auth_method": "private_key_jwt"},
+        )
+        with pytest.raises(BadRequestException, match="must be one of"):
+            MCPServerService._validate_auth_config(
+                OAUTH_AUTH_TYPE, {"client_id": "pre", "client_auth_method": "mtls"}
+            )
+        with pytest.raises(BadRequestException, match="pre-registered"):
+            MCPServerService._validate_auth_config(
+                OAUTH_AUTH_TYPE, {"client_auth_method": "private_key_jwt"}
+            )
+        with pytest.raises(BadRequestException, match="replaces the client secret"):
+            MCPServerService._validate_auth_config(
+                OAUTH_AUTH_TYPE,
+                {
+                    "client_id": "pre",
+                    "client_secret": "s3cret",
+                    "client_auth_method": "private_key_jwt",
+                },
+            )
+
     def test_values_must_be_clean_strings(self):
         with pytest.raises(BadRequestException, match="non-empty"):
             MCPServerService._validate_auth_config(OAUTH_AUTH_TYPE, {"client_id": " "})

@@ -7,6 +7,7 @@ from eneo.mcp_servers.domain.entities.mcp_oauth_connection import (
     IdpUserToken,
     MCPOAuthClientRegistration,
     MCPOAuthConnection,
+    MCPOAuthSigningKey,
 )
 
 
@@ -62,6 +63,16 @@ class MCPOAuthRepository(ABC):
     async def save_registration(
         self, registration: MCPOAuthClientRegistration
     ) -> MCPOAuthClientRegistration: ...
+
+    @abstractmethod
+    async def list_signing_keys(self) -> Sequence[MCPOAuthSigningKey]:
+        """Every signing key of the deployment, newest first."""
+        ...
+
+    @abstractmethod
+    async def save_signing_key(self, key: MCPOAuthSigningKey) -> MCPOAuthSigningKey:
+        """Insert a new key, or update the retirement of an existing one."""
+        ...
 
     @abstractmethod
     async def get_idp_token(self, *, user_id: UUID) -> Optional[IdpUserToken]: ...

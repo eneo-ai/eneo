@@ -41,6 +41,10 @@ from mcp.shared.auth_utils import check_resource_allowed, resource_url_from_serv
 from eneo.authentication.auth_models import is_service_api_key
 from eneo.main.exceptions import MCPUserActionRequiredError
 from eneo.main.logging import get_logger
+from eneo.mcp_servers.application.mcp_oauth_client_identity import (
+    resolve_client_credential,
+)
+from eneo.mcp_servers.application.mcp_oauth_signing_keys import current_signer
 from eneo.mcp_servers.domain.entities.mcp_oauth_connection import (
     STRATEGY_CLIENT_CREDENTIALS,
     STRATEGY_ID_JAG,
@@ -594,36 +598,23 @@ class MCPOAuthTokenProvider:
         discovery: OAuthServerDiscovery,
         config: dict[str, Any],
     ) -> ClientCredential:
-        """Eneo's client identity at this server's authorization server."""
-        client_id = config.get("client_id")
-        if isinstance(client_id, str) and client_id:
-            secret = config.get("client_secret")
-            secret_str = secret if isinstance(secret, str) and secret else None
-            return ClientCredential(
-                client_id=client_id,
-                client_secret=secret_str,
-                auth_method=choose_client_auth_method(
-                    secret_str, discovery.token_endpoint_auth_methods
-                ),
-            )
+        """Eneo's client identity at this server's authorization server.
+
+        The connect flow registers; here a server without any identity yet
+        is one the user has to connect to first.
+        """
         async with self._repo() as repo:
-            registration = await repo.get_registration(
-                mcp_server_id=server.id, issuer=discovery.issuer
+            credential = await resolve_client_credential(
+                mcp_server_id=server.id,
+                discovery=discovery,
+                settings=self._settings,
+                config=config,
+                repo=repo,
+                signer=lambda: current_signer(repo),
             )
-        if registration is not None:
-            return ClientCredential(
-                client_id=registration.client_id,
-                client_secret=registration.client_secret,
-                auth_method=choose_client_auth_method(
-                    registration.client_secret, discovery.token_endpoint_auth_methods
-                ),
-            )
-        cimd = client_metadata.client_metadata_url(self._settings)
-        if cimd is not None and discovery.supports_cimd:
-            return ClientCredential(
-                client_id=cimd, client_secret=None, auth_method="none"
-            )
-        raise self.user_action_required(server, reason="client_not_registered")
+        if credential is None:
+            raise self.user_action_required(server, reason="client_not_registered")
+        return credential
 
     @staticmethod
     def _apply(connection: MCPOAuthConnection, response: TokenResponse) -> None:

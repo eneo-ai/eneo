@@ -4891,6 +4891,8 @@
   "mcp_oauth_client_id": "Client ID (pre-registered)",
   "mcp_oauth_client_id_hint": "Leave empty and Eneo identifies itself with its own client metadata document, or registers dynamically. Enter a client ID only when the vendor requires pre-registration.",
   "mcp_oauth_client_secret": "Client secret",
+  "mcp_oauth_private_key_jwt": "Authenticate with Eneo's signing key (private_key_jwt)",
+  "mcp_oauth_private_key_jwt_hint": "Used instead of a client secret. Register Eneo's key set URL with the vendor: {url}",
   "mcp_oauth_scope_override": "Permissions (scope)",
   "mcp_oauth_scope_override_hint": "Optional. Leave empty and Eneo requests the permissions the server names. Space separated.",
   "mcp_oauth_admin_connection_status": "Your connection",

@@ -24,6 +24,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     OAUTH_AUTH_TYPE,
     MCPServer,
 )
+from eneo.mcp_servers.infrastructure.oauth.client_assertion import jwks_document
 from eneo.roles.permissions import Permission
 from eneo.settings.encryption_service import EncryptionService
 from tests.unit.mcp_servers.application.test_mcp_oauth_token_provider import (
@@ -35,6 +36,8 @@ from tests.unit.mcp_servers.infrastructure.oauth.fake_authorization_server impor
 
 SETTINGS = SimpleNamespace(public_origin="https://eneo.example", api_prefix="/api/v1")
 CIMD = "https://eneo.example/api/v1/mcp-oauth/client.json"
+CONFIDENTIAL_CIMD = "https://eneo.example/api/v1/mcp-oauth/client-confidential.json"
+JWKS = "https://eneo.example/api/v1/mcp-oauth/jwks.json"
 
 
 class FakeRedis:
@@ -179,6 +182,73 @@ async def test_dcr_is_the_fallback_and_is_remembered_per_issuer(monkeypatch):
     assert vendor.registrations[0]["application_type"] == "web"
     saved = repo.registrations[(server.id, vendor.issuer)]
     assert saved.source == "dcr"
+
+
+async def test_a_server_that_accepts_private_key_jwt_gets_the_confidential_identity(
+    monkeypatch,
+):
+    vendor = FakeAuthorizationServer(auth_methods=("private_key_jwt", "none"))
+    vendor.install(monkeypatch)
+    user = _user()
+    server = _server(vendor, user)
+    service, repo, _ = _service(user, [server])
+    vendor.client_jwks = lambda: jwks_document(repo.signing_keys)
+
+    started = await service.authorize_url(server.id)
+    code, state = vendor.authorize(started["url"])
+    public = await service.complete(server.id, code=code, state=state)
+
+    assert _params(started["url"])["client_id"] == CONFIDENTIAL_CIMD
+    assert public["status"] == "connected"
+    assert vendor.assertions[-1]["iss"] == CONFIDENTIAL_CIMD
+    assert vendor.assertions[-1]["aud"] == f"{vendor.base}/oauth2/token"
+    # One deployment key, made on first use.
+    assert len(repo.signing_keys) == 1
+    assert vendor.registrations == []
+
+
+async def test_dcr_registers_the_confidential_client_when_the_server_allows(
+    monkeypatch,
+):
+    vendor = FakeAuthorizationServer(cimd=False, auth_methods=("private_key_jwt",))
+    vendor.install(monkeypatch)
+    user = _user()
+    server = _server(vendor, user)
+    service, repo, _ = _service(user, [server])
+    vendor.client_jwks = lambda: jwks_document(repo.signing_keys)
+
+    started = await service.authorize_url(server.id)
+    code, state = vendor.authorize(started["url"])
+    await service.complete(server.id, code=code, state=state)
+
+    request = vendor.registrations[0]
+    assert request["token_endpoint_auth_method"] == "private_key_jwt"
+    assert request["jwks_uri"] == JWKS
+    assert request["token_endpoint_auth_signing_alg"] == "ES256"
+    saved = repo.registrations[(server.id, vendor.issuer)]
+    assert saved.client_secret is None
+    assert saved.registration_payload["token_endpoint_auth_method"] == "private_key_jwt"
+    assert vendor.assertions[-1]["iss"] == "dcr-client-1"
+
+
+async def test_a_pre_registered_client_can_opt_into_private_key_jwt(monkeypatch):
+    vendor = FakeAuthorizationServer(auth_methods=("private_key_jwt",))
+    vendor.install(monkeypatch)
+    user = _user()
+    server = _server(
+        vendor,
+        user,
+        config={"client_id": "pre", "client_auth_method": "private_key_jwt"},
+    )
+    service, repo, _ = _service(user, [server])
+    vendor.client_jwks = lambda: jwks_document(repo.signing_keys)
+
+    started = await service.authorize_url(server.id)
+    code, state = vendor.authorize(started["url"])
+    public = await service.complete(server.id, code=code, state=state)
+
+    assert public["status"] == "connected"
+    assert vendor.assertions[-1]["iss"] == "pre"
 
 
 async def test_pre_registered_client_wins(monkeypatch):

@@ -166,7 +166,12 @@ AUTH_SCOPES: tuple[str, ...] = (AUTH_SCOPE_PER_USER, AUTH_SCOPE_SHARED)
 # Admin-entered keys of an OAuth server's ``http_auth_config_schema``: a
 # pre-registered client at the vendor's authorization server (also the client
 # of a shared client-credentials connection) and a scope override.
-OAUTH_CONFIG_KEYS: tuple[str, ...] = ("client_id", "client_secret", "scope")
+OAUTH_CONFIG_KEYS: tuple[str, ...] = (
+    "client_id",
+    "client_secret",
+    "client_auth_method",
+    "scope",
+)
 
 
 def is_oauth_server(http_auth_type: str | None) -> bool:

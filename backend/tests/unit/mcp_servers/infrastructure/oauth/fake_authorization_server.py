@@ -13,12 +13,18 @@ import base64
 import hashlib
 import json
 import secrets
+from collections.abc import Callable
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
+import jwt
 
 from eneo.mcp_servers.infrastructure.oauth import discovery, token_client
+from eneo.mcp_servers.infrastructure.oauth.client_assertion import (
+    CLIENT_ASSERTION_TYPE,
+    PRIVATE_KEY_JWT,
+)
 
 ID_JAG_PROFILE = "urn:ietf:params:oauth:grant-profile:id-jag"
 
@@ -77,6 +83,11 @@ class FakeAuthorizationServer:
         self.fail_id_jag_with: Optional[str] = None
         self.idp_token_endpoint = f"{base}/idp/token"
         self.access_token_ttl = 3600
+        # What the server would fetch from the client's jwks_uri: a key set,
+        # or a callable returning one (the client may make its key lazily).
+        self.client_jwks: Optional[dict[str, Any] | Callable[[], dict[str, Any]]] = None
+        self.assertions: list[dict[str, Any]] = []
+        self.seen_jti: set[str] = set()
 
     # -- wiring -------------------------------------------------------------
 
@@ -210,7 +221,46 @@ class FakeAuthorizationServer:
             return client_id if secret == "s3cret" else None
         if "client_secret" in form:
             return form["client_id"] if form["client_secret"] == "s3cret" else None
+        if "client_assertion" in form:
+            return self._assertion_client(request, form)
         return form.get("client_id")
+
+    def _assertion_client(
+        self, request: httpx.Request, form: dict[str, str]
+    ) -> Optional[str]:
+        """RFC 7523 section 2.2: verify the assertion against the client's keys."""
+        if (
+            PRIVATE_KEY_JWT not in self.auth_methods
+            or form.get("client_assertion_type") != CLIENT_ASSERTION_TYPE
+        ):
+            return None
+        assertion = form["client_assertion"]
+        jwks = self.client_jwks() if callable(self.client_jwks) else self.client_jwks
+        header = jwt.get_unverified_header(assertion)
+        key = next(
+            (
+                k
+                for k in (jwks or {}).get("keys", [])
+                if k.get("kid") == header.get("kid")
+            ),
+            None,
+        )
+        if key is None:
+            return None
+        try:
+            claims = jwt.decode(
+                assertion,
+                key=jwt.PyJWK.from_dict(key).key,
+                algorithms=["ES256"],
+                audience=str(request.url),
+            )
+        except jwt.PyJWTError:
+            return None
+        if claims.get("iss") != claims.get("sub") or claims["jti"] in self.seen_jti:
+            return None
+        self.seen_jti.add(claims["jti"])
+        self.assertions.append(claims)
+        return str(claims["iss"])
 
     def _register(self, request: httpx.Request) -> httpx.Response:
         if not self.dcr:
@@ -223,7 +273,12 @@ class FakeAuthorizationServer:
             "redirect_uris": payload["redirect_uris"],
             "token_endpoint_auth_method": payload.get("token_endpoint_auth_method"),
         }
-        if "none" not in self.auth_methods:
+        if "jwks_uri" in payload:
+            response["jwks_uri"] = payload["jwks_uri"]
+        if (
+            "none" not in self.auth_methods
+            and payload.get("token_endpoint_auth_method") != PRIVATE_KEY_JWT
+        ):
             response["client_secret"] = "s3cret"
         return httpx.Response(201, json=response)
 

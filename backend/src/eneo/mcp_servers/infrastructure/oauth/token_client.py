@@ -16,6 +16,11 @@ from typing import Any, Literal, Optional, cast
 import httpx
 
 from eneo.main.logging import get_logger
+from eneo.mcp_servers.infrastructure.oauth.client_assertion import (
+    CLIENT_ASSERTION_TYPE,
+    PRIVATE_KEY_JWT,
+    ClientAssertionSigner,
+)
 
 logger = get_logger(__name__)
 
@@ -27,7 +32,9 @@ ID_JAG_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:id-jag"
 ID_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:id_token"
 ID_JAG_JWT_TYP = "oauth-id-jag+jwt"
 
-ClientAuthMethod = Literal["none", "client_secret_basic", "client_secret_post"]
+ClientAuthMethod = Literal[
+    "none", "client_secret_basic", "client_secret_post", "private_key_jwt"
+]
 
 
 class OAuthTokenError(Exception):
@@ -69,12 +76,19 @@ class ClientCredential:
     client_id: str
     client_secret: Optional[str]
     auth_method: ClientAuthMethod
+    # Signs the assertion of a ``private_key_jwt`` credential.
+    signer: Optional[ClientAssertionSigner] = None
 
 
 def choose_client_auth_method(
-    client_secret: Optional[str], methods_supported: tuple[str, ...]
+    client_secret: Optional[str],
+    methods_supported: tuple[str, ...],
+    *,
+    can_sign: bool = False,
 ) -> ClientAuthMethod:
     if not client_secret:
+        if can_sign and PRIVATE_KEY_JWT in methods_supported:
+            return PRIVATE_KEY_JWT
         return "none"
     if "client_secret_basic" in methods_supported:
         return "client_secret_basic"
@@ -91,8 +105,13 @@ def _client() -> httpx.AsyncClient:
 
 
 def _apply_client_auth(
-    form: dict[str, str], headers: dict[str, str], credential: ClientCredential
+    form: dict[str, str],
+    headers: dict[str, str],
+    credential: ClientCredential,
+    audience: str,
 ) -> None:
+    """Authenticate the request as the client; ``audience`` is the endpoint it
+    goes to, which a ``private_key_jwt`` assertion names."""
     form["client_id"] = credential.client_id
     if credential.auth_method == "client_secret_basic" and credential.client_secret:
         raw = f"{credential.client_id}:{credential.client_secret}".encode()
@@ -100,6 +119,11 @@ def _apply_client_auth(
         form.pop("client_id", None)
     elif credential.auth_method == "client_secret_post" and credential.client_secret:
         form["client_secret"] = credential.client_secret
+    elif credential.auth_method == PRIVATE_KEY_JWT and credential.signer is not None:
+        form["client_assertion_type"] = CLIENT_ASSERTION_TYPE
+        form["client_assertion"] = credential.signer.sign(
+            client_id=credential.client_id, audience=audience
+        )
 
 
 async def _post_form(
@@ -184,7 +208,7 @@ async def exchange_authorization_code(
         "resource": resource,
     }
     headers: dict[str, str] = {}
-    _apply_client_auth(form, headers, credential)
+    _apply_client_auth(form, headers, credential, token_endpoint)
     status, payload = await _post_form(token_endpoint, form, headers)
     _raise_for_error(status, payload, "Authorization code exchange")
     return _token_response(payload, datetime.now(timezone.utc))
@@ -206,7 +230,7 @@ async def refresh_access_token(
     if scope:
         form["scope"] = scope
     headers: dict[str, str] = {}
-    _apply_client_auth(form, headers, credential)
+    _apply_client_auth(form, headers, credential, token_endpoint)
     status, payload = await _post_form(token_endpoint, form, headers)
     _raise_for_error(status, payload, "Token refresh")
     return _token_response(payload, datetime.now(timezone.utc))
@@ -223,7 +247,7 @@ async def client_credentials_grant(
     if scope:
         form["scope"] = scope
     headers: dict[str, str] = {}
-    _apply_client_auth(form, headers, credential)
+    _apply_client_auth(form, headers, credential, token_endpoint)
     status, payload = await _post_form(token_endpoint, form, headers)
     _raise_for_error(status, payload, "Client credentials grant")
     return _token_response(payload, datetime.now(timezone.utc))
@@ -235,7 +259,7 @@ async def revoke_token(
     """Best effort RFC 7009 revocation; failures are logged, never raised."""
     form = {"token": token}
     headers: dict[str, str] = {}
-    _apply_client_auth(form, headers, credential)
+    _apply_client_auth(form, headers, credential, revocation_endpoint)
     try:
         status, _ = await _post_form(revocation_endpoint, form, headers)
     except OAuthTokenError as exc:
@@ -341,7 +365,7 @@ async def request_id_jag(
     if scope:
         form["scope"] = scope
     headers: dict[str, str] = {}
-    _apply_client_auth(form, headers, credential)
+    _apply_client_auth(form, headers, credential, idp_token_endpoint)
     status, payload = await _post_form(idp_token_endpoint, form, headers)
     _raise_for_error(status, payload, "ID-JAG request")
     issued_type = payload.get("issued_token_type")
@@ -382,7 +406,7 @@ async def redeem_id_jag(
     if scope:
         form["scope"] = scope
     headers: dict[str, str] = {}
-    _apply_client_auth(form, headers, credential)
+    _apply_client_auth(form, headers, credential, token_endpoint)
     status, payload = await _post_form(token_endpoint, form, headers)
     _raise_for_error(status, payload, "ID-JAG redemption")
     return _token_response(payload, datetime.now(timezone.utc))

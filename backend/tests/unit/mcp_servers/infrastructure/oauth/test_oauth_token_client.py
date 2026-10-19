@@ -6,6 +6,11 @@ from datetime import datetime, timezone
 
 import pytest
 
+from eneo.mcp_servers.infrastructure.oauth.client_assertion import (
+    ClientAssertionSigner,
+    generate_signing_key,
+    jwks_document,
+)
 from eneo.mcp_servers.infrastructure.oauth.token_client import (
     ID_JAG_JWT_TYP,
     ClientCredential,
@@ -45,6 +50,41 @@ def test_client_auth_method_follows_the_servers_advertisement():
     )
     # RFC 8414 default when the server lists nothing.
     assert choose_client_auth_method("s", ()) == "client_secret_basic"
+    # Signing is preferred over no authentication, where the server allows it.
+    assert (
+        choose_client_auth_method(None, ("private_key_jwt", "none"), can_sign=True)
+        == "private_key_jwt"
+    )
+    assert choose_client_auth_method(None, ("private_key_jwt", "none")) == "none"
+    assert choose_client_auth_method(None, ("none",), can_sign=True) == "none"
+
+
+async def test_private_key_jwt_sends_an_assertion_for_the_endpoint(monkeypatch):
+    vendor = FakeAuthorizationServer(
+        client_credentials=True, auth_methods=("private_key_jwt",)
+    )
+    vendor.install(monkeypatch)
+    key = generate_signing_key()
+    vendor.client_jwks = jwks_document([key])
+    credential = ClientCredential(
+        client_id="https://eneo.example/c.json",
+        client_secret=None,
+        auth_method="private_key_jwt",
+        signer=ClientAssertionSigner(key),
+    )
+
+    response = await client_credentials_grant(
+        token_endpoint=f"{vendor.base}/oauth2/token",
+        resource=vendor.resource,
+        credential=credential,
+    )
+
+    assert response.access_token == "access-1"
+    form = vendor.token_requests[-1]
+    assert form["client_assertion_type"].endswith(":jwt-bearer")
+    assert "client_secret" not in form
+    assert vendor.assertions[-1]["aud"] == f"{vendor.base}/oauth2/token"
+    assert vendor.assertions[-1]["iss"] == "https://eneo.example/c.json"
 
 
 async def test_refresh_sends_resource_and_rotates(monkeypatch):

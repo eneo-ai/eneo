@@ -19,6 +19,7 @@ from eneo.database.tables.mcp_oauth_table import (
     IdpUserTokens,
     MCPOAuthClientRegistrations,
     MCPOAuthConnections,
+    MCPOAuthSigningKeys,
 )
 from eneo.mcp_servers.domain.entities.mcp_oauth_connection import (
     ConnectionStatus,
@@ -26,6 +27,7 @@ from eneo.mcp_servers.domain.entities.mcp_oauth_connection import (
     IdpUserToken,
     MCPOAuthClientRegistration,
     MCPOAuthConnection,
+    MCPOAuthSigningKey,
 )
 from eneo.mcp_servers.domain.repositories.mcp_oauth_repo import MCPOAuthRepository
 
@@ -229,6 +231,46 @@ class MCPOAuthRepoImpl(MCPOAuthRepository):
         )
         row = (await self.session.scalars(stmt)).one()
         return self._to_registration(row)
+
+    # -- signing keys -------------------------------------------------------
+
+    def _to_signing_key(self, row: MCPOAuthSigningKeys) -> MCPOAuthSigningKey:
+        return MCPOAuthSigningKey(
+            id=row.id,
+            kid=row.kid,
+            algorithm=row.algorithm,
+            private_key_pem=self._open(row.private_key_ciphertext) or "",
+            public_jwk=dict(row.public_jwk),
+            created_at=row.created_at,
+            retired_at=row.retired_at,
+        )
+
+    async def list_signing_keys(self) -> Sequence[MCPOAuthSigningKey]:
+        stmt = sa.select(MCPOAuthSigningKeys).order_by(
+            MCPOAuthSigningKeys.created_at.desc()
+        )
+        rows = (await self.session.scalars(stmt)).all()
+        return [self._to_signing_key(row) for row in rows]
+
+    async def save_signing_key(self, key: MCPOAuthSigningKey) -> MCPOAuthSigningKey:
+        values: dict[str, object] = {
+            "kid": key.kid,
+            "algorithm": key.algorithm,
+            "private_key_ciphertext": self._seal(key.private_key_pem),
+            "public_jwk": key.public_jwk,
+            "retired_at": key.retired_at,
+        }
+        stmt = (
+            insert(MCPOAuthSigningKeys)
+            .values(**values)
+            .on_conflict_do_update(
+                constraint="uq_mcp_oauth_signing_keys_kid",
+                set_={"retired_at": values["retired_at"], "updated_at": sa.func.now()},
+            )
+            .returning(MCPOAuthSigningKeys)
+        )
+        row = (await self.session.scalars(stmt)).one()
+        return self._to_signing_key(row)
 
     # -- login ID tokens ----------------------------------------------------
 
