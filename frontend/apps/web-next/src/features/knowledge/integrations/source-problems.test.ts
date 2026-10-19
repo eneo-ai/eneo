@@ -78,6 +78,36 @@ describe("buildSourceProblems", () => {
     expect(problems.causeCount).toBe(4);
   });
 
+  it("leaves out files an older version listed as skipped because they were unchanged", () => {
+    const a = item("a");
+    const problems = buildSourceProblems(
+      [a],
+      {
+        a: skipped([
+          ["samma.docx", "unchanged"],
+          ["scan.pdf", "no_text_layer"]
+        ])
+      },
+      t
+    );
+
+    expect(problems.fixable.flatMap((group) => group.files.map((f) => f.file))).toEqual([
+      "scan.pdf"
+    ]);
+    expect(problems.intentional).toEqual([]);
+    expect(problems.causeCount).toBe(1);
+  });
+
+  it("counts a file set aside after failed attempts as a passing problem that is tried again", () => {
+    const problems = buildSourceProblems(
+      [item("a")],
+      { a: skipped([["trasig.docx", "set_aside"]]) },
+      t
+    );
+    expect(problems.fixable.map((group) => group.category)).toEqual(["transient"]);
+    expect(problems.causeCount).toBe(1);
+  });
+
   it("collects sign-in failures once and other failures per message", () => {
     const problems = buildSourceProblems(
       [

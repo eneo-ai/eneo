@@ -18,6 +18,11 @@ const EXAMPLES: Record<SkipReasonCode, [SkipReason, string]> = {
     t("skip_reason_unsupported_type", { label: t("skip_reason_type_legacy_word") })
   ],
   no_text_layer: [{ code: "no_text_layer", params: {} }, t("skip_reason_no_text_layer")],
+  unchanged: [{ code: "unchanged", params: {} }, "Redan indexerad och oförändrad"],
+  set_aside: [
+    { code: "set_aside", params: { attempts: 3, detail: "HTTP 500" } },
+    "Lagd åt sidan efter 3 misslyckade försök och försöks igen senare: HTTP 500"
+  ],
   empty_content: [{ code: "empty_content", params: {} }, t("skip_reason_empty_content")],
   file_too_large: [
     { code: "file_too_large", params: { limit_mb: "50" } },
@@ -113,6 +118,15 @@ describe("describeSkipReason", () => {
         t("skip_reason_unsupported_type", { label: expected })
       );
     }
+  });
+
+  it("names an item SharePoint offers no download for", () => {
+    expect(
+      describeSkipReason(
+        { code: "error", params: { detail: "SharePoint offers no download for this item" } },
+        t
+      )
+    ).toBe(t("skip_reason_error", { detail: "SharePoint erbjuder ingen nedladdning av objektet" }));
   });
 
   it("does not double the full stop before the retry note", () => {
