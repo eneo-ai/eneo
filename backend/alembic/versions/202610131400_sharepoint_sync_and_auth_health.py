@@ -8,7 +8,7 @@ Subscriptions remember the notification URL they were registered with so a
 changed Eneo origin can be detected at renewal.
 
 Revision ID: 202610131400
-Revises: 202610161200
+Revises: 202610191000
 Create Date: 2026-10-13
 
 """
@@ -19,7 +19,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "202610131400"
-down_revision = "202610161200"
+down_revision = "202610191000"
 branch_labels = None
 depends_on = None
 
