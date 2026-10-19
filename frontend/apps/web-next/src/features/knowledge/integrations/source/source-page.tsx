@@ -32,7 +32,6 @@ import {
   type IntegrationSource,
   type SourceTab
 } from "../sources";
-import { useAnnounceChange } from "../use-announce-change";
 import { useSourceAnnouncements } from "../use-sync-announcements";
 import { useSyncProgress } from "../use-sync-progress";
 import { VENDOR, VendorIcon } from "../vendor";
@@ -244,7 +243,6 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
         : summary.failedItems.length === 1
           ? t("integration_source_failed_one")
           : t("integration_source_failed_other", { count: summary.failedItems.length });
-  useAnnounceChange(failureTitle);
 
   return (
     <RemovalFocusScope target={headingRef}>

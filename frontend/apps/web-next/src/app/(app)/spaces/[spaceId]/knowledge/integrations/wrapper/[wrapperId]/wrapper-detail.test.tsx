@@ -1170,7 +1170,7 @@ describe("WrapperDetail problems", () => {
     });
   });
 
-  it("shows failed folders politely: not again on every return from Problems, once when new", async () => {
+  it("shows failed folders without speaking the banner, on every return from Problems or later", async () => {
     const failing = (item: typeof mall) => ({
       ...item,
       metadata: { ...item.metadata, last_sync_status: "error", last_sync_error: "Graph timeout" }
@@ -1184,14 +1184,39 @@ describe("WrapperDetail problems", () => {
     expect(screen.getByText("Senaste synken av 1 mapp misslyckades")).toBeTruthy();
     expect(liveRegion()).toBe("");
 
-    // Another folder fails while the page is open.
+    // Another folder fails while the page is open, by no sync seen here.
     state.space = makeSpace({
       integrations: [failing(mall), failing(protokoll)].map((item) =>
         makeIntegration({ ...folder, ...item })
       )
     });
     await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
-    await waitFor(() => expect(liveRegion()).toBe("Senaste synken av 2 mappar misslyckades"));
+    expect(await screen.findByText("Senaste synken av 2 mappar misslyckades")).toBeTruthy();
+    expect(liveRegion()).toBe("");
+  });
+
+  it("tells a sync that failed here once, by the sync's own announcement", async () => {
+    const { said } = recordAnnouncements();
+    state.progress = [running("i1", 4)];
+    const { queryClient } = show([mall]);
+    expect(await screen.findByRole("heading", { name: "Synk pågår" })).toBeTruthy();
+
+    state.space = makeSpace({
+      integrations: [
+        makeIntegration({
+          ...folder,
+          ...mall,
+          metadata: { ...mall.metadata, last_sync_status: "error", last_sync_error: "Boom" }
+        })
+      ]
+    });
+    state.progress = [];
+    await act(() =>
+      queryClient.invalidateQueries({ queryKey: ["integrations", "sync-progress", "space-1"] })
+    );
+    expect(await screen.findByText("Senaste synken av 1 mapp misslyckades")).toBeTruthy();
+    await waitFor(() => expect(said).toEqual(["Synk av Byggnad misslyckades. Problem: 1"]));
+    expect(said).not.toContain("Senaste synken av 1 mapp misslyckades");
   });
 });
 
