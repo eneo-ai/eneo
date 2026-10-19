@@ -20,13 +20,12 @@
     isReadRelease,
     type WhatsNewFilters
   } from "$lib/features/whats-new/filters";
-  import { releases } from "@eneo/whats-new";
   import type { EntryArea, Localized, Release, ReleaseEntry } from "@eneo/whats-new";
   import { Sparkles } from "@lucide/svelte";
   import { get } from "svelte/store";
 
   const { user, settings } = getAppContext();
-  const { markLatestSeen, seenVersion, resetState } = getWhatsNewStore();
+  const { releases, markLatestSeen, seenVersion, resetState } = getWhatsNewStore();
   const { start, running } = getWhatsNewTour();
   const developerTools = settings.developer_tools_available === true;
   const isAdmin = user.hasPermission("admin");

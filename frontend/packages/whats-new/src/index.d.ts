@@ -48,11 +48,14 @@ export function compareVersions(a: string, b: string): number;
 /** The newest release, or undefined when releases.json is empty. */
 export function latestRelease(): Release | undefined;
 
+/** Bind matching release notes to the installed RC version; docs keep the authored versions. */
+export function releasesForVersion(installedVersion: string): Release[];
+
 /**
  * Whether the newest bundled release is newer than the one the user has seen.
  * `seenVersion` is the value stored by the backend (null before the first visit).
  */
-export function hasUnseenRelease(seenVersion: string | null | undefined): boolean;
+export function hasUnseenRelease(seenVersion: string | null | undefined, latest?: Release): boolean;
 
 /** Entries the given user may see (admin-only entries need `isAdmin`). */
 export function visibleEntries(release: Release, isAdmin: boolean): ReleaseEntry[];
