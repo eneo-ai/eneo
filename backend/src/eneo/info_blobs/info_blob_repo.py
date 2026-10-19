@@ -281,6 +281,26 @@ class InfoBlobRepository:
         *,
         original_sha256: bytes | None = None,
     ) -> None:
+        """Serialize publishers of one identity until the transaction ends.
+
+        Without it two transactions that both find no active version insert
+        two. A sync publishes a whole library in one transaction, and an
+        advisory lock per document would stay held until it commits and fill
+        the shared lock table; an integration knowledge's publications lock its
+        row instead, whose lock lives in the tuple and which the sync already
+        holds from recording its start.
+        """
+        if (
+            info_blob.group_id is None
+            and info_blob.website_id is None
+            and info_blob.integration_knowledge_id is not None
+        ):
+            await self.session.execute(
+                sa.select(IntegrationKnowledge.id)
+                .where(IntegrationKnowledge.id == info_blob.integration_knowledge_id)
+                .with_for_update(key_share=True)
+            )
+            return
         identities = {
             identity
             for identity in (
