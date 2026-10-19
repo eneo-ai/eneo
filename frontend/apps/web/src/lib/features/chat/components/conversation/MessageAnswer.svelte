@@ -148,6 +148,7 @@
   const previousAttempts = $derived(previousToolAttemptIndexes(tracedToolCalls, isStreamingTurn));
   const tracedSteps = $derived(
     tracedToolCalls.map((tc, i) => {
+      const writing = chat.writingDocument;
       const denied =
         (!!tc.tool_call_id && deniedToolIds.has(tc.tool_call_id)) ||
         tc.approved === false ||
@@ -181,6 +182,9 @@
         ? ((tc.arguments?.title as string | undefined) ??
           chat.partialArgumentsOf(tc.tool_call_id)?.title)
         : undefined;
+      // The document as far as it is written, so the step can show it again
+      // after the reader closed the panel on it.
+      const draft = createsFile && writing && writing.callId === tc.tool_call_id ? writing : null;
       // A change to an earlier document names that document while it is made.
       const updatingName = createsFile && !writingTitle ? revisedDocumentName(tc.arguments) : null;
       const activity = analysisStepLabels(
@@ -250,7 +254,8 @@
         // whichever slim run it sits in rather than to a kind of its own.
         neutral: isSkillActivation(tc),
         icon: toolStepIcon(tc.purpose),
-        view
+        view,
+        draft
       };
     })
   );
@@ -518,6 +523,7 @@
                   document={step.document}
                   icon={step.icon}
                   view={step.view}
+                  draft={step.draft}
                   onLoadResult={step.toolCallId
                     ? () => chat.getToolCallResult(step.toolCallId!)
                     : undefined}

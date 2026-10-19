@@ -148,15 +148,20 @@
           fileId: file.id,
           content
         });
-        chat.addGeneratedFile(version);
+        // The request can finish after another conversation has opened.
+        if (chat.currentConversation.id === sessionId) chat.addGeneratedFile(version);
         return version;
       },
       saved: (version) => {
         // A save onto the reader's own version takes its place: the new
         // version then revises what the old one revised, not the old one.
-        // Only once the panel shows the new version, or the panel would
-        // close over a file the conversation no longer has.
-        if (file.revises_file_id && version.revises_file_id !== file.id) {
+        // Reconcile only the conversation that received the save. The preview
+        // has already accepted the result if its editing session is still current.
+        if (
+          chat.currentConversation.id === sessionId &&
+          file.revises_file_id &&
+          version.revises_file_id !== file.id
+        ) {
           chat.removeGeneratedFile(file.id);
         }
       }

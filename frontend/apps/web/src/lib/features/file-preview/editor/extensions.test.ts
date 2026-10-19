@@ -1,16 +1,30 @@
+import { getSchema } from "@tiptap/core";
+import { Node } from "@tiptap/pm/model";
 import { describe, expect, it } from "vitest";
-import { documentMarkdown, withFinalNewline } from "./extensions";
+import { documentExtensions, documentMarkdown, withFinalNewline } from "./extensions";
 
-// What the document tools write must come back out as the same document.
+// What the document tools write must come back out as the same document, by
+// way of a document the editor's schema accepts.
 const markdown = documentMarkdown();
-const roundTrip = (source: string) => withFinalNewline(markdown.serialize(markdown.parse(source)));
-const types = (source: string) =>
-  (markdown.parse(source).content ?? []).map((node) => node.type as string);
+const schema = getSchema(documentExtensions());
+const parse = (source: string) => {
+  const parsed = markdown.parse(source);
+  Node.fromJSON(schema, parsed).check();
+  return parsed;
+};
+const roundTrip = (source: string) => withFinalNewline(markdown.serialize(parse(source)));
+const types = (source: string) => (parse(source).content ?? []).map((node) => node.type as string);
 
 describe("a document's Markdown round-trips through the editor model", () => {
   it("keeps headings, emphasis and lists", () => {
     const source =
       "# Plan\n\n## Fas ett\n\n### Mål\n\nEn **viktig** och *lugn* start med ~~ändrat~~ `kod`.\n\n- Ett\n- Två\n  - Två b\n\n3. Tre\n4. Fyra\n";
+    expect(roundTrip(source)).toBe(source);
+  });
+
+  it("keeps headings deeper than the tools are asked for", () => {
+    const source = "#### Fyra\n\n##### Fem\n\n###### Sex\n";
+    expect(types(source)).toEqual(["heading", "heading", "heading"]);
     expect(roundTrip(source)).toBe(source);
   });
 
@@ -34,6 +48,14 @@ describe("a document's Markdown round-trips through the editor model", () => {
     expect(roundTrip(source)).toBe(source);
   });
 
+  it("keeps a code block that shows a fence, and the prose after it", () => {
+    const source = "Exempel:\n\n````md\n```js\nconsole.log(1)\n```\n````\n\nEfter blocket.\n";
+    expect(types(source)).toEqual(["paragraph", "codeBlock", "paragraph"]);
+    expect(roundTrip(source)).toBe(source);
+    // The way back out must read the same way in again.
+    expect(types(roundTrip(source))).toEqual(["paragraph", "codeBlock", "paragraph"]);
+  });
+
   it("keeps web and mail links", () => {
     const source = "Se [sidan](https://example.se/a) eller [skriv](mailto:a@b.se).\n";
     expect(roundTrip(source)).toBe(source);
@@ -41,16 +63,27 @@ describe("a document's Markdown round-trips through the editor model", () => {
 
   it("keeps an image handle and its caption as written", () => {
     const source = '![Figur 1](eneo-file:0123456789abcdef0123456789abcdef "Bildtext")\n';
-    // An image on a line of its own stands as a block of its own.
-    const [image] = markdown.parse(source).content ?? [];
-    expect(image).toMatchObject({
-      type: "image",
-      attrs: {
-        src: "eneo-file:0123456789abcdef0123456789abcdef",
-        alt: "Figur 1",
-        title: "Bildtext"
-      }
+    // An image on a line of its own is the one thing in its paragraph.
+    const [paragraph] = parse(source).content ?? [];
+    expect(paragraph).toMatchObject({
+      type: "paragraph",
+      content: [
+        {
+          type: "image",
+          attrs: {
+            src: "eneo-file:0123456789abcdef0123456789abcdef",
+            alt: "Figur 1",
+            title: "Bildtext"
+          }
+        }
+      ]
     });
+    expect(roundTrip(source)).toBe(source);
+  });
+
+  it("keeps an image inside its line of text", () => {
+    const source = "Se ![Figur 2](eneo-file:0123456789abcdef0123456789abcdef) här.\n";
+    expect(types(source)).toEqual(["paragraph"]);
     expect(roundTrip(source)).toBe(source);
   });
 

@@ -20,7 +20,7 @@
 <script lang="ts">
   import { sanitizeLinkHref } from "$lib/components/markdown/index.js";
   import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
-  import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
+  import { getFilePreview, type PreviewDraft } from "$lib/features/file-preview/FilePreview.svelte";
   import { previewKindOf } from "$lib/features/file-preview/previewKind";
   import type { CapabilityDescriptor } from "$lib/features/mcp/capabilities";
   import { m } from "$lib/paraglide/messages";
@@ -45,7 +45,8 @@
     previousAttempt = false,
     document = null,
     icon = null,
-    view = null
+    view = null,
+    draft = null
   }: {
     /** Present-tense label without ellipsis, e.g. "Söker kunskap". */
     runningLabel: string;
@@ -73,6 +74,8 @@
     icon?: CapabilityDescriptor["icon"] | null;
     /** The view of the call's result that the panel can show, named and opened from the step. */
     view?: { name: string; open: () => void } | null;
+    /** The document the running call is writing, which the step shows in the panel on click. */
+    draft?: PreviewDraft | null;
   } = $props();
 
   const preview = getFilePreview();
@@ -86,9 +89,11 @@
   const canViewResult = $derived(
     !!toolCallId && !!onLoadResult && (status === "complete" || status === "failed")
   );
+  // A document being written is shown in the panel instead of as parameters.
+  const writing = $derived(isActive && !!preview && draft ? draft : null);
   // The parameters are known as soon as the model has written them, so a
   // running call (a long image generation, say) already opens to its prompt.
-  const canExpand = $derived(hasArgs || canViewResult);
+  const canExpand = $derived(!writing && (hasArgs || canViewResult));
 
   const file = $derived(status === "complete" ? (document?.file ?? null) : null);
   const kind = $derived(file ? previewKindOf(file) : null);
@@ -192,14 +197,20 @@
   <div role={isActive ? "status" : undefined} aria-label={isActive ? runningLabel : undefined}>
     <button
       type="button"
-      class="group flex w-fit max-w-full items-start justify-start gap-2 text-left text-sm leading-tight transition-colors {isActive
+      class="group focus-visible:ring-accent-default flex w-fit max-w-full items-start justify-start gap-2 rounded-sm text-left text-sm leading-tight transition-colors focus-visible:ring-2 focus-visible:outline-none {isActive
         ? ''
-        : 'text-muted hover:text-secondary'} {canExpand ? 'cursor-pointer' : 'cursor-default'}"
+        : 'text-muted hover:text-secondary'} {canExpand || writing
+        ? 'cursor-pointer'
+        : 'cursor-default'}"
       onclick={() => {
-        if (canExpand) open = !open;
+        if (writing) preview?.showDraft(writing);
+        else if (canExpand) open = !open;
       }}
-      disabled={!canExpand}
-      aria-expanded={open}
+      disabled={!canExpand && !writing}
+      aria-expanded={writing ? undefined : open}
+      aria-label={writing
+        ? m.tool_step_show_draft({ name: writing.title || runningLabel })
+        : undefined}
     >
       {#if icon}
         <!-- The chip carries the failure, so no bare cross precedes the text. -->

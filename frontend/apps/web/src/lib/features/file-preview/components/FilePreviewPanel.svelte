@@ -203,10 +203,11 @@
   // document is read-only: the version saved is the text as it stood when the
   // reader asked, and a keystroke meanwhile would be lost with the editor.
   const saver = $derived(file ? (saverOf?.(file) ?? null) : null);
-  let saving = $state(false);
-  const editable = $derived(
-    !!saver && !!file && content?.kind === "markdown" && !draft && !later && !saving
-  );
+  const saving = $derived(preview.saving);
+  // Only the whole document can be edited: a preview cut short would be saved
+  // as the whole document, and the part beyond the cut lost.
+  const whole = $derived(content?.kind === "markdown" && !content.truncated);
+  const editable = $derived(!!saver && !!file && whole && !draft && !later && !saving);
   // What this version changed against the one before it, when asked for.
   const comparable = $derived(!!earlier && content?.kind === "markdown" && !draft);
   let previousMarkdown = $state<string | null>(null);
@@ -227,15 +228,15 @@
   let contentOf = $state<Record<string, FilePreviewContent>>({});
 
   async function saveAs(target: DocumentSaver, markdown: string) {
-    saving = true;
+    const request = preview.beginSave();
     try {
       const version = await target.save(markdown);
-      preview.saved(version, markdown);
+      request.apply(version, markdown);
       target.saved?.(version);
     } catch {
       toast.error(m.file_preview_save_failed());
     } finally {
-      saving = false;
+      request.finish();
     }
   }
 
@@ -249,9 +250,9 @@
   // An older version is read, not edited; its text can be brought forward as
   // the newest version instead, as the reader's edit of the latest one.
   const restorer = $derived(latest ? (saverOf?.(latest) ?? null) : null);
-  const restorable = $derived(!!restorer && content?.kind === "markdown" && !draft);
+  const restorable = $derived(!!restorer && whole && !draft);
   async function restoreVersion() {
-    if (!restorer || content?.kind !== "markdown" || saving) return;
+    if (!restorer || !restorable || content?.kind !== "markdown" || saving) return;
     await saveAs(restorer, content.text);
   }
 

@@ -7,6 +7,7 @@ import { ChangeHighlight } from "./changeHighlight";
 import { DocumentCodeBlock } from "./codeBlock";
 import { EneoImage } from "./eneoImage";
 import { PageBreak } from "./pageBreak";
+import { DocumentParagraph } from "./paragraph";
 import { PassageHighlight } from "./passageHighlight";
 import { RawHtml } from "./rawHtml";
 
@@ -36,7 +37,9 @@ export function documentExtensions({
 }: DocumentExtensionOptions = {}): Extensions {
   return [
     StarterKit.configure({
-      heading: { levels: [1, 2, 3] },
+      // The tools are asked for three levels, but a model writes deeper ones
+      // too, and a level the schema does not know is shown as the first it does.
+      heading: { levels: [1, 2, 3, 4, 5, 6] },
       underline: false,
       link: {
         openOnClick: false,
@@ -46,9 +49,11 @@ export function documentExtensions({
         isAllowedUri: (url, context) => context.defaultValidate(url) && isAllowedHref(url),
         shouldAutoLink: () => false
       },
-      // Replaced by the highlighted code block below.
-      codeBlock: false
+      // Replaced by the highlighted code block and the paragraph below.
+      codeBlock: false,
+      paragraph: false
     }),
+    DocumentParagraph,
     DocumentCodeBlock,
     TableKit.configure({ table: { resizable: false } }),
     TaskList,

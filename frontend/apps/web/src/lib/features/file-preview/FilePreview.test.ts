@@ -412,6 +412,62 @@ it("holds a newer version back while edits are unsaved and shows it when they ar
   expect(preview.dirty).toBe(false);
 });
 
+it("shows the finished document, not the draft it was, when edits are let go after the draft was asked for", async () => {
+  const preview = panel();
+  const document = { ...file, name: "report.md", mimetype: "text/markdown" };
+  vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
+  preview.open(document);
+  await vi.waitFor(() => expect(preview.status).toBe("ready"));
+  preview.setEdits(document.id, "# Edited\n");
+
+  preview.showDraft(draft);
+  expect(preview.pendingDiscard).not.toBeNull();
+  const finished = { ...document, id: "report-2" };
+  preview.arrive(finished, null, draft.callId);
+  await vi.waitFor(() => expect(preview.replacementContent).not.toBeNull());
+  preview.finishReplacement(finished.id);
+  expect(preview.file).toEqual(document);
+
+  preview.pendingDiscard?.proceed();
+  await vi.waitFor(() => expect(preview.status).toBe("ready"));
+  expect(preview.file).toEqual(finished);
+  expect(preview.draft).toBeNull();
+  expect(preview.dirty).toBe(false);
+});
+
+it("shows the draft as it stands when edits are let go, not as it was when asked for", async () => {
+  const preview = panel();
+  const document = { ...file, name: "report.md", mimetype: "text/markdown" };
+  vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
+  preview.open(document);
+  await vi.waitFor(() => expect(preview.status).toBe("ready"));
+  preview.setEdits(document.id, "# Edited\n");
+
+  preview.showDraft(draft);
+  preview.write({ ...draft, text: "Introduction and more" });
+  expect(preview.file).toEqual(document);
+
+  preview.pendingDiscard?.proceed();
+  expect(preview.file).toBeNull();
+  expect(preview.draft?.text).toBe("Introduction and more");
+});
+
+it("a save in flight no longer applies once a draft takes the panel", async () => {
+  const preview = panel();
+  const document = { ...file, name: "report.md", mimetype: "text/markdown" };
+  vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
+  preview.open(document);
+  await vi.waitFor(() => expect(preview.status).toBe("ready"));
+  const request = preview.beginSave();
+  expect(preview.saving).toBe(true);
+
+  preview.showDraft(draft);
+  expect(preview.saving).toBe(false);
+  expect(request.apply({ ...document, id: "report-2" }, "# Restored\n")).toBe(false);
+  expect(preview.file).toBeNull();
+  expect(preview.draft).toEqual(draft);
+});
+
 it("a save settles a question about discarding edits that was still open", async () => {
   const preview = panel();
   const document = { ...file, name: "report.md", mimetype: "text/markdown" };
@@ -427,4 +483,82 @@ it("a save settles a question about discarding edits that was still open", async
 
   expect(preview.pendingDiscard).toBeNull();
   expect(preview.shown).toBe(true);
+});
+
+it("shows a ready replacement when edits are undone to the saved text", async () => {
+  const preview = await existingPanel();
+  preview.setEdits(file.id, "Edited text");
+  preview.arrive(revision);
+  await vi.waitFor(() => expect(preview.replacementContent).not.toBeNull());
+  preview.finishReplacement(revision.id);
+  expect(preview.file).toEqual(file);
+
+  preview.setEdits(file.id, null);
+
+  expect(preview.file).toEqual(revision);
+  expect(preview.replacementFile).toBeNull();
+  expect(preview.editsOf(file)).toBeNull();
+  expect(preview.dirty).toBe(false);
+});
+
+it("waits for the replacement renderer if edits are undone before it is ready", async () => {
+  const preview = await existingPanel();
+  preview.setEdits(file.id, "Edited text");
+  preview.arrive(revision);
+  await vi.waitFor(() => expect(preview.replacementContent).not.toBeNull());
+
+  preview.setEdits(file.id, null);
+  expect(preview.file).toEqual(file);
+
+  preview.finishReplacement(revision.id);
+  expect(preview.file).toEqual(revision);
+});
+
+it("an older save cannot apply to a reopened file or clear a newer save", async () => {
+  const preview = await existingPanel();
+  const first = preview.beginSave();
+  expect(preview.saving).toBe(true);
+  preview.close();
+  expect(preview.saving).toBe(false);
+  preview.open(file);
+  const second = preview.beginSave();
+
+  expect(first.apply(revision, "Old save")).toBe(false);
+  first.finish();
+  expect(preview.saving).toBe(true);
+  expect(preview.file).toEqual(file);
+
+  expect(second.apply(revision, "Current save")).toBe(true);
+  second.finish();
+  expect(preview.file).toEqual(revision);
+  expect(preview.saving).toBe(false);
+});
+
+it("shows the document being written again when the reader asks, after closing it", () => {
+  const preview = panel();
+  preview.besideConversation = true;
+  preview.write(draft);
+  expect(preview.draft?.callId).toBe("one");
+  preview.close();
+  preview.write({ ...draft, text: "More" });
+  expect(preview.shown).toBe(false);
+
+  preview.showDraft({ ...draft, text: "More" });
+
+  expect(preview.draft?.text).toBe("More");
+  // The rest of the document follows into the panel again.
+  preview.write({ ...draft, text: "More still" });
+  expect(preview.draft?.text).toBe("More still");
+});
+
+it("shows the document being written on a narrow screen when the reader asks", () => {
+  const preview = panel();
+  preview.besideConversation = false;
+  preview.write(draft);
+  expect(preview.shown).toBe(false);
+
+  preview.showDraft(draft);
+
+  expect(preview.shown).toBe(true);
+  expect(preview.draft?.callId).toBe("one");
 });
