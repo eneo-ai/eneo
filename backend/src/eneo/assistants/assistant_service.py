@@ -2663,6 +2663,12 @@ class AssistantService:
                                         )
                             yield chunk
 
+                        if chunk.response_type == ResponseType.ERROR:
+                            # The adapter ends a failed answer with this event
+                            # instead of raising; the client needs it to tell
+                            # a cut-off answer from a finished one.
+                            yield chunk
+
                     # Get the references for the whole response
                     reference_chunks = get_references(
                         response_string=response_string,

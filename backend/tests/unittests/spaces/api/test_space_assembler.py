@@ -99,6 +99,43 @@ def test_space_hides_skill_permissions_from_api_keys(
     assert space_public.skill_permissions == []
 
 
+@pytest.mark.parametrize("kind", ["personal", "shared", "organization", "unlinked"])
+def test_public_space_exposes_organization_identity_without_organization_membership(
+    kind: str, space_assembler: SpaceAssembler
+):
+    organization_id = uuid4()
+    space_id = organization_id if kind == "organization" else uuid4()
+    parent_id = organization_id if kind in {"personal", "shared"} else None
+    space = Space(
+        id=space_id,
+        tenant_id=TEST_UUID,
+        tenant_space_id=parent_id,
+        user_id=TEST_UUID if kind in {"personal", "unlinked"} else None,
+        name=TEST_NAME,
+        description=None,
+        embedding_models=[],
+        completion_models=[],
+        transcription_models=[],
+        mcp_servers=[],
+        default_assistant=None,
+        assistants=[],
+        apps=[],
+        services=[],
+        websites=[],
+        collections=[],
+        integration_knowledge_list=[],
+        members={},
+    )
+
+    public_space = space_assembler.from_space_to_model(space)
+
+    expected_id = None if kind == "unlinked" else organization_id
+    assert public_space.organization_space_id == expected_id
+    assert public_space.model_dump(mode="json")["organization_space_id"] == (
+        str(expected_id) if expected_id is not None else None
+    )
+
+
 @pytest.fixture
 def space():
     space = MagicMock(

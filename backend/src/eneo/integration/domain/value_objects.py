@@ -60,6 +60,8 @@ class SyncMetadata(TypedDict, total=False):
     changed_total: int
     changed_truncated: bool
     changed_details: list[ChangedDetail]
+
+    failed_items: int
     reconcile_warning: str
     trigger: str
     recovery: str

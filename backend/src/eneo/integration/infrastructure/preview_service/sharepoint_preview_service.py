@@ -20,15 +20,6 @@ if TYPE_CHECKING:
     from eneo.integration.domain.entities.tenant_sharepoint_app import (
         TenantSharePointApp,
     )
-    from eneo.integration.domain.repositories.tenant_sharepoint_app_repo import (
-        TenantSharePointAppRepository,
-    )
-    from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
-        ServiceAccountAuthService,
-    )
-    from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import (
-        TenantAppAuthService,
-    )
     from eneo.integration.infrastructure.oauth_token_service import OauthTokenService
 
 logger = get_logger(__name__)
@@ -47,37 +38,10 @@ class SharePointPreviewService(BasePreviewService):
     def __init__(
         self,
         oauth_token_service: "OauthTokenService",
-        tenant_app_auth_service: Optional["TenantAppAuthService"] = None,
-        service_account_auth_service: Optional["ServiceAccountAuthService"] = None,
-        tenant_sharepoint_app_repo: Optional["TenantSharePointAppRepository"] = None,
-        org_token_provider: Optional[OrgTokenProvider] = None,
+        org_token_provider: OrgTokenProvider,
     ):
         super().__init__(oauth_token_service)
-        self.tenant_app_auth_service = tenant_app_auth_service
-        self.service_account_auth_service = service_account_auth_service
-        self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
         self.org_token_provider = org_token_provider
-
-    def _require_org_token_provider(self) -> OrgTokenProvider:
-        if self.org_token_provider is not None:
-            return self.org_token_provider
-        if self.tenant_sharepoint_app_repo is None:
-            raise ValueError("TenantSharePointAppRepository not configured")
-        from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
-            ServiceAccountAuthService,
-        )
-        from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import (
-            TenantAppAuthService,
-        )
-
-        self.org_token_provider = OrgTokenProvider(
-            tenant_app_repo=self.tenant_sharepoint_app_repo,
-            tenant_app_auth_service=self.tenant_app_auth_service
-            or TenantAppAuthService(),
-            service_account_auth_service=self.service_account_auth_service
-            or ServiceAccountAuthService(),
-        )
-        return self.org_token_provider
 
     @override
     async def get_preview_info(
@@ -123,7 +87,7 @@ class SharePointPreviewService(BasePreviewService):
         tenant_app: "TenantSharePointApp",
     ) -> List[IntegrationPreview]:
         """Get preview information from SharePoint using tenant app credentials"""
-        provider = self._require_org_token_provider()
+        provider = self.org_token_provider
         access_token = await provider.get_access_token(tenant_app)
         logger.info(
             "Organisation token acquired for preview",

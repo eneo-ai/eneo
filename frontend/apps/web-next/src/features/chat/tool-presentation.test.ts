@@ -26,6 +26,37 @@ describe("chat tool presentation", () => {
     expect(toolPresentation(call, t, true).label).toBe("tool_web_search_query_done:weather");
   });
 
+  it("names a function by its purpose and hides a provider built into Eneo", () => {
+    const bundled = {
+      toolName: "create_document",
+      providerMetadata: {
+        eneo: {
+          server_name: "Create a file",
+          title: "Create document",
+          purpose: "file_creation",
+          is_internal: false,
+          is_bundled: true
+        }
+      }
+    };
+    expect(toolPresentation(bundled, t, false)).toEqual({
+      label: "tool_file_creation",
+      server: "file_creation",
+      provider: null
+    });
+    expect(toolPresentation(bundled, t, true).label).toBe("tool_file_creation_done");
+
+    const external = {
+      toolName: "plot",
+      providerMetadata: { eneo: { server_name: "Plot Inc", purpose: "charts", is_internal: false } }
+    };
+    expect(toolPresentation(external, t, true)).toEqual({
+      label: "tool_charts_done",
+      server: "charts",
+      provider: "Plot Inc"
+    });
+  });
+
   it("distinguishes image edits from new image generation", () => {
     const call = {
       toolName: "draw",

@@ -19,12 +19,13 @@ from eneo.integration.infrastructure.auth_service.org_token_provider import (
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountTokenResult,
 )
+from eneo.integration.presentation.admin_models import TenantSharePointAppPublic
 from eneo.integration.presentation.admin_sharepoint_router import (
     OAUTH_STATE_PREFIX,
     _get_sharepoint_token_for_user_integration,
-    _pop_oauth_state,
     _require_sharepoint_webhook_client_state,
-    _store_oauth_state,
+    _to_app_public,
+    get_sharepoint_app,
     list_sharepoint_subscriptions,
     recreate_all_subscriptions,
     recreate_subscription,
@@ -187,29 +188,6 @@ async def test_token_helper_persists_rotated_service_account_refresh_token():
     assert token.access_token == "service-account-access-token"
     tenant_app.update_refresh_token.assert_called_once_with("new-refresh-token")
     tenant_app_repo.update.assert_called_once_with(tenant_app)
-
-
-@pytest.mark.asyncio
-async def test_oauth_state_is_encrypted_at_rest_and_single_use():
-    redis = _FakeRedis()
-    encryption = _encryption_service()
-    data = {"client_secret": "super-secret", "tenant_id": "t", "user_id": "u"}
-
-    await _store_oauth_state(redis, encryption, "state-1", data)
-
-    stored = redis.store[f"{OAUTH_STATE_PREFIX}state-1"]
-    assert "super-secret" not in stored
-    assert encryption.decrypt(stored) == json.dumps(data)
-    assert await _pop_oauth_state(redis, encryption, "state-1") == data
-    assert await _pop_oauth_state(redis, encryption, "state-1") is None
-
-
-@pytest.mark.asyncio
-async def test_pop_oauth_state_discards_blob_sealed_with_another_key():
-    redis = _FakeRedis()
-    await _store_oauth_state(redis, _encryption_service(), "state-1", {"a": "b"})
-
-    assert await _pop_oauth_state(redis, _encryption_service(), "state-1") is None
 
 
 def _callback_container(stored: dict[str, str], user_id, tenant_id):
@@ -412,6 +390,70 @@ async def test_recreate_all_recreates_every_tenant_subscription_and_reports_fail
     ] == [healthy, broken]
     assert (result.total_subscriptions, result.recreated, result.failed) == (2, 1, 1)
     assert str(broken.id) in result.errors[0]
+
+
+_LEAKY_ERROR = RuntimeError(
+    "GET https://graph.microsoft.com/v1.0/drives/d/items?access_token=abc failed"
+)
+
+
+@pytest.mark.asyncio
+async def test_recreate_all_reports_failures_without_internal_error_text():
+    container, user = _build_container_with_admin_user()
+    broken = MagicMock(id=uuid4())
+    broken.is_expired.return_value = False
+    broken.site_id, broken.drive_id = "site", "drive"
+    container.sharepoint_subscription_repo.return_value.list_by_tenant = AsyncMock(
+        return_value=[broken]
+    )
+    integration = MagicMock()
+    integration.tenant_integration.tenant_id = user.tenant_id
+    container.user_integration_repo.return_value.one_or_none = AsyncMock(
+        return_value=integration
+    )
+    container.sharepoint_subscription_service.return_value.require_webhook_configuration = MagicMock()
+
+    with patch(
+        f"{_ROUTER}._get_sharepoint_token_for_user_integration",
+        new=AsyncMock(side_effect=_LEAKY_ERROR),
+    ):
+        result = await recreate_all_subscriptions(container=container)
+
+    assert result.failed == 1
+    (error,) = result.errors
+    assert str(broken.id) in error
+    assert "access_token=abc" not in error
+    assert "https://graph.microsoft.com/v1.0/drives/d/items" in error
+
+
+@pytest.mark.asyncio
+async def test_unexpected_failures_answer_500_without_the_exception_text():
+    container, _ = _build_container_with_admin_user()
+    container.tenant_sharepoint_app_service.return_value.get_active_app_for_tenant = (
+        AsyncMock(side_effect=_LEAKY_ERROR)
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        await get_sharepoint_app(container=container)
+
+    assert exc_info.value.status_code == 500
+    assert exc_info.value.detail == "Failed to get SharePoint app"
+
+
+def test_stored_credential_errors_are_cleaned_when_served():
+    app = _service_account_app(uuid4())
+    app.last_auth_error = (
+        "HTTP 401 for url https://login.microsoftonline.com/t/token?client_secret=s"
+    )
+    encryption = MagicMock()
+    encryption.mask_secret.return_value = "****"
+
+    public = _to_app_public(app, encryption)
+
+    assert isinstance(public, TenantSharePointAppPublic)
+    assert public.last_auth_error is not None
+    assert "client_secret=s" not in public.last_auth_error
+    assert "https://login.microsoftonline.com/t/token" in public.last_auth_error
 
 
 @pytest.mark.asyncio

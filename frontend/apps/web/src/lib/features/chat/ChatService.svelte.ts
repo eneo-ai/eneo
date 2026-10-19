@@ -1,10 +1,11 @@
 import { browser } from "$app/environment";
 import { splitPendingInref } from "./inrefBuffer";
 import { PAGINATION } from "$lib/core/constants";
-import { toastError } from "$lib/core/errors";
+import { getAnswerFailureMessage, toastError } from "$lib/core/errors";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { waitFor } from "$lib/core/waitFor";
+import { m } from "$lib/paraglide/messages";
 import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
 import {
   type ConversationSparse,
@@ -779,6 +780,16 @@ export class ChatService {
       let requestOpened = false;
       let stopMirroringUploads: (() => void) | undefined;
 
+      const flushReceivedContent = () => {
+        // Drain both buffers before deciding whether an answer is empty or
+        // replacing it with an error. Repeated calls have nothing left to append.
+        this.#finalizeStream();
+        if (inrefBuffer) {
+          ref.answer += inrefBuffer;
+          inrefBuffer = "";
+        }
+      };
+
       const ensureCurrentSession = (event: { session_id: string }) => {
         if (event.session_id !== this.currentConversation.id) {
           abortController?.abort();
@@ -1109,6 +1120,7 @@ export class ChatService {
           if (index !== -1) this.currentConversation.messages.splice(index, 1);
         }
         if (isStale()) return;
+        flushReceivedContent();
 
         if (!requestOpened) {
           // Nothing was sent: propagate so ConversationInput can restore the
@@ -1131,12 +1143,17 @@ export class ChatService {
           console.error(error);
           throw error;
         } else {
-          // Error during streaming — show inline in the conversation
-          let message = "We encountered an error processing your request.";
-          if (error instanceof EneoError) {
-            message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
-          } else if (error instanceof Object && "message" in error && "name" in error) {
-            message += `\n\`\`\`\n${error.name}: "${error.message}"\n\`\`\``;
+          // Error during streaming — show inline in the conversation. A known
+          // reason says whose side failed; anything else keeps its details
+          // for a support report.
+          let message = getAnswerFailureMessage(error);
+          if (message === undefined) {
+            message = m.chat_answer_failed();
+            if (error instanceof EneoError) {
+              message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
+            } else if (error instanceof Object && "message" in error && "name" in error) {
+              message += `\n\`\`\`\n${error.name}: "${error.message}"\n\`\`\``;
+            }
           }
 
           this.currentConversation.messages[this.currentConversation.messages?.length - 1].answer =
@@ -1146,13 +1163,7 @@ export class ChatService {
       } finally {
         stopMirroringUploads?.();
         if (this.#streamGen === streamGen) {
-          // Flush the frame-buffered text first, then anything still held back
-          // as a possible <inref>, so the answer keeps its arrival order.
-          this.#finalizeStream();
-          if (ref && inrefBuffer) {
-            ref.answer += inrefBuffer;
-            inrefBuffer = "";
-          }
+          flushReceivedContent();
           this.#activeDiagnosticsStreamGeneration = null;
           if (this.debugPanelOpen) {
             void this.#confirmPendingDiagnosticsMessages();

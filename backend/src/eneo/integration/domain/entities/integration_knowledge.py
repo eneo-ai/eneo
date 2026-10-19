@@ -89,10 +89,11 @@ class IntegrationKnowledge(Entity):
         self.last_sync_error = None
         self.last_synced_at = at
 
-    def mark_sync_failed(self, error: str, at: datetime) -> None:
+    def mark_sync_failed(self, error: str) -> None:
+        # last_sync_attempted_at is the start of the attempt (mark_sync_started);
+        # a failure does not move it.
         self.last_sync_status = SYNC_STATUS_ERROR
         self.last_sync_error = error[:_MAX_SYNC_ERROR_LENGTH]
-        self.last_sync_attempted_at = at
 
     @property
     def integration_type(self) -> str:

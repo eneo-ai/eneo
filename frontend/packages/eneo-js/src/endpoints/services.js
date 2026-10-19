@@ -51,18 +51,17 @@ export function initServices(client) {
     /**
      * Transfer an service into a different space. Needs matching models to be available
      * Will throw error if not possible
-     * @param {{service: {id: string}, targetSpace: {id: string}, moveResources?: boolean}} params
+     * @param {{service: {id: string}, targetSpace: {id: string}}} params
      * @throws {EneoError}
      * */
-    transfer: async ({ service, targetSpace, moveResources }) => {
+    transfer: async ({ service, targetSpace }) => {
       const { id } = service;
       await client.fetch("/api/v1/services/{id}/transfer/", {
         method: "post",
         params: { path: { id } },
         requestBody: {
           "application/json": {
-            target_space_id: targetSpace.id,
-            move_resources: moveResources
+            target_space_id: targetSpace.id
           }
         }
       });

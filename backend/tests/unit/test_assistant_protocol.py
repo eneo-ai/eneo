@@ -221,3 +221,21 @@ def test_tool_approval_sse_requires_real_approval_id():
             ),
             uuid4(),
         )
+
+
+def test_error_sse_says_why_the_answer_failed():
+    event = to_sse_response(
+        Completion(
+            response_type=ResponseType.ERROR,
+            error="The AI provider could not be reached. Please try again later.",
+            error_code=503,
+            error_reason="provider_unreachable",
+            stop=True,
+        ),
+        uuid4(),
+    )
+
+    data = json.loads(event.data)
+    assert event.event == "error"
+    assert data["error_code"] == 503
+    assert data["code"] == "provider_unreachable"

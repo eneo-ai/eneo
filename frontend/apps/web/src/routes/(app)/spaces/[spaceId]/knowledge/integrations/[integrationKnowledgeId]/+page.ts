@@ -1,5 +1,5 @@
 import { error, redirect } from "@sveltejs/kit";
-import type { IntegrationKnowledge } from "@eneo/eneo-js";
+import { findIntegrationItems } from "$lib/features/integrations/integrationItems";
 import { sourceHref, type SourceTab } from "$lib/features/integrations/sources";
 
 /** The wrapper page's tab for a tab of the item page; the skipped files moved to Problems. */
@@ -10,12 +10,13 @@ function wrapperTab(tab: string | null): SourceTab | undefined {
 }
 
 export const load = async (event) => {
-  const { currentSpace } = await event.parent();
+  const { eneo, currentSpace } = await event.parent();
   const integrationKnowledgeId = event.params.integrationKnowledgeId;
 
-  const items: IntegrationKnowledge[] =
-    currentSpace.knowledge.integration_knowledge_list?.items ?? [];
-  const knowledge = items.find(
+  // The layout's space predates an import made since; such an item is only on the server.
+  const [knowledge] = await findIntegrationItems(
+    eneo,
+    currentSpace,
     (item) => item.id === integrationKnowledgeId && item.space_id === currentSpace.id
   );
   if (!knowledge) {
@@ -41,5 +42,5 @@ export const load = async (event) => {
     throw redirect(307, `${event.url.pathname}?tab=problems`);
   }
 
-  return { knowledgeId: knowledge.id };
+  return { knowledge };
 };

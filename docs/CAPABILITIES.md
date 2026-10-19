@@ -11,9 +11,12 @@ run through a configured image model or an external MCP server; web search
 uses an external server; file analysis, file creation, charts and compute run in the
 bundled tool runtime or an external MCP server.
 
-For the relationship between Skills, Functions, providers, interactive MCP Apps
-and native document views, see the docs site's
-[Architecture](../frontend/apps/docs-site/src/content/docs/architecture.mdx#skills-functions-tools-and-views).
+For the three places a provider can run, the relationship between Skills,
+Functions, providers, interactive MCP Apps and native document views, and the
+reasons behind that split, see the docs site's
+[Tools and MCP Architecture](../frontend/apps/docs-site/src/content/docs/tool-architecture.mdx).
+The runtime's isolation is described in
+[Tool Runtime Security](../frontend/apps/docs-site/src/content/docs/tool-runtime-security.mdx).
 The [Functions guide](../frontend/apps/docs-site/src/content/guides/capabilities.mdx)
 owns user workflows and UI instructions; this page records the contributor contract.
 
@@ -193,7 +196,7 @@ Adding a capability requires:
 
 All admin, space, assistant and chat surfaces render from those lists.
 
-Whether a capability should be served by a built-in loopback server at all, and which attachment pattern it should use, is covered in the docs site page **Built-in Tool Servers** (`frontend/apps/docs-site/src/content/docs/builtin-tool-servers.mdx`). The rule in short: a loopback tool is a pure function of the request, the tenant database and at most one outbound provider call, finishing inside a tool-call timeout; anything with a runtime footprint (engine, process, storage, heavy dependency) runs outside the backend, as an Eneo-bundled isolated provider in the tool runtime or an independently operated MCP server, and receives the signed reference URL.
+Whether a capability should be served by a built-in loopback server at all, and which attachment pattern it should use, is covered in the docs site page **Built-in Tool Servers** (`frontend/apps/docs-site/src/content/docs/builtin-tool-servers.mdx`); the reasoning behind the split between loopback, bundled and external providers is in **Tools and MCP Architecture** (`frontend/apps/docs-site/src/content/docs/tool-architecture.mdx`). The rule in short: a loopback tool is a pure function of the request, the tenant database and at most one outbound provider call, finishing inside a tool-call timeout; anything with a runtime footprint (engine, process, storage, heavy dependency) runs outside the backend, as an Eneo-bundled isolated provider in the tool runtime or an independently operated MCP server, and receives the signed reference URL.
 
 
 ## 6. Deployment and client changes

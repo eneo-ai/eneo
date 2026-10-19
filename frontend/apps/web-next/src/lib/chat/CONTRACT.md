@@ -149,7 +149,7 @@ stream. The SDK keeps it as a `source-document` part in stream order
   "url": "<base>/api/v1/files/<id>/download/?token=<signed>",
   "mediaType": "image/png",
   "filename": "generated.png",
-  "providerMetadata": { "eneo": {/* FilePublic */} }
+  "providerMetadata": { "eneo": {/* FilePublic */, "tool_call_id": "call-1" } }
 }
 ```
 
@@ -157,6 +157,13 @@ stream. The SDK keeps it as a `source-document` part in stream order
 only `mediaType`, `url` and `providerMetadata` on the part — **`filename` is
 dropped**, so read the name from `providerMetadata.eneo.name`. The file part
 may arrive while a text part is still open.
+
+`providerMetadata.eneo` is the `FilePublic` dump followed by `tool_call_id`:
+the tool call that produced the file (an image, a generated document), or
+`null` when unknown. A client places the file with that call (for example a
+Markdown document in the document workspace). Typed as `EneoFileMetadata`
+(`types.ts`). In history the link runs the other way: the persisted call
+lists its files in `generated_file_ids`.
 
 ### Tool calls (`dynamic-tool` parts)
 
@@ -167,29 +174,63 @@ results. All tool parts carry `dynamic: true`, `toolCallId` and
 ```json
 "providerMetadata": { "eneo": {
   "server_name": "files", "title": "Read a file", "purpose": null,
-  "is_internal": true
+  "is_internal": true, "is_bundled": null, "app_view": null,
+  "approved": null, "result_status": "succeeded"
 } }
 ```
 
-`purpose` names the capability a provider serves (`"web_search"`,
-`"image_generation"`) or is null. `is_internal` (`true`/`false`/`null`)
-says whether the call ran on one of Eneo's own servers, stamped by the
-server the call was **routed** to — never inferred from `server_name`,
-which an admin may set to "files" or "knowledge" on an external server.
-`null` means the backend did not know (older rows).
+The keys always come in this order (typed as `EneoToolMetadata` in
+`types.ts`); each chunk carries the values of the snapshot it came from.
 
-| Part                    | Extra fields                        | Emitted when `result_status` is                           |
-| ----------------------- | ----------------------------------- | --------------------------------------------------------- |
-| `tool-input-available`  | `toolName`, `input` (arguments)     | Always first for a call, whatever its status (see below). |
-| `tool-output-available` | `output: { "status": "succeeded" }` | `succeeded`                                               |
-| `tool-output-error`     | `errorText: <result_status>`        | `failed`, `denied`, `timeout_denied`                      |
+- `purpose` names the capability a provider serves (`"web_search"`,
+  `"image_generation"`) or is null.
+- `is_internal` (`true`/`false`/`null`) says whether the call ran on one of
+  Eneo's own servers, stamped by the server the call was **routed** to —
+  never inferred from `server_name`, which an admin may set to "files" or
+  "knowledge" on an external server. `null` means the backend did not know
+  (older rows).
+- `is_bundled` says whether the call ran on a server built into Eneo (the
+  bundled tool runtime), decided by the server's auth type.
+- `app_view` is the tool's approved MCP App view,
+  `{ "view_id", "mcp_server_id", "ui" }` (`ui` is the view's render policy,
+  e.g. `{ "prefersBorder": true }`), or `null`. It is known from the
+  announcement on, so a client can open the view while the arguments are
+  still being written.
+- `approved` (`true`/`false`/`null`) and `result_status` are the snapshot's
+  approval and execution status (`pending`, `approved`, `succeeded`,
+  `failed`, `denied`, `timeout_denied`, or `null`).
+
+| Part                    | Extra fields                        | Emitted when                                                                                                            |
+| ----------------------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `tool-input-start`      | `toolName`                          | The call is announced before its arguments are written (`arguments` null, not finished). At most once, and only first.  |
+| `tool-input-delta`      | `inputTextDelta` (no metadata)      | The next piece of the argument JSON of a started call whose input is not yet available.                                 |
+| `tool-input-available`  | `toolName`, `input` (arguments)     | The first snapshot with arguments, or any first snapshot that is already finished. Once, always before the output part. |
+| `tool-output-available` | `output: { "status": "succeeded" }` | `result_status` is `succeeded`                                                                                          |
+| `tool-output-error`     | `errorText: <result_status>`        | `result_status` is `failed`, `denied`, `timeout_denied`                                                                 |
+
+A streamed call therefore reads, for example:
+
+```text
+tool-input-start      { toolCallId: "call-doc", toolName: "create_document", eneo: { app_view: {…}, result_status: "pending" } }
+tool-input-delta      { toolCallId: "call-doc", inputTextDelta: "{\"title\": \"Pl" }
+tool-input-delta      { toolCallId: "call-doc", inputTextDelta: "an\"}" }
+tool-input-available  { toolCallId: "call-doc", input: { title: "Plan" }, … }
+tool-output-available { toolCallId: "call-doc", output: { status: "succeeded" }, … }
+```
 
 Rules:
 
 - `toolCallId` is the provider's tool call id. A snapshot entry without one
   gets a generated uuid that stays stable for its position in the list.
 - Each `(toolCallId, part type)` pair is emitted **once**; repeated
-  snapshots add nothing.
+  snapshots add nothing. A `tool-input-start` is never sent after the
+  call's `tool-input-available` (it would put a known input back into
+  streaming).
+- `tool-input-delta` is sent only between a call's `tool-input-start` and
+  its `tool-input-available`. Deltas for a call that was never started (the
+  SDK throws on those) and deltas after the input is available (the
+  complete arguments supersede them) are dropped. A call whose first
+  snapshot already has its arguments has no start and no deltas.
 - `tool-input-available` **always precedes** an output part for the same
   id. The SDK throws (`No tool invocation found…`) for an output it has not
   seen the input of; before this contract a denied approval produced exactly
@@ -198,8 +239,11 @@ Rules:
 - `result_status: "approved"` (the call was approved and is about to run) is
   an input-phase status: only `tool-input-available` is emitted for it.
 - The SDK projects the call to one `dynamic-tool` part updated in place:
-  `state` is `input-available` → `output-available` | `output-error`;
-  `callProviderMetadata` holds the metadata from the input part,
+  `state` is `input-streaming` (after `tool-input-start`; `input` is
+  `undefined`, then the partially parsed argument JSON after each delta) →
+  `input-available` → `output-available` | `output-error`;
+  `callProviderMetadata` holds the metadata from the latest input part
+  (`tool-input-start`, then `tool-input-available`; deltas carry none),
   `resultProviderMetadata` the one from the output part.
 
 The client never executes tools: `useChat` has no `onToolCall`, and the
@@ -286,8 +330,11 @@ is on `message.metadata`: `mcpToolReferences`, `generatedFiles`,
 
 Persisted tool parts map `result_status` to `state: "output-available"`
 (`succeeded` or missing) or `"output-error"` with `errorText = result_status`,
-`output: { status }`, and carry `server_name`, `title`, `purpose`,
-`is_internal` and `approved` in `providerMetadata.eneo`.
+`output: { status }`, and carry the same keys as a streamed call in
+`providerMetadata.eneo` (`server_name`, `title`, `purpose`, `is_internal`,
+`is_bundled`, `app_view`, `approved`, `result_status`), plus
+`generated_file_ids` (the files the call produced). A key the row lacks is
+`null`.
 
 ## Ordering guarantees
 
@@ -299,6 +346,8 @@ Persisted tool parts map `result_status` to `state: "output-available"`
    - for a tool-call snapshot: approval decisions (`data-tool-approval`
      updates), then `data-mcp-tool-references`, then the tool parts (input
      before output per call);
+   - `tool-input-delta` parts where the model writes a started call's
+     arguments;
    - `data-tool-approval` (`pending`, `timeout_denied`) at the moment the
      backend pauses / gives up;
    - `file` parts where the adapter produced them;
@@ -409,6 +458,8 @@ turn each:
 | `tool-approval-denied`   | `finish`  | `pending` → `denied` → input + `tool-output-error "denied"`.         |
 | `tool-approval-timeout`  | `finish`  | `pending` → `timeout_denied` → `tool-output-error "timeout_denied"`. |
 | `file-part`              | `finish`  | Generated image with a signed url (token pinned to `fixture-token`). |
+| `generated-document`     | `finish`  | A bundled call's Markdown `file` part, `tool_call_id` set.           |
+| `tool-input-streaming`   | `finish`  | View-bearing bundled call: start → two deltas → input → output.      |
 | `sources`                | `finish`  | Pre-retrieved and in-stream citations, deduplicated.                 |
 | `cancelled-mid-stream`   | truncated | The prefix a cancelled client saw: no `finish`, no `[DONE]`.         |
 | `backend-error`          | `error`   | Partial text, `data-error` + `error`, then the trailing close.       |

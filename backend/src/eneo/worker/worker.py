@@ -21,6 +21,7 @@ from eneo.main.container.container import Container, SessionProxy
 from eneo.main.container.container_overrides import override_user
 from eneo.main.logging import get_logger
 from eneo.main.models import ChannelType
+from eneo.observability.error_text import user_visible_error
 from eneo.redis.connection import build_arq_redis_settings
 from eneo.server.dependencies import lifespan
 from eneo.worker.task_manager import TaskManager, WorkerConfig
@@ -450,7 +451,9 @@ class Worker:
     ) -> None:
         """Record the failure in a fresh session so the job is not left pending
         until the reaper finds it."""
-        message = (str(exc).strip() or type(exc).__name__)[:512]
+        # JobPublic serves the result of a failed integration task as its
+        # failure message; a commit error carries SQL with bound values.
+        message = user_visible_error(exc)
         try:
             async with sessionmanager.session() as session, session.begin():
                 container = await self._create_container(session, user_id=user_id)

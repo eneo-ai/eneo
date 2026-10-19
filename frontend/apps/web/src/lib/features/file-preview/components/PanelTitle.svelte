@@ -9,7 +9,7 @@
   import { m } from "$lib/paraglide/messages";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import type { FilePreview } from "../FilePreview.svelte";
-  import type { PanelContents } from "../panelContents";
+  import { panelContentsCount, type PanelContents } from "../panelContents";
   import PanelContentsList from "./PanelContentsList.svelte";
 
   let {
@@ -26,9 +26,7 @@
     contents?: PanelContents;
   } = $props();
 
-  const count = $derived(
-    contents ? contents.views.length + contents.documents.length + contents.uploads.length : 0
-  );
+  const count = $derived(panelContentsCount(contents));
 
   let open = $state(false);
   let trigger = $state<HTMLElement | null>(null);

@@ -204,6 +204,8 @@ export function IntegrationItemsTable({
       key: "link",
       header: t("link"),
       width: proportional(1),
+      // The backend serves an item's source only as an absolute https URL;
+      // an item without one gets no link rather than a dead one.
       renderCell: ({ row }) =>
         row.kind === "item" && row.item.url ? (
           <AstryxLink href={row.item.url} isExternalLink color="secondary">

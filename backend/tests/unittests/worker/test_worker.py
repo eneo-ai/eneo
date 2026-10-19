@@ -308,3 +308,41 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
     recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
         job_id, "storage quota exceeded"
     )
+
+
+async def test_commit_failure_is_recorded_without_the_statement(monkeypatch) -> None:
+    """The recorded text is served to users as the failure message of an
+    integration task, so a database error must not carry its SQL."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from sqlalchemy.exc import IntegrityError
+
+    from eneo.worker import worker as worker_module
+
+    db = MagicMock()
+    db.begin.return_value = _AsyncContext()
+    monkeypatch.setattr(
+        worker_module,
+        "sessionmanager",
+        SimpleNamespace(session=lambda: _AsyncContext(db)),
+    )
+    container = MagicMock()
+    container.job_service.return_value = AsyncMock()
+    worker = worker_module.Worker()
+
+    async def create_container(session, user_id=None):
+        return container
+
+    monkeypatch.setattr(worker, "_create_container", create_container)
+    error = IntegrityError(
+        "INSERT INTO info_blobs (title) VALUES (%(title)s)",
+        {"title": "Lönelista 2026"},
+        Exception("duplicate key"),
+    )
+
+    await worker._fail_job_after_commit_error(uuid4(), None, error)
+
+    container.job_service.return_value.fail_job.assert_awaited_once()
+    message = container.job_service.return_value.fail_job.await_args.args[1]
+    assert message == "Database error"

@@ -2,6 +2,8 @@ import type { IntegrationKnowledge } from "@eneo/eneo-js";
 import { get } from "svelte/store";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  PENDING_IMPORTS_STORAGE_KEY,
+  createPendingImports,
   describeImportOutcome,
   pendingImports,
   settledImports,
@@ -22,6 +24,20 @@ function knowledge(metadata: Partial<Metadata>): IntegrationKnowledge {
 
 function pending(jobId: string): PendingImport {
   return { jobId, knowledgeId: `ik-${jobId}`, name: jobId, spaceRouteId: "space-1" };
+}
+
+function fakeStorage(): Storage {
+  const entries = new Map<string, string>();
+  return {
+    getItem: (key) => entries.get(key) ?? null,
+    setItem: (key, value) => void entries.set(key, value),
+    removeItem: (key) => void entries.delete(key),
+    clear: () => entries.clear(),
+    key: () => null,
+    get length() {
+      return entries.size;
+    }
+  };
 }
 
 describe("pending imports", () => {
@@ -45,6 +61,48 @@ describe("pending imports", () => {
       ]
     );
     expect(settled.map((item) => item.jobId)).toEqual(["b", "c", "d"]);
+  });
+
+  it("does not count a missing job as finished before the job list has loaded", () => {
+    const items = [pending("a"), pending("b")];
+    const jobs = [{ id: "a", status: "complete" as const }];
+    expect(settledImports(items, jobs, false).map((item) => item.jobId)).toEqual(["a"]);
+    expect(settledImports(items, jobs, true).map((item) => item.jobId)).toEqual(["a", "b"]);
+  });
+
+  it("restores the imports an earlier page load stored and clears them once reported", () => {
+    const storage = fakeStorage();
+    createPendingImports(storage).set([pending("a")]);
+
+    const restored = createPendingImports(storage);
+    expect(get(restored)).toEqual([pending("a")]);
+
+    restored.set([]);
+    expect(storage.getItem(PENDING_IMPORTS_STORAGE_KEY)).toBeNull();
+  });
+
+  it("starts empty when the stored list is unreadable or storage is unavailable", () => {
+    const garbage = fakeStorage();
+    garbage.setItem(PENDING_IMPORTS_STORAGE_KEY, "{not json");
+    expect(get(createPendingImports(garbage))).toEqual([]);
+
+    const partial = fakeStorage();
+    partial.setItem(PENDING_IMPORTS_STORAGE_KEY, JSON.stringify([{ jobId: "a" }, pending("b")]));
+    expect(get(createPendingImports(partial))).toEqual([pending("b")]);
+
+    const blocked: Storage = {
+      ...fakeStorage(),
+      getItem: () => {
+        throw new Error("blocked");
+      },
+      setItem: () => {
+        throw new Error("blocked");
+      }
+    };
+    const store = createPendingImports(blocked);
+    store.set([pending("c")]);
+    expect(get(store)).toEqual([pending("c")]);
+    expect(get(createPendingImports(null))).toEqual([]);
   });
 });
 

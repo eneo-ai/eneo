@@ -166,6 +166,21 @@ def test_exceptions_are_described_by_their_kind(error, expected):
             id="relative-url-parameters",
         ),
         pytest.param(
+            "status code=429, retry key=12345678, sig=ab",
+            "status code=429, retry key=12345678, sig=ab",
+            id="short-keys-naming-plain-fields",
+        ),
+        pytest.param(
+            "code=0.AXsAbCdEf-ghij&key=AbCdEfGh1&sig=abcdefgh",
+            "code=[redacted]&key=[redacted]&sig=[redacted]",
+            id="short-keys-with-token-values",
+        ),
+        pytest.param(
+            "api_key=ab token=1 secret=x",
+            "api_key=[redacted] token=[redacted] secret=[redacted]",
+            id="credential-keys-redacted-whatever-the-value",
+        ),
+        pytest.param(
             "headers={'Authorization': 'Bearer graph-token', 'Accept': 'json'}",
             "headers={'Authorization': '[redacted]', 'Accept': 'json'}",
             id="authorization-header",
@@ -238,6 +253,13 @@ def test_long_text_is_capped():
 
     assert len(text) == MAX_ERROR_TEXT_LENGTH
     assert text.startswith("Error: x") and text.endswith("…")
+
+
+def test_very_long_text_is_scanned_only_as_far_as_the_cap_can_show():
+    text = user_visible_error("x" * 100_000 + f" {SIGNED_URL}")
+
+    assert len(text) == MAX_ERROR_TEXT_LENGTH
+    assert "tempauth" not in text
 
 
 def test_nothing_secret_survives_any_path():

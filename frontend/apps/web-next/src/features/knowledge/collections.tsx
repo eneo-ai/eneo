@@ -14,7 +14,7 @@ import {
 import { Table } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { FolderClosed, FolderInput, Pencil, SearchX, Trash2 } from "lucide-react";
+import { FolderClosed, Pencil, SearchX, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
@@ -47,7 +47,6 @@ import {
   COLLECTION_DEFAULT_SORT,
   type CollectionSortKey
 } from "./knowledge-sort";
-import { MoveResourceDialog } from "./move-dialog";
 import { NoCreatePermissionInfo } from "./no-create-permission-info";
 import { filterCollections } from "./table-controls";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
@@ -204,13 +203,11 @@ export function CreateCollectionButton() {
   );
 }
 
-/** Row menu for a collection: rename, move to another space, delete. */
+/** Row menu for a collection: rename, delete. */
 export function CollectionActions({ collection }: { collection: Collection }) {
   const t = useTranslations();
-  const { space } = useSpace();
   const invalidateSpace = useInvalidateSpace();
   const [showEdit, setShowEdit] = useState(false);
-  const [showMove, setShowMove] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
 
   const canDelete = collection.permissions?.includes("delete") ?? false;
@@ -224,29 +221,8 @@ export function CollectionActions({ collection }: { collection: Collection }) {
     onRemoved: () => setShowDelete(false)
   });
 
-  const moveCollection = useRemovalMutation({
-    mutationFn: (targetSpaceId: string) =>
-      unwrap(
-        browserApi.POST("/api/v1/groups/{id}/transfer/", {
-          params: { path: { id: collection.id } },
-          body: { target_space_id: targetSpaceId }
-        })
-      ),
-    refresh: invalidateSpace,
-    onRemoved: () => setShowMove(false)
-  });
-
   const items: DropdownMenuOption[] = [
     { label: t("edit"), icon: <Pencil aria-hidden="true" />, onClick: () => setShowEdit(true) },
-    ...(canDelete && !space.organization
-      ? [
-          {
-            label: t("move"),
-            icon: <FolderInput aria-hidden="true" />,
-            onClick: () => setShowMove(true)
-          }
-        ]
-      : []),
     ...(canDelete
       ? [
           {
@@ -269,15 +245,6 @@ export function CollectionActions({ collection }: { collection: Collection }) {
       {showEdit && (
         <CollectionDialog collection={collection} open={showEdit} onOpenChange={setShowEdit} />
       )}
-      <MoveResourceDialog
-        open={showMove}
-        onOpenChange={setShowMove}
-        title={t("move_collection")}
-        hint={t("move_collection_hint")}
-        confirmLabel={t("move_collection")}
-        pending={moveCollection.isPending}
-        onMove={(targetSpaceId) => moveCollection.mutate(targetSpaceId)}
-      />
       {showDelete && (
         <ConfirmDialogControlled
           open={showDelete}

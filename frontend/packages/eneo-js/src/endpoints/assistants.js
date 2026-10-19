@@ -60,18 +60,17 @@ export function initAssistants(client) {
     /**
      * Transfer an assistant into a different space. Needs matching models to be available
      * Will throw error if not possible
-     * @param {{assistant: {id: string}, targetSpace: {id: string}, moveResources?: boolean}} params
+     * @param {{assistant: {id: string}, targetSpace: {id: string}}} params
      * @throws {EneoError}
      * */
-    transfer: async ({ assistant, targetSpace, moveResources }) => {
+    transfer: async ({ assistant, targetSpace }) => {
       const { id } = assistant;
       await client.fetch("/api/v1/assistants/{id}/transfer/", {
         method: "post",
         params: { path: { id } },
         requestBody: {
           "application/json": {
-            target_space_id: targetSpace.id,
-            move_resources: moveResources
+            target_space_id: targetSpace.id
           }
         }
       });

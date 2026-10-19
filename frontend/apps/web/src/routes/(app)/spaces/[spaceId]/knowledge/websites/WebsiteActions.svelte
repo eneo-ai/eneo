@@ -2,12 +2,10 @@
   import { type WebsiteSparse } from "@eneo/eneo-js";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import { IconEdit } from "@eneo/icons/edit";
-  import { IconMove } from "@eneo/icons/move";
   import { IconTrash } from "@eneo/icons/trash";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
-  import MoveToSpaceDialog from "$lib/features/spaces/components/MoveToSpaceDialog.svelte";
   import WebsiteEditor from "./WebsiteEditor.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getEneo } from "$lib/core/Eneo";
@@ -17,12 +15,7 @@
   export let website: WebsiteSparse;
 
   const eneo = getEneo();
-  const {
-    refreshCurrentSpace,
-    state: { currentSpace }
-  } = getSpacesManager();
-
-  $: isOrgSpace = $currentSpace.organization === true;
+  const { refreshCurrentSpace } = getSpacesManager();
 
   async function deleteWebsite() {
     const result = await eneo.websites.bulkDelete({ website_ids: [website.id] });
@@ -41,14 +34,8 @@
     await refreshCurrentSpace("knowledge");
   }
 
-  async function moveWebsite(targetSpace: { id: string }) {
-    await eneo.websites.transfer({ website, targetSpace });
-    refreshCurrentSpace();
-  }
-
   let showEditDialog = false;
   let showDeleteDialog = false;
-  let showMoveDialog = false;
 </script>
 
 <DropdownMenu.Root>
@@ -65,11 +52,6 @@
       {m.edit()}
     </DropdownMenu.Item>
     {#if website.permissions?.includes("delete")}
-      {#if !isOrgSpace}
-        <DropdownMenu.Item onSelect={() => (showMoveDialog = true)}>
-          <IconMove size="sm" />{m.move()}
-        </DropdownMenu.Item>
-      {/if}
       <DropdownMenu.Item variant="destructive" onSelect={() => (showDeleteDialog = true)}>
         <IconTrash size="sm" />{m.delete()}
       </DropdownMenu.Item>
@@ -92,11 +74,3 @@
 </ConfirmDialog>
 
 <WebsiteEditor mode="update" {website} bind:showDialog={showEditDialog}></WebsiteEditor>
-
-<MoveToSpaceDialog
-  bind:open={showMoveDialog}
-  title={m.move_website()}
-  submitLabel={m.move_website()}
-  hint={m.move_website_hint()}
-  onMove={moveWebsite}
-/>

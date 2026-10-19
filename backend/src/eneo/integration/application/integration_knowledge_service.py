@@ -152,8 +152,8 @@ class IntegrationKnowledgeService:
         sharepoint_subscription_service: "SharePointSubscriptionService",
         tenant_sharepoint_app_repo: TenantSharePointAppRepositoryProtocol,
         tenant_app_auth_service: "TenantAppAuthService",
+        org_token_provider: "OrgTokenProvider",
         service_account_auth_service: "ServiceAccountAuthService | None" = None,
-        org_token_provider: "OrgTokenProvider | None" = None,
     ) -> None:
         super().__init__()
         self.job_service = job_service
@@ -294,24 +294,7 @@ class IntegrationKnowledgeService:
         self, tenant_app: "TenantSharePointApp"
     ) -> str:
         """Resolve tenant app access token and persist service-account token rotation."""
-        if self.org_token_provider is not None:
-            return await self.org_token_provider.get_access_token(tenant_app)
-        if tenant_app.is_service_account() and not self.service_account_auth_service:
-            raise BadRequestException("ServiceAccountAuthService not configured")
-        from eneo.integration.infrastructure.auth_service.org_token_provider import (
-            OrgTokenProvider,
-        )
-        from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
-            ServiceAccountAuthService,
-        )
-
-        provider = OrgTokenProvider(
-            tenant_app_repo=self.tenant_sharepoint_app_repo,
-            tenant_app_auth_service=self.tenant_app_auth_service,
-            service_account_auth_service=self.service_account_auth_service
-            or ServiceAccountAuthService(),
-        )
-        return await provider.get_access_token(tenant_app)
+        return await self.org_token_provider.get_access_token(tenant_app)
 
     async def create_space_integration_knowledge(
         self,
@@ -599,14 +582,15 @@ class IntegrationKnowledgeService:
 
         space = await self.space_repo.one(id=space_id)
 
+        # Membership is checked before the item is looked up so a non-member
+        # cannot probe which items a space holds.
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_delete_integrations():
+            raise UnauthorizedException()
+
         knowledge = space.get_integration_knowledge(
             integration_knowledge_id=integration_knowledge_id
         )
-
-        actor = self.actor_manager.get_space_actor_from_space(space)
-
-        if not actor.can_delete_integrations():
-            raise UnauthorizedException()
 
         # SECURITY: tenant_app integrations require admin permission
         if knowledge.user_integration.auth_type == "tenant_app":
@@ -694,13 +678,13 @@ class IntegrationKnowledgeService:
     ) -> "JobInDb":
         """Trigger a full resync for an existing SharePoint integration knowledge."""
         space = await self.space_repo.one(id=space_id)
-        knowledge = space.get_integration_knowledge(
-            integration_knowledge_id=integration_knowledge_id
-        )
-
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_edit_integrations():
             raise UnauthorizedException()
+
+        knowledge = space.get_integration_knowledge(
+            integration_knowledge_id=integration_knowledge_id
+        )
 
         if knowledge.space_id != space.id:
             raise UnauthorizedException(
@@ -814,14 +798,13 @@ class IntegrationKnowledgeService:
     ) -> IntegrationKnowledge:
         """Update the name of an integration knowledge item."""
         space = await self.space_repo.one(id=space_id)
-        # Verify the knowledge exists in this space (for permission check)
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_edit_integrations():
+            raise UnauthorizedException()
+
         space_knowledge = space.get_integration_knowledge(
             integration_knowledge_id=integration_knowledge_id
         )
-        actor = self.actor_manager.get_space_actor_from_space(space)
-
-        if not actor.can_edit_integrations():
-            raise UnauthorizedException()
 
         # SECURITY: tenant_app integrations require admin permission
         if space_knowledge.user_integration.auth_type == "tenant_app":
@@ -843,7 +826,9 @@ class IntegrationKnowledgeService:
             id=integration_knowledge_id
         )
         knowledge.name = name
-        return await self.integration_knowledge_repo.update(knowledge)
+        knowledge = await self.integration_knowledge_repo.update(knowledge)
+        await self.integration_knowledge_repo.attach_document_counts([knowledge])
+        return knowledge
 
     async def _get_owned_wrapper_knowledge(
         self,
@@ -906,6 +891,7 @@ class IntegrationKnowledgeService:
             updated_items.append(
                 await self.integration_knowledge_repo.update(knowledge)
             )
+        await self.integration_knowledge_repo.attach_document_counts(updated_items)
 
         return updated_items
 

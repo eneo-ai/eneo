@@ -3,6 +3,8 @@
 import pytest
 from pydantic import ValidationError
 
+from eneo.integration.presentation.models import IntegrationKnowledgePublic
+from eneo.integration.presentation.validation import https_url_or_none
 from eneo.spaces.api.space_models import (
     CreateSpaceIntegrationKnowledge,
     CreateSpaceIntegrationKnowledgeBatchItem,
@@ -29,6 +31,7 @@ def _create(**fields):
         pytest.param(
             {"folder_id": "01ABCDEF", "selected_item_type": "folder"}, id="folder"
         ),
+        pytest.param({"folder_id": ".01ABC.DEF."}, id="folder-id-dots-inside"),
         pytest.param(
             {"key": "~712020:1f3a9c2e-5b7d", "selected_item_type": "personal"},
             id="confluence-personal-space",
@@ -55,6 +58,9 @@ def test_graph_shaped_selections_are_accepted(fields):
         pytest.param({"key": "x" * 513}, id="key-too-long"),
         pytest.param({"folder_id": "01A?$select=id"}, id="folder-id-query"),
         pytest.param({"folder_id": "01A B"}, id="folder-id-space"),
+        pytest.param({"folder_id": "."}, id="folder-id-dot"),
+        pytest.param({"folder_id": ".."}, id="folder-id-dotdot"),
+        pytest.param({"key": ".."}, id="key-dotdot"),
         pytest.param({"folder_path": "/a/../b"}, id="path-dotdot"),
         pytest.param({"folder_path": "/a/./b"}, id="path-dot"),
         pytest.param({"folder_path": "a/b"}, id="path-relative"),
@@ -131,3 +137,66 @@ def test_the_link_stays_a_plain_string_in_the_api_schema():
             "title": "Url",
             "type": "string",
         }
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param(
+            "https://contoso.sharepoint.com/sites/KS/Doc.pdf",
+            "https://contoso.sharepoint.com/sites/KS/Doc.pdf",
+            id="https",
+        ),
+        pytest.param(
+            "HTTPS://contoso.sharepoint.com/",
+            "HTTPS://contoso.sharepoint.com/",
+            id="scheme-case",
+        ),
+        pytest.param("http://contoso.sharepoint.com/sites/KS", None, id="http"),
+        pytest.param("javascript:alert(1)", None, id="javascript"),
+        pytest.param("data:text/html,<script>", None, id="data"),
+        pytest.param("https://user@contoso.sharepoint.com/", None, id="user-info"),
+        pytest.param("https:///sites/KS", None, id="no-host"),
+        pytest.param("https://contoso.sharepoint.com/a b", None, id="whitespace"),
+        pytest.param("/sites/KS/Doc.pdf", None, id="relative"),
+        pytest.param("", None, id="empty"),
+        pytest.param(None, None, id="none"),
+    ],
+)
+def test_only_absolute_https_urls_are_served_as_links(value, expected):
+    assert https_url_or_none(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        (
+            "https://contoso.sharepoint.com/sites/KS",
+            "https://contoso.sharepoint.com/sites/KS",
+        ),
+        ("javascript:alert(1)", None),
+        ("http://contoso.sharepoint.com/sites/KS", None),
+    ],
+)
+def test_knowledge_items_only_link_to_https(url, expected):
+    knowledge = IntegrationKnowledgePublic.model_validate(
+        {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "name": "Policies",
+            "url": url,
+            "tenant_id": "00000000-0000-0000-0000-000000000002",
+            "space_id": "00000000-0000-0000-0000-000000000003",
+            "user_integration_id": "00000000-0000-0000-0000-000000000004",
+            "embedding_model": {
+                "id": "00000000-0000-0000-0000-000000000005",
+                "name": "text-embedding-3-small",
+                "is_deprecated": False,
+                "open_source": False,
+            },
+            "metadata": {"size": 0},
+            "integration_type": "sharepoint",
+            "task": "pull_sharepoint_content",
+        }
+    )
+
+    assert knowledge.url == expected

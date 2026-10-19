@@ -12,6 +12,7 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
   import LinkReference from "$lib/features/knowledge/components/LinkReference.svelte";
+  import { sanitizeWebHref } from "$lib/components/markdown/index.js";
   import McpResourceSnippetModal from "./McpResourceSnippetModal.svelte";
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
@@ -177,7 +178,7 @@
   {#if referencesExpanded}
     <div class="mb-2 flex w-full flex-wrap gap-2 pt-2 md:pb-6">
       {#each message.references as reference, index (reference.id)}
-        {#if reference.metadata.url}
+        {#if sanitizeWebHref(reference.metadata.url)}
           <LinkReference blob={reference} index={index + 1} />
         {:else}
           <BlobPreview blob={reference} index={index + 1} />

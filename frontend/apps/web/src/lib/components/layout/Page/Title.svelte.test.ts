@@ -36,6 +36,31 @@ describe("Page.Title", () => {
     await expectNoAxeViolations(nav.element());
   });
 
+  it("keeps every crumb a visible, focusable link when the title overflows", async () => {
+    const long = "Kommunstyrelsens arbetsutskott för digitalisering och verksamhetsutveckling";
+    render(Title, {
+      title: `${long} ${long}`,
+      truncate: true,
+      parents: [
+        { title: long, href: "/spaces/s1/knowledge?tab=integrations" },
+        { title: `${long} protokoll`, href: "/spaces/s1/knowledge/integrations/wrapper/w1" }
+      ]
+    });
+
+    const nav = page.getByRole("navigation", { name: m.breadcrumb() });
+    const [first, second] = nav.getByRole("link").elements() as HTMLElement[];
+    // The crumb text goes screen-reader-only once the measured width overflows.
+    await expect.poll(() => second.querySelector(".sr-only") !== null).toBe(true);
+
+    expect(second.closest("li")?.classList.contains("sr-only")).toBe(false);
+    expect(second.getBoundingClientRect().width).toBeGreaterThan(4);
+    expect(first.getBoundingClientRect().width).toBeGreaterThan(4);
+    await expect.element(nav.getByRole("link", { name: `${long} protokoll` })).toBeVisible();
+    second.focus();
+    expect(document.activeElement).toBe(second);
+    await expectNoAxeViolations(nav.element());
+  });
+
   it("keeps a single parent working", async () => {
     render(Title, { title: "Edit", parent: { title: "Templates", href: "/admin/templates" } });
 

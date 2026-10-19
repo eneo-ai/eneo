@@ -68,38 +68,98 @@ def _rows(pairs):
     return result
 
 
+def _entity():
+    entity = MagicMock()
+    entity.id = uuid4()
+    entity.document_count = 0
+    return entity
+
+
+class TestOneOrNone:
+    """The filters the interface accepts reach the query; none at all is refused."""
+
+    async def test_filters_reach_the_query(self, repo, session):
+        space_id = uuid4()
+        session.scalar.return_value = None
+
+        assert await repo.one_or_none(space_id=space_id, name="Docs") is None
+
+        sql = _compiled(session.scalar.await_args.args[0])
+        assert f"integration_knowledge.space_id = '{space_id}'" in sql
+        assert "integration_knowledge.name = 'Docs'" in sql
+
+    async def test_without_any_filter_is_refused(self, repo, session):
+        with pytest.raises(ValueError, match="No filter"):
+            await repo.one_or_none()
+
+        session.scalar.assert_not_called()
+
+
 class TestDocumentCountProjection:
-    async def test_get_by_ids_counts_all_records_in_one_query(self, repo, session):
-        first, second = _record(), _record()
-        session.scalars.return_value = MagicMock(all=lambda: [first, second])
+    """Fetches never count; the count is attached where an item is served."""
+
+    async def test_fetches_issue_no_count_query(self, repo, session):
+        record = _record()
+        session.scalar.return_value = record
+        session.scalars.return_value = MagicMock(all=lambda: [record])
+
+        await repo.one_or_none(id=record.id)
+        await repo.get_by_ids([record.id])
+
+        session.execute.assert_not_called()
+        repo.mapper.to_entity.assert_called_once()
+        repo.mapper.to_entities.assert_called_once()
+        # Knowledge keeps its embedding model after the model is deprecated.
+        repo.embedding_model_repo.all.assert_awaited_with(with_deprecated=True)
+
+    async def test_attach_document_counts_counts_all_items_in_one_query(
+        self, repo, session
+    ):
+        first, second = _entity(), _entity()
         session.execute.return_value = _rows([(first.id, 3)])
 
-        await repo.get_by_ids([first.id, second.id])
+        await repo.attach_document_counts([first, second])
 
         assert session.execute.await_count == 1
-        assert first.document_count == 3
-        assert second.document_count == 0
+        assert (first.document_count, second.document_count) == (3, 0)
         sql = _compiled(session.execute.await_args.args[0])
         assert "GROUP BY info_blobs.integration_knowledge_id" in sql
         assert "info_blobs.version_state = 'active'" in sql
         assert f"'{first.id}'" in sql and f"'{second.id}'" in sql
-        repo.mapper.to_entities.assert_called_once()
-        # Knowledge keeps its embedding model after the model is deprecated.
-        repo.embedding_model_repo.all.assert_awaited_once_with(with_deprecated=True)
 
-    async def test_one_or_none_attaches_the_count(self, repo, session):
-        record = _record()
-        session.scalar.return_value = record
-        session.execute.return_value = _rows([(record.id, 7)])
-
-        await repo.one_or_none(id=record.id)
-
-        assert record.document_count == 7
-        repo.mapper.to_entity.assert_called_once()
-
-    async def test_no_records_means_no_count_query(self, repo, session):
-        session.scalars.return_value = MagicMock(all=lambda: [])
-
-        assert await repo.get_by_ids([uuid4()]) == []
+    async def test_attach_document_counts_without_items_issues_no_query(
+        self, repo, session
+    ):
+        await repo.attach_document_counts([])
 
         session.execute.assert_not_called()
+
+
+class TestUpdateSyncState:
+    """A sync writes its own columns only; a rename committed meanwhile survives."""
+
+    async def test_writes_only_the_given_sync_columns(self, repo, session):
+        knowledge_id = uuid4()
+        session.execute.return_value = MagicMock(rowcount=1)
+
+        await repo.update_sync_state(
+            knowledge_id, last_sync_status="success", delta_token="token-2"
+        )
+
+        sql = _compiled(session.execute.await_args.args[0])
+        assert sql.startswith(
+            "UPDATE integration_knowledge SET last_sync_status='success', "
+            "delta_token='token-2', updated_at=now() WHERE"
+        )
+        assert f"'{knowledge_id}'" in sql
+
+    async def test_without_fields_issues_no_query(self, repo, session):
+        await repo.update_sync_state(uuid4())
+
+        session.execute.assert_not_called()
+
+    async def test_missing_row_raises(self, repo, session):
+        session.execute.return_value = MagicMock(rowcount=0)
+
+        with pytest.raises(NotFoundException):
+            await repo.update_sync_state(uuid4(), last_sync_status="error")

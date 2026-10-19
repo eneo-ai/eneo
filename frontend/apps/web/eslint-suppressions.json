@@ -293,10 +293,5 @@
     "eneo/no-raw-color": {
       "count": 6
     }
-  },
-  "src/routes/integrations/callback/token/+page.svelte": {
-    "eneo/no-raw-color": {
-      "count": 12
-    }
   }
 }

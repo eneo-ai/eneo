@@ -24,6 +24,7 @@ from eneo.integration.domain.entities.tenant_sharepoint_app import (
     TenantSharePointApp,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
     from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
@@ -52,8 +53,19 @@ CREDENTIALS_INVALID_MESSAGE = (
 # refused. Anything else (5xx, timeouts, throttling) is transient and is not
 # recorded as credential failure.
 _CREDENTIAL_ERROR_CODES = frozenset(
-    {"invalid_grant", "invalid_client", "interaction_required", "unauthorized_client"}
+    {
+        "invalid_grant",
+        "invalid_client",
+        "interaction_required",
+        "unauthorized_client",
+        "invalid_scope",
+        "invalid_resource",
+    }
 )
+# ``invalid_request`` is usually a malformed call, except when Entra reports
+# that the configured tenant (AADSTS90002) or application (AADSTS700016) does
+# not exist: a mistyped tenant domain or client id fails every sync.
+_CREDENTIAL_REQUEST_MARKERS = ("AADSTS90002", "AADSTS700016")
 
 # A cached tenant-app token is reused for up to an hour; the success stamp is
 # refreshed at most this often so browsing does not write the row per request.
@@ -95,10 +107,17 @@ def describe_credential_failure(exc: BaseException) -> Optional[str]:
         return exc.detail
     if not isinstance(exc, httpx.HTTPStatusError):
         return None
-    code = _error_body(exc).get("error")
-    if exc.response.status_code != 401 and code not in _CREDENTIAL_ERROR_CODES:
-        return None
-    return summarize_token_endpoint_error(exc)
+    body = _error_body(exc)
+    code = body.get("error")
+    if exc.response.status_code == 401 or code in _CREDENTIAL_ERROR_CODES:
+        return summarize_token_endpoint_error(exc)
+    if code == "invalid_request":
+        description = body.get("error_description")
+        if isinstance(description, str) and any(
+            marker in description for marker in _CREDENTIAL_REQUEST_MARKERS
+        ):
+            return summarize_token_endpoint_error(exc)
+    return None
 
 
 async def persist_auth_health(
@@ -135,19 +154,21 @@ async def persist_auth_health(
             )
         return
     except Exception as exc:
+        # The exception text can carry the statement's bound parameters, among
+        # them the encrypted refresh token; log the kind only.
         logger.warning(
             "Could not record SharePoint credential health for app %s on its own "
             "connection (%s); recording in the current transaction instead",
             app.id,
-            exc,
+            type(exc).__name__,
         )
     try:
         await fallback_repo.update(app)
     except Exception as exc:
         logger.warning(
-            "Could not record SharePoint credential health for app %s: %s",
+            "Could not record SharePoint credential health for app %s (%s)",
             app.id,
-            exc,
+            type(exc).__name__,
         )
 
 
@@ -179,7 +200,9 @@ class OrgTokenProvider:
         try:
             if app.is_service_account():
                 token_data = (
-                    await self.service_account_auth_service.refresh_access_token(app)
+                    await self.service_account_auth_service.refresh_access_token(
+                        app, force_refresh=force_refresh
+                    )
                 )
                 access_token = token_data["access_token"]
                 new_refresh_token = token_data.get("refresh_token")
@@ -226,7 +249,7 @@ class OrgTokenProvider:
         except httpx.HTTPStatusError as exc:
             return False, summarize_token_endpoint_error(exc)
         except Exception as exc:
-            return False, str(exc)
+            return False, user_visible_error(exc)
         return True, None
 
     @staticmethod
@@ -244,17 +267,29 @@ class OrgTokenProvider:
     async def _persist_success(
         self, app: TenantSharePointApp, *, rotated: bool
     ) -> None:
-        extra: dict[str, object] = {}
-        if rotated:
-            if self.encryption_service is None or not app.service_account_refresh_token:
-                await self.tenant_app_repo.update(app)
-                return
-            extra["service_account_refresh_token_encrypted"] = (
-                self.encryption_service.encrypt(app.service_account_refresh_token)
+        try:
+            extra: dict[str, object] = {}
+            if rotated:
+                if (
+                    self.encryption_service is None
+                    or not app.service_account_refresh_token
+                ):
+                    await self.tenant_app_repo.update(app)
+                    return
+                extra["service_account_refresh_token_encrypted"] = (
+                    self.encryption_service.encrypt(app.service_account_refresh_token)
+                )
+            await persist_auth_health(
+                app, fallback_repo=self.tenant_app_repo, extra_values=extra
             )
-        await persist_auth_health(
-            app, fallback_repo=self.tenant_app_repo, extra_values=extra
-        )
+        except Exception as exc:
+            # The token was obtained; failing to record that must not fail the
+            # caller, which would retry a refresh that just worked.
+            logger.warning(
+                "Could not record SharePoint credential success for app %s (%s)",
+                app.id,
+                type(exc).__name__,
+            )
 
     async def _record_failure(self, app: TenantSharePointApp, detail: str) -> None:
         app.mark_auth_failure(detail, datetime.now(timezone.utc))

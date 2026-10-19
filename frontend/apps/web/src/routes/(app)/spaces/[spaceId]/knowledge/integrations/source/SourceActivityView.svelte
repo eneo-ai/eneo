@@ -114,6 +114,7 @@
   }
 
   function loadOlder() {
+    if (loading) return;
     const targets = itemsToPage(loaded);
     void run(async () => {
       const pages = await Promise.all(
@@ -392,10 +393,11 @@
     {/each}
 
     {#if hasMore}
+      <!-- Stays focusable while loading: a focused button that turns disabled drops focus to the body. -->
       <Button
         variant="outline"
-        class="w-fit"
-        disabled={loading}
+        class="w-fit {loading ? 'pointer-events-none opacity-50' : ''}"
+        aria-disabled={loading}
         aria-busy={loading}
         onclick={loadOlder}
       >

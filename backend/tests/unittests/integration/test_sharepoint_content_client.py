@@ -226,6 +226,21 @@ class TestFileDownloadExtraction:
 
         assert result == ExtractionResult.no_text(EMPTY_CONTENT_REASON, OCTET)
 
+    async def test_office_bytes_are_parsed_in_the_upload_sandbox(
+        self, client: SharePointContentClient
+    ):
+        payload = docx_bytes("Sandboxed")
+        _serve(client, [payload], **{"Content-Length": str(len(payload))})
+
+        with patch(
+            "eneo.integration.infrastructure.content_service.utils.extract_in_process",
+            AsyncMock(return_value="From the child process"),
+        ) as sandbox:
+            result = await client.get_file_extraction_by_id("drive", "item")
+
+        assert result == ExtractionResult.ok("From the child process", OCTET)
+        sandbox.assert_awaited_once()
+
     async def test_parse_failure_is_a_failed_result(
         self, client: SharePointContentClient
     ):
