@@ -280,7 +280,7 @@ To onboard a new organization:
 3. **Register Eneo** in their IdP with the callback URL `{canonical_public_origin}/login/callback`
 4. **Configure via API** with their IdP details
 5. **Test** the configuration
-6. **Provision users through SCIM**, or create/invite them, and keep tenant `provisioning: false`. For deployments without SCIM, optionally enable JIT (`POST /api/v1/sysadmin/tenants/{tenant_id}/` with `{"provisioning": true}` and a `default_role_id`), configure a non-empty `allowed_domains`, and ensure the ID token provides boolean `email_verified: true` for `email`.
+6. **Provision users through SCIM**, or create/invite them, and keep tenant `provisioning: false`. For deployments without SCIM, optionally enable JIT (`POST /api/v1/sysadmin/tenants/{tenant_id}/` with `{"provisioning": true}` and a `default_role_id`), configure a non-empty `allowed_domains`, and ensure the ID token provides `email_verified: true` for `email` (the strings `"true"` and `"1"` are also accepted).
 
 An existing active tenant member can sign in without an `email_verified` claim. Creating a new member requires all JIT conditions above. A custom email claims mapping can be used for existing accounts, but JIT only accepts verification when the selected address equals the token's standard `email` address. Missing verification is not an implied approval. Use SCIM or administrative provisioning when your IdP does not provide this guarantee.
 
@@ -308,7 +308,7 @@ The user authenticated successfully with the IdP but doesn't exist in Eneo and t
 
 **Fix:** Either:
 - Create or invite the user in the tenant first
-- For deployments without SCIM, enable JIT (`provisioning: true`), configure a non-empty `allowed_domains`, require boolean `email_verified: true` from the IdP, and set a `default_role_id`. Otherwise auto-created users have no permissions. Do not enable JIT to bypass a SCIM provisioning failure.
+- For deployments without SCIM, enable JIT (`provisioning: true`), configure a non-empty `allowed_domains`, require `email_verified: true` from the IdP (`"true"` and `"1"` are also accepted), and set a `default_role_id`. Otherwise auto-created users have no permissions. Do not enable JIT to bypass a SCIM provisioning failure.
 
 ### "Authorization session is invalid or has expired"
 
