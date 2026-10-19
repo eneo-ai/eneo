@@ -39,6 +39,8 @@
     knowledge: IntegrationKnowledge;
     space: { id: string };
     progress: Record<string, IntegrationSyncProgress>;
+    /** Folders whose queued sync no worker has reported on yet. */
+    queued?: ReadonlySet<string>;
     /** The files this item's latest sync skipped; null while unknown or not loadable. */
     skipped: IntegrationSkippedDocuments | null;
     problemsHref: string;
@@ -52,6 +54,7 @@
     knowledge,
     space,
     progress,
+    queued,
     skipped,
     problemsHref,
     showHeader = true,
@@ -73,7 +76,7 @@
   let previousButton = $state<HTMLElement | null>(null);
   let nextButton = $state<HTMLElement | null>(null);
 
-  let folderState = $derived(itemState(knowledge, progress));
+  let folderState = $derived(itemState(knowledge, progress, queued));
   let watchState = $derived(itemWatchState(knowledge));
   let knowledgeUrl = $derived(safeExternalUrl(knowledge.url));
   let view = $state<"searchable" | "skipped">("searchable");
@@ -215,7 +218,10 @@
               <IconLinkExternal size="sm" data-icon="inline-end" />
             </Button>
           {/if}
-          <IntegrationActions knowledgeItem={knowledge} />
+          <IntegrationActions
+            knowledgeItem={knowledge}
+            syncActive={folderState === "syncing" || folderState === "queued"}
+          />
         </div>
       {/if}
     </div>
@@ -270,7 +276,7 @@
                 >{file.file}</Table.Cell
               >
               <Table.Cell class="text-warning-stronger whitespace-normal">
-                {describeSkipReason(file.reason)}
+                {describeSkipReason(file)}
               </Table.Cell>
             </Table.Row>
           {/each}

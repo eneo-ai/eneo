@@ -7,6 +7,7 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { buildSourceProblems, type SkippedDocuments } from "../source-problems";
+import type { SkipReasonCode } from "../skip-reasons";
 import { inPlaceLink } from "./in-place-link";
 import { ProblemsView } from "./problems-view";
 
@@ -17,7 +18,6 @@ afterEach(cleanup);
 const t = createTranslator({ locale: "sv", messages: sv as Record<string, string> });
 
 const ADMIN_URL = "https://eneo.example.se/admin/integrations";
-const NO_TEXT = "No text layer (scanned document; OCR is not supported)";
 const CREDENTIALS =
   "SharePoint credentials are invalid or expired; an administrator must reconnect the integration";
 
@@ -35,9 +35,17 @@ function item(
   } as IntegrationKnowledge;
 }
 
-function skipped(entries: [string, string][]): SkippedDocuments {
+type Entry = [file: string, code: SkipReasonCode, params?: Record<string, string>];
+
+function skipped(entries: Entry[]): SkippedDocuments {
   return {
-    items: entries.map(([file, reason]) => ({ file, reason })),
+    items: entries.map(([file, code, params = {}]) => ({
+      file,
+      reason: "",
+      code,
+      params,
+      retry: false
+    })),
     total: entries.length,
     truncated: false,
     synced_at: "2026-10-14T08:00:00Z"
@@ -105,10 +113,10 @@ describe("ProblemsView", () => {
       [avtal, mallar],
       {
         a: skipped([
-          ["skanning.pdf", NO_TEXT],
-          ["bild.png", "Unsupported file type (image/png)"]
+          ["skanning.pdf", "no_text_layer"],
+          ["bild.png", "unsupported_type", { label: "image/png" }]
         ]),
-        b: skipped([["stor.pdf", "File too large (exceeds 50 MB limit)"]])
+        b: skipped([["stor.pdf", "file_too_large", { limit_mb: "50" }]])
       },
       { showFolders: true }
     );
@@ -145,9 +153,9 @@ describe("ProblemsView", () => {
   });
 
   it("shows the first ten files of a cause and the rest on request", () => {
-    const files = Array.from({ length: 12 }, (_, i): [string, string] => [
+    const files = Array.from({ length: 12 }, (_, i): Entry => [
       `skanning-${i}.pdf`,
-      NO_TEXT
+      "no_text_layer"
     ]);
     renderView([item("a", "Avtal")], { a: skipped(files) });
 

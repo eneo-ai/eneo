@@ -1,6 +1,6 @@
 import type { IntegrationKnowledge } from "@eneo/eneo-js";
 import type { IntegrationSkippedDocuments } from "./integrationDocuments";
-import { describeSkipReason, skipReasonKind, type SkipReasonKind } from "./skipReasons";
+import { describeSkipReason, skipReasonKind, type SkipReasonCode } from "./skipReasons";
 
 // Mirrors CREDENTIALS_INVALID_MESSAGE in
 // backend/src/eneo/integration/infrastructure/auth_service/org_token_provider.py.
@@ -24,7 +24,7 @@ export type FileProblemCategory =
 /** Fixable files can be made searchable by changing them; intentional ones never become knowledge. */
 export type FileProblemSeverity = "fixable" | "intentional";
 
-const CATEGORY_BY_KIND: Record<SkipReasonKind, FileProblemCategory> = {
+const CATEGORY_BY_CODE: Record<SkipReasonCode, FileProblemCategory> = {
   no_text_layer: "no_text_layer",
   file_too_large: "too_large",
   extraction_limit: "too_much_text",
@@ -32,6 +32,11 @@ const CATEGORY_BY_KIND: Record<SkipReasonKind, FileProblemCategory> = {
   corrupt_file: "corrupt",
   empty_content: "empty",
   incomplete_download: "transient",
+  http_error: "transient",
+  removal_failed: "transient",
+  listing_failed: "transient",
+  scope_path_unavailable: "transient",
+  missing_item_id: "transient",
   error: "transient",
   unsupported_type: "unsupported"
 };
@@ -124,13 +129,13 @@ export function buildSourceProblems(
     if (skipped.items.length > 0) skippedAsOf = latest(skippedAsOf, skipped.synced_at);
     if (skipped.truncated) notListed += Math.max(0, skipped.total - skipped.items.length);
     for (const entry of skipped.items) {
-      const category = CATEGORY_BY_KIND[skipReasonKind(entry.reason)];
+      const category = CATEGORY_BY_CODE[skipReasonKind(entry)];
       let group = groups.get(category);
       if (!group) {
         group = { category, severity: fileProblemSeverity(category), files: [] };
         groups.set(category, group);
       }
-      group.files.push({ file: entry.file, detail: describeSkipReason(entry.reason), item });
+      group.files.push({ file: entry.file, detail: describeSkipReason(entry), item });
     }
   }
 

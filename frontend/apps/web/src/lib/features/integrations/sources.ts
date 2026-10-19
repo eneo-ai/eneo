@@ -24,9 +24,9 @@ export type IntegrationSource = {
 
 export type SourceTab = "content" | "problems" | "activity";
 
-export type SourceState = "syncing" | "attention" | "never" | "empty" | "ok";
+export type SourceState = "syncing" | "queued" | "attention" | "never" | "empty" | "ok";
 
-export type ItemState = "syncing" | "error" | "never" | "empty" | "ok";
+export type ItemState = "syncing" | "queued" | "error" | "never" | "empty" | "ok";
 
 export type SourceSummary = {
   state: SourceState;
@@ -36,12 +36,17 @@ export type SourceSummary = {
   failedItems: IntegrationKnowledge[];
   /** Items that have not finished a first sync and are not syncing now. */
   waitingItems: number;
+  /** Items whose sync this person queued and that no worker has reported on yet. */
+  queuedItems: number;
   /** Every failure is the organisation's SharePoint sign-in, which only an admin can fix. */
   credentialsFailed: boolean;
   progress: SyncProgressSummary | null;
 };
 
 type ProgressById = Readonly<Record<string, IntegrationSyncProgress>>;
+type QueuedIds = ReadonlySet<string>;
+
+const NO_QUEUED: QueuedIds = new Set();
 
 function wrapperName(items: IntegrationKnowledge[]): string {
   const named = items.find(
@@ -132,8 +137,13 @@ export function watchStateLabel(state: WatchState): string {
   }
 }
 
-export function itemState(item: IntegrationKnowledge, progress: ProgressById): ItemState {
+export function itemState(
+  item: IntegrationKnowledge,
+  progress: ProgressById,
+  queued: QueuedIds = NO_QUEUED
+): ItemState {
   if (progress[item.id]) return "syncing";
+  if (queued.has(item.id)) return "queued";
   const state = summarizeIntegrationSync(item).state;
   return state === "success" ? "ok" : state;
 }
@@ -146,7 +156,8 @@ function latest(a: string | null, b: string | null): string | null {
 
 export function summarizeSource(
   items: IntegrationKnowledge[],
-  progress: ProgressById
+  progress: ProgressById,
+  queued: QueuedIds = NO_QUEUED
 ): SourceSummary {
   let documentCount = 0;
   let lastSyncedAt: string | null = null;
@@ -159,12 +170,14 @@ export function summarizeSource(
     lastSyncedAt = latest(lastSyncedAt, summary.lastSyncedAt);
     lastSyncAttemptedAt = latest(lastSyncAttemptedAt, summary.lastSyncAttemptedAt);
     if (summary.state === "error") failedItems.push(item);
-    states.push(itemState(item, progress));
+    states.push(itemState(item, progress, queued));
   }
   const syncing = items.map((item) => progress[item.id]).filter((entry) => entry !== undefined);
+  const queuedItems = states.filter((s) => s === "queued").length;
 
   let state: SourceState;
   if (syncing.length > 0) state = "syncing";
+  else if (queuedItems > 0) state = "queued";
   else if (failedItems.length > 0) state = "attention";
   else if (states.every((s) => s === "never")) state = "never";
   else if (documentCount === 0) state = "empty";
@@ -177,11 +190,17 @@ export function summarizeSource(
     lastSyncAttemptedAt,
     failedItems,
     waitingItems: states.filter((s) => s === "never").length,
+    queuedItems,
     credentialsFailed:
       failedItems.length > 0 &&
       failedItems.every((item) => isCredentialsError(item.metadata?.last_sync_error)),
     progress: combineSyncProgress(syncing)
   };
+}
+
+/** A sync of the source is queued or running: starting one now would only queue a second. */
+export function isSyncActive(summary: Pick<SourceSummary, "progress" | "queuedItems">): boolean {
+  return summary.progress !== null || summary.queuedItems > 0;
 }
 
 /** "SharePoint · 3 folders" style description of what a source holds. */
@@ -249,7 +268,7 @@ export function matchesSourceFilter(summary: SourceSummary, filter: SourceFilter
     case "attention":
       return summary.failedItems.length > 0;
     case "syncing":
-      return summary.progress !== null;
+      return isSyncActive(summary);
     case "never":
       return summary.waitingItems > 0;
     default:

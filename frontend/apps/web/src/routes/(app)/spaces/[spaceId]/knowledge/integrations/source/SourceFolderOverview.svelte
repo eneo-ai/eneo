@@ -19,11 +19,13 @@
   interface Props {
     items: IntegrationKnowledge[];
     progress: Record<string, IntegrationSyncProgress>;
+    /** Folders whose queued sync no worker has reported on yet. */
+    queued: ReadonlySet<string>;
     sourceName: string;
     hrefFor: (itemId: string) => string;
   }
 
-  let { items, progress, sourceName, hrefFor }: Props = $props();
+  let { items, progress, queued, sourceName, hrefFor }: Props = $props();
 
   let rows = $derived(flattenIntegrationTree(buildIntegrationTree(items), () => true));
   let showWatch = $derived(items.some((item) => item.integration_type === "sharepoint"));
@@ -45,6 +47,7 @@
   <Table.Body>
     {#each rows as row (row.item.id)}
       {@const item = row.item}
+      {@const state = itemState(item, progress, queued)}
       <Table.Row>
         <Table.Cell class="max-w-[24rem]">
           <!-- eslint-disable svelte/no-navigation-without-resolve -- href comes from the caller -->
@@ -52,6 +55,7 @@
             href={hrefFor(item.id)}
             data-sveltekit-noscroll
             data-sveltekit-replacestate
+            data-sveltekit-keepfocus
             style:padding-left="{row.depth * 1.25}rem"
             class="focus-visible:ring-stronger block truncate rounded font-medium hover:underline focus-visible:ring-2 focus-visible:outline-none"
           >
@@ -68,7 +72,7 @@
             >
           {/if}
         </Table.Cell>
-        <Table.Cell><SourceStateBadge state={itemState(item, progress)} /></Table.Cell>
+        <Table.Cell><SourceStateBadge {state} /></Table.Cell>
         <Table.Cell class="text-right tabular-nums">
           {progress[item.id] ? "–" : (item.metadata?.document_count ?? 0)}
         </Table.Cell>
@@ -106,7 +110,10 @@
                 <IconLinkExternal size="sm" />
               </Button>
             {/if}
-            <IntegrationActions knowledgeItem={item} />
+            <IntegrationActions
+              knowledgeItem={item}
+              syncActive={state === "syncing" || state === "queued"}
+            />
           </div>
         </Table.Cell>
       </Table.Row>

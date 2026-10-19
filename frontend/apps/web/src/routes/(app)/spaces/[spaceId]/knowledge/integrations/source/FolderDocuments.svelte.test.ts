@@ -12,7 +12,9 @@ import type {
 
 const api = vi.hoisted(() => ({
   listDocuments: vi.fn(),
-  getInfoBlob: vi.fn()
+  getInfoBlob: vi.fn(),
+  addJob: vi.fn(),
+  startFastUpdatePolling: vi.fn()
 }));
 
 vi.mock("$lib/core/Eneo", () => ({
@@ -31,6 +33,13 @@ vi.mock("$lib/features/spaces/SpacesManager", async () => {
     })
   };
 });
+
+vi.mock("$lib/features/jobs/JobManager", () => ({
+  getJobManager: () => ({
+    addJob: api.addJob,
+    startFastUpdatePolling: api.startFastUpdatePolling
+  })
+}));
 
 import FolderDocuments from "./FolderDocuments.svelte";
 
@@ -210,7 +219,13 @@ describe("FolderDocuments", () => {
     show({
       skipped: {
         items: [
-          { file: "scan.pdf", reason: "No text layer (scanned document; OCR is not supported)" }
+          {
+            file: "scan.pdf",
+            reason: "No text layer (scanned document; OCR is not supported)",
+            code: "no_text_layer",
+            params: {},
+            retry: false
+          }
         ],
         total: 3,
         truncated: true,
@@ -251,7 +266,13 @@ describe("FolderDocuments", () => {
           deleted: 0,
           current: "Protokoll KS 2026-04.pdf",
           recent: [
-            { name: "Bild.png", outcome: "skipped", reason: "Unsupported file type (image)" },
+            {
+              name: "Bild.png",
+              outcome: "skipped",
+              reason: "Unsupported file type (image)",
+              code: "unsupported_type",
+              params: { label: "image" }
+            },
             { name: "Protokoll KS 2026-03.pdf", outcome: "indexed" }
           ]
         }

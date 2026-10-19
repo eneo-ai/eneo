@@ -50,7 +50,7 @@ vi.mock("$lib/core/AppContext", () => ({
 }));
 vi.mock("$lib/features/jobs/JobManager", () => ({
   jobCompletionEvents: writable(null),
-  getJobManager: () => ({ startFastUpdatePolling: vi.fn() })
+  getJobManager: () => ({ addJob: vi.fn(), startFastUpdatePolling: vi.fn() })
 }));
 
 const CREDENTIALS =
@@ -124,9 +124,17 @@ vi.mock("$lib/features/spaces/SpacesManager", () => ({
 
 import SourcePage from "./SourcePage.svelte";
 
-function skippedList(entries: [string, string][]): IntegrationSkippedDocuments {
+function skippedList(
+  entries: [string, IntegrationSkippedDocuments["items"][number]["code"], Record<string, string>?][]
+): IntegrationSkippedDocuments {
   return {
-    items: entries.map(([file, reason]) => ({ file, reason })),
+    items: entries.map(([file, code, params = {}]) => ({
+      file,
+      reason: "",
+      code,
+      params,
+      retry: false
+    })),
     total: entries.length,
     truncated: false,
     synced_at: null
@@ -173,8 +181,8 @@ describe("source page", () => {
     api.listSkippedDocuments.mockReset().mockImplementation(async ({ knowledge: item }) =>
       item.id === "ik-a"
         ? skippedList([
-            ["scan.pdf", "No text layer (scanned document; OCR is not supported)"],
-            ["bild.png", "Unsupported file type (image)"]
+            ["scan.pdf", "no_text_layer"],
+            ["bild.png", "unsupported_type", { label: "image" }]
           ])
         : skippedList([])
     );
@@ -265,6 +273,44 @@ describe("source page", () => {
     await expect.element(page.getByText("8/20")).toBeVisible();
   });
 
+  it("keeps keyboard focus on the folder links it navigates by", async () => {
+    showWrapper();
+    await expect
+      .element(page.getByRole("navigation", { name: m.integration_source_folders() }))
+      .toBeVisible();
+
+    // SvelteKit moves focus to the body after a navigation unless the link keeps it.
+    const folderLinks = [...document.querySelectorAll("a[data-sveltekit-replacestate]")];
+    // The nav's "all folders" and two folders, and the overview's two folders.
+    expect(folderLinks).toHaveLength(5);
+    for (const link of folderLinks) {
+      expect(link.hasAttribute("data-sveltekit-keepfocus"), link.textContent ?? "").toBe(true);
+    }
+  });
+
+  it("speaks a folder's sync starting and finishing in a polite live region", async () => {
+    showWrapper();
+    await expect
+      .element(page.getByRole("navigation", { name: m.integration_source_folders() }))
+      .toBeVisible();
+    const live = () =>
+      document.querySelector('[role="status"][aria-live="polite"]')?.textContent?.trim();
+    expect(live()).toBe("");
+
+    // A changed space makes the page look for progress at once.
+    api.getSyncProgress.mockResolvedValue({ items: [progressFor("ik-a")] });
+    currentSpace.set({ ...space });
+    await expect.poll(live).toBe(m.integration_announce_sync_started({ name: "Kommunstyrelsen" }));
+
+    api.getSyncProgress.mockResolvedValue({ items: [] });
+    currentSpace.set({ ...space });
+    await expect
+      .poll(live)
+      .toBe(
+        m.integration_announce_sync_finished({ name: "Kommunstyrelsen", indexed: 7, skipped: 1 })
+      );
+  });
+
   it("lists the problems by cause on the problems tab", async () => {
     api.route.state = { tab: "problems" };
     showWrapper("?tab=problems");
@@ -293,11 +339,7 @@ describe("source page", () => {
         ? skippedList(
             Array.from(
               { length: 14 },
-              (_, i) =>
-                [`scan-${i}.pdf`, "No text layer (scanned document; OCR is not supported)"] as [
-                  string,
-                  string
-                ]
+              (_, i) => [`scan-${i}.pdf`, "no_text_layer"] as [string, "no_text_layer"]
             )
           )
         : skippedList([])

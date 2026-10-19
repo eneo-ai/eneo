@@ -1,6 +1,7 @@
+from collections.abc import Mapping
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Generic, Literal, Optional, Self, TypeVar, cast
+from typing import Any, Dict, Generic, Literal, Optional, TypeVar, cast
 from uuid import UUID, uuid4
 
 from pydantic import (
@@ -15,6 +16,11 @@ from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
 )
 from eneo.info_blobs.info_blob import SourceMetadataEntry
+from eneo.integration.domain.skip_reasons import (
+    SkipReasonCode,
+    visible_skip_params,
+    with_code,
+)
 from eneo.integration.domain.value_objects import (
     IntegrationType,
     SkippedDetail,
@@ -52,11 +58,21 @@ _UNPLACED_SKIP_REASONS = (
 )
 
 
-def _visible_skip(file: str, reason: str) -> SkippedDetail:
-    reason = user_visible_error(reason)
-    return SkippedDetail(
-        file="" if reason.startswith(_UNPLACED_SKIP_REASONS) else file, reason=reason
-    )
+def _visible_skip(detail: Mapping[str, Any]) -> SkippedDetail:
+    """The detail as served: coded, its text cleaned, unplaced items unnamed."""
+    stored = detail.get("reason")
+    cleaned = user_visible_error(stored) if isinstance(stored, str) else ""
+    coded = with_code({**detail, "reason": cleaned})
+    reason = coded["reason"]
+    visible: SkippedDetail = {
+        "file": "" if reason.startswith(_UNPLACED_SKIP_REASONS) else coded["file"],
+        "reason": reason,
+        "code": coded.get("code", "error"),
+        "params": visible_skip_params(coded.get("params", {})),
+    }
+    if coded.get("retry"):
+        visible["retry"] = True
+    return visible
 
 
 def _visible_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
@@ -77,16 +93,9 @@ def _visible_detail(detail: object) -> object:
     if not isinstance(detail, dict):
         return detail
     entry = cast(Dict[str, object], detail)
-    file, reason = entry.get("file"), entry.get("reason")
     # A sync names an item Graph returned without a name as a null file; a
     # detail without a readable reason keeps its shape and loses the reason.
-    return {
-        **entry,
-        **_visible_skip(
-            file if isinstance(file, str) else "",
-            reason if isinstance(reason, str) else "",
-        ),
-    }
+    return {**entry, **_visible_skip(entry)}
 
 
 class BaseListModel(BaseModel, Generic[T]):
@@ -453,13 +462,25 @@ class IntegrationDocumentsPage(BaseModel):
 
 class IntegrationSkippedDocument(BaseModel):
     file: str
-    reason: str
+    reason: str = Field(description="The reason as text, for logs and older clients")
+    code: SkipReasonCode = Field(description="Why the file was skipped")
+    params: dict[str, str | int] = Field(
+        default_factory=dict,
+        description="What the code refers to: a file type, a limit, an HTTP status",
+    )
+    retry: bool = Field(
+        default=False,
+        description="The pass could not finish the file; the next sync tries again",
+    )
 
-    @model_validator(mode="after")
-    def _user_visible(self) -> Self:
-        visible = _visible_skip(self.file, self.reason)
-        self.file, self.reason = visible["file"], visible["reason"]
-        return self
+    # Rows written before codes existed are classified from their text here.
+    @model_validator(mode="before")
+    @classmethod
+    def _user_visible(cls, value: object) -> object:
+        if not isinstance(value, Mapping):
+            return value
+        entry = cast(Mapping[str, Any], value)
+        return {**entry, **_visible_skip(entry)}
 
 
 class IntegrationSkippedDocuments(BaseModel):
@@ -482,11 +503,28 @@ class IntegrationSyncProgressFile(BaseModel):
     reason: Optional[str] = Field(
         default=None, description="Why a skipped file was skipped, when known"
     )
+    code: Optional[SkipReasonCode] = Field(
+        default=None, description="The skip reason's code, when known"
+    )
+    params: dict[str, str | int] = Field(default_factory=dict)
+    retry: bool = Field(default=False, description="The next sync tries the file again")
 
-    @field_validator("reason")
+    @model_validator(mode="before")
     @classmethod
-    def _user_visible_reason(cls, value: Optional[str]) -> Optional[str]:
-        return _visible_error(value)
+    def _user_visible(cls, value: object) -> object:
+        if not isinstance(value, Mapping):
+            return value
+        entry = cast(Mapping[str, Any], value)
+        if not isinstance(entry.get("reason"), str):
+            return entry
+        visible = _visible_skip({**entry, "file": str(entry.get("name", ""))})
+        return {
+            **entry,
+            "reason": visible["reason"],
+            "code": visible.get("code"),
+            "params": visible.get("params", {}),
+            "retry": bool(visible.get("retry")),
+        }
 
 
 def _no_finished_files() -> list[IntegrationSyncProgressFile]:

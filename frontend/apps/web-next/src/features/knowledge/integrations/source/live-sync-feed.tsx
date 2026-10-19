@@ -59,7 +59,9 @@ export function LiveSyncFeed({ progress }: { progress: IntegrationSyncProgress }
         ) : null}
         {recent.map((file, index) => {
           const reason =
-            file.outcome === "skipped" && file.reason ? describeSkipReason(file.reason, t) : null;
+            file.outcome === "skipped" && (file.code || file.reason)
+              ? describeSkipReason(file, t)
+              : null;
           return (
             <li
               // The same file name can recur across folders, so the key needs the position.

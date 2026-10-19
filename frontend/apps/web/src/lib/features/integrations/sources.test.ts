@@ -4,6 +4,8 @@ import {
   countSourceFilters,
   groupIntegrationSources,
   groupSourcesBySpace,
+  isSyncActive,
+  itemState,
   itemWatchState,
   matchesSourceFilter,
   sourceHref,
@@ -190,6 +192,29 @@ describe("source status filters", () => {
     expect(matchesSourceFilter(partlyWaiting, "never")).toBe(true);
     expect(matchesSourceFilter(partlyWaiting, "ok")).toBe(true);
     expect(matchesSourceFilter(summarizeSource([item("c")], {}), "never")).toBe(false);
+  });
+});
+
+describe("queued syncs", () => {
+  it("reads an item as queued until its progress appears", () => {
+    const queued = new Set(["a"]);
+
+    expect(itemState(item("a"), {}, queued)).toBe("queued");
+    expect(itemState(item("a"), { a: progress("a") }, queued)).toBe("syncing");
+    expect(itemState(item("b"), {}, queued)).toBe("ok");
+  });
+
+  it("makes a source queued before it fails or empties, and active for the filter", () => {
+    const failing = item("b", {}, { last_sync_status: "error", last_sync_error: "Graph timeout" });
+    const summary = summarizeSource([item("a"), failing], {}, new Set(["a"]));
+
+    expect(summary.state).toBe("queued");
+    expect(summary.queuedItems).toBe(1);
+    // The earlier failure stays countable while the new sync waits.
+    expect(summary.failedItems).toEqual([failing]);
+    expect(isSyncActive(summary)).toBe(true);
+    expect(matchesSourceFilter(summary, "syncing")).toBe(true);
+    expect(isSyncActive(summarizeSource([item("a")], {}))).toBe(false);
   });
 });
 

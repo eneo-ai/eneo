@@ -51,6 +51,27 @@ describe("SyncProgressTracker", () => {
     tracker.stop();
   });
 
+  it("polls fast while a queued sync waits for its worker", async () => {
+    const responses: IntegrationSyncProgress[][] = [[], [], [entry("a")], []];
+    const load = vi.fn(async () => ({ items: responses.shift() ?? [] }));
+    const tracker = new SyncProgressTracker({ load });
+
+    tracker.start();
+    await vi.advanceTimersByTimeAsync(0);
+    tracker.pending = ["a"];
+    expect([...tracker.queued]).toEqual(["a"]);
+    tracker.refresh();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(load).toHaveBeenCalledTimes(2);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(load).toHaveBeenCalledTimes(3);
+    // Reported: no longer queued, still fast while it runs.
+    expect(tracker.queued.size).toBe(0);
+    expect(tracker.active).toBe(true);
+    tracker.stop();
+  });
+
   it("keeps the same object while nothing changes, so readers do not re-render", async () => {
     const load = vi.fn(async () => ({ items: [] as IntegrationSyncProgress[] }));
     const tracker = new SyncProgressTracker({ load });

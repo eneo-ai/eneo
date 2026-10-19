@@ -9,6 +9,7 @@ import pytest
 from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
 )
+from eneo.integration.domain.skip_reasons import classify_skip_reason
 from eneo.integration.presentation.models import (
     IntegrationDocumentItem,
     IntegrationKnowledgeMetaData,
@@ -77,8 +78,18 @@ def test_a_sync_log_is_served_clean():
 
     assert served["error_message"] == "Database error"
     assert served["skipped_details"] == [
-        {"file": "a.docx", "reason": "Error: HTTP 403 Forbidden"},
-        {"file": "b.zip", "reason": "Unsupported file type (.zip)"},
+        {
+            "file": "a.docx",
+            "reason": "Error: HTTP 403 Forbidden",
+            "code": "http_error",
+            "params": {"status": 403, "message": "Forbidden"},
+        },
+        {
+            "file": "b.zip",
+            "reason": "Unsupported file type (.zip)",
+            "code": "unsupported_type",
+            "params": {"label": ".zip"},
+        },
     ]
     assert served["metadata"]["skipped_details"] == served["skipped_details"]
     assert served["metadata"]["reconcile_warning"] == (
@@ -215,7 +226,9 @@ def test_a_skip_of_an_item_never_placed_in_scope_is_served_without_its_name(reas
         metadata.model_dump()["last_sync_summary"]["skipped_details"][0],
     ]
 
-    assert served == [{"file": "", "reason": reason}] * 3
+    code, params, _ = classify_skip_reason(reason)
+    coded = {"file": "", "reason": reason, "code": code, "params": params}
+    assert served == [coded, {**coded, "retry": False}, coded]
 
 
 def test_a_stored_skip_without_a_file_name_still_has_its_reason_cleaned():
@@ -235,8 +248,18 @@ def test_a_stored_skip_without_a_file_name_still_has_its_reason_cleaned():
     served = metadata.model_dump()["last_sync_summary"]["skipped_details"]
 
     assert served == [
-        {"file": "", "reason": "Could not remove unextractable: Database error"},
-        {"file": "Protokoll.docx", "reason": ""},
+        {
+            "file": "",
+            "reason": "Could not remove unextractable: Database error",
+            "code": "removal_failed",
+            "params": {"what": "unextractable", "detail": "Database error"},
+        },
+        {
+            "file": "Protokoll.docx",
+            "reason": "",
+            "code": "error",
+            "params": {"detail": ""},
+        },
     ]
 
 

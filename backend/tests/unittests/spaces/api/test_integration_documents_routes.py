@@ -23,6 +23,7 @@ from eneo.integration.domain.entities.sync_log import SyncLog
 from eneo.integration.domain.repositories.integration_knowledge_repo import (
     IntegrationKnowledgeLocation,
 )
+from eneo.integration.domain.skip_reasons import NO_TEXT_LAYER_REASON
 from eneo.integration.infrastructure.sharepoint_sync_progress import (
     sync_progress_key,
 )
@@ -420,7 +421,9 @@ async def test_skipped_documents_come_from_the_newest_sync_log(documents_api):
             started_at=datetime(2026, 10, 13, 7, tzinfo=timezone.utc),
             completed_at=datetime(2026, 10, 13, 8, tzinfo=timezone.utc),
             metadata={
-                "skipped_details": [{"file": "scan.pdf", "reason": "No text layer"}],
+                "skipped_details": [
+                    {"file": "scan.pdf", "reason": NO_TEXT_LAYER_REASON}
+                ],
                 "skipped_total": 17,
                 "skipped_truncated": True,
             },
@@ -431,7 +434,15 @@ async def test_skipped_documents_come_from_the_newest_sync_log(documents_api):
 
     assert response.status_code == 200, response.text
     assert response.json() == {
-        "items": [{"file": "scan.pdf", "reason": "No text layer"}],
+        "items": [
+            {
+                "file": "scan.pdf",
+                "reason": NO_TEXT_LAYER_REASON,
+                "code": "no_text_layer",
+                "params": {},
+                "retry": False,
+            }
+        ],
         "total": 17,
         "truncated": True,
         "synced_at": "2026-10-13T08:00:00Z",
@@ -489,7 +500,29 @@ async def test_sync_progress_lists_the_space_items_that_are_syncing(documents_ap
     response = await _get(api, api.progress_url)
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"items": [running]}
+    # The feed's entries are served with their codes, classified from the text.
+    served = {
+        **running,
+        "recent": [
+            {
+                "name": "Budget.xlsm",
+                "outcome": "skipped",
+                "reason": "Unsupported",
+                "code": "error",
+                "params": {"detail": "Unsupported"},
+                "retry": False,
+            },
+            {
+                "name": "Rutin.pdf",
+                "outcome": "indexed",
+                "reason": None,
+                "code": None,
+                "params": {},
+                "retry": False,
+            },
+        ],
+    }
+    assert response.json() == {"items": [served]}
     api.progress_redis.mget.assert_awaited_once_with(
         [sync_progress_key(api.knowledge.id), sync_progress_key(idle.id)]
     )
@@ -584,7 +617,13 @@ async def test_skipped_documents_written_before_the_cleanup_are_served_clean(
 
     assert response.status_code == 200, response.text
     assert response.json()["items"] == [
-        {"file": "a.docx", "reason": "Error: HTTP 403 Forbidden"}
+        {
+            "file": "a.docx",
+            "reason": "Error: HTTP 403 Forbidden",
+            "code": "http_error",
+            "params": {"status": 403, "message": "Forbidden"},
+            "retry": False,
+        }
     ]
     assert "tempauth" not in response.text
 
@@ -620,5 +659,12 @@ async def test_sync_progress_written_before_the_cleanup_is_served_clean(
 
     assert response.status_code == 200, response.text
     assert response.json()["items"][0]["recent"] == [
-        {"name": "a.docx", "outcome": "skipped", "reason": "Error: HTTP 403 Forbidden"}
+        {
+            "name": "a.docx",
+            "outcome": "skipped",
+            "reason": "Error: HTTP 403 Forbidden",
+            "code": "http_error",
+            "params": {"status": 403, "message": "Forbidden"},
+            "retry": False,
+        }
     ]

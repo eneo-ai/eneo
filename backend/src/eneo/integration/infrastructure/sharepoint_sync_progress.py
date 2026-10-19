@@ -20,6 +20,7 @@ import redis.asyncio as redis
 from pydantic import TypeAdapter, ValidationError
 from redis.exceptions import RedisError
 
+from eneo.integration.domain.skip_reasons import SkippedDetail
 from eneo.integration.infrastructure.content_service.types import SyncStats
 from eneo.integration.presentation.models import (
     IntegrationSyncProgress,
@@ -133,7 +134,18 @@ class SharePointSyncProgressStore:
         return progress
 
 
-_FinishedFile = tuple[str, FileOutcome, str | None]
+_FinishedFile = tuple[str, FileOutcome, SkippedDetail | None]
+
+
+def _skip_fields(detail: SkippedDetail | None) -> dict[str, Any]:
+    if detail is None:
+        return {}
+    return {
+        "reason": detail["reason"],
+        "code": detail.get("code"),
+        "params": detail.get("params", {}),
+        "retry": detail.get("retry", False),
+    }
 
 
 def _recent_files() -> deque[_FinishedFile]:
@@ -319,19 +331,19 @@ class SyncProgressReporter:
         details = stats["skipped_details"]
         if run.current is not None:
             outcome: FileOutcome | None = None
-            reason: str | None = None
+            detail: SkippedDetail | None = None
             if stats["skipped_items"] > run.skipped:
                 outcome = "skipped"
                 # A skip that also fails to remove the old copy adds a second
                 # detail; the first one says why the file was skipped.
                 if new_details := details[run.skip_reasons :]:
-                    reason = new_details[0].get("reason")
+                    detail = new_details[0]
             elif indexed > run.indexed:
                 outcome = "indexed"
             elif stats["unchanged_items"] > run.unchanged:
                 outcome = "unchanged"
             if outcome is not None:
-                run.recent.appendleft((run.current, outcome, reason))
+                run.recent.appendleft((run.current, outcome, detail))
         run.indexed = indexed
         run.unchanged = stats["unchanged_items"]
         run.skipped = stats["skipped_items"]
@@ -362,9 +374,9 @@ class SyncProgressReporter:
                 current=run.current,
                 recent=[
                     IntegrationSyncProgressFile(
-                        name=name, outcome=outcome, reason=reason
+                        name=name, outcome=outcome, **_skip_fields(detail)
                     )
-                    for name, outcome, reason in run.recent
+                    for name, outcome, detail in run.recent
                 ],
             )
             await self._store.save(progress)

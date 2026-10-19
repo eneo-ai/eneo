@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createTranslator } from "next-intl";
 import sv from "@/lib/i18n/messages/sv.json";
 import { buildSourceProblems, isCredentialsError, type SkippedDocuments } from "./source-problems";
+import type { SkipReasonCode } from "./skip-reasons";
 
 const t = createTranslator({ locale: "sv", messages: sv as Record<string, string> });
 
@@ -17,11 +18,11 @@ function item(id: string, metadata: Partial<Metadata> = {}): IntegrationKnowledg
 }
 
 function skipped(
-  entries: [string, string][],
+  entries: [string, SkipReasonCode][],
   extra: Partial<SkippedDocuments> = {}
 ): SkippedDocuments {
   return {
-    items: entries.map(([file, reason]) => ({ file, reason })),
+    items: entries.map(([file, code]) => ({ file, reason: "", code, params: {}, retry: false })),
     total: entries.length,
     truncated: false,
     synced_at: null,
@@ -51,14 +52,14 @@ describe("buildSourceProblems", () => {
       [a, b],
       {
         a: skipped([
-          ["bild.png", "Unsupported file type (image/png)"],
-          ["scan.pdf", "No text layer (scanned document; OCR is not supported)"],
-          ["stor.pdf", "File too large (exceeds 50 MB limit)"]
+          ["bild.png", "unsupported_type"],
+          ["scan.pdf", "no_text_layer"],
+          ["stor.pdf", "file_too_large"]
         ]),
         b: skipped([
-          ["gammal.pdf", "No text layer (scanned document; OCR is not supported)"],
-          ["hemlig.docx", "Error: Password-protected file"],
-          ["avbruten.pdf", "Error: Incomplete download of 'x' (10 of 20 bytes)"]
+          ["gammal.pdf", "no_text_layer"],
+          ["hemlig.docx", "password_protected"],
+          ["avbruten.pdf", "incomplete_download"]
         ])
       },
       t
@@ -112,7 +113,7 @@ describe("buildSourceProblems", () => {
     const problems = buildSourceProblems(
       [item("a"), failed],
       {
-        a: skipped([["x.png", "Unsupported file type (image/png)"]], {
+        a: skipped([["x.png", "unsupported_type"]], {
           total: 40,
           truncated: true,
           synced_at: "2026-10-14T03:00:00Z"

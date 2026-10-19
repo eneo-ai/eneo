@@ -15741,8 +15741,44 @@ export interface components {
     IntegrationSkippedDocument: {
       /** File */
       file: string;
-      /** Reason */
+      /**
+       * Reason
+       * @description The reason as text, for logs and older clients
+       */
       reason: string;
+      /**
+       * Code
+       * @description Why the file was skipped
+       * @enum {string}
+       */
+      code:
+        | "unsupported_type"
+        | "no_text_layer"
+        | "empty_content"
+        | "file_too_large"
+        | "extraction_limit"
+        | "incomplete_download"
+        | "password_protected"
+        | "corrupt_file"
+        | "http_error"
+        | "removal_failed"
+        | "listing_failed"
+        | "scope_path_unavailable"
+        | "missing_item_id"
+        | "error";
+      /**
+       * Params
+       * @description What the code refers to: a file type, a limit, an HTTP status
+       */
+      params?: {
+        [key: string]: string | number;
+      };
+      /**
+       * Retry
+       * @description The pass could not finish the file; the next sync tries again
+       * @default false
+       */
+      retry?: boolean;
     };
     /**
      * IntegrationSkippedDocuments
@@ -15857,6 +15893,38 @@ export interface components {
        * @description Why a skipped file was skipped, when known
        */
       reason?: string | null;
+      /**
+       * Code
+       * @description The skip reason's code, when known
+       */
+      code?:
+        | (
+            | "unsupported_type"
+            | "no_text_layer"
+            | "empty_content"
+            | "file_too_large"
+            | "extraction_limit"
+            | "incomplete_download"
+            | "password_protected"
+            | "corrupt_file"
+            | "http_error"
+            | "removal_failed"
+            | "listing_failed"
+            | "scope_path_unavailable"
+            | "missing_item_id"
+            | "error"
+          )
+        | null;
+      /** Params */
+      params?: {
+        [key: string]: string | number;
+      };
+      /**
+       * Retry
+       * @description The next sync tries the file again
+       * @default false
+       */
+      retry?: boolean;
     };
     /**
      * IntegrationSyncProgressList
@@ -21658,6 +21726,31 @@ export interface components {
       file: string;
       /** Reason */
       reason: string;
+      /**
+       * Code
+       * @enum {string}
+       */
+      code?:
+        | "unsupported_type"
+        | "no_text_layer"
+        | "empty_content"
+        | "file_too_large"
+        | "extraction_limit"
+        | "incomplete_download"
+        | "password_protected"
+        | "corrupt_file"
+        | "http_error"
+        | "removal_failed"
+        | "listing_failed"
+        | "scope_path_unavailable"
+        | "missing_item_id"
+        | "error";
+      /** Params */
+      params?: {
+        [key: string]: string | number;
+      };
+      /** Retry */
+      retry?: boolean;
     };
     /**
      * SortField

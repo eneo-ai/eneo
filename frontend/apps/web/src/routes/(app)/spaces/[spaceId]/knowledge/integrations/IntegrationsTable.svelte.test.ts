@@ -10,14 +10,27 @@ import type { IntegrationSyncProgress } from "$lib/features/integrations/syncPro
 
 const api = vi.hoisted(() => ({
   getSyncProgress: vi.fn(),
-  deleteKnowledge: vi.fn()
+  deleteKnowledge: vi.fn(),
+  triggerFullSync: vi.fn(),
+  addJob: vi.fn(),
+  startFastUpdatePolling: vi.fn()
 }));
 
 vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({
     integrations: {
-      knowledge: { getSyncProgress: api.getSyncProgress, delete: api.deleteKnowledge }
+      knowledge: {
+        getSyncProgress: api.getSyncProgress,
+        delete: api.deleteKnowledge,
+        triggerFullSync: api.triggerFullSync
+      }
     }
+  })
+}));
+vi.mock("$lib/features/jobs/JobManager", () => ({
+  getJobManager: () => ({
+    addJob: api.addJob,
+    startFastUpdatePolling: api.startFastUpdatePolling
   })
 }));
 
@@ -70,6 +83,7 @@ vi.mock("$lib/features/spaces/SpacesManager", () => ({
   getSpacesManager: () => ({ state: { currentSpace }, refreshCurrentSpace: vi.fn() })
 }));
 
+import { pendingSyncs } from "$lib/features/integrations/pendingSyncs";
 import IntegrationsTable from "./IntegrationsTable.svelte";
 
 const SOURCE_NAMES = ["Avtal", "Blanketter", "Kommunstyrelsen", "HR-handboken"];
@@ -107,6 +121,67 @@ describe("IntegrationsTable", () => {
     currentSpace.set(spaceWith(defaultItems));
     api.getSyncProgress.mockReset().mockResolvedValue({ items: [] });
     api.deleteKnowledge.mockReset().mockResolvedValue(undefined);
+    api.triggerFullSync.mockReset().mockResolvedValue({ id: "job-c", status: "queued" });
+    api.addJob.mockClear();
+    pendingSyncs.set([]);
+  });
+
+  function liveText() {
+    return [...document.querySelectorAll('[role="status"][aria-live="polite"]')]
+      .map((region) => region.textContent?.trim() ?? "")
+      .join(" ");
+  }
+
+  it("shows a started sync as queued until the worker reports, then announces its course", async () => {
+    render(IntegrationsTable);
+    await expect.element(page.getByRole("link", { name: "HR-handboken" })).toBeVisible();
+
+    await page
+      .getByRole("row")
+      .filter({ hasText: "HR-handboken" })
+      .getByRole("button", { name: m.actions() })
+      .click();
+    await page.getByRole("menuitem", { name: m.trigger_full_sync() }).click();
+    await page.getByRole("button", { name: m.start_full_sync() }).click();
+
+    await expect
+      .element(page.getByText(m.integration_source_state_queued(), { exact: true }))
+      .toBeVisible();
+    expect(api.addJob).toHaveBeenCalledWith({ id: "job-c", status: "queued" });
+    expect(api.startFastUpdatePolling).toHaveBeenCalled();
+    await expect
+      .poll(liveText)
+      .toContain(m.integration_announce_sync_queued({ name: "HR-handboken" }));
+
+    // A second sync is not offered while this one waits.
+    await page
+      .getByRole("row")
+      .filter({ hasText: "HR-handboken" })
+      .getByRole("button", { name: m.actions() })
+      .click();
+    await expect
+      .element(page.getByRole("menuitem", { name: m.integration_sync_already_running() }))
+      .toHaveAttribute("aria-disabled", "true");
+    await page.getByRole("menuitem", { name: m.integration_sync_already_running() }).click({
+      force: true
+    });
+    await expect.element(page.getByRole("alertdialog")).not.toBeInTheDocument();
+
+    // The worker reports: the progress replaces the queued state, and its end is spoken.
+    api.getSyncProgress.mockResolvedValue({ items: [progress("c")] });
+    await expect
+      .poll(liveText, { timeout: 5_000 })
+      .toContain(m.integration_announce_sync_started({ name: "HR-handboken" }));
+    expect(
+      page.getByText(m.integration_source_state_queued(), { exact: true }).elements()
+    ).toHaveLength(0);
+
+    api.getSyncProgress.mockResolvedValue({ items: [] });
+    await expect
+      .poll(liveText, { timeout: 5_000 })
+      .toContain(
+        m.integration_announce_sync_finished({ name: "HR-handboken", indexed: 7, skipped: 1 })
+      );
   });
 
   it("finds a source by its own name or a folder's name", async () => {

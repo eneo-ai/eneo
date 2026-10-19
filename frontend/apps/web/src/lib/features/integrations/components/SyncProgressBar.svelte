@@ -23,12 +23,18 @@
   let skippedWidth = $derived(
     progress.total ? Math.min(100 - readableWidth, (progress.skipped / progress.total) * 100) : 0
   );
-  let valueText = $derived(
+  let doneText = $derived(
     progress.total !== null
       ? m.integration_progress_done_of_total({ done: progress.done, total: progress.total })
       : progress.done === 1
         ? m.integration_progress_done_so_far_one()
         : m.integration_progress_done_so_far_other({ count: progress.done })
+  );
+  // The skipped share is a colour of its own; the value text says it too.
+  let valueText = $derived(
+    progress.skipped > 0
+      ? `${doneText}, ${m.integration_progress_skipped({ count: progress.skipped })}`
+      : doneText
   );
 </script>
 

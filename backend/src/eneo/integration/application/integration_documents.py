@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unicodedata
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Literal, Protocol, cast
 from urllib.parse import unquote, urlsplit
 
 from eneo.integration.presentation.models import (
@@ -161,13 +161,13 @@ def skipped_documents(sync_log: SyncLog | None) -> IntegrationSkippedDocuments:
     if sync_log is None:
         return IntegrationSkippedDocuments(items=[], total=0, truncated=False)
     metadata = sync_log.metadata
-    details = metadata.get("skipped_details", [])
+    # Stored JSON: anything but a mapping is not a detail.
+    details = cast(list[object], metadata.get("skipped_details", []))
     return IntegrationSkippedDocuments(
         items=[
-            IntegrationSkippedDocument(
-                file=str(detail.get("file", "")), reason=str(detail.get("reason", ""))
-            )
+            IntegrationSkippedDocument.model_validate(detail)
             for detail in details
+            if isinstance(detail, dict)
         ],
         total=int(
             metadata.get("skipped_total", metadata.get("skipped_items", len(details)))

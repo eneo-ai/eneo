@@ -192,7 +192,13 @@ describe("WrapperDetail", () => {
   it("shows the source with its folders, figures and the problems to look at", async () => {
     state.skipped.i1 = {
       items: [
-        { file: "scan.pdf", reason: "No text layer (scanned document; OCR is not supported)" }
+        {
+          file: "scan.pdf",
+          reason: "No text layer (scanned document; OCR is not supported)",
+          code: "no_text_layer",
+          params: {},
+          retry: false
+        }
       ],
       total: 1,
       truncated: false,
@@ -242,7 +248,13 @@ describe("WrapperDetail", () => {
     };
     state.skipped.i1 = {
       items: [
-        { file: "scan.pdf", reason: "No text layer (scanned document; OCR is not supported)" }
+        {
+          file: "scan.pdf",
+          reason: "No text layer (scanned document; OCR is not supported)",
+          code: "no_text_layer",
+          params: {},
+          retry: false
+        }
       ],
       total: 1,
       truncated: false,
@@ -327,7 +339,8 @@ describe("WrapperDetail", () => {
           {
             name: "Ritning.pdf",
             outcome: "skipped",
-            reason: "No text layer (scanned document; OCR is not supported)"
+            reason: "No text layer (scanned document; OCR is not supported)",
+            code: "no_text_layer"
           }
         ]
       }
@@ -463,7 +476,13 @@ const NO_TEXT = "No text layer (scanned document; OCR is not supported)";
 
 function skippedList(...files: string[]) {
   return {
-    items: files.map((file) => ({ file, reason: NO_TEXT })),
+    items: files.map((file) => ({
+      file,
+      reason: NO_TEXT,
+      code: "no_text_layer" as const,
+      params: {},
+      retry: false
+    })),
     total: files.length,
     truncated: false,
     synced_at: "2026-10-14T08:00:00Z"
@@ -989,7 +1008,13 @@ describe("WrapperDetail problems", () => {
       ...skippedList("scan.pdf", "karta.pdf"),
       items: [
         ...skippedList("scan.pdf", "karta.pdf").items,
-        { file: "stor.pdf", reason: "File too large (exceeds 50 MB limit)" }
+        {
+          file: "stor.pdf",
+          reason: "File too large (exceeds 50 MB limit)",
+          code: "file_too_large" as const,
+          params: { limit_mb: "50" },
+          retry: false
+        }
       ],
       total: 3
     };

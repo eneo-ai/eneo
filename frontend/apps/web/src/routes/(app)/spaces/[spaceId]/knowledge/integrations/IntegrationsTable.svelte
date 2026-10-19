@@ -1,7 +1,7 @@
 <script lang="ts">
   import * as Table from "$lib/components/resource-table/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import { derived, writable } from "svelte/store";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -10,6 +10,7 @@
   import {
     countSourceFilters,
     groupIntegrationSources,
+    isSyncActive,
     matchesSourceFilter,
     sourceContentsLabel,
     sourceHref,
@@ -19,6 +20,10 @@
     type SourceFilter,
     type SourceSummary
   } from "$lib/features/integrations/sources";
+  import {
+    announceSourceChange,
+    type SourceSnapshot
+  } from "$lib/features/integrations/syncAnnouncements";
   import type { IntegrationSyncProgress } from "$lib/features/integrations/syncProgress";
   import { useSyncProgress } from "$lib/features/integrations/useSyncProgress.svelte";
   import { m } from "$lib/paraglide/messages";
@@ -40,17 +45,47 @@
 
   const tracker = useSyncProgress({ active: () => active });
   const progress = writable<Record<string, IntegrationSyncProgress>>({});
+  const queued = writable<ReadonlySet<string>>(new Set());
   $effect(() => {
     progress.set(tracker.byId);
+  });
+  $effect(() => {
+    queued.set(tracker.queued);
   });
 
   type SourceRow = { source: IntegrationSource; summary: SourceSummary };
 
-  const rows = derived([currentSpace, progress], ([$currentSpace, $progress]) =>
+  const rows = derived([currentSpace, progress, queued], ([$currentSpace, $progress, $queued]) =>
     groupIntegrationSources(
       $currentSpace.knowledge.integrationKnowledge.filter((k) => k.space_id === $currentSpace.id)
-    ).map((source): SourceRow => ({ source, summary: summarizeSource(source.items, $progress) }))
+    ).map((source): SourceRow => ({
+      source,
+      summary: summarizeSource(source.items, $progress, $queued)
+    }))
   );
+
+  // Each source's start, finish or queueing is spoken once; counts belong to its page.
+  let announcement = $state("");
+  let previousSnapshots: Record<string, SourceSnapshot> = {};
+  $effect(() => {
+    const current = $rows;
+    untrack(() => {
+      const next: Record<string, SourceSnapshot> = {};
+      for (const { source, summary } of current) {
+        const snapshot: SourceSnapshot = { state: summary.state, progress: summary.progress };
+        next[source.id] = snapshot;
+        const text = announceSourceChange(
+          source.name,
+          previousSnapshots[source.id] ?? null,
+          snapshot,
+          0,
+          { speakProgress: false }
+        );
+        if (text) announcement = text;
+      }
+      previousSnapshots = next;
+    });
+  });
 
   const statusFilter = writable<SourceFilter>("all");
   const visibleRows = derived([rows, statusFilter], ([$rows, $statusFilter]) =>
@@ -207,10 +242,14 @@
             itemCount: source.items.length,
             items: source.items,
             canEdit,
-            canDelete
+            canDelete,
+            syncActive: isSyncActive(row.summary)
           });
         }
-        return Table.renderComponent(IntegrationActions, { knowledgeItem: source.items[0] });
+        return Table.renderComponent(IntegrationActions, {
+          knowledgeItem: source.items[0],
+          syncActive: isSyncActive(row.summary)
+        });
       }
     })
   ]);
@@ -219,6 +258,8 @@
     return (row: SourceRow) => row.source.embeddingModelId === embeddingModelId;
   }
 </script>
+
+<p class="sr-only" role="status" aria-live="polite">{announcement}</p>
 
 {#if signInStopped.length > 0}
   {@const first = signInStopped[0]}

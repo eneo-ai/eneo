@@ -1,6 +1,7 @@
 import type { IntegrationKnowledge } from "@eneo/eneo-js";
 import { describe, expect, it } from "vitest";
 import type { IntegrationSkippedDocuments } from "./integrationDocuments";
+import type { SkipReasonCode } from "./skipReasons";
 import { buildSourceProblems, isCredentialsError } from "./sourceProblems";
 
 type Metadata = NonNullable<IntegrationKnowledge["metadata"]>;
@@ -14,11 +15,11 @@ function item(id: string, metadata: Partial<Metadata> = {}): IntegrationKnowledg
 }
 
 function skipped(
-  entries: [string, string][],
+  entries: [string, SkipReasonCode][],
   extra: Partial<IntegrationSkippedDocuments> = {}
 ): IntegrationSkippedDocuments {
   return {
-    items: entries.map(([file, reason]) => ({ file, reason })),
+    items: entries.map(([file, code]) => ({ file, reason: "", code, params: {}, retry: false })),
     total: entries.length,
     truncated: false,
     synced_at: null,
@@ -46,14 +47,15 @@ describe("buildSourceProblems", () => {
     const b = item("b");
     const problems = buildSourceProblems([a, b], {
       a: skipped([
-        ["bild.png", "Unsupported file type (image/png)"],
-        ["scan.pdf", "No text layer (scanned document; OCR is not supported)"],
-        ["stor.pdf", "File too large (exceeds 50 MB limit)"]
+        ["bild.png", "unsupported_type"],
+        ["scan.pdf", "no_text_layer"],
+        ["stor.pdf", "file_too_large"]
       ]),
       b: skipped([
-        ["gammal.pdf", "No text layer (scanned document; OCR is not supported)"],
-        ["hemlig.docx", "Error: Password-protected file"],
-        ["avbruten.pdf", "Error: Incomplete download of 'x' (10 of 20 bytes)"]
+        ["gammal.pdf", "no_text_layer"],
+        ["hemlig.docx", "password_protected"],
+        ["avbruten.pdf", "incomplete_download"],
+        ["listad.docx", "listing_failed"]
       ])
     });
 
@@ -63,7 +65,7 @@ describe("buildSourceProblems", () => {
       ["no_text_layer", ["scan.pdf", "gammal.pdf"]],
       ["too_large", ["stor.pdf"]],
       ["password_protected", ["hemlig.docx"]],
-      ["transient", ["avbruten.pdf"]]
+      ["transient", ["avbruten.pdf", "listad.docx"]]
     ]);
     expect(problems.intentional.map((group) => group.category)).toEqual(["unsupported"]);
     expect(problems.fixable[0].files[1].item).toBe(b);
@@ -102,7 +104,7 @@ describe("buildSourceProblems", () => {
   it("reports capped lists and lists that could not be loaded", () => {
     const failed = item("b");
     const problems = buildSourceProblems([item("a"), failed], {
-      a: skipped([["x.png", "Unsupported file type (image/png)"]], {
+      a: skipped([["x.png", "unsupported_type"]], {
         total: 40,
         truncated: true,
         synced_at: "2026-10-14T03:00:00Z"

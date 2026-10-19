@@ -10,11 +10,17 @@ type Options = {
 };
 
 /**
- * Polls the space's live sync progress: quickly while something syncs, slowly
- * otherwise. Stops for good when the backend does not offer the endpoint.
+ * Polls the space's live sync progress: quickly while something syncs or a queued
+ * sync waits for a worker, slowly otherwise. Stops for good when the backend does
+ * not offer the endpoint.
  */
 export class SyncProgressTracker {
   byId = $state<Record<string, IntegrationSyncProgress>>({});
+  /** Items whose sync was queued from here; polled for fast until the worker reports on them. */
+  pending = $state<readonly string[]>([]);
+  /** The pending items the worker has not reported on yet. */
+  // eslint-disable-next-line svelte/prefer-svelte-reactivity -- rebuilt on every change, never mutated
+  queued: ReadonlySet<string> = $derived(new Set(this.pending.filter((id) => !(id in this.byId))));
 
   #load: Options["load"];
   #onSettled: Options["onSettled"];
@@ -74,7 +80,7 @@ export class SyncProgressTracker {
     if (!this.#running) return;
     this.#timer = setTimeout(
       () => void this.#tick(),
-      this.active ? ACTIVE_INTERVAL_MS : IDLE_INTERVAL_MS
+      this.active || this.queued.size > 0 ? ACTIVE_INTERVAL_MS : IDLE_INTERVAL_MS
     );
   }
 }

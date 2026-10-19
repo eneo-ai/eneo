@@ -3,6 +3,7 @@
   import Check from "@lucide/svelte/icons/check";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
   import Circle from "@lucide/svelte/icons/circle";
+  import Clock from "@lucide/svelte/icons/clock";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import X from "@lucide/svelte/icons/x";
@@ -20,12 +21,14 @@
   interface Props {
     items: IntegrationKnowledge[];
     progress: Record<string, IntegrationSyncProgress>;
+    /** Folders whose queued sync no worker has reported on yet. */
+    queued: ReadonlySet<string>;
     /** Null selects the overview of every folder. */
     selectedId: string | null;
     hrefFor: (itemId: string | null) => string;
   }
 
-  let { items, progress, selectedId, hrefFor }: Props = $props();
+  let { items, progress, queued, selectedId, hrefFor }: Props = $props();
 
   /** Below this many folders the whole tree fits and a filter only adds noise. */
   const FILTER_FROM = 8;
@@ -51,6 +54,7 @@
     ok: { icon: Check, class: "text-positive-default" },
     error: { icon: X, class: "text-negative-default" },
     syncing: { icon: LoaderCircle, class: "text-accent-default motion-safe:animate-spin" },
+    queued: { icon: Clock, class: "text-accent-default" },
     empty: { icon: TriangleAlert, class: "text-warning-default" },
     never: { icon: Circle, class: "text-secondary" }
   };
@@ -63,6 +67,8 @@
         return m.integration_sync_status_error();
       case "syncing":
         return m.integration_source_state_syncing();
+      case "queued":
+        return m.integration_source_state_queued();
       case "empty":
         return m.integration_sync_status_empty();
       case "never":
@@ -108,6 +114,7 @@
           aria-current={selectedId === null ? "page" : undefined}
           data-sveltekit-noscroll
           data-sveltekit-replacestate
+          data-sveltekit-keepfocus
           class="{linkClass} pl-8 {selectedId === null
             ? 'bg-secondary font-medium'
             : 'hover:bg-hover-dimmer'}"
@@ -119,7 +126,7 @@
       </li>
     {/if}
     {#each rows as row (row.item.id)}
-      {@const state = itemState(row.item, progress)}
+      {@const state = itemState(row.item, progress, queued)}
       {@const StateIcon = stateIcons[state].icon}
       <li class="flex items-center" style:padding-left="{row.depth * 1.25}rem">
         {#if row.hasChildren && !filtering}
@@ -147,6 +154,7 @@
           title={row.item.folder_path ?? row.item.name}
           data-sveltekit-noscroll
           data-sveltekit-replacestate
+          data-sveltekit-keepfocus
           class="{linkClass} pl-1 {selectedId === row.item.id
             ? 'bg-secondary font-medium'
             : 'hover:bg-hover-dimmer'}"

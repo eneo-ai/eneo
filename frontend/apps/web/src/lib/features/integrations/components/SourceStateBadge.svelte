@@ -12,6 +12,7 @@
 
   const styles: Record<SourceState | ItemState, string> = {
     syncing: "bg-accent-dimmer text-accent-stronger",
+    queued: "text-accent-stronger",
     attention: "bg-negative-dimmer text-negative-stronger",
     error: "bg-negative-dimmer text-negative-stronger",
     never: "text-secondary",
@@ -23,6 +24,8 @@
     switch (value) {
       case "syncing":
         return m.integration_source_state_syncing();
+      case "queued":
+        return m.integration_source_state_queued();
       case "attention":
         return m.integration_source_state_attention();
       case "error":
@@ -38,7 +41,7 @@
 </script>
 
 <Badge
-  variant={state === "never" ? "outline" : "secondary"}
+  variant={state === "never" || state === "queued" ? "outline" : "secondary"}
   class="gap-1.5 {styles[state]} {className}"
 >
   <span class="size-1.5 shrink-0 rounded-full bg-current" aria-hidden="true"></span>

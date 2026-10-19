@@ -296,7 +296,7 @@ export function WrapperActions({
         (result): result is PromiseRejectedResult => result.status === "rejected"
       );
       const failedNames = resyncable
-        .filter((_, index) => results[index].status === "rejected")
+        .filter((_, index) => results[index]?.status === "rejected")
         .map((item) => item.name);
       return { jobs, total: results.length, failedNames, refusal: refused?.reason as unknown };
     },

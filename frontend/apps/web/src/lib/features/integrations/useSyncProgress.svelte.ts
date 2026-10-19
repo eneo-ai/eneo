@@ -2,6 +2,7 @@ import { onMount, untrack } from "svelte";
 import { fromStore, get } from "svelte/store";
 import { getEneo } from "$lib/core/Eneo";
 import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+import { pendingSyncs, reportedSyncs, untrackSyncs } from "./pendingSyncs";
 import type { IntegrationSyncProgress } from "./syncProgress";
 import { SyncProgressTracker } from "./SyncProgressTracker.svelte";
 
@@ -13,7 +14,8 @@ type Options = {
 /**
  * Live sync progress for the current space while the calling component is mounted.
  * It polls only while the space has integration knowledge, `active` holds and the
- * browser tab is visible; coming back to the tab polls at once.
+ * browser tab is visible; coming back to the tab polls at once. A sync queued from
+ * a menu is polled for at once and fast, and shows as queued until it reports.
  */
 export function useSyncProgress({ active = () => true }: Options = {}): SyncProgressTracker {
   const eneo = getEneo();
@@ -45,11 +47,26 @@ export function useSyncProgress({ active = () => true }: Options = {}): SyncProg
       if (first) first = false;
       else tracker.refresh();
     });
+    const unsubscribePending = pendingSyncs.subscribe((pending) => {
+      const ids = pending.map((item) => item.knowledgeId);
+      const added = ids.some((id) => !tracker.pending.includes(id));
+      tracker.pending = ids;
+      if (added) tracker.refresh();
+    });
     return () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
       unsubscribe();
+      unsubscribePending();
       tracker.stop();
     };
+  });
+
+  // Once the worker reports on a queued sync, its progress tells the rest.
+  $effect(() => {
+    const byId = tracker.byId;
+    if (tracker.pending.length === 0) return;
+    const reported = reportedSyncs(get(pendingSyncs), byId);
+    untrack(() => untrackSyncs(reported.map((item) => item.jobId)));
   });
 
   const hasKnowledge = $derived(

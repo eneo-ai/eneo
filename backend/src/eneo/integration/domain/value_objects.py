@@ -11,6 +11,8 @@ from typing import Literal
 
 from typing_extensions import TypedDict
 
+from eneo.integration.domain.skip_reasons import SkippedDetail
+
 
 class IntegrationType(str, Enum):
     Confluence = "confluence"
@@ -31,11 +33,6 @@ class OAuthResource(TypedDict, total=False):
     name: str
     type: str
     webUrl: str
-
-
-class SkippedDetail(TypedDict):
-    file: str
-    reason: str
 
 
 ChangeKind = Literal["added", "updated", "deleted"]

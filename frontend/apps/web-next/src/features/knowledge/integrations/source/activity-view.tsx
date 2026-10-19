@@ -202,9 +202,7 @@ function SyncFiles({ log }: { log: SyncLog }) {
             </span>
             <span className="min-w-0 break-all">
               <span className="text-ax-text">{detail.file}</span>{" "}
-              <span className="text-ax-text-secondary">
-                – {describeSkipReason(detail.reason, t)}
-              </span>
+              <span className="text-ax-text-secondary">– {describeSkipReason(detail, t)}</span>
             </span>
           </li>
         ))}

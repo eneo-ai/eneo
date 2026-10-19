@@ -177,9 +177,7 @@ function SkippedFiles({
       key: "reason",
       header: t("integration_source_skip_reason"),
       width: proportional(3),
-      renderCell: (row) => (
-        <span className="text-ax-warning">{describeSkipReason(row.reason, t)}</span>
-      )
+      renderCell: (row) => <span className="text-ax-warning">{describeSkipReason(row, t)}</span>
     }
   ];
   return (
