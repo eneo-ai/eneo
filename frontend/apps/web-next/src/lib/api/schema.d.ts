@@ -33643,7 +33643,10 @@ export interface components {
     };
     /** PartialUpdateSpaceRequest */
     PartialUpdateSpaceRequest: {
-      /** Completion Models */
+      /**
+       * Completion Models
+       * @description The completion models linked to the space. The list replaces the links the space lists; a link it does not list (a deprecated model) is kept. A change to a security classification of another level removes every linked model whose classification is not at or above the new level, listed or not.
+       */
       completion_models?: components["schemas"]["ModelId"][] | null;
       /**
        * Data Retention Days
@@ -33652,7 +33655,10 @@ export interface components {
       data_retention_days?: number | null;
       /** Description */
       description?: string | null;
-      /** Embedding Models */
+      /**
+       * Embedding Models
+       * @description The embedding models linked to the space. The list replaces the links the space lists; a link it does not list (a deprecated model) is kept. A change to a security classification of another level removes every linked model whose classification is not at or above the new level, listed or not.
+       */
       embedding_models?: components["schemas"]["ModelId"][] | null;
       /** Enabled Capabilities */
       enabled_capabilities?:
@@ -33670,9 +33676,15 @@ export interface components {
        * @description Icon ID referencing an uploaded icon. Set to null to remove.
        */
       icon_id?: string | null;
-      /** Mcp Servers */
+      /**
+       * Mcp Servers
+       * @description The MCP servers linked to the space. The list replaces the links the space lists; a link it does not list (a disabled server, or a capability server such as web search, which has its own setting) is kept. A change to a security classification of another level removes every linked server other than a capability server whose classification is not at or above the new level, listed or not.
+       */
       mcp_servers?: components["schemas"]["ModelId"][] | null;
-      /** Mcp Tools */
+      /**
+       * Mcp Tools
+       * @description The space's switches for its MCP servers' tools. The list sets the switch of every tool it names and clears the switches of the tools the space lists that it leaves out. The switch of a tool the space does not list (one of a server it does not list, or one the instance admin switched off for everyone) is kept unless the list names it. Each tool must belong to a server linked to the space after this request.
+       */
       mcp_tools?: components["schemas"]["MCPToolSetting"][] | null;
       /** Name */
       name?: string | null;
@@ -33681,11 +33693,14 @@ export interface components {
        * @description ID of the security classification to apply to this space. Set to null to remove the security classification. Omit to keep the current security classification unchanged.
        */
       security_classification?: components["schemas"]["ModelId"] | null;
-      /** Transcription Models */
+      /**
+       * Transcription Models
+       * @description The transcription models linked to the space. The list replaces the links the space lists; a link it does not list (a deprecated model) is kept. A change to a security classification of another level removes every linked model whose classification is not at or above the new level, listed or not.
+       */
       transcription_models?: components["schemas"]["ModelId"][] | null;
       /**
        * Transcription Services
-       * @description The transcription services granted to the space. The list replaces the grants: a service it leaves out is no longer granted. A new grant must be enabled and meet the space's classification.
+       * @description The transcription services granted to the space. The space lists every service granted to it, so the list replaces the grants: a service it leaves out is no longer granted. A new grant must be enabled and meet the space's classification. A change to a security classification of another level removes every grant whose classification is not at or above the new level.
        */
       transcription_services?: components["schemas"]["ModelId"][] | null;
     };
@@ -38119,7 +38134,7 @@ export interface components {
        */
       id: string;
       knowledge: components["schemas"]["Knowledge"];
-      /** @description Every model linked to this space, each marked with whether it meets the space's security classification and whether the tenant has it available. Only links with both are in the usable model lists. A model list sent to update the space adds the models it names and removes the listed links it leaves out, so build it from these IDs. Links to retired models are not listed and are never changed. */
+      /** @description Every model linked to this space, each marked with whether it meets the space's security classification and whether the tenant has it available. Only links with both are in the usable model lists. A model list sent to update the space adds the models it names and removes the listed links it leaves out, so build it from these IDs. Links to retired models are not listed. A model list keeps them; a change of the space's security classification level removes those below the new level. */
       linked_models: components["schemas"]["SpaceLinkedModels"];
       /** Mcp Servers */
       mcp_servers?: components["schemas"]["MCPServerPublicDict"][];

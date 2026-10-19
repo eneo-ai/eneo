@@ -103,6 +103,18 @@ class AppSparse(ResourcePermissionsMixin, InDB):
 # Spaces
 
 
+def _link_list_description(
+    links: str, hidden: str = "a deprecated model", level_scope: str = "model"
+) -> str:
+    return (
+        f"The {links} linked to the space. The list replaces the links the "
+        f"space lists; a link it does not list ({hidden}) is kept. A change to "
+        "a security classification of another level removes every linked "
+        f"{level_scope} whose classification is not at or above the new "
+        "level, listed or not."
+    )
+
+
 class CreateSpaceRequest(CreateRequest):
     pass
 
@@ -113,18 +125,44 @@ class UpdateSpaceRequest(BaseModel):
     name: str
     description: str
 
-    embedding_models: list[ModelId]
-    completion_models: list[ModelId]
-    transcription_models: list[ModelId]
+    embedding_models: list[ModelId] = Field(
+        description=_link_list_description("embedding models")
+    )
+    completion_models: list[ModelId] = Field(
+        description=_link_list_description("completion models")
+    )
+    transcription_models: list[ModelId] = Field(
+        description=_link_list_description("transcription models")
+    )
     transcription_services: list[ModelId] = Field(
         description=(
-            "The transcription services granted to the space. The list replaces "
-            "the grants: a service it leaves out is no longer granted. A new "
-            "grant must be enabled and meet the space's classification."
+            "The transcription services granted to the space. The space lists "
+            "every service granted to it, so the list replaces the grants: a "
+            "service it leaves out is no longer granted. A new grant must be "
+            "enabled and meet the space's classification. A change to a "
+            "security classification of another level removes every grant "
+            "whose classification is not at or above the new level."
         )
     )
-    mcp_servers: list[ModelId]
-    mcp_tools: list[MCPToolSetting]
+    mcp_servers: list[ModelId] = Field(
+        description=_link_list_description(
+            "MCP servers",
+            hidden="a disabled server, or a capability server such as web search, "
+            "which has its own setting",
+            level_scope="server other than a capability server",
+        )
+    )
+    mcp_tools: list[MCPToolSetting] = Field(
+        description=(
+            "The space's switches for its MCP servers' tools. The list sets the "
+            "switch of every tool it names and clears the switches of the tools "
+            "the space lists that it leaves out. The switch of a tool the space "
+            "does not list (one of a server it does not list, or one the "
+            "instance admin switched off for everyone) is kept unless the list "
+            "names it. Each tool must belong to a server linked to the space "
+            "after this request."
+        )
+    )
 
     security_classification: Union[ModelId, NotProvided, None] = Field(
         default=NOT_PROVIDED,
@@ -300,7 +338,9 @@ class SpacePublic(SpaceDashboard):
             "available. Only links with both are in the usable model lists. A "
             "model list sent to update the space adds the models it names and "
             "removes the listed links it leaves out, so build it from these IDs. "
-            "Links to retired models are not listed and are never changed."
+            "Links to retired models are not listed. A model list keeps them; "
+            "a change of the space's security classification level removes "
+            "those below the new level."
         ),
     )
     transcription_services: list[SpaceTranscriptionServiceLink] = Field(
