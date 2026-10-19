@@ -280,6 +280,9 @@
                   id={entry.id}
                   class="border-default bg-primary flex flex-col gap-2 rounded-lg border p-4"
                 >
+                  {#each entry.aliases ?? [] as alias (alias)}
+                    <span id={alias} class="absolute" aria-hidden="true"></span>
+                  {/each}
                   <div class="flex flex-wrap items-center gap-2 text-xs">
                     <Badge
                       variant="outline"

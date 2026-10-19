@@ -79,6 +79,37 @@ class CheckWhatsNewTests(_RepoCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("OK (1 release(s), 1 entries)", result.stdout)
 
+    def test_accepts_merged_entry_aliases(self) -> None:
+        data = copy.deepcopy(VALID)
+        data["releases"][0]["entries"][0]["aliases"] = ["old-password-entry"]
+        result = self.run_check(self.make_repo(data))
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_rejects_invalid_aliases(self) -> None:
+        for aliases in [None, [], "old-entry", [17], [{}], ["Bad ID"], ["bad\n"]]:
+            with self.subTest(aliases=aliases):
+                data = copy.deepcopy(VALID)
+                data["releases"][0]["entries"][0]["aliases"] = aliases
+                self.assert_rejected(data, ".aliases:")
+
+    def test_rejects_duplicate_anchor_targets(self) -> None:
+        for first, second in [
+            (["old-entry", "old-entry"], []),
+            ([ENTRY["id"]], []),
+            (["second-entry"], []),
+            ([], [ENTRY["id"]]),
+            (["old-entry"], ["old-entry"]),
+        ]:
+            with self.subTest(first=first, second=second):
+                entries = [copy.deepcopy(ENTRY), dict(copy.deepcopy(ENTRY), id="second-entry")]
+                for entry, aliases in zip(entries, [first, second]):
+                    if aliases:
+                        entry["aliases"] = aliases
+                self.assert_rejected(
+                    {"releases": [{"version": "2.3.0", "entries": entries}]},
+                    "is not unique in the release",
+                )
+
     def test_requires_newest_release_first(self) -> None:
         data = {
             "releases": [

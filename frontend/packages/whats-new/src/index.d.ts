@@ -15,6 +15,8 @@ export interface ShowMe {
 
 export interface ReleaseEntry {
   id: string;
+  /** Published ids of entries merged into this one; preserved as deep-link anchors. */
+  aliases?: string[];
   type: EntryType;
   area: EntryArea;
   audience?: EntryAudience;
