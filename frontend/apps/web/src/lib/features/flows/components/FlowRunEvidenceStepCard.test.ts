@@ -224,7 +224,10 @@ describe("FlowRunEvidenceStepCard", () => {
     expect(html).toContain(m.flow_run_review_speakers_confidence_low());
   });
 
-  it("shows none of the step's support for a name its review changed or cleared", () => {
+  // Presentation only. The review checkpoint stores a name the reviewer
+  // changed or cleared without the step's support, which its tests and the
+  // review panel's DOM test hold; these rows are typed as it stores them.
+  it("shows a row stored without the step's support as low confidence, without evidence", () => {
     const renderMapping = (speakers: Record<string, unknown>[]) =>
       renderCard(false, {
         ...result,
