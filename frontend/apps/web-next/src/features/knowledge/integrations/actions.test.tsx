@@ -228,3 +228,26 @@ it("resyncs a group's folders four at a time and names at most five it could not
     "6 av 7 objekt kunde inte köas: Mapp 1, Mapp 2, Mapp 3, Mapp 4, Mapp 5, …"
   );
 });
+
+it("says a source cannot be renamed while it syncs, in the viewer's words", async () => {
+  api.PATCH.mockResolvedValue({
+    error: {
+      message: "Knowledge is syncing",
+      eneo_error_code: 9007,
+      code: "integration_knowledge_syncing"
+    },
+    response: new Response("{}", { status: 409 })
+  });
+  renderInApp(<IntegrationActions item={policies} />);
+  await openMenu();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Byt namn" }));
+  const dialog = await screen.findByRole("dialog", { name: "Byt namn på integration" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Källan synkas just nu. Försök igen när synken är klar.",
+      expect.anything()
+    )
+  );
+});
