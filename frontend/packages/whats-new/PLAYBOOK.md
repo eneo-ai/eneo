@@ -126,6 +126,8 @@ then fails.
 ### RC notification identity
 
 Author one content entry for the final core version, such as `2.3.0`.
+The tag validator rejects an RC with no matching release content, so a new
+candidate cannot silently reuse an older version's notification identity.
 The primary web app uses the installed frontend version from `APP_VERSION`
 to resolve that content as `2.3.0-rc.1` while running that candidate. The page,
 popup and persisted seen/announced markers use the same resolved identity.

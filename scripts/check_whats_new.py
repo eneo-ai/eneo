@@ -318,6 +318,14 @@ def check_release_tag(data: dict, tag: str) -> list[str]:
             f"newest entry {newest_version} is newer than release tag {tag}; "
             "release notes for a later version must not ship in this release"
         ]
+    if re.fullmatch(r"\d+\.\d+\.\d+-rc\.\d+", version) and not any(
+        release.get("version") in {version, _core_version(version)}
+        for release in releases
+    ):
+        return [
+            f"RC tag {tag} needs notes for {_core_version(version)}; "
+            "the app cannot identify a new candidate from another version's notes"
+        ]
     is_final = "-" not in version
     if is_final:
         return [
