@@ -17,7 +17,7 @@ vi.mock("@/features/spaces/use-space", async () => {
   return { useSpace: () => useSpaceFromQuery(() => space as Space) };
 });
 
-import { IntegrationActions } from "./actions";
+import { IntegrationActions, WrapperActions } from "./actions";
 import { pendingSyncs, resetPendingSyncs } from "./pending-syncs";
 
 afterEach(() => {
@@ -70,6 +70,48 @@ it("shows an empty name at the field on rename, which takes focus", async () => 
   fireEvent.change(name, { target: { value: "Policyer 2026" } });
   fireEvent.click(save);
   await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+});
+
+it("saves a rename with Enter, without the spaces around the name", async () => {
+  api.PATCH.mockReturnValue(new Promise(() => {}));
+  renderInApp(<IntegrationActions item={policies} />);
+  await openMenu();
+  fireEvent.click(screen.getByRole("menuitem", { name: "Byt namn" }));
+  const dialog = await screen.findByRole("dialog", { name: "Byt namn på integration" });
+  const name = within(dialog).getByLabelText<HTMLInputElement>("Namn");
+  const save = within(dialog).getByRole<HTMLButtonElement>("button", { name: "Spara" });
+  // Enter in the field submits its form, which Spara belongs to.
+  expect(name.form).not.toBeNull();
+  expect(save.type).toBe("submit");
+  expect(save.form).toBe(name.form);
+
+  fireEvent.change(name, { target: { value: "  Policyer 2026 " } });
+  fireEvent.submit(name.form!);
+
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+  expect(api.PATCH.mock.calls[0]?.[1]).toMatchObject({ body: { name: "Policyer 2026" } });
+});
+
+it("renames a group without the spaces around its name", async () => {
+  api.PATCH.mockReturnValue(new Promise(() => {}));
+  renderInApp(
+    <WrapperActions
+      wrapperId="w1"
+      wrapperName="Byggnad"
+      items={[{ ...policies, wrapper_id: "w1" }]}
+      canEdit
+      canDelete={false}
+    />
+  );
+  fireEvent.click(screen.getByRole("button", { name: /Byggnad/ }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Byt namn på grupp" }));
+  const dialog = await screen.findByRole("dialog", { name: "Byt namn på grupp" });
+  const name = within(dialog).getByLabelText<HTMLInputElement>("Namn");
+  fireEvent.change(name, { target: { value: " Byggnader  " } });
+  fireEvent.submit(name.form!);
+
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+  expect(api.PATCH.mock.calls[0]?.[1]).toMatchObject({ body: { name: "Byggnader" } });
 });
 
 it("keeps focus on a busy full sync and starts one", async () => {

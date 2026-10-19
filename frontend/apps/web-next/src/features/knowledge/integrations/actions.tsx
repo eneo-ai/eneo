@@ -10,7 +10,7 @@ import {
 } from "@tanstack/react-query";
 import { Pencil, RefreshCw, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -112,7 +112,7 @@ export function IntegrationActions({
       unwrap(
         browserApi.PATCH("/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/", {
           params: { path: { id: space.id, integration_knowledge_id: item.id } },
-          body: { name: newName }
+          body: { name: newName.trim() }
         })
       ),
     onSuccess: () => {
@@ -358,7 +358,7 @@ export function WrapperActions({
       unwrap(
         browserApi.PATCH("/api/v1/spaces/{id}/knowledge/integrations/wrappers/{wrapper_id}/", {
           params: { path: { id: space.id, wrapper_id: wrapperId } },
-          body: { name: newName }
+          body: { name: newName.trim() }
         })
       ),
     onSuccess: () => {
@@ -487,6 +487,7 @@ function RenameDialog({
   onSave: () => void;
 }) {
   const t = useTranslations();
+  const formId = useId();
   const [submitted, setSubmitted] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
   const nameProblem = submitted && !name.trim() ? t("required_field") : null;
@@ -514,7 +515,15 @@ function RenameDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
-        <div className="flex flex-col gap-2">
+        <form
+          id={formId}
+          noValidate
+          className="flex flex-col gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            save();
+          }}
+        >
           <Label htmlFor="integration-name">{t("name")}</Label>
           <Input
             ref={nameRef}
@@ -524,13 +533,18 @@ function RenameDialog({
             {...fieldProblemProps("integration-name", nameProblem)}
           />
           <FieldProblem id="integration-name" problem={nameProblem} />
-        </div>
+        </form>
         <DialogFooter>
-          <Button variant="outline" disabled={pending} onClick={() => onOpenChange(false)}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={pending}
+            onClick={() => onOpenChange(false)}
+          >
             {t("cancel")}
           </Button>
           {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
-          <Button aria-busy={pending || undefined} onClick={save}>
+          <Button type="submit" form={formId} aria-busy={pending || undefined}>
             {pending ? t("saving") : t("save")}
           </Button>
         </DialogFooter>
