@@ -7,6 +7,9 @@
  * the RAW segment text, token-shaped edits trigger the "same correction
  * elsewhere" suggestion dialog, and every save is one replace-style request
  * guarded by the revision.
+ *
+ * Speaker names are read, never sent: a save without them keeps the names
+ * a person gave elsewhere.
  */
 
 import { type Eneo, type FlowRunTranscriptCorrections } from "@eneo/eneo-js";
@@ -54,6 +57,7 @@ export function createTranscriptCorrectionsController(options: {
 
   let occurrences = $state<CorrectionOccurrence[]>([]);
   let speakerEdits = $state<SpeakerEdit[]>([]);
+  let speakerNames = $state<Record<string, string | null>>({});
   let revision = $state<number | null>(null);
   let segmentsHash = $state<string | null>(rawSegments[0]?.segmentsHash ?? null);
   let stale = $state(false);
@@ -85,6 +89,7 @@ export function createTranscriptCorrectionsController(options: {
       ? storedSpeakerEdits
       : convertTranscriptAnchors(storedSpeakerEdits, rawSegments, "fromWire");
     if (!set?.stale && set?.segments_hash && !segmentsHash) segmentsHash = set.segments_hash;
+    const nextSpeakerNames = set?.speaker_names ?? {};
     const nextRevision = set?.revision ?? null;
     const nextStale = set?.stale ?? false;
     // Keep identities stable when nothing changed: replacing the occurrence
@@ -93,12 +98,14 @@ export function createTranscriptCorrectionsController(options: {
       nextRevision === revision &&
       nextStale === stale &&
       JSON.stringify(nextOccurrences) === JSON.stringify(occurrences) &&
-      JSON.stringify(nextSpeakerEdits) === JSON.stringify(speakerEdits)
+      JSON.stringify(nextSpeakerEdits) === JSON.stringify(speakerEdits) &&
+      JSON.stringify(nextSpeakerNames) === JSON.stringify(speakerNames)
     ) {
       return;
     }
     occurrences = nextOccurrences;
     speakerEdits = nextSpeakerEdits;
+    speakerNames = nextSpeakerNames;
     revision = nextRevision;
     stale = nextStale;
   }
@@ -350,6 +357,13 @@ export function createTranscriptCorrectionsController(options: {
     /** Speaker edits safe to apply; empty while the stored set is stale. */
     get speakerEdits(): readonly SpeakerEdit[] {
       return stale ? [] : speakerEdits;
+    },
+    /**
+     * A person's names per label, over a speaker-naming step's
+     * (`effectiveSpeakerNames`); none while the stored set is stale.
+     */
+    get speakerNames(): Readonly<Record<string, string | null>> {
+      return stale ? {} : speakerNames;
     },
     get staleCount(): number {
       return stale ? occurrences.length + speakerEdits.length : 0;

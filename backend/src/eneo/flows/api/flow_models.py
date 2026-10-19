@@ -2336,6 +2336,7 @@ class FlowTranscriptCorrectionRevisionBaselinePublic(BaseModel):
     revision: int
     occurrences_json: list[dict[str, Any]]
     speaker_edits_json: list[dict[str, Any]]
+    speaker_names: dict[str, str | None]
 
 
 FLOW_RUN_REVIEW_CHECKPOINT_EDIT_PAGE_EXAMPLE: dict[str, Any] = {
@@ -2383,7 +2384,12 @@ class FlowRunReviewCheckpointEditPagePublic(BaseModel):
 
 
 FLOW_TRANSCRIPT_CORRECTION_REVISION_PAGE_EXAMPLE: dict[str, Any] = {
-    "baseline": {"revision": 1, "occurrences_json": [], "speaker_edits_json": []},
+    "baseline": {
+        "revision": 1,
+        "occurrences_json": [],
+        "speaker_edits_json": [],
+        "speaker_names": {},
+    },
     "items": [
         {
             "id": "00000000-0000-0000-0000-000000000911",
@@ -2397,6 +2403,7 @@ FLOW_TRANSCRIPT_CORRECTION_REVISION_PAGE_EXAMPLE: dict[str, Any] = {
                 {"segment_index": 3, "start": 12, "end": 17, "replacement": "Sundsvall"}
             ],
             "speaker_edits_json": [],
+            "speaker_names": {"SPEAKER_00": "Anna Svensson"},
             "segments_hash": "3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f",
             "edited_by_user_id": "00000000-0000-0000-0000-000000000042",
             "edited_by_service_id": None,
@@ -2957,6 +2964,7 @@ FLOW_TRANSCRIPT_CORRECTIONS_PUBLIC_EXAMPLE: dict[str, Any] = {
     "step_id": "00000000-0000-0000-0000-000000000101",
     "occurrences": [FLOW_TRANSCRIPT_CORRECTION_OCCURRENCE_EXAMPLE],
     "speaker_edits": [FLOW_TRANSCRIPT_SPEAKER_EDIT_EXAMPLE],
+    "speaker_names": {"SPEAKER_00": "Anna Svensson", "SPEAKER_01": None},
     "revision": 2,
     "stale": False,
     "edited_by_principal_type": "user",
@@ -2969,6 +2977,7 @@ FLOW_TRANSCRIPT_CORRECTIONS_EDIT_REQUEST_EXAMPLE: dict[str, Any] = {
     "expected_revision": 1,
     "occurrences": [FLOW_TRANSCRIPT_CORRECTION_OCCURRENCE_EXAMPLE],
     "speaker_edits": [FLOW_TRANSCRIPT_SPEAKER_EDIT_EXAMPLE],
+    "speaker_names": {"SPEAKER_00": "Anna Svensson", "SPEAKER_01": None},
 }
 
 
@@ -3108,6 +3117,15 @@ class FlowTranscriptCorrectionsPublic(BaseModel):
             "before speaker edits existed."
         ),
     )
+    speaker_names: dict[str, str | None] = Field(
+        description=(
+            "A person's name per speaker label, shown in place of the label "
+            "once the corrections are applied. A name overrides the one a "
+            "speaker-naming step gave, null is explicitly no name (it clears "
+            "that step's name), and a label left out keeps it. Empty when "
+            "nobody has named a speaker."
+        ),
+    )
     revision: int = Field(
         description=(
             "Compare token for the next edit. Send it back as "
@@ -3172,6 +3190,22 @@ class FlowTranscriptCorrectionsEditRequest(BaseModel):
             "The full replacement list of speaker reassignments for this step "
             "(replace-style, like `occurrences`). Omit or send an empty list "
             "to clear them."
+        ),
+    )
+    speaker_names: dict[str, str | None] | None = Field(
+        default=None,
+        description=(
+            "The step's speaker names (replace-style): at most 100, each keyed "
+            "by a label of the stored segments or a `speaker` this request's "
+            "`speaker_edits` assign. A name is trimmed and must be one line of "
+            "at most 120 characters; an empty name becomes null, which is "
+            "explicitly no name. Omit the field or send null to keep the "
+            "stored names; names of split labels the saved `speaker_edits` no "
+            "longer assign are then dropped. Names change only on a completed "
+            "run. Refusals return `400` with code "
+            "`flow_transcript_corrections_invalid_speaker_edit` and `reason` "
+            "`unknown_speaker_label`, `invalid_speaker_name`, "
+            "`too_many_speaker_names` or `run_not_completed`."
         ),
     )
 

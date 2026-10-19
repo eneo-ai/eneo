@@ -31,6 +31,17 @@ from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
 from eneo.flows.principal import FlowPrincipal
 
 
+def _revision_logical_bytes() -> sa.ColumnElement[int]:
+    """Text bytes of a revision's content: the unit of every history and
+    evidence budget."""
+    revisions = FlowTranscriptCorrectionRevisions
+    return (
+        sa.func.octet_length(sa.cast(revisions.occurrences_json, sa.Text))
+        + sa.func.octet_length(sa.cast(revisions.speaker_edits_json, sa.Text))
+        + sa.func.octet_length(sa.cast(revisions.speaker_names, sa.Text))
+    )
+
+
 class FlowTranscriptCorrectionsRepository:
     def __init__(self, *, session: AsyncSession):
         self.session = session
@@ -70,11 +81,7 @@ class FlowTranscriptCorrectionsRepository:
             )
         )
         if logical_byte_budget is not None:
-            logical = sa.func.octet_length(
-                sa.cast(FlowTranscriptCorrectionRevisions.occurrences_json, sa.Text)
-            ) + sa.func.octet_length(
-                sa.cast(FlowTranscriptCorrectionRevisions.speaker_edits_json, sa.Text)
-            )
+            logical = _revision_logical_bytes()
             candidates = (
                 sa.select(
                     FlowTranscriptCorrectionRevisions.id,
@@ -125,17 +132,7 @@ class FlowTranscriptCorrectionsRepository:
             await self.session.execute(
                 sa.select(
                     FlowTranscriptCorrectionRevisions.id,
-                    sa.func.octet_length(
-                        sa.cast(
-                            FlowTranscriptCorrectionRevisions.occurrences_json, sa.Text
-                        )
-                    )
-                    + sa.func.octet_length(
-                        sa.cast(
-                            FlowTranscriptCorrectionRevisions.speaker_edits_json,
-                            sa.Text,
-                        )
-                    ),
+                    _revision_logical_bytes(),
                 ).where(
                     FlowTranscriptCorrectionRevisions.flow_run_id == run_id,
                     FlowTranscriptCorrectionRevisions.step_id == step_id,
@@ -166,19 +163,7 @@ class FlowTranscriptCorrectionsRepository:
             sa.select(
                 FlowTranscriptCorrectionRevisions.id,
                 FlowTranscriptCorrectionRevisions.revision,
-                (
-                    sa.func.octet_length(
-                        sa.cast(
-                            FlowTranscriptCorrectionRevisions.occurrences_json, sa.Text
-                        )
-                    )
-                    + sa.func.octet_length(
-                        sa.cast(
-                            FlowTranscriptCorrectionRevisions.speaker_edits_json,
-                            sa.Text,
-                        )
-                    )
-                ).label("logical"),
+                _revision_logical_bytes().label("logical"),
             )
             .where(
                 FlowTranscriptCorrectionRevisions.flow_run_id == run_id,
@@ -247,6 +232,7 @@ class FlowTranscriptCorrectionsRepository:
                 revision=row.revision,
                 occurrences_json=row.occurrences_json,
                 speaker_edits_json=row.speaker_edits_json,
+                speaker_names=row.speaker_names,
                 segments_hash=row.segments_hash,
                 edited_by_user_id=row.edited_by_user_id,
                 edited_by_service_id=row.edited_by_service_id,
@@ -310,6 +296,7 @@ class FlowTranscriptCorrectionsRepository:
         step_id: UUID,
         occurrences_json: list[dict[str, Any]],
         speaker_edits_json: list[dict[str, Any]],
+        speaker_names: dict[str, str | None],
         segments_hash: str,
         expected_revision: int | None,
         principal: FlowPrincipal,
@@ -331,6 +318,7 @@ class FlowTranscriptCorrectionsRepository:
                     step_id=step_id,
                     occurrences_json=occurrences_json,
                     speaker_edits_json=speaker_edits_json,
+                    speaker_names=speaker_names,
                     segments_hash=segments_hash,
                     schema_version=schema_version,
                     **principal_values,
@@ -360,6 +348,7 @@ class FlowTranscriptCorrectionsRepository:
             .values(
                 occurrences_json=occurrences_json,
                 speaker_edits_json=speaker_edits_json,
+                speaker_names=speaker_names,
                 segments_hash=segments_hash,
                 revision=FlowTranscriptCorrections.revision + 1,
                 schema_version=schema_version,
@@ -410,22 +399,16 @@ class FlowTranscriptCorrectionsRepository:
         candidate_limit: int | None = None,
     ) -> FlowRunReviewCheckpointEvidenceMeasurement:
         stmt = sa.select(
-            (
-                sa.func.octet_length(
-                    sa.cast(FlowTranscriptCorrectionRevisions.occurrences_json, sa.Text)
-                )
-                + sa.func.octet_length(
-                    sa.cast(
-                        FlowTranscriptCorrectionRevisions.speaker_edits_json, sa.Text
-                    )
-                )
-            ).label("logical"),
+            _revision_logical_bytes().label("logical"),
             (
                 sa.func.pg_column_size(
                     FlowTranscriptCorrectionRevisions.occurrences_json
                 )
                 + sa.func.pg_column_size(
                     FlowTranscriptCorrectionRevisions.speaker_edits_json
+                )
+                + sa.func.pg_column_size(
+                    FlowTranscriptCorrectionRevisions.speaker_names
                 )
             ).label("stored"),
         ).where(

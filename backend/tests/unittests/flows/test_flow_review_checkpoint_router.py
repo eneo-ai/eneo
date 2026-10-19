@@ -611,6 +611,7 @@ def _history_context(monkeypatch, *, corrections=False):
                 revision=revision,
                 occurrences_json=[{"corrected": f"revision {revision}"}],
                 speaker_edits_json=[],
+                speaker_names={},
                 segments_hash="a" * 64,
                 **common,
             )

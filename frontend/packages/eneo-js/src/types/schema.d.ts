@@ -6056,6 +6056,17 @@ export interface paths {
      *     clients cannot replace v3 decisions. Failures return
      *     `400` with code `flow_transcript_corrections_invalid_speaker_edit`.
      *
+     *     `speaker_names` replaces the step's names for its speakers once the run has
+     *     completed: a label of the stored segments, or a `speaker` the request's
+     *     `speaker_edits` assign, maps to a name or to null (explicitly no name, which clears
+     *     the name a speaker-naming step gave). A client that omits the field keeps the stored
+     *     names, without those of split labels its `speaker_edits` no longer assign. The
+     *     stored transcript keeps its labels; a transcript regeneration writes the names into
+     *     the new run.
+     *     Refused names return `400` with code `flow_transcript_corrections_invalid_speaker_edit`
+     *     and `reason` `unknown_speaker_label`, `invalid_speaker_name`,
+     *     `too_many_speaker_names` or `run_not_completed`.
+     *
      *     Service-key principals may edit corrections only for runs they own (key must have
      *     `resource_permissions.flows = write`).
      *
@@ -6084,7 +6095,10 @@ export interface paths {
      *     The source run, its summary and files stay unchanged. The new run stores source
      *     run/step IDs, correction revision and source/reviewed-text hashes in its input
      *     provenance and imported attempt records. Raw segments, word evidence and human
-     *     decisions remain separate. Unresolved spans are preserved.
+     *     decisions remain separate. Unresolved spans are preserved. The speaker names saved
+     *     with the corrections replace the labels once the corrections apply: in the imported
+     *     transcription text when no speaker-mapping step follows it, otherwise in that step's
+     *     text, over the names it gave. The new run's copy of the corrections keeps them.
      *
      *     Supply the original segments_hash and observed run/correction revisions.
      *     The same Idempotency-Key and request replay the accepted run (200), even if
@@ -28465,6 +28479,10 @@ export interface components {
       speaker_edits_json: {
         [key: string]: unknown;
       }[];
+      /** Speaker Names */
+      speaker_names: {
+        [key: string]: string | null;
+      };
     };
     /**
      * FlowTranscriptCorrectionRevisionPagePublic
@@ -28472,7 +28490,8 @@ export interface components {
      *       "baseline": {
      *         "occurrences_json": [],
      *         "revision": 1,
-     *         "speaker_edits_json": []
+     *         "speaker_edits_json": [],
+     *         "speaker_names": {}
      *       },
      *       "items": [
      *         {
@@ -28495,6 +28514,9 @@ export interface components {
      *           "revision": 2,
      *           "segments_hash": "3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f",
      *           "speaker_edits_json": [],
+     *           "speaker_names": {
+     *             "SPEAKER_00": "Anna Svensson"
+     *           },
      *           "step_id": "00000000-0000-0000-0000-000000000101",
      *           "tenant_id": "00000000-0000-0000-0000-000000000010"
      *         }
@@ -28557,6 +28579,10 @@ export interface components {
       speaker_edits_json: {
         [key: string]: unknown;
       }[];
+      /** Speaker Names */
+      speaker_names: {
+        [key: string]: string | null;
+      };
       /**
        * Step Id
        * Format: uuid
@@ -28588,7 +28614,10 @@ export interface components {
      *           "segment_index": 12,
      *           "speaker": "SPEAKER_01"
      *         }
-     *       ]
+     *       ],
+     *       "speaker_names": {
+     *         "SPEAKER_00": "Anna Svensson"
+     *       }
      *     }
      */
     FlowTranscriptCorrectionsEditRequest: {
@@ -28615,6 +28644,13 @@ export interface components {
        * @description The full replacement list of speaker reassignments for this step (replace-style, like `occurrences`). Omit or send an empty list to clear them.
        */
       speaker_edits?: components["schemas"]["TranscriptSpeakerEditPublic"][];
+      /**
+       * Speaker Names
+       * @description The step's speaker names (replace-style): at most 100, each keyed by a label of the stored segments or a `speaker` this request's `speaker_edits` assign. A name is trimmed and must be one line of at most 120 characters; an empty name becomes null, which is explicitly no name. Omit the field or send null to keep the stored names; names of split labels the saved `speaker_edits` no longer assign are then dropped. Names change only on a completed run. Refusals return `400` with code `flow_transcript_corrections_invalid_speaker_edit` and `reason` `unknown_speaker_label`, `invalid_speaker_name`, `too_many_speaker_names` or `run_not_completed`.
+       */
+      speaker_names?: {
+        [key: string]: string | null;
+      } | null;
     };
     /**
      * FlowTranscriptCorrectionsPublic
@@ -28639,6 +28675,9 @@ export interface components {
      *           "speaker": "SPEAKER_01"
      *         }
      *       ],
+     *       "speaker_names": {
+     *         "SPEAKER_00": "Anna Svensson"
+     *       },
      *       "stale": false,
      *       "step_id": "00000000-0000-0000-0000-000000000101",
      *       "updated_at": "2026-03-17T10:14:30Z"
@@ -28675,6 +28714,13 @@ export interface components {
        * @description Speaker reassignments stored with the set; empty for sets saved before speaker edits existed.
        */
       speaker_edits?: components["schemas"]["TranscriptSpeakerEditPublic"][];
+      /**
+       * Speaker Names
+       * @description A person's name per speaker label, shown in place of the label once the corrections are applied. A name overrides the one a speaker-naming step gave, null is explicitly no name (it clears that step's name), and a label left out keeps it. Empty when nobody has named a speaker.
+       */
+      speaker_names: {
+        [key: string]: string | null;
+      };
       /**
        * Stale
        * @description True when the step's stored transcript changed after these corrections were written (re-run or re-transcription). Stale corrections anchor to text that no longer exists and must not be applied.
@@ -64826,7 +64872,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowTranscriptCorrectionsPublic"];
         };
       };
-      /** @description Transcript corrections edit failed. Machine-readable codes are `flow_transcript_corrections_stale_revision`, `flow_transcript_corrections_segments_unavailable`, `flow_transcript_corrections_invalid_occurrence`, and `flow_transcript_corrections_invalid_speaker_edit` (the last two carry `reason` plus the offending anchor fields in `context`). */
+      /** @description Transcript corrections edit failed. Machine-readable codes are `flow_transcript_corrections_stale_revision`, `flow_transcript_corrections_segments_unavailable`, `flow_transcript_corrections_invalid_occurrence`, and `flow_transcript_corrections_invalid_speaker_edit` (the last two carry `reason` plus the offending anchor fields in `context`; refused `speaker_names` come with the last). */
       400: {
         headers: {
           [name: string]: unknown;

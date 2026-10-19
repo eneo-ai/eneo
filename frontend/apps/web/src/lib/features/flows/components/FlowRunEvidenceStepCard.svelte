@@ -31,6 +31,7 @@
   } from "$lib/features/flows/transcriptSegments";
   import {
     buildSpeakerRows,
+    effectiveSpeakerNames,
     speakerNamesFromRows,
     type SpeakerConfidence
   } from "$lib/features/flows/speakerMappingReview";
@@ -75,6 +76,8 @@
     loading?: boolean;
     /** The transcription step the segments (and any corrections) anchor to. */
     stepId: string | null;
+    /** A speaker-naming step names these segments; the transcription step keeps its labels. */
+    namedByStep?: boolean;
     getAudioUrl: (fileIndex: number) => Promise<SignedAudio>;
   };
 
@@ -230,7 +233,6 @@
   // not a mapping). Rendered once the step is done: the review that named the
   // speakers is gone by then, and raw JSON is not an answer to "who is who".
   const speakerMapping = $derived(buildSpeakerRows(result.output_payload_json ?? null));
-  const transcriptSpeakerNames = $derived(speakerNamesFromRows(speakerMapping));
   // The stored segments (word timings, corrections, speaker edits) belong to
   // the transcription step and to the speaker-mapping step whose text is that
   // transcript with names; those two cards render them, the mapping supplying
@@ -241,6 +243,19 @@
     transcriptContext !== null &&
       transcriptContext !== undefined &&
       (result.step_id === transcriptContext.stepId || speakerMapping.length > 0)
+  );
+  // The names a person gave, kept with the corrections, go where a transcript
+  // regeneration puts them: over the naming step's names on its card, or on
+  // the transcription step's when no naming step names its segments.
+  const showsPersonNames = $derived(
+    ownsStoredSegments && (speakerMapping.length > 0 || !transcriptContext?.namedByStep)
+  );
+  const stepSpeakerNames = $derived(speakerNamesFromRows(speakerMapping));
+  const transcriptSpeakerNames = $derived(
+    effectiveSpeakerNames(
+      stepSpeakerNames,
+      showsPersonNames ? (correctionsController?.speakerNames ?? {}) : {}
+    )
   );
   const transcriptSegments = $derived.by(() => {
     if (!transcriptContext || !outputText) return null;
@@ -358,18 +373,24 @@
                 </h4>
                 <ul class="divide-default mt-1.5 divide-y rounded-lg border p-0">
                   {#each speakerMapping as row (row.label)}
+                    <!-- The name the transcript below shows, a person's over the step's. -->
+                    {@const name = transcriptSpeakerNames[row.label] ?? null}
                     <li class="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 px-3 py-2">
                       <span class="text-secondary text-xs">{speakerRowLabel(row.label)}</span>
-                      <span class="text-sm font-medium" class:text-secondary={row.name === null}>
-                        {row.name ?? m.flow_run_transcript_unknown_speaker()}
+                      <span class="text-sm font-medium" class:text-secondary={name === null}>
+                        {name ?? m.flow_run_transcript_unknown_speaker()}
                       </span>
-                      <Badge variant="outline" class="text-xs">
-                        {confidenceText(row.confidence)}
-                      </Badge>
-                      {#if row.evidence}
-                        <span class="text-secondary basis-full text-xs text-pretty sm:basis-auto">
-                          {row.evidence}
-                        </span>
+                      <!-- The step's confidence and evidence are for its own name, not
+                           for one a person changed or cleared. -->
+                      {#if name === (stepSpeakerNames[row.label] ?? null)}
+                        <Badge variant="outline" class="text-xs">
+                          {confidenceText(row.confidence)}
+                        </Badge>
+                        {#if row.evidence}
+                          <span class="text-secondary basis-full text-xs text-pretty sm:basis-auto">
+                            {row.evidence}
+                          </span>
+                        {/if}
                       {/if}
                     </li>
                   {/each}

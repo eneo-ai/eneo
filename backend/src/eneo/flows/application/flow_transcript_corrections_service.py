@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -13,6 +14,7 @@ from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
 from eneo.flows.application.flow_transcript_source_service import (
     FlowTranscriptSourceService,
 )
+from eneo.flows.domain.flow import FlowRunStatus
 from eneo.flows.domain.transcript_corrections import (
     FlowTranscriptCorrectionSet,
     FlowTranscriptCorrectionsStaleRevisionError,
@@ -20,6 +22,8 @@ from eneo.flows.domain.transcript_corrections import (
     TranscriptCorrectionOccurrence,
     TranscriptSpeakerEdit,
     TranscriptSpeakerEditInvalidError,
+    normalize_speaker_names,
+    prune_speaker_names,
     sort_occurrences,
     sort_speaker_edits,
     validate_correction_partitions,
@@ -125,9 +129,16 @@ class FlowTranscriptCorrectionsService:
         expected_revision: int | None,
         occurrences: list[TranscriptCorrectionOccurrence],
         speaker_edits: list[TranscriptSpeakerEdit] | None = None,
+        speaker_names: Mapping[str, str | None] | None = None,
         schema_version: int = 2,
         expected_segments_hash: str,
     ) -> FlowTranscriptCorrectionsView:
+        """Replace the step's correction set under the revision guard.
+
+        ``speaker_names`` None keeps the stored names, without those of split
+        labels the saved speaker edits no longer make; a map replaces them.
+        Names change only on a completed run.
+        """
         if schema_version not in (2, 3):
             raise FlowBadRequestException(
                 "Unsupported transcript correction schema version.",
@@ -222,6 +233,31 @@ class FlowTranscriptCorrectionsService:
                 code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT,
                 context={"reason": exc.reason, **exc.context},
             ) from exc
+        stored_names = prune_speaker_names(
+            existing.speaker_names if existing is not None else {},
+            segments=segments,
+            speaker_edits=speaker_edits,
+        )
+        try:
+            names = (
+                stored_names
+                if speaker_names is None
+                else normalize_speaker_names(
+                    speaker_names, segments=segments, speaker_edits=speaker_edits
+                )
+            )
+        except TranscriptSpeakerEditInvalidError as exc:
+            raise FlowBadRequestException(
+                "The speaker names do not fit the stored transcript.",
+                code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT,
+                context={"reason": exc.reason, **exc.context},
+            ) from exc
+        if names != stored_names and run.status != FlowRunStatus.COMPLETED:
+            raise FlowBadRequestException(
+                "Speakers can be named once the run has completed.",
+                code=FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT,
+                context={"reason": "run_not_completed"},
+            )
         canonical = sort_occurrences(occurrences)
         canonical_speaker_edits = sort_speaker_edits(speaker_edits)
         try:
@@ -232,6 +268,7 @@ class FlowTranscriptCorrectionsService:
                 step_id=step_id,
                 occurrences_json=[occurrence.as_json() for occurrence in canonical],
                 speaker_edits_json=[edit.as_json() for edit in canonical_speaker_edits],
+                speaker_names=names,
                 segments_hash=current_hash,
                 expected_revision=expected_revision,
                 schema_version=schema_version,
@@ -263,6 +300,8 @@ class FlowTranscriptCorrectionsService:
                         "step_id": str(step_id),
                         "occurrence_count": len(saved.occurrences_json),
                         "speaker_edit_count": len(saved.speaker_edits_json),
+                        # Names are personal data; the audit keeps their count.
+                        "speaker_name_count": len(saved.speaker_names),
                         "revision": saved.revision,
                         "schema_version": saved.schema_version,
                     },

@@ -248,10 +248,17 @@ def ground_speaker_mapping_proposal(
                 r"(?<!\w)" + re.escape(_normalize_name_evidence(name)) + r"(?!\w)"
             )
             if not any(pattern.search(text) for text in normalized_passages):
-                # Do not retain the model's explanation of an unsupported identity.
-                proposed.update(name=None, confidence="low", evidence="")
+                proposed = _without_model_support(proposed, None)
         speakers.append(proposed)
     return {**structured, "speakers": speakers}
+
+
+def _without_model_support(
+    entry: Mapping[str, Any], name: str | None
+) -> dict[str, Any]:
+    """``entry`` naming ``name``, an identity the model's evidence does not
+    support: the model's confidence and explanation are not kept."""
+    return {**entry, "name": name, "confidence": "low", "evidence": ""}
 
 
 def _normalize_name_evidence(text: str) -> str:
@@ -266,3 +273,31 @@ def mapping_to_names(structured: Mapping[str, Any]) -> dict[str, str]:
         if isinstance(label, str) and isinstance(name, str) and name:
             names[label] = name
     return names
+
+
+def mapping_with_names(
+    structured: Mapping[str, Any],
+    names: Mapping[str, str],
+    *,
+    split_labels: Sequence[str],
+) -> dict[str, Any]:
+    """``structured`` naming each of its labels as ``names`` does, None where
+    ``names`` has none; its labels and their order stay, followed by each of
+    ``split_labels`` (speakers split off in review) that ``names`` names and
+    ``structured`` lacks. A name this changes or adds is a person's, not the
+    model's, so its entry keeps no model support."""
+    current = mapping_to_names(structured)
+    speakers: list[dict[str, Any]] = []
+    for entry in structured.get("speakers", []):
+        label = entry.get("label")
+        name = names.get(label)
+        speakers.append(
+            entry if name == current.get(label) else _without_model_support(entry, name)
+        )
+    listed = {entry.get("label") for entry in speakers}
+    speakers.extend(
+        _without_model_support({"label": label}, names[label])
+        for label in split_labels
+        if label in names and label not in listed
+    )
+    return {**structured, "speakers": speakers}

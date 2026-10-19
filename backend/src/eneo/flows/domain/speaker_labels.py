@@ -229,6 +229,21 @@ def apply_speaker_names(text: str, names: Mapping[str, str]) -> str:
     return "\n".join(lines)
 
 
+def effective_speaker_names(
+    base: Mapping[str, str], overrides: Mapping[str, str | None]
+) -> dict[str, str]:
+    """The names a transcript shows: ``base`` (a speaker-naming step's) under
+    ``overrides`` (a person's, kept with the transcript corrections). A string
+    overrides, None removes the base name, and an absent label inherits it."""
+    names = dict(base)
+    for label, name in overrides.items():
+        if name is None:
+            names.pop(label, None)
+        else:
+            names[label] = name
+    return names
+
+
 def parse_participants(value: object) -> list[str]:
     """Names from a form field: a list of strings, or free text split on
     newlines, commas and semicolons. Stripped and deduplicated, order kept."""

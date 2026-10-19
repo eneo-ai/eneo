@@ -10,6 +10,12 @@ Speaker edits live in the same set: a whole-segment edit reassigns a stored
 line to another speaker label, a span edit reassigns part of a line. Both
 anchor to the raw segment array exactly like text occurrences do.
 
+Speaker names live there too: a person's name per label, keyed by a stored
+segment label or a label a speaker edit assigns. Names never enter the
+attribution; a rendered transcript gets them last, through
+``apply_speaker_names``. None is explicitly no name: it clears the name a
+speaker-naming step gave.
+
 Anchors are only valid for the exact segment array they were written against;
 ``segments_content_hash`` is the staleness token that detects re-transcription.
 """
@@ -28,6 +34,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.domain.one_line_text import ONE_LINE_TEXT_MAX_CHARS, breaks_one_line
 from eneo.flows.domain.speaker_labels import (
     SPEAKER_LABEL_RE,
     render_line_prefix,
@@ -39,6 +46,7 @@ TRANSCRIPT_CORRECTIONS_SCHEMA_VERSION = 3
 SUPPORTED_TRANSCRIPT_CORRECTIONS_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 MAX_CORRECTION_OCCURRENCES = 2000
 MAX_SPEAKER_EDITS = 2000
+MAX_SPEAKER_NAMES = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +146,7 @@ class FlowTranscriptCorrectionRevision(BaseModel):
     revision: int
     occurrences_json: list[dict[str, Any]]
     speaker_edits_json: list[dict[str, Any]]
+    speaker_names: dict[str, str | None]
     segments_hash: str
     edited_by_user_id: UUID | None
     edited_by_service_id: UUID | None
@@ -157,6 +166,7 @@ class FlowTranscriptCorrectionSet(BaseModel):
     speaker_edits_json: list[dict[str, Any]] = Field(
         default_factory=list[dict[str, Any]]
     )
+    speaker_names: dict[str, str | None] = Field(default_factory=dict[str, str | None])
     revision: int
     schema_version: int
     segments_hash: str
@@ -443,6 +453,74 @@ def validate_speaker_edits(
                         "second_range": [current[0], current[1]],
                     },
                 )
+
+
+def _nameable_labels(
+    segments: list[dict[str, Any]], speaker_edits: list[TranscriptSpeakerEdit]
+) -> set[str]:
+    """Every stored segment label, and every label the speaker edits assign
+    (a speaker split off in review)."""
+    labels = {label for segment in segments if (label := _segment_speaker(segment))}
+    labels.update(edit.speaker for edit in speaker_edits if edit.speaker)
+    return labels
+
+
+def prune_speaker_names(
+    names: Mapping[str, str | None],
+    *,
+    segments: list[dict[str, Any]],
+    speaker_edits: list[TranscriptSpeakerEdit],
+) -> dict[str, str | None]:
+    """``names`` without the split labels the speaker edits no longer make.
+
+    A stored label keeps its name, or its None, even when every passage was
+    reassigned; the same rule ``drop_undone_split_names`` applies to a
+    speaker-naming review.
+    """
+    labels = _nameable_labels(segments, speaker_edits)
+    return {label: name for label, name in names.items() if label in labels}
+
+
+def normalize_speaker_names(
+    names: Mapping[str, str | None],
+    *,
+    segments: list[dict[str, Any]],
+    speaker_edits: list[TranscriptSpeakerEdit],
+) -> dict[str, str | None]:
+    """A person's names for the speakers of ``segments``, trimmed; a name left
+    empty is None.
+
+    Raises TranscriptSpeakerEditInvalidError for the first violation: more
+    than ``MAX_SPEAKER_NAMES`` names, a label that is neither a stored segment
+    label nor one ``speaker_edits`` assign, or a name that is not one line of
+    at most ``ONE_LINE_TEXT_MAX_CHARS`` characters.
+    """
+    if len(names) > MAX_SPEAKER_NAMES:
+        raise TranscriptSpeakerEditInvalidError(
+            reason="too_many_speaker_names",
+            context={
+                "speaker_name_count": len(names),
+                "max_speaker_names": MAX_SPEAKER_NAMES,
+            },
+        )
+    labels = _nameable_labels(segments, speaker_edits)
+    normalized: dict[str, str | None] = {}
+    for label, raw_name in names.items():
+        if not SPEAKER_LABEL_RE.fullmatch(label) or label not in labels:
+            raise TranscriptSpeakerEditInvalidError(
+                reason="unknown_speaker_label", context={"label": label}
+            )
+        name = (raw_name or "").strip() or None
+        if name is not None and (
+            len(name) > ONE_LINE_TEXT_MAX_CHARS
+            or any(breaks_one_line(char) for char in name)
+        ):
+            raise TranscriptSpeakerEditInvalidError(
+                reason="invalid_speaker_name",
+                context={"label": label, "max_chars": ONE_LINE_TEXT_MAX_CHARS},
+            )
+        normalized[label] = name
+    return normalized
 
 
 def validate_correction_partitions(

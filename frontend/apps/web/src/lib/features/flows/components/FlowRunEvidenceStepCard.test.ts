@@ -30,6 +30,7 @@ function renderCard(
     stepDef?: Record<string, unknown>;
     isPowerUser?: boolean;
     transcription?: Record<string, unknown>;
+    correctionsController?: never;
   } = {}
 ): string {
   return render(FlowRunEvidenceStepCard, {
@@ -267,6 +268,69 @@ describe("FlowRunEvidenceStepCard", () => {
     expect(html).toContain("Handläggare");
     // Its own names, not the transcription step's numbered fallback.
     expect(html).not.toContain(m.flow_transcript_editor_speaker({ number: 1 }));
+  });
+
+  // A person's names, kept with the transcription step's corrections.
+  const named = (speakerNames: Record<string, string | null>) =>
+    ({ error: null, staleCount: 0, occurrences: [], speakerEdits: [], speakerNames }) as never;
+
+  it("shows the names a person gave on the stored segments", () => {
+    const transcription = renderCard(
+      false,
+      { ...result, output_payload_json: { text: "[00:00:00 - 00:00:04] SPEAKER_00: Hej Gunnar." } },
+      rawContext,
+      null,
+      null,
+      { correctionsController: named({ SPEAKER_00: "Gunnar Ek", SPEAKER_01: null }) }
+    );
+    expect(transcription).toContain("Gunnar Ek");
+    expect(transcription).toContain(m.flow_transcript_editor_speaker({ number: 2 }));
+
+    // Over the speaker-naming step's names, the same rule a regeneration uses.
+    const naming = renderCard(
+      false,
+      {
+        ...result,
+        step_id: "00000000-0000-0000-0000-000000000009",
+        step_order: 2,
+        output_payload_json: {
+          text: "[00:00:00 - 00:00:04] Gunnar: Hej Gunnar.",
+          speaker_mapping: {
+            inventory: [
+              { label: "SPEAKER_00", line_count: 1, samples: ["Hej Gunnar."] },
+              { label: "SPEAKER_01", line_count: 1, samples: ["Jo tack."] }
+            ]
+          },
+          structured: {
+            speakers: [
+              { label: "SPEAKER_00", name: "Gunnar", confidence: "high", evidence: "" },
+              { label: "SPEAKER_01", name: "Handläggare", confidence: "low", evidence: "" }
+            ]
+          }
+        } as unknown as FlowRunStep["output_payload_json"]
+      },
+      rawContext,
+      null,
+      null,
+      { correctionsController: named({ SPEAKER_00: "Gunnar Ek" }) }
+    );
+    expect(naming).toContain("Gunnar Ek");
+
+    // A downstream step's own transcript is shown as it was written.
+    const downstream = renderCard(
+      false,
+      {
+        ...result,
+        step_id: "00000000-0000-0000-0000-000000000010",
+        step_order: 3,
+        output_payload_json: { text: "[00:00:00 - 00:00:04] SPEAKER_00: Hej Gunnar." }
+      },
+      rawContext,
+      null,
+      null,
+      { correctionsController: named({ SPEAKER_00: "Gunnar Ek" }) }
+    );
+    expect(downstream).not.toContain("Gunnar Ek");
   });
 
   it("shows a downstream document as authored when it only quotes transcript lines", () => {
