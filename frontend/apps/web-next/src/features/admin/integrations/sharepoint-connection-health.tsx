@@ -219,11 +219,15 @@ function WatchCheck({ watch }: { watch: ReturnType<typeof useWatchHealth> }) {
       ? t("sharepoint_subscriptions_load_error")
       : total === 0
         ? t("sharepoint_health_watch_none")
-        : expired + failing > 0
-          ? t("sharepoint_health_watch_issues", { active, total, expired, failing })
-          : active === 1
-            ? t("sharepoint_health_watch_ok_one")
-            : t("sharepoint_health_watch_ok_other", { count: active });
+        : failing === 0 && expired > 0
+          ? t("sharepoint_health_watch_issues_expired", { active, total, expired })
+          : expired === 0 && failing > 0
+            ? t("sharepoint_health_watch_issues_failing", { active, total, failing })
+            : expired + failing > 0
+              ? t("sharepoint_health_watch_issues", { active, total, expired, failing })
+              : active === 1
+                ? t("sharepoint_health_watch_ok_one")
+                : t("sharepoint_health_watch_ok_other", { count: active });
 
   return (
     <HealthCheck

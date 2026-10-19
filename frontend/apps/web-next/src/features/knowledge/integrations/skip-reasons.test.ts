@@ -15,7 +15,7 @@ const t = createTranslator({ locale: "sv", messages: sv as Record<string, string
 const EXAMPLES: Record<SkipReasonCode, [SkipReason, string]> = {
   unsupported_type: [
     { code: "unsupported_type", params: { label: "legacy Word .doc, save as .docx" } },
-    t("skip_reason_unsupported_type", { label: "legacy Word .doc, save as .docx" })
+    t("skip_reason_unsupported_type", { label: t("skip_reason_type_legacy_word") })
   ],
   no_text_layer: [{ code: "no_text_layer", params: {} }, t("skip_reason_no_text_layer")],
   empty_content: [{ code: "empty_content", params: {} }, t("skip_reason_empty_content")],
@@ -100,6 +100,25 @@ describe("describeSkipReason", () => {
     expect(
       describeSkipReason({ code: "http_error", params: { status: 503 }, retry: true }, t)
     ).toBe(t("skip_reason_with_retry", { reason: t("skip_reason_http_other", { status: 503 }) }));
+  });
+
+  it("names a type in the viewer's language, and passes names without words through", () => {
+    for (const [label, expected] of [
+      ["image", "bild"],
+      ["Outlook .msg", "Outlook .msg"],
+      [".zip", ".zip"],
+      ["toString", "toString"]
+    ] as const) {
+      expect(describeSkipReason({ code: "unsupported_type", params: { label } }, t)).toBe(
+        t("skip_reason_unsupported_type", { label: expected })
+      );
+    }
+  });
+
+  it("does not double the full stop before the retry note", () => {
+    expect(describeSkipReason({ reason: "Server busy.", retry: true }, t)).toBe(
+      "Server busy. Försöks igen vid nästa synk"
+    );
   });
 
   it("shows the text only for a code this client does not know", () => {

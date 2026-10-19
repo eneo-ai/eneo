@@ -276,6 +276,26 @@ describe("SharePointConnectionHealth", () => {
     ).toBeTruthy();
   });
 
+  it("leaves a count of none out of the watch issues", async () => {
+    subscriptions = [subscription(), subscription({ is_expired: true })];
+    respond();
+    const { health } = show(app());
+    expect(
+      await within(health).findByText(
+        "1 av 2 bevakningar aktiva: 1 har gått ut. De mapparna uppdateras bara vid fullständig synk."
+      )
+    ).toBeTruthy();
+    cleanup();
+
+    subscriptions = [subscription(), subscription({ consecutive_renewal_failures: 3 })];
+    const failing = show(app());
+    expect(
+      await within(failing.health).findByText(
+        "1 av 2 bevakningar aktiva: 1 kunde inte förnyas. De mapparna uppdateras bara vid fullständig synk."
+      )
+    ).toBeTruthy();
+  });
+
   it("moves focus to the watches button once the renewed ones are no longer expired", async () => {
     subscriptions = [subscription(), subscription({ is_expired: true })];
     respond({
