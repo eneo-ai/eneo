@@ -1202,10 +1202,10 @@ class TestReadOverrideSnapshot:
         ],
         "CONVERSATIONS_READ_OVERRIDES": [
             "chat",
-            "conversation_settings_defaults",
             "delete_message_feedback",
             "export_conversation_document",
             "leave_feedback",
+            "resolve_conversation_settings",
             "set_message_feedback",
             "update_conversation_settings",
         ],

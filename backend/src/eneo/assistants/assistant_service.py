@@ -417,7 +417,7 @@ class AssistantService:
         return authenticated
 
     @staticmethod
-    def _requested_capabilities(
+    def requested_capabilities(
         *,
         assistant: Assistant,
         space: "Space",
@@ -464,7 +464,7 @@ class AssistantService:
             else assistant.mcp_servers
         )
         servers = general_servers_for_space(attached, space.security_classification)
-        requested_capabilities = self._requested_capabilities(
+        requested_capabilities = self.requested_capabilities(
             assistant=assistant, space=space, effective_config=effective_config
         )
         if requested_capabilities:
@@ -1123,7 +1123,7 @@ class AssistantService:
             effective_mcp_servers = assistant.mcp_servers
         if assistant.has_knowledge():
             effective_mcp_servers = []
-        requested_capabilities = self._requested_capabilities(
+        requested_capabilities = self.requested_capabilities(
             assistant=assistant, space=space, effective_config=effective_config
         )
         if requested_capabilities:
@@ -3437,7 +3437,7 @@ class AssistantService:
             capability_base, space.security_classification
         )
         capability_mcp_servers: list["MCPServer"] = []
-        requested_capabilities = self._requested_capabilities(
+        requested_capabilities = self.requested_capabilities(
             assistant=assistant_to_ask, space=space, effective_config=effective_config
         )
         requested_capabilities -= set(disabled_capabilities or [])

@@ -11,6 +11,7 @@ import {
   type ConversationSparse,
   type ConversationSettings,
   type ConversationSettingsState,
+  type ConversationSettingsResolution,
   type Assistant,
   type Conversation,
   type GroupChat,
@@ -103,6 +104,7 @@ export class ChatService {
   #modelCatalog = $state<SparseCompletionModel[]>([]);
   #draftSettings = $state<ConversationSettings | null>(null);
   settings = $derived(this.currentConversation.settings?.settings ?? this.#draftSettings);
+  settingsResolution = $state<ConversationSettingsResolution | null>(null);
   settingsBusy = $state(false);
   settingsError = $state<unknown>(null);
   #settingsEnabled = false;
@@ -304,6 +306,7 @@ export class ChatService {
   // resolution: keep an allowed current model, otherwise use policy default,
   // then the first allowed model.
   #partnerEffectiveModel(): SparseCompletionModel | undefined {
+    if (this.settingsResolution) return this.settingsResolution.effective_model ?? undefined;
     const partner = this.#chatPartner;
     if (!partner || !("completion_model" in partner)) return undefined;
 
@@ -324,43 +327,41 @@ export class ChatService {
 
   #resetSettings() {
     this.#draftSettings = null;
+    this.settingsResolution = null;
     this.settingsBusy = false;
     this.settingsError = null;
   }
 
   async loadSettings(force = false) {
     this.#settingsEnabled = true;
-    if (this.settingsBusy || (this.settings && !force)) return;
+    if (this.settingsBusy || (this.settingsResolution && !force)) return;
     const conversation = this.currentConversation;
     const partner = this.#chatPartner;
     this.settingsBusy = true;
     this.settingsError = null;
     try {
-      let state = conversation.settings;
-      if (force && conversation.id) {
-        state = (await this.#eneo.conversations.get(conversation)).settings;
-      }
-      if (!state) {
-        const defaults = await this.#eneo.conversations.settingsDefaults({
+      let resolution = await this.#eneo.conversations.resolveSettings({
+        chatPartner: partner,
+        conversation,
+        settings: conversation.id ? undefined : (this.settings ?? undefined)
+      });
+      if (conversation.id && resolution.revision === 0) {
+        try {
+          await this.#eneo.conversations.updateSettings(conversation, resolution.settings, 0);
+        } catch (error) {
+          if (!(error instanceof EneoError) || error.status !== 409) throw error;
+        }
+        resolution = await this.#eneo.conversations.resolveSettings({
           chatPartner: partner,
           conversation
         });
-        if (conversation.id) {
-          try {
-            state = await this.#eneo.conversations.updateSettings(conversation, defaults, 0);
-          } catch (error) {
-            // Another tab may have initialized the legacy conversation first.
-            if (!(error instanceof EneoError) || error.status !== 409) throw error;
-            state = (await this.#eneo.conversations.get(conversation)).settings;
-            if (!state) throw error;
-          }
-        } else if (conversation === this.currentConversation) {
-          this.#draftSettings = defaults;
-        }
       }
       if (conversation !== this.currentConversation) return;
-      if (state) {
-        conversation.settings = state;
+      this.settingsResolution = resolution;
+      if (conversation.id && resolution.revision > 0) {
+        conversation.settings = { revision: resolution.revision, settings: resolution.settings };
+      } else {
+        this.#draftSettings = resolution.settings;
       }
       this.#clearPreflight();
     } catch (error) {
@@ -387,6 +388,13 @@ export class ChatService {
       if (conversation !== this.currentConversation) return;
       if (state) conversation.settings = state;
       if (!state) this.#draftSettings = settings;
+      const resolution = await this.#eneo.conversations.resolveSettings({
+        chatPartner: this.#chatPartner,
+        conversation,
+        settings: conversation.id ? undefined : settings
+      });
+      if (conversation !== this.currentConversation) return;
+      this.settingsResolution = resolution;
       this.#clearPreflight();
     } catch (error) {
       if (conversation === this.currentConversation) this.settingsError = error;
@@ -862,6 +870,8 @@ export class ChatService {
     ) => {
       if (this.#settingsEnabled) {
         if (this.settingsError) throw this.settingsError;
+        if (this.settingsResolution?.model_unavailable)
+          throw new Error(m.conversation_settings_model_unavailable());
         if (!this.settings || this.settingsBusy)
           throw new Error("Conversation settings are still loading.");
       }
@@ -1231,7 +1241,7 @@ export class ChatService {
           }
         });
       } catch (error) {
-        if (!isStale() && error instanceof EneoError && error.status === 409) {
+        if (!isStale() && error instanceof EneoError && [400, 409].includes(error.status)) {
           this.settingsError = error;
         }
         if (!requestOpened && ref) {
@@ -1296,6 +1306,7 @@ export class ChatService {
 
       if (this.#streamGen === streamGen) {
         this.reloadHistory();
+        if (this.#settingsEnabled && !this.settingsError) await this.loadSettings(true);
       }
 
       // The $effect in constructor now handles automatic token calculation

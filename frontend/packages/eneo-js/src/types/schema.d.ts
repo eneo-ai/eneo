@@ -1600,7 +1600,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/conversations/settings/defaults/": {
+  "/api/v1/conversations/settings/resolve/": {
     parameters: {
       query?: never;
       header?: never;
@@ -1610,10 +1610,10 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Conversation Settings Defaults
-     * @description Return the current settings defaults for a new or legacy conversation after checking access to its target.
+     * Resolve Conversation Settings
+     * @description Resolve saved or draft choices against current model and tool availability without replacing unavailable choices.
      */
-    post: operations["conversation_settings_defaults_api_v1_conversations_settings_defaults__post"];
+    post: operations["resolve_conversation_settings_api_v1_conversations_settings_resolve__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -12679,6 +12679,27 @@ export interface components {
       /** @description Ratings on the answers in these conversations. Conversation-level feedback is not included. */
       feedback: components["schemas"]["MessageFeedbackCounts"];
     };
+    /**
+     * ConversationMcpServer
+     * @description A general tool offered by current policy, including why it cannot run.
+     */
+    ConversationMcpServer: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Icon Url */
+      icon_url?: string | null;
+      /** Available */
+      available: boolean;
+      /** Reason */
+      reason?: string | null;
+    };
     /** ConversationRenameRequest */
     ConversationRenameRequest: {
       /** Name */
@@ -12754,6 +12775,44 @@ export interface components {
        */
       require_tool_approval?: boolean;
     };
+    /**
+     * ConversationSettingsResolution
+     * @description Saved choices and current model/tool availability; never rewrites saved choices.
+     */
+    ConversationSettingsResolution: {
+      /** Revision */
+      revision: number;
+      settings: components["schemas"]["ConversationSettings"];
+      /** Available Models */
+      available_models?: components["schemas"]["CompletionModelPublic"][] | null;
+      effective_model?: components["schemas"]["CompletionModelPublic"] | null;
+      /**
+       * Model Unavailable
+       * @default false
+       */
+      model_unavailable?: boolean;
+      /**
+       * Supports Tool Calling
+       * @default false
+       */
+      supports_tool_calling?: boolean;
+      /** Effective Reasoning Effort */
+      effective_reasoning_effort?: string | null;
+      /** Default Reasoning Effort */
+      default_reasoning_effort?: string | null;
+      /** Reasoning Effort Options */
+      reasoning_effort_options?: string[];
+      /** Mcp Servers */
+      mcp_servers?: components["schemas"]["ConversationMcpServer"][];
+      /** Capabilities */
+      capabilities?: components["schemas"]["CapabilityAvailability"][];
+      /** Default Disabled Mcp Server Ids */
+      default_disabled_mcp_server_ids?: string[];
+      /** Default Disabled Capabilities */
+      default_disabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+      )[];
+    };
     /** ConversationSettingsState */
     ConversationSettingsState: {
       /** Revision */
@@ -12766,21 +12825,17 @@ export interface components {
       expected_revision: number;
       settings: components["schemas"]["ConversationSettings"];
     };
-    /**
-     * ConversationTarget
-     * @description Shared targeting fields for chat-style requests.
-     *
-     *     Exactly one of `session_id`, `assistant_id`, or `group_chat_id` must be
-     *     present. Centralized here so the validator stays in one place — adding a
-     *     new target type later is a single edit.
-     */
-    ConversationTarget: {
+    /** ConversationTurnTarget */
+    ConversationTurnTarget: {
       /** Session Id */
       session_id?: string | null;
       /** Assistant Id */
       assistant_id?: string | null;
       /** Group Chat Id */
       group_chat_id?: string | null;
+      settings?: components["schemas"]["ConversationSettings"] | null;
+      /** Settings Revision */
+      settings_revision?: number | null;
     };
     /** Counts */
     Counts: {
@@ -31678,7 +31733,7 @@ export interface operations {
       };
     };
   };
-  conversation_settings_defaults_api_v1_conversations_settings_defaults__post: {
+  resolve_conversation_settings_api_v1_conversations_settings_resolve__post: {
     parameters: {
       query?: never;
       header?: never;
@@ -31687,7 +31742,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["ConversationTarget"];
+        "application/json": components["schemas"]["ConversationTurnTarget"];
       };
     };
     responses: {
@@ -31697,7 +31752,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["ConversationSettings"];
+          "application/json": components["schemas"]["ConversationSettingsResolution"];
         };
       };
       /** @description Bad Request */
@@ -31720,6 +31775,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

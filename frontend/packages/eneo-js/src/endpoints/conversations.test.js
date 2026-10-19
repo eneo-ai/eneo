@@ -208,3 +208,23 @@ test("a failed answer without a reason is reported as a stream error", async () 
     (error) => error instanceof EneoError && error.response.code === "stream_error"
   );
 });
+
+test("resolution sends drafts inline but reads saved choices by session identity", async () => {
+  const calls = [];
+  const conversations = initConversations({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return {};
+    }
+  });
+  const chatPartner = { id: "assistant", type: "default-assistant" };
+  const settings = { completion_model_id: "model" };
+  await conversations.resolveSettings({ chatPartner, settings });
+  await conversations.resolveSettings({ chatPartner, conversation: { id: "saved" }, settings });
+  assert.equal(calls[0].endpoint, "/api/v1/conversations/settings/resolve/");
+  assert.deepEqual(calls[0].request.requestBody["application/json"], {
+    assistant_id: "assistant",
+    settings
+  });
+  assert.deepEqual(calls[1].request.requestBody["application/json"], { session_id: "saved" });
+});

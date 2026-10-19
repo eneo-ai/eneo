@@ -227,7 +227,7 @@ CONVERSATIONS_READ_OVERRIDES: frozenset[str] = frozenset(
     {
         "chat",
         "leave_feedback",
-        "conversation_settings_defaults",
+        "resolve_conversation_settings",
         "update_conversation_settings",
         # Rating answers is part of chatting, like conversation feedback; the
         # route's own "conversations" guard still applies.

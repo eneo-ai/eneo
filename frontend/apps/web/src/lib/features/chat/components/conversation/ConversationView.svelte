@@ -25,7 +25,6 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { getChatService } from "../../ChatService.svelte";
   import { editedPassage } from "../../documentVersions";
-  import { chatCapabilityAvailable } from "../../chatCapabilities";
   import { initMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
   import McpAppPanel from "../../mcp-apps/McpAppPanel.svelte";
   import {
@@ -36,7 +35,6 @@
     toolCallsOf
   } from "../../mcp-apps/mcpApps";
   import type { PanelContents } from "$lib/features/file-preview/panelContents";
-  import { getAppContext } from "$lib/core/AppContext";
   import { onDestroy, untrack, type Snippet } from "svelte";
   import { followConversationScroll } from "../../followConversationScroll";
   import { m } from "$lib/paraglide/messages";
@@ -51,7 +49,6 @@
   const chat = getChatService();
   const uploadGroups = $derived(conversationUploadGroups(chat.currentConversation.messages ?? []));
   const uploads = $derived(uploadGroups.flatMap((group) => group.files));
-  const { user } = getAppContext();
 
   // Validate uploads client-side against the backend's per-format size limits
   // (and the partner model's vision support) so oversized or unsupported files
@@ -64,12 +61,20 @@
     toStore(() => {
       const partner = chat.partner;
       const completion_model =
-        partner && "completion_model" in partner ? partner.completion_model : null;
+        chat.settingsResolution?.effective_model ??
+        chat.selectedPersonalModel ??
+        (partner && "completion_model" in partner ? partner.completion_model : null);
       return {
         completion_model,
         acceptsImageAttachments:
           completion_model?.vision === true ||
-          chatCapabilityAvailable(partner, user, "image_generation")
+          (chat.settingsResolution?.capabilities?.some(
+            (capability) => capability.purpose === "image_generation" && capability.available
+          ) === true &&
+            (chat.settings?.capability_states?.image_generation ??
+              !chat.settingsResolution?.default_disabled_capabilities?.includes(
+                "image_generation"
+              )))
       };
     })
   );

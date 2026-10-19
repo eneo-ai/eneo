@@ -310,3 +310,6 @@ export type InitiateAuthResponse = {
 };
 
 export type AccessTokenResponse = components["schemas"]["AccessTokenResponse"];
+
+export type ConversationSettingsResolution =
+  components["schemas"]["ConversationSettingsResolution"];

@@ -317,7 +317,15 @@ ask a file is not granted to service keys.
   preferences cannot reliably be attributed to a conversation and are not imported.
 - Saved choices cannot grant access removed by an administrator. Availability,
   policy and security classification are checked again when answering. If a
-  saved model is unavailable, choose an allowed model or start a new conversation.
+  saved model is unavailable, sending is paused and the model picker still offers
+  the models that pass current access, policy and classification checks, even
+  when only one replacement remains. Choose one explicitly or start a new conversation.
+  Temporarily unavailable tool choices stay saved and apply again when the tool
+  becomes available. The chat refreshes availability when opened, after saving
+  choices and after a completed turn; backend checks still apply to every request.
+  These rules apply in both the standard chat and the React beta.
+  Interactive built-in tool views use the open conversation's approval choice;
+  external views always ask before executing another tool.
   If policy locks reasoning effort, the policy value applies. A previous saved
   effort does not prevent you from changing tools or approval preferences.
   If another tab changes the settings, Eneo asks you to reload the saved choices

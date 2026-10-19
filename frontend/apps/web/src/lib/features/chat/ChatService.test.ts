@@ -36,7 +36,7 @@ function chatService(
   overrides: {
     ask?: ReturnType<typeof vi.fn>;
     get?: ReturnType<typeof vi.fn>;
-    settingsDefaults?: ReturnType<typeof vi.fn>;
+    resolveSettings?: ReturnType<typeof vi.fn>;
     updateSettings?: ReturnType<typeof vi.fn>;
     getTurnDiagnostics?: ReturnType<typeof vi.fn>;
     initialConversation?: Conversation | null;
@@ -47,11 +47,20 @@ function chatService(
     eneo: {
       conversations: {
         preflight,
-        settingsDefaults:
-          overrides.settingsDefaults ??
-          vi.fn().mockResolvedValue({
-            completion_model_id: "model-1",
-            mcp_server_states: { tool: true }
+        resolveSettings:
+          overrides.resolveSettings ??
+          vi.fn().mockImplementation(async ({ conversation, settings }) => {
+            const saved =
+              overrides.get && conversation.id ? await overrides.get(conversation) : conversation;
+            const state = saved.settings;
+            return {
+              revision: state?.revision ?? 0,
+              settings: state?.settings ??
+                settings ?? { completion_model_id: "model-1", mcp_server_states: { tool: true } },
+              effective_model: { id: "model-1", name: "model-1", token_limit: 128000 },
+              available_models: [{ id: "model-1" }, { id: "model-2" }],
+              model_unavailable: false
+            };
           }),
         updateSettings:
           overrides.updateSettings ??
@@ -687,6 +696,32 @@ describe("ChatService personal conversation model", () => {
 });
 
 describe("ChatService saved conversation choices", () => {
+  it("blocks a removed model and recovers by selecting the only allowed replacement", async () => {
+    const ask = completedAsk();
+    const resolveSettings = vi.fn().mockImplementation(async ({ settings }) => ({
+      revision: 0,
+      settings: settings ?? { completion_model_id: "removed" },
+      available_models: [{ id: "model-2" }],
+      effective_model:
+        settings?.completion_model_id === "model-2"
+          ? { id: "model-2", name: "model-2", token_limit: 64000 }
+          : null,
+      model_unavailable: settings?.completion_model_id !== "model-2"
+    }));
+    const chat = chatService(vi.fn(), { ask, resolveSettings });
+    await chat.loadSettings();
+    await expect(chat.askQuestion("hello")).rejects.toThrow(
+      m.conversation_settings_model_unavailable()
+    );
+    expect(ask).not.toHaveBeenCalled();
+    await chat.updateSettings({ completion_model_id: "model-2" });
+    expect(chat.settingsResolution?.model_unavailable).toBe(false);
+    await chat.askQuestion("hello");
+    expect(ask).toHaveBeenCalledWith(
+      expect.objectContaining({ settings: { completion_model_id: "model-2" } })
+    );
+  });
+
   it("saves tools, approval and reasoning together, then reloads them in another client", async () => {
     const conversation: Conversation = {
       id: "saved",

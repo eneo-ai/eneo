@@ -37,7 +37,7 @@ from eneo.conversations.conversation_models import (
     ChatTurnDiagnostics,
     ConversationRenameRequest,
     ConversationRequest,
-    ConversationTarget,
+    ConversationTurnTarget,
     PreflightRequest,
     PreflightResponse,
     RecentConversation,
@@ -79,7 +79,7 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.server.protocol.downloads import content_disposition_header
 from eneo.sessions.conversation_settings import (
-    ConversationSettings,
+    ConversationSettingsResolution,
     ConversationSettingsState,
     ConversationSettingsUpdate,
 )
@@ -664,15 +664,15 @@ async def list_conversations(
 
 
 @router.post(
-    "/settings/defaults/",
-    description="Return the current settings defaults for a new or legacy conversation after checking access to its target.",
-    response_model=ConversationSettings,
-    responses=responses.get_responses([400, 403, 404]),
+    "/settings/resolve/",
+    description="Resolve saved or draft choices against current model and tool availability without replacing unavailable choices.",
+    response_model=ConversationSettingsResolution,
+    responses=responses.get_responses([400, 403, 404, 409]),
     dependencies=[
         Depends(
             require_resource_permission_for_method(
                 "conversations",
-                read_override_endpoints=frozenset({"conversation_settings_defaults"}),
+                read_override_endpoints=frozenset({"resolve_conversation_settings"}),
             )
         )
     ],
@@ -682,12 +682,12 @@ async def list_conversations(
     authorization=Authorization.AUTHENTICATED,
     reason=_CONVERSATION_SERVICE_ACCESS_REASON,
 )
-async def conversation_settings_defaults(
-    request: ConversationTarget,
+async def resolve_conversation_settings(
+    request: ConversationTurnTarget,
     http_request: Request,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    """Current defaults for a draft, or for a legacy conversation without settings."""
+    """Read authoritative settings and current model and tool eligibility."""
     await _validate_conversation_scope(
         http_request=http_request,
         container=container,
@@ -695,10 +695,12 @@ async def conversation_settings_defaults(
         group_chat_id=request.group_chat_id,
         session_id=request.session_id,
     )
-    return await container.conversation_service().settings_defaults(
+    return await container.conversation_service().resolve_settings(
         assistant_id=request.assistant_id,
         group_chat_id=request.group_chat_id,
         session_id=request.session_id,
+        settings=request.settings,
+        settings_revision=request.settings_revision,
     )
 
 

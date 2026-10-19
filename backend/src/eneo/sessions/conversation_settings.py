@@ -8,7 +8,11 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
+from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
+from eneo.mcp_servers.domain.capabilities import (
+    CapabilityAvailability,
+    CapabilityPurpose,
+)
 
 
 class ConversationSettings(BaseModel):
@@ -54,3 +58,39 @@ class ConversationSettingsUpdate(BaseModel):
 
     expected_revision: int = Field(ge=0)
     settings: ConversationSettings
+
+
+class ConversationMcpServer(BaseModel):
+    """A general tool offered by current policy, including why it cannot run."""
+
+    id: UUID
+    name: str
+    description: str | None = None
+    icon_url: str | None = None
+    available: bool
+    reason: str | None = None
+
+
+class ConversationSettingsResolution(BaseModel):
+    """Saved choices and current model/tool availability; never rewrites saved choices."""
+
+    revision: int = Field(ge=0)
+    settings: ConversationSettings
+    # None for assistants/group chats whose model is not user-selectable.
+    available_models: list[CompletionModelPublic] | None = None
+    effective_model: CompletionModelPublic | None = None
+    model_unavailable: bool = False
+    supports_tool_calling: bool = False
+    effective_reasoning_effort: str | None = None
+    default_reasoning_effort: str | None = None
+    reasoning_effort_options: list[str] = Field(default_factory=list[str])
+    mcp_servers: list[ConversationMcpServer] = Field(
+        default_factory=list[ConversationMcpServer]
+    )
+    capabilities: list[CapabilityAvailability] = Field(
+        default_factory=list[CapabilityAvailability]
+    )
+    default_disabled_mcp_server_ids: list[UUID] = Field(default_factory=list[UUID])
+    default_disabled_capabilities: list[CapabilityPurpose] = Field(
+        default_factory=list[CapabilityPurpose]
+    )

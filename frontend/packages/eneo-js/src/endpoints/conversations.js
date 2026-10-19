@@ -61,17 +61,17 @@ export function initConversations(client) {
     },
 
     /**
-     * Current defaults for a new conversation or a legacy conversation without settings.
-     * @param {{chatPartner: ChatPartner, conversation?: {id: string}}} params
-     * @returns {Promise<import('../types/resources').ConversationSettings>}
+     * Saved or draft choices and the models currently allowed by the backend.
+     * @param {{chatPartner: ChatPartner, conversation?: {id: string}, settings?: import('../types/resources').ConversationSettings}} params
+     * @returns {Promise<import('../types/resources').ConversationSettingsResolution>}
      */
-    settingsDefaults: async ({ chatPartner, conversation }) => {
+    resolveSettings: async ({ chatPartner, conversation, settings }) => {
       const target = conversation?.id
         ? { session_id: conversation.id }
         : chatPartner.type === "group-chat"
-          ? { group_chat_id: chatPartner.id }
-          : { assistant_id: chatPartner.id };
-      return await client.fetch("/api/v1/conversations/settings/defaults/", {
+          ? { group_chat_id: chatPartner.id, settings }
+          : { assistant_id: chatPartner.id, settings };
+      return await client.fetch("/api/v1/conversations/settings/resolve/", {
         method: "post",
         requestBody: { "application/json": target }
       });

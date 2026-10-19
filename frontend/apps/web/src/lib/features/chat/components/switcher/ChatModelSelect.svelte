@@ -42,18 +42,7 @@
         ) ?? effectiveConfig.locked_model)
       : null
   );
-  const policyAllowedModelIds = $derived(
-    effectiveConfig?.models_enforced
-      ? new Set(effectiveConfig.available_models.map((model) => model.id))
-      : null
-  );
-  const visibleModels = $derived(
-    sortModels(
-      policyAllowedModelIds
-        ? $currentSpace.completion_models.filter((model) => policyAllowedModelIds.has(model.id))
-        : $currentSpace.completion_models
-    )
-  );
+  const visibleModels = $derived(sortModels(chat.settingsResolution?.available_models ?? []));
   const selectedModel = $derived.by(() => {
     const selected = visibleModels.find((model) => model.id === chat.selectedPersonalModel?.id);
     return (
@@ -67,10 +56,7 @@
     );
   });
   const selectedId = $derived(chat.settings?.completion_model_id ?? selectedModel?.id ?? "");
-  const savedModelUnavailable = $derived(
-    Boolean(chat.settings?.completion_model_id) &&
-      !visibleModels.some((model) => model.id === chat.settings?.completion_model_id)
-  );
+  const savedModelUnavailable = $derived(chat.settingsResolution?.model_unavailable ?? false);
   const selectedLabel = $derived(
     savedModelUnavailable
       ? m.conversation_settings_model_unavailable()
@@ -95,7 +81,11 @@
   // identically.
   const modelGroups = $derived(groupModelsByVendor(visibleModels, m.model_group_other()));
 
-  $effect(() => chat.setModelCatalog($currentSpace.completion_models));
+  $effect(() =>
+    chat.setModelCatalog(
+      chat.settingsResolution?.available_models ?? $currentSpace.completion_models
+    )
+  );
 
   async function applyModel(id: string) {
     const model = visibleModels.find((candidate) => candidate.id === id);
@@ -124,22 +114,11 @@
 </script>
 
 {#if savedModelUnavailable}
-  <div class="text-destructive flex items-center gap-2 text-sm" role="status">
-    <span>{m.conversation_settings_model_unavailable()}</span>
-    {#if selectedModel}
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={chat.settingsBusy || chat.askQuestion.isLoading}
-        onclick={() => {
-          if (selectedModel) selectModel(selectedModel.id);
-        }}
-      >
-        {m.conversation_settings_use_default()}
-      </Button>
-    {/if}
-  </div>
-{:else if lockedModel}
+  <p class="text-destructive text-sm" role="status">
+    {m.conversation_settings_model_unavailable()}
+  </p>
+{/if}
+{#if lockedModel && !savedModelUnavailable}
   <div
     class="text-muted-foreground flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm"
     title={m.governance_locked_by_admin()}
@@ -147,7 +126,7 @@
     <Lock class="size-3.5" aria-hidden="true" />
     <span class="text-foreground max-w-[10rem] truncate font-medium">{lockedModel.nickname}</span>
   </div>
-{:else if visibleModels.length <= 1}
+{:else if visibleModels.length === 0 || (visibleModels.length === 1 && !savedModelUnavailable)}
   <div class="rounded-lg px-2.5 py-1.5 text-sm" title={m.choose_a_completion_model()}>
     <span class="max-w-[12rem] truncate font-medium">{selectedLabel}</span>
   </div>

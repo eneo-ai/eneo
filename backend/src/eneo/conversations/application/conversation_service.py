@@ -11,6 +11,9 @@ from eneo.completion_models.infrastructure.context_builder import (
 from eneo.completion_models.infrastructure.static_prompts import (
     SET_TITLE_OF_CONVERSATION_PROMPT,
 )
+from eneo.completion_models.presentation.completion_model_assembler import (
+    CompletionModelAssembler,
+)
 from eneo.conversations.conversation_models import PreflightResponse
 from eneo.files.file_models import FileType
 from eneo.files.file_reference import (
@@ -29,11 +32,17 @@ from eneo.main.exceptions import (
     BadRequestException,
     ConversationSettingsConflictException,
 )
+from eneo.mcp_servers.application.capability_resolver import (
+    meets_security_classification,
+)
 from eneo.mcp_servers.domain.capabilities import (
+    CapabilityAvailability,
     CapabilityPurpose,
 )
 from eneo.sessions.conversation_settings import (
+    ConversationMcpServer,
     ConversationSettings,
+    ConversationSettingsResolution,
     ConversationSettingsState,
 )
 from eneo.sessions.session import SessionUpdate
@@ -42,6 +51,7 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from eneo.assistants.api.assistant_models import AssistantResponse
+    from eneo.assistants.assistant import Assistant
     from eneo.assistants.assistant_service import AssistantService
     from eneo.completion_models.domain.completion_model import CompletionModel
     from eneo.completion_models.infrastructure.completion_service import (
@@ -49,9 +59,11 @@ if TYPE_CHECKING:
     )
     from eneo.files.file_models import File
     from eneo.files.file_service import FileService
+    from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
     from eneo.group_chat.application.group_chat_service import GroupChatService
     from eneo.sessions.session import SessionContext, SessionInDB
     from eneo.sessions.session_service import SessionService
+    from eneo.spaces.space import Space
     from eneo.spaces.space_service import SpaceService
 
 
@@ -111,10 +123,16 @@ class ConversationService:
             assistant_id
         )
         space = await self.space_service.get_space_by_assistant(assistant_id)
+        return self._assistant_settings_defaults(assistant, space, config)
+
+    @staticmethod
+    def _assistant_settings_defaults(
+        assistant: "Assistant", space: "Space", config: "EffectiveConfig | None"
+    ) -> ConversationSettings:
         personal = (
             space.is_personal()
             and space.default_assistant is not None
-            and space.default_assistant.id == assistant_id
+            and space.default_assistant.id == assistant.id
         )
         model = select_effective_completion_model(
             current_model=None
@@ -149,6 +167,165 @@ class ConversationService:
                 for purpose in capabilities
             },
         )
+
+    async def resolve_settings(
+        self,
+        *,
+        session_id: "UUID | None" = None,
+        assistant_id: "UUID | None" = None,
+        group_chat_id: "UUID | None" = None,
+        settings: ConversationSettings | None = None,
+        settings_revision: int | None = None,
+    ) -> ConversationSettingsResolution:
+        revision = 0
+        if session_id is not None:
+            session = await self.session_service.get_context(session_id)
+            assistant_id, group_chat_id = session.assistant_id, session.group_chat_id
+            if session.settings:
+                settings, revision = (
+                    session.settings.settings,
+                    session.settings.revision,
+                )
+            if settings_revision is not None and settings_revision != revision:
+                raise ConversationSettingsConflictException()
+        if group_chat_id is not None:
+            await self.group_chat_service.get_group_chat(group_chat_id)
+            return ConversationSettingsResolution(
+                revision=revision, settings=settings or ConversationSettings()
+            )
+        if assistant_id is None:
+            raise BadRequestException("A conversation target is required.")
+        (
+            assistant,
+            _,
+            config,
+        ) = await self.assistant_service.get_assistant_with_effective_config(
+            assistant_id
+        )
+        space = await self.space_service.get_space_by_assistant(assistant_id)
+        if settings is None:
+            settings = self._assistant_settings_defaults(assistant, space, config)
+        result = ConversationSettingsResolution(revision=revision, settings=settings)
+        personal = (
+            space.is_personal()
+            and space.default_assistant is not None
+            and space.default_assistant.id == assistant_id
+        )
+        model = select_effective_completion_model(
+            current_model=assistant.completion_model, effective_config=config
+        )
+        if personal:
+            result.available_models = []
+            allowed_ids: set[UUID] = set()
+            for candidate in space.completion_models:
+                try:
+                    self.assistant_service.resolve_personal_chat_model_override(
+                        space=space,
+                        assistant=assistant,
+                        effective_config=config,
+                        completion_model_id=candidate.id,
+                    )
+                except BadRequestException:
+                    continue
+                allowed_ids.add(candidate.id)
+                result.available_models.append(
+                    CompletionModelAssembler().from_completion_model_to_model(
+                        candidate,
+                        show_pricing=self.assistant_service.user.can_view_model_pricing,
+                    )
+                )
+            selected_id = settings.completion_model_id or (model.id if model else None)
+            if selected_id is None or selected_id not in allowed_ids:
+                result.model_unavailable = True
+                model = None
+            else:
+                model = space.get_completion_model(selected_id)
+        else:
+            if model is None or not space.is_completion_model_available(model.id):
+                result.model_unavailable = True
+                model = None
+            else:
+                try:
+                    space.validate_model_security_compatibility(model)
+                except BadRequestException:
+                    result.model_unavailable = True
+                    model = None
+        if model:
+            result.effective_model = (
+                CompletionModelAssembler().from_completion_model_to_model(
+                    model,
+                    show_pricing=self.assistant_service.user.can_view_model_pricing,
+                )
+            )
+        if model and config and config.reasoning_policy_configured:
+            result.effective_reasoning_effort = select_effective_reasoning_effort(
+                selected_model=model,
+                stored_effort=settings.reasoning_effort,
+                effective_config=config,
+            )
+        if model and config and config.reasoning_effort_user_configurable:
+            capability = model.get_supported_model_kwargs().reasoning_effort
+            if capability.supported and capability.control == "select":
+                result.reasoning_effort_options = capability.options or []
+                result.default_reasoning_effort = config.default_reasoning_effort
+        supports_tools = model is not None and model.supports_tool_calling
+        result.supports_tool_calling = supports_tools
+        servers = (
+            config.available_mcp_servers
+            if config and config.mcp_enforced
+            else assistant.mcp_servers
+        )
+        for server in servers:
+            if server.purpose != "general":
+                continue
+            reason = (
+                "server_disabled"
+                if not server.is_enabled
+                else "classification"
+                if not meets_security_classification(
+                    server, space.security_classification
+                )
+                else "model_no_tool_calling"
+                if not supports_tools
+                else None
+            )
+            result.mcp_servers.append(
+                ConversationMcpServer(
+                    id=server.id,
+                    name=server.name,
+                    description=server.description,
+                    icon_url=server.icon_url,
+                    available=reason is None,
+                    reason=reason,
+                )
+            )
+        requested = self.assistant_service.requested_capabilities(
+            assistant=assistant, space=space, effective_config=config
+        )
+        availability = (
+            config.available_capabilities
+            if config and config.mcp_enforced
+            else assistant.available_capabilities
+        )
+        for purpose in sorted(requested):
+            state = next(
+                (state for state in availability if state.purpose == purpose), None
+            )
+            if state is None:
+                state = CapabilityAvailability(
+                    purpose=purpose, available=False, reason="no_active_provider"
+                )
+            if state.available and not supports_tools:
+                state = state.model_copy(
+                    update={"available": False, "reason": "model_no_tool_calling"}
+                )
+            result.capabilities.append(state)
+        if config:
+            result.default_disabled_mcp_server_ids = (
+                config.default_disabled_mcp_server_ids
+            )
+            result.default_disabled_capabilities = config.default_disabled_capabilities
+        return result
 
     async def validate_settings(
         self,

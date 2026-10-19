@@ -19,32 +19,17 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getChatService } from "../../ChatService.svelte";
   import { effectiveKnowledgeMode, internalMcpServerNames } from "../../internalMcpAvailability";
-  import { selectEffectiveChatModel } from "../../selectEffectiveChatModel";
   import { track } from "$lib/core/helpers/track";
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { SvelteSet } from "svelte/reactivity";
   import { TextQuote, TriangleAlert, X } from "@lucide/svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
-  import { getCapability, isCapabilityPurpose } from "$lib/features/mcp/capabilities";
-  import { modelSupportsToolCalling } from "$lib/features/mcp/readiness";
-  import { chatCapabilities } from "../../chatCapabilities";
+  import { getCapability, canUseCapability } from "$lib/features/mcp/capabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
   import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
   import { getMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
   import { composeQuotedQuestion } from "../../questionQuote";
-
-  type McpServerSummary = {
-    id: string;
-    name: string;
-    description?: string | null;
-    icon_url?: string | null;
-    /** "general" for ordinary MCP servers, otherwise a capability purpose (web search, image generation). */
-    purpose?: string | null;
-    /** Org-level availability: a deactivated server stays attached but is never called. */
-    is_enabled?: boolean;
-    readiness_reason?: string | null;
-  };
 
   const chat = getChatService();
   const { user } = getAppContext();
@@ -294,58 +279,22 @@
     return hasTools && isEnabled;
   });
 
-  // MCP servers available to the current partner (drives the toolbar popover).
-  // For the personal/default assistant the policy GRANTS servers that are not
-  // attached to the entity itself, so read them from effective_config (mirrors
-  // the backend); otherwise fall back to the assistant's own mcp_servers.
-  const mcpServers = $derived.by(() => {
-    const partner = chat.partner;
-    if (!partner) return [];
-    if ("effective_config" in partner && partner.effective_config?.mcp_enforced) {
-      return (partner.effective_config.available_mcp_servers ?? []) as Array<McpServerSummary>;
-    }
-    if ("mcp_servers" in partner && Array.isArray(partner.mcp_servers)) {
-      return partner.mcp_servers as Array<McpServerSummary>;
-    }
-    return [];
-  });
-
-  const effectiveModel = $derived.by(() => {
-    const partner = chat.partner;
-    if (!partner || !("completion_model" in partner)) return undefined;
-    return partner.type === "default-assistant" && chat.selectedPersonalModel
-      ? chat.selectedPersonalModel
-      : selectEffectiveChatModel(partner.completion_model, partner.effective_config);
-  });
-  // A model without tool calling never receives any tool: the backend drops
-  // MCP servers, capabilities and loopback tools alike. Every tool row then
-  // reads as unavailable for that reason, unless a more specific one applies.
-  const supportsToolCalling = $derived(modelSupportsToolCalling(effectiveModel));
-
-  // The tenant's capability providers (web search, image generation) flow
-  // through the same MCP inheritance chain as other servers but are presented
-  // as capabilities, not servers: split them out of the generic rows and give
-  // each its own popover entry. A capability the user's role may not use is
-  // hidden; the backend never attaches its tools for that user anyway.
+  const supportsToolCalling = $derived(chat.settingsResolution?.supports_tool_calling ?? false);
   const generalMcpServers = $derived(
-    mcpServers
-      .filter((server) => !isCapabilityPurpose(server.purpose))
-      .map((server) => {
-        const reason =
-          server.is_enabled === false
-            ? "server_disabled"
-            : supportsToolCalling
-              ? null
-              : "model_no_tool_calling";
-        return { ...server, available: reason === null, reason };
-      })
+    (chat.settingsResolution?.mcp_servers ?? []).map((server) => ({
+      ...server,
+      reason: server.reason ?? null
+    }))
   );
   const capabilityServers = $derived(
-    chatCapabilities(chat.partner, user).map((capability) =>
-      supportsToolCalling || !capability.available
-        ? capability
-        : { ...capability, available: false, reason: "model_no_tool_calling" }
-    )
+    (chat.settingsResolution?.capabilities ?? [])
+      .filter((capability) => canUseCapability(user, capability.purpose))
+      .map((capability) => ({
+        ...capability,
+        id: `capability:${capability.purpose}`,
+        name: capability.purpose,
+        reason: capability.reason ?? null
+      }))
   );
   const availableMcpServerIds = $derived(
     [...generalMcpServers, ...capabilityServers].map((s) => s.id)
@@ -353,7 +302,7 @@
 
   const disabledMcpServerIds = $derived.by(() => {
     const disabled = new SvelteSet<string>();
-    const config = "effective_config" in chat.partner ? chat.partner.effective_config : null;
+    const config = chat.settingsResolution;
     for (const id of availableMcpServerIds) {
       const purpose = getCapability(
         id.startsWith("capability:") ? id.slice("capability:".length) : null
@@ -453,7 +402,11 @@
   const isAskingDisabled = $derived(
     isConversationSubmitDisabled({
       isLoading: chat.askQuestion.isLoading,
-      sendPending: sendPending || settingsDisabled || Boolean(chat.settingsError),
+      sendPending:
+        sendPending ||
+        settingsDisabled ||
+        Boolean(chat.settingsError) ||
+        Boolean(chat.settingsResolution?.model_unavailable),
       hasContent: $question !== "" || $attachments.length > 0,
       hasCompletionModel: chat.hasCompletionModel,
       estimatedExceedsContext: chat.willExceedContext

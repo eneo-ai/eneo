@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -6,6 +7,7 @@ from uuid import uuid4
 import pytest
 
 from eneo.assistants.assistant_service import AssistantService
+from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.conversations.application.conversation_service import ConversationService
 from eneo.main.exceptions import (
     BadRequestException,
@@ -57,8 +59,42 @@ def test_new_tools_follow_current_defaults_but_explicit_choices_survive():
 
 
 def service_with_policy():
-    model, old_model = SimpleNamespace(id=uuid4()), SimpleNamespace(id=uuid4())
-    server = SimpleNamespace(id=uuid4())
+    def completion_model():
+        return CompletionModel(
+            user=TEST_USER,
+            id=uuid4(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            nickname="Model",
+            name="model",
+            max_input_tokens=8000,
+            max_output_tokens=1000,
+            vision=False,
+            family=None,
+            hosting=None,
+            org=None,
+            stability=None,
+            open_source=False,
+            description=None,
+            nr_billion_parameters=None,
+            hf_link=None,
+            is_deprecated=False,
+            deployment_name=None,
+            is_org_enabled=True,
+            is_org_default=False,
+            reasoning=False,
+            supports_tool_calling=True,
+        )
+
+    model, old_model = completion_model(), completion_model()
+    server = SimpleNamespace(
+        id=uuid4(),
+        purpose="general",
+        is_enabled=True,
+        name="Tool",
+        description=None,
+        icon_url=None,
+    )
     assistant = SimpleNamespace(
         id=uuid4(),
         completion_model=old_model,
@@ -73,23 +109,29 @@ def service_with_policy():
         mcp_enforced=True,
         available_mcp_servers=[server],
         enabled_capabilities=["web_search"],
+        available_capabilities=[],
         inline_file_text=None,
         default_disabled_mcp_server_ids=[server.id],
         default_disabled_capabilities=["image_generation"],
         reasoning_effort_user_configurable=False,
+        reasoning_policy_configured=False,
     )
     space = SimpleNamespace(
         is_personal=lambda: True,
         default_assistant=assistant,
+        completion_models=[model, old_model],
+        security_classification=None,
         is_completion_model_available=lambda id: id in [model.id, old_model.id],
         get_completion_model=lambda id: model if id == model.id else old_model,
         validate_model_security_compatibility=lambda _model: None,
     )
     assistant_service = SimpleNamespace(
+        user=TEST_USER,
         get_assistant_with_effective_config=AsyncMock(
             return_value=(assistant, [], policy)
         ),
         resolve_personal_chat_model_override=AssistantService.resolve_personal_chat_model_override,
+        requested_capabilities=AssistantService.requested_capabilities,
         ask=AsyncMock(),
     )
     session_service = SimpleNamespace(
@@ -284,10 +326,10 @@ async def test_new_conversation_cannot_submit_locked_reasoning():
 @pytest.mark.parametrize("legacy", [True, False])
 async def test_preflight_and_first_send_use_the_same_current_policy_default(legacy):
     service, assistant, model, *_ = service_with_policy()
-    model.name, model.token_limit, model.vision = "gpt-4o-mini", 8000, False
+    model.name, model.max_input_tokens, model.vision = "gpt-4o-mini", 8000, False
     model.provider_id = model.provider_type = None
     assistant.completion_model.name = "gpt-4o"
-    assistant.completion_model.token_limit = 128000
+    assistant.completion_model.max_input_tokens = 128000
     service.assistant_service.get_preflight_baseline = AsyncMock(
         return_value=SimpleNamespace(
             prompt_tokens=0, skill_context_tokens=0, attachments=[]
@@ -372,3 +414,137 @@ async def test_settings_update_rechecks_access_to_the_current_chat_partner(group
     with pytest.raises(UnauthorizedException, match="Access revoked"):
         await service.update_settings(uuid4(), ConversationSettings(), 0)
     service.session_service.update_settings.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocked_by", ["policy", "access", "security", "deleted"])
+async def test_resolve_preserves_unavailable_choice_and_offers_recovery(blocked_by):
+    service, assistant, model, server, policy = service_with_policy()
+    space = await service.space_service.get_space_by_assistant(assistant.id)
+    settings = ConversationSettings(
+        completion_model_id=model.id,
+        mcp_server_states={server.id: True},
+        capability_states={"web_search": False},
+        require_tool_approval=True,
+    )
+    if blocked_by == "policy":
+        policy.available_models = [assistant.completion_model]
+    elif blocked_by == "access":
+        space.is_completion_model_available = lambda id: id != model.id
+    elif blocked_by == "security":
+
+        def check(candidate):
+            if candidate.id == model.id:
+                raise BadRequestException("Security classification")
+
+        space.validate_model_security_compatibility = check
+    else:
+        space.completion_models = [assistant.completion_model]
+    result = await service.resolve_settings(
+        assistant_id=assistant.id, settings=settings
+    )
+    assert result.model_unavailable
+    assert result.effective_model is None
+    assert [item.id for item in result.available_models] == [
+        assistant.completion_model.id
+    ]
+    assert result.settings == settings
+    settings.completion_model_id = assistant.completion_model.id
+    result = await service.resolve_settings(
+        assistant_id=assistant.id, settings=settings
+    )
+    assert not result.model_unavailable
+    assert result.effective_model.id == assistant.completion_model.id
+    assert result.settings.require_tool_approval
+    assert result.settings.mcp_server_states == {server.id: True}
+
+
+@pytest.mark.asyncio
+async def test_saved_settings_resolve_again_after_policy_is_restored():
+    service, assistant, model, server, policy = service_with_policy()
+    settings = ConversationSettings(
+        completion_model_id=model.id, mcp_server_states={server.id: True}
+    )
+    session_id = uuid4()
+    service.session_service.get_context.return_value = SessionContext(
+        id=session_id,
+        assistant_id=assistant.id,
+        user_id=None,
+        api_key_id=None,
+        group_chat_id=None,
+        space_id=None,
+        settings=ConversationSettingsState(revision=4, settings=settings),
+    )
+    policy.available_models = []
+    blocked = await service.resolve_settings(session_id=session_id)
+    assert blocked.model_unavailable
+    policy.available_models = [model]
+    restored = await service.resolve_settings(
+        session_id=session_id, settings_revision=4
+    )
+    assert not restored.model_unavailable
+    assert restored.settings == settings
+    assert restored.revision == 4
+    service.session_service.update_settings.assert_not_called()
+    with pytest.raises(ConversationSettingsConflictException):
+        await service.resolve_settings(session_id=session_id, settings_revision=3)
+
+
+@pytest.mark.asyncio
+async def test_tool_choices_survive_server_and_model_availability_transitions():
+    service, assistant, model, server, policy = service_with_policy()
+    from eneo.mcp_servers.domain.capabilities import CapabilityAvailability
+
+    policy.available_capabilities = [
+        CapabilityAvailability(purpose="web_search", available=True)
+    ]
+    choices = ConversationSettings(
+        completion_model_id=model.id,
+        mcp_server_states={server.id: True},
+        capability_states={"web_search": False},
+    )
+    server.is_enabled = False
+    blocked = await service.resolve_settings(
+        assistant_id=assistant.id, settings=choices
+    )
+    assert blocked.mcp_servers[0].reason == "server_disabled"
+    assert blocked.settings == choices
+    server.is_enabled = True
+    model.supports_tool_calling = False
+    no_tools = await service.resolve_settings(
+        assistant_id=assistant.id, settings=choices
+    )
+    assert no_tools.mcp_servers[0].reason == "model_no_tool_calling"
+    assert no_tools.capabilities[0].reason == "model_no_tool_calling"
+    model.supports_tool_calling = True
+    restored = await service.resolve_settings(
+        assistant_id=assistant.id, settings=choices
+    )
+    assert restored.mcp_servers[0].available
+    assert restored.capabilities[0].available
+    assert restored.settings == choices
+
+
+@pytest.mark.asyncio
+async def test_ordinary_assistant_uses_current_model_and_reports_its_removal():
+    service, assistant, model, _, _ = service_with_policy()
+    space = await service.space_service.get_space_by_assistant(assistant.id)
+    space.is_personal = lambda: False
+    space.enabled_capabilities = []
+    assistant.available_capabilities = []
+    service.assistant_service.get_assistant_with_effective_config.return_value = (
+        assistant,
+        [],
+        None,
+    )
+    initial = await service.resolve_settings(assistant_id=assistant.id)
+    assert initial.available_models is None
+    assert initial.effective_model.id == assistant.completion_model.id
+    assistant.completion_model = model
+    updated = await service.resolve_settings(assistant_id=assistant.id)
+    assert updated.effective_model.id == model.id
+    space.is_completion_model_available = lambda _id: False
+    removed = await service.resolve_settings(assistant_id=assistant.id)
+    assert removed.model_unavailable
+    assert removed.effective_model is None
+    assert not removed.supports_tool_calling
