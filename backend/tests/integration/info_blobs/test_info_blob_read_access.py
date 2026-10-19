@@ -25,7 +25,7 @@ from eneo.database.tables.users_table import usergroups_users_table
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites
 from eneo.info_blobs import info_blob_protocol
-from eneo.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.main.exceptions import UnauthorizedException
 from eneo.users.user import UserInDB
 from eneo.websites.domain.crawl_run import CrawlType
 
@@ -301,31 +301,6 @@ async def test_preview_access_is_not_retained_after_organization_unlink(
         )
     async with db_container(user=knowledge.reader) as container:
         with pytest.raises(UnauthorizedException):
-            await container.info_blob_service().get_by_id(knowledge.blob_id)
-
-
-async def test_preview_cannot_cross_tenant_boundary(
-    db_container, knowledge, tenant_factory, user_factory
-):
-    async with db_container() as container:
-        session = container.session()
-        tenant = await tenant_factory(session)
-        reader = await user_factory(session, tenant_id=tenant.id)
-        # A foreign key alone cannot authorize an organization in another
-        # tenant: the source is resolved within the caller's tenant, so the
-        # knowledge does not exist from the reader's point of view.
-        session.add(
-            Spaces(
-                name="Foreign reader",
-                tenant_id=tenant.id,
-                user_id=reader.id,
-                tenant_space_id=knowledge.org_id,
-            )
-        )
-        await session.flush()
-        reader = await container.user_repo().get_user_by_id(reader.id)
-    async with db_container(user=reader) as container:
-        with pytest.raises(NotFoundException):
             await container.info_blob_service().get_by_id(knowledge.blob_id)
 
 

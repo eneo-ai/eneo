@@ -195,10 +195,14 @@ class TestAuditConfigService:
                 assert len(category_config.example_actions) > 0
                 assert len(category_config.example_actions) <= 3
 
-    async def test_get_config_admin_actions_has_56_actions(
+    async def test_get_config_admin_actions_has_64_actions(
         self, db_session, seeded_tenant
     ):
-        """Verify admin_actions category has correct action count."""
+        """Verify admin_actions category has correct action count.
+
+        The exact count is a tripwire: adding an admin audit action must be a
+        conscious change here, so it is not derived from the category mapping.
+        """
         async with db_session() as session:
             repo = AuditConfigRepositoryImpl(session)
             service = AuditConfigService(repository=repo)
@@ -207,7 +211,7 @@ class TestAuditConfigService:
             admin_config = next(
                 c for c in response.categories if c.category == "admin_actions"
             )
-            assert admin_config.action_count == 56
+            assert admin_config.action_count == 64
 
     async def test_update_config_single_category(self, db_session, seeded_tenant):
         """Test updating a single category."""

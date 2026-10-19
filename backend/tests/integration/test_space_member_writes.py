@@ -1,7 +1,6 @@
 """Creating, deleting or publishing one assistant writes only that assistant, so
 a change another transaction commits meanwhile is neither undone nor deleted by
-it. A whole-space write that still exists (group chat create) no longer deletes
-an assistant created after it loaded the space."""
+it."""
 
 from __future__ import annotations
 
@@ -362,39 +361,3 @@ async def test_publish_keeps_a_rename_committed_meanwhile(
             sa.select(Assistants.published).where(Assistants.id == target_id)
         )
     assert audited == [(ActionType.ASSISTANT_PUBLISHED, target_id)]
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_whole_space_write_keeps_an_assistant_created_after_its_load(
-    client,
-    db_container,
-    admin_user,
-    patch_auth_service_jwt,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    _ = patch_auth_service_jwt
-    token, space_id = await _admin_token_and_space(client, db_container, admin_user)
-    sibling_id = await _create_assistant(client, token, space_id, "sibling")
-
-    created: list[UUID] = []
-    _before(
-        monkeypatch,
-        SpaceRepository,
-        "update",
-        _commit_elsewhere(
-            db_container, _insert_assistant(space_id, admin_user.id, created)
-        ),
-    )
-
-    response = await client.post(
-        f"/api/v1/spaces/{space_id}/applications/group-chats/",
-        json={"name": "group"},
-        headers={"Authorization": f"Bearer {token}"},
-    )
-
-    assert response.status_code == 201, response.text
-    assert await _names(db_container, space_id) == {
-        sibling_id: "sibling",
-        created[0]: "created meanwhile",
-    }

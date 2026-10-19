@@ -208,7 +208,11 @@ async def test_moving_a_provider_endpoint_withdraws_its_strict_declarations(
     move_response = await client.put(
         f"/api/v1/admin/model-providers/{moved_provider_id}/",
         headers={"Authorization": f"Bearer {admin_bearer_token}"},
-        json={"config": {"endpoint": "https://moved-gateway.invalid/v1"}},
+        # A moved endpoint never reuses the stored key, so the move re-enters one.
+        json={
+            "config": {"endpoint": "https://moved-gateway.invalid/v1"},
+            "credentials": {"api_key": "replacement-openai-key"},
+        },
     )
 
     assert move_response.status_code == 200, move_response.text
