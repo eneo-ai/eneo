@@ -9,6 +9,7 @@ import httpx
 import pytest
 from dependency_injector import providers
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 
 from eneo.integration.application.oauth2_service import Oauth2Service
 from eneo.integration.domain.entities.oauth_token import OauthToken
@@ -27,6 +28,7 @@ from eneo.integration.infrastructure.auth_service.confluence_auth_service import
 from eneo.integration.infrastructure.auth_service.sharepoint_auth_service import (
     SharepointAuthService,
 )
+from eneo.integration.presentation.models import AuthCallbackParams
 from eneo.main.config import set_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
@@ -115,6 +117,7 @@ async def oauth_flow(
         states[key] = value.encode("utf-8")
 
     redis.set.side_effect = store_state
+    redis.get.side_effect = lambda key: states.get(key)
     redis.getdel.side_effect = lambda key: states.pop(key, None)
     sharepoint = AsyncMock(spec=SharepointAuthService)
     confluence = AsyncMock(spec=ConfluenceAuthService)
@@ -308,7 +311,11 @@ async def test_invalid_state_still_rejects_callback_without_writes(oauth_flow, f
         },
     )
     assert response.status_code == 400
-    assert flow.states == {}
+    if failure in ("other_user", "other_integration"):
+        # A caller the state was not issued to cannot spend it.
+        assert list(flow.states) == [key]
+    else:
+        assert flow.states == {}
     assert flow.connections == []
     assert flow.tokens == []
     flow.provider.exchange_token.assert_not_awaited()
@@ -440,3 +447,41 @@ async def test_a_token_endpoint_outage_is_not_reported_as_a_refused_code(oauth_f
                 "state": started.json()["state"],
             },
         )
+
+
+async def test_a_mismatched_callback_leaves_the_state_to_its_owner(oauth_flow):
+    flow = oauth_flow
+    started = await flow.client.get(f"/integrations/auth/{flow.own.id}/url/")
+    state = started.json()["state"]
+
+    wrong = await flow.client.post(
+        "/integrations/auth/callback/token/",
+        json={
+            "tenant_integration_id": str(uuid4()),
+            "auth_code": "attacker-code",
+            "state": state,
+        },
+    )
+    right = await flow.client.post(
+        "/integrations/auth/callback/token/",
+        json={
+            "tenant_integration_id": str(flow.own.id),
+            "auth_code": "test-code",
+            "state": state,
+        },
+    )
+
+    assert wrong.status_code == 400
+    assert right.status_code == 200, right.text
+    assert flow.states == {}
+    assert flow.provider.exchange_token.await_count == 1
+
+
+def test_the_callback_state_is_bounded():
+    with pytest.raises(ValidationError):
+        AuthCallbackParams(
+            auth_code="code", tenant_integration_id=uuid4(), state="s" * 257
+        )
+    assert AuthCallbackParams(
+        auth_code="code", tenant_integration_id=uuid4(), state="s" * 43
+    )

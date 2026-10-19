@@ -42,8 +42,8 @@ _ROUTER = "eneo.integration.presentation.admin_sharepoint_router"
 
 
 class _FakeRedis:
-    """Dict-backed Redis exposing only GETDEL for reads, so a non-atomic
-    GET+DEL pop fails loudly."""
+    """Dict-backed Redis without DEL, so a pop that is not GETDEL fails loudly.
+    GET serves the binding check that runs before the state is spent."""
 
     def __init__(self) -> None:
         self.store: dict[str, str] = {}
@@ -54,8 +54,8 @@ class _FakeRedis:
     async def getdel(self, key: str) -> str | None:
         return self.store.pop(key, None)
 
-    async def get(self, key: str) -> None:
-        raise AssertionError("pop must use GETDEL, not GET")
+    async def get(self, key: str) -> str | None:
+        return self.store.get(key)
 
     async def delete(self, key: str) -> None:
         raise AssertionError("pop must use GETDEL, not DEL")
@@ -227,6 +227,10 @@ async def test_callback_rejects_state_bound_to_another_principal(mismatch):
 
     assert exc_info.value.status_code == 400
     auth_cls.return_value.exchange_token.assert_not_called()
+    # Another principal cannot spend the state of the admin who started it.
+    assert list(container.redis_client.return_value.store) == [
+        f"{OAUTH_STATE_PREFIX}state-1"
+    ]
 
 
 @pytest.mark.asyncio

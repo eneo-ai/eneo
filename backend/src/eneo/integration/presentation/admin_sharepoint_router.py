@@ -1237,12 +1237,17 @@ async def service_account_auth_callback(
         _require_sharepoint_webhook_client_state()
 
         encryption_service: EncryptionService = container.encryption_service()
-        stored_state = await _oauth_state_store(container).pop(callback.state)
+        state_store = _oauth_state_store(container)
+        expired = HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired OAuth state. Please restart the authentication flow.",
+        )
+        # The binding is checked before the state is spent, so another admin
+        # cannot burn it.
+        stored_state = await state_store.peek(callback.state)
         if stored_state is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired OAuth state. Please restart the authentication flow.",
-            )
+            await state_store.pop(callback.state)
+            raise expired
 
         if stored_state.get("tenant_id") != str(user.tenant_id) or stored_state.get(
             "user_id"
@@ -1251,6 +1256,9 @@ async def service_account_auth_callback(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="OAuth state was initiated by a different user or tenant",
             )
+        stored_state = await state_store.pop(callback.state)
+        if stored_state is None:
+            raise expired
 
         tenant_app_service: TenantSharePointAppService = (
             container.tenant_sharepoint_app_service()

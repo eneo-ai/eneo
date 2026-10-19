@@ -49,10 +49,17 @@ class OauthStateStore:
             f"{self.prefix}{state}", payload, ex=self.ttl_seconds
         )
 
+    async def peek(self, state: str) -> Optional[dict[str, str]]:
+        """The bound data without spending the state, so a callback can check
+        the binding first and a mismatched caller cannot burn another's state."""
+        return self._decode(await self.redis_client.get(f"{self.prefix}{state}"))
+
     async def pop(self, state: str) -> Optional[dict[str, str]]:
         """The bound data, or None when the state is unknown, spent or unreadable."""
         # GETDEL makes the state single-use even under concurrent callbacks.
-        raw = await self.redis_client.getdel(f"{self.prefix}{state}")
+        return self._decode(await self.redis_client.getdel(f"{self.prefix}{state}"))
+
+    def _decode(self, raw: object) -> Optional[dict[str, str]]:
         if raw is None:
             return None
         if isinstance(raw, bytes):

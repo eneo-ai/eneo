@@ -34,7 +34,7 @@ async def test_service_account_callback_rejects_another_user_in_same_tenant(
     provider = AsyncMock(spec=ServiceAccountAuthService)
     monkeypatch.setattr(router, "ServiceAccountAuthService", lambda: provider)
     state_store = MagicMock()
-    state_store.pop = AsyncMock(
+    state_store.peek = AsyncMock(
         return_value={
             "tenant_id": str(user.tenant_id),
             "user_id": str(uuid4()),
@@ -44,6 +44,7 @@ async def test_service_account_callback_rejects_another_user_in_same_tenant(
             "redirect_uri": "https://beta.example/integrations/callback/token/",
         }
     )
+    state_store.pop = AsyncMock()
     monkeypatch.setattr(router, "_oauth_state_store", lambda container: state_store)
     container = Container(user=providers.Object(user))
     with pytest.raises(HTTPException) as error:
@@ -53,6 +54,8 @@ async def test_service_account_callback_rejects_another_user_in_same_tenant(
         )
     assert error.value.status_code == 400
     provider.exchange_token.assert_not_awaited()
+    # The admin who started the sign-in can still finish it.
+    state_store.pop.assert_not_awaited()
 
 
 async def test_service_account_state_is_consumed_once_under_concurrent_callbacks():
@@ -103,7 +106,7 @@ async def test_a_refused_service_account_code_is_a_400_not_a_500(
     )
     monkeypatch.setattr(router, "ServiceAccountAuthService", lambda: provider)
     state_store = MagicMock()
-    state_store.pop = AsyncMock(
+    state_store.peek = AsyncMock(
         return_value={
             "tenant_id": str(user.tenant_id),
             "user_id": str(user.id),
@@ -113,6 +116,7 @@ async def test_a_refused_service_account_code_is_a_400_not_a_500(
             "redirect_uri": "https://beta.example/integrations/callback/token/",
         }
     )
+    state_store.pop = AsyncMock(return_value=state_store.peek.return_value)
     monkeypatch.setattr(router, "_oauth_state_store", lambda container: state_store)
     tenant_app_service = AsyncMock()
     container = Container(

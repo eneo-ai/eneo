@@ -207,7 +207,8 @@ class AuthUrlPublic(BaseModel):
 class AuthCallbackParams(BaseModel):
     auth_code: str
     tenant_integration_id: UUID
-    state: str
+    # The issued state is token_urlsafe(32), 43 characters.
+    state: str = Field(max_length=256)
 
 
 class ConfluenceContentTaskParam(ResourceTaskParams):
