@@ -145,10 +145,9 @@ it.each(["other-document", file.id])(
     preview.saved(file, "Original document");
     let complete!: (version: typeof file) => void;
     const save = vi.fn(() => new Promise<typeof file>((resolve) => (complete = resolve)));
-    const saved = vi.fn();
     const firstPanel = render(FilePreviewPanel, {
       preview,
-      saverOf: () => ({ save, saved })
+      saverOf: () => ({ save })
     });
     await editDocument("First edit");
     await vi.waitFor(() => expect(preview.dirty).toBe(true));
@@ -173,7 +172,8 @@ it.each(["other-document", file.id])(
     await vi.waitFor(() => expect(preview.dirty).toBe(true));
 
     complete({ ...file, id: "saved-version" });
-    await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce());
+    await save.mock.results[0]!.value;
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(preview.file?.id).toBe(nextId);
     // The edited text follows the keystrokes a moment later.
@@ -188,8 +188,7 @@ it("keeps the same document read-only through a panel remount until its save com
   preview.saved(file, "Original document");
   let complete!: (version: typeof file) => void;
   const save = vi.fn(() => new Promise<typeof file>((resolve) => (complete = resolve)));
-  const saved = vi.fn();
-  const saverOf = () => ({ save, saved });
+  const saverOf = () => ({ save });
   const firstPanel = render(FilePreviewPanel, { preview, saverOf });
   await editDocument("Saved edit");
   await vi.waitFor(() => expect(preview.dirty).toBe(true));
@@ -203,8 +202,7 @@ it("keeps the same document read-only through a panel remount until its save com
   await vi.waitFor(() => expect(surface.getAttribute("contenteditable")).toBe("false"));
 
   complete({ ...file, id: "saved-version" });
-  await vi.waitFor(() => expect(saved).toHaveBeenCalledOnce());
-  expect(preview.file?.id).toBe("saved-version");
+  await vi.waitFor(() => expect(preview.file?.id).toBe("saved-version"));
   expect(preview.dirty).toBe(false);
   expect((await editorSurface()).textContent).toContain("Saved edit");
 });

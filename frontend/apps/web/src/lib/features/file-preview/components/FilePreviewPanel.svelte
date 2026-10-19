@@ -235,7 +235,6 @@
     try {
       const version = await target.save(markdown);
       request.apply(version, markdown);
-      target.saved?.(version);
       return true;
     } catch {
       toast.error(m.file_preview_save_failed());
