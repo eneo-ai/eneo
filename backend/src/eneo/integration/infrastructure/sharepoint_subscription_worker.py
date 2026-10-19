@@ -33,6 +33,10 @@ from eneo.worker.worker import Worker
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from eneo.integration.infrastructure.sharepoint_subscription_service import (
+        SharePointSubscriptionService,
+    )
+
 logger = get_logger(__name__)
 
 worker = Worker()
@@ -182,12 +186,16 @@ async def _maintain_subscription(
     if subscription is None:
         return
     service = container.sharepoint_subscription_service()
+    removed = request.event == LIFECYCLE_SUBSCRIPTION_REMOVED
+    action = (
+        "replace the subscription Microsoft Graph removed"
+        if removed
+        else "reauthorize the subscription Microsoft Graph asked about"
+    )
     token = await get_token_for_subscription(subscription, container)
     if token is None:
         await record_renewal_failure(
-            subscription,
-            container,
-            f"Could not get a token to handle {request.event} from Microsoft Graph",
+            subscription, container, f"Could not get a token to {action}"
         )
         return
     session = cast("AsyncSession", container.session())
@@ -208,7 +216,7 @@ async def _maintain_subscription(
                     subscription=subscription, token=token
                 )
             if not done:
-                raise RuntimeError(f"Microsoft Graph refused {request.event}")
+                raise RuntimeError(f"Microsoft Graph refused to {action}")
     except Exception as exc:
         if subscription.consecutive_renewal_failures > failures_before:
             await persist_renewal_failure(subscription, container)
@@ -217,21 +225,15 @@ async def _maintain_subscription(
                 subscription, container, user_visible_error(exc)
             )
         return
-    if request.event == LIFECYCLE_SUBSCRIPTION_REMOVED:
-        # Changes made while the subscription was gone were never notified.
-        queued = (
-            await container.sharepoint_webhook_service().queue_syncs_for_subscription(
-                subscription
-            )
-        )
-        logger.info(
-            "Recreated removed SharePoint subscription %s and queued %d sync(s)",
-            subscription.id,
-            queued,
-        )
+    if removed or failures_before:
+        # Changes made while the subscription was gone, or paused because Graph
+        # could not reauthorize it, were never notified.
+        await queue_syncs_after_recovery(subscription, container)
 
 
-@worker.cron_job(minute=0, hour={0, 12})  # Every 12 hours (midnight and noon)
+@worker.cron_job(
+    minute=0, hour={0, 12}, manages_own_session=True
+)  # Every 12 hours (midnight and noon)
 async def renew_expiring_subscriptions(container: Container):
     """Renew SharePoint subscriptions expiring within the next 48 hours.
 
@@ -241,15 +243,22 @@ async def renew_expiring_subscriptions(container: Container):
     Runs every 12 hours to catch all subscriptions before they expire.
 
     Supports both user OAuth and tenant app authentication methods.
+
+    Each subscription is renewed and committed in a transaction of its own. A
+    renewal can recreate the subscription and delete the old one at Graph at
+    once; until the new id is committed its notifications are for an unknown
+    subscription, and a rollback would put back an id Graph no longer has.
     """
     logger.info("Starting SharePoint subscription renewal job")
 
     sharepoint_subscription_service = container.sharepoint_subscription_service()
+    session = cast("AsyncSession", container.session())
 
     # Find subscriptions expiring in next 48 hours (2 days)
-    expiring = await sharepoint_subscription_service.list_expiring_subscriptions(
-        hours=48
-    )
+    async with session.begin():
+        expiring = await sharepoint_subscription_service.list_expiring_subscriptions(
+            hours=48
+        )
 
     if not expiring:
         logger.info("No subscriptions need renewal")
@@ -259,58 +268,22 @@ async def renew_expiring_subscriptions(container: Container):
 
     renewed_count = 0
     failed_count = 0
-    session = cast("AsyncSession", container.session())
-
     for subscription in expiring:
-        failures_before = subscription.consecutive_renewal_failures
         try:
-            token = await get_token_for_subscription(subscription, container)
-            if not token:
-                raise RuntimeError(
-                    f"Could not get token for subscription {subscription.subscription_id}"
+            async with session.begin():
+                renewed = await _renew_one(
+                    subscription, container, sharepoint_subscription_service
                 )
-
-            # Isolate each renewal in a SAVEPOINT so one subscription's DB error
-            # cannot poison the shared cron transaction and drop the rest. Token
-            # refresh happens before this savepoint so a Graph renewal rollback
-            # cannot undo a rotated refresh token.
-            async with session.begin_nested():
-                success = await sharepoint_subscription_service.renew_subscription(
-                    subscription=subscription, token=token
-                )
-                if not success:
-                    raise RuntimeError(
-                        f"Renewal returned false for subscription {subscription.subscription_id}"
-                    )
-                # Knowledge rows whose link was lost at import only receive
-                # webhooks once they point at the live subscription again.
-                linked = await container.sharepoint_subscription_repo().link_unreferenced_knowledge(
-                    subscription
-                )
-                if linked:
-                    logger.info(
-                        "Linked %d knowledge row(s) to SharePoint subscription %s",
-                        linked,
-                        subscription.subscription_id,
-                    )
-            renewed_count += 1
-
-        except Exception as exc:
+        except Exception:
             logger.error(
-                f"Error renewing subscription {subscription.subscription_id}: {exc}",
+                "Could not commit the renewal of subscription %s",
+                subscription.subscription_id,
                 exc_info=True,
             )
-            # The savepoint above has rolled back, so the transaction is clean for
-            # this failure write (which uses its own savepoint).
-            if subscription.consecutive_renewal_failures > failures_before:
-                # The service already recorded why a recreation failed; the
-                # rollback took that write with it, so it is written again
-                # rather than counted a second time.
-                await persist_renewal_failure(subscription, container)
-            else:
-                await record_renewal_failure(
-                    subscription, container, user_visible_error(exc)
-                )
+            renewed = False
+        if renewed:
+            renewed_count += 1
+        else:
             failed_count += 1
 
     logger.info(
@@ -318,6 +291,84 @@ async def renew_expiring_subscriptions(container: Container):
     )
 
     return {"renewed": renewed_count, "failed": failed_count}
+
+
+async def _renew_one(
+    subscription: SharePointSubscription,
+    container: Container,
+    sharepoint_subscription_service: "SharePointSubscriptionService",
+) -> bool:
+    session = cast("AsyncSession", container.session())
+    failures_before = subscription.consecutive_renewal_failures
+    try:
+        token = await get_token_for_subscription(subscription, container)
+        if not token:
+            raise RuntimeError(
+                f"Could not get token for subscription {subscription.subscription_id}"
+            )
+
+        # The renewal runs in a SAVEPOINT so its DB error leaves the
+        # transaction usable for the failure write. Token refresh happens
+        # before it so a Graph renewal rollback cannot undo a rotated refresh
+        # token.
+        async with session.begin_nested():
+            success = await sharepoint_subscription_service.renew_subscription(
+                subscription=subscription, token=token
+            )
+            if not success:
+                raise RuntimeError(
+                    f"Renewal returned false for subscription {subscription.subscription_id}"
+                )
+            # Knowledge rows whose link was lost at import only receive
+            # webhooks once they point at the live subscription again.
+            linked = await container.sharepoint_subscription_repo().link_unreferenced_knowledge(
+                subscription
+            )
+            if linked:
+                logger.info(
+                    "Linked %d knowledge row(s) to SharePoint subscription %s",
+                    linked,
+                    subscription.subscription_id,
+                )
+    except Exception as exc:
+        logger.error(
+            f"Error renewing subscription {subscription.subscription_id}: {exc}",
+            exc_info=True,
+        )
+        # The savepoint above has rolled back, so the transaction is clean for
+        # this failure write (which uses its own savepoint).
+        if subscription.consecutive_renewal_failures > failures_before:
+            # The service already recorded why a recreation failed; the
+            # rollback took that write with it, so it is written again
+            # rather than counted a second time.
+            await persist_renewal_failure(subscription, container)
+        else:
+            await record_renewal_failure(
+                subscription, container, user_visible_error(exc)
+            )
+        return False
+    if failures_before:
+        await queue_syncs_after_recovery(subscription, container)
+    return True
+
+
+async def queue_syncs_after_recovery(
+    subscription: SharePointSubscription, container: Container
+) -> None:
+    """Queue a sync for the sources of a subscription that was not delivering.
+
+    Graph pauses a subscription it could not reauthorize or renew, and
+    removes one it gave up on; the changes made meanwhile are never notified.
+    """
+    queued = await container.sharepoint_webhook_service().queue_syncs_for_subscription(
+        subscription
+    )
+    logger.info(
+        "SharePoint subscription %s delivers again; queued %d sync(s) for the "
+        "changes it missed",
+        subscription.subscription_id,
+        queued,
+    )
 
 
 @worker.cron_job(hour=2, minute=0)  # Run daily at 2 AM
