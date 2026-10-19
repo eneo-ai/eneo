@@ -245,8 +245,10 @@ function ActivityRow({ entry, showFolders }: { entry: ActivityEntry; showFolders
         {failure ? <p className="text-ax-error text-sm break-words">{failure}</p> : null}
         {extras.reconcileWarning ? (
           <p className="text-ax-warning text-sm">
-            <span className="font-medium">{t("sync_reconcile_warning")}:</span>{" "}
-            {extras.reconcileWarning}
+            {t.rich("integration_activity_reconcile_warning", {
+              label: (chunks) => <span className="font-medium">{chunks}</span>,
+              warning: extras.reconcileWarning
+            })}
           </p>
         ) : null}
         <p className="text-ax-text-secondary text-xs">{details.join(" · ")}</p>

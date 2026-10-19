@@ -407,6 +407,18 @@ describe("WrapperDetail", () => {
     // Why a file was skipped is there for everyone to read, not only screen readers.
     const reason = within(live).getByText("Inget textlager (skannat dokument; OCR stöds inte)");
     expect(reason.closest(".sr-only")).toBeNull();
+    // A finished step says so in one phrase, its "done" for screen readers only.
+    const steps = screen.getByRole("list", { name: "Synkens steg" });
+    const [found] = within(steps).getAllByRole("listitem");
+    expect(found?.textContent).toBe("Klart: Hitta filer");
+    expect(within(found!).getByText("Klart:").className).toContain("sr-only");
+  });
+
+  it("says when a folder was last up to date in one phrase", () => {
+    show([mall, protokoll], `${WRAPPER_PAGE}?folder=i1`);
+    const heading = screen.getByRole("heading", { level: 2, name: "Mallar" });
+    const line = heading.parentElement!;
+    expect(within(line).getByText(/^Aktuell 14 okt\. 2026 \d{1,2}:\d{2}$/)).toBeTruthy();
   });
 
   it("shows a one-folder source's link and actions once, in the page header", () => {

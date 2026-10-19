@@ -98,6 +98,7 @@ function FolderHeader({
   showControls: boolean;
 }) {
   const t = useTranslations();
+  const synced = useClientTimeText(item.metadata?.last_synced_at, "date_time");
   const attempted = useClientTimeText(item.metadata?.last_sync_attempted_at, "date_time");
   const [watch] = useWatchStates([item]) ?? [];
   const url = safeExternalUrl(item.url);
@@ -116,10 +117,9 @@ function FolderHeader({
         <div className="text-ax-text-secondary flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           <SourceStateLabel state={state} className="text-xs" />
           {item.metadata?.last_synced_at ? (
-            <span>
-              {t("integration_source_last_up_to_date")}:{" "}
-              <ClientTime value={item.metadata.last_synced_at} format="auto" />
-            </span>
+            synced ? (
+              <span>{t("integration_source_last_up_to_date_at", { time: synced })}</span>
+            ) : null
           ) : attempted ? (
             <span>{t("integration_source_last_attempt_at", { time: attempted })}</span>
           ) : null}

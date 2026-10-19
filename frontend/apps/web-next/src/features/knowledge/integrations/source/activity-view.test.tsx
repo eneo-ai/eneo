@@ -225,6 +225,20 @@ describe("ActivityView", () => {
     expect(screen.queryByRole("combobox", { name: "Mapp" })).toBeNull();
   });
 
+  it("says a sync's reconciliation warning in one sentence", async () => {
+    serve({
+      a: [
+        log("a1", 14, {
+          metadata: { reconcile_warning: "Deltatoken återställd" } as SyncLog["metadata"]
+        })
+      ]
+    });
+    renderInApp(<Activity items={[avtal]} />);
+
+    const warning = await screen.findByText(/^Avstämningsvarning:/);
+    expect(warning.closest("p")?.textContent).toBe("Avstämningsvarning: Deltatoken återställd");
+  });
+
   it("reads a history longer than the endpoint's limit, ten syncs at a time", async () => {
     serve({ a: hourly("a", 120, "2026-10-15T12:00:00Z") });
     renderInApp(<Activity items={[avtal]} />);

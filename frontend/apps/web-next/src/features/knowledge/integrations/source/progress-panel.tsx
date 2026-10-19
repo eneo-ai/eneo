@@ -102,10 +102,7 @@ export function SyncProgressPanel({
               } ${done || active ? "" : "text-ax-text-secondary"}`}
             >
               {done ? (
-                <>
-                  <Check className="text-ax-success size-4 shrink-0" aria-hidden="true" />
-                  <span className="sr-only">{t("integration_progress_step_done")}:</span>
-                </>
+                <Check className="text-ax-success size-4 shrink-0" aria-hidden="true" />
               ) : active ? (
                 <Loader2
                   className="text-ax-text-accent size-4 shrink-0 motion-safe:animate-spin"
@@ -117,7 +114,14 @@ export function SyncProgressPanel({
                   aria-hidden="true"
                 />
               )}
-              <span>{t(PHASE_LABEL[phase])}</span>
+              <span>
+                {done
+                  ? t.rich("integration_progress_step_done_named", {
+                      hidden: (chunks) => <span className="sr-only">{chunks}</span>,
+                      step: t(PHASE_LABEL[phase])
+                    })
+                  : t(PHASE_LABEL[phase])}
+              </span>
             </li>
           );
         })}

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTranslator } from "next-intl";
+import en from "@/lib/i18n/messages/en.json";
 import sv from "@/lib/i18n/messages/sv.json";
 import { makeSpace, makeIntegration } from "@/features/spaces/testing/space-fixture";
 import { testQueryClient } from "@/test/render";
@@ -233,4 +234,38 @@ it("tells every import finishing in the same space in a toast of its own", async
     expect.stringContaining("Policy:")
   ]);
   expect(pendingImports()).toEqual([]);
+});
+
+it("words the documents of an import result in the singular and the plural", async () => {
+  const waiting = [pending("a"), pending("b")];
+  trackImports(waiting);
+  api.GET.mockResolvedValue({
+    data: makeSpace({
+      integrations: [
+        makeIntegration({
+          id: "ik-a",
+          name: "Avtal",
+          metadata: { size: 0, last_sync_status: "success", document_count: 1 }
+        }),
+        makeIntegration({
+          id: "ik-b",
+          name: "Policy",
+          metadata: { size: 0, last_sync_status: "success", document_count: 3 }
+        })
+      ]
+    }),
+    response: new Response("{}")
+  });
+  await reportImports(
+    waiting.map((item) => ({ ...item, jobStatus: "complete" })),
+    {
+      queryClient: testQueryClient(),
+      t: createTranslator({ locale: "en", messages: en as Record<string, string> }),
+      navigate: vi.fn()
+    }
+  );
+  expect(toast.success.mock.calls.map(([message]) => message)).toEqual([
+    "Avtal: 1 document indexed, 0 skipped",
+    "Policy: 3 documents indexed, 0 skipped"
+  ]);
 });

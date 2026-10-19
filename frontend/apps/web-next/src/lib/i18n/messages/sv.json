@@ -1988,7 +1988,7 @@
   "integration_import_complete_description": "{count} objekt köades. Första synken körs i bakgrunden och du får ett meddelande när varje objekt är klart.",
   "integration_import_complete_failed": "{failed} objekt kunde inte köas.",
   "integration_import_view_site": "Visa importen",
-  "integration_import_result_toast": "{name}: {indexed} dokument indexerades, {skipped} hoppades över",
+  "integration_import_result_toast": "{name}: {indexed, plural, one {# dokument indexerades} other {# dokument indexerades}}, {skipped} hoppades över",
   "integration_import_failed_toast": "{name}: första synken misslyckades",
   "organization_knowledge": "Organisationskunskap",
   "add_knowledge_space": "Lägg till kunskap (Denna yta)",
@@ -6708,5 +6708,7 @@
   "chat_quote_label": "Citat",
   "chat_quote_remove": "Ta bort citatet",
   "file_preview_previous_version": "Föregående version",
-  "file_preview_next_version": "Nästa version"
+  "file_preview_next_version": "Nästa version",
+  "integration_activity_reconcile_warning": "<label>Avstämningsvarning:</label> {warning}",
+  "integration_progress_step_done_named": "<hidden>Klart:</hidden> {step}"
 }
