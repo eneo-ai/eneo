@@ -153,6 +153,10 @@ class OAuthAuthResolver(Protocol):
         self, server: MCPServer, auth: httpx.Auth | None = None
     ) -> MCPUserActionRequiredError | None: ...
 
+    def forget(self, server: MCPServer) -> None:
+        """Drop what is cached for ``server`` so the next token is re-read."""
+        ...
+
 
 # A resolver may also be a plain coroutine function for tests.
 OAuthAuthResolverLike = OAuthAuthResolver | Callable[[MCPServer], Awaitable[httpx.Auth]]
@@ -1547,6 +1551,87 @@ class MCPProxySession:
             await self._record_failure(server.id)
             raise
 
+    def server_id_for_tool(self, prefixed_tool_name: str) -> UUID | None:
+        entry = self._tool_registry.get(prefixed_tool_name)
+        return entry[0].id if entry is not None else None
+
+    async def prepare_calls(
+        self, tool_calls: list[tuple[str, dict[str, Any]]]
+    ) -> dict[UUID, MCPUserActionRequiredError]:
+        """Connect the servers these calls need; report the ones awaiting
+        authorization, keyed by server id.
+
+        Pre-connects SEQUENTIALLY in this task. Sequential is required:
+        streamablehttp_client uses anyio cancel scopes bound to the connecting
+        task. asyncio.gather would dispatch each connect to its own gather
+        task; close() later runs from the proxy session's owning task and
+        anyio's task-boundary check would silently leak the underlying HTTP
+        read/write loops, creeping CPU toward 100% over the worker's lifetime.
+        """
+        servers_needed: dict[UUID, MCPServer] = {}
+        for tool_name, _ in tool_calls:
+            if tool_name in self._tool_registry:
+                server, _, _ = self._tool_registry[tool_name]
+                servers_needed[server.id] = server
+        for server in servers_needed.values():
+            if (
+                server.id in self._clients
+                or server.id in self._failed_server_ids
+                or server.id in self._authorization_required
+            ):
+                continue
+            try:
+                await self._get_or_create_client(server)
+            except MCPUserActionRequiredError as exc:
+                logger.info(
+                    "[MCPProxy] '%s' awaits authorization (%s)", server.name, exc.reason
+                )
+                self._authorization_required[server.id] = exc
+            except Exception as exc:
+                logger.warning(
+                    f"[MCPProxy] Failed to pre-connect to '{server.name}': {exc}"
+                )
+                self._mark_server_failed(server.id)
+                if isinstance(exc, MCPInsecureCredentialTransportError):
+                    self._insecure_transport_server_ids.add(server.id)
+        return {
+            server_id: error
+            for server_id, error in self._authorization_required.items()
+            if server_id in servers_needed
+        }
+
+    async def retry_authorization(self, server_ids: Iterable[UUID]) -> set[UUID]:
+        """The user authorized these servers meanwhile: connect them with the
+        fresh tokens. Returns the servers now connected."""
+        connected: set[UUID] = set()
+        by_id = {server.id: server for server in self.mcp_servers}
+        for server_id in server_ids:
+            server = by_id.get(server_id)
+            if server is None:
+                continue
+            self._authorization_required.pop(server_id, None)
+            self._failed_server_ids.discard(server_id)
+            forget = getattr(self._oauth_auth_resolver, "forget", None)
+            if callable(forget):
+                forget(server)
+            try:
+                await self._get_or_create_client(server)
+            except MCPUserActionRequiredError as exc:
+                self._authorization_required[server_id] = exc
+                continue
+            except Exception as exc:
+                logger.warning(
+                    "[MCPProxy] Failed to connect to '%s' after authorization: %s",
+                    server.name,
+                    exc,
+                )
+                self._mark_server_failed(server_id)
+                if isinstance(exc, MCPInsecureCredentialTransportError):
+                    self._insecure_transport_server_ids.add(server_id)
+                continue
+            connected.add(server_id)
+        return connected
+
     async def call_tools_parallel(
         self,
         tool_calls: list[tuple[str, dict[str, Any]]],
@@ -1570,40 +1655,7 @@ class MCPProxySession:
         logger.debug(f"[MCPProxy] Executing {len(tool_calls)} tool(s): {tool_names}")
         total_start = time.perf_counter()
 
-        # First, identify all servers we need to connect to (by ID to avoid hashability issues)
-        servers_needed: dict[UUID, MCPServer] = {}
-        for tool_name, _ in tool_calls:
-            if tool_name in self._tool_registry:
-                server, _, _ = self._tool_registry[tool_name]
-                servers_needed[server.id] = server
-
-        # Pre-connect SEQUENTIALLY in this task. Sequential is required:
-        # streamablehttp_client uses anyio cancel scopes bound to the connecting
-        # task. asyncio.gather would dispatch each connect to its own gather
-        # task — close() later runs from the proxy session's owning task and
-        # anyio's task-boundary check would silently leak the underlying HTTP
-        # read/write loops, creeping CPU toward 100% over the worker's lifetime.
-        for server in servers_needed.values():
-            if (
-                server.id in self._clients
-                or server.id in self._failed_server_ids
-                or server.id in self._authorization_required
-            ):
-                continue
-            try:
-                await self._get_or_create_client(server)
-            except MCPUserActionRequiredError as exc:
-                logger.info(
-                    "[MCPProxy] '%s' awaits authorization (%s)", server.name, exc.reason
-                )
-                self._authorization_required[server.id] = exc
-            except Exception as exc:
-                logger.warning(
-                    f"[MCPProxy] Failed to pre-connect to '{server.name}': {exc}"
-                )
-                self._mark_server_failed(server.id)
-                if isinstance(exc, MCPInsecureCredentialTransportError):
-                    self._insecure_transport_server_ids.add(server.id)
+        await self.prepare_calls(tool_calls)
 
         # Execute all tool calls in parallel
         async def execute_single(

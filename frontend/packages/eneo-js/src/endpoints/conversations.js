@@ -221,6 +221,7 @@ export function initConversations(client) {
      * @param {(data: import("../types/resources").SSE.ToolCallDelta) => void} [params.callbacks.onToolCallDelta] Callback to run when the next piece of a pending tool call's arguments is received
      * @param {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [params.callbacks.onToolApprovalRequired] Callback to run when MCP tools require user approval
      * @param {(data: import("../types/resources").SSE.ToolApprovalTimeout) => void} [params.callbacks.onToolApprovalTimeout] Callback to run when a pending tool approval expires
+     * @param {(data: import("../types/resources").SSE.ToolAuthorizationRequired) => void} [params.callbacks.onToolAuthorizationRequired] Callback to run when the turn pauses for the user to authorize an OAuth MCP server
      * @param {(response: Response) => Promise<void>} [params.callbacks.onOpen] Callback to run once the initial response of the backend is received
      * @param {AbortController} [params.abortController] Optionally pass in an AbortController that can abort the stream
      * @throws {EneoError}
@@ -335,6 +336,10 @@ export function initConversations(client) {
 
               case "tool_approval_timeout":
                 callbacks?.onToolApprovalTimeout?.(data);
+                break;
+
+              case "tool_authorization_required":
+                callbacks?.onToolAuthorizationRequired?.(data);
                 break;
 
               case "error":

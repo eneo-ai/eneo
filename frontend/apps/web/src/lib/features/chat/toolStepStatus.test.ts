@@ -7,6 +7,10 @@ it.each(["pending", "approved", "deferred"])(
     expect(toolStepStatus(status, false, false)).toBe("failed");
   }
 );
+it("keeps a call paused for authorization running until the turn ends", () => {
+  expect(toolStepStatus("awaiting_authorization", false, true)).toBe("running");
+  expect(toolStepStatus("awaiting_authorization", false, false)).toBe("failed");
+});
 it("tracks admission and execution separately", () => {
   expect(toolStepStatus("pending", false, true)).toBe("preparing");
   expect(toolStepStatus("approved", false, true)).toBe("running");

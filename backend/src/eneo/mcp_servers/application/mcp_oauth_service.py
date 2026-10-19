@@ -39,6 +39,9 @@ from eneo.mcp_servers.domain.entities.mcp_oauth_connection import (
 )
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 from eneo.mcp_servers.infrastructure.oauth import client_metadata
+from eneo.mcp_servers.infrastructure.oauth.authorization_wait import (
+    MCPOAuthAuthorizationWaiter,
+)
 from eneo.mcp_servers.infrastructure.oauth.discovery import (
     OAuthDiscoveryError,
     OAuthServerDiscovery,
@@ -373,6 +376,11 @@ class MCPOAuthService:
             or (str(requested_scope).split() if requested_scope else []),
         )
         saved = await self._repo.save_connection(connection)
+        if principal is not None:
+            # A turn may be paused on this very authorization.
+            await MCPOAuthAuthorizationWaiter(self._redis).mark_connected(
+                principal, server.id
+            )
         logger.info(
             "MCP OAuth connection established for '%s' (%s)",
             server.name,

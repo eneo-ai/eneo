@@ -269,3 +269,49 @@ def test_error_sse_says_why_the_answer_failed():
     assert event.event == "error"
     assert data["error_code"] == 503
     assert data["code"] == "provider_unreachable"
+
+
+def test_tool_authorization_sse_carries_the_connect_remedy_per_call():
+    """The paused calls reach the client with the remedy the connect action
+    needs, under the same meta key the failed result would use."""
+    remedy = {
+        "code": "mcp_authorization_required",
+        "mcp_server_id": str(uuid4()),
+        "server_name": "Vendor",
+        "auth_scope": "per_user",
+        "connect_url": "https://eneo.example/mcp-oauth/connect?server=x",
+    }
+    event = to_sse_response(
+        Completion(
+            response_type=ResponseType.TOOL_AUTHORIZATION_REQUIRED,
+            authorization_id="auth-1",
+            tool_calls_metadata=[
+                ToolCallMetadata(
+                    server_name="Vendor",
+                    tool_name="search",
+                    tool_call_id="call_1",
+                    result_status="awaiting_authorization",
+                    meta={"eneo/authorization_required": remedy},
+                )
+            ],
+        ),
+        uuid4(),
+    )
+
+    data = json.loads(event.data)
+    assert event.event == "tool_authorization_required"
+    assert data["authorization_id"] == "auth-1"
+    assert data["tools"][0]["result_status"] == "awaiting_authorization"
+    assert data["tools"][0]["meta"]["eneo/authorization_required"] == remedy
+
+
+def test_tool_authorization_sse_requires_an_authorization_id():
+    with pytest.raises(ValueError, match="authorization_id"):
+        to_sse_response(
+            Completion(
+                response_type=ResponseType.TOOL_AUTHORIZATION_REQUIRED,
+                authorization_id=None,
+                tool_calls_metadata=[],
+            ),
+            uuid4(),
+        )

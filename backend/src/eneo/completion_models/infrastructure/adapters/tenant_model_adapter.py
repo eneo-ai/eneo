@@ -575,9 +575,14 @@ class _RoundJoiner:
 
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from eneo.ai_models.completion_models.completion_model import (
         CompletionModel,
         Context,
+    )
+    from eneo.mcp_servers.infrastructure.oauth.authorization_wait import (
+        MCPOAuthAuthorizationWaiter,
     )
     from eneo.mcp_servers.infrastructure.proxy import MCPProxySession
     from eneo.mcp_servers.infrastructure.tool_approval import ToolApprovalManager
@@ -1809,6 +1814,69 @@ class TenantModelAdapter(CompletionModelAdapter):
                 ),
             )
 
+    async def _pause_for_authorization(
+        self,
+        *,
+        mcp_proxy: "MCPProxySession",
+        proxy_calls: list[tuple[str, dict[str, Any]]],
+        tool_metadata: list[ToolCallMetadata],
+        waiter: "MCPOAuthAuthorizationWaiter | None",
+        user_id: "UUID | None",
+    ) -> AsyncIterator[Completion]:
+        """Pause the turn while the user authorizes OAuth servers these calls need.
+
+        Yields the TOOL_AUTHORIZATION_REQUIRED event (the paused calls carry
+        their connect remedy under ``meta``), waits for the authorization mark,
+        and connects the authorized servers again with their fresh tokens. A
+        shared server is an administrator's business and is never waited for.
+        """
+        if waiter is None or user_id is None or not waiter.available:
+            return
+        awaiting = await mcp_proxy.prepare_calls(proxy_calls)
+        awaiting = {
+            server_id: error
+            for server_id, error in awaiting.items()
+            if error.auth_scope == "per_user"
+        }
+        if not awaiting:
+            return
+        metadata_by_call_id = {
+            tm.tool_call_id: tm for tm in tool_metadata if tm.tool_call_id is not None
+        }
+        paused: list[ToolCallMetadata] = []
+        for name, _ in proxy_calls:
+            server_id = mcp_proxy.server_id_for_tool(name)
+            if server_id is None or server_id not in awaiting:
+                continue
+            error = awaiting[server_id]
+            for tm in metadata_by_call_id.values():
+                if tm.mcp_tool_name != name:
+                    continue
+                paused.append(
+                    ToolCallMetadata(
+                        server_name=tm.server_name,
+                        tool_name=tm.tool_name,
+                        title=tm.title,
+                        arguments=_tool_metadata_arguments(tm),
+                        tool_call_id=tm.tool_call_id,
+                        approved=tm.approved,
+                        result_status="awaiting_authorization",
+                        mcp_tool_name=tm.mcp_tool_name,
+                        purpose=tm.purpose,
+                        is_internal=tm.is_internal,
+                        is_bundled=tm.is_bundled,
+                        meta={"eneo/authorization_required": error.remedy()},
+                    )
+                )
+        yield Completion(
+            response_type=ResponseType.TOOL_AUTHORIZATION_REQUIRED,
+            authorization_id=str(uuid.uuid4()),
+            tool_calls_metadata=paused,
+        )
+        connected = await waiter.wait(user_id, awaiting.keys())
+        if connected:
+            await mcp_proxy.retry_authorization(connected)
+
     @override
     async def iterate_stream(
         self,
@@ -1819,9 +1887,17 @@ class TenantModelAdapter(CompletionModelAdapter):
         approval_manager: "ToolApprovalManager | None" = None,
         approval_context: dict[str, Any] | None = None,
         pending_approval_ids: set[str] | None = None,
+        authorization_waiter: "MCPOAuthAuthorizationWaiter | None" = None,
+        authorization_user_id: "UUID | None" = None,
     ) -> AsyncIterator[Completion]:
         """
         Iterate streaming response from tenant model.
+
+        ``authorization_waiter`` pauses the turn when a call needs an OAuth
+        authorization the acting user (``authorization_user_id``) has not
+        given: the client shows a connect action and the turn resumes with a
+        fresh token once the popup completes, or proceeds with the remedy
+        after the wait times out.
         Phase 2: Iterate pre-created stream inside EventSourceResponse.
 
         Handles both thinking-block stripping (Qwen3) and MCP tool call
@@ -2519,6 +2595,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
                             for tc in approved_tcs
                         ]
+                        async for paused in self._pause_for_authorization(
+                            mcp_proxy=mcp_proxy,
+                            proxy_calls=proxy_calls,
+                            tool_metadata=tool_metadata,
+                            waiter=authorization_waiter,
+                            user_id=authorization_user_id,
+                        ):
+                            yield paused
                         results = await mcp_proxy.call_tools_parallel(proxy_calls)
                         execution_metadata: list[ToolCallMetadata] = []
                         captured_refs: list[McpToolReference] = []

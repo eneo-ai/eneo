@@ -16,7 +16,7 @@
   import type { AuthorizationRemedy } from "$lib/features/mcp/oauthRemedy";
   import { Plug } from "@lucide/svelte";
 
-  let { remedy }: { remedy: AuthorizationRemedy } = $props();
+  let { remedy, live = false }: { remedy: AuthorizationRemedy; live?: boolean } = $props();
 
   const connect = getMcpOAuthConnect();
   let connected = $state(false);
@@ -26,7 +26,8 @@
     const result = await connect.connect(remedy.mcp_server_id);
     if (result.success) {
       connected = true;
-      toast.success(m.mcp_oauth_connected_resend());
+      // A live turn resumes the call by itself; a finished one needs a resend.
+      toast.success(live ? m.mcp_oauth_connected_continuing() : m.mcp_oauth_connected_resend());
     } else if (result.error.message !== "popup_closed") {
       toastError(result.error);
     }
@@ -36,7 +37,9 @@
 {#if remedy.auth_scope === "shared"}
   <span class="text-muted text-xs">{m.mcp_oauth_needs_admin({ server: remedy.server_name })}</span>
 {:else if connected}
-  <span class="text-positive-default text-xs">{m.mcp_oauth_connected_resend()}</span>
+  <span class="text-positive-default text-xs"
+    >{live ? m.mcp_oauth_connected_continuing() : m.mcp_oauth_connected_resend()}</span
+  >
 {:else if connect}
   <Button
     variant="outline"

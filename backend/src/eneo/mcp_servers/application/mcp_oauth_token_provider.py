@@ -133,6 +133,11 @@ class MCPOAuthTokenProvider:
                         connection
                     )
 
+    def forget(self, server: MCPServer) -> None:
+        """Drop the cached connection: the user just authorized this server."""
+        self._connections.pop(self._key(server), None)
+        self._auths.pop(server.id, None)
+
     async def auth_for(self, server: MCPServer) -> MCPOAuthBearerAuth:
         """An httpx auth with a fresh token, or the error that explains why not."""
         token = await self.access_token_for(server)

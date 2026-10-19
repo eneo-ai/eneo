@@ -24595,7 +24595,12 @@ export interface components {
       set_at: string;
     };
     /** @enum {string} */
-    EneoEventType: "tool_call" | "tool_approval_required" | "tool_approval_timeout" | "token_usage";
+    EneoEventType:
+      | "tool_call"
+      | "tool_approval_required"
+      | "tool_approval_timeout"
+      | "tool_authorization_required"
+      | "token_usage";
     /** SSEText */
     SSEText: {
       /**
@@ -30959,6 +30964,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "tool_authorization_required"
                     | "token_usage";
                   /**
                    * McpToolReferencePublic
@@ -31077,6 +31083,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "tool_authorization_required"
                     | "token_usage";
                   /**
                    * ToolCallInfo
@@ -31147,6 +31154,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "tool_authorization_required"
                     | "token_usage";
                   /**
                    * ToolCallInfo

@@ -9,6 +9,9 @@ export function toolStepStatus(
 ): ToolStepStatus {
   if (denied || status === "denied" || status === "timeout_denied") return "denied";
   if (status === "failed") return "failed";
+  // Paused for the user to authorize an OAuth server: the turn resumes the
+  // call once they connect, so while it streams the step is still running.
+  if (status === "awaiting_authorization") return streaming ? "running" : "failed";
   if (status === "pending" || status === "approved" || status === "deferred") {
     if (!streaming) return "failed";
     return status === "approved" ? "running" : "preparing";

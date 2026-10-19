@@ -4923,5 +4923,6 @@
   "audit_action_mcp_oauth_shared_connection_set": "Shared MCP connection established",
   "audit_action_mcp_oauth_shared_connection_set_description": "Logs when an administrator connects a shared MCP server for the whole organization",
   "audit_action_mcp_oauth_shared_connection_cleared": "Shared MCP connection removed",
-  "audit_action_mcp_oauth_shared_connection_cleared_description": "Logs when an administrator removes the organization's shared connection to an MCP server"
+  "audit_action_mcp_oauth_shared_connection_cleared_description": "Logs when an administrator removes the organization's shared connection to an MCP server",
+  "mcp_oauth_connected_continuing": "Connected. Continuing…"
 }

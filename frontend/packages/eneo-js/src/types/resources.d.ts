@@ -261,6 +261,19 @@ export namespace SSE {
       result_status?: string;
     }>;
   };
+  export type ToolAuthorizationRequired = {
+    session_id: string;
+    eneo_event_type: "tool_authorization_required";
+    authorization_id: string;
+    tools: Array<{
+      server_name: string;
+      tool_name: string;
+      arguments?: Record<string, unknown>;
+      tool_call_id?: string;
+      result_status?: string;
+      meta?: Record<string, unknown> | null;
+    }>;
+  };
   export type TokenUsage = Omit<components["schemas"]["SSETokenUsage"], "$defs">;
   export type Error = Omit<components["schemas"]["SSEError"], "$defs">;
   export type Event =

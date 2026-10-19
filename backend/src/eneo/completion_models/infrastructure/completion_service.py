@@ -34,6 +34,9 @@ from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
     McpAppViewRepo,
 )
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
+from eneo.mcp_servers.infrastructure.oauth.authorization_wait import (
+    MCPOAuthAuthorizationWaiter,
+)
 from eneo.mcp_servers.infrastructure.proxy import (
     MCPProxySession,
     MCPProxySessionFactory,
@@ -675,6 +678,20 @@ class CompletionService:
                             ),
                         }
 
+                    # A turn may pause for the acting user to authorize an
+                    # OAuth MCP server; a service key has nobody to wait for.
+                    authorization_user_id = (
+                        self.mcp_oauth_token_provider.user_id
+                        if self.mcp_oauth_token_provider is not None
+                        else None
+                    )
+                    authorization_waiter = (
+                        MCPOAuthAuthorizationWaiter(self.redis_client)
+                        if authorization_user_id is not None
+                        and self.redis_client is not None
+                        else None
+                    )
+
                     async for chunk in model_adapter.iterate_stream(
                         stream=stream_obj,
                         context=context,
@@ -683,6 +700,8 @@ class CompletionService:
                         approval_manager=approval_manager,
                         approval_context=approval_context,
                         pending_approval_ids=pending_approval_ids,
+                        authorization_waiter=authorization_waiter,
+                        authorization_user_id=authorization_user_id,
                     ):
                         await _name_app_views(chunk, mcp_proxy)
                         yield chunk

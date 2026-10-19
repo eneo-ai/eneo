@@ -2653,6 +2653,48 @@ class AssistantService:
                                         )
                             yield chunk
 
+                        if (
+                            chunk.response_type
+                            == ResponseType.TOOL_AUTHORIZATION_REQUIRED
+                        ):
+                            # The paused calls are shown with their connect
+                            # remedy; the TOOL_CALL that follows the wait
+                            # replaces status and meta either way.
+                            if chunk.tool_calls_metadata:
+                                for tc in chunk.tool_calls_metadata:
+                                    existing = next(
+                                        (
+                                            t
+                                            for t in tool_calls
+                                            if t.tool_call_id
+                                            and t.tool_call_id == tc.tool_call_id
+                                        ),
+                                        None,
+                                    )
+                                    if existing:
+                                        existing.result_status = tc.result_status
+                                        existing.meta = tc.meta
+                                    else:
+                                        tool_calls.append(
+                                            ToolCallInfo(
+                                                server_name=tc.server_name,
+                                                tool_name=tc.tool_name,
+                                                title=tc.title,
+                                                arguments=cast(
+                                                    dict[str, object] | None,
+                                                    tc.arguments,
+                                                ),
+                                                tool_call_id=tc.tool_call_id,
+                                                result_status=tc.result_status,
+                                                mcp_tool_name=tc.mcp_tool_name,
+                                                purpose=tc.purpose,
+                                                is_internal=tc.is_internal,
+                                                is_bundled=tc.is_bundled,
+                                                meta=tc.meta,
+                                            )
+                                        )
+                            yield chunk
+
                         if chunk.response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
                             if chunk.tool_calls_metadata:
                                 for tc in chunk.tool_calls_metadata:

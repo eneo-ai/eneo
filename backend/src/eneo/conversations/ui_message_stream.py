@@ -448,6 +448,26 @@ async def _ui_message_chunks(
                 approval_id=completion.approval_id, tools=tools, status="pending"
             )
 
+        elif response_type == ResponseType.TOOL_AUTHORIZATION_REQUIRED:
+            assert completion.authorization_id is not None
+            yield {
+                "type": "data-tool-authorization",
+                "id": completion.authorization_id,
+                "data": {
+                    "authorization_id": completion.authorization_id,
+                    "tools": [
+                        {
+                            "server_name": tool.server_name,
+                            "tool_name": tool.tool_name,
+                            "tool_call_id": tool.tool_call_id,
+                            "result_status": tool.result_status,
+                            "meta": tool.meta,
+                        }
+                        for tool in (completion.tool_calls_metadata or [])
+                    ],
+                },
+            }
+
         elif response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
             assert completion.approval_id is not None
             pending_approvals.pop(completion.approval_id, None)

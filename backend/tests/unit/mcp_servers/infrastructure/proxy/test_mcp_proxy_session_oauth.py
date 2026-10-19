@@ -61,6 +61,10 @@ class _Resolver:
         self.error = error
         self.token = token
         self.denials: list[MCPServer] = []
+        self.forgotten: list[MCPServer] = []
+
+    def forget(self, server: MCPServer) -> None:
+        self.forgotten.append(server)
 
     async def auth_for(self, server: MCPServer) -> httpx.Auth:
         if self.error is not None:
@@ -164,3 +168,44 @@ async def test_identity_scoped_discovery_keeps_the_catalog_when_unauthorized(
     assert TOOL in proxy._tool_registry
     (result,) = await proxy.call_tools_parallel([(TOOL, {})])
     assert "AUTHORIZATION_REQUIRED" in result["content"][0]["text"]
+
+
+async def test_prepare_reports_awaiting_servers_and_retry_reconnects_after_authorization(
+    monkeypatch,
+):
+    server = _server()
+    resolver = _Resolver(error=_error(server))
+    proxy = _proxy(monkeypatch, server, resolver)
+
+    awaiting = await proxy.prepare_calls([(TOOL, {})])
+    assert set(awaiting) == {server.id}
+    assert awaiting[server.id].reason == "not_connected"
+    assert proxy.server_id_for_tool(TOOL) == server.id
+
+    # The user connected meanwhile: the resolver now hands out a token and the
+    # proxy connects the server for real (stubbed here).
+    resolver.error = None
+    connected_servers: list[MCPServer] = []
+
+    async def fake_connect(self_, s):
+        connected_servers.append(s)
+        proxy._clients[s.id] = object()  # type: ignore[assignment]
+        return proxy._clients[s.id]
+
+    monkeypatch.setattr(type(proxy), "_get_or_create_client", fake_connect)
+    connected = await proxy.retry_authorization([server.id])
+
+    assert connected == {server.id}
+    assert resolver.forgotten == [server]
+    assert server.id not in proxy._authorization_required
+    assert await proxy.prepare_calls([(TOOL, {})]) == {}
+
+
+async def test_retry_keeps_the_remedy_when_still_unauthorized(monkeypatch):
+    server = _server()
+    resolver = _Resolver(error=_error(server))
+    proxy = _proxy(monkeypatch, server, resolver)
+    await proxy.prepare_calls([(TOOL, {})])
+
+    assert await proxy.retry_authorization([server.id]) == set()
+    assert server.id in proxy._authorization_required

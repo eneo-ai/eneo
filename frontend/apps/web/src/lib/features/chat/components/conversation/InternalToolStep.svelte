@@ -247,9 +247,9 @@
           </span>
         {/if}
       </span>
-      {#if authorization && isNegative}
+      {#if authorization && (isNegative || isActive)}
         <span class="ml-1 shrink-0" onclick={(event) => event.stopPropagation()} role="none">
-          <McpConnectAction remedy={authorization} />
+          <McpConnectAction remedy={authorization} live={isActive} />
         </span>
       {/if}
       {#if canExpand}

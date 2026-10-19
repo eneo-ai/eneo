@@ -135,9 +135,9 @@
     {/if}
   </button>
 
-  {#if authorization && status === "failed"}
+  {#if authorization && (status === "failed" || status === "running" || status === "preparing")}
     <div class="border-dimmer flex items-center gap-2 border-t px-3 py-2">
-      <McpConnectAction remedy={authorization} />
+      <McpConnectAction remedy={authorization} live={status !== "failed"} />
     </div>
   {/if}
 
