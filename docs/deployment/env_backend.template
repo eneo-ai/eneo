@@ -504,6 +504,11 @@ SHAREPOINT_WEBHOOK_CLIENT_STATE=
 # {PUBLIC_ORIGIN}/api/v1/integrations/sharepoint/webhook/
 # SHAREPOINT_WEBHOOK_NOTIFICATION_URL=
 
+# [OPTIONAL] Where Graph sends subscription lifecycle events. Defaults to
+# lifecycle/ under the webhook callback URL; set it to the callback URL itself
+# when a proxy in front of Eneo only forwards that exact path.
+# SHAREPOINT_WEBHOOK_LIFECYCLE_NOTIFICATION_URL=
+
 # [OPTIONAL] Hours without any sync after which a SharePoint source gets a
 # delta sync anyway, in case Graph dropped its notifications (0 = off), and the
 # most such syncs queued per run (every 15 minutes).

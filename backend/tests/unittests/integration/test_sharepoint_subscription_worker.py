@@ -846,3 +846,104 @@ class TestFailStaleSharePointSyncJobs:
                 result = await fail_stale_sharepoint_sync_jobs({})
 
         assert result["failed_stale_jobs"] == 0
+
+
+class TestLifecycleMaintenance:
+    """Graph calls a lifecycle event asks for, run after the acknowledgement."""
+
+    @staticmethod
+    def _setup(mock_container, mock_subscription, *, token=True):
+        from eneo.integration.infrastructure import sharepoint_subscription_worker
+
+        repo = mock_container.sharepoint_subscription_repo()
+        repo.one_or_none = AsyncMock(return_value=mock_subscription)
+        service = mock_container.sharepoint_subscription_service()
+        webhooks = MagicMock()
+        webhooks.queue_syncs_for_subscription = AsyncMock(return_value=2)
+        mock_container.sharepoint_webhook_service = MagicMock(return_value=webhooks)
+        get_token = AsyncMock(return_value=MagicMock() if token else None)
+        return sharepoint_subscription_worker, service, webhooks, get_token, repo
+
+    async def test_reauthorization_renews_the_subscription(
+        self, mock_container, mock_subscription
+    ):
+        worker_module, service, webhooks, get_token, _ = self._setup(
+            mock_container, mock_subscription
+        )
+        service.renew_subscription = AsyncMock(return_value=True)
+
+        with patch.object(worker_module, "get_token_for_subscription", get_token):
+            await worker_module._maintain_subscription(  # pyright: ignore[reportPrivateUsage]
+                mock_container,
+                worker_module.SubscriptionMaintenance(
+                    mock_subscription.id, "reauthorizationRequired"
+                ),
+            )
+
+        service.renew_subscription.assert_awaited_once()
+        webhooks.queue_syncs_for_subscription.assert_not_called()
+
+    async def test_a_removed_subscription_is_recreated_and_its_sources_synced(
+        self, mock_container, mock_subscription
+    ):
+        worker_module, service, webhooks, get_token, _ = self._setup(
+            mock_container, mock_subscription
+        )
+        service.recreate_expired_subscription = AsyncMock(return_value=True)
+
+        with patch.object(worker_module, "get_token_for_subscription", get_token):
+            await worker_module._maintain_subscription(  # pyright: ignore[reportPrivateUsage]
+                mock_container,
+                worker_module.SubscriptionMaintenance(
+                    mock_subscription.id, "subscriptionRemoved"
+                ),
+            )
+
+        service.recreate_expired_subscription.assert_awaited_once()
+        assert (
+            service.recreate_expired_subscription.await_args.kwargs["is_onedrive"]
+            is False
+        )
+        webhooks.queue_syncs_for_subscription.assert_awaited_once_with(
+            mock_subscription
+        )
+
+    async def test_a_refused_recreation_is_recorded_and_syncs_nothing(
+        self, mock_container, mock_subscription
+    ):
+        worker_module, service, webhooks, get_token, repo = self._setup(
+            mock_container, mock_subscription
+        )
+        service.recreate_expired_subscription = AsyncMock(return_value=False)
+
+        with patch.object(worker_module, "get_token_for_subscription", get_token):
+            await worker_module._maintain_subscription(  # pyright: ignore[reportPrivateUsage]
+                mock_container,
+                worker_module.SubscriptionMaintenance(
+                    mock_subscription.id, "subscriptionRemoved"
+                ),
+            )
+
+        webhooks.queue_syncs_for_subscription.assert_not_called()
+        assert mock_subscription.consecutive_renewal_failures == 1
+        repo.update.assert_awaited_with(mock_subscription)
+
+    async def test_without_a_token_the_failure_is_recorded(
+        self, mock_container, mock_subscription
+    ):
+        worker_module, service, _, get_token, repo = self._setup(
+            mock_container, mock_subscription, token=False
+        )
+        service.renew_subscription = AsyncMock()
+
+        with patch.object(worker_module, "get_token_for_subscription", get_token):
+            await worker_module._maintain_subscription(  # pyright: ignore[reportPrivateUsage]
+                mock_container,
+                worker_module.SubscriptionMaintenance(
+                    mock_subscription.id, "reauthorizationRequired"
+                ),
+            )
+
+        service.renew_subscription.assert_not_called()
+        assert "reauthorizationRequired" in (mock_subscription.last_renewal_error or "")
+        repo.update.assert_awaited_with(mock_subscription)

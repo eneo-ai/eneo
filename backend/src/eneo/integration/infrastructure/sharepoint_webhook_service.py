@@ -77,9 +77,21 @@ def client_state_matches(expected: str | None, value: object) -> bool:
     return hmac.compare_digest(value.encode("utf-8"), expected.encode("utf-8"))
 
 
+LIFECYCLE_MISSED = "missed"
+LIFECYCLE_REAUTHORIZATION_REQUIRED = "reauthorizationRequired"
+LIFECYCLE_SUBSCRIPTION_REMOVED = "subscriptionRemoved"
+_MAINTENANCE_WINDOW_SECONDS = 10 * 60
 # Catch-up reads the sync state of this many sources per Redis round trip.
 _SYNC_STATE_BATCH = 500
 _USERS_WHO_CAN_SIGN_IN = (UserState.ACTIVE.value, UserState.INVITED.value)
+
+
+@dataclass(frozen=True)
+class SubscriptionMaintenance:
+    """A Graph call a lifecycle event asks for, run after the acknowledgement."""
+
+    subscription_id: UUID
+    event: str
 
 
 @dataclass(frozen=True)
@@ -190,7 +202,7 @@ class SharepointWebhookService:
 
     async def handle_notifications(
         self, notifications: list[SharePointWebhookNotification]
-    ) -> None:
+    ) -> list[SubscriptionMaintenance]:
         """Queue syncs for notifications ``authenticated_notifications`` accepted.
 
         Notifications are routed by their ``subscriptionId`` to the stored
@@ -198,12 +210,24 @@ class SharepointWebhookService:
         notification can only ever reach the tenant that created the
         subscription. ChangeKey-based deduplication prevents processing of
         duplicate notifications.
+
+        Lifecycle notifications (those with a ``lifecycleEvent``) concern the
+        subscription rather than a change. ``missed`` queues a sync for every
+        knowledge row on the subscription, since Graph says it dropped
+        notifications. ``reauthorizationRequired`` and ``subscriptionRemoved``
+        need calls to Graph, which are returned for the caller to run once the
+        notification has been acknowledged.
         """
         by_subscription: dict[str, list[SharePointWebhookNotification]] = {}
+        lifecycle: list[tuple[str, str]] = []
         for notification in notifications:
             subscription_id = notification.get("subscriptionId")
             if not isinstance(subscription_id, str) or not subscription_id:
                 logger.warning("Ignoring webhook notification without subscriptionId")
+                continue
+            event = cast(dict[str, object], notification).get("lifecycleEvent")
+            if event is not None:
+                lifecycle.append((subscription_id, str(event)))
                 continue
             by_subscription.setdefault(subscription_id, []).append(notification)
 
@@ -224,6 +248,107 @@ class SharepointWebhookService:
                 subscription=subscription,
                 notifications=subscription_notifications,
             )
+        return await self._handle_lifecycle_events(lifecycle)
+
+    async def _handle_lifecycle_events(
+        self, events: list[tuple[str, str]]
+    ) -> list[SubscriptionMaintenance]:
+        maintenance: list[SubscriptionMaintenance] = []
+        handled: set[tuple[str, str]] = set()
+        for subscription_id, event in events:
+            if (subscription_id, event) in handled:
+                continue
+            handled.add((subscription_id, event))
+            subscription = (
+                await self.sharepoint_subscription_repo.get_by_subscription_id(
+                    subscription_id
+                )
+            )
+            if subscription is None:
+                logger.info(
+                    "Ignoring SharePoint lifecycle event %s for unknown subscription %s",
+                    event[:40],
+                    subscription_id,
+                )
+                continue
+            if event == LIFECYCLE_MISSED:
+                logger.warning(
+                    "Graph dropped notifications for SharePoint subscription %s; "
+                    "queuing a sync for its knowledge",
+                    subscription_id,
+                )
+                await self.queue_syncs_for_subscription(subscription)
+            elif event in (
+                LIFECYCLE_REAUTHORIZATION_REQUIRED,
+                LIFECYCLE_SUBSCRIPTION_REMOVED,
+            ):
+                if await self._claim_maintenance(subscription.id, event):
+                    logger.info(
+                        "Graph sent %s for SharePoint subscription %s",
+                        event,
+                        subscription_id,
+                    )
+                    maintenance.append(SubscriptionMaintenance(subscription.id, event))
+            else:
+                logger.info(
+                    "Ignoring unknown SharePoint lifecycle event %s for subscription %s",
+                    event[:40],
+                    subscription_id,
+                )
+        return maintenance
+
+    async def _claim_maintenance(self, subscription_db_id: UUID, event: str) -> bool:
+        """At most one Graph call per subscription and event in a window.
+
+        Graph repeats ``reauthorizationRequired`` as expiry nears, and asks
+        apps not to renew a subscription twice within ten minutes.
+        """
+        try:
+            return bool(
+                await self.redis_client.set(
+                    f"sharepoint_subscription_maintenance:{subscription_db_id}:{event}",
+                    "1",
+                    nx=True,
+                    ex=_MAINTENANCE_WINDOW_SECONDS,
+                )
+            )
+        except (RedisError, OSError) as exc:
+            logger.warning(
+                "Could not check recent maintenance of subscription %s (%s)",
+                subscription_db_id,
+                type(exc).__name__,
+            )
+            return True
+
+    async def queue_syncs_for_subscription(
+        self, subscription: SharePointSubscription
+    ) -> int:
+        """Queue a sync for every knowledge row on a subscription; returns how many.
+
+        For when Graph says changes went unnotified: they may be anywhere in
+        the drive, so every row is in scope. A row being synced gets a marker
+        instead of a job, as for any notification.
+        """
+        if subscription.site_id == subscription.drive_id:
+            fallback = ("drive", subscription.drive_id)
+        else:
+            fallback = ("site", subscription.site_id)
+        context = _QueueContext()
+        queued = 0
+        for (
+            knowledge_db,
+            user_integration_db,
+        ) in await self._fetch_knowledge_by_subscription(subscription.id):
+            if await self._deferred_to_running_sync(str(knowledge_db.id)):
+                continue
+            if await self._queue_sync(
+                knowledge_db,
+                user_integration_db,
+                context=context,
+                fallback_resource=fallback,
+            ):
+                queued += 1
+        return queued
 
     async def _mark_subscription_webhook_received(
         self, subscription: SharePointSubscription

@@ -13,6 +13,10 @@ from eneo.authentication.endpoint_access import (
 from eneo.integration.infrastructure.content_service.types import (
     SharePointWebhookPayload,
 )
+from eneo.integration.infrastructure.detached_tasks import run_detached
+from eneo.integration.infrastructure.sharepoint_subscription_worker import (
+    maintain_subscriptions,
+)
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.server.dependencies.container import get_container
@@ -65,6 +69,17 @@ async def _read_capped_body(request: Request) -> Optional[bytes]:
     return b"".join(chunks)
 
 
+# The lifecycle notification URL Graph is given (reauthorization, removal,
+# missed notifications) is served by the same handlers: a lifecycle event is
+# told from a change by its lifecycleEvent field. Graph is the only caller, so
+# the path stays out of the published API.
+@router.get(
+    "/sharepoint/webhook/lifecycle/",
+    description="Graph validation handshake for the lifecycle notification URL.",
+    responses={200: {"description": "Validation token echoed as plain text."}},
+    response_model=None,
+    include_in_schema=False,
+)
 @router.get(
     "/sharepoint/webhook/",
     description=(
@@ -102,6 +117,17 @@ async def sharepoint_webhook_validation(validationToken: Optional[str] = None):
     return {"status": "ok"}
 
 
+@router.post(
+    "/sharepoint/webhook/lifecycle/",
+    description=(
+        "Handle Graph lifecycle notifications for SharePoint subscriptions; echo "
+        "the Graph validation token (plain text) during the handshake."
+    ),
+    response_class=Response,
+    responses={202: {"description": "Lifecycle notifications accepted."}},
+    response_model=None,
+    include_in_schema=False,
+)
 @router.post(
     "/sharepoint/webhook/",
     description=(
@@ -203,6 +229,10 @@ async def sharepoint_webhook(
         )
         session = cast(AsyncSession, container.session())
         async with session.begin():
-            await service.handle_notifications(accepted)
+            maintenance = await service.handle_notifications(accepted)
+        if maintenance:
+            # Graph wants the acknowledgement quickly; renewing or recreating a
+            # subscription takes Graph calls of its own.
+            run_detached(maintain_subscriptions(maintenance))
 
     return JSONResponse(status_code=202, content={"status": "acknowledged"})

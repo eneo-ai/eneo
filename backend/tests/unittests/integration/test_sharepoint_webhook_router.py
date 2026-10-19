@@ -1,5 +1,6 @@
 """HTTP contract of the public Graph webhook endpoint."""
 
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -25,6 +26,7 @@ from eneo.integration.presentation.sharepoint_webhook_router import (
 
 CLIENT_STATE = "webhook-secret"
 WEBHOOK = "/integrations/sharepoint/webhook/"
+LIFECYCLE = "/integrations/sharepoint/webhook/lifecycle/"
 
 
 @dataclass
@@ -163,10 +165,11 @@ def _knowledge_rows(count: int):
     return rows
 
 
+@pytest.mark.parametrize("path", [WEBHOOK, LIFECYCLE])
 @pytest.mark.parametrize("method", ["GET", "POST"])
-async def test_handshake_echoes_the_validation_token_as_plain_text(api, method):
+async def test_handshake_echoes_the_validation_token_as_plain_text(api, method, path):
     response = await api.client.request(
-        method, WEBHOOK, params={"validationToken": "abc 123"}
+        method, path, params={"validationToken": "abc 123"}
     )
 
     assert response.status_code == 200
@@ -304,3 +307,69 @@ async def test_valid_notification_queues_exactly_the_referencing_knowledge(api):
         knowledge.id for knowledge, _ in result.all.return_value
     }
     assert api.subscription.last_webhook_received_at is not None
+
+
+def _lifecycle(event: str, client_state: str = CLIENT_STATE) -> dict[str, object]:
+    return {
+        "subscriptionId": "sub-known",
+        "clientState": client_state,
+        "lifecycleEvent": event,
+    }
+
+
+async def test_a_reauthorization_request_is_renewed_after_the_acknowledgement(
+    api, monkeypatch
+):
+    maintain = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.integration.presentation.sharepoint_webhook_router.maintain_subscriptions",
+        maintain,
+    )
+
+    response = await api.client.post(
+        LIFECYCLE, json={"value": [_lifecycle("reauthorizationRequired")]}
+    )
+    for _ in range(3):
+        await asyncio.sleep(0)
+
+    assert response.status_code == 202
+    [requests] = maintain.await_args.args
+    assert [(r.subscription_id, r.event) for r in requests] == [
+        (api.subscription.id, "reauthorizationRequired")
+    ]
+
+
+async def test_a_forged_lifecycle_event_does_nothing(api, monkeypatch):
+    maintain = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.integration.presentation.sharepoint_webhook_router.maintain_subscriptions",
+        maintain,
+    )
+
+    response = await api.client.post(
+        LIFECYCLE,
+        json={"value": [_lifecycle("subscriptionRemoved", client_state="guess")]},
+    )
+
+    assert response.status_code == 202
+    maintain.assert_not_called()
+    api.session.begin.assert_not_called()
+
+
+async def test_the_lifecycle_path_has_the_same_body_limits(api):
+    response = await api.client.post(
+        LIFECYCLE,
+        content=b"{" + b" " * MAX_WEBHOOK_BODY_BYTES + b"}",
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 400
+    api.subscription_repo.get_by_subscription_id.assert_not_called()
+
+
+def test_the_lifecycle_path_stays_out_of_the_published_api():
+    app = FastAPI()
+    app.include_router(router, prefix="/integrations")
+
+    assert LIFECYCLE not in app.openapi()["paths"]
+    assert WEBHOOK in app.openapi()["paths"]

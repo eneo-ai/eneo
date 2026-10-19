@@ -18,7 +18,10 @@ from eneo.integration.domain.repositories.sharepoint_subscription_repo import (
 )
 from eneo.integration.infrastructure.sharepoint_subscription_service import (
     SharePointSubscriptionService,
+    lifecycle_notification_url_for,
 )
+
+LIFECYCLE_URL = "https://example.com/webhook/lifecycle/"
 
 
 @pytest.fixture
@@ -54,6 +57,7 @@ def mock_subscription():
         subscription_id="graph-subscription-id-abc",
         drive_id="drive-id-xyz",
         expires_at=datetime.now(timezone.utc) + timedelta(days=29),
+        lifecycle_notification_url=LIFECYCLE_URL,
     )
 
 
@@ -79,6 +83,7 @@ def service(mock_subscription_repo):
         settings = MagicMock()
         settings.sharepoint_webhook_notification_url = "https://example.com/webhook/"
         settings.sharepoint_webhook_client_state = "test-client-state"
+        settings.sharepoint_webhook_lifecycle_notification_url = None
         settings.public_origin = "https://example.com"
         mock_settings.return_value = settings
 
@@ -236,6 +241,7 @@ class TestEnsureSubscriptionForSite:
             settings = MagicMock()
             settings.sharepoint_webhook_notification_url = None
             settings.sharepoint_webhook_client_state = "test-client-state"
+            settings.sharepoint_webhook_lifecycle_notification_url = None
             settings.public_origin = None
             mock_settings.return_value = settings
 
@@ -414,6 +420,7 @@ class TestRecreateExpiredSubscription:
                 "https://example.com/webhook/"
             )
             settings.sharepoint_webhook_client_state = "test-client-state"
+            settings.sharepoint_webhook_lifecycle_notification_url = None
             settings.public_origin = None
             setattr(settings, missing, None)
             mock_settings.return_value = settings
@@ -737,6 +744,7 @@ class TestGraphApiInteractions:
                 "https://example.com/webhook/"
             )
             settings.sharepoint_webhook_client_state = None
+            settings.sharepoint_webhook_lifecycle_notification_url = None
             settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
 
@@ -812,3 +820,132 @@ class TestListExpiringSubscriptions:
 
         assert result == expiring_subs
         mock_subscription_repo.list_expiring_before.assert_called_once()
+
+
+@pytest.mark.parametrize(
+    "notification_url, configured, expected",
+    [
+        pytest.param(
+            "https://eneo.example/api/webhook/",
+            None,
+            "https://eneo.example/api/webhook/lifecycle/",
+            id="derived",
+        ),
+        pytest.param(
+            "https://eneo.example/api/webhook",
+            None,
+            "https://eneo.example/api/webhook/lifecycle/",
+            id="derived-without-slash",
+        ),
+        pytest.param(
+            "https://eneo.example/api/webhook/",
+            " https://eneo.example/api/webhook/ ",
+            "https://eneo.example/api/webhook/",
+            id="configured",
+        ),
+        pytest.param(None, "https://eneo.example/x/", None, id="no-webhooks"),
+    ],
+)
+def test_lifecycle_notification_url(notification_url, configured, expected):
+    assert lifecycle_notification_url_for(notification_url, configured) == expected
+
+
+class TestLifecycleNotificationUrl:
+    @staticmethod
+    def _graph(post_status: int = 201, patch_status: int = 200):
+        posted = MagicMock()
+        posted.status = post_status
+        posted.json = AsyncMock(return_value={"id": "fresh-sub"})
+        posted.text = AsyncMock(return_value="refused")
+        posted.__aenter__ = AsyncMock(return_value=posted)
+        posted.__aexit__ = AsyncMock(return_value=None)
+        patched = MagicMock()
+        patched.status = patch_status
+        patched.__aenter__ = AsyncMock(return_value=patched)
+        patched.__aexit__ = AsyncMock(return_value=None)
+        session = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=None)
+        session.post = MagicMock(return_value=posted)
+        session.patch = MagicMock(return_value=patched)
+        return session
+
+    async def test_a_new_subscription_registers_and_remembers_it(
+        self, service, mock_subscription_repo, mock_token
+    ):
+        mock_subscription_repo.add.side_effect = lambda subscription: subscription
+        graph = self._graph()
+
+        with (
+            patch("aiohttp.ClientSession", return_value=graph),
+            patch.object(service, "_resolve_drive_id", return_value="drive-1"),
+        ):
+            created = await service.ensure_subscription_for_site(
+                user_integration_id=uuid4(), site_id="site-1", token=mock_token
+            )
+
+        assert graph.post.call_args.kwargs["json"]["lifecycleNotificationUrl"] == (
+            LIFECYCLE_URL
+        )
+        assert created.lifecycle_notification_url == LIFECYCLE_URL
+
+    async def test_renewal_recreates_a_subscription_created_without_it(
+        self, service, mock_subscription, mock_token
+    ):
+        mock_subscription.lifecycle_notification_url = None
+        graph = self._graph()
+
+        with (
+            patch("aiohttp.ClientSession", return_value=graph),
+            patch.object(service, "_delete_graph_subscription", return_value=True),
+        ):
+            assert await service.renew_subscription(mock_subscription, mock_token)
+
+        graph.patch.assert_not_called()
+        assert mock_subscription.subscription_id == "fresh-sub"
+        assert mock_subscription.lifecycle_notification_url == LIFECYCLE_URL
+
+    async def test_a_subscription_that_cannot_be_recreated_is_renewed_as_it_is(
+        self, service, mock_subscription, mock_token
+    ):
+        """Without lifecycle events it still delivers changes; letting it expire
+        would not."""
+        mock_subscription.lifecycle_notification_url = None
+        graph = self._graph(post_status=400)
+
+        with patch("aiohttp.ClientSession", return_value=graph):
+            assert await service.renew_subscription(mock_subscription, mock_token)
+
+        graph.patch.assert_called_once()
+        assert mock_subscription.subscription_id == "graph-subscription-id-abc"
+        assert mock_subscription.lifecycle_notification_url is None
+        assert mock_subscription.consecutive_renewal_failures == 0
+
+    async def test_a_subscription_that_has_it_is_renewed_in_place(
+        self, service, mock_subscription, mock_token
+    ):
+        graph = self._graph()
+
+        with patch("aiohttp.ClientSession", return_value=graph):
+            assert await service.renew_subscription(mock_subscription, mock_token)
+
+        graph.post.assert_not_called()
+        graph.patch.assert_called_once()
+
+    async def test_reuse_at_import_does_not_recreate_for_it(
+        self, service, mock_subscription_repo, mock_subscription, mock_token
+    ):
+        """Renewal adds it; an import must not pay a Graph round trip for it."""
+        mock_subscription.lifecycle_notification_url = None
+        mock_subscription.notification_url = "https://example.com/webhook/"
+        mock_subscription_repo.get_by_user_and_site.return_value = mock_subscription
+
+        with patch.object(service, "_create_graph_subscription") as create:
+            reused = await service.ensure_subscription_for_site(
+                user_integration_id=mock_subscription.user_integration_id,
+                site_id=mock_subscription.site_id,
+                token=mock_token,
+            )
+
+        assert reused is mock_subscription
+        create.assert_not_called()

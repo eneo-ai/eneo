@@ -27,12 +27,14 @@ class SharePointSubscription(Entity):
         last_renewal_error: str | None = None,
         last_webhook_received_at: datetime | None = None,
         notification_url: str | None = None,
+        lifecycle_notification_url: str | None = None,
         id: Optional[UUID] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.notification_url = notification_url
+        self.lifecycle_notification_url = lifecycle_notification_url
         self.user_integration_id = user_integration_id
         self.site_id = site_id
         self.subscription_id = subscription_id

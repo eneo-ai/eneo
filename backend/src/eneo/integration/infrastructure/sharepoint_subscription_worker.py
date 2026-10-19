@@ -5,16 +5,24 @@ This worker handles:
 2. Orphaned subscription cleanup - runs daily to remove unused subscriptions
 3. Stale sync jobs - every 30 minutes, fails sync jobs a crashed worker left
 4. Sync catch-up - every 15 minutes, queues the syncs notifications missed
+5. Lifecycle events - renews or recreates a subscription Graph asked about
 """
 
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional, cast
 
+from dependency_injector import providers
+
+from eneo.database.database import sessionmanager
 from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
 from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
     SimpleSharePointToken,
+)
+from eneo.integration.infrastructure.sharepoint_webhook_service import (
+    LIFECYCLE_SUBSCRIPTION_REMOVED,
+    SubscriptionMaintenance,
 )
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
@@ -142,6 +150,85 @@ async def get_token_for_subscription(
                 f"Failed to get/refresh OAuth token for subscription {subscription.subscription_id}: {e}"
             )
             return None
+
+
+async def maintain_subscriptions(requests: list[SubscriptionMaintenance]) -> None:
+    """Run the Graph calls lifecycle events asked for, each in its own transaction.
+
+    Started once the lifecycle notification has been acknowledged, on a
+    session of its own. A failure is recorded on the subscription like a
+    failed renewal; the renewal cron retries before the subscription expires.
+    """
+    for request in requests:
+        try:
+            async with sessionmanager.session() as session, session.begin():
+                container = Container(session=providers.Object(session))
+                await _maintain_subscription(container, request)
+        except Exception:
+            logger.error(
+                "Could not handle %s for SharePoint subscription %s",
+                request.event,
+                request.subscription_id,
+                exc_info=True,
+            )
+
+
+async def _maintain_subscription(
+    container: Container, request: SubscriptionMaintenance
+) -> None:
+    subscription = await container.sharepoint_subscription_repo().one_or_none(
+        id=request.subscription_id
+    )
+    if subscription is None:
+        return
+    service = container.sharepoint_subscription_service()
+    token = await get_token_for_subscription(subscription, container)
+    if token is None:
+        await record_renewal_failure(
+            subscription,
+            container,
+            f"Could not get a token to handle {request.event} from Microsoft Graph",
+        )
+        return
+    session = cast("AsyncSession", container.session())
+    failures_before = subscription.consecutive_renewal_failures
+    try:
+        # The savepoint keeps a token refreshed above when Graph refuses.
+        async with session.begin_nested():
+            if request.event == LIFECYCLE_SUBSCRIPTION_REMOVED:
+                # Graph has deleted it; renewing is not possible.
+                done = await service.recreate_expired_subscription(
+                    subscription=subscription,
+                    token=token,
+                    is_onedrive=subscription.site_id == subscription.drive_id,
+                )
+            else:
+                # A renewal reauthorizes the subscription as well.
+                done = await service.renew_subscription(
+                    subscription=subscription, token=token
+                )
+            if not done:
+                raise RuntimeError(f"Microsoft Graph refused {request.event}")
+    except Exception as exc:
+        if subscription.consecutive_renewal_failures > failures_before:
+            await persist_renewal_failure(subscription, container)
+        else:
+            await record_renewal_failure(
+                subscription, container, user_visible_error(exc)
+            )
+        return
+    if request.event == LIFECYCLE_SUBSCRIPTION_REMOVED:
+        # Changes made while the subscription was gone were never notified.
+        queued = (
+            await container.sharepoint_webhook_service().queue_syncs_for_subscription(
+                subscription
+            )
+        )
+        logger.info(
+            "Recreated removed SharePoint subscription %s and queued %d sync(s)",
+            subscription.id,
+            queued,
+        )
 
 
 @worker.cron_job(minute=0, hour={0, 12})  # Every 12 hours (midnight and noon)

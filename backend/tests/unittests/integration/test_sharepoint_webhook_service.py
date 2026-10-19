@@ -1150,3 +1150,99 @@ async def test_queue_sync_for_a_deleted_knowledge_queues_nothing(setup: Setup):
         assert await setup.service.queue_sync_for_knowledge(uuid4()) is None
 
     job_service.queue_job.assert_not_awaited()
+
+
+def _lifecycle(event: str, subscription_id: str = "sub-123") -> dict[str, str]:
+    return {
+        "subscriptionId": subscription_id,
+        "clientState": "test-client-state-123",
+        "lifecycleEvent": event,
+        "subscriptionExpirationDateTime": "2026-11-01T00:00:00Z",
+    }
+
+
+async def test_missed_notifications_queue_a_sync_for_every_row_on_the_subscription(
+    setup: Setup,
+    mock_knowledge_db,
+    mock_tenant_app_integration_db,
+    mock_user,
+):
+    file_scoped = MagicMock()
+    file_scoped.id = uuid4()
+    file_scoped.site_id = "site-123"
+    file_scoped.drive_id = None
+    file_scoped.resource_type = "site"
+    file_scoped.folder_id = "file-1"
+    file_scoped.folder_path = None
+    file_scoped.selected_item_type = "file"
+    file_scoped.delta_token = "token"
+    file_scoped.name = "One file"
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(
+        return_value=[
+            (mock_knowledge_db, mock_tenant_app_integration_db),
+            (file_scoped, mock_tenant_app_integration_db),
+        ]
+    )
+    setup.user_repo.list_tenant_admins.return_value = [mock_user]
+    job_service = AsyncMock()
+
+    with patch(
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
+        return_value=job_service,
+    ):
+        maintenance = await setup.service.handle_notifications([_lifecycle("missed")])
+
+    assert maintenance == []
+    queued = {
+        call.kwargs["task_params"].integration_knowledge_id
+        for call in job_service.queue_job.await_args_list
+    }
+    assert queued == {mock_knowledge_db.id, file_scoped.id}
+    setup.change_key_service.should_process.assert_not_called()
+
+
+@pytest.mark.parametrize("event", ["reauthorizationRequired", "subscriptionRemoved"])
+async def test_lifecycle_events_needing_graph_are_returned_once_per_window(
+    setup: Setup, event
+):
+    store: dict[str, str] = {}
+
+    async def set_nx(key, value, nx=False, ex=None):
+        if nx and key in store:
+            return None
+        store[key] = value
+        return True
+
+    setup.redis.set.side_effect = set_nx
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
+
+    first = await setup.service.handle_notifications(
+        [_lifecycle(event), _lifecycle(event)]
+    )
+    second = await setup.service.handle_notifications([_lifecycle(event)])
+
+    assert [(m.subscription_id, m.event) for m in first] == [
+        (setup.subscription.id, event)
+    ]
+    assert second == []
+    setup.service._fetch_knowledge_by_subscription.assert_not_called()
+
+
+async def test_lifecycle_events_for_unknown_subscriptions_are_ignored(setup: Setup):
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
+
+    maintenance = await setup.service.handle_notifications(
+        [_lifecycle("missed", "sub-unknown"), _lifecycle("subscriptionRemoved", "x")]
+    )
+
+    assert maintenance == []
+    setup.service._fetch_knowledge_by_subscription.assert_not_called()
+
+
+async def test_a_lifecycle_event_is_not_treated_as_a_change(setup: Setup):
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
+
+    await setup.service.handle_notifications([_lifecycle("somethingNew")])
+
+    setup.service._fetch_knowledge_by_subscription.assert_not_called()
+    setup.sharepoint_subscription_repo.update.assert_not_called()
