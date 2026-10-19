@@ -28,6 +28,9 @@ from eneo.files.file_protocol import (
 )
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
+from eneo.files.file_size_service import FileSizeService
+from eneo.files.image import ImageExtractor
+from eneo.files.text import TextExtractor
 from eneo.object_content.content import (
     CapturedContent,
     ContentState,
@@ -627,6 +630,33 @@ async def test_inline_and_object_store_save_the_same_exact_bytes(
             real_object_store.store,
             await _remote_object_keys(object_content_database),
         )
+
+
+@pytest.mark.asyncio
+async def test_a_generated_document_saves_without_upload_admission(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """Kills the mutant that holds a tool-generated document to the upload
+    admission snapshot: the chat's FileService is built without one, so every
+    generated document would fail to save."""
+    payload = b"a,b\n1,2\n"
+    async with object_content_database.session() as session:
+        user = await _user(session)
+        saved = await FileService(
+            user=user,
+            repo=FileRepository(session),
+            protocol=FileProtocol(FileSizeService(), TextExtractor(), ImageExtractor()),
+            object_content=ObjectContentService(
+                real_object_store.settings, object_content_database
+            ),
+        ).save_generated_document(payload, "result.csv", "text/csv")
+
+    assert (saved.name, saved.mimetype, saved.original_available) == (
+        "result.csv",
+        "text/csv",
+        True,
+    )
 
 
 @pytest.mark.asyncio

@@ -18,8 +18,8 @@ from fastapi import UploadFile
 from eneo.files import audio
 from eneo.files import file_protocol as file_protocol_module
 from eneo.files import file_size_service as file_size_module
-from eneo.files.file_models import FileContentVariant
-from eneo.files.file_protocol import FileProtocol
+from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_protocol import FileProtocol, upload_limit
 from eneo.files.file_size_service import FileSizeService
 from eneo.files.text import (
     PdfExtractionLimitExceeded,
@@ -564,6 +564,30 @@ async def test_domain_limit_cannot_relax_upload_admission(protocol):
 
     assert exc_info.value.max_size == TEXT_MAX
     assert exc_info.value.limit_name == "flow_runtime_input"
+
+
+@pytest.mark.asyncio
+async def test_a_caller_limit_needs_no_upload_admission(protocol):
+    """Kills the mutant that requires an admission snapshot although the
+    caller brings its own limit, as a tool-generated document does (it passes
+    mcp_tool_file_max_bytes and no limit name), and the mutant that names the
+    admission use case when the caller's limit applies."""
+    upload, size = _make_upload("text/plain", 2_000)
+    protocol.file_size_service.get_file_size.return_value = size
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        async with protocol.prepare_upload(upload, max_size=size - 1):
+            pass
+
+    assert exc_info.value.max_size == size - 1
+    assert exc_info.value.limit_name is None
+
+
+def test_an_upload_without_any_limit_is_refused():
+    """Kills the mutant that lets an upload with neither a caller limit nor an
+    admission snapshot through unbounded."""
+    with pytest.raises(RuntimeError, match="snapshot is required"):
+        upload_limit(FileType.TEXT, snapshot=None, max_size=None)
 
 
 @pytest.mark.asyncio

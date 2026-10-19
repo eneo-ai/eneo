@@ -5,7 +5,7 @@ from collections.abc import AsyncGenerator, AsyncIterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, NamedTuple
 
 from fastapi import UploadFile
 
@@ -94,6 +94,41 @@ async def _measure_audio_length(
         raise audio.AudioUnreadableError(str(exc)) from exc
 
 
+class UploadLimit(NamedTuple):
+    maximum_bytes: int
+    # The limit a refusal reports: the caller's own name, else the admission
+    # use case when the snapshot's limit applies.
+    name: str | None
+
+
+def upload_limit(
+    file_type: FileType,
+    *,
+    snapshot: UploadAdmissionSnapshot | None,
+    max_size: int | None,
+    limit_name: str | None = None,
+) -> UploadLimit:
+    """The tighter of the caller's limit and the admission snapshot's limit for
+    this type of session upload. A caller that brings its own limit, such as a
+    tool-generated document, needs no snapshot."""
+    if snapshot is None:
+        if max_size is None:
+            raise RuntimeError("Upload admission snapshot is required")
+        return UploadLimit(max_size, limit_name)
+    if file_type is FileType.IMAGE:
+        admitted = snapshot.session_image_maximum_bytes
+        use_case = UploadLimitUseCase.SESSION_IMAGE
+    elif file_type is FileType.AUDIO:
+        admitted = snapshot.session_audio_maximum_bytes
+        use_case = UploadLimitUseCase.SESSION_AUDIO
+    else:
+        admitted = snapshot.session_file_maximum_bytes
+        use_case = UploadLimitUseCase.SESSION_FILE
+    if max_size is not None and max_size <= admitted:
+        return UploadLimit(max_size, limit_name)
+    return UploadLimit(admitted, limit_name or use_case.value)
+
+
 class FileProtocol:
     def __init__(
         self,
@@ -117,18 +152,18 @@ class FileProtocol:
     ) -> AsyncGenerator[PreparedFileUpload]:
         """Preserve an uploaded document exactly for domain-specific inspection."""
 
-        if max_size is None:
-            if upload_admission_snapshot is None:
-                raise RuntimeError("Upload admission snapshot is required")
-            max_size = upload_admission_snapshot.session_file_maximum_bytes
-            limit_name = limit_name or UploadLimitUseCase.SESSION_FILE.value
-
+        limit = upload_limit(
+            FileType.DOCUMENT,
+            snapshot=upload_admission_snapshot,
+            max_size=max_size,
+            limit_name=limit_name,
+        )
         file_size = self.file_size_service.get_file_size(upload_file.file)
-        if file_size > max_size:
+        if file_size > limit.maximum_bytes:
             raise FileTooLargeException(
                 file_size=file_size,
-                max_size=max_size,
-                limit_name=limit_name,
+                max_size=limit.maximum_bytes,
+                limit_name=limit.name,
             )
 
         # Prior inspection must not truncate the original document we persist.
@@ -177,35 +212,23 @@ class FileProtocol:
         content_type = (upload_file.content_type or "").split(";")[0].strip()
         if ImageMimeTypes.has_value(content_type):
             file_type = FileType.IMAGE
-            if upload_admission_snapshot is None:
-                raise RuntimeError("Upload admission snapshot is required")
-            admission_max_size = upload_admission_snapshot.session_image_maximum_bytes
-            if max_size is None or admission_max_size < max_size:
-                max_size = admission_max_size
-                limit_name = limit_name or UploadLimitUseCase.SESSION_IMAGE.value
         elif AudioMimeTypes.has_value(content_type):
             file_type = FileType.AUDIO
-            if upload_admission_snapshot is None:
-                raise RuntimeError("Upload admission snapshot is required")
-            admission_max_size = upload_admission_snapshot.session_audio_maximum_bytes
-            if max_size is None or admission_max_size < max_size:
-                max_size = admission_max_size
-                limit_name = limit_name or UploadLimitUseCase.SESSION_AUDIO.value
         else:
             file_type = FileType.TEXT
-            if upload_admission_snapshot is None:
-                raise RuntimeError("Upload admission snapshot is required")
-            admission_max_size = upload_admission_snapshot.session_file_maximum_bytes
-            if max_size is None or admission_max_size < max_size:
-                max_size = admission_max_size
-                limit_name = limit_name or UploadLimitUseCase.SESSION_FILE.value
+        limit = upload_limit(
+            file_type,
+            snapshot=upload_admission_snapshot,
+            max_size=max_size,
+            limit_name=limit_name,
+        )
 
         file_size = self.file_size_service.get_file_size(upload_file.file)
-        if file_size > max_size:
+        if file_size > limit.maximum_bytes:
             raise FileTooLargeException(
                 file_size=file_size,
-                max_size=max_size,
-                limit_name=limit_name,
+                max_size=limit.maximum_bytes,
+                limit_name=limit.name,
             )
 
         filepath = Path(

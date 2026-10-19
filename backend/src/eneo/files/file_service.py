@@ -33,6 +33,7 @@ from eneo.files.file_protocol import (
     FileProtocol,
     PendingFileContent,
     PreparedFileUpload,
+    upload_limit,
 )
 from eneo.files.file_repo import (
     FileContentReferenceRecord,
@@ -265,9 +266,9 @@ class FileService:
                             capture_stack,
                             prepared,
                             storage_kind=storage_target,
-                            business_maximum_bytes=self._effective_maximum_bytes(
+                            business_maximum_bytes=upload_limit(
                                 prepared.file_type, snapshot=snapshot, max_size=max_size
-                            ),
+                            ).maximum_bytes,
                         )
                     ]
                     + [
@@ -275,11 +276,11 @@ class FileService:
                             capture_stack,
                             derivative,
                             storage_kind=storage_target,
-                            business_maximum_bytes=self._effective_maximum_bytes(
+                            business_maximum_bytes=upload_limit(
                                 derivative.file_type,
                                 snapshot=snapshot,
                                 max_size=max_size,
-                            ),
+                            ).maximum_bytes,
                         )
                         for derivative in prepared.derivatives
                     ]
@@ -524,34 +525,6 @@ class FileService:
             access_class=ContentAccessClass.PRIVATE_RESOURCE,
             state=ContentState.AVAILABLE,
             storage_kind=storage_kind,
-        )
-
-    @staticmethod
-    def _maximum_bytes_for_file_type(
-        file_type: FileType,
-        *,
-        snapshot: UploadAdmissionSnapshot,
-    ) -> int:
-        if file_type is FileType.IMAGE:
-            return snapshot.session_image_maximum_bytes
-        if file_type is FileType.AUDIO:
-            return snapshot.session_audio_maximum_bytes
-        return snapshot.session_file_maximum_bytes
-
-    @classmethod
-    def _effective_maximum_bytes(
-        cls,
-        file_type: FileType,
-        *,
-        snapshot: UploadAdmissionSnapshot,
-        max_size: int | None,
-    ) -> int:
-        admission_maximum = cls._maximum_bytes_for_file_type(
-            file_type,
-            snapshot=snapshot,
-        )
-        return (
-            admission_maximum if max_size is None else min(admission_maximum, max_size)
         )
 
     def _require_upload_admission(self) -> UploadAdmissionSnapshot:
