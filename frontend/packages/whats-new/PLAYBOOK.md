@@ -115,6 +115,22 @@ A hotfix tag needs no entry of its own, but all the notes it does ship must be
 dated. Running it first avoids a published GitHub release whose image build
 then fails.
 
+### RC notification identity
+
+Author one content entry for the final core version, such as `2.3.0`.
+The primary web app uses the installed frontend version from `APP_VERSION`
+to resolve that content as `2.3.0-rc.1` while running that candidate. The page,
+popup and persisted seen/announced markers use the same resolved identity.
+Do not copy the release entry for each RC or use an RC's core version as its
+progress marker. RCs ignore the draft's eventual final date; docs keep the
+authored release list. Local unversioned builds keep the authored identity.
+
+Validate RC0 → RC1 → RC10 → final, reload on the same version, and rollback
+to an older RC. The store and Chromium tests cover these boundaries. A newer
+RC backend ignores future markers sent by stale clients, so an old tab cannot
+pre-record the final release. The 2.3 migration corrects RC0's already stored
+`2.3.0` markers to `2.3.0-rc.0` and must ship before the first 2.3 final.
+
 ## Maintenance
 
 **Single sources.** `releases.schema.json` owns the shape and the closed

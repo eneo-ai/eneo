@@ -3,7 +3,7 @@
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { releases, visibleEntries, type Locale } from "@eneo/whats-new";
+import { releases, releasesForVersion, visibleEntries, type Locale } from "@eneo/whats-new";
 import { getLocale, overwriteGetLocale } from "$lib/paraglide/runtime";
 import { m } from "$lib/paraglide/messages";
 import { announcementSummary } from "$lib/features/whats-new/announcement";
@@ -12,6 +12,7 @@ import "../../../app.css";
 
 const state = vi.hoisted(() => ({
   admin: false,
+  installedVersion: "2.3.0",
   markSeen: vi.fn().mockResolvedValue(undefined),
   markAnnounced: vi.fn().mockResolvedValue(undefined),
   start: vi.fn().mockResolvedValue("completed")
@@ -37,11 +38,12 @@ vi.mock("$lib/features/whats-new/whatsNewStore", async () => {
   const { writable } = await import("svelte/store");
   return {
     getWhatsNewStore: () => ({
+      releases: releasesForVersion(state.installedVersion),
       markLatestSeen: state.markSeen,
       seenVersion: writable(null),
       resetState: vi.fn(),
       enabled: writable(true),
-      pendingAnnouncement: () => release,
+      pendingAnnouncement: () => releasesForVersion(state.installedVersion)[0],
       markLatestAnnounced: state.markAnnounced
     })
   };
@@ -65,6 +67,7 @@ afterEach(() => {
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  state.installedVersion = "2.3.0";
   document.documentElement.dataset.theme = "light";
   await page.viewport(1280, 900);
 });
@@ -175,3 +178,19 @@ for (const locale of ["sv", "en"] satisfies Locale[]) {
     });
   });
 }
+
+it("shows the installed RC in both the announcement and release picker", async () => {
+  state.installedVersion = "2.3.0-rc.1";
+  state.admin = false;
+  overwriteGetLocale(() => "en");
+  const announcement = render(WhatsNewAnnouncement);
+  await expect.element(page.getByRole("dialog")).toBeVisible();
+  await expect.element(page.getByText("Version 2.3.0-rc.1", { exact: true })).toBeVisible();
+  await page.screenshot({ path: "__screenshots__/announcement-rc1.png" });
+  await announcement.unmount();
+  render(WhatsNewPage);
+  await expect
+    .element(page.getByRole("heading", { name: "Version 2.3.0-rc.1", exact: true }))
+    .toBeVisible();
+  await expect.element(page.getByRole("button", { name: /^2\.3\.0-rc\.1/ })).toBeVisible();
+});
