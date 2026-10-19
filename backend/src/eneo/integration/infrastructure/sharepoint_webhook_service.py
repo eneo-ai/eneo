@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -14,6 +15,7 @@ from eneo.database.tables.integration_table import (
 from eneo.database.tables.integration_table import (
     UserIntegration as UserIntegrationDBModel,
 )
+from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
@@ -25,11 +27,14 @@ from eneo.integration.infrastructure.content_service.types import (
     SharePointWebhookNotification,
     SharePointWebhookPayload,
 )
+from eneo.integration.infrastructure.detached_tasks import run_detached
 from eneo.integration.infrastructure.office_change_key_service import (
     OfficeChangeKeyService,
 )
 from eneo.integration.infrastructure.sharepoint_sync_keys import (
     SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+    claim_sync_queue_slot,
+    release_sync_queue_slot,
     sync_lock_key,
     sync_pending_key,
 )
@@ -58,6 +63,14 @@ def client_state_matches(expected: str | None, value: object) -> bool:
     if not expected or not isinstance(value, str):
         return False
     return hmac.compare_digest(value.encode("utf-8"), expected.encode("utf-8"))
+
+
+@dataclass
+class _QueueContext:
+    """Per-call caches: one tenant admin or user lookup and one JobService each."""
+
+    users: dict[str, UserInDB] = field(default_factory=lambda: {})
+    job_services: dict[str, JobService] = field(default_factory=lambda: {})
 
 
 class SharepointWebhookService:
@@ -219,8 +232,7 @@ class SharepointWebhookService:
             )
             return
 
-        job_services: dict[str, JobService] = {}
-        user_cache: dict[str, UserInDB] = {}
+        context = _QueueContext()
         queued_knowledge: set[str] = set()
 
         # Deduplicate per subscription: two subscriptions on the same site get
@@ -307,156 +319,248 @@ class SharepointWebhookService:
                 queued_knowledge.add(knowledge_id_str)
                 continue
 
-            # Validate that user_integration_db.id is not None before proceeding
-            # (id is always populated from DB; this guards against unexpected None)
-            ui_id = user_integration_db.id
-            if ui_id is None:  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard: DB id is non-null in practice
-                logger.error(
-                    "user_integration_db.id is None for knowledge %s; skipping",
-                    knowledge_db.id,
+            if await self._queue_sync(
+                knowledge_db,
+                user_integration_db,
+                context=context,
+                fallback_resource=(resource_type, resource_id),
+            ):
+                queued_knowledge.add(knowledge_id_str)
+
+    async def queue_sync_for_knowledge(
+        self, knowledge_id: UUID, *, full: bool = False
+    ) -> Task | None:
+        """Queue a sync for one knowledge row the way a notification would.
+
+        For syncs no request asked for: the follow-up a sync task queues for
+        markers left during its lease, and the periodic catch-up. ``full``
+        asks for a full sync even when the knowledge has a delta token.
+        Returns the task queued, or None when nothing was queued.
+        """
+        records = await self._fetch_knowledge(
+            IntegrationKnowledgeDBModel.id == knowledge_id
+        )
+        if not records:
+            logger.info(
+                "Not queuing a sync for knowledge %s: it no longer exists",
+                knowledge_id,
+            )
+            return None
+        knowledge_db, user_integration_db = records[0]
+        return await self._queue_sync(
+            knowledge_db, user_integration_db, context=_QueueContext(), full=full
+        )
+
+    async def _queue_sync(
+        self,
+        knowledge_db: IntegrationKnowledgeDBModel,
+        user_integration_db: UserIntegrationDBModel,
+        *,
+        context: "_QueueContext",
+        full: bool = False,
+        fallback_resource: tuple[str, str] | None = None,
+    ) -> Task | None:
+        """Queue one sync job for a knowledge row; None when nothing was queued.
+
+        The job runs with the connection's own credentials: the tenant app,
+        or the OAuth token of the person who connected. ``fallback_resource``
+        is the notified subscription's (kind, id), used when the row lacks
+        its own site or drive id.
+        """
+        knowledge_id_str = str(knowledge_db.id)
+        # Validate that user_integration_db.id is not None before proceeding
+        # (id is always populated from DB; this guards against unexpected None)
+        ui_id = user_integration_db.id
+        if ui_id is None:  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard: DB id is non-null in practice
+            logger.error(
+                "user_integration_db.id is None for knowledge %s; skipping",
+                knowledge_db.id,
+            )
+            return None
+
+        # Determine authentication method and fetch appropriate credentials
+        # For tenant_app integrations: use tenant_app_id, no OAuth token
+        # For user_oauth integrations: use OAuth token, no tenant_app_id
+        token_id: UUID | None = None
+        tenant_app_id: UUID | None = None
+
+        if user_integration_db.auth_type == "tenant_app":
+            # Tenant app integration - no OAuth token needed
+            # The worker task will fetch tenant app credentials using tenant_app_id
+            tenant_app_id = user_integration_db.tenant_app_id
+            if not tenant_app_id:
+                logger.warning(
+                    "Tenant app integration %s has no tenant_app_id; skipping",
+                    user_integration_db.id,
                 )
-                continue
+                return None
+            logger.info(
+                f"Using tenant app {tenant_app_id} for integration {user_integration_db.id}"
+            )
+        else:
+            # User OAuth integration - fetch OAuth token
+            token = await self.oauth_token_repo.one_or_none(
+                user_integration_id=user_integration_db.id
+            )
+            if not token:
+                logger.warning(
+                    "No OAuth token found for user integration %s; skipping",
+                    user_integration_db.id,
+                )
+                return None
+            token_id = token.id
+            logger.info(
+                f"Using OAuth token {token_id} for integration {user_integration_db.id}"
+            )
 
-            # Determine authentication method and fetch appropriate credentials
-            # For tenant_app integrations: use tenant_app_id, no OAuth token
-            # For user_oauth integrations: use OAuth token, no tenant_app_id
-            token_id: UUID | None = None
-            tenant_app_id: UUID | None = None
-
-            if user_integration_db.auth_type == "tenant_app":
-                # Tenant app integration - no OAuth token needed
-                # The worker task will fetch tenant app credentials using tenant_app_id
-                tenant_app_id = user_integration_db.tenant_app_id
-                if not tenant_app_id:
-                    logger.warning(
-                        "Tenant app integration %s has no tenant_app_id; skipping",
-                        user_integration_db.id,
+        # Determine which user to use for job creation
+        # For tenant_app integrations (user_id=None), use a tenant admin
+        # For user_oauth integrations, use the specific user
+        user_cache = context.users
+        if user_integration_db.user_id is None:
+            # Tenant app integration - person-independent
+            # Use a tenant admin for job creation
+            cache_key = f"tenant_admin_{user_integration_db.tenant_id}"
+            if cache_key not in user_cache:
+                try:
+                    admin_user = await self._get_tenant_admin(
+                        user_integration_db.tenant_id
                     )
-                    continue
-                logger.info(
-                    f"Using tenant app {tenant_app_id} for integration {user_integration_db.id}"
-                )
-            else:
-                # User OAuth integration - fetch OAuth token
-                token = await self.oauth_token_repo.one_or_none(
-                    user_integration_id=user_integration_db.id
-                )
-                if not token:
-                    logger.warning(
-                        "No OAuth token found for user integration %s; skipping",
-                        user_integration_db.id,
+                    user_cache[cache_key] = admin_user
+                    logger.info(
+                        f"Using tenant admin {admin_user.id} for tenant_app integration {user_integration_db.id}"
                     )
-                    continue
-                token_id = token.id
-                logger.info(
-                    f"Using OAuth token {token_id} for integration {user_integration_db.id}"
-                )
+                except Exception as exc:
+                    logger.warning(
+                        "Could not load tenant admin for tenant %s: %s",
+                        user_integration_db.tenant_id,
+                        exc,
+                    )
+                    return None
+            user_for_job = user_cache[cache_key]
+            user_id_for_job = user_for_job.id
+            job_service_key = cache_key
+        else:
+            # User OAuth integration - use the specific user
+            user_id_str = str(user_integration_db.user_id)
+            if user_id_str not in user_cache:
+                try:
+                    loaded_user = await self.user_repo.get_user_by_id(
+                        id=user_integration_db.user_id
+                    )
+                    if loaded_user is None:
+                        raise ValueError(
+                            f"User {user_integration_db.user_id} not found"
+                        )
+                    user_cache[user_id_str] = loaded_user
+                except Exception as exc:
+                    logger.warning(
+                        "Could not load user %s for SharePoint webhook notification: %s",
+                        user_integration_db.user_id,
+                        exc,
+                    )
+                    return None
+            user_for_job = user_cache[user_id_str]
+            user_id_for_job = user_integration_db.user_id
+            job_service_key = user_id_str
 
-            # Determine which user to use for job creation
-            # For tenant_app integrations (user_id=None), use a tenant admin
-            # For user_oauth integrations, use the specific user
-            if user_integration_db.user_id is None:
-                # Tenant app integration - person-independent
-                # Use a tenant admin for job creation
-                cache_key = f"tenant_admin_{user_integration_db.tenant_id}"
-                if cache_key not in user_cache:
-                    try:
-                        admin_user = await self._get_tenant_admin(
-                            user_integration_db.tenant_id
-                        )
-                        user_cache[cache_key] = admin_user
-                        logger.info(
-                            f"Using tenant admin {admin_user.id} for tenant_app integration {user_integration_db.id}"
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Could not load tenant admin for tenant %s: %s",
-                            user_integration_db.tenant_id,
-                            exc,
-                        )
-                        continue
-                user_for_job = user_cache[cache_key]
-                user_id_for_job = user_for_job.id
-                job_service_key = cache_key
-            else:
-                # User OAuth integration - use the specific user
-                user_id_str = str(user_integration_db.user_id)
-                if user_id_str not in user_cache:
-                    try:
-                        loaded_user = await self.user_repo.get_user_by_id(
-                            id=user_integration_db.user_id
-                        )
-                        if loaded_user is None:
-                            raise ValueError(
-                                f"User {user_integration_db.user_id} not found"
-                            )
-                        user_cache[user_id_str] = loaded_user
-                    except Exception as exc:
-                        logger.warning(
-                            "Could not load user %s for SharePoint webhook notification: %s",
-                            user_integration_db.user_id,
-                            exc,
-                        )
-                        continue
-                user_for_job = user_cache[user_id_str]
-                user_id_for_job = user_integration_db.user_id
-                job_service_key = user_id_str
+        resource_type, resource_id = fallback_resource or (
+            ("drive", knowledge_db.drive_id)
+            if knowledge_db.resource_type == "onedrive"
+            else ("site", knowledge_db.site_id)
+        )
+        site_id_value = (
+            knowledge_db.site_id if isinstance(knowledge_db.site_id, str) else None
+        )
+        drive_id_value = (
+            knowledge_db.drive_id if isinstance(knowledge_db.drive_id, str) else None
+        )
+        resource_type_value = (
+            knowledge_db.resource_type
+            if isinstance(knowledge_db.resource_type, str)
+            and knowledge_db.resource_type in {"site", "onedrive"}
+            else None
+        )
+        site_id_param = site_id_value or (
+            resource_id if resource_type == "site" else None
+        )
+        drive_id_param = drive_id_value or (
+            resource_id if resource_type == "drive" else None
+        )
+        if not site_id_param and not drive_id_param:
+            logger.warning(
+                "Knowledge %s has no site or drive to sync; skipping",
+                knowledge_id_str,
+            )
+            return None
 
-            site_id_value = (
-                knowledge_db.site_id if isinstance(knowledge_db.site_id, str) else None
-            )
-            drive_id_value = (
-                knowledge_db.drive_id
-                if isinstance(knowledge_db.drive_id, str)
-                else None
-            )
-            resource_type_value = (
-                knowledge_db.resource_type
-                if isinstance(knowledge_db.resource_type, str)
-                and knowledge_db.resource_type in {"site", "onedrive"}
-                else None
-            )
+        params = SharepointContentTaskParam(
+            user_id=user_id_for_job,
+            id=ui_id,
+            token_id=token_id,  # None for tenant_app, UUID for user_oauth
+            tenant_app_id=tenant_app_id,  # UUID for tenant_app, None for user_oauth
+            integration_knowledge_id=knowledge_db.id,
+            site_id=site_id_param,
+            drive_id=drive_id_param,
+            folder_id=knowledge_db.folder_id,
+            folder_path=knowledge_db.folder_path,
+            resource_type=resource_type_value
+            or ("onedrive" if resource_type == "drive" else "site"),
+        )
 
-            params = SharepointContentTaskParam(
-                user_id=user_id_for_job,
-                id=ui_id,
-                token_id=token_id,  # None for tenant_app, UUID for user_oauth
-                tenant_app_id=tenant_app_id,  # UUID for tenant_app, None for user_oauth
-                integration_knowledge_id=knowledge_db.id,
-                site_id=site_id_value
-                or (resource_id if resource_type == "site" else None),
-                drive_id=drive_id_value
-                or (resource_id if resource_type == "drive" else None),
-                folder_id=knowledge_db.folder_id,
-                folder_path=knowledge_db.folder_path,
-                resource_type=resource_type_value
-                or ("onedrive" if resource_type == "drive" else "site"),
+        if job_service_key not in context.job_services:
+            context.job_services[job_service_key] = JobService(
+                user=user_for_job,
+                job_repo=self.job_repo,
             )
 
-            if job_service_key not in job_services:
-                job_services[job_service_key] = JobService(
-                    user=user_for_job,
-                    job_repo=self.job_repo,
-                )
+        # Use delta sync if we have a delta token, otherwise do full sync
+        task_type = (
+            Task.SYNC_SHAREPOINT_DELTA
+            if knowledge_db.delta_token and not full
+            else Task.PULL_SHAREPOINT_CONTENT
+        )
 
-            # Use delta sync if we have a delta token, otherwise do full sync
-            task_type = (
-                Task.SYNC_SHAREPOINT_DELTA
-                if knowledge_db.delta_token
-                else Task.PULL_SHAREPOINT_CONTENT
+        if not await claim_sync_queue_slot(self.redis_client, knowledge_id_str):
+            # The queued job starts after this change and its pass covers it.
+            logger.info(
+                "Knowledge %s already has a sync queued; not queuing another",
+                knowledge_id_str,
             )
-
-            await job_services[job_service_key].queue_job(
+            return None
+        try:
+            await context.job_services[job_service_key].queue_job(
                 task=task_type,
                 name=knowledge_db.name or f"SharePoint ({resource_id})",
                 task_params=params,
+                after_commit=True,
             )
+        except Exception:
+            await release_sync_queue_slot(self.redis_client, knowledge_id_str)
+            raise
+        self._release_queue_slot_on_rollback(knowledge_id_str)
 
-            queued_knowledge.add(knowledge_id_str)
-            logger.info(
-                f"Queued {task_type.value} task for integration knowledge {knowledge_id_str} "
-                f"({resource_type}_id={resource_id})"
-            )
+        logger.info(
+            f"Queued {task_type.value} task for integration knowledge {knowledge_id_str} "
+            f"({resource_type}_id={resource_id})"
+        )
+        return task_type
+
+    def _release_queue_slot_on_rollback(self, knowledge_id: str) -> None:
+        """A job rolled back with the transaction must not block the next one."""
+        session = cast(object, self.session)
+        if not isinstance(session, AsyncSession):
+            return
+
+        async def committed() -> None:
+            return None
+
+        def rolled_back() -> None:
+            run_detached(release_sync_queue_slot(self.redis_client, knowledge_id))
+
+        after_outer_transaction(
+            session.sync_session, on_commit=committed, on_rollback=rolled_back
+        )
 
     async def _deferred_to_running_sync(self, knowledge_id: str) -> bool:
         """Leave the pending marker instead of a job while a sync holds the lease.
@@ -467,10 +571,10 @@ class SharepointWebhookService:
         pass before releasing, which is what the skipped job would have asked
         for. Without Redis the job is queued as before.
 
-        The lease is checked again after the marker is set: a holder that had
-        already drained the markers and was releasing would otherwise leave
-        this one unread until the next notification. A job queued then takes
-        the lease and drains it.
+        The lease is checked again after the marker is set. The holder looks
+        for markers after it has released, so a marker set before the release
+        is queued by the holder, and one set after it finds the lease free
+        here and is served by the job queued now.
         """
         try:
             if not await self.redis_client.exists(sync_lock_key(knowledge_id)):
@@ -527,6 +631,13 @@ class SharepointWebhookService:
     async def _fetch_knowledge_by_subscription(
         self, subscription_db_id: UUID
     ) -> list[tuple[IntegrationKnowledgeDBModel, UserIntegrationDBModel]]:
+        return await self._fetch_knowledge(
+            IntegrationKnowledgeDBModel.sharepoint_subscription_id == subscription_db_id
+        )
+
+    async def _fetch_knowledge(
+        self, condition: sa.ColumnElement[bool]
+    ) -> list[tuple[IntegrationKnowledgeDBModel, UserIntegrationDBModel]]:
         stmt = (
             sa.select(IntegrationKnowledgeDBModel, UserIntegrationDBModel)
             .join(
@@ -534,10 +645,7 @@ class SharepointWebhookService:
                 IntegrationKnowledgeDBModel.user_integration_id
                 == UserIntegrationDBModel.id,
             )
-            .where(
-                IntegrationKnowledgeDBModel.sharepoint_subscription_id
-                == subscription_db_id
-            )
+            .where(condition)
         )
 
         result = await self.session.execute(stmt)

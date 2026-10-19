@@ -17,8 +17,10 @@ from eneo.integration.domain.entities.sharepoint_subscription import (
 )
 from eneo.integration.infrastructure.sharepoint_sync_keys import (
     SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+    SHAREPOINT_SYNC_QUEUED_TTL_SECONDS,
     sync_lock_key,
     sync_pending_key,
+    sync_queued_key,
 )
 from eneo.integration.infrastructure.sharepoint_webhook_service import (
     SharepointWebhookService,
@@ -599,12 +601,22 @@ async def test_a_notification_during_a_running_sync_leaves_a_marker_not_a_job(
         call(sync_lock_key(knowledge_id)),
         call(sync_lock_key(knowledge_id)),
     ]
-    setup.redis.set.assert_awaited_once_with(
+    marker = call(
         sync_pending_key(knowledge_id), "1", ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS
     )
     if released_meanwhile:
+        assert setup.redis.set.await_args_list == [
+            marker,
+            call(
+                sync_queued_key(knowledge_id),
+                "1",
+                nx=True,
+                ex=SHAREPOINT_SYNC_QUEUED_TTL_SECONDS,
+            ),
+        ]
         job_service.queue_job.assert_awaited_once()
     else:
+        assert setup.redis.set.await_args_list == [marker]
         job_service.queue_job.assert_not_awaited()
 
 
@@ -619,6 +631,7 @@ async def test_a_redis_outage_falls_back_to_queuing_the_job(
         setup, mock_knowledge_db, mock_tenant_app_integration_db, mock_user
     )
     setup.redis.exists.side_effect = RedisConnectionError("refused")
+    setup.redis.set.side_effect = RedisConnectionError("refused")
     job_service = AsyncMock()
 
     with patch(
@@ -628,7 +641,10 @@ async def test_a_redis_outage_falls_back_to_queuing_the_job(
         await _handle(setup.service, {"value": [mock_notification]})
 
     job_service.queue_job.assert_awaited_once()
-    setup.redis.set.assert_not_awaited()
+    # Neither the marker nor the queued-sync check got through.
+    assert [c.args[0] for c in setup.redis.set.await_args_list] == [
+        sync_queued_key(str(mock_knowledge_db.id))
+    ]
 
 
 def test_the_webhook_uses_the_sync_tasks_lease_and_marker_keys():
@@ -1006,3 +1022,131 @@ async def test_onedrive_queued_job_contains_drive_id(
     assert task_params.drive_id == "drive-456"
     assert task_params.site_id is None
     assert task_params.resource_type == "onedrive"
+
+
+class _NxRedis:
+    """Enough of Redis for the queued-sync marker: SET NX really refuses."""
+
+    def __init__(self) -> None:
+        self.store: dict[str, str] = {}
+
+    async def exists(self, key):
+        return 1 if key in self.store else 0
+
+    async def set(self, key, value, nx=False, ex=None):
+        if nx and key in self.store:
+            return None
+        self.store[key] = value
+        return True
+
+    async def delete(self, key):
+        return 1 if self.store.pop(key, None) is not None else 0
+
+
+async def test_a_burst_of_notifications_queues_one_sync_per_knowledge(
+    setup: Setup,
+    mock_notification,
+    mock_knowledge_db,
+    mock_tenant_app_integration_db,
+    mock_user,
+):
+    """Until the queued job starts, every later change is covered by it."""
+    _running_sync_setup(
+        setup, mock_knowledge_db, mock_tenant_app_integration_db, mock_user
+    )
+    setup.service.redis_client = _NxRedis()  # pyright: ignore[reportAttributeAccessIssue]
+    job_service = AsyncMock()
+
+    with patch(
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
+        return_value=job_service,
+    ):
+        for _ in range(3):
+            await _handle(setup.service, {"value": [mock_notification]})
+
+    job_service.queue_job.assert_awaited_once()
+    assert job_service.queue_job.await_args.kwargs["after_commit"] is True
+
+
+async def test_a_job_that_could_not_be_queued_frees_the_queued_sync_marker(
+    setup: Setup,
+    mock_notification,
+    mock_knowledge_db,
+    mock_tenant_app_integration_db,
+    mock_user,
+):
+    _running_sync_setup(
+        setup, mock_knowledge_db, mock_tenant_app_integration_db, mock_user
+    )
+    redis = _NxRedis()
+    setup.service.redis_client = redis  # pyright: ignore[reportAttributeAccessIssue]
+    job_service = AsyncMock()
+    job_service.queue_job.side_effect = RuntimeError("database down")
+
+    with (
+        patch(
+            "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
+            return_value=job_service,
+        ),
+        pytest.raises(RuntimeError),
+    ):
+        await _handle(setup.service, {"value": [mock_notification]})
+
+    assert sync_queued_key(str(mock_knowledge_db.id)) not in redis.store
+
+
+@pytest.mark.parametrize(
+    ("delta_token", "full", "expected"),
+    [
+        ("token", False, Task.SYNC_SHAREPOINT_DELTA),
+        ("token", True, Task.PULL_SHAREPOINT_CONTENT),
+        (None, False, Task.PULL_SHAREPOINT_CONTENT),
+    ],
+)
+async def test_queue_sync_for_knowledge_uses_the_rows_own_resource(
+    setup: Setup,
+    mock_knowledge_db,
+    mock_tenant_app_integration_db,
+    mock_user,
+    delta_token,
+    full,
+    expected,
+):
+    mock_knowledge_db.delta_token = delta_token
+    mock_knowledge_db.resource_type = "site"
+    mock_knowledge_db.drive_id = "drive-456"
+    setup.service._fetch_knowledge = AsyncMock(  # pyright: ignore[reportPrivateUsage]
+        return_value=[(mock_knowledge_db, mock_tenant_app_integration_db)]
+    )
+    setup.user_repo.list_tenant_admins.return_value = [mock_user]
+    job_service = AsyncMock()
+
+    with patch(
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
+        return_value=job_service,
+    ):
+        queued = await setup.service.queue_sync_for_knowledge(
+            mock_knowledge_db.id, full=full
+        )
+
+    assert queued == expected
+    kwargs = job_service.queue_job.await_args.kwargs
+    assert kwargs["task"] == expected
+    params = kwargs["task_params"]
+    assert params.integration_knowledge_id == mock_knowledge_db.id
+    assert params.site_id == "site-123"
+    assert params.drive_id == "drive-456"
+    assert params.tenant_app_id == mock_tenant_app_integration_db.tenant_app_id
+
+
+async def test_queue_sync_for_a_deleted_knowledge_queues_nothing(setup: Setup):
+    setup.service._fetch_knowledge = AsyncMock(return_value=[])  # pyright: ignore[reportPrivateUsage]
+    job_service = AsyncMock()
+
+    with patch(
+        "eneo.integration.infrastructure.sharepoint_webhook_service.JobService",
+        return_value=job_service,
+    ):
+        assert await setup.service.queue_sync_for_knowledge(uuid4()) is None
+
+    job_service.queue_job.assert_not_awaited()
