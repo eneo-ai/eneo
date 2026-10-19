@@ -24,6 +24,10 @@ from eneo.completion_models.domain.skill_context import SkillContextMeasurement
 from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
 from eneo.main.exceptions import BadRequestException
 from eneo.services.service import DatastoreResult
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+)
 from eneo.sessions.session import SessionInDB
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
@@ -96,7 +100,10 @@ def _service_with_effective_config(effective_config_service: AsyncMock):
     )
 
 
-async def test_ask_uses_effective_model_for_session_metadata_and_response():
+@pytest.mark.parametrize("selected_effort", [None, "low"])
+async def test_ask_uses_effective_model_for_session_metadata_and_response(
+    selected_effort,
+):
     assistant_id = uuid4()
     now = datetime.now(UTC)
     effective_model = DomainCompletionModel(
@@ -126,7 +133,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
             reasoning_effort=ModelKwargCapability(
                 supported=True,
                 control="select",
-                options=["high"],
+                options=["low", "high"],
             )
         ),
         tenant_id=TEST_USER.tenant_id,
@@ -156,6 +163,8 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
     space.security_classification = None
+    space.default_assistant = assistant
+    space.get_completion_model.return_value = effective_model
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True
@@ -212,7 +221,26 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
 
-    result = await service.ask(question="hello", assistant_id=assistant_id)
+    settings = (
+        ConversationSettingsState(
+            revision=1,
+            settings=ConversationSettings(
+                completion_model_id=effective_model.id,
+                reasoning_effort=selected_effort,
+            ),
+        )
+        if selected_effort
+        else None
+    )
+    result = await service.ask(
+        question="hello", assistant_id=assistant_id, conversation_settings=settings
+    )
+    assert (
+        session_service.create_session_with_question_placeholder.await_args.kwargs[
+            "settings"
+        ]
+        == settings
+    )
 
     service._handle_response.assert_awaited_once()
     assert (
@@ -220,6 +248,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
         is effective_model
     )
     assert result.completion_model.id == effective_model.id
+    assert result.session.settings == settings
     assert (
         session_service.create_session_with_question_placeholder.await_args.kwargs[
             "completion_model"
@@ -229,10 +258,9 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     assert (
         assistant.ask.await_args.kwargs["completion_model_override"] is effective_model
     )
-    assert (
-        assistant.ask.await_args.kwargs["model_kwargs_override"].reasoning_effort
-        == "high"
-    )
+    assert assistant.ask.await_args.kwargs[
+        "model_kwargs_override"
+    ].reasoning_effort == (selected_effort or "high")
     assert assistant.ask.await_args.kwargs["prompt_override"] is None
     assert (
         session_service.create_session_with_question_placeholder.await_args.kwargs[

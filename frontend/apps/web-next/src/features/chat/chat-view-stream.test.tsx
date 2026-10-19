@@ -61,6 +61,7 @@ vi.mock("@/lib/chat/transport", () => ({
           type: "data-session",
           data: {
             session_id: "session-1",
+            settings: { revision: 1, settings: { require_tool_approval: false } },
             completion_model: { id: "m", name: "claude-haiku", nickname: "Claude Haiku 4.5" },
             files: [],
             web_search_references: []
@@ -84,22 +85,38 @@ vi.mock("@/lib/chat/transport", () => ({
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: vi.fn(async () => ({ data: undefined, response: new Response() })),
-    POST: vi.fn(async (path: string, init: { params?: { path?: { session_id?: string } } }) => {
-      if (path === "/api/v1/files/") {
-        const uploaded = (upload: { id: string; name: string }) => ({
-          data: { ...upload, mimetype: "application/pdf", size: 2048 },
-          response: new Response()
-        });
-        if (spies.holdUpload !== null) {
-          return new Promise<ReturnType<typeof uploaded>>((resolve) => {
-            spies.holdUpload = (upload) => resolve(uploaded(upload));
+    POST: vi.fn(
+      async (
+        path: string,
+        init: { params?: { path?: { session_id?: string } }; body?: { session_id?: string } }
+      ) => {
+        if (path.endsWith("/settings/resolve/"))
+          return {
+            data: {
+              revision: init?.body?.session_id ? 1 : 0,
+              settings: { require_tool_approval: false },
+              supports_tool_calling: true,
+              mcp_servers: [],
+              capabilities: []
+            },
+            response: new Response()
+          };
+        if (path === "/api/v1/files/") {
+          const uploaded = (upload: { id: string; name: string }) => ({
+            data: { ...upload, mimetype: "application/pdf", size: 2048 },
+            response: new Response()
           });
+          if (spies.holdUpload !== null) {
+            return new Promise<ReturnType<typeof uploaded>>((resolve) => {
+              spies.holdUpload = (upload) => resolve(uploaded(upload));
+            });
+          }
+          return uploaded({ id: "file-1", name: "Policy.pdf" });
         }
-        return uploaded({ id: "file-1", name: "Policy.pdf" });
+        if (path.endsWith("/title/")) spies.titled.push(init.params?.path?.session_id ?? "");
+        return { data: { name: "Gräns för direktupphandling" }, response: new Response() };
       }
-      if (path.endsWith("/title/")) spies.titled.push(init.params?.path?.session_id ?? "");
-      return { data: { name: "Gräns för direktupphandling" }, response: new Response() };
-    }),
+    ),
     PUT: vi.fn(async (path: string, init: { params: { path: unknown }; body: unknown }) => {
       spies.rated.push({ path, params: init.params.path, body: init.body });
       return { data: init.body, response: new Response() };
@@ -151,9 +168,14 @@ function Harness({
   );
 }
 
-function ask(question: string) {
+async function ask(question: string) {
   const textarea = screen.getByRole("textbox", { name: /Meddelande till/ });
   fireEvent.change(textarea, { target: { value: question } });
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "Skicka meddelande" }) as HTMLButtonElement).disabled
+    ).toBe(false)
+  );
   fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
 }
 
@@ -163,7 +185,7 @@ describe("ChatView streaming an answer", () => {
     const onSessionCreated = vi.fn();
     const onTitle = vi.fn();
     renderInApp(<Harness onSessionCreated={onSessionCreated} onTitle={onTitle} />);
-    ask("Vilken gräns gäller?");
+    await ask("Vilken gräns gäller?");
 
     const log = await screen.findByRole("log", { name: "Konversation" });
     expect(await within(log).findByText("Gränsen är 700 000 kr.")).toBeTruthy();
@@ -185,7 +207,7 @@ describe("ChatView streaming an answer", () => {
     queryClient.setQueryData(history, { pages: [], pageParams: [] });
     queryClient.setQueryData(recent, []);
     renderInApp(<Harness />, { queryClient });
-    ask("Vilken gräns gäller?");
+    await ask("Vilken gräns gäller?");
 
     await waitFor(() => expect(queryClient.getQueryState(recent)?.isInvalidated).toBe(true));
     expect(queryClient.getQueryState(history)?.isInvalidated).toBe(true);
@@ -196,7 +218,7 @@ describe("ChatView rating a streamed answer", () => {
   it("offers no rating while the answer streams", async () => {
     spies.mode = "hold";
     renderInApp(<Harness />);
-    ask("Vilken gräns gäller?");
+    await ask("Vilken gräns gäller?");
     const log = await screen.findByRole("log", { name: "Konversation" });
     await within(log).findByText(/Gränsen/);
     expect(within(log).queryByRole("group", { name: "Betygsätt svaret" })).toBeNull();
@@ -208,7 +230,7 @@ describe("ChatView rating a streamed answer", () => {
   it("rates the finished answer under the id the backend saved it with", async () => {
     spies.mode = "answer";
     renderInApp(<Harness />);
-    ask("Vilken gräns gäller?");
+    await ask("Vilken gräns gäller?");
     const log = await screen.findByRole("log", { name: "Konversation" });
     const rating = await within(log).findByRole("group", { name: "Betygsätt svaret" });
 
@@ -239,7 +261,7 @@ describe("ChatView sending", () => {
     );
     fireEvent.click(screen.getByRole("combobox", { name: "Nämn" }));
     fireEvent.click(await screen.findByRole("option", { name: "@juristen" }));
-    ask("Är avtalet förenligt med LOU?");
+    await ask("Är avtalet förenligt med LOU?");
     await waitFor(() => expect(spies.sent).toHaveLength(1));
     expect(spies.sent[0]?.body).toMatchObject({
       group_chat_id: "group-1",
@@ -255,7 +277,7 @@ describe("ChatView sending", () => {
   it("stops an answer from the stop button and says so", async () => {
     spies.mode = "hold";
     renderInApp(<Harness />);
-    ask("Vilken gräns gäller?");
+    await ask("Vilken gräns gäller?");
     const stop = await screen.findByRole("button", { name: "Stoppa generering" });
     fireEvent.click(stop);
     await waitFor(() => expect(spies.announce).toHaveBeenCalledWith("Svaret stoppades"));
@@ -271,7 +293,7 @@ describe("ChatView docked composer", () => {
   it("keeps focus clear of the dock that appears with the first question", async () => {
     spies.mode = "answer";
     renderInApp(<Harness />);
-    ask("Vilken gräns gäller?");
+    await ask("Vilken gräns gäller?");
 
     const log = await screen.findByRole("log", { name: "Konversation" });
     const scroller = log.closest<HTMLElement>('[style*="scroll-padding-bottom"]');
@@ -289,7 +311,7 @@ describe("ChatView when generation fails", () => {
   it("says the session expired when the request is refused, with status and trace id for support", async () => {
     spies.mode = "refused";
     renderInApp(<Harness />);
-    ask("Vilken gräns gäller?");
+    await ask("Vilken gräns gäller?");
 
     expect(await screen.findByText("Din session har gått ut. Logga in igen.")).toBeTruthy();
     expect(spies.announce).toHaveBeenCalledWith("Din session har gått ut. Logga in igen.");
@@ -306,7 +328,7 @@ describe("ChatView when generation fails", () => {
   it("never shows a JSON error body", async () => {
     spies.mode = "json";
     renderInApp(<Harness />);
-    ask("Vilken gräns gäller?");
+    await ask("Vilken gräns gäller?");
 
     expect(await screen.findByText("Något gick fel. Försök igen.")).toBeTruthy();
     expect(document.body.textContent).not.toContain("{");
@@ -318,7 +340,7 @@ describe("ChatView when generation fails", () => {
 
   it("shows and announces the error, keeps the question and retries it", async () => {
     renderInApp(<Harness />);
-    ask("Vilken gräns gäller?");
+    await ask("Vilken gräns gäller?");
 
     // A sentence, never the raw error; the original text waits behind "Visa detaljer".
     expect(await screen.findByText("Något gick fel. Försök igen.")).toBeTruthy();
@@ -368,7 +390,7 @@ describe("ChatView when generation fails", () => {
     const attachments = await screen.findByRole("list", { name: "1 bilaga bifogad" });
     await waitFor(() => expect(within(attachments).queryByText("Laddar upp…")).toBeNull());
 
-    ask("Sammanfatta policyn");
+    await ask("Sammanfatta policyn");
     expect(await screen.findByText("Något gick fel. Försök igen.")).toBeTruthy();
     // Back in the composer (it has the remove button; the log's copy does not).
     await screen.findByRole("button", { name: "Ta bort Policy.pdf" });
@@ -412,7 +434,7 @@ describe("ChatView when generation fails", () => {
     });
     await screen.findByRole("list", { name: "1 bilaga bifogad" });
 
-    ask("Sammanfatta policyn");
+    await ask("Sammanfatta policyn");
     // The question is in the conversation at once, with its upload on it,
     // while nothing has been sent and the composer is clear.
     const question = await screen.findByText("Sammanfatta policyn");
@@ -454,7 +476,7 @@ describe("ChatView when generation fails", () => {
     });
     await screen.findByRole("list", { name: "1 bilaga bifogad" });
 
-    ask("Sammanfatta policyn");
+    await ask("Sammanfatta policyn");
     await screen.findByText("Laddar upp bilagor (0 av 1)...");
     fireEvent.click(screen.getByRole("button", { name: "Stoppa generering" }));
 

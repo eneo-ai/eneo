@@ -4826,6 +4826,14 @@
   "sharepoint_filters_clear": "Rensa filter",
   "sharepoint_filters_active": "Aktiva filter",
   "sharepoint_filter_remove": "Ta bort filtret {column}",
+  "personal_chat_model_change_title": "Byta modell i den här konversationen?",
+  "personal_chat_model_change_description": "Vi rekommenderar att du startar en ny konversation vid modellbyte för att undvika att blanda svar från olika modeller. Dina meddelanden finns kvar om du fortsätter här, men den nya modellen kan använda mindre av historiken och ha annat stöd för bilder och verktyg.",
+  "personal_chat_model_new_conversation": "Starta ny konversation",
+  "personal_chat_model_change_anyway": "Byt ändå",
+  "eneo_error_9065": "Valen för den här konversationen ändrades någon annanstans, till exempel i en annan flik. Läs in de sparade valen och försök igen.",
+  "conversation_settings_save_failed": "Inställningarna kunde inte sparas eller hämtas.",
+  "conversation_settings_reload": "Läs in sparade val",
+  "conversation_settings_model_unavailable": "Den sparade modellen är inte tillgänglig",
   "document_templates": "Dokumentmallar",
   "document_templates_description": "Används för Word- och PDF-filer som assistenterna skapar. Standardmallen gäller om inte en assistent väljer en annan mall.",
   "document_template_upload": "Ladda upp mall",
@@ -4881,5 +4889,7 @@
   "audit_action_document_template_deleted": "Dokumentmall borttagen",
   "audit_action_document_template_deleted_description": "En dokumentmall togs bort ur organisationens bibliotek",
   "audit_action_document_template_default_set": "Standardmall vald",
-  "audit_action_document_template_default_set_description": "En dokumentmall gjordes till organisationens standard"
+  "audit_action_document_template_default_set_description": "En dokumentmall gjordes till organisationens standard",
+  "conversation_settings_loading": "Konversationens inställningar läses fortfarande in.",
+  "conversation_settings_incompatible": "Den här appversionen stöder inte alla sparade inställningar. Du kan läsa historiken, men behöver en kompatibel appversion för att fortsätta chatta eller ändra inställningar."
 }

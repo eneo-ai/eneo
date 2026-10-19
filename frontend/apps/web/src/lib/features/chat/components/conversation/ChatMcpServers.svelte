@@ -5,9 +5,8 @@
 
     MCP server controls for the chat input toolbar: pick which of the partner's
     MCP servers are active for this conversation and whether tool calls run
-    automatically or require per-call approval. State is owned by the parent
-    (ConversationInput) so it can be sent with each ask request — this component
-    only renders and mutates it. Eneo's own internal (loopback) servers are
+    automatically or require per-call approval. ChatService owns the saved
+    choices; this component renders them and reports requested changes. Eneo's own internal (loopback) servers are
     listed too, but they are always active and cannot be toggled. The tenant's
     capability providers (web search, image generation) are real MCP servers
     under the hood but are presented as togglable capability rows, not servers.
@@ -26,7 +25,7 @@
   import { BookOpen, Paperclip, Plug, ShieldCheck } from "@lucide/svelte";
   import { readinessMessage } from "$lib/features/mcp/readiness";
   import { getCapability } from "$lib/features/mcp/capabilities";
-  import type { SvelteSet } from "svelte/reactivity";
+  import { SvelteSet } from "svelte/reactivity";
 
   type McpServer = {
     id: string;
@@ -52,12 +51,15 @@
     internalServers?: InternalMcpServer[];
     /** Whether the partner's model can call tools at all; false renders every row unavailable. */
     modelSupportsTools?: boolean;
-    /** Server ids the user has switched off for this conversation (mutated in place). */
-    disabledServerIds: SvelteSet<string>;
+    /** Server ids disabled by defaults or the user for this conversation. */
+    disabledServerIds: ReadonlySet<string>;
     /** Called after the user changes the external server selection. */
     onSelectionChange?: (disabledServerIds: ReadonlySet<string>) => void;
     /** When true, tool calls run without per-call approval. */
     autoAcceptTools: boolean;
+    disabled?: boolean;
+    showApproval?: boolean;
+    onAutoAcceptChange?: (enabled: boolean) => void;
   };
 
   let {
@@ -67,7 +69,10 @@
     modelSupportsTools = true,
     disabledServerIds,
     onSelectionChange,
-    autoAcceptTools = $bindable()
+    autoAcceptTools,
+    disabled = false,
+    showApproval = true,
+    onAutoAcceptChange
   }: Props = $props();
 
   const INTERNAL_SERVER_ICONS: Record<string, typeof Plug> = {
@@ -92,17 +97,21 @@
       .length
   );
 
-  function setServer(id: string, on: boolean, notify = true) {
-    if (on) disabledServerIds.delete(id);
-    else disabledServerIds.add(id);
-    if (notify) onSelectionChange?.(disabledServerIds);
+  function setServer(id: string, on: boolean) {
+    const next = new SvelteSet(disabledServerIds);
+    if (on) next.delete(id);
+    else next.add(id);
+    onSelectionChange?.(next);
   }
 
   function setAll(on: boolean) {
+    const next = new SvelteSet(disabledServerIds);
     for (const server of servers) {
-      if (server.available !== false) setServer(server.id, on, false);
+      if (server.available === false) continue;
+      if (on) next.delete(server.id);
+      else next.add(server.id);
     }
-    onSelectionChange?.(disabledServerIds);
+    onSelectionChange?.(next);
   }
 </script>
 
@@ -132,14 +141,14 @@
             <button
               type="button"
               class="hover:text-foreground rounded px-1 py-0.5 font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
-              disabled={generalSwitchableOffCount === 0}
+              disabled={disabled || generalSwitchableOffCount === 0}
               onclick={() => setAll(true)}>{m.mcp_all_on()}</button
             >
             <span aria-hidden="true" class="text-border">·</span>
             <button
               type="button"
               class="hover:text-foreground rounded px-1 py-0.5 font-medium transition-colors disabled:pointer-events-none disabled:opacity-40"
-              disabled={generalDisabledCount === servers.length}
+              disabled={disabled || generalDisabledCount === servers.length}
               onclick={() => setAll(false)}>{m.mcp_all_off()}</button
             >
           </span>
@@ -206,7 +215,7 @@
               checked={on}
               onCheckedChange={(value) => setServer(server.id, value)}
               aria-label={label}
-              disabled={server.available === false}
+              disabled={disabled || server.available === false}
             />
           </label>
         {/each}
@@ -255,14 +264,14 @@
               onCheckedChange={(value) => setServer(server.id, value)}
               aria-label={server.name}
               aria-describedby={descId}
-              disabled={server.available === false}
+              disabled={disabled || server.available === false}
             />
           </label>
         {/each}
       </div>
     {/if}
 
-    {#if modelSupportsTools && (servers.length > 0 || capabilityServers.length > 0)}
+    {#if showApproval && modelSupportsTools && (servers.length > 0 || capabilityServers.length > 0)}
       <Separator />
 
       <div class="p-1">
@@ -279,7 +288,9 @@
             </span>
           </span>
           <Switch
-            bind:checked={autoAcceptTools}
+            checked={autoAcceptTools}
+            onCheckedChange={onAutoAcceptChange}
+            {disabled}
             aria-label={m.mcp_run_tools_automatically()}
             aria-describedby="mcp-auto-accept-desc"
           />

@@ -21,6 +21,7 @@ import {
   type ReactNode
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
+import { EneoApiError } from "@/lib/api/errors";
 import { browserApi } from "@/lib/api/browser";
 import { invalidateConversationLists } from "@/lib/api/conversations";
 import { describeChatFailure } from "@/lib/chat/chat-error";
@@ -50,9 +51,9 @@ import { matchesUpload } from "./chat-attachment-plan";
 import { ChatMessage, PendingAnswer, PendingQuestion, type ActivityRequest } from "./chat-message";
 import { Composer } from "./composer";
 import { ContextUsageBar } from "./context-usage-bar";
-import { ChatTools, mcpConversationOptions } from "./mcp-controls";
+import { ChatTools } from "./mcp-controls";
 import type { PendingUpload } from "./message-files";
-import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
+import { ConversationSettingsProvider, useConversationSettings } from "./conversation-settings";
 import { historyQueryKey } from "./session-actions";
 import { StartState } from "./start-state";
 import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
@@ -173,14 +174,20 @@ type ChatViewProps = {
  */
 export function ChatView(props: ChatViewProps) {
   return (
-    <SidePanelProvider>
-      <ConversationView {...props} />
-    </SidePanelProvider>
+    <ConversationSettingsProvider
+      partner={props.partner}
+      initialSessionId={props.initialSessionId}
+      hasHistory={Boolean(props.initialMessages?.length)}
+    >
+      <SidePanelProvider>
+        <ConversationView {...props} />
+      </SidePanelProvider>
+    </ConversationSettingsProvider>
   );
 }
 
 function ConversationView({
-  partner,
+  partner: configuredPartner,
   initialSessionId = null,
   initialMessages = [],
   focusComposerIfLost = false,
@@ -193,13 +200,31 @@ function ConversationView({
   activity,
   onActivityChange
 }: ChatViewProps) {
+  const conversationSettings = useConversationSettings();
+  const { resolution, setRunning } = conversationSettings;
+  const partner = resolution
+    ? { ...configuredPartner, completionModel: resolution.effective_model ?? null }
+    : configuredPartner;
+  const settingsBlocked =
+    !resolution ||
+    conversationSettings.busy ||
+    Boolean(conversationSettings.error) ||
+    Boolean(resolution.model_unavailable) ||
+    resolution.settings_compatible === false;
   const t = useTranslations();
   const { featureFlags, can } = useAppContext();
   const queryClient = useQueryClient();
   // A file sent earlier in this conversation is attached again as it is,
   // without another upload. The uploads come from the messages, set up below.
   const uploadsRef = useRef<PreviewFile[]>([]);
+  const toolChoices = useToolChoices();
   const attachments = useAttachments(partner, {
+    imageGenerationAvailable: toolChoices.capabilities.some(
+      (capability) =>
+        capability.purpose === "image_generation" &&
+        capability.available &&
+        !toolChoices.disabledCapabilities.has("image_generation")
+    ),
     findExisting: (file) => uploadsRef.current.find((uploaded) => matchesUpload(file, uploaded))
   });
   const panel = useSidePanel()!;
@@ -210,7 +235,6 @@ function ConversationView({
   const announce = useAnnounce();
   const [timings] = useState(() => new ActivityTimings());
   useSyncExternalStore(timings.subscribe, timings.getVersion, timings.getVersion);
-  const toolChoices = useToolChoices(partner);
 
   const [input, setInput] = useState("");
   const [mentionId, setMentionId] = useState<string>(NO_MENTION);
@@ -287,6 +311,7 @@ function ConversationView({
       experimental_throttle: 50,
       onData: (part) => {
         if (part.type === "data-session") {
+          conversationSettings.adoptSession(part.data.session_id, part.data.settings);
           streamStartedRef.current = true;
           // The question went through: its attachments won't come back.
           const pending = pendingSendRef.current;
@@ -332,6 +357,8 @@ function ConversationView({
           if (pending) releasePreviews(pending.attachments);
           return;
         }
+        if (failure instanceof EneoApiError && [400, 409].includes(failure.status))
+          conversationSettings.invalidate(failure);
         announce(describeChatFailure(failure, streamErrorCodeRef.current, t).message);
         if (!pending || streamStartedRef.current) return;
         // Failed before the answer started: the question goes back to the
@@ -377,12 +404,16 @@ function ConversationView({
           }
         }
         invalidateConversationLists(queryClient, historyQueryKey(partner));
+        if (mounted.current && !isError) void conversationSettings.reload();
       }
     });
 
   const busy = status === "submitted" || status === "streaming";
   // The composer is taken from the moment a question leaves it, uploads included.
   const sending = busy || pendingQuestion !== null;
+  useEffect(() => {
+    setRunning(sending);
+  }, [sending, setRunning]);
 
   // Record client-side step timings for the answer being streamed.
   useEffect(() => {
@@ -503,7 +534,10 @@ function ConversationView({
     fileIds: attachments.fileIds,
     sessionId,
     assistantId: sessionId || partner.type === "group-chat" ? null : partner.id,
-    groupChatId: !sessionId && partner.type === "group-chat" ? partner.id : null
+    groupChatId: !sessionId && partner.type === "group-chat" ? partner.id : null,
+    settings: sessionId ? undefined : resolution?.settings,
+    settingsRevision: sessionId ? resolution?.revision || undefined : undefined,
+    disabled: settingsBlocked
   });
 
   const usage = deriveContextUsage({
@@ -548,12 +582,6 @@ function ConversationView({
       partner.type === "group-chat" && mentionId !== NO_MENTION
         ? partner.mentionableAssistants?.find((assistant) => assistant.id === mentionId)
         : undefined;
-    const mcpOptions = mcpConversationOptions({
-      servers: toolChoices.mcpServers,
-      disabledServerIds: toolChoices.disabledMcpServerIds,
-      autoAcceptTools: toolChoices.autoAcceptTools,
-      supportsToolApproval: partner.type !== "group-chat"
-    });
     return {
       tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
       disabled_capabilities: disabledCapabilitiesForRequest(
@@ -561,7 +589,8 @@ function ConversationView({
         toolChoices.disabledCapabilities,
         featureFlags.showWebSearch
       ),
-      ...mcpOptions
+      settings: sessionIdRef.current ? undefined : resolution?.settings,
+      settings_revision: sessionIdRef.current ? resolution?.revision || undefined : undefined
     };
   }
 
@@ -573,7 +602,7 @@ function ConversationView({
    * the server (`awaitUploads`), or is withdrawn if they never are.
    */
   function sendQuestion(question: string, resendFiles?: SentFiles) {
-    if (!question || sending || usage.willExceedContext) return;
+    if (!question || sending || settingsBlocked || usage.willExceedContext) return;
     // A quote from a file or a view opens the question; it is sent once.
     const quote = resendFiles ? null : panel.quote;
     const text = resendFiles ? question : composeQuotedQuestion(quote, question);
@@ -650,11 +679,7 @@ function ConversationView({
     };
 
     timings.markSent();
-    const send = () => sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
-    // A model or reasoning switch made in the composer is saved on the
-    // assistant; the backend answers with what is stored, so that save lands first.
-    if (hasPendingPartnerUpdates()) void awaitPartnerUpdates().then(send);
-    else void send();
+    void sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
   }
 
   /** Takes a waiting question back out of the conversation; nothing was sent. */
@@ -696,7 +721,7 @@ function ConversationView({
 
   // Attachments still uploading do not block: the question waits for them in
   // the conversation.
-  const canSubmit = input.trim().length > 0 && !usage.willExceedContext;
+  const canSubmit = input.trim().length > 0 && !usage.willExceedContext && !settingsBlocked;
   const quote = panel.quote;
   const composerQuote = quote
     ? { text: quote.text, source: quote.fileName, onRemove: () => panel.clearQuote() }
@@ -757,17 +782,28 @@ function ConversationView({
     ) : null;
 
   const tools = (
-    <ChatTools
-      capabilities={toolChoices.capabilities}
-      disabledCapabilities={toolChoices.disabledCapabilities}
-      servers={toolChoices.mcpServers}
-      disabledServerIds={toolChoices.disabledMcpServerIds}
-      autoAcceptTools={toolChoices.autoAcceptTools}
-      modelSupportsTools={toolChoices.modelSupportsTools}
-      onDisabledCapabilitiesChange={toolChoices.setDisabledCapabilities}
-      onDisabledServerIdsChange={toolChoices.setDisabledMcpServerIds}
-      onAutoAcceptToolsChange={toolChoices.setAutoAcceptTools}
-    />
+    <fieldset
+      disabled={
+        conversationSettings.busy ||
+        sending ||
+        !resolution ||
+        resolution.settings_compatible === false
+      }
+    >
+      <ChatTools
+        capabilities={toolChoices.capabilities}
+        disabledCapabilities={toolChoices.disabledCapabilities}
+        servers={toolChoices.mcpServers}
+        disabledServerIds={toolChoices.disabledMcpServerIds}
+        autoAcceptTools={toolChoices.autoAcceptTools}
+        modelSupportsTools={toolChoices.modelSupportsTools}
+        onDisabledCapabilitiesChange={toolChoices.setDisabledCapabilities}
+        onDisabledServerIdsChange={toolChoices.setDisabledMcpServerIds}
+        onAutoAcceptToolsChange={toolChoices.setAutoAcceptTools}
+        onSelectionChange={toolChoices.setTools}
+        supportsToolApproval={partner.type !== "group-chat"}
+      />
+    </fieldset>
   );
 
   const composerLabel = t("chat_composer_label", { name: partnerName });
@@ -827,6 +863,49 @@ function ConversationView({
   // question and, for support, the technical facts behind "Visa detaljer".
   // Shown in both layouts: a first question that fails before streaming
   // starts puts the view back in the start state.
+  const settingsNotice =
+    conversationSettings.error ||
+    resolution?.model_unavailable ||
+    resolution?.settings_compatible === false ? (
+      <ChatSystemMessage icon={<CircleAlert aria-hidden="true" className="text-ax-error size-4" />}>
+        <span className="flex flex-wrap items-center justify-center gap-2">
+          <span>
+            {t(
+              conversationSettings.error
+                ? "conversation_settings_save_failed"
+                : resolution?.settings_compatible === false
+                  ? "conversation_settings_incompatible"
+                  : "conversation_settings_model_unavailable"
+            )}
+          </span>
+          <Button
+            label={t("conversation_settings_reload")}
+            size="sm"
+            variant="secondary"
+            isDisabled={sending}
+            isLoading={conversationSettings.busy}
+            isInterruptible
+            onClick={async () => {
+              await conversationSettings.reload();
+              rescueFocus((started ? dockTextareaRef : startTextareaRef).current);
+            }}
+          />
+        </span>
+      </ChatSystemMessage>
+    ) : null;
+  useEffect(() => {
+    if (conversationSettings.error) announce(t("conversation_settings_save_failed"));
+    else if (resolution?.settings_compatible === false)
+      announce(t("conversation_settings_incompatible"));
+    else if (resolution?.model_unavailable) announce(t("conversation_settings_model_unavailable"));
+  }, [
+    conversationSettings.error,
+    resolution?.model_unavailable,
+    resolution?.settings_compatible,
+    announce,
+    t
+  ]);
+
   const errorNotice = failure ? (
     <ChatSystemMessage icon={<CircleAlert aria-hidden="true" className="text-ax-error size-4" />}>
       <span className="flex flex-col items-center gap-2">
@@ -873,6 +952,7 @@ function ConversationView({
             }}
             composer={
               <div ref={startComposerRef} className="flex w-full flex-col gap-3">
+                {settingsNotice}
                 {errorNotice}
                 <Composer
                   {...composerProps}
@@ -1003,6 +1083,7 @@ function ConversationView({
                 }
               />
             )}
+            {settingsNotice}
             {errorNotice}
           </ChatMessageList>
         </ChatLayout>

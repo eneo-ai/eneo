@@ -9,6 +9,9 @@ import { m } from "$lib/paraglide/messages";
 import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
 import {
   type ConversationSparse,
+  type ConversationSettings,
+  type ConversationSettingsState,
+  type ConversationSettingsResolution,
   type Assistant,
   type Conversation,
   type GroupChat,
@@ -97,6 +100,27 @@ type SparseCompletionModel = NonNullable<Assistant["completion_model"]>;
 export class ChatService {
   #chatPartner = $state<ChatPartner>() as ChatPartner; // Needs typecast to get rid of undefined
   partner = $derived(this.#chatPartner);
+  currentConversation = $state<Conversation>(emptyConversation());
+  #modelCatalog = $state<SparseCompletionModel[]>([]);
+  #draftSettings = $state<ConversationSettings | null>(null);
+  settings = $derived(this.currentConversation.settings?.settings ?? this.#draftSettings);
+  settingsResolution = $state<ConversationSettingsResolution | null>(null);
+  settingsBusy = $state(false);
+  settingsError = $state<unknown>(null);
+  #settingsEnabled = false;
+  selectedPersonalModel = $derived.by(() => {
+    const id = this.settings?.completion_model_id;
+    if (!id || this.#chatPartner?.type !== "default-assistant") return null;
+    const partner = this.#chatPartner;
+    return (
+      this.#modelCatalog.find((model) => model.id === id) ??
+      partner.effective_config?.available_models?.find((model) => model.id === id) ??
+      (partner.completion_model?.id === id ? partner.completion_model : null) ??
+      this.currentConversation.messages.find((message) => message.completion_model?.id === id)
+        ?.completion_model ??
+      null
+    );
+  });
   hasCompletionModel = $derived.by(() => {
     const partner = this.#chatPartner;
     if (!partner) return false;
@@ -105,7 +129,6 @@ export class ChatService {
   });
   #eneo: Eneo;
   #toolCallResultCache = new SvelteMap<string, Promise<ToolCallOutcome>>();
-  currentConversation = $state<Conversation>(emptyConversation());
   totalConversations = $state<number>(0);
   loadedConversations = $state<ConversationSparse[]>([]);
   hasMoreConversations = $derived(this.loadedConversations.length < this.totalConversations);
@@ -265,10 +288,8 @@ export class ChatService {
   #preflightGen = 0;
   // Resolution order for the active model's context window:
   //   1. preflight (server-resolved current model, set while composing)
-  //   2. for a single assistant, the partner's own model — it is global and
-  //      authoritative for the next turn, so it must win over history (opening
-  //      an old conversation must reflect the model that will actually answer,
-  //      i.e. what the picker shows, not whatever model answered last time)
+  //   2. for a single assistant, the selected personal-conversation model or
+  //      the partner's policy-resolved default
   //   3. the most recent message's model — only meaningful for group chats,
   //      where the active model varies per turn
   contextLimit = $derived<number>(
@@ -281,7 +302,7 @@ export class ChatService {
   // The name of the model that will answer the next turn. Single source of
   // truth for any "active model" label (e.g. the context bar) so it can never
   // disagree with contextLimit — same precedence: live preflight, then the
-  // single assistant's own (global) model, then the latest message's model
+  // single assistant's selected model, then the latest message's model
   // for group chats where the active model varies per turn.
   activeModelName = $derived<string>(
     this.pendingModelName || this.#partnerModelName() || this.#latestMessageModelName() || ""
@@ -300,10 +321,110 @@ export class ChatService {
   // resolution: keep an allowed current model, otherwise use policy default,
   // then the first allowed model.
   #partnerEffectiveModel(): SparseCompletionModel | undefined {
+    if (this.settingsResolution) return this.settingsResolution.effective_model ?? undefined;
     const partner = this.#chatPartner;
     if (!partner || !("completion_model" in partner)) return undefined;
 
+    if (partner.type === "default-assistant" && this.selectedPersonalModel) {
+      return this.selectedPersonalModel;
+    }
+
     return selectEffectiveChatModel(partner.completion_model, partner.effective_config);
+  }
+
+  setModelCatalog(models: SparseCompletionModel[]) {
+    this.#modelCatalog = models;
+  }
+
+  async selectPersonalModel(model: SparseCompletionModel) {
+    await this.updateSettings({ completion_model_id: model.id, reasoning_effort: null });
+  }
+
+  #resetSettings() {
+    this.#draftSettings = null;
+    this.settingsResolution = null;
+    this.settingsBusy = false;
+    this.settingsError = null;
+  }
+
+  #setResolvedSettings(conversation: Conversation, resolution: ConversationSettingsResolution) {
+    this.settingsResolution = resolution;
+    if (conversation.id && resolution.revision > 0) {
+      conversation.settings = { revision: resolution.revision, settings: resolution.settings };
+    } else {
+      this.#draftSettings = resolution.settings;
+    }
+    this.#clearPreflight();
+  }
+
+  async loadSettings(force = false) {
+    this.#settingsEnabled = true;
+    if (this.settingsBusy || (this.settingsResolution && !force)) return;
+    const conversation = this.currentConversation;
+    const partner = this.#chatPartner;
+    this.settingsBusy = true;
+    try {
+      let resolution = await this.#eneo.conversations.resolveSettings({
+        chatPartner: partner,
+        conversation,
+        settings: conversation.id ? undefined : (this.settings ?? undefined)
+      });
+      if (conversation.id && resolution.revision === 0 && !resolution.model_unavailable) {
+        try {
+          await this.#eneo.conversations.updateSettings(conversation, resolution.settings, 0);
+        } catch (error) {
+          if (!(error instanceof EneoError) || error.status !== 409) throw error;
+        }
+        resolution = await this.#eneo.conversations.resolveSettings({
+          chatPartner: partner,
+          conversation
+        });
+      }
+      if (conversation !== this.currentConversation) return;
+      this.settingsError = null;
+      this.#setResolvedSettings(conversation, resolution);
+    } catch (error) {
+      if (conversation === this.currentConversation) this.settingsError = error;
+    } finally {
+      if (conversation === this.currentConversation) this.settingsBusy = false;
+    }
+  }
+
+  async updateSettings(update: Partial<ConversationSettings>) {
+    if (
+      !this.settings ||
+      this.settingsBusy ||
+      this.askQuestion.isLoading ||
+      this.settingsResolution?.settings_compatible === false
+    )
+      return;
+    const conversation = this.currentConversation;
+    const settings = { ...this.settings, ...update };
+    this.settingsBusy = true;
+    this.settingsError = null;
+    try {
+      const state: ConversationSettingsState | null = conversation.id
+        ? await this.#eneo.conversations.updateSettings(
+            conversation,
+            settings,
+            conversation.settings?.revision ?? 0
+          )
+        : null;
+      if (conversation !== this.currentConversation) return;
+      if (state) conversation.settings = state;
+      if (!state) this.#draftSettings = settings;
+      const resolution = await this.#eneo.conversations.resolveSettings({
+        chatPartner: this.#chatPartner,
+        conversation,
+        settings: conversation.id ? undefined : settings
+      });
+      if (conversation !== this.currentConversation) return;
+      this.#setResolvedSettings(conversation, resolution);
+    } catch (error) {
+      if (conversation === this.currentConversation) this.settingsError = error;
+    } finally {
+      if (conversation === this.currentConversation) this.settingsBusy = false;
+    }
   }
 
   #partnerModelTokenLimit(): number | undefined {
@@ -385,12 +506,14 @@ export class ChatService {
       onLoaded: (initialConversation) => {
         this.#resetConversationDiagnostics();
         this.currentConversation = initialConversation;
+        this.#resetSettings();
         this.#seedLockedFromHistory();
         this.#clearPreflight();
       },
       onNull: () => {
         this.#resetConversationDiagnostics();
         this.currentConversation = emptyConversation();
+        this.#resetSettings();
         this.#resetLocked();
         this.#clearPreflight();
       }
@@ -400,6 +523,7 @@ export class ChatService {
   newConversation() {
     this.#resetConversationDiagnostics();
     this.currentConversation = emptyConversation();
+    this.#resetSettings();
     this.#resetLocked();
     this.#clearPreflight();
   }
@@ -539,6 +663,10 @@ export class ChatService {
     const gen = ++this.#preflightGen;
     const partnerAtStart = this.#chatPartner;
     const conversationAtStart = this.currentConversation;
+    const modelIdAtStart =
+      !tools && partnerAtStart.type === "default-assistant"
+        ? this.selectedPersonalModel?.id
+        : undefined;
 
     this.#preflightDebounce = setTimeout(async () => {
       try {
@@ -547,13 +675,16 @@ export class ChatService {
           conversation: conversationAtStart.id ? { id: conversationAtStart.id } : undefined,
           question,
           files: fileIds.map((id) => ({ id })),
-          tools
+          tools,
+          settings: conversationAtStart.id ? undefined : (this.settings ?? undefined),
+          settingsRevision: conversationAtStart.settings?.revision
         });
 
         // Discard if a newer request started or the user switched context
         if (gen !== this.#preflightGen) return;
         if (this.#chatPartner !== partnerAtStart) return;
         if (this.currentConversation.id !== conversationAtStart.id) return;
+        if (this.selectedPersonalModel?.id !== modelIdAtStart && !tools) return;
 
         this.pendingInputTokens = res.input_tokens;
         this.pendingFileTokens = res.file_tokens;
@@ -722,6 +853,7 @@ export class ChatService {
       const loaded = await this.#eneo.conversations.get(conversation);
       this.#resetConversationDiagnostics();
       this.currentConversation = loaded;
+      this.#resetSettings();
       this.#seedLockedFromHistory();
       this.#clearPreflight();
       return loaded;
@@ -732,12 +864,7 @@ export class ChatService {
   }
 
   changeChatPartner(newPartner: ChatPartner) {
-    // Compare by id, not object identity: switching the personal assistant's
-    // model replaces the partner object but keeps the same id, and that must
-    // not wipe the open conversation — the model is global, so a switch just
-    // changes which model answers the next turn. A different id is a genuine
-    // partner switch and resets. (Comparing the $state proxy with !== also
-    // trips Svelte's state_proxy_equality_mismatch warning.)
+    // A refresh of the same partner keeps this conversation's model selection.
     const current = this.#chatPartner;
     const partnerChanged = current?.id !== newPartner?.id;
     if (
@@ -746,10 +873,10 @@ export class ChatService {
     ) {
       return;
     }
+    this.#chatPartner = newPartner;
     if (partnerChanged) {
       this.newConversation();
     }
-    this.#chatPartner = newPartner;
 
     if (partnerChanged) {
       this.reloadHistory();
@@ -765,6 +892,14 @@ export class ChatService {
       abortController?: AbortController,
       disabledMcpServerIds?: string[]
     ) => {
+      if (this.#settingsEnabled) {
+        if (this.settingsError) throw this.settingsError;
+        if (this.settingsResolution?.settings_compatible === false)
+          throw new Error(m.conversation_settings_incompatible());
+        if (this.settingsResolution?.model_unavailable)
+          throw new Error(m.conversation_settings_model_unavailable());
+        if (!this.settings || this.settingsBusy) throw new Error(m.conversation_settings_loading());
+      }
       // Stop pressed while the send was still waiting its turn.
       if (abortController?.signal.aborted) {
         throw new DOMException("Send cancelled", "AbortError");
@@ -862,6 +997,8 @@ export class ChatService {
           conversation: { id: this.currentConversation.id },
           files: files.map((fileRef) => ({ id: fileRef.id })),
           tools,
+          settings: this.currentConversation.id ? undefined : (this.settings ?? undefined),
+          settingsRevision: this.currentConversation.settings?.revision,
           abortController,
           requireToolApproval,
           disabledMcpServerIds: disabledMcpServerIds?.filter((id) => !id.startsWith("capability:")),
@@ -882,6 +1019,9 @@ export class ChatService {
               const { mcp_tool_references, ...stored } = chunk;
               Object.assign(ref, stored);
               mergeToolReferences(mcp_tool_references);
+              if (chunk.settings) {
+                this.currentConversation.settings = chunk.settings;
+              }
               this.#markDiagnosticsPending(ref.id);
               this.currentConversation.id = chunk.session_id;
               this.currentConversation.name = question;
@@ -1126,6 +1266,9 @@ export class ChatService {
           }
         });
       } catch (error) {
+        if (!isStale() && error instanceof EneoError && [400, 409].includes(error.status)) {
+          this.settingsError = error;
+        }
         if (!requestOpened && ref) {
           // The backend never took the question, so the pending echo comes
           // back out. Found by identity: a newer request may have pushed its
@@ -1188,6 +1331,7 @@ export class ChatService {
 
       if (this.#streamGen === streamGen) {
         this.reloadHistory();
+        if (this.#settingsEnabled && !this.settingsError) await this.loadSettings(true);
       }
 
       // The $effect in constructor now handles automatic token calculation

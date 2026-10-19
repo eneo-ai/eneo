@@ -1076,28 +1076,24 @@ class TestScopeBodyDriven:
                 side_effect=NotFoundException()
             )
 
-        if space_by_session is not None:
-            space_repo.get_space_by_session = AsyncMock(return_value=space_by_session)
-        else:
-            from eneo.main.exceptions import NotFoundException
-
-            space_repo.get_space_by_session = AsyncMock(side_effect=NotFoundException())
-
         container.space_repo = MagicMock(return_value=space_repo)
 
         session_service = AsyncMock()
         if session_obj is not None:
-            session_service.get_session_by_uuid = AsyncMock(return_value=session_obj)
+            session_service.get_context = AsyncMock(
+                return_value=SimpleNamespace(
+                    assistant_id=session_obj.assistant.id
+                    if session_obj.assistant
+                    else None,
+                    space_id=space_by_session.id if space_by_session else None,
+                )
+            )
         elif session_not_found:
             from eneo.main.exceptions import NotFoundException
 
-            session_service.get_session_by_uuid = AsyncMock(
-                side_effect=NotFoundException()
-            )
+            session_service.get_context = AsyncMock(side_effect=NotFoundException())
         else:
-            session_service.get_session_by_uuid = AsyncMock(
-                side_effect=Exception("not found")
-            )
+            session_service.get_context = AsyncMock(side_effect=Exception("not found"))
         container.session_service = MagicMock(return_value=session_service)
 
         # Feature flag service (for _validate_conversation_scope flag gating)
