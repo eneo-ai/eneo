@@ -104,6 +104,8 @@ export function IntegrationActions({
   const [showSync, setShowSync] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [newName, setNewName] = useState(item.name);
+  // In the item's row, so its removal can hand focus to the next row.
+  const anchor = useRef<HTMLSpanElement>(null);
 
   const canEdit = item.permissions?.includes("edit") ?? false;
   const canDelete = item.permissions?.includes("delete") ?? false;
@@ -145,6 +147,7 @@ export function IntegrationActions({
   });
 
   const deleteKnowledge = useRemovalMutation({
+    anchor,
     mutationKey: onDeleted ? sourceRemovalKey(space.id, { kind: "item", id: item.id }) : undefined,
     mutationFn: () =>
       unwrap(
@@ -199,11 +202,13 @@ export function IntegrationActions({
 
   return (
     <>
-      <MoreMenu
-        label={t("space_more_actions_for", { name: item.name })}
-        items={items}
-        alignment="end"
-      />
+      <span ref={anchor} className="contents">
+        <MoreMenu
+          label={t("space_more_actions_for", { name: item.name })}
+          items={items}
+          alignment="end"
+        />
+      </span>
       <RenameDialog
         open={showRename}
         onOpenChange={setShowRename}
@@ -283,6 +288,7 @@ export function WrapperActions({
   const [showResync, setShowResync] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [newName, setNewName] = useState(wrapperName);
+  const anchor = useRef<HTMLSpanElement>(null);
 
   const resyncable = wrapperItems.filter(
     (item) =>
@@ -375,6 +381,7 @@ export function WrapperActions({
   });
 
   const deleteWrapper = useRemovalMutation({
+    anchor,
     mutationKey: onDeleted
       ? sourceRemovalKey(space.id, { kind: "wrapper", id: wrapperId })
       : undefined,
@@ -430,11 +437,13 @@ export function WrapperActions({
 
   return (
     <>
-      <MoreMenu
-        label={t("space_more_actions_for", { name: wrapperName })}
-        items={items}
-        alignment="end"
-      />
+      <span ref={anchor} className="contents">
+        <MoreMenu
+          label={t("space_more_actions_for", { name: wrapperName })}
+          items={items}
+          alignment="end"
+        />
+      </span>
       <RenameDialog
         open={showRename}
         onOpenChange={setShowRename}

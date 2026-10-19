@@ -199,8 +199,17 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
     if (next.folder) url.searchParams.set("folder", next.folder);
     else url.searchParams.delete("folder");
     window.history.replaceState(null, "", url);
-    // The link that was pressed may have gone with the old view.
-    focusPanelIfLost();
+    // The link that was pressed may have gone with the old view; a folder picked
+    // from the overview takes focus at its heading, anything else at the panel.
+    const folderHeading =
+      next.tab === "content" && next.folder && next.folder !== view.folder
+        ? `folder-documents-${next.folder}`
+        : null;
+    rescueFocus(
+      () =>
+        (folderHeading ? document.getElementById(folderHeading) : null) ??
+        document.getElementById(panelId)
+    );
   }
 
   const linkTo = (next: SourceView) =>

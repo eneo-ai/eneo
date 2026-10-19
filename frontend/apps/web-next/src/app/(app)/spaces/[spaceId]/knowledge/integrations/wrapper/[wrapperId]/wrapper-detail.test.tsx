@@ -704,6 +704,50 @@ describe("WrapperDetail navigation", () => {
     expect(selected("Aktivitet")).toBe("true");
   });
 
+  it("moves focus to a folder's heading when it is picked from the overview", async () => {
+    show([mall, protokoll]);
+    const overview = screen.getByRole("table", { name: "Mappar i Byggnad" });
+    const link = within(overview).getByRole("link", { name: "Protokoll" });
+    link.focus();
+    fireEvent.click(link);
+
+    const heading = await screen.findByRole("heading", { level: 2, name: "Protokoll" });
+    await waitFor(() => expect(document.activeElement).toBe(heading), { timeout: 1500 });
+  });
+
+  it("moves focus to the next folder's row when one is deleted from its row", async () => {
+    const rutiner = { ...protokoll, id: "i3", name: "Rutiner", folder_path: "/Rutiner" };
+    show([mall, protokoll, rutiner]);
+    state.onDelete = () => {
+      state.space = makeSpace({
+        integrations: [mall, rutiner].map((item) => makeIntegration({ ...folder, ...item }))
+      });
+    };
+    const overview = screen.getByRole("table", { name: "Mappar i Byggnad" });
+    const row = within(overview).getByRole("link", { name: "Protokoll" }).closest("tr")!;
+    const trigger = within(row).getByRole("button", { name: "Fler åtgärder för Protokoll" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("true"));
+    const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort integrationskunskap" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+
+    await waitFor(() =>
+      expect(within(overview).queryByRole("link", { name: "Protokoll" })).toBeNull()
+    );
+    await waitFor(
+      () =>
+        expect(document.activeElement).toBe(
+          within(screen.getByRole("table", { name: "Mappar i Byggnad" })).getByRole("link", {
+            name: "Rutiner"
+          })
+        ),
+      { timeout: 1500 }
+    );
+  });
+
   it("replaces the page with the list once the source was deleted from its own menu", async () => {
     show([mall]);
     state.onDelete = () => {

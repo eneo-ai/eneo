@@ -113,3 +113,17 @@ describe("isFocusLost", () => {
     }
   });
 });
+
+it("asks a target given as a function at the check, for one the re-render brings", () => {
+  const row = document.createElement("button");
+  document.body.append(row);
+  row.focus();
+  row.remove();
+
+  let later: HTMLElement | null = null;
+  rescueFocus(() => later);
+  later = panel;
+  vi.advanceTimersByTime(500);
+
+  expect(document.activeElement).toBe(panel);
+});

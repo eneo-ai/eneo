@@ -106,7 +106,11 @@ function FolderHeader({
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex min-w-0 flex-col gap-1">
-        <h2 id={`folder-documents-${item.id}`} className="text-base font-semibold break-words">
+        <h2
+          id={`folder-documents-${item.id}`}
+          tabIndex={-1}
+          className="focus-visible:outline-ring rounded-ax-inner text-base font-semibold break-words focus-visible:outline-2 focus-visible:outline-offset-2"
+        >
           {item.name}
           {item.original_name && item.original_name !== item.name ? (
             <span className="text-ax-text-secondary ms-1 text-sm font-normal">
@@ -406,7 +410,7 @@ export function FolderDocuments({
       {showHeader ? (
         <FolderHeader item={item} progress={progress} queued={queued} showControls={showControls} />
       ) : (
-        <h2 id={`folder-documents-${item.id}`} className="sr-only">
+        <h2 id={`folder-documents-${item.id}`} tabIndex={-1} className="sr-only">
           {t("documents")}
         </h2>
       )}
