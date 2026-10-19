@@ -9,7 +9,11 @@ from eneo.main.exceptions import (
     ConflictException,
     UnauthorizedException,
 )
+from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
+from eneo.security_classifications.domain.entities.security_classification import (
+    SecurityClassification,
+)
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_service import SpaceService
@@ -133,6 +137,43 @@ async def test_raise_unauthorized_if_user_can_not_edit(
 
     with pytest.raises(UnauthorizedException):
         await service.update_space(uuid4(), MagicMock())
+
+
+@pytest.mark.parametrize(("new_level", "removes_below"), [(20, None), (30, 30)])
+async def test_only_a_change_of_level_removes_the_links_below_it(
+    service: SpaceService, new_level: int, removes_below: int | None
+):
+    """Kills the mutant that derives the link removal from the classification
+    being sent (``is_provided``) instead of a change of its level: restating
+    the space's level must not delete the links below it, raising it must."""
+    current = SecurityClassification(
+        tenant_id=TEST_USER.tenant_id,
+        name="K20",
+        security_level=20,
+        security_enabled=True,
+    )
+    sent = SecurityClassification(
+        tenant_id=TEST_USER.tenant_id,
+        name=f"K{new_level}",
+        security_level=new_level,
+        security_enabled=True,
+    )
+    space = SpaceFactory.create_space(name="space", tenant_id=TEST_USER.tenant_id)
+    space.security_classification = current
+    service.repo.one.return_value = space
+    service.user = TEST_USER.model_copy(
+        update={
+            "tenant": TEST_USER.tenant.model_copy(update={"security_enabled": True})
+        }
+    )
+    service.security_classification_service.get_security_classification.return_value = (
+        sent
+    )
+
+    await service.update_space(space.id, security_classification=ModelId(id=uuid4()))
+
+    (_, change), _ = service.repo.update_settings.await_args
+    assert change.minimum_security_level == removes_below
 
 
 async def test_raise_unauthorized_if_user_can_not_delete(
