@@ -15,7 +15,9 @@ again for a change it already reported.
 
 ``sync_queued_key`` is held from the moment a system-initiated sync job is
 queued until a sync task starts, so a burst of notifications queues one job
-per knowledge instead of one per notification.
+per knowledge instead of one per notification. ``sync_catch_up_key`` keeps
+the periodic catch-up from queueing the same source again before its window
+has passed, whatever became of the sync it queued.
 """
 
 from typing import TYPE_CHECKING
@@ -50,6 +52,10 @@ def sync_pending_full_key(knowledge_id: str) -> str:
 
 def sync_queued_key(knowledge_id: str) -> str:
     return f"sharepoint_sync_queued:{knowledge_id}"
+
+
+def sync_catch_up_key(knowledge_id: str) -> str:
+    return f"sharepoint_sync_catch_up:{knowledge_id}"
 
 
 async def claim_sync_queue_slot(

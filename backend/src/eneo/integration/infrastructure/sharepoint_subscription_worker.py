@@ -3,6 +3,8 @@
 This worker handles:
 1. Subscription renewal - runs every 12 hours to renew expiring subscriptions
 2. Orphaned subscription cleanup - runs daily to remove unused subscriptions
+3. Stale sync jobs - every 30 minutes, fails sync jobs a crashed worker left
+4. Sync catch-up - every 15 minutes, queues the syncs notifications missed
 """
 
 from datetime import datetime, timedelta, timezone
@@ -14,6 +16,7 @@ from eneo.integration.domain.entities.sharepoint_subscription import (
 from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
     SimpleSharePointToken,
 )
+from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.observability.error_text import user_visible_error
@@ -355,3 +358,38 @@ async def fail_stale_sharepoint_sync_jobs(container: Container):
         )
 
     return {"failed_stale_jobs": len(failed_ids)}
+
+
+@worker.cron_job(minute={7, 22, 37, 52})  # Every 15 minutes, offset from the others
+async def catch_up_sharepoint_syncs(container: Container):
+    """Queue the SharePoint syncs that notifications alone would have missed.
+
+    Graph notifications are the only other trigger. Graph drops them when it
+    throttles or the endpoint was unreachable, and a sync interrupted by a
+    worker crash leaves its markers unread. Every source with such a marker,
+    and every source with a delta token that no sync has touched for
+    SHAREPOINT_CATCH_UP_AFTER_HOURS, gets a sync here (a delta, or a full
+    sync when one was asked for), at most
+    SHAREPOINT_CATCH_UP_MAX_SYNCS_PER_RUN per run and never while a sync of
+    it runs or is queued.
+    """
+    settings = get_settings()
+    hours = settings.sharepoint_catch_up_after_hours
+    if hours <= 0:
+        return {"queued": 0, "markers": 0, "stale": 0}
+    window = timedelta(hours=hours)
+    summary = await container.sharepoint_webhook_service().queue_catch_up_syncs(
+        stale_before=datetime.now(timezone.utc) - window,
+        limit=settings.sharepoint_catch_up_max_syncs_per_run,
+        window_seconds=int(window.total_seconds()),
+    )
+    if summary["queued"]:
+        logger.info(
+            "SharePoint catch-up queued %d sync(s): %d for unread markers, "
+            "%d for sources without a sync in %d hours",
+            summary["queued"],
+            summary["markers"],
+            summary["stale"],
+            hours,
+        )
+    return summary

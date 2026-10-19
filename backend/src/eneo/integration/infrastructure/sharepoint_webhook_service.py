@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hmac
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import TYPE_CHECKING, cast
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -10,11 +11,18 @@ from redis.exceptions import RedisError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.integration_table import (
+    Integration,
+    TenantIntegration,
+)
+from eneo.database.tables.integration_table import (
     IntegrationKnowledge as IntegrationKnowledgeDBModel,
 )
 from eneo.database.tables.integration_table import (
     UserIntegration as UserIntegrationDBModel,
 )
+from eneo.database.tables.tenant_sharepoint_app_table import TenantSharePointApp
+from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.users_table import Users
 from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
@@ -35,8 +43,11 @@ from eneo.integration.infrastructure.sharepoint_sync_keys import (
     SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
     claim_sync_queue_slot,
     release_sync_queue_slot,
+    sync_catch_up_key,
     sync_lock_key,
+    sync_pending_full_key,
     sync_pending_key,
+    sync_queued_key,
 )
 from eneo.integration.presentation.models import SharepointContentTaskParam
 from eneo.jobs.job_models import Task
@@ -44,7 +55,8 @@ from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_service import JobService
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
-from eneo.users.user import UserInDB
+from eneo.tenants.tenant import TenantState
+from eneo.users.user import UserInDB, UserState
 from eneo.users.user_repo import UsersRepository
 
 if TYPE_CHECKING:
@@ -63,6 +75,27 @@ def client_state_matches(expected: str | None, value: object) -> bool:
     if not expected or not isinstance(value, str):
         return False
     return hmac.compare_digest(value.encode("utf-8"), expected.encode("utf-8"))
+
+
+# Catch-up reads the sync state of this many sources per Redis round trip.
+_SYNC_STATE_BATCH = 500
+_USERS_WHO_CAN_SIGN_IN = (UserState.ACTIVE.value, UserState.INVITED.value)
+
+
+@dataclass(frozen=True)
+class _CatchUpCandidate:
+    id: UUID
+    has_delta_token: bool
+    last_activity: datetime
+
+
+@dataclass(frozen=True)
+class _SyncState:
+    running: bool
+    queued: bool
+    full_requested: bool
+    delta_requested: bool
+    recently_caught_up: bool
 
 
 @dataclass
@@ -545,6 +578,159 @@ class SharepointWebhookService:
             f"({resource_type}_id={resource_id})"
         )
         return task_type
+
+    async def queue_catch_up_syncs(
+        self, *, stale_before: datetime, limit: int, window_seconds: int
+    ) -> dict[str, int]:
+        """Queue the syncs notifications should have led to but did not.
+
+        Two kinds of SharePoint source get a job, at most ``limit`` in all and
+        none while a sync of it runs or is queued: one with a marker that no
+        sync is left to read (its sync was interrupted, or the follow-up could
+        not be queued), and one with a delta token that no sync has touched
+        since ``stale_before`` (Graph dropped or never sent its
+        notifications). A source queued for being stale is not queued for it
+        again within ``window_seconds``, whatever became of that sync, so a
+        broken source is retried once per window rather than on every run.
+
+        Only sources whose tenant is active and whose connection can still
+        authenticate are considered: an active tenant app, or the OAuth
+        connection of a user who can still sign in.
+        """
+        candidates = await self._catch_up_candidates()
+        states = await self._sync_states([str(c.id) for c in candidates])
+        with_markers: list[_CatchUpCandidate] = []
+        stale: list[_CatchUpCandidate] = []
+        for candidate in candidates:
+            state = states[str(candidate.id)]
+            if state.running or state.queued:
+                continue
+            if state.full_requested or state.delta_requested:
+                with_markers.append(candidate)
+            elif (
+                candidate.has_delta_token
+                and candidate.last_activity < stale_before
+                and not state.recently_caught_up
+            ):
+                stale.append(candidate)
+        with_markers.sort(key=lambda c: c.last_activity)
+        stale.sort(key=lambda c: c.last_activity)
+        picked = (with_markers + stale)[:limit]
+        summary = {"queued": 0, "markers": 0, "stale": 0}
+        if not picked:
+            return summary
+
+        records = {
+            knowledge_db.id: (knowledge_db, user_integration_db)
+            for knowledge_db, user_integration_db in await self._fetch_knowledge(
+                IntegrationKnowledgeDBModel.id.in_([c.id for c in picked])
+            )
+        }
+        stale_ids = {c.id for c in stale}
+        context = _QueueContext()
+        for candidate in picked:
+            record = records.get(candidate.id)
+            if record is None:
+                continue
+            knowledge_id_str = str(candidate.id)
+            is_stale = candidate.id in stale_ids
+            if is_stale:
+                await self.redis_client.set(
+                    sync_catch_up_key(knowledge_id_str), "1", ex=window_seconds
+                )
+            queued = await self._queue_sync(
+                *record,
+                context=context,
+                full=states[knowledge_id_str].full_requested,
+            )
+            if queued is None:
+                continue
+            summary["queued"] += 1
+            summary["stale" if is_stale else "markers"] += 1
+        return summary
+
+    async def _catch_up_candidates(self) -> list[_CatchUpCandidate]:
+        knowledge = IntegrationKnowledgeDBModel
+        connection = UserIntegrationDBModel
+        last_activity = sa.func.coalesce(
+            sa.func.greatest(
+                knowledge.last_sync_attempted_at, knowledge.last_synced_at
+            ),
+            knowledge.created_at,
+        )
+        stmt = (
+            sa.select(
+                knowledge.id,
+                knowledge.delta_token.is_not(None).label("has_delta_token"),
+                last_activity.label("last_activity"),
+            )
+            .join(connection, knowledge.user_integration_id == connection.id)
+            .join(
+                TenantIntegration,
+                connection.tenant_integration_id == TenantIntegration.id,
+            )
+            .join(Integration, TenantIntegration.integration_id == Integration.id)
+            .join(Tenants, connection.tenant_id == Tenants.id)
+            .outerjoin(
+                TenantSharePointApp, connection.tenant_app_id == TenantSharePointApp.id
+            )
+            .outerjoin(Users, connection.user_id == Users.id)
+            .where(
+                Integration.integration_type == "sharepoint",
+                connection.authenticated.is_(True),
+                Tenants.state == TenantState.ACTIVE.value,
+                sa.or_(knowledge.site_id.is_not(None), knowledge.drive_id.is_not(None)),
+                sa.or_(
+                    sa.and_(
+                        connection.auth_type == "tenant_app",
+                        TenantSharePointApp.is_active.is_(True),
+                    ),
+                    sa.and_(
+                        connection.auth_type == "user_oauth",
+                        Users.deleted_at.is_(None),
+                        Users.state.in_(_USERS_WHO_CAN_SIGN_IN),
+                    ),
+                ),
+            )
+        )
+        result = await self.session.execute(stmt)
+        return [
+            _CatchUpCandidate(
+                id=row.id,
+                has_delta_token=bool(row.has_delta_token),
+                last_activity=row.last_activity,
+            )
+            for row in result.all()
+        ]
+
+    async def _sync_states(self, knowledge_ids: list[str]) -> dict[str, _SyncState]:
+        keys = (
+            sync_lock_key,
+            sync_queued_key,
+            sync_pending_full_key,
+            sync_pending_key,
+            sync_catch_up_key,
+        )
+        states: dict[str, _SyncState] = {}
+        for start in range(0, len(knowledge_ids), _SYNC_STATE_BATCH):
+            batch = knowledge_ids[start : start + _SYNC_STATE_BATCH]
+            async with self.redis_client.pipeline(transaction=False) as pipe:
+                for knowledge_id in batch:
+                    for key in keys:
+                        pipe.exists(key(knowledge_id))
+                flags = [bool(flag) for flag in await pipe.execute()]
+            for index, knowledge_id in enumerate(batch):
+                running, queued, full, delta, caught_up = flags[
+                    index * len(keys) : (index + 1) * len(keys)
+                ]
+                states[knowledge_id] = _SyncState(
+                    running=running,
+                    queued=queued,
+                    full_requested=full,
+                    delta_requested=delta,
+                    recently_caught_up=caught_up,
+                )
+        return states
 
     def _release_queue_slot_on_rollback(self, knowledge_id: str) -> None:
         """A job rolled back with the transaction must not block the next one."""
