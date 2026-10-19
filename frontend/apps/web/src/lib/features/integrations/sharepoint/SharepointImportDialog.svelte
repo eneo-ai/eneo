@@ -29,6 +29,10 @@
   import { getJobManager } from "$lib/features/jobs/JobManager";
   import { trackImports } from "$lib/features/integrations/importCompletion";
   import { integrationDocumentsHref } from "$lib/features/integrations/integrationDocuments";
+  import {
+    KNOWLEDGE_NAME_MAX_LENGTH,
+    fitKnowledgeName
+  } from "$lib/features/integrations/knowledgeNames";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import type { IntegrationImportDialogProps } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
@@ -479,7 +483,7 @@
       const resourceType = site.type === "onedrive" ? ("onedrive" as const) : ("site" as const);
       const batchItems = dedupedSelection.effectiveEntries.map((entry) => ({
         key: site.key,
-        name: entry.importName.trim() || entry.item.name,
+        name: fitKnowledgeName(entry.importName.trim() || entry.item.name),
         url: entry.item.type === "site_root" ? (site.url ?? "") : (entry.item.web_url ?? ""),
         folder_id: entry.item.type === "site_root" ? undefined : entry.item.id,
         folder_path: entry.item.type === "site_root" ? undefined : entry.item.path,
@@ -778,6 +782,7 @@
               <Input
                 id="sharepoint-wrapper-name"
                 bind:value={wrapperName}
+                maxlength={KNOWLEDGE_NAME_MAX_LENGTH}
                 placeholder={m.sharepoint_wrapper_name_placeholder()}
                 aria-invalid={showWrapperNameError}
                 aria-describedby="sharepoint-wrapper-description"
@@ -857,6 +862,7 @@
                     <Input
                       id={`sharepoint-import-name-${index}`}
                       value={selection.importName}
+                      maxlength={KNOWLEDGE_NAME_MAX_LENGTH}
                       oninput={(event) =>
                         updateSelectionName(selection.selectionKey, event.currentTarget.value)}
                     />

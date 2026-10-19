@@ -4998,7 +4998,7 @@ export interface paths {
     put?: never;
     /**
      * Create Space Integration Knowledge Batch
-     * @description Add multiple integration knowledge items to a space in a single batch.
+     * @description Add multiple integration knowledge items to a space in a single batch. Access, the connection and its token are checked first: when they fail, the request fails and nothing is written. Otherwise each item is created or reported failed on its own.
      */
     post: operations["create_space_integration_knowledge_batch_api_v1_spaces__id__knowledge_integrations_add__user_integration_id__batch__post"];
     delete?: never;
@@ -13376,7 +13376,10 @@ export interface components {
        * @default site
        */
       resource_type?: ("site" | "onedrive") | null;
-      /** Name */
+      /**
+       * Name
+       * @description Stored without surrounding whitespace; an item whose name is then empty or longer than 255 characters fails on its own
+       */
       name: string;
       /** Url */
       url: string;
@@ -43090,7 +43093,7 @@ export interface operations {
           "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResponse"];
         };
       };
-      /** @description Bad Request */
+      /** @description Bad request; `code` is `sharepoint_credentials_invalid` when Microsoft refuses the organization's SharePoint credentials, which an administrator must reconnect. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -43165,6 +43168,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description `code` is `integration_knowledge_syncing`: a sync holds the source; try again when it has finished. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -43206,6 +43218,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description `code` is `integration_knowledge_syncing`: a sync holds the source; try again when it has finished. */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -43269,6 +43290,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description `code` is `integration_knowledge_syncing`: a sync holds the source; try again when it has finished. */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -43434,6 +43464,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description `code` is `integration_knowledge_syncing`: a sync holds the source; try again when it has finished. */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -52518,7 +52557,7 @@ export interface operations {
           "application/json": components["schemas"]["TenantSharePointAppPublic"];
         };
       };
-      /** @description Invalid state or auth code; `code` is `oauth_code_rejected` when Microsoft refuses the code */
+      /** @description Invalid state or auth code; `code` is `oauth_code_rejected` when Microsoft refuses the code (start the sign-in again) and `oauth_client_rejected` when it refuses the app's client ID or secret */
       400: {
         headers: {
           [name: string]: unknown;
@@ -53477,7 +53516,7 @@ export interface operations {
           "application/json": components["schemas"]["UserIntegration"];
         };
       };
-      /** @description Bad request; `code` is `oauth_code_rejected` when the identity provider refuses the code (expired, already used or issued for another redirect URI). The state is spent; start the sign-in again. */
+      /** @description Bad request; `code` is `oauth_code_rejected` when the identity provider refuses the code (expired, already used or issued for another redirect URI; the state is spent, start the sign-in again) and `oauth_client_rejected` when it refuses the app's client ID or secret, which an administrator must fix. */
       400: {
         headers: {
           [name: string]: unknown;
