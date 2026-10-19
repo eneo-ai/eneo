@@ -50,6 +50,46 @@ export async function expectOk(
   );
 }
 
+/**
+ * The flow's draft revision as the backend holds it now. Writing a flow-managed
+ * assistant advances the flow's revision, so a fence taken when the flow was
+ * created is stale once its steps' assistants have been edited.
+ */
+export async function currentDraftRevision(
+  page: Page,
+  request: APIRequestContext,
+  flowId: string
+): Promise<number> {
+  const response = await backendFetch(page, request, `/api/v1/flows/${flowId}/`);
+  await expectOk(response, "reading the flow's draft revision");
+  const flow: { draft_revision: number } = await response.json();
+  return flow.draft_revision;
+}
+
+const READY_BUILDER_MODEL_ID = "00000000-0000-0000-0000-0000000000e2";
+
+/**
+ * A Builder model listing with one ready model as the default. The composer
+ * sends only when the model it shows is listed and ready, so a stub that lists
+ * no model keeps the send button disabled.
+ */
+export function readyBuilderModelsBody() {
+  return {
+    models: [
+      {
+        id: READY_BUILDER_MODEL_ID,
+        name: "E2E Mock",
+        provider: "openai",
+        org: "OpenAI",
+        provider_name: "E2E",
+        reasoning_effort_options: [],
+        availability: { state: "ready" }
+      }
+    ],
+    default_model_id: READY_BUILDER_MODEL_ID
+  };
+}
+
 export async function askChatQuestion(page: Page, question: string) {
   const input = page.locator('[contenteditable="true"]').first();
   await input.click();

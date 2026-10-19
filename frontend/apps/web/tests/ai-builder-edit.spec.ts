@@ -6,7 +6,7 @@ import {
   type Page,
   type Route
 } from "@playwright/test";
-import { backendFetch, expectOk, uniqueName } from "./helpers";
+import { backendFetch, expectOk, readyBuilderModelsBody, uniqueName } from "./helpers";
 
 // The edit-side builder journeys. The flow itself is real — created through the
 // backend API — while every AI Builder turn answers from a fixed SSE script, so
@@ -17,15 +17,16 @@ import { backendFetch, expectOk, uniqueName } from "./helpers";
 const AI_BUILDER_TAB = "AI-byggaren"; // ai_builder_tab
 const BUILDER_TAB = "Byggare"; // flow_builder
 const STAGE_PROCESSING_STEPS = "Bearbetningssteg"; // flow_stage_processing_steps
-const CHANGE_STEP_WITH_AI = "Ändra det här steget med AI"; // flow_step_change_with_ai
+const CHANGE_STEP_WITH_AI = "Ändra med AI"; // flow_step_change_with_ai
+const STEP_AI_OWN_CHANGE = "Beskriv en egen ändring"; // flow_step_ai_menu_own
 const TASK_TITLE_EDIT = "Vad ska ändras i flödet?"; // ai_builder_task_title_edit
+const TASK_TITLE_EDIT_STEP = "Vad ska ändras i steget?"; // ai_builder_task_title_edit_step
 const TASK_TITLE = "Vad ska flödet göra?"; // ai_builder_task_title
 const SAVED_STEP_PLACEHOLDER = "Beskriv vad du vill ändra i det valda steget…"; // ai_builder_saved_step_prompt_placeholder
 const SEND = "Skicka"; // ai_builder_send
 const RAIL_LABEL = "AI-byggarens förlopp"; // ai_builder_progress_aria
-const HOW_FLOW_WORKS = "Så fungerar flödet"; // ai_builder_how_flow_works
+const FLOW_CARD_TITLE_EDIT = "Flödet efter ändringen"; // ai_builder_flow_card_title_edit
 const APPROVE = "Godkänn"; // ai_builder_approve
-const APPLY = "Skriv in ändringarna"; // ai_builder_apply
 const APPLY_CONFIRM = "Uppdatera flödet"; // ai_builder_approve_dialog_confirm_edit
 const CONVERSATION_BUTTON = "Samtal"; // ai_builder_conversation_button
 const EDIT_ANSWER = "Ändra det här svaret"; // ai_builder_conversation_edit_answer
@@ -79,12 +80,15 @@ interface BuilderStubOptions {
 interface BuilderStub {
   /** Bodies of every POST to .../messages, in order. */
   messageRequests: Record<string, unknown>[];
+  /** The plan operations the client sent, in order. */
+  planOperations: ("approve" | "apply")[];
 }
 
 const SESSION_ID = "edit-session";
 
 async function stubBuilder(page: Page, options: BuilderStubOptions): Promise<BuilderStub> {
   const messageRequests: Record<string, unknown>[] = [];
+  const planOperations: BuilderStub["planOperations"] = [];
   let session: SessionBody = {
     session_id: SESSION_ID,
     space_id: options.spaceId,
@@ -108,7 +112,7 @@ async function stubBuilder(page: Page, options: BuilderStubOptions): Promise<Bui
     const method = route.request().method();
 
     if (url.includes("/models")) {
-      return route.fulfill({ json: { models: [], default_model_id: null } });
+      return route.fulfill({ json: readyBuilderModelsBody() });
     }
     if (/\/messages\/?$/.test(url) && method === "POST") {
       messageRequests.push((route.request().postDataJSON() ?? {}) as Record<string, unknown>);
@@ -122,10 +126,12 @@ async function stubBuilder(page: Page, options: BuilderStubOptions): Promise<Bui
       });
     }
     if (/\/plans\/[^/]+\/approve\/?$/.test(url)) {
+      planOperations.push("approve");
       planStatus = "approved";
       return route.fulfill({ json: { plan_id: PLAN_ID, status: "approved" } });
     }
     if (/\/plans\/[^/]+\/apply\/?$/.test(url)) {
+      planOperations.push("apply");
       planStatus = "applied";
       session = { ...session, status: "applied", flow_id: options.flowId };
       return route.fulfill({ json: options.applyResult ?? {} });
@@ -145,7 +151,7 @@ async function stubBuilder(page: Page, options: BuilderStubOptions): Promise<Bui
     return route.fulfill({ json: {} });
   });
 
-  return { messageRequests };
+  return { messageRequests, planOperations };
 }
 
 // ---- Real flow fixtures ----------------------------------------------------
@@ -385,7 +391,7 @@ test.describe("AI builder edit journeys", () => {
     const flow = await createFlowWithStep(page, request, "Sammanfatta underlaget");
     const plan = editPlan(flow.stepId, "Sammanfatta underlaget");
 
-    await stubBuilder(page, {
+    const stub = await stubBuilder(page, {
       spaceId,
       flowId: flow.id,
       targetKind: "edit",
@@ -416,16 +422,17 @@ test.describe("AI builder edit journeys", () => {
 
     await sendFromComposer(page, "Lägg till källhänvisningar sist i sammanfattningen");
 
-    await expect(page.getByRole("heading", { name: HOW_FLOW_WORKS })).toBeVisible({
+    await expect(page.getByRole("heading", { name: FLOW_CARD_TITLE_EDIT })).toBeVisible({
       timeout: 20_000
     });
 
-    await page.getByRole("button", { name: APPROVE }).click();
-    const apply = page.getByRole("button", { name: APPLY });
-    await expect(apply).toBeEnabled();
-    await apply.click();
-    // Applying is confirmed in a dialog before anything is written.
+    // Approving and applying are one decision: the dialog confirms it before
+    // anything is written, then the client approves the plan and applies it.
+    const approve = page.getByRole("button", { name: APPROVE, exact: true });
+    await expect(approve).toBeEnabled();
+    await approve.click();
     await page.getByRole("alertdialog").getByRole("button", { name: APPLY_CONFIRM }).click();
+    await expect.poll(() => stub.planOperations, { timeout: 20_000 }).toEqual(["approve", "apply"]);
 
     // Applying hands the user back to the builder tab with the updated flow.
     await expect(flowTab(page, BUILDER_TAB)).toHaveAttribute("aria-selected", "true", {
@@ -451,12 +458,14 @@ test.describe("AI builder edit journeys", () => {
     await page.setViewportSize({ width: 1600, height: 900 });
     await openFlowPage(page, flow);
     await page.getByRole("button", { name: STAGE_PROCESSING_STEPS }).click();
-    await page.getByRole("button", { name: CHANGE_STEP_WITH_AI }).click();
+    await page.getByRole("button", { name: CHANGE_STEP_WITH_AI, exact: true }).click();
+    // The menu item's name also carries its description line.
+    await page.getByRole("menuitem", { name: new RegExp(`^${STEP_AI_OWN_CHANGE}`) }).click();
 
     await expect(page.getByRole("navigation", { name: RAIL_LABEL })).toBeVisible({
       timeout: 20_000
     });
-    await expect(page.getByRole("heading", { name: TASK_TITLE_EDIT })).toBeVisible();
+    await expect(page.getByRole("heading", { name: TASK_TITLE_EDIT_STEP })).toBeVisible();
     await expect(page.getByText(editContextStepLabel(1, flow.stepName))).toBeVisible();
     await expect(composer(page)).toHaveAttribute("placeholder", SAVED_STEP_PLACEHOLDER);
 

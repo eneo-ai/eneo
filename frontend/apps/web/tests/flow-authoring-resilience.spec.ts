@@ -1,6 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import type { FlowStep } from "@eneo/eneo-js";
-import { backendFetch, expectOk, uniqueName } from "./helpers";
+import { backendFetch, currentDraftRevision, expectOk, uniqueName } from "./helpers";
 
 const STEP_NAME = /^(Step name|Stegnamn)\b/;
 const INSTRUCTION = /^(Instruction for the AI|Instruktion till AI:n)$/;
@@ -53,7 +53,7 @@ async function createFlow(page: Page, request: APIRequestContext) {
   }
   const response = await backendFetch(page, request, `/api/v1/flows/${flow.id}/`, {
     method: "PATCH",
-    data: { steps, expected_revision: flow.draft_revision }
+    data: { steps, expected_revision: await currentDraftRevision(page, request, flow.id) }
   });
   await expectOk(response, "saving eight-step flow");
   return response.json();
@@ -63,6 +63,8 @@ test("step navigation remains usable during slow flow and instruction saves", as
   page,
   request
 }) => {
+  // Eight-step setup, then two queued writes, one of them a long instruction.
+  test.setTimeout(90_000);
   const flow = await createFlow(page, request);
   await page.goto(`/spaces/personal/flows/${flow.id}?stage=4`);
   await page.waitForLoadState("networkidle");
@@ -88,7 +90,9 @@ test("step navigation remains usable during slow flow and instruction saves", as
   try {
     await page.getByRole("textbox", { name: INSTRUCTION }).fill(instruction);
     await page.getByRole("textbox", { name: STEP_NAME }).fill("Renamed while saving");
-    await expect.poll(() => flowSaving && assistantSaving).toBe(true);
+    // The flow write and the step's instruction write share one save queue, so
+    // whichever is sent first is held here and the other waits behind it.
+    await expect.poll(() => flowSaving || assistantSaving).toBe(true);
 
     await page
       .getByRole("listitem")
@@ -111,21 +115,28 @@ test("step navigation remains usable during slow flow and instruction saves", as
     release();
   }
 
+  // Released, the held write lets the queued one through: both writes land.
   await expect
-    .poll(async () => {
-      const saved = await api(page, request, `/api/v1/flows/${flow.id}/`);
-      return saved.steps[0].user_description;
-    })
+    .poll(
+      async () => {
+        const saved = await api(page, request, `/api/v1/flows/${flow.id}/`);
+        return saved.steps[0].user_description;
+      },
+      { timeout: 30_000 }
+    )
     .toBe("Renamed while saving");
   await expect
-    .poll(async () => {
-      const assistant = await api(
-        page,
-        request,
-        `/api/v1/flows/${flow.id}/assistants/${flow.steps[0].assistant_id}/`
-      );
-      return assistant.prompt.text;
-    })
+    .poll(
+      async () => {
+        const assistant = await api(
+          page,
+          request,
+          `/api/v1/flows/${flow.id}/assistants/${flow.steps[0].assistant_id}/`
+        );
+        return assistant.prompt.text;
+      },
+      { timeout: 30_000 }
+    )
     .toBe(instruction);
   const nextAssistant = await api(
     page,
@@ -139,6 +150,8 @@ test("exported flow imports as a draft with text-step uploads, retrieval policy 
   page,
   request
 }) => {
+  // Eight-step setup, export and import against the real backend.
+  test.setTimeout(90_000);
   const flow = await createFlow(page, request);
   const runtimeInput = {
     runtime_input: {
@@ -239,6 +252,8 @@ test("a rejected transcription save does not trap the author away from the fix",
   page,
   request
 }) => {
+  // Eight-step setup plus a transcription model against the real backend.
+  test.setTimeout(90_000);
   const flow = await createFlow(page, request);
   const providers = await api(page, request, "/api/v1/admin/model-providers/");
   const model = await api(page, request, "/api/v1/admin/tenant-models/transcription/", {
