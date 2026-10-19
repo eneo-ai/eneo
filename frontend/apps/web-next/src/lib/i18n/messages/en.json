@@ -4832,7 +4832,6 @@
   "conversation_settings_save_failed": "The settings could not be saved or loaded.",
   "conversation_settings_reload": "Reload saved choices",
   "conversation_settings_model_unavailable": "The saved model is unavailable",
-  "conversation_settings_use_default": "Use the available default model",
   "document_templates": "Document templates",
   "document_templates_description": "Used for the Word and PDF files assistants create. The default applies unless an assistant chooses another template.",
   "document_template_upload": "Upload template",

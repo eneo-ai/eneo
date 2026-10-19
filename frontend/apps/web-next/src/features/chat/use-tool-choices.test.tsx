@@ -137,6 +137,26 @@ describe("conversation choices", () => {
     expect([...second.current.tools.disabledCapabilities]).toEqual(["web_search"]);
   });
 
+  it("lets a legacy conversation replace an unavailable default before its first save", async () => {
+    saved = { revision: 0, settings: { completion_model_id: "removed" } };
+    api.POST.mockResolvedValueOnce({
+      data: {
+        ...saved,
+        model_unavailable: true,
+        available_models: [{ id: "model-2" }]
+      },
+      response: new Response()
+    });
+    const view = renderChoices(personal, "legacy");
+    await ready(view);
+    expect(api.PATCH).not.toHaveBeenCalled();
+    expect(view.current.settings.error).toBeNull();
+    expect(view.current.settings.resolution?.available_models?.[0].id).toBe("model-2");
+    await act(async () => view.current.settings.update({ completion_model_id: "model-2" }));
+    expect(saved.revision).toBe(1);
+    expect(view.current.settings.resolution?.settings.completion_model_id).toBe("model-2");
+  });
+
   it("uses current defaults for a new conversation, ignoring old browser preferences", async () => {
     window.localStorage.setItem("autoAcceptToolsEnabled", "false");
     const first = renderChoices();

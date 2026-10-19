@@ -722,6 +722,39 @@ describe("ChatService saved conversation choices", () => {
     );
   });
 
+  it("lets an older conversation replace an unavailable default before initializing settings", async () => {
+    const updateSettings = vi.fn().mockResolvedValue({
+      revision: 1,
+      settings: { completion_model_id: "replacement" }
+    });
+    const resolveSettings = vi
+      .fn()
+      .mockResolvedValueOnce({
+        revision: 0,
+        settings: { completion_model_id: "removed" },
+        model_unavailable: true,
+        available_models: [{ id: "replacement" }]
+      })
+      .mockResolvedValue({
+        revision: 1,
+        settings: { completion_model_id: "replacement" },
+        effective_model: { id: "replacement" }
+      });
+    const chat = chatService(vi.fn(), {
+      initialConversation: { id: "legacy", name: "Legacy", messages: [] },
+      resolveSettings,
+      updateSettings
+    });
+    await chat.loadSettings();
+    expect(updateSettings).not.toHaveBeenCalled();
+    expect(chat.settingsError).toBeNull();
+    expect(chat.settingsResolution?.available_models?.[0].id).toBe("replacement");
+    await chat.updateSettings({ completion_model_id: "replacement" });
+    expect(updateSettings.mock.lastCall?.[2]).toBe(0);
+    expect(chat.currentConversation.settings?.revision).toBe(1);
+    expect(chat.settings?.completion_model_id).toBe("replacement");
+  });
+
   it("saves tools, approval and reasoning together, then reloads them in another client", async () => {
     const conversation: Conversation = {
       id: "saved",
@@ -752,6 +785,30 @@ describe("ChatService saved conversation choices", () => {
     await chat.loadSettings();
     expect(chat.settings?.mcp_server_states).toEqual({ tool: true });
     expect(reopened.settings?.mcp_server_states).toEqual({ tool: false });
+  });
+
+  it("adopts a newer revision saved elsewhere between its save and resolution", async () => {
+    const latest = {
+      revision: 3,
+      settings: { require_tool_approval: true, mcp_server_states: { tool: false } },
+      effective_model: { id: "model-1", name: "model-1", token_limit: 128000 }
+    };
+    const updateSettings = vi.fn().mockResolvedValue({ revision: 2, settings: {} });
+    const chat = chatService(vi.fn(), {
+      initialConversation: {
+        id: "saved",
+        name: "Saved",
+        messages: [],
+        settings: { revision: 1, settings: {} }
+      },
+      updateSettings,
+      resolveSettings: vi.fn().mockResolvedValue(latest)
+    });
+    await chat.updateSettings({ reasoning_effort: "high" });
+    expect(chat.currentConversation.settings?.revision).toBe(3);
+    expect(chat.settings).toEqual(latest.settings);
+    await chat.updateSettings({ require_tool_approval: false });
+    expect(updateSettings.mock.lastCall?.[2]).toBe(3);
   });
 
   it("does not leak a late save into the next conversation", async () => {
@@ -800,7 +857,9 @@ describe("ChatService saved conversation choices", () => {
     expect(chat.settings?.reasoning_effort).toBeUndefined();
     await expect(chat.askQuestion("hello")).rejects.toThrow("Changed elsewhere");
     expect(ask).not.toHaveBeenCalled();
-    await chat.loadSettings(true);
+    const reload = chat.loadSettings(true);
+    expect(chat.settingsError).toBe(conflict);
+    await reload;
     expect(chat.settingsError).toBeNull();
     expect(chat.currentConversation.settings?.revision).toBe(3);
     expect(chat.settings?.require_tool_approval).toBe(true);

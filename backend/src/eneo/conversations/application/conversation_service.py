@@ -215,6 +215,9 @@ class ConversationService:
             current_model=assistant.completion_model, effective_config=config
         )
         if personal:
+            result.model_locked = bool(
+                config and config.models_enforced and config.locked_model
+            )
             result.available_models = []
             allowed_ids: set[UUID] = set()
             for candidate in space.completion_models:

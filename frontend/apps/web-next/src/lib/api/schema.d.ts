@@ -12815,6 +12815,11 @@ export interface components {
        */
       model_unavailable?: boolean;
       /**
+       * Model Locked
+       * @default false
+       */
+      model_locked?: boolean;
+      /**
        * Supports Tool Calling
        * @default false
        */

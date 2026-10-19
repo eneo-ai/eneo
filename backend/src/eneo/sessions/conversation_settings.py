@@ -80,6 +80,7 @@ class ConversationSettingsResolution(BaseModel):
     available_models: list[CompletionModelPublic] | None = None
     effective_model: CompletionModelPublic | None = None
     model_unavailable: bool = False
+    model_locked: bool = False
     supports_tool_calling: bool = False
     effective_reasoning_effort: str | None = None
     default_reasoning_effort: str | None = None

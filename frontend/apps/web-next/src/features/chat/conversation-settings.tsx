@@ -69,7 +69,7 @@ export function ConversationSettingsProvider({
 
   async function readSettings() {
     let next = await resolve(current.current?.settings);
-    if (sessionId.current && next.revision === 0) {
+    if (sessionId.current && next.revision === 0 && !next.model_unavailable) {
       try {
         await unwrap(
           browserApi.PATCH("/api/v1/conversations/{session_id}/settings/", {

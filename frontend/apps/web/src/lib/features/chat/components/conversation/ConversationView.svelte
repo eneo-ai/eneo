@@ -62,10 +62,10 @@
   const attachmentRules = getAttachmentRulesStore(
     toStore(() => {
       const partner = chat.partner;
-      const completion_model =
-        chat.settingsResolution?.effective_model ??
-        chat.selectedPersonalModel ??
-        (partner && "completion_model" in partner ? partner.completion_model : null);
+      const completion_model = chat.settingsResolution
+        ? chat.settingsResolution.effective_model
+        : (chat.selectedPersonalModel ??
+          (partner && "completion_model" in partner ? partner.completion_model : null));
       return {
         completion_model,
         acceptsImageAttachments:

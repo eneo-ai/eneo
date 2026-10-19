@@ -347,20 +347,29 @@ export class ChatService {
     this.settingsError = null;
   }
 
+  #setResolvedSettings(conversation: Conversation, resolution: ConversationSettingsResolution) {
+    this.settingsResolution = resolution;
+    if (conversation.id && resolution.revision > 0) {
+      conversation.settings = { revision: resolution.revision, settings: resolution.settings };
+    } else {
+      this.#draftSettings = resolution.settings;
+    }
+    this.#clearPreflight();
+  }
+
   async loadSettings(force = false) {
     this.#settingsEnabled = true;
     if (this.settingsBusy || (this.settingsResolution && !force)) return;
     const conversation = this.currentConversation;
     const partner = this.#chatPartner;
     this.settingsBusy = true;
-    this.settingsError = null;
     try {
       let resolution = await this.#eneo.conversations.resolveSettings({
         chatPartner: partner,
         conversation,
         settings: conversation.id ? undefined : (this.settings ?? undefined)
       });
-      if (conversation.id && resolution.revision === 0) {
+      if (conversation.id && resolution.revision === 0 && !resolution.model_unavailable) {
         try {
           await this.#eneo.conversations.updateSettings(conversation, resolution.settings, 0);
         } catch (error) {
@@ -372,13 +381,8 @@ export class ChatService {
         });
       }
       if (conversation !== this.currentConversation) return;
-      this.settingsResolution = resolution;
-      if (conversation.id && resolution.revision > 0) {
-        conversation.settings = { revision: resolution.revision, settings: resolution.settings };
-      } else {
-        this.#draftSettings = resolution.settings;
-      }
-      this.#clearPreflight();
+      this.settingsError = null;
+      this.#setResolvedSettings(conversation, resolution);
     } catch (error) {
       if (conversation === this.currentConversation) this.settingsError = error;
     } finally {
@@ -409,8 +413,7 @@ export class ChatService {
         settings: conversation.id ? undefined : settings
       });
       if (conversation !== this.currentConversation) return;
-      this.settingsResolution = resolution;
-      this.#clearPreflight();
+      this.#setResolvedSettings(conversation, resolution);
     } catch (error) {
       if (conversation === this.currentConversation) this.settingsError = error;
     } finally {

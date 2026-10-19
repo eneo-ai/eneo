@@ -4833,7 +4833,6 @@
   "conversation_settings_save_failed": "Inställningarna kunde inte sparas eller hämtas.",
   "conversation_settings_reload": "Läs in sparade val",
   "conversation_settings_model_unavailable": "Den sparade modellen är inte tillgänglig",
-  "conversation_settings_use_default": "Använd tillgänglig standardmodell",
   "document_templates": "Dokumentmallar",
   "document_templates_description": "Används för Word- och PDF-filer som assistenterna skapar. Standardmallen gäller om inte en assistent väljer en annan mall.",
   "document_template_upload": "Ladda upp mall",

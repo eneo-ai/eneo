@@ -14,47 +14,18 @@
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { getChatService } from "../../ChatService.svelte";
-  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { sortModels } from "$lib/features/ai-models/sortModels";
   import { groupModelsByVendor } from "$lib/features/ai-models/groupModels";
-  import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
   import { m } from "$lib/paraglide/messages";
   import { Lock } from "@lucide/svelte";
   import ChatModelDetails from "./ChatModelDetails.svelte";
 
-  const {
-    state: { currentSpace }
-  } = getSpacesManager();
   const chat = getChatService();
   const { onNewConversation }: { onNewConversation: () => void } = $props();
 
-  // Only rendered when chat.partner.type === "default-assistant", which
-  // guarantees the personal space's default_assistant is present.
-  const defaultAssistant = $derived($currentSpace.default_assistant!);
-  const effectiveConfig = $derived(defaultAssistant.effective_config);
-
-  // When the admin policy locks the model to one option, show the locked name
-  // instead of a picker.
-  const lockedModel = $derived(
-    effectiveConfig?.models_enforced && effectiveConfig.locked_model
-      ? ($currentSpace.completion_models.find(
-          (model) => model.id === effectiveConfig.locked_model?.id
-        ) ?? effectiveConfig.locked_model)
-      : null
-  );
   const visibleModels = $derived(sortModels(chat.settingsResolution?.available_models ?? []));
-  const selectedModel = $derived.by(() => {
-    const selected = visibleModels.find((model) => model.id === chat.selectedPersonalModel?.id);
-    return (
-      selected ??
-      selectEffectiveChatModel(
-        defaultAssistant.completion_model,
-        effectiveConfig,
-        $currentSpace.completion_models
-      ) ??
-      null
-    );
-  });
+  const selectedModel = $derived(chat.settingsResolution?.effective_model ?? null);
+  const lockedModel = $derived(chat.settingsResolution?.model_locked ? selectedModel : null);
   const selectedId = $derived(chat.settings?.completion_model_id ?? selectedModel?.id ?? "");
   const savedModelUnavailable = $derived(chat.settingsResolution?.model_unavailable ?? false);
   const selectedLabel = $derived(
@@ -81,11 +52,7 @@
   // identically.
   const modelGroups = $derived(groupModelsByVendor(visibleModels, m.model_group_other()));
 
-  $effect(() =>
-    chat.setModelCatalog(
-      chat.settingsResolution?.available_models ?? $currentSpace.completion_models
-    )
-  );
+  $effect(() => chat.setModelCatalog(chat.settingsResolution?.available_models ?? []));
 
   async function applyModel(id: string) {
     const model = visibleModels.find((candidate) => candidate.id === id);
@@ -113,11 +80,6 @@
   }
 </script>
 
-{#if savedModelUnavailable}
-  <p class="text-destructive text-sm" role="status">
-    {m.conversation_settings_model_unavailable()}
-  </p>
-{/if}
 {#if lockedModel && !savedModelUnavailable}
   <div
     class="text-muted-foreground flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm"

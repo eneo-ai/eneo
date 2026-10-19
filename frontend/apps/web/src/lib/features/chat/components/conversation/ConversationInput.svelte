@@ -487,11 +487,20 @@
     <MentionInput onpaste={queueUploadsFromClipboard}></MentionInput>
   </PromptInput.Body>
 
-  {#if chat.settingsError}
+  {#if chat.settingsError || chat.settingsResolution?.model_unavailable}
     <div class="text-destructive flex items-center gap-2 px-3 py-2 text-sm" role="alert">
-      <p>{m.conversation_settings_save_failed()} {getErrorMessage(chat.settingsError)}</p>
-      <Button variant="ghost" size="sm" onclick={() => void chat.loadSettings(true)}
-        >{m.conversation_settings_reload()}</Button
+      <p>
+        {#if chat.settingsError}
+          {m.conversation_settings_save_failed()} {getErrorMessage(chat.settingsError)}
+        {:else}
+          {m.conversation_settings_model_unavailable()}
+        {/if}
+      </p>
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={chat.settingsBusy || chat.askQuestion.isLoading}
+        onclick={() => void chat.loadSettings(true)}>{m.conversation_settings_reload()}</Button
       >
     </div>
   {/if}

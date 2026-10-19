@@ -104,6 +104,7 @@ def service_with_policy():
     )
     policy = SimpleNamespace(
         models_enforced=True,
+        locked_model=None,
         available_models=[model, old_model],
         policy_default_model=model,
         mcp_enforced=True,
@@ -548,3 +549,18 @@ async def test_ordinary_assistant_uses_current_model_and_reports_its_removal():
     assert removed.model_unavailable
     assert removed.effective_model is None
     assert not removed.supports_tool_calling
+
+
+@pytest.mark.asyncio
+async def test_model_lock_follows_current_policy_without_rewriting_saved_choice():
+    service, assistant, model, _, policy = service_with_policy()
+    choices = ConversationSettings(completion_model_id=model.id)
+    policy.locked_model = model
+    locked = await service.resolve_settings(assistant_id=assistant.id, settings=choices)
+    assert locked.model_locked
+    policy.locked_model = None
+    unlocked = await service.resolve_settings(
+        assistant_id=assistant.id, settings=choices
+    )
+    assert not unlocked.model_locked
+    assert unlocked.settings == choices

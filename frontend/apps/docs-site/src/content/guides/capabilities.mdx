@@ -313,7 +313,9 @@ ask a file is not granted to service keys.
 - Changes in an existing conversation are saved immediately, before the next
   message. A draft is saved together with its first question; refreshing an
   unsent draft restores current defaults. Older conversations without saved
-  settings initialize once from current defaults when opened. Old browser
+  settings initialize once from current defaults when opened. If the default
+  model is unavailable, select an available replacement before saving those
+  initial settings. Old browser
   preferences cannot reliably be attributed to a conversation and are not imported.
 - Saved choices cannot grant access removed by an administrator. Availability,
   policy and security classification are checked again when answering. If a
