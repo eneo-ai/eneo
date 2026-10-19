@@ -238,10 +238,18 @@ class ComposeTests(unittest.TestCase):
                 c: release.REGISTRY + c + "@sha256:" + "b" * 64
                 for c in release.COMPONENTS
             }
+            # The operator's .env pins the third-party images by digest
+            # (docs/deployment/.env.template); the bundle's release.env pins Eneo's.
+            third_party = {
+                "traefik": ("TRAEFIK_IMAGE_DIGEST", "traefik"),
+                "db": ("PGVECTOR_IMAGE_DIGEST", "pgvector/pgvector"),
+                "redis": ("REDIS_IMAGE_DIGEST", "redis"),
+            }
             env = {
                 "PATH": os.environ["PATH"],
                 "ENEO_VERSION": "2.3.0",
                 "TOOL_RUNTIME_TOKEN": "x" * 64,
+                **{variable: "c" * 64 for variable, _ in third_party.values()},
                 **{
                     "ENEO_" + c.upper().replace("-", "_") + "_IMAGE": ref
                     for c, ref in images.items()
@@ -261,6 +269,10 @@ class ComposeTests(unittest.TestCase):
             normal = config()
             self.assertEqual(normal, config("docker-compose.tool-runtime.yml"))
             services = normal["services"]
+            for name, (_, repository) in third_party.items():
+                self.assertEqual(
+                    services[name]["image"], repository + "@sha256:" + "c" * 64
+                )
             for name in ("backend", "worker", "crawler-worker", "db-init"):
                 self.assertEqual(services[name]["image"], images["backend"])
                 self.assertNotIn("tool-runtime", services[name].get("depends_on", {}))
