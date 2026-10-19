@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 from uuid import UUID
@@ -124,6 +125,16 @@ class SharePointSubscriptionRepository(ABC):
         """Point knowledge rows for the subscription's resource at it.
 
         Rows of the same user integration and site (or OneDrive drive) whose
-        link is still NULL get it; returns how many rows were linked.
+        link is still NULL get it; returns how many rows were linked. A row
+        another transaction holds (a running sync) is skipped, not waited
+        for; that sync links it itself.
         """
+        ...
+
+    @abstractmethod
+    def own_transaction(
+        self,
+    ) -> "AbstractAsyncContextManager[SharePointSubscriptionRepository]":
+        """A repository on a session and transaction of its own, committed when
+        the block ends."""
         ...

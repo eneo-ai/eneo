@@ -1,3 +1,5 @@
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 from uuid import UUID
@@ -33,6 +35,7 @@ if TYPE_CHECKING:
 
 
 _USER_SITE_UNIQUE_CONSTRAINT = "uq_sharepoint_subscription_user_site"
+_OWN_TRANSACTION_LOCK_TIMEOUT = "120s"
 
 
 def _violates_user_site_uniqueness(exc: IntegrityError) -> bool:
@@ -243,8 +246,8 @@ class SharePointSubscriptionRepositoryImpl(
     async def link_unreferenced_knowledge(
         self, subscription: SharePointSubscription
     ) -> int:
-        stmt = (
-            sa.update(IntegrationKnowledgeDBModel)
+        unreferenced = (
+            sa.select(IntegrationKnowledgeDBModel.id)
             .where(
                 IntegrationKnowledgeDBModel.sharepoint_subscription_id.is_(None),
                 IntegrationKnowledgeDBModel.user_integration_id
@@ -255,7 +258,30 @@ class SharePointSubscriptionRepositoryImpl(
                 )
                 == subscription.site_id,
             )
+            .with_for_update(skip_locked=True)
+        )
+        stmt = (
+            sa.update(IntegrationKnowledgeDBModel)
+            .where(IntegrationKnowledgeDBModel.id.in_(unreferenced))
+            .where(IntegrationKnowledgeDBModel.sharepoint_subscription_id.is_(None))
             .values(sharepoint_subscription_id=subscription.id)
         )
         result = await self.session.execute(stmt)
         return affected_row_count(result)
+
+    @override
+    @asynccontextmanager
+    async def own_transaction(
+        self,
+    ) -> AsyncGenerator["SharePointSubscriptionRepositoryImpl"]:
+        from eneo.database.database import sessionmanager
+
+        async with sessionmanager.session() as session, session.begin():
+            # Waiting longer than any Graph round trip means a lock the
+            # caller's own transaction holds; fail instead of hanging.
+            await session.execute(
+                sa.text(f"SET LOCAL lock_timeout = '{_OWN_TRANSACTION_LOCK_TIMEOUT}'")
+            )
+            yield SharePointSubscriptionRepositoryImpl(
+                session=session, mapper=self.mapper
+            )

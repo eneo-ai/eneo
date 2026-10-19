@@ -114,8 +114,12 @@ class IntegrationKnowledgeRepository(ABC):
         ...
 
     @abstractmethod
-    async def link_subscription(self, id: "UUID", subscription_id: "UUID") -> None:
-        """Write only ``sharepoint_subscription_id``."""
+    async def link_subscription(self, id: "UUID", subscription_id: "UUID") -> bool:
+        """Write only ``sharepoint_subscription_id``; False when it was not written.
+
+        A row another transaction holds (a running sync, which links it
+        itself) is skipped rather than waited for.
+        """
         ...
 
     @abstractmethod

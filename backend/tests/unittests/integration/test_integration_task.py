@@ -582,3 +582,48 @@ async def test_a_follow_up_that_cannot_be_queued_still_closes_redis(
 
     assert fake_redis.closed
     assert LOCK_KEY not in fake_redis.store
+
+
+class _Savepoint:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+
+@pytest.mark.parametrize("task", [delta_task, full_task], ids=["delta", "full"])
+async def test_a_sync_links_its_knowledge_to_the_sites_subscription(
+    fake_redis, service, container, params, knowledge, task
+):
+    """An import or resync skips the link while a sync holds the row."""
+    knowledge.sharepoint_subscription_id = None
+    knowledge.site_id = "site-1"
+    subscription = MagicMock(id=uuid4())
+    container.session.return_value.begin_nested = MagicMock(return_value=_Savepoint())
+    container.sharepoint_subscription_repo.return_value.get_by_user_and_site = (
+        AsyncMock(return_value=subscription)
+    )
+    link = AsyncMock(return_value=True)
+    container.integration_knowledge_repo.return_value.link_subscription = link
+
+    await task(params, container)
+
+    container.sharepoint_subscription_repo.return_value.get_by_user_and_site.assert_awaited_once_with(
+        user_integration_id=knowledge.user_integration.id, site_id="site-1"
+    )
+    link.assert_awaited_once_with(KNOWLEDGE_ID, subscription.id)
+    assert knowledge.sharepoint_subscription_id == subscription.id
+
+
+async def test_a_failing_link_does_not_fail_the_sync(
+    fake_redis, service, container, params, knowledge
+):
+    knowledge.sharepoint_subscription_id = None
+    knowledge.site_id = "site-1"
+    container.session.return_value.begin_nested = MagicMock(return_value=_Savepoint())
+    container.sharepoint_subscription_repo.return_value.get_by_user_and_site = (
+        AsyncMock(side_effect=RuntimeError("database hiccup"))
+    )
+
+    assert await delta_task(params, container) == "Imported 1 file"

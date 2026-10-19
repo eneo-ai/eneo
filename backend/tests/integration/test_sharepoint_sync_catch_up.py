@@ -1,11 +1,14 @@
 """Which SharePoint sources the periodic catch-up may queue a sync for."""
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from dependency_injector import providers
 
+from eneo.database.database import sessionmanager
 from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.database.tables.integration_table import (
     Integration as IntegrationDB,
@@ -29,12 +32,41 @@ from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 from eneo.integration.infrastructure.sharepoint_sync_keys import (
     sync_catch_up_key,
+    sync_pending_full_key,
     sync_queued_key,
 )
+from eneo.main.container.container import Container
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 STALE = datetime.now(timezone.utc) - timedelta(hours=30)
+
+
+class _Dispatches:
+    """Jobs handed to the worker; they are handed over only after a commit."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, UUID]] = []
+        self._changed = asyncio.Event()
+
+    async def record(self, task, _job_id, params) -> None:
+        self.calls.append((task.value, params.integration_knowledge_id))
+        self._changed.set()
+
+    async def wait_for(self, count: int) -> None:
+        async def reached() -> None:
+            while len(self.calls) < count:
+                self._changed.clear()
+                await self._changed.wait()
+
+        await asyncio.wait_for(reached(), timeout=5)
+
+
+@pytest.fixture
+def dispatches(monkeypatch) -> _Dispatches:
+    recorder = _Dispatches()
+    monkeypatch.setattr("eneo.jobs.job_service.job_manager.enqueue", recorder.record)
+    return recorder
 
 
 async def _space_and_model(container) -> tuple[UUID, UUID]:
@@ -125,7 +157,13 @@ async def _source(
     return knowledge.id
 
 
-async def _tenant_app(container, *, active: bool) -> UUID:
+async def _tenant_app(
+    container,
+    *,
+    active: bool,
+    failed_at: datetime | None = None,
+    succeeded_at: datetime | None = None,
+) -> UUID:
     session = container.session()
     user = container.user()
     app = TenantSharePointApp(
@@ -136,6 +174,11 @@ async def _tenant_app(container, *, active: bool) -> UUID:
         tenant_domain="contoso.onmicrosoft.com",
         is_active=active,
         created_by=user.id,
+        last_auth_error="AADSTS7000222: the client secret has expired"
+        if failed_at
+        else None,
+        last_auth_error_at=failed_at,
+        last_auth_success_at=succeeded_at,
     )
     session.add(app)
     await session.flush()
@@ -239,25 +282,22 @@ async def test_last_activity_is_the_latest_attempt_or_success(db_container):
 
 
 async def test_a_stale_source_gets_one_delta_job_per_window(
-    db_container, redis_client, monkeypatch
+    db_container, redis_client, dispatches
 ):
-    enqueue = []
-
-    async def record(task, job_id, params):
-        enqueue.append((task, job_id, params.integration_knowledge_id))
-
-    monkeypatch.setattr("eneo.jobs.job_service.job_manager.enqueue", record)
     stale_before = datetime.now(timezone.utc) - timedelta(hours=6)
     async with db_container() as container:
         personal = await _source(container)
     try:
         for _ in range(2):
-            async with db_container() as container:
+            # As the cron runs it: a session with no transaction open.
+            async with sessionmanager.session() as session:
+                container = Container(session=providers.Object(session))
                 summary = (
                     await container.sharepoint_webhook_service().queue_catch_up_syncs(
                         stale_before=stale_before, limit=25, window_seconds=3600
                     )
                 )
+            await dispatches.wait_for(1)
             # The first run's job has not started, and the window holds after.
             await redis_client.delete(sync_queued_key(str(personal)))
         async with db_container() as container:
@@ -273,35 +313,45 @@ async def test_a_stale_source_gets_one_delta_job_per_window(
 
     assert summary["queued"] == 0
     assert tasks == ["sync_sharepoint_delta"]
-    assert [(task.value, knowledge) for task, _, knowledge in enqueue] == [
-        ("sync_sharepoint_delta", personal)
-    ]
+    assert dispatches.calls == [("sync_sharepoint_delta", personal)]
 
 
 async def test_a_follow_up_queues_the_sync_its_markers_ask_for(
-    db_container, redis_client, monkeypatch
+    db_container, redis_client, dispatches
 ):
-    """The job a lease holder queues after releasing runs on its own session."""
+    """What a lease holder does once its lease is released: read the markers,
+    queue the sync they ask for on a session of its own, and hand it to the
+    worker after that commits."""
     from eneo.integration.tasks import integration_task
 
-    enqueue = []
-
-    async def record(task, job_id, params):
-        enqueue.append((task.value, params.integration_knowledge_id))
-
-    monkeypatch.setattr("eneo.jobs.job_service.job_manager.enqueue", record)
     async with db_container() as container:
         personal = await _source(container)
+    knowledge_id = str(personal)
     try:
-        await integration_task._queue_sync_job(personal, full=True)  # pyright: ignore[reportPrivateUsage]
-    finally:
-        await redis_client.delete(sync_queued_key(str(personal)))
+        await integration_task._queue_follow_up(redis_client, personal)  # pyright: ignore[reportPrivateUsage]
+        assert dispatches.calls == []
 
-    assert enqueue == [("pull_sharepoint_content", personal)]
+        await redis_client.set(sync_pending_full_key(knowledge_id), "1", ex=60)
+        await integration_task._queue_follow_up(redis_client, personal)  # pyright: ignore[reportPrivateUsage]
+        await dispatches.wait_for(1)
+        async with db_container() as container:
+            tasks = (
+                await container.session().scalars(
+                    sa.select(Jobs.task).where(Jobs.name == "Library")
+                )
+            ).all()
+    finally:
+        await redis_client.delete(
+            sync_queued_key(knowledge_id), sync_pending_full_key(knowledge_id)
+        )
+
+    # The source has a delta token; the marker asked for a full sync.
+    assert dispatches.calls == [("pull_sharepoint_content", personal)]
+    assert tasks == ["pull_sharepoint_content"]
 
 
 async def test_a_removed_subscription_is_recreated_and_its_sources_queued(
-    db_container, redis_client, monkeypatch
+    db_container, redis_client, monkeypatch, dispatches
 ):
     from eneo.database.tables.sharepoint_subscription_table import (
         SharePointSubscription as SubscriptionDB,
@@ -314,11 +364,6 @@ async def test_a_removed_subscription_is_recreated_and_its_sources_queued(
         SubscriptionMaintenance,
     )
 
-    enqueue = []
-
-    async def record(task, job_id, params):
-        enqueue.append((task.value, params.integration_knowledge_id))
-
     async def token(*_args):
         return object()
 
@@ -328,7 +373,6 @@ async def test_a_removed_subscription_is_recreated_and_its_sources_queued(
     async def delete_at_graph(self, **_kwargs):
         return True
 
-    monkeypatch.setattr("eneo.jobs.job_service.job_manager.enqueue", record)
     monkeypatch.setattr(
         sharepoint_subscription_worker, "get_token_for_subscription", token
     )
@@ -365,6 +409,7 @@ async def test_a_removed_subscription_is_recreated_and_its_sources_queued(
         await sharepoint_subscription_worker.maintain_subscriptions(
             [SubscriptionMaintenance(subscription_id, "subscriptionRemoved")]
         )
+        await dispatches.wait_for(1)
     finally:
         await redis_client.delete(sync_queued_key(str(personal)))
 
@@ -375,4 +420,39 @@ async def test_a_removed_subscription_is_recreated_and_its_sources_queued(
             )
         )
     assert graph_id == "graph-new"
-    assert enqueue == [("sync_sharepoint_delta", personal)]
+    assert dispatches.calls == [("sync_sharepoint_delta", personal)]
+
+
+@pytest.mark.parametrize(
+    ("failed_hours_ago", "succeeded_hours_ago", "candidate"),
+    [
+        pytest.param(1, None, False, id="never-signed-in"),
+        pytest.param(1, 2, False, id="failed-since"),
+        pytest.param(2, 1, True, id="signed-in-since"),
+        pytest.param(None, 1, True, id="healthy"),
+    ],
+)
+async def test_sources_of_an_org_app_whose_sign_in_fails_are_skipped(
+    db_container, failed_hours_ago, succeeded_hours_ago, candidate
+):
+    """A sync would fail the same way; the next successful sign-in elsewhere
+    brings them back."""
+    now = datetime.now(timezone.utc)
+    async with db_container() as container:
+        app_id = await _tenant_app(
+            container,
+            active=True,
+            failed_at=now - timedelta(hours=failed_hours_ago)
+            if failed_hours_ago
+            else None,
+            succeeded_at=now - timedelta(hours=succeeded_hours_ago)
+            if succeeded_hours_ago
+            else None,
+        )
+        organization = await _source(
+            container, auth_type="tenant_app", tenant_app_id=app_id
+        )
+
+        candidates = await _candidate_ids(container)
+
+    assert (organization in candidates) is candidate
