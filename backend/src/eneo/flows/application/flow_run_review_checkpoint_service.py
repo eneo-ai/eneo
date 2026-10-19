@@ -96,6 +96,7 @@ from eneo.flows.principal import FlowPrincipal
 from eneo.flows.runtime.speaker_mapping_runtime import (
     SpeakerMappingValidationError,
     mapping_to_names,
+    mapping_with_proposal_support,
     validate_speaker_mapping,
 )
 from eneo.main.config import get_settings
@@ -431,7 +432,9 @@ def _speaker_mapping_text(
 
     The mapping is the value the reviewer owns; the step text is derived from it
     so the two never disagree. Names outside the participant list are allowed:
-    the reviewer is correcting, not proposing.
+    the reviewer is correcting, not proposing. The reviewer owns the names
+    only: an entry has the confidence and evidence of the step's own proposal
+    (the original payload) while it keeps the proposed name, and none after.
     """
     if source_text is None:
         raise TypedIOValidationException(
@@ -460,6 +463,10 @@ def _speaker_mapping_text(
             code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED,
             context={"checkpoint_id": str(checkpoint.id)},
         ) from exc
+    proposal = (checkpoint.original_payload_json or {}).get("structured")
+    mapping = mapping_with_proposal_support(
+        mapping, cast(dict[str, Any], proposal) if isinstance(proposal, dict) else {}
+    )
     return apply_speaker_names(source_text, mapping_to_names(mapping)), mapping
 
 

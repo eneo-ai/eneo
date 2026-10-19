@@ -1904,18 +1904,19 @@ async def test_large_source_is_reviewed_and_regenerated_through_api(
     assert child.json()["segments"] == detail.json()["segments"]
 
 
-@pytest.mark.parametrize("split_state", ["kept", "undone", "passage_deleted"])
-async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
-    split_state,
-    client,
+async def _open_speaker_mapping_review(
+    proposal: dict,
+    *,
     db_container,
-    patch_auth_service_jwt,
     completion_model_factory,
     space_factory,
     assistant_factory,
     admin_user,
 ):
-    from eneo.database.tables.flow_tables import FlowRuns, FlowStepAttempts
+    """A run waiting at the review of a speaker-mapping step that proposed
+    ``proposal`` for SEGMENTS: the scenario, the checkpoint and the headers of
+    an editor of the flow's space."""
+    from eneo.database.tables.flow_tables import FlowStepAttempts
     from eneo.database.tables.spaces_table import SpacesUsers
     from eneo.flows.application.flow_transcript_regeneration_service import (
         render_original_segments,
@@ -1928,21 +1929,12 @@ async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
     from eneo.flows.enums import FlowOutputType
     from eneo.flows.flow_review_policy import FlowStepReviewMode
     from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
+    from eneo.flows.runtime.speaker_mapping_runtime import mapping_to_names
     from eneo.spaces.api.space_models import SpaceRoleValue
 
     source_text = render_original_segments(SEGMENTS)
-    proposal = {
-        "speakers": [
-            {
-                "label": "SPEAKER_00",
-                "name": "Anna",
-                "confidence": "high",
-                "evidence": "",
-            },
-            {"label": "SPEAKER_01", "name": None, "confidence": "low", "evidence": ""},
-        ]
-    }
-    named_text = apply_speaker_names(source_text, {"SPEAKER_00": "Anna"})
+    names = mapping_to_names(proposal)
+    named_text = apply_speaker_names(source_text, names)
     async with db_container() as container:
         session = container.session()
         scenario = await _create_scenario(
@@ -1991,7 +1983,7 @@ async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
                 "source_step_order": 1,
                 "source_attempt_no": source.current_attempt_no,
                 "participants_field": "deltagare",
-                "participants": ["Anna"],
+                "participants": list(names.values()),
                 "infer_names": False,
                 "inventory": build_speaker_inventory(source_text),
             },
@@ -2039,9 +2031,42 @@ async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
             output_type=FlowOutputType.JSON,
             output_contract_json=SPEAKER_MAPPING_OUTPUT_CONTRACT,
         )
-        checkpoint = opened.checkpoint
         token = container.auth_service().create_access_token_for_user(admin_user)
-    headers = {"Authorization": f"Bearer {token}"}
+    return scenario, opened.checkpoint, {"Authorization": f"Bearer {token}"}
+
+
+@pytest.mark.parametrize("split_state", ["kept", "undone", "passage_deleted"])
+async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
+    split_state,
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    from eneo.database.tables.flow_tables import FlowRuns
+
+    proposal = {
+        "speakers": [
+            {
+                "label": "SPEAKER_00",
+                "name": "Anna",
+                "confidence": "high",
+                "evidence": "",
+            },
+            {"label": "SPEAKER_01", "name": None, "confidence": "low", "evidence": ""},
+        ]
+    }
+    scenario, checkpoint, headers = await _open_speaker_mapping_review(
+        proposal,
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
     run_path = f"/api/v1/flows/{scenario.flow_id}/runs/{scenario.flow_run_id}"
     split = await client.patch(
         f"{run_path}/steps/{scenario.transcription_step_id}/transcript-corrections/",
@@ -2150,6 +2175,83 @@ async def test_a_speaker_split_at_the_mapping_review_is_named_downstream(
         )
     assert output["text"] == document
     assert run_input["transkribering"]["text"] == document
+
+
+async def test_a_name_changed_at_the_mapping_review_keeps_no_model_support(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    anna = {
+        "label": "SPEAKER_00",
+        "name": "Anna",
+        "confidence": "high",
+        "evidence": "Presenterar sig som Anna.",
+    }
+    bo = {
+        "label": "SPEAKER_01",
+        "name": "Bo",
+        "confidence": "medium",
+        "evidence": "Tilltalas som Bo.",
+    }
+    scenario, checkpoint, headers = await _open_speaker_mapping_review(
+        {"speakers": [anna, bo]},
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    checkpoint_path = (
+        f"/api/v1/flows/{scenario.flow_id}/runs/{scenario.flow_run_id}"
+        f"/review-checkpoints/{checkpoint.id}/"
+    )
+
+    # Bertil for Anna and nobody for Bo, sent with the step's confidence and
+    # evidence as the review editor holds them.
+    edited = await client.patch(
+        checkpoint_path,
+        headers=headers,
+        json={
+            "expected_checkpoint_revision": checkpoint.revision,
+            "edited_value": {
+                "speakers": [{**anna, "name": "Bertil"}, {**bo, "name": None}]
+            },
+        },
+    )
+    assert edited.status_code == 200, edited.text
+    approved = await client.post(
+        f"{checkpoint_path}approve/",
+        headers=headers,
+        json={"expected_checkpoint_revision": edited.json()["revision"]},
+    )
+
+    assert approved.status_code == 200, approved.text
+    unsupported = {
+        "speakers": [
+            {
+                "label": "SPEAKER_00",
+                "name": "Bertil",
+                "confidence": "low",
+                "evidence": "",
+            },
+            {"label": "SPEAKER_01", "name": None, "confidence": "low", "evidence": ""},
+        ]
+    }
+    assert approved.json()["current_payload_json"]["structured"] == unsupported
+    # The run view reads the step's result.
+    async with db_container() as container:
+        output = await container.session().scalar(
+            sa.select(FlowStepResults.output_payload_json).where(
+                FlowStepResults.flow_run_id == scenario.flow_run_id,
+                FlowStepResults.step_id == scenario.plain_step_id,
+            )
+        )
+    assert output["structured"] == unsupported
 
 
 async def _complete_run(session, run_id: UUID) -> None:

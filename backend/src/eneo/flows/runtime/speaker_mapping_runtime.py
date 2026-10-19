@@ -253,6 +253,25 @@ def ground_speaker_mapping_proposal(
     return {**structured, "speakers": speakers}
 
 
+def mapping_with_proposal_support(
+    mapping: Mapping[str, Any], proposal: Mapping[str, Any]
+) -> dict[str, Any]:
+    """``mapping``, a person's review of ``proposal``, with ``proposal``'s
+    entry for each label it names as ``proposal`` does. A name the person
+    changed, cleared or gave a label ``proposal`` lacks is theirs, not the
+    model's, so its entry keeps no model support, whatever it was sent with."""
+    proposed = {entry.get("label"): entry for entry in proposal.get("speakers", [])}
+    speakers: list[dict[str, Any]] = []
+    for entry in mapping["speakers"]:
+        kept = proposed.get(entry["label"])
+        speakers.append(
+            dict(kept)
+            if kept is not None and kept.get("name") == entry["name"]
+            else _without_model_support(entry, entry["name"])
+        )
+    return {**mapping, "speakers": speakers}
+
+
 def _without_model_support(
     entry: Mapping[str, Any], name: str | None
 ) -> dict[str, Any]:

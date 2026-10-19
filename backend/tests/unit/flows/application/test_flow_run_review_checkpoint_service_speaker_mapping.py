@@ -143,6 +143,78 @@ def test_edit_reapplies_the_mapping_to_the_source_transcript() -> None:
     assert payload["speaker_mapping"]["source_step_id"] == str(SOURCE_STEP_ID)
 
 
+# The step's proposal, with the support it gave each name.
+SUPPORTED = {
+    "speakers": [
+        {
+            "label": "SPEAKER_00",
+            "name": "Anna",
+            "confidence": "high",
+            "evidence": "Presenterar sig som Anna.",
+        },
+        {
+            "label": "SPEAKER_01",
+            "name": "Bo",
+            "confidence": "medium",
+            "evidence": "Tilltalas som Bo.",
+        },
+    ]
+}
+
+
+def test_a_name_the_reviewer_changed_or_cleared_keeps_no_model_support() -> None:
+    anna, bo = SUPPORTED["speakers"]
+
+    # The review editor sends the step's confidence and evidence back as they were.
+    payload = build_edited_review_payload(
+        checkpoint=_checkpoint({**_payload(SOURCE), "structured": SUPPORTED}),
+        edited_value={"speakers": [{**anna, "name": "Bertil"}, {**bo, "name": None}]},
+        source_text=SOURCE,
+    )
+
+    assert payload["structured"] == {
+        "speakers": [
+            {
+                "label": "SPEAKER_00",
+                "name": "Bertil",
+                "confidence": "low",
+                "evidence": "",
+            },
+            {"label": "SPEAKER_01", "name": None, "confidence": "low", "evidence": ""},
+        ]
+    }
+
+
+def test_a_name_as_the_step_proposed_it_keeps_the_step_support() -> None:
+    anna, bo = SUPPORTED["speakers"]
+    renamed = {**anna, "name": "Bertil", "confidence": "low", "evidence": ""}
+    proposed = {**_payload(SOURCE), "structured": SUPPORTED}
+    # An earlier save renamed Anna.
+    checkpoint = _checkpoint(proposed).model_copy(
+        update={
+            "current_payload_json": {
+                **proposed,
+                "structured": {"speakers": [renamed, bo]},
+            }
+        }
+    )
+
+    payload = build_edited_review_payload(
+        checkpoint=checkpoint,
+        # Anna again, as the editor holds her after that save, and Bo with
+        # support the step never gave.
+        edited_value={
+            "speakers": [
+                {**renamed, "name": "Anna"},
+                {**bo, "confidence": "high", "evidence": "Låter som Bo."},
+            ]
+        },
+        source_text=SOURCE,
+    )
+
+    assert payload["structured"] == SUPPORTED
+
+
 def test_edit_without_source_transcript_is_rejected() -> None:
     with pytest.raises(TypedIOValidationException):
         build_edited_review_payload(
@@ -575,7 +647,18 @@ async def test_review_edit_names_a_speaker_split_at_the_pause(split) -> None:
         return
     edited = await edit
 
-    assert edited.current_payload_json["structured"] == NAMED_SPLIT
+    # The split's name is the reviewer's: the step never proposed one.
+    assert edited.current_payload_json["structured"] == {
+        "speakers": [
+            *PROPOSAL["speakers"],
+            {
+                "label": "SPEAKER_05",
+                "name": "Eva Ek",
+                "confidence": "low",
+                "evidence": "",
+            },
+        ]
+    }
     service.transcript_corrections_repo.get_for_step.assert_awaited_once_with(
         run_id=run.id, step_id=SOURCE_STEP_ID, tenant_id=run.tenant_id
     )
