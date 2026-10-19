@@ -379,7 +379,7 @@ class AIBuilderProposalAttemptDiagnostic(BaseModel):
 class AIBuilderProviderCallDiagnostic(BaseModel):
     """One provider call of a send turn, whichever phase spent it.
 
-    Projected from every assistant message's persisted call records, so a turn
+    Projected from every message's persisted call records, so a turn
     that classified and then asked a question shows its classifier cost here
     even though it produced no proposal attempt.
     """

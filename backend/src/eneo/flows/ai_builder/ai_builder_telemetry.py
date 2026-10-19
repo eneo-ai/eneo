@@ -1,8 +1,9 @@
 """AI Builder turn + session telemetry.
 
-The session aggregator here reads metrics out of persisted assistant
-messages. By design it covers **committed turns only** — turns that
-became part of the durable conversation history the user sees.
+The session aggregator here reads metrics out of persisted
+messages. By design it covers **committed turns only** — turns that left a
+telemetry record on a message kept in the durable conversation history: an
+answer, or the user message of a turn the server ended in an error.
 """
 
 from __future__ import annotations
@@ -111,7 +112,7 @@ class PlannerCallRecordsRead(BaseModel):
 def planner_call_records_from_metadata(
     metadata: Mapping[str, object] | None,
 ) -> PlannerCallRecordsRead:
-    """The provider calls a persisted assistant message accounts for.
+    """The provider calls a persisted message accounts for.
 
     Reads the shape `build_planner_telemetry` writes. Diagnostics degrade, they
     never raise on the request path: a message without telemetry contributes
@@ -239,10 +240,11 @@ def summarize_session_telemetry(
 ) -> dict[str, Any] | None:
     """Aggregate committed-turn metrics from the persisted conversation.
 
-    Only turns that became assistant messages contribute; rejected and
-    parse-failed turns are absent from the conversation history and
-    therefore from this summary. See the module docstring for the
-    committed-turns-only contract.
+    Only turns that left a telemetry record on a kept message contribute (an
+    answer, or the user message of a server-ended turn); provider-rejected and
+    parse-failed turns are absent from the conversation history and therefore
+    from this summary. See the module docstring for the committed-turns-only
+    contract.
     """
     latest = _latest_session_telemetry(conversation)
     if latest is not None:

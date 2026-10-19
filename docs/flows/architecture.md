@@ -133,7 +133,9 @@ assistant message leaves a structured log event instead: a known provider reject
 emits `ai_builder.provider.failure` (`schema_version` 1, the provider failure with its
 timing, without the proposal attempts), and a failed proposal turn emits
 `ai_builder.proposal.failed_turn` (`schema_version` 3, with the attempts). A persisted
-snapshot for these turns is V0.2c.
+snapshot for these turns is V0.2c. A turn the server itself ends in an error after it
+made calls (an unsupported architecture, an unrenderable question) is the exception:
+it stores its telemetry record on the user message it kept.
 Every correctable failure names the owner of each rule whose feedback it carries
 (`parse`, `assembly`, `platform_validator`, `lint`, `critic`, `review_guard`,
 `scope_guard`); a merged failure names every contributor, and each failed

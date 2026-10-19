@@ -105,8 +105,10 @@ from eneo.flows.ai_builder.ai_builder_resource_catalog import (
 from eneo.flows.ai_builder.ai_builder_send_lease import claim_ai_builder_send_turn
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
+    ServerDecisionKind,
     ServerDecisionTelemetry,
     dispatch_server_decision,
+    server_turn_telemetry,
 )
 from eneo.flows.ai_builder.ai_builder_session_turn import (
     SessionSendLease,
@@ -339,6 +341,44 @@ class AIBuilderPlanner:
                 *(covered for covered in restated if covered is not user_message),
                 user_message,
             ],
+            lease=lease,
+        )
+
+    async def _store_telemetry_of_unanswered_turn(
+        self,
+        *,
+        user_message: ConversationMessage,
+        conversation: list[ConversationMessage],
+        session_id: UUID,
+        lease: SessionSendLease,
+        usage_tracker: ProposalTurnTelemetry,
+        action_kind: ServerDecisionKind,
+    ) -> None:
+        """Keep what a turn paid for when the server ended it in an error.
+
+        An assistant message carries a turn's telemetry, and a turn the server
+        ends in an error stores none, so the calls it made (the classifier's
+        reading above all) would otherwise leave no spend or model behind. The
+        user message is the one record of the turn that was kept, and the
+        session and call readers take telemetry from any message. A commit the
+        turn made before the error is recorded in the planning state, so the
+        record never claims one, as the answers chained after a commit do not.
+        """
+
+        user_message.metadata = build_assistant_message_metadata(
+            conversation,
+            planner_telemetry=server_turn_telemetry(
+                usage_tracker,
+                action_kind=action_kind,
+                architecture_commit_populated=False,
+                tool_call_count=0,
+            ),
+            base_metadata=user_message.metadata,
+        )
+        await self.repo.append_session_messages(
+            session_id=session_id,
+            tenant_id=self.user.tenant_id,
+            conversation=[user_message],
             lease=lease,
         )
 
@@ -984,6 +1024,15 @@ class AIBuilderPlanner:
                             ),
                             None,
                         )
+                        if error is not None and usage_tracker.llm_calls_made > 0:
+                            await self._store_telemetry_of_unanswered_turn(
+                                user_message=user_message,
+                                conversation=conversation,
+                                session_id=session_id,
+                                lease=lease,
+                                usage_tracker=usage_tracker,
+                                action_kind=dispatch_result.action_kind,
+                            )
                         await self.repo.complete_session_turn(
                             turn=turn,
                             error=error,

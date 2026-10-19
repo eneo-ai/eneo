@@ -145,6 +145,7 @@ from eneo.flows.ai_builder.ai_builder_schema_evidence import (
 from eneo.flows.ai_builder.ai_builder_server_decision_dispatch import (
     ServerDecisionDispatchRequest,
     ServerDecisionDispatchResult,
+    ServerDecisionKind,
     ServerDecisionProposalContinuation,
     ServerDecisionTelemetry,
     dispatch_server_decision,
@@ -168,6 +169,10 @@ from eneo.flows.ai_builder.ai_builder_slot_classification_contract import (
     SlotClassificationInput,
     SlotClassificationResult,
     SlotClassificationSource,
+)
+from eneo.flows.ai_builder.ai_builder_telemetry import (
+    planner_call_records_from_metadata,
+    summarize_session_telemetry,
 )
 from eneo.flows.ai_builder.ai_builder_token_usage import CompletionTokenUsage
 from eneo.flows.ai_builder.ai_builder_tool_names import (
@@ -3811,6 +3816,71 @@ async def test_send_message_refuses_unsupported_architecture_without_provider_or
     assert persisted_state.model_dump(mode="json") == persisted_snapshot
     completed_error = planner.repo.complete_session_turn.await_args.kwargs["error"]
     assert completed_error.model_dump(mode="json", exclude_none=True) == error_payload
+    # Mutant: the error path stores a record even when no call was made.
+    assert planner.repo.append_session_messages.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "dispatched_kind",
+    ["ask_question", "refuse_architecture_commit", "commit_architecture"],
+)
+async def test_a_paid_turn_records_its_call_once_on_the_message_the_turn_kept(
+    monkeypatch: pytest.MonkeyPatch, dispatched_kind: ServerDecisionKind
+) -> None:
+    # Mutants: a server-ended turn stores no spend; the record replaces the user
+    # message's metadata; an answered turn also stores it on the user message
+    # (double count); a commit chained into a refusal is claimed again.
+    planner = _make_planner()
+    _configure_minimal_send_message(planner, monkeypatch, _server_output_prepared())
+
+    async def dispatch(
+        request: ServerDecisionDispatchRequest,
+    ) -> ServerDecisionDispatchResult:
+        tracker = request.telemetry.usage_tracker
+        tracker.complete_call(
+            call=tracker.begin_call(call_kind="slot_classification"),
+            usage=CompletionTokenUsage(total_tokens=150, source="provider"),
+        )
+        request.conversation[request.new_messages_start].metadata = {"kept": 1}
+        if dispatched_kind == "ask_question":
+            return await dispatch_server_decision(request)
+        return ServerDecisionDispatchResult(
+            action_kind=dispatched_kind,
+            events=(
+                build_ai_builder_error_event(
+                    message="refused",
+                    code=AIBuilderErrorCode.UNSUPPORTED_ARCHITECTURE,
+                    request_id=request.telemetry.request_id,
+                ),
+            ),
+            new_planning_state_version=5,
+        )
+
+    monkeypatch.setattr(
+        "eneo.flows.ai_builder.ai_builder_planner.dispatch_server_decision", dispatch
+    )
+
+    await _collect_send_message_events(planner, session_id=uuid4())
+
+    stored = [
+        *planner.repo.append_session_messages.await_args.kwargs["conversation"],
+        *(
+            message
+            for call in planner.repo.commit_turn.await_args_list
+            for message in call.kwargs["new_messages"]
+        ),
+    ]
+    assert (stored[0].metadata or {})["kept"] == 1
+    assert [
+        message.role
+        for message in stored
+        if planner_call_records_from_metadata(message.metadata).records
+    ] == ["assistant" if dispatched_kind == "ask_question" else "user"]
+    telemetry = summarize_session_telemetry(stored) or {}
+    assert telemetry["total_tokens_total"] == 150
+    assert telemetry["last_outcome_kind"] == f"server_{dispatched_kind}"
+    assert telemetry["architecture_commit_count"] == 0
 
 
 @pytest.mark.asyncio

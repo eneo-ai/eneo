@@ -197,7 +197,10 @@ call's record in that message's telemetry carries the bounded disposition (`prov
 status class, turn state), `local_deadline`, and the call's chunk timing, never
 its content. A terminal turn without an assistant message (for example a known
 provider rejection) leaves only the failure-event log; a persisted snapshot for
-those turns is V0.2c.
+those turns is V0.2c. A turn the server itself ends in an error after it made
+provider calls (an unsupported architecture, an unrenderable question) is the
+exception: it stores its telemetry record on the user message it kept. A refusal
+that made no call stores none.
 
 Example query:
 

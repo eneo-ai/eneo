@@ -223,8 +223,8 @@ async def _dispatch_question(
             ),
         )
 
-    telemetry = _server_turn_telemetry(
-        request,
+    telemetry = server_turn_telemetry(
+        request.telemetry.usage_tracker,
         action_kind="ask_question",
         architecture_commit_populated=False,
         tool_call_count=1 if followup is not None else 0,
@@ -544,8 +544,8 @@ async def _dispatch_requirements_confirmation(
             content=requirements_payload.summary,
             metadata=build_assistant_message_metadata(
                 request.conversation,
-                planner_telemetry=_server_turn_telemetry(
-                    request,
+                planner_telemetry=server_turn_telemetry(
+                    request.telemetry.usage_tracker,
                     action_kind="confirm_requirements",
                     architecture_commit_populated=False,
                     tool_call_count=0,
@@ -567,16 +567,16 @@ async def _dispatch_requirements_confirmation(
     )
 
 
-def _server_turn_telemetry(
-    request: ServerDecisionDispatchRequest,
+def server_turn_telemetry(
+    usage_tracker: ProposalTurnTelemetry,
     *,
     action_kind: ServerDecisionKind,
     architecture_commit_populated: bool,
     tool_call_count: int,
 ) -> dict[str, object]:
-    telemetry = request.telemetry.usage_tracker.build_planner_telemetry(
-        tool_call_count=tool_call_count
-    )
+    """The record of a turn the server decided, in the shape every turn writes."""
+
+    telemetry = usage_tracker.build_planner_telemetry(tool_call_count=tool_call_count)
     telemetry.update(
         outcome_kind=f"server_{action_kind}",
         architecture_commit_populated=architecture_commit_populated,
@@ -587,8 +587,10 @@ def _server_turn_telemetry(
 __all__ = [
     "ServerDecisionDispatchRequest",
     "ServerDecisionDispatchResult",
+    "ServerDecisionKind",
     "ServerDecisionProposalContinuation",
     "ServerDecisionTelemetry",
     "dispatch_server_decision",
+    "server_turn_telemetry",
     "situate_question",
 ]
