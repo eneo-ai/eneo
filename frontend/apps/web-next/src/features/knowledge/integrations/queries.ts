@@ -278,15 +278,19 @@ export function syncLogWindowQueryOptions(
 const PROGRESS_ACTIVE_MS = 2_000;
 const PROGRESS_IDLE_MS = 15_000;
 
-function isNotFound(error: unknown): boolean {
-  return error instanceof EneoApiError && error.status === 404;
+/** No endpoint (an older backend), or no access to the space any more: asking again won't help. */
+function isUnavailable(error: unknown): boolean {
+  return (
+    error instanceof EneoApiError &&
+    (error.status === 404 || error.status === 403 || error.status === 401)
+  );
 }
 
 /**
  * The running syncs of a space, keyed by item. Polls every 2 s while one runs
  * or an item of `awaiting` (a sync queued from here) has not reported yet, and
  * every 15 s otherwise, but not while the browser tab is hidden; stops for
- * good on a 404 (a backend without the endpoint). Structural sharing keeps the
+ * good on a 404 (a backend without the endpoint) or a refusal (401, 403). Structural sharing keeps the
  * data stable between identical polls.
  */
 export function syncProgressQueryOptions(
@@ -304,9 +308,9 @@ export function syncProgressQueryOptions(
       );
       return Object.fromEntries(list.items.map((entry) => [entry.integration_knowledge_id, entry]));
     },
-    retry: (failures, error) => !isNotFound(error) && failures < 2,
+    retry: (failures, error) => !isUnavailable(error) && failures < 2,
     refetchInterval: (query) => {
-      if (isNotFound(query.state.error)) return false;
+      if (isUnavailable(query.state.error)) return false;
       const progress = query.state.data ?? {};
       const busy = Object.keys(progress).length > 0 || awaiting.some((id) => !(id in progress));
       return busy ? PROGRESS_ACTIVE_MS : PROGRESS_IDLE_MS;

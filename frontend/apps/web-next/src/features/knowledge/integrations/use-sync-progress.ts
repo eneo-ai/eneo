@@ -58,13 +58,12 @@ export function useSyncProgress(): { progress: ProgressById; queued: QueuedIds }
     if (reported.length > 0) untrackSyncs(reported.map((entry) => entry.jobId));
   }, [pending, progress]);
 
-  const queued = useMemo<QueuedIds>(
-    () =>
-      new Set(
-        pending.filter((entry) => !(entry.knowledgeId in progress)).map((e) => e.knowledgeId)
-      ),
-    [pending, progress]
-  );
+  const queued = useMemo<QueuedIds>(() => {
+    const reported = new Set(reportedSyncs(pending, progress).map((entry) => entry.knowledgeId));
+    return new Set(
+      pending.filter((entry) => !reported.has(entry.knowledgeId)).map((entry) => entry.knowledgeId)
+    );
+  }, [pending, progress]);
 
   return { progress, queued };
 }

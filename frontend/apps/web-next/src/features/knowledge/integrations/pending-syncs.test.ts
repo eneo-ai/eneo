@@ -35,4 +35,12 @@ describe("pending syncs", () => {
     const running = { b: {} as IntegrationSyncProgress };
     expect(reportedSyncs(pending, running)).toEqual([{ jobId: "j2", knowledgeId: "b" }]);
   });
+
+  it("does not take a change notification's delta pass for the full sync queued here", () => {
+    const pending = [{ jobId: "j1", knowledgeId: "a" }];
+    const delta = { a: { sync_type: "delta" } as IntegrationSyncProgress };
+    expect(reportedSyncs(pending, delta)).toEqual([]);
+    const full = { a: { sync_type: "full" } as IntegrationSyncProgress };
+    expect(reportedSyncs(pending, full)).toEqual(pending);
+  });
 });

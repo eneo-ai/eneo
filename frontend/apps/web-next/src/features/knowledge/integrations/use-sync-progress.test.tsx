@@ -141,6 +141,34 @@ describe("useSyncProgress", () => {
     expect(pendingSyncs()).toEqual([]);
   });
 
+  it("keeps a full sync queued while a change notification's delta pass of the item runs", async () => {
+    const { result } = renderSyncProgress();
+    await flush();
+    act(() => trackSyncs([{ jobId: "job-1", knowledgeId: "i1" }]));
+    api.GET.mockImplementation(() =>
+      Promise.resolve({
+        data: { items: [{ ...running("i1"), sync_type: "delta" }] },
+        response: new Response("{}")
+      })
+    );
+    await flush(2_000);
+    await flush();
+    expect(Object.keys(result.current.progress)).toEqual(["i1"]);
+    expect(result.current.queued).toEqual(new Set(["i1"]));
+    expect(pendingSyncs()).toEqual([{ jobId: "job-1", knowledgeId: "i1" }]);
+  });
+
+  it.each([401, 403, 404])("stops polling for good on a %i", async (status) => {
+    api.GET.mockImplementation(() =>
+      Promise.resolve({ error: { detail: "No" }, response: new Response("{}", { status }) })
+    );
+    renderSyncProgress();
+    await flush();
+    expect(progressPolls()).toBe(1);
+    await flush(60_000);
+    expect(progressPolls()).toBe(1);
+  });
+
   it("does not poll fast for a sync queued in another space", async () => {
     const { result } = renderSyncProgress();
     await flush();

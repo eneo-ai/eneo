@@ -37,12 +37,18 @@ export function untrackSyncs(jobIds: readonly string[]): void {
   publish(pending.filter((entry) => !jobIds.includes(entry.jobId)));
 }
 
-/** The pending syncs the worker reports on now; their progress tells the rest. */
+/**
+ * The pending syncs the worker reports on now; their progress tells the rest. A
+ * change notification's delta pass of the item is not the full sync queued here.
+ */
 export function reportedSyncs(
   items: readonly PendingSync[],
   progress: ProgressById
 ): PendingSync[] {
-  return items.filter((item) => item.knowledgeId in progress);
+  return items.filter((item) => {
+    const entry = progress[item.knowledgeId];
+    return entry !== undefined && entry.sync_type !== "delta";
+  });
 }
 
 /** Test seam: forget every pending sync. */
