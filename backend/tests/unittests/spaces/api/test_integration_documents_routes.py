@@ -24,6 +24,10 @@ from eneo.integration.domain.repositories.integration_knowledge_repo import (
     IntegrationKnowledgeLocation,
 )
 from eneo.integration.domain.skip_reasons import NO_TEXT_LAYER_REASON
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    CREDENTIALS_INVALID_MESSAGE,
+    SharePointCredentialsInvalidError,
+)
 from eneo.integration.infrastructure.sharepoint_sync_progress import (
     sync_progress_key,
 )
@@ -51,6 +55,7 @@ class DocumentsAPI:
     sync_logs: AsyncMock
     progress_redis: AsyncMock
     knowledge_repo: AsyncMock
+    container: Container
 
     @property
     def progress_url(self) -> str:
@@ -194,6 +199,7 @@ def documents_api(user: UserInDB) -> DocumentsAPI:
         sync_logs,
         progress_redis,
         knowledge_repo,
+        container,
     )
 
 
@@ -668,3 +674,44 @@ async def test_sync_progress_written_before_the_cleanup_is_served_clean(
             "retry": False,
         }
     ]
+
+
+def _organization_item(api: DocumentsAPI) -> None:
+    """Make the item one the organization's SharePoint app imported, and the
+    caller an admin who may sync it."""
+    api.user.roles = [
+        RoleInDB(
+            id=uuid4(),
+            name="Admin",
+            tenant_id=api.user.tenant_id,
+            permissions=[Permission.ADMIN, Permission.INTEGRATIONS],
+        )
+    ]
+    api.space.members[api.user.id].role = SpaceRoleValue.ADMIN
+    api.knowledge.user_integration.auth_type = "tenant_app"
+    api.knowledge.user_integration.tenant_app_id = uuid4()
+    api.knowledge.site_id = "contoso.sharepoint.com,site,web"
+
+
+async def test_refused_organization_credentials_are_a_400_with_a_stable_code(
+    documents_api,
+):
+    """An expired app secret made a sync a 500."""
+    api = documents_api
+    _organization_item(api)
+    tokens = AsyncMock()
+    tokens.get_access_token.side_effect = SharePointCredentialsInvalidError(
+        "AADSTS7000222: The provided client secret keys are expired."
+    )
+    jobs = AsyncMock()
+    api.container.org_token_provider.override(providers.Object(tokens))
+    api.container.job_service.override(providers.Object(jobs))
+
+    response = await _send(api, "POST", api.change_url("{id}/sync/", api.knowledge.id))
+
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["code"] == "sharepoint_credentials_invalid"
+    assert body["message"] == CREDENTIALS_INVALID_MESSAGE
+    assert "AADSTS" not in response.text
+    jobs.queue_job.assert_not_awaited()

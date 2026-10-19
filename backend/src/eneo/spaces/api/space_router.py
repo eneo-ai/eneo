@@ -48,7 +48,13 @@ from eneo.integration.presentation.models import (
 from eneo.jobs.job_models import JobPublic
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
-from eneo.main.models import NOT_PROVIDED, ModelId, PaginatedResponse, is_provided
+from eneo.main.models import (
+    NOT_PROVIDED,
+    GeneralError,
+    ModelId,
+    PaginatedResponse,
+    is_provided,
+)
 from eneo.roles.permissions import Permission
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
@@ -94,6 +100,16 @@ _SPACE_OPERATION_ACCESS_REASON = (
     "SpaceService enforces membership and the requested space operation."
 )
 _INTEGRATION_KNOWLEDGE_ACCESS_REASON = "IntegrationKnowledgeService enforces the space actor's permission for this operation."
+# Imports and syncs through the organization's SharePoint app fetch its token first.
+_ORGANIZATION_TOKEN_RESPONSES = {
+    **responses.get_responses([400, 403, 404]),
+    400: {
+        "model": GeneralError,
+        "description": "Bad request; `code` is `sharepoint_credentials_invalid` when "
+        "Microsoft refuses the organization's SharePoint credentials, which an "
+        "administrator must reconnect.",
+    },
+}
 ApiKeyRevokingContainer = Annotated[
     Container,
     Depends(get_container(with_user=True, transaction_scope="function")),
@@ -916,7 +932,7 @@ async def _audit_integration_knowledge(
     response_model=JobPublic,
     status_code=202,  # Changed to 202 Accepted since job is queued
     description="Add integration knowledge to a space. Returns a job to track import progress.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=_ORGANIZATION_TOKEN_RESPONSES,
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -1367,7 +1383,7 @@ async def get_integration_knowledge_skipped_documents(
     response_model=JobPublic,
     status_code=202,
     description="Trigger a full re-sync of integration knowledge. Returns a job to track progress.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=_ORGANIZATION_TOKEN_RESPONSES,
 )
 @endpoint_access(
     authentication=Authentication.USER,

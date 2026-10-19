@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Optional, cast
 from uuid import UUID
 
+import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 
 from eneo.authentication.endpoint_access import Authentication, endpoint_access
@@ -13,6 +14,10 @@ from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
 from eneo.integration.domain.entities.user_integration import UserIntegration
+from eneo.integration.infrastructure.auth_service.base_auth_service import (
+    OAuthCodeRejectedError,
+    rejected_code,
+)
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
 )
@@ -1209,7 +1214,10 @@ async def restart_service_account_auth(
     ),
     responses={
         201: {"description": "Service account successfully configured"},
-        400: {"description": "Invalid state or auth code"},
+        400: {
+            "description": "Invalid state or auth code; `code` is "
+            "`oauth_code_rejected` when Microsoft refuses the code"
+        },
         401: {"description": "Authentication required"},
         403: {"description": "Admin permissions required"},
     },
@@ -1265,15 +1273,20 @@ async def service_account_auth_callback(
             client_secret = stored_state["client_secret"]
             tenant_domain = stored_state["tenant_domain"]
 
-        # Exchange auth code for tokens
         service_account_auth_service = ServiceAccountAuthService()
-        token_result = await service_account_auth_service.exchange_token(
-            auth_code=callback.auth_code,
-            client_id=client_id,
-            client_secret=client_secret,
-            tenant_domain=tenant_domain,
-            redirect_uri=stored_state.get("redirect_uri"),
-        )
+        try:
+            token_result = await service_account_auth_service.exchange_token(
+                auth_code=callback.auth_code,
+                client_id=client_id,
+                client_secret=client_secret,
+                tenant_domain=tenant_domain,
+                redirect_uri=stored_state.get("redirect_uri"),
+            )
+        except httpx.HTTPStatusError as exc:
+            rejection = rejected_code(exc)
+            if rejection is None:
+                raise
+            raise rejection from exc
 
         app = await tenant_app_service.configure_service_account(
             tenant_id=user.tenant_id,
@@ -1369,7 +1382,7 @@ async def service_account_auth_callback(
 
         return _to_app_public(app, encryption_service)
 
-    except HTTPException:
+    except (HTTPException, OAuthCodeRejectedError):
         raise
     except Exception:
         logger.error("Failed to complete service account OAuth", exc_info=True)

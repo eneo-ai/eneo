@@ -3,11 +3,15 @@ import json
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import httpx
 import pytest
 from dependency_injector import providers
 from fastapi import HTTPException
 from pydantic import ValidationError
 
+from eneo.integration.infrastructure.auth_service.base_auth_service import (
+    OAuthCodeRejectedError,
+)
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
 )
@@ -71,3 +75,58 @@ def test_service_account_callback_state_is_bounded():
     with pytest.raises(ValidationError):
         ServiceAccountAuthCallback(auth_code="code", state="s" * 257)
     assert ServiceAccountAuthCallback(auth_code="code", state="s" * 43)
+
+
+async def test_a_refused_service_account_code_is_a_400_not_a_500(
+    integration_access, test_settings, monkeypatch
+):
+    user = integration_access.user
+    set_settings(
+        test_settings.model_copy(
+            update={"sharepoint_webhook_client_state": "test-webhook-state"}
+        )
+    )
+    request = httpx.Request("POST", "https://login.microsoftonline.com/x/token")
+    provider = AsyncMock(spec=ServiceAccountAuthService)
+    provider.exchange_token.side_effect = httpx.HTTPStatusError(
+        "refused",
+        request=request,
+        response=httpx.Response(
+            400,
+            json={
+                "error": "invalid_grant",
+                "error_description": "AADSTS54005: OAuth2 Authorization code "
+                "was already redeemed. Trace ID: 1f2e",
+            },
+            request=request,
+        ),
+    )
+    monkeypatch.setattr(router, "ServiceAccountAuthService", lambda: provider)
+    state_store = MagicMock()
+    state_store.pop = AsyncMock(
+        return_value={
+            "tenant_id": str(user.tenant_id),
+            "user_id": str(user.id),
+            "client_id": "test-client",
+            "client_secret": "test-secret",
+            "tenant_domain": "example.onmicrosoft.com",
+            "redirect_uri": "https://beta.example/integrations/callback/token/",
+        }
+    )
+    monkeypatch.setattr(router, "_oauth_state_store", lambda container: state_store)
+    tenant_app_service = AsyncMock()
+    container = Container(
+        user=providers.Object(user),
+        tenant_sharepoint_app_service=providers.Object(tenant_app_service),
+    )
+
+    with pytest.raises(OAuthCodeRejectedError) as error:
+        await router.service_account_auth_callback(
+            ServiceAccountAuthCallback(auth_code="used-code", state="test-state"),
+            container,
+        )
+
+    assert error.value.code == "oauth_code_rejected"
+    assert "AADSTS54005" in str(error.value)
+    assert "Trace ID" not in str(error.value)
+    tenant_app_service.configure_service_account.assert_not_awaited()

@@ -74,7 +74,13 @@ _HEALTH_WRITE_LOCK_TIMEOUT = "2s"
 
 
 class SharePointCredentialsInvalidError(Exception):
-    """The token endpoint refused the stored credentials; retrying cannot help."""
+    """The token endpoint refused the stored credentials; retrying cannot help.
+
+    Served as a 400 with ``code`` below; ``detail`` is Microsoft's reason, which
+    is recorded on the app for administrators and never put in the response.
+    """
+
+    code = "sharepoint_credentials_invalid"
 
     def __init__(self, detail: str) -> None:
         super().__init__(CREDENTIALS_INVALID_MESSAGE)

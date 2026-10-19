@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
 from dependency_injector import providers
 from httpx import ASGITransport, AsyncClient
@@ -383,3 +384,59 @@ async def test_unregistered_callback_is_rejected_before_oauth_starts(
     assert response.status_code == 400
     assert flow.states == {}
     flow.provider.gen_auth_url.assert_not_awaited()
+
+
+def _token_endpoint_error(status: int, body: dict[str, str]) -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", "https://login.example/token")
+    response = httpx.Response(status, json=body, request=request)
+    return httpx.HTTPStatusError("refused", request=request, response=response)
+
+
+async def test_a_refused_code_is_a_400_the_person_can_act_on(oauth_flow):
+    """An expired or reused code was a 500 from raise_for_status."""
+    flow = oauth_flow
+    flow.provider.exchange_token.side_effect = _token_endpoint_error(
+        400,
+        {
+            "error": "invalid_grant",
+            "error_description": "AADSTS70008: The provided authorization code "
+            "has expired.\r\nTrace ID: 1f2e Correlation ID: 3a4b",
+        },
+    )
+    started = await flow.client.get(f"/integrations/auth/{flow.own.id}/url/")
+
+    response = await flow.client.post(
+        "/integrations/auth/callback/token/",
+        json={
+            "tenant_integration_id": str(flow.own.id),
+            "auth_code": "expired-code",
+            "state": started.json()["state"],
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["code"] == "oauth_code_rejected"
+    assert "AADSTS70008" in body["message"]
+    assert "Start the sign-in again" in body["message"]
+    assert "Trace ID" not in body["message"]
+    assert flow.tokens == []
+    flow.audit.log_async.assert_not_awaited()
+
+
+async def test_a_token_endpoint_outage_is_not_reported_as_a_refused_code(oauth_flow):
+    flow = oauth_flow
+    flow.provider.exchange_token.side_effect = _token_endpoint_error(
+        503, {"error": "temporarily_unavailable"}
+    )
+    started = await flow.client.get(f"/integrations/auth/{flow.own.id}/url/")
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await flow.client.post(
+            "/integrations/auth/callback/token/",
+            json={
+                "tenant_integration_id": str(flow.own.id),
+                "auth_code": "test-code",
+                "state": started.json()["state"],
+            },
+        )

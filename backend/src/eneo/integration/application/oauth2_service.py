@@ -1,8 +1,14 @@
 import secrets
 from typing import TYPE_CHECKING
 
+import httpx
+
 from eneo.integration.domain.entities.oauth_token import OauthToken
 from eneo.integration.domain.entities.user_integration import UserIntegration
+from eneo.integration.infrastructure.auth_service.base_auth_service import (
+    TokenResponse,
+    rejected_code,
+)
 from eneo.integration.infrastructure.oauth_state_store import OauthStateStore
 from eneo.integration.presentation.models import IntegrationType
 from eneo.main.config import get_settings
@@ -10,6 +16,7 @@ from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
+    from collections.abc import Awaitable
     from uuid import UUID
 
     import redis.asyncio as redis
@@ -165,10 +172,12 @@ class Oauth2Service:
     ) -> None:
         integration_type = authenticated_integration.integration_type
         if integration_type == IntegrationType.Sharepoint.value:
-            token_result = await self.sharepoint_auth_service.exchange_token(
-                auth_code,
-                tenant_id=authenticated_integration.tenant_integration.tenant_id,
-                redirect_uri=redirect_uri,
+            token_result = await self._exchange(
+                self.sharepoint_auth_service.exchange_token(
+                    auth_code,
+                    tenant_id=authenticated_integration.tenant_integration.tenant_id,
+                    redirect_uri=redirect_uri,
+                )
             )
             if token_result is None:
                 raise BadRequestException("Failed to exchange SharePoint auth code")
@@ -177,8 +186,10 @@ class Oauth2Service:
                 access_token
             )
         elif integration_type == IntegrationType.Confluence.value:
-            token_result = await self.confluence_auth_service.exchange_token(
-                auth_code, redirect_uri=redirect_uri
+            token_result = await self._exchange(
+                self.confluence_auth_service.exchange_token(
+                    auth_code, redirect_uri=redirect_uri
+                )
             )
             if token_result is None:
                 raise BadRequestException("Failed to exchange Confluence auth code")
@@ -200,3 +211,19 @@ class Oauth2Service:
             resources=resource_data,
         )
         await self.oauth_token_repo.add(obj=token)
+
+    @staticmethod
+    async def _exchange(
+        exchange: "Awaitable[TokenResponse | None]",
+    ) -> "TokenResponse | None":
+        """The token response; a refused code is the caller's 400, not a 500."""
+        try:
+            return await exchange
+        except httpx.HTTPStatusError as exc:
+            rejection = rejected_code(exc)
+            if rejection is None:
+                raise
+            logger.warning(
+                "OAuth code exchange refused with HTTP %s", exc.response.status_code
+            )
+            raise rejection from exc
