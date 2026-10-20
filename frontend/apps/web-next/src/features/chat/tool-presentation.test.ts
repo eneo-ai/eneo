@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { Schema } from "@/lib/api/models";
 import {
+  failedResultText,
   humanizeToolName,
   isSkillCall,
   skillName,
@@ -280,5 +281,19 @@ describe("toolTarget", () => {
         t
       )
     ).toBe(`project: LOU · summary: ${"x".repeat(48)}…`);
+  });
+});
+
+describe("a failed call's result", () => {
+  it("shows the error as its message, not as the JSON the model reads", () => {
+    expect(failedResultText('{"error": "SHORT_HISTORY: too short.\\nThe file is readable."}')).toBe(
+      "SHORT_HISTORY: too short.\nThe file is readable."
+    );
+    expect(failedResultText('{"rows": []}')).toBe('{"rows": []}');
+    // An error with more to say than its message is shown whole.
+    expect(failedResultText('{"error": "failed", "request_id": "r1"}')).toBe(
+      '{"error": "failed", "request_id": "r1"}'
+    );
+    expect(failedResultText("plain text")).toBe("plain text");
   });
 });

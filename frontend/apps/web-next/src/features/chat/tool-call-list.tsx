@@ -17,6 +17,7 @@ import type { StepStatus, ToolCall, ToolPart } from "./activity";
 import { callTimingKey, type TurnDurations } from "./activity-timings";
 import { formatSeconds } from "./format";
 import {
+  failedResultText,
   fileIdFromUrl,
   toolPresentation,
   toolTarget,
@@ -142,8 +143,12 @@ function CallResult({ part, sessionId }: { part: ToolPart; sessionId: string | n
   if (!canLoad) {
     return errorText ? <p className="text-ax-error text-[12.5px]">{errorText}</p> : null;
   }
-  const text =
-    typeof result.data === "string" && result.data.trim() ? result.data : (errorText ?? null);
+  const stored = typeof result.data === "string" && result.data.trim() ? result.data : null;
+  const text = stored
+    ? part.state === "output-error"
+      ? failedResultText(stored)
+      : stored
+    : (errorText ?? null);
   const body = result.isPending
     ? t("loading_ellipsis")
     : result.isError

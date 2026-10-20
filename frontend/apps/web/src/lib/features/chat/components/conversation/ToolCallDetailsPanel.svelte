@@ -9,6 +9,7 @@
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
+  import { failedResultText } from "$lib/features/chat/toolStepStatus";
   import { Wrench } from "@lucide/svelte";
 
   type Status = "preparing" | "running" | "complete" | "failed" | "denied";
@@ -111,7 +112,10 @@
           <p class="text-muted text-xs">{m.loading_ellipsis()}</p>
         {:else if resultLoaded && result}
           <pre
-            class="bg-primary/60 text-secondary max-h-72 overflow-auto rounded-md p-2.5 font-mono text-xs whitespace-pre-wrap">{result}</pre>
+            class="bg-primary/60 text-secondary max-h-72 overflow-auto rounded-md p-2.5 font-mono text-xs whitespace-pre-wrap">{status ===
+            "failed"
+              ? failedResultText(result)
+              : result}</pre>
         {:else if resultLoaded}
           <p class="text-muted text-xs italic">{m.mcp_tool_response_empty()}</p>
         {/if}

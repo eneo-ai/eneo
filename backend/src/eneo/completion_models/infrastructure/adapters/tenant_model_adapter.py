@@ -300,7 +300,8 @@ def _build_tool_result_with_references(
                 )
             )
 
-    upstream_text = "".join(text_parts)
+    # Blocks stay apart: a tool's text and a note Eneo adds to it are separate blocks.
+    upstream_text = "\n".join(text_parts)
     if not refs:
         return upstream_text, upstream_text, refs, images
 

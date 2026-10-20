@@ -347,6 +347,24 @@ def test_build_tool_result_with_references_skips_unciteable_resources():
     assert refs == []
 
 
+def test_build_tool_result_with_references_keeps_text_blocks_apart():
+    # A refusal from the tool and the recovery note Eneo appends are two blocks.
+    llm_text, display_text, refs, _ = _build_tool_result_with_references(
+        content_list=[
+            {"type": "text", "text": "SHORT_HISTORY: too short. Request ID: r1"},
+            {"type": "text", "text": "The attached file itself is still readable."},
+        ],
+        tool_call_id="call_1",
+        mcp_tool_name="server__tool",
+        existing_prefixes=set(),
+    )
+
+    expected = "SHORT_HISTORY: too short. Request ID: r1\nThe attached file itself is still readable."
+    assert llm_text == expected
+    assert display_text == expected
+    assert refs == []
+
+
 def test_build_tool_result_with_references_turns_image_blocks_into_generated_images():
     png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
     encoded = base64.b64encode(png_bytes).decode("ascii")
@@ -368,7 +386,7 @@ def test_build_tool_result_with_references_turns_image_blocks_into_generated_ima
     assert images[0].mcp_tool_name == "images__generate"
 
     # The model and the persisted result text see a placeholder, never base64.
-    expected = "Here is your picture." + MCP_IMAGE_PLACEHOLDER_TEMPLATE.format(
+    expected = "Here is your picture.\n" + MCP_IMAGE_PLACEHOLDER_TEMPLATE.format(
         index=1, mime_type="image/png"
     )
     assert llm_text == expected
