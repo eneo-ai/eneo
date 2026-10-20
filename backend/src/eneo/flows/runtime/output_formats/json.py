@@ -21,7 +21,7 @@ class JsonOutputFormatSpec:
     ) -> bool:
         return True
 
-    def process_model_output(
+    async def process_model_output(
         self,
         full_text: str,
         *,
@@ -33,7 +33,7 @@ class JsonOutputFormatSpec:
         conformed = ConformedModelOutput(diagnostics=(), conformed_text=None)
         if output_contract is not None and context.json_contract_validation_enabled:
             conformed = conform_model_output_keys(structured_output, output_contract)
-            context.validate_against_contract(
+            await context.check_contract(
                 structured_output,
                 output_contract,
                 label=f"Step {step_order} output",

@@ -1086,7 +1086,7 @@ async def test_a_check_whose_process_does_not_start_fails_the_step_as_the_host(
     assert error.retryable is False
     assert error.message == (
         "Flow step 2 failed because this worker could not run its schema check; "
-        "no model was called for the step and it produced no result."
+        "the step produced no result."
     )
 
 
@@ -1097,8 +1097,8 @@ async def test_a_copy_of_a_tool_answer_whose_check_cannot_run_names_no_tool_clai
     # step's contract check runs after its tool has answered.
     monkeypatch.setattr(
         tool_argument_check,
-        "_COPY_CHECKER",
-        ToolArgumentChecker(tool_argument_check.copy_contract_limit_seconds),
+        "_CONTRACT_CHECKER",
+        ToolArgumentChecker(tool_argument_check.contract_check_limit_seconds),
     )
     monkeypatch.setattr(tool_argument_check, "_START_TIMEOUT_SECONDS", 0.0)
     facts = _facts()
@@ -1131,7 +1131,49 @@ async def test_a_copy_of_a_tool_answer_whose_check_cannot_run_names_no_tool_clai
     assert len(caller.calls) == 1
     assert executor._terminalize_run.await_args.kwargs["error"].message == (
         "Flow step 2 failed because this worker could not run its schema check; "
-        "no model was called for the step and it produced no result."
+        "the step produced no result."
+    )
+
+
+async def test_an_output_check_that_cannot_run_after_the_model_answered_discloses_it(
+    user, monkeypatch
+) -> None:
+    # Kills a host-fault sentence that says no model was called: a model
+    # step's output contract check runs after its model has answered.
+    monkeypatch.setattr(
+        tool_argument_check,
+        "_CONTRACT_CHECKER",
+        ToolArgumentChecker(tool_argument_check.contract_check_limit_seconds),
+    )
+    monkeypatch.setattr(tool_argument_check, "_START_TIMEOUT_SECONDS", 0.0)
+    facts = _facts()
+    executor = _tool_executor(user, _Facts(facts), _answered({"ok": True}))
+    assistant = _mock_assistant_for_execute_step(response_text='{"ok": true}')
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = replace(
+        _tool_step(facts), output_type="json", output_contract={"type": "object"}
+    )
+    with pytest.raises(ToolArgumentCheckFailed) as failed:
+        await executor._execute_step(step=step, run=_running(user), attempt_no=1)
+    claimed = _failing(executor, user, step)
+    stored = _empty_execution_state()
+    stored.activated_attempts.add((step.step_id, 1))
+
+    await executor._handle_generic_step_failure(
+        run_id=claimed.flow_run_id,
+        tenant_id=user.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        state=stored,
+        exc=failed.value,
+    )
+
+    assert assistant.get_response.await_count == 1
+    assert executor._terminalize_run.await_args.kwargs["error"].message == (
+        "Flow step 2 failed because this worker could not run its schema check; "
+        "the step produced no result. "
+        f"{executor_module._PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
     )
 
 

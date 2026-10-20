@@ -213,13 +213,8 @@ def test_authoring_rejects_remote_ref_in_legacy_definitions(schema_listener):
     assert requests == []
 
 
-@pytest.mark.parametrize(
-    ("input_type", "check_in_child"),
-    [("json", False), ("json", True), ("text", False)],
-)
-async def test_runtime_input_contract_never_retrieves(
-    schema_listener, input_type, check_in_child
-):
+@pytest.mark.parametrize("input_type", ["json", "text"])
+async def test_runtime_input_contract_never_retrieves(schema_listener, input_type):
     uri, requests = schema_listener
     with pytest.raises(TypedIOValidationException) as exc_info:
         await validate_input_contract(
@@ -228,7 +223,6 @@ async def test_runtime_input_contract_never_retrieves(
             input_contract=_remote_schema(uri),
             text=json.dumps({"value": {}}),
             structured={"value": {}} if input_type == "json" else None,
-            check_in_child=check_in_child,
         )
     assert exc_info.value.code == "typed_io_contract_violation"
     assert requests == []

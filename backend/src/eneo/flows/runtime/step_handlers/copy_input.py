@@ -10,12 +10,12 @@ from eneo.flows.enums import FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.output_modes import copy_input_violation
 from eneo.flows.output_processing import StructuredOutputValue
+from eneo.flows.runtime.contract_check import check_contract_in_child
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import attach_typed_failure_context
 from eneo.flows.runtime.step_handlers.base import PrepareAssistantStepFn
 from eneo.flows.runtime.step_handlers.deterministic_result import deterministic_result
-from eneo.flows.runtime.step_input_validation import check_contract_in_child
 from eneo.flows.runtime.structured_output_budget import (
     ensure_structured_output_allowed,
     structured_output_json,

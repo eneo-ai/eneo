@@ -44,6 +44,10 @@ class _Run:
     tenant_id: UUID
 
 
+async def _accept_contract(data, schema, *, label) -> None:
+    return None
+
+
 @pytest.mark.asyncio
 async def test_process_typed_output_json_with_contract_validation() -> None:
     step = _Step(step_order=1, output_type="json", output_contract={"type": "object"})
@@ -54,7 +58,7 @@ async def test_process_typed_output_json_with_contract_validation() -> None:
         file_names=_FILE_NAMES,
         compile_validators=lambda steps: {("output", 1): object()},
         parse_json_output=lambda text: {"ok": True},
-        validate_against_contract=lambda data, schema, label: None,
+        check_contract=_accept_contract,
         render_document=lambda text, output_type, step_order, title: (b"", ""),
         render_structured_document=lambda data,
         output_type,
@@ -84,17 +88,15 @@ async def test_process_typed_output_json_without_compiled_validator_skips_contra
     step = _Step(step_order=2, output_type="json", output_contract={"type": "object"})
     run = _Run(tenant_id=uuid4())
 
-    def _unexpected_validate(*args, **kwargs) -> None:
-        raise AssertionError(
-            "validate_against_contract should not run without compiled validator"
-        )
+    async def _unexpected_check(*args, **kwargs) -> None:
+        raise AssertionError("check_contract should not run without compiled validator")
 
     deps = OutputRuntimeDeps(
         file_service=SimpleNamespace(save_generated_file=AsyncMock()),
         file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"ok": True},
-        validate_against_contract=_unexpected_validate,
+        check_contract=_unexpected_check,
         render_document=lambda text, output_type, step_order, title: (b"", ""),
         render_structured_document=lambda data,
         output_type,
@@ -148,7 +150,7 @@ async def test_process_typed_output_docx_creates_artifact_file() -> None:
         file_names=_FILE_NAMES,
         compile_validators=compile_validators,
         parse_json_output=lambda text: {"unused": True},
-        validate_against_contract=lambda data, schema, label: None,
+        check_contract=_accept_contract,
         render_document=render_document,
         render_structured_document=lambda data,
         output_type,
@@ -209,7 +211,7 @@ async def test_process_typed_output_pdf_preserves_pdf_bytes_from_model() -> None
         file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
-        validate_against_contract=lambda data, schema, label: None,
+        check_contract=_accept_contract,
         render_document=_render_not_expected,
         render_structured_document=lambda data,
         output_type,
@@ -251,7 +253,7 @@ async def test_process_typed_output_pdf_bytes_obeys_document_render_limits() -> 
         file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
-        validate_against_contract=lambda data, schema, label: None,
+        check_contract=_accept_contract,
         render_document=lambda text, output_type, step_order, title: (
             b"",
             "",
@@ -296,7 +298,7 @@ async def test_process_typed_output_docx_renders_validated_structured_contract()
     validate_calls: list[tuple[object, dict, str]] = []
     render_calls: list[tuple[object, str, int, str, dict | None]] = []
 
-    def _validate(data, schema, label):
+    async def _check(data, schema, *, label):
         validate_calls.append((data, schema, label))
 
     def _render_structured(data, output_type, step_order, title, schema=None):
@@ -308,7 +310,7 @@ async def test_process_typed_output_docx_renders_validated_structured_contract()
         file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"structured": 1},
-        validate_against_contract=_validate,
+        check_contract=_check,
         render_document=lambda text, output_type, step_order, title: (
             b"pdf",
             "application/pdf",
@@ -368,7 +370,7 @@ async def test_process_typed_output_prunes_extra_item_properties_before_validati
     }
     validate_calls: list[tuple[object, dict, str]] = []
 
-    def _validate(data, schema, label):
+    async def _check(data, schema, *, label):
         validate_calls.append((data, schema, label))
 
     deps = OutputRuntimeDeps(
@@ -376,7 +378,7 @@ async def test_process_typed_output_prunes_extra_item_properties_before_validati
         file_names=_FILE_NAMES,
         compile_validators=lambda steps: {("output", 4): object()},
         parse_json_output=lambda text: parsed,
-        validate_against_contract=_validate,
+        check_contract=_check,
         render_document=lambda text, output_type, step_order, title: (b"", ""),
         render_structured_document=lambda data,
         output_type,
@@ -427,7 +429,7 @@ async def test_process_typed_output_docx_treats_empty_contract_as_structured() -
         file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: ["legacy", "data"],
-        validate_against_contract=lambda data, schema, label: None,
+        check_contract=_accept_contract,
         render_document=lambda text, output_type, step_order, title: (
             b"raw-json-doc",
             "application/docx",
@@ -463,7 +465,7 @@ async def test_process_typed_output_docx_without_contract_does_not_parse_json() 
         file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=_parse_not_expected,
-        validate_against_contract=lambda data, schema, label: None,
+        check_contract=_accept_contract,
         render_document=lambda text, output_type, step_order, title: (
             b"docx",
             "application/docx",
@@ -501,7 +503,7 @@ async def test_process_typed_output_unknown_type_returns_empty() -> None:
         file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"ok": True},
-        validate_against_contract=lambda data, schema, label: None,
+        check_contract=_accept_contract,
         render_document=lambda text, output_type, step_order, title: (b"", ""),
         render_structured_document=lambda data,
         output_type,
@@ -531,7 +533,7 @@ async def test_process_typed_output_json_contract_violation_propagates() -> None
     run = _Run(tenant_id=uuid4())
     file_service = SimpleNamespace(save_generated_file=AsyncMock())
 
-    def _raise_contract(*args, **kwargs):
+    async def _raise_contract(*args, **kwargs):
         raise TypedIOValidationException(
             "bad schema", code="typed_io_contract_violation"
         )
@@ -541,7 +543,7 @@ async def test_process_typed_output_json_contract_violation_propagates() -> None
         file_names=_FILE_NAMES,
         compile_validators=lambda steps: {("output", 7): object()},
         parse_json_output=lambda text: {"ok": True},
-        validate_against_contract=_raise_contract,
+        check_contract=_raise_contract,
         render_document=lambda text, output_type, step_order, title: (b"", ""),
         render_structured_document=lambda data,
         output_type,
@@ -578,7 +580,7 @@ async def test_process_typed_output_render_failure_propagates() -> None:
         file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
-        validate_against_contract=lambda data, schema, label: None,
+        check_contract=_accept_contract,
         render_document=_fail_render,
         render_structured_document=lambda data,
         output_type,
@@ -614,7 +616,7 @@ async def test_process_typed_output_file_service_failure_propagates() -> None:
         file_names=_FILE_NAMES,
         compile_validators=lambda steps: {},
         parse_json_output=lambda text: {"unused": True},
-        validate_against_contract=lambda data, schema, label: None,
+        check_contract=_accept_contract,
         render_document=lambda text, output_type, step_order, title: (
             b"pdf",
             "application/pdf",

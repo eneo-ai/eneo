@@ -267,6 +267,35 @@ async def test_a_child_that_dies_during_a_check_is_a_host_fault_at_once(
     assert [record.name for record in caplog.records] == [tool_argument_check.__name__]
 
 
+async def test_a_check_queued_behind_another_ends_at_its_own_limit(children) -> None:
+    # Kills the mutant that starts the limit after the checker's lock: the
+    # queued check would wait for the first and then get its full limit. Also
+    # kills ending the running check's child when a queued check times out or
+    # is cancelled.
+    limit = [2.0]
+    checker = ToolArgumentChecker(lambda: limit[0])
+    assert await checker.check({}, _REQUIRED) == _MISSING_DAYS
+    running = asyncio.create_task(checker.check(_SLOW_ARGUMENTS, _SLOW_SCHEMA))
+    await asyncio.sleep(0.1)
+    limit[0] = 0.3
+
+    started = time.monotonic()
+    queued = await checker.check({}, _REQUIRED)
+
+    assert queued == ArgumentCheckUnfinished(timed_out=True)
+    assert time.monotonic() - started < 1.0
+    cancelled = asyncio.create_task(checker.check({}, _REQUIRED))
+    await asyncio.sleep(0.05)
+    cancelled.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled
+    assert not running.done()
+    assert children[-1].process.poll() is None
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+
 async def test_a_cancelled_check_does_not_leave_its_answer_to_the_next(
     children,
 ) -> None:

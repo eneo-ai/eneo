@@ -18,7 +18,7 @@ class TextOutputFormatSpec:
     ) -> bool:
         return False
 
-    def process_model_output(
+    async def process_model_output(
         self,
         full_text: str,
         *,

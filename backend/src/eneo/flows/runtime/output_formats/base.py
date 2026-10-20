@@ -25,11 +25,12 @@ class ParseJsonOutputFn(Protocol):
     def __call__(self, raw_text: str, /) -> StructuredOutputValue: ...
 
 
-class ValidateAgainstContractFn(Protocol):
-    def __call__(
+class CheckContractFn(Protocol):
+    async def __call__(
         self,
-        data: object,
+        data: StructuredOutputValue,
         schema: FlowPersistedJsonObject,
+        /,
         *,
         label: str,
     ) -> None: ...
@@ -81,7 +82,7 @@ class OutputFormatProcessingResult:
 @dataclass(frozen=True, slots=True)
 class OutputFormatProcessingContext:
     parse_json_output: ParseJsonOutputFn
-    validate_against_contract: ValidateAgainstContractFn
+    check_contract: CheckContractFn
     render_document: RenderDocumentFn
     render_structured_document: RenderStructuredDocumentFn
     ensure_source_within_limits: EnsureSourceWithinLimitsFn
@@ -100,14 +101,17 @@ class OutputFormatSpec(Protocol):
         self, output_contract: FlowPersistedJsonObject | None
     ) -> bool: ...
 
-    def process_model_output(
+    async def process_model_output(
         self,
         full_text: str,
         *,
         step_order: int,
         output_contract: FlowPersistedJsonObject | None,
         context: OutputFormatProcessingContext,
-    ) -> OutputFormatProcessingResult: ...
+    ) -> OutputFormatProcessingResult:
+        """Parse and conform the model's text, await the contract check,
+        then render."""
+        ...
 
 
 def append_output_format_instructions(prompt: str, instructions: Sequence[str]) -> str:
@@ -213,7 +217,7 @@ def conform_model_output_keys(
     )
 
 
-def process_structured_document_output(
+async def process_structured_document_output(
     full_text: str,
     *,
     output_type: str,
@@ -223,7 +227,7 @@ def process_structured_document_output(
 ) -> OutputFormatProcessingResult:
     structured_output = context.parse_json_output(full_text)
     conformed = conform_model_output_keys(structured_output, output_contract)
-    context.validate_against_contract(
+    await context.check_contract(
         structured_output,
         output_contract,
         label=f"Step {step_order} output",

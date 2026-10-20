@@ -1357,9 +1357,6 @@ async def prepare_step_execution(
             input_contract=step.input_contract,
             text=step_input.text,
             structured=step_input.structured,
-            # A copy step's value can be a third-party tool's answer that no
-            # model bounds; its contract checks run where a time limit holds.
-            check_in_child=step.output_mode == FlowOutputMode.COPY_INPUT,
             binding_context=(
                 "input_bindings" if step_input.used_question_binding else None
             ),

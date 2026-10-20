@@ -163,6 +163,7 @@ from eneo.flows.published_definition import (
 )
 from eneo.flows.runtime import step_deadline as step_deadline_module
 from eneo.flows.runtime.claim_resolution import resolve_step_claim
+from eneo.flows.runtime.contract_check import check_contract_in_child
 from eneo.flows.runtime.document_rendering import DocumentRenderService
 from eneo.flows.runtime.document_rendering.limits import (
     DEFAULT_DOCUMENT_RENDER_LIMITS,
@@ -2451,13 +2452,18 @@ class FlowRunExecutor:
                 step=step,
             )
         elif isinstance(exc, ToolArgumentCheckFailed):
-            # A tool's argument check runs before the step's model, and a copy
-            # step has none; its tool, if any, may already have answered.
+            # A tool step whose input was never stored asked no provider; any
+            # other check may have run after the step's model (an output check
+            # always does), so the disclosure owner states what it may have
+            # spent. A tool, if any, may have answered.
             public_error = (
                 f"Flow step {step.step_order} failed because this worker could not "
-                "run its schema check; no model was called for the step and it "
-                "produced no result."
+                "run its schema check; the step produced no result."
             )
+            if not _tool_step_failed_before_its_input_was_stored(
+                step, attempt_no=attempt_no, state=state
+            ):
+                public_error = _with_provider_work_disclosure(public_error, step=step)
         else:
             public_error = _with_provider_work_disclosure(
                 f"Flow step {step.step_order} execution failed.",
@@ -3471,17 +3477,13 @@ class FlowRunExecutor:
         step: RuntimeStep,
         run: FlowRun,
     ) -> TypedOutputProcessingResult:
-        from eneo.flows.output_processing import (
-            compile_validators,
-            parse_json_output,
-            validate_against_contract,
-        )
+        from eneo.flows.output_processing import compile_validators, parse_json_output
 
         deps = OutputRuntimeDeps(
             file_service=self.file_service,
             compile_validators=compile_validators,
             parse_json_output=parse_json_output,
-            validate_against_contract=partial(validate_against_contract, side="output"),
+            check_contract=partial(check_contract_in_child, side="output"),
             render_document=self.document_render_service.render_document,
             render_structured_document=(
                 self.document_render_service.render_structured_document

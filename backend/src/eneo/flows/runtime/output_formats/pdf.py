@@ -26,7 +26,7 @@ class PdfOutputFormatSpec:
     ) -> bool:
         return document_requests_structured_output(output_contract)
 
-    def process_model_output(
+    async def process_model_output(
         self,
         full_text: str,
         *,
@@ -35,7 +35,7 @@ class PdfOutputFormatSpec:
         context: OutputFormatProcessingContext,
     ) -> OutputFormatProcessingResult:
         if output_contract is not None:
-            return process_structured_document_output(
+            return await process_structured_document_output(
                 full_text,
                 output_type=FlowOutputType.PDF.value,
                 step_order=step_order,

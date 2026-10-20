@@ -24,12 +24,12 @@ from eneo.flows.runtime.document_rendering.limits import (
 from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.runtime.output_formats.base import (
+    CheckContractFn,
     OutputFormatProcessingContext,
     ParseJsonOutputFn,
     RenderDocumentFn,
     RenderedOutputArtifact,
     RenderStructuredDocumentFn,
-    ValidateAgainstContractFn,
 )
 from eneo.flows.runtime.step_deadline import record_step_phase
 
@@ -112,7 +112,7 @@ class OutputRuntimeDeps:
     file_service: RuntimeOutputFileService
     compile_validators: Callable[[list[Any]], dict[tuple[str, int], Any]]
     parse_json_output: ParseJsonOutputFn
-    validate_against_contract: ValidateAgainstContractFn
+    check_contract: CheckContractFn
     render_document: RenderDocumentFn
     render_structured_document: RenderStructuredDocumentFn
     file_names: GeneratedFileNames
@@ -132,7 +132,7 @@ async def process_typed_output(
     compiled = deps.compile_validators([step])
     context = OutputFormatProcessingContext(
         parse_json_output=deps.parse_json_output,
-        validate_against_contract=deps.validate_against_contract,
+        check_contract=deps.check_contract,
         render_document=deps.render_document,
         render_structured_document=deps.render_structured_document,
         ensure_source_within_limits=lambda text: ensure_source_within_limits(
@@ -144,7 +144,7 @@ async def process_typed_output(
         ),
         json_contract_validation_enabled=("output", step.step_order) in compiled,
     )
-    format_result = resolve_format_spec(step.output_type).process_model_output(
+    format_result = await resolve_format_spec(step.output_type).process_model_output(
         full_text,
         step_order=step.step_order,
         output_contract=step.output_contract,

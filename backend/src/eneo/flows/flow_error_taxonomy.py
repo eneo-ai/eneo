@@ -1009,7 +1009,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     FlowApiErrorCode.TYPED_IO_CONTRACT_NOT_CHECKED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
-        cause="A copy_input step's value could not be checked against its contract in time, which a larger value or a contract with more work per item reaches sooner, or at all.",
+        cause="A step's input or output could not be checked against its contract in time, which a larger value or a contract with more work per item reaches sooner, or at all.",
         consumer_action="Send a smaller value or simplify the contract, then start a new run.",
         user_action="Ask a flow editor to simplify the step's format, or use less material.",
     ),

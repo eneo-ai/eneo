@@ -1258,7 +1258,6 @@ async def test_resolve_step_input_json_source_refs_build_exact_structured_projec
         input_contract=input_contract,
         text=resolved.text,
         structured=resolved.structured,
-        check_in_child=False,
         binding_context="input_bindings.source_refs",
     ) == {
         "schema_type_hint": "object",
@@ -6366,7 +6365,7 @@ async def test_copy_input_checks_a_backtracking_contract_off_the_event_loop(
     # and the step ends with a pattern violation instead of at the limit.
     from eneo.flows.runtime import tool_argument_check
 
-    monkeypatch.setattr(tool_argument_check, "COPY_CONTRACT_CHECK_TIMEOUT_SECONDS", 0.5)
+    monkeypatch.setattr(tool_argument_check, "CONTRACT_CHECK_TIMEOUT_SECONDS", 0.5)
     executor, _, _, _ = _build_executor(user)
     assistant = _mock_assistant_for_execute_step()
     assistant.get_prompt_text.return_value = ""
@@ -6453,6 +6452,80 @@ async def test_copy_input_checks_a_large_valid_value_past_the_tool_argument_limi
     output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
 
     assert output.structured_output == value
+
+
+_BACKTRACKING = {"properties": {"code": {"pattern": "^(a+)+$"}}}
+
+
+@pytest.mark.parametrize(
+    "site",
+    [
+        {"output_type": "json", "output_contract": _BACKTRACKING},
+        {"output_type": "docx", "output_contract": _BACKTRACKING},
+        {"input_type": "json", "input_contract": _BACKTRACKING},
+        {"input_contract": {"type": "string", "pattern": "^(a+)+$"}},
+    ],
+    ids=["json-output", "document-output", "json-input", "scalar-text-input"],
+)
+async def test_a_model_step_checks_a_backtracking_contract_off_the_event_loop(
+    user, monkeypatch, site
+) -> None:
+    # Kills an in-process contract check at each check site of a model step,
+    # and a check that skips a scalar (the text input): Python's re holds the
+    # GIL on this pattern for seconds, so the loop stops beating and the step
+    # ends with a pattern violation instead of at the limit.
+    from eneo.flows.runtime import tool_argument_check
+
+    monkeypatch.setattr(tool_argument_check, "CONTRACT_CHECK_TIMEOUT_SECONDS", 0.5)
+    slow = {"code": "a" * 27 + "!"}
+    executor, _, _, _ = _build_executor(user)
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step(response_text=json.dumps(slow))
+    )
+    step = _runtime_step(**site)
+    text = json.dumps(slow) if step.input_type == "json" else slow["code"]
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text=text,
+            source_text=text,
+            structured=slow if step.input_type == "json" else None,
+            input_source="flow_input",
+        )
+    )
+    beats: list[float] = []
+
+    async def heartbeat() -> None:
+        while True:
+            beats.append(time.monotonic())
+            await asyncio.sleep(0.01)
+
+    beating = asyncio.create_task(heartbeat())
+    started = time.monotonic()
+    try:
+        with pytest.raises(TypedIOValidationException) as refused:
+            await executor._execute_step(
+                step=step,
+                run=_run(status=FlowRunStatus.RUNNING, user=user),
+                attempt_no=1,
+            )
+    finally:
+        ended = time.monotonic()
+        beating.cancel()
+    marks = [started, *beats, ended]
+    assert max(b - a for a, b in zip(marks, marks[1:])) < 0.25
+    assert ended - started < 3.0
+    assert refused.value.code == "typed_io_contract_not_checked"
+
+
+async def test_a_model_answer_that_is_not_json_fails_as_output(user) -> None:
+    # Kills the input side's code for a value the output's contract check
+    # cannot write as JSON: Python's reader takes NaN, JSON does not.
+    with pytest.raises(TypedIOValidationException) as refused:
+        await _execute_json_step(
+            user, output_contract={"type": "object"}, response='{"score": NaN}'
+        )
+
+    assert refused.value.code == "typed_io_output_parse_failed"
 
 
 @pytest.mark.parametrize(

@@ -8,13 +8,13 @@ from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.enums import FlowOutputType
 from eneo.flows.output_processing import StructuredOutputValue
 from eneo.flows.runtime.output_formats.base import (
+    CheckContractFn,
     EnsureSourceWithinLimitsFn,
     OutputFormatProcessingContext,
     OutputFormatSpec,
     ParseJsonOutputFn,
     RenderDocumentFn,
     RenderStructuredDocumentFn,
-    ValidateAgainstContractFn,
 )
 from eneo.flows.runtime.output_formats.docx import DocxOutputFormatSpec
 from eneo.flows.runtime.output_formats.json import JsonOutputFormatSpec
@@ -25,7 +25,7 @@ from eneo.flows.runtime.output_formats.text import TextOutputFormatSpec
 def _context(
     *,
     parse_json_output: ParseJsonOutputFn | None = None,
-    validate_against_contract: ValidateAgainstContractFn | None = None,
+    check_contract: CheckContractFn | None = None,
     render_document: RenderDocumentFn | None = None,
     render_structured_document: RenderStructuredDocumentFn | None = None,
     ensure_source_within_limits: EnsureSourceWithinLimitsFn | None = None,
@@ -34,13 +34,13 @@ def _context(
     def _parse_not_expected(raw_text: str) -> StructuredOutputValue:
         raise AssertionError(f"parse_json_output was not expected: {raw_text}")
 
-    def _validate_not_expected(
-        data: object,
+    async def _check_not_expected(
+        data: StructuredOutputValue,
         schema: FlowPersistedJsonObject,
         *,
         label: str,
     ) -> None:
-        raise AssertionError(f"validate_against_contract was not expected: {label}")
+        raise AssertionError(f"check_contract was not expected: {label}")
 
     def _render_document_not_expected(
         text: str,
@@ -68,7 +68,7 @@ def _context(
 
     return OutputFormatProcessingContext(
         parse_json_output=parse_json_output or _parse_not_expected,
-        validate_against_contract=(validate_against_contract or _validate_not_expected),
+        check_contract=check_contract or _check_not_expected,
         render_document=render_document or _render_document_not_expected,
         render_structured_document=(
             render_structured_document or _render_structured_not_expected
@@ -81,8 +81,8 @@ def _context(
     )
 
 
-def test_text_output_format_processing_is_noop() -> None:
-    result = TextOutputFormatSpec().process_model_output(
+async def test_text_output_format_processing_is_noop() -> None:
+    result = await TextOutputFormatSpec().process_model_output(
         "plain response",
         step_order=1,
         output_contract=None,
@@ -94,7 +94,7 @@ def test_text_output_format_processing_is_noop() -> None:
     assert result.diagnostics == ()
 
 
-def test_json_output_format_skips_contract_validation_without_compiled_validator() -> (
+async def test_json_output_format_skips_contract_validation_without_compiled_validator() -> (
     None
 ):
     parsed: StructuredOutputValue = {"ok": True, "extra": "kept"}
@@ -103,10 +103,12 @@ def test_json_output_format_skips_contract_validation_without_compiled_validator
     def _parse(raw_text: str) -> StructuredOutputValue:
         return parsed
 
-    def _validate(data: object, schema: FlowPersistedJsonObject, *, label: str) -> None:
+    async def _check(
+        data: StructuredOutputValue, schema: FlowPersistedJsonObject, *, label: str
+    ) -> None:
         validate_calls.append(label)
 
-    result = JsonOutputFormatSpec().process_model_output(
+    result = await JsonOutputFormatSpec().process_model_output(
         '{"ok": true, "extra": "kept"}',
         step_order=2,
         output_contract={
@@ -116,7 +118,7 @@ def test_json_output_format_skips_contract_validation_without_compiled_validator
         },
         context=_context(
             parse_json_output=_parse,
-            validate_against_contract=_validate,
+            check_contract=_check,
             json_contract_validation_enabled=False,
         ),
     )
@@ -126,7 +128,7 @@ def test_json_output_format_skips_contract_validation_without_compiled_validator
     assert validate_calls == []
 
 
-def test_json_output_format_prunes_and_validates_when_compiled_validator_exists() -> (
+async def test_json_output_format_prunes_and_validates_when_compiled_validator_exists() -> (
     None
 ):
     parsed: StructuredOutputValue = {"ok": True, "extra": "dropped"}
@@ -135,10 +137,12 @@ def test_json_output_format_prunes_and_validates_when_compiled_validator_exists(
     def _parse(raw_text: str) -> StructuredOutputValue:
         return parsed
 
-    def _validate(data: object, schema: FlowPersistedJsonObject, *, label: str) -> None:
+    async def _check(
+        data: StructuredOutputValue, schema: FlowPersistedJsonObject, *, label: str
+    ) -> None:
         validate_payloads.append(data)
 
-    result = JsonOutputFormatSpec().process_model_output(
+    result = await JsonOutputFormatSpec().process_model_output(
         '{"ok": true, "extra": "dropped"}',
         step_order=3,
         output_contract={
@@ -148,7 +152,7 @@ def test_json_output_format_prunes_and_validates_when_compiled_validator_exists(
         },
         context=_context(
             parse_json_output=_parse,
-            validate_against_contract=_validate,
+            check_contract=_check,
             json_contract_validation_enabled=True,
         ),
     )
@@ -167,7 +171,7 @@ _ALL_STRUCTURED_SPECS = [
 ]
 
 
-def _process_structured(
+async def _process_structured(
     spec: OutputFormatSpec,
     parsed: StructuredOutputValue,
     contract: FlowPersistedJsonObject,
@@ -176,7 +180,9 @@ def _process_structured(
     def _parse(raw_text: str) -> StructuredOutputValue:
         return parsed
 
-    def _validate(data: object, schema: FlowPersistedJsonObject, *, label: str) -> None:
+    async def _check(
+        data: StructuredOutputValue, schema: FlowPersistedJsonObject, *, label: str
+    ) -> None:
         pass
 
     def _render_structured(
@@ -189,13 +195,13 @@ def _process_structured(
     ) -> tuple[bytes, str]:
         return b"rendered", "application/test"
 
-    return spec.process_model_output(
+    return await spec.process_model_output(
         raw_text,
         step_order=4,
         output_contract=contract,
         context=_context(
             parse_json_output=_parse,
-            validate_against_contract=_validate,
+            check_contract=_check,
             render_structured_document=_render_structured,
             json_contract_validation_enabled=True,
         ),
@@ -222,7 +228,7 @@ def _avvikelser_contract(item_keys: list[str]) -> FlowPersistedJsonObject:
 
 
 @pytest.mark.parametrize("spec", _ALL_STRUCTURED_SPECS)
-def test_structured_output_formats_rename_respelled_keys_and_report_them(
+async def test_structured_output_formats_rename_respelled_keys_and_report_them(
     spec: OutputFormatSpec,
 ) -> None:
     parsed: StructuredOutputValue = {
@@ -232,7 +238,7 @@ def test_structured_output_formats_rename_respelled_keys_and_report_them(
         ]
     }
 
-    result = _process_structured(
+    result = await _process_structured(
         spec, parsed, _avvikelser_contract(["vad_vi_avser_att_forelagga_om"])
     )
 
@@ -258,7 +264,7 @@ def test_structured_output_formats_rename_respelled_keys_and_report_them(
 
 
 @pytest.mark.parametrize("spec", _ALL_STRUCTURED_SPECS)
-def test_structured_output_formats_keep_the_model_text_when_nothing_is_renamed(
+async def test_structured_output_formats_keep_the_model_text_when_nothing_is_renamed(
     spec: OutputFormatSpec,
 ) -> None:
     exact: StructuredOutputValue = {"avvikelser": [{"avvikelse": "Rätta"}]}
@@ -267,8 +273,8 @@ def test_structured_output_formats_keep_the_model_text_when_nothing_is_renamed(
     }
     contract = _avvikelser_contract(["avvikelse"])
 
-    exact_result = _process_structured(spec, exact, contract)
-    pruned_result = _process_structured(spec, pruned, contract)
+    exact_result = await _process_structured(spec, exact, contract)
+    pruned_result = await _process_structured(spec, pruned, contract)
 
     assert exact_result.conformed_text is None
     assert exact_result.diagnostics == ()
@@ -278,12 +284,12 @@ def test_structured_output_formats_keep_the_model_text_when_nothing_is_renamed(
     ]
 
 
-def test_renamed_keys_message_counts_and_pluralises() -> None:
+async def test_renamed_keys_message_counts_and_pluralises() -> None:
     parsed: StructuredOutputValue = {
         "avvikelser": [{"vad_vi_avser_att_forelägga_om": f"V{i}"} for i in range(4)]
     }
 
-    result = _process_structured(
+    result = await _process_structured(
         JsonOutputFormatSpec(),
         parsed,
         _avvikelser_contract(["vad_vi_avser_att_forelagga_om"]),
@@ -294,10 +300,10 @@ def test_renamed_keys_message_counts_and_pluralises() -> None:
     assert message.count(" -> ") == 4
 
 
-def test_dropped_keys_message_counts_and_pluralises() -> None:
+async def test_dropped_keys_message_counts_and_pluralises() -> None:
     parsed: StructuredOutputValue = {"avvikelser": [{"avvikelse": "A", "x": 1, "y": 2}]}
 
-    result = _process_structured(
+    result = await _process_structured(
         JsonOutputFormatSpec(), parsed, _avvikelser_contract(["avvikelse"])
     )
 
@@ -306,7 +312,7 @@ def test_dropped_keys_message_counts_and_pluralises() -> None:
     )
 
 
-def test_reported_paths_stop_at_twenty_and_say_how_many_more() -> None:
+async def test_reported_paths_stop_at_twenty_and_say_how_many_more() -> None:
     parsed: StructuredOutputValue = {
         "avvikelser": [{"avvikelse": "A", "extra": "x"} for _ in range(25)]
     }
@@ -316,12 +322,12 @@ def test_reported_paths_stop_at_twenty_and_say_how_many_more() -> None:
     contract = _avvikelser_contract(["avvikelse"])
 
     dropped_message = (
-        _process_structured(JsonOutputFormatSpec(), parsed, contract)
+        (await _process_structured(JsonOutputFormatSpec(), parsed, contract))
         .diagnostics[0]
         .message
     )
     renamed_message = (
-        _process_structured(JsonOutputFormatSpec(), renamed, contract)
+        (await _process_structured(JsonOutputFormatSpec(), renamed, contract))
         .diagnostics[0]
         .message
     )
@@ -334,11 +340,11 @@ def test_reported_paths_stop_at_twenty_and_say_how_many_more() -> None:
     assert renamed_message.count(" -> ") == 20
 
 
-def test_a_reported_path_is_cut_at_two_hundred_characters() -> None:
+async def test_a_reported_path_is_cut_at_two_hundred_characters() -> None:
     long_key = "z" * 300
     parsed: StructuredOutputValue = {"avvikelser": [{"avvikelse": "A", long_key: 1}]}
 
-    result = _process_structured(
+    result = await _process_structured(
         JsonOutputFormatSpec(), parsed, _avvikelser_contract(["avvikelse"])
     )
 
@@ -348,27 +354,29 @@ def test_a_reported_path_is_cut_at_two_hundred_characters() -> None:
     assert reported.endswith("...")
 
 
-def test_the_whole_reported_message_is_cut_at_sixteen_hundred_characters() -> None:
+async def test_the_whole_reported_message_is_cut_at_sixteen_hundred_characters() -> (
+    None
+):
     keys = [f"{index:02d}" + "k" * 150 for index in range(20)]
     parsed: StructuredOutputValue = {
         "avvikelser": [{"avvikelse": "A", **{k: 1 for k in keys}}]
     }
 
-    result = _process_structured(
+    result = await _process_structured(
         JsonOutputFormatSpec(), parsed, _avvikelser_contract(["avvikelse"])
     )
 
     assert len(result.diagnostics[0].message) == 1600
 
 
-def test_pdf_output_format_preserves_raw_pdf_bytes() -> None:
+async def test_pdf_output_format_preserves_raw_pdf_bytes() -> None:
     limit_calls: list[str] = []
 
     def _ensure_limits(text: str) -> None:
         limit_calls.append(text)
 
     raw_pdf = "%PDF-1.4\n%%EOF"
-    result = PdfOutputFormatSpec().process_model_output(
+    result = await PdfOutputFormatSpec().process_model_output(
         f"\n{raw_pdf}",
         step_order=4,
         output_contract=None,
@@ -388,7 +396,7 @@ def test_pdf_output_format_preserves_raw_pdf_bytes() -> None:
         (PdfOutputFormatSpec(), FlowOutputType.PDF.value),
     ],
 )
-def test_document_output_formats_share_structured_contract_pipeline(
+async def test_document_output_formats_share_structured_contract_pipeline(
     spec: OutputFormatSpec,
     output_type: str,
 ) -> None:
@@ -406,7 +414,9 @@ def test_document_output_formats_share_structured_contract_pipeline(
     def _parse(raw_text: str) -> StructuredOutputValue:
         return parsed
 
-    def _validate(data: object, schema: FlowPersistedJsonObject, *, label: str) -> None:
+    async def _check(
+        data: StructuredOutputValue, schema: FlowPersistedJsonObject, *, label: str
+    ) -> None:
         validate_payloads.append(data)
 
     def _render_structured(
@@ -420,13 +430,13 @@ def test_document_output_formats_share_structured_contract_pipeline(
         render_calls.append((data, rendered_output_type, step_order, title, schema))
         return b"rendered", "application/test"
 
-    result = spec.process_model_output(
+    result = await spec.process_model_output(
         '{"title": "Report", "extra": "dropped"}',
         step_order=5,
         output_contract=contract,
         context=_context(
             parse_json_output=_parse,
-            validate_against_contract=_validate,
+            check_contract=_check,
             render_structured_document=_render_structured,
         ),
     )

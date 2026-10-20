@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from eneo.flows.runtime.contract_check import check_contract_in_child
 from eneo.flows.runtime.step_input_validation import (
-    check_contract_in_child,
     validate_input_contract,
     validate_runtime_input_policy,
 )
@@ -154,7 +154,6 @@ async def test_validate_input_contract_returns_json_contract_metadata() -> None:
         input_contract={"type": "object", "properties": {"name": {"type": "string"}}},
         text='{"name":"A"}',
         structured={"name": "A"},
-        check_in_child=False,
     )
 
     assert contract_validation == {
@@ -173,7 +172,6 @@ async def test_validate_input_contract_rejects_json_without_structured_input() -
             input_contract={"type": "object"},
             text='{"name":"A"}',
             structured=None,
-            check_in_child=False,
         )
 
     assert exc.value.code == "typed_io_invalid_json_input"
@@ -186,7 +184,6 @@ async def test_validate_input_contract_parses_text_for_structured_schema() -> No
         input_contract={"type": "object", "properties": {"a": {"type": "number"}}},
         text='{"a":1}',
         structured=None,
-        check_in_child=False,
     )
 
     assert contract_validation == {
@@ -204,7 +201,6 @@ async def test_validate_input_contract_keeps_text_for_string_schema() -> None:
         input_contract={"type": "string"},
         text="hello",
         structured=None,
-        check_in_child=False,
     )
 
     assert contract_validation == {
@@ -227,7 +223,6 @@ async def test_validate_input_contract_invalid_text_json_attaches_parse_metadata
             input_contract={"type": "object", "properties": {"a": {"type": "number"}}},
             text=raw_text,
             structured=None,
-            check_in_child=False,
         )
 
     assert exc.value.code == "typed_io_contract_violation"
