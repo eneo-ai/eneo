@@ -5598,6 +5598,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/websites/{id}/content-folders/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Content Folders */
+    get: operations["get_content_folders_api_v1_websites__id__content_folders__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/prompts/{id}/": {
     parameters: {
       query?: never;
@@ -24560,6 +24577,25 @@ export interface components {
       | "crawl_stop_requested"
       | "crawl_active"
       | "crawl_cleanup_pending";
+    /**
+     * WebsiteContentFolderPublic
+     * @description A directory prefix in indexed resource URLs; counts include descendants.
+     */
+    WebsiteContentFolderPublic: {
+      /** Path */
+      path: string;
+      /** Count */
+      count: number;
+      /** Has Children */
+      has_children: boolean;
+    };
+    /** WebsiteContentFoldersPublic */
+    WebsiteContentFoldersPublic: {
+      /** Items */
+      items: components["schemas"]["WebsiteContentFolderPublic"][];
+      /** Next Cursor */
+      next_cursor: string | null;
+    };
     /** WebsiteCreate */
     WebsiteCreate: {
       /** Name */
@@ -44832,6 +44868,8 @@ export interface operations {
       query?: {
         limit?: number;
         cursor?: string | null;
+        q?: string;
+        prefix?: string;
       };
       header?: never;
       path: {
@@ -44849,6 +44887,68 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CursorPaginatedResponse_InfoBlobPublicNoText_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_content_folders_api_v1_websites__id__content_folders__get: {
+    parameters: {
+      query?: {
+        prefix?: string;
+        cursor?: string | null;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebsiteContentFoldersPublic"];
         };
       };
       /** @description Bad Request */

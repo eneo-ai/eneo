@@ -188,6 +188,101 @@ async def test_website_info_blob_endpoints_preserve_list_and_cursor_contracts(
     assert second_page["next_cursor"] is None
 
 
+async def test_website_directories_and_search_cover_the_active_index(db_container):
+    origin = "https://municipality.example/"
+    async with db_container() as container:
+        session = container.session()
+        user = container.user()
+        model_id = await session.scalar(sa.select(EmbeddingModels.id).limit(1))
+        website = Websites(
+            name="URL navigation",
+            url=origin,
+            download_files=True,
+            crawl_type=CrawlType.CRAWL,
+            update_interval="never",
+            size=0,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            embedding_model_id=model_id,
+        )
+        session.add(website)
+        await session.flush()
+        website_id = website.id
+        paths = [
+            "A/first",
+            "A/nested/guide.pdf",
+            "A/nested/index?redirect=/other/path",
+            "a/lowercase",
+            "A%20B_100%25/literal",
+            "AxBz100zz/decoy",
+            "%C3%85rsplan/guide",
+            "root?download=/ignored/path",
+        ]
+        for index, path in enumerate(paths + ["A/obsolete"]):
+            session.add(
+                InfoBlobs(
+                    id=UUID(int=9001 + index),
+                    title=f"Resource {index}",
+                    url=origin + path,
+                    text="sample",
+                    size=6,
+                    source_id=uuid4(),
+                    version_state="superseded" if path == "A/obsolete" else "active",
+                    user_id=user.id,
+                    tenant_id=user.tenant_id,
+                    website_id=website_id,
+                    embedding_model_id=model_id,
+                )
+            )
+        await session.flush()
+        repo = container.info_blob_repo()
+
+        roots = await repo.get_website_folders(website_id)
+        assert [(item.path, item.count, item.has_children) for item in roots.items] == [
+            (origin, 8, True)
+        ]
+        # Directory pagination must preserve case-sensitive distinct prefixes.
+        first = await repo.get_website_folders(website_id, prefix=origin, limit=2)
+        assert len(first.items) == 2
+        second = await repo.get_website_folders(
+            website_id, prefix=origin, cursor=first.next_cursor, limit=100
+        )
+        folders = {item.path: item for item in first.items + second.items}
+        assert len(folders) == 5
+        assert folders[origin + "A/"].count == 3
+        assert folders[origin + "a/"].count == 1
+        assert folders[origin + "A/"].has_children
+        assert not folders[origin + "a/"].has_children
+        assert all("ignored" not in path and "other" not in path for path in folders)
+
+        nested = await repo.get_website_folders(website_id, prefix=origin + "A/")
+        assert [
+            (item.path, item.count, item.has_children) for item in nested.items
+        ] == [(origin + "A/nested/", 2, False)]
+        documents = await repo.get_by_website_page(
+            website_id, prefix=origin + "A/", limit=1
+        )
+        assert documents.total_count == 3
+        remaining = await repo.get_by_website_page(
+            website_id, prefix=origin + "A/", cursor=documents.next_cursor, limit=100
+        )
+        assert remaining.total_count == 3
+        assert len(remaining.items) == 2
+        assert all(item.url.startswith(origin + "A/") for item in remaining.items)
+        literal = await repo.get_by_website_page(
+            website_id, prefix=origin + "A%20B_100%25/", limit=100
+        )
+        assert [item.title for item in literal.items] == ["Resource 4"]
+        encoded = await repo.get_by_website_page(website_id, q="Årsplan", limit=100)
+        assert [item.title for item in encoded.items] == ["Resource 6"]
+        combined = await repo.get_by_website_page(
+            website_id, prefix=origin + "A/", q="guide", limit=100
+        )
+        assert [item.title for item in combined.items] == ["Resource 1"]
+        other = await repo.get_website_folders(uuid4(), prefix=origin)
+        assert other.items == []
+
+
 async def test_deep_website_cursor_page_uses_the_active_composite_index(
     db_container,
 ) -> None:

@@ -7,7 +7,10 @@
   import CrawlRunsTable from "./CrawlRunsTable.svelte";
   import { onMount } from "svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import BlobTable from "../../collections/[collectionId]/BlobTable.svelte";
+  import WebsiteContent from "$lib/features/knowledge/WebsiteContent.svelte";
+  import CrawlRunDetailsContent from "$lib/features/knowledge/CrawlRunDetailsContent.svelte";
+  import CrawlRunStatus from "$lib/features/knowledge/CrawlRunStatus.svelte";
+  import { writable } from "svelte/store";
   import CrawlLimitations from "./CrawlLimitations.svelte";
   import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName.js";
@@ -19,7 +22,7 @@
     isActiveCrawlRun
   } from "$lib/features/knowledge/crawlRunState";
   import { Info, LoaderCircle, TriangleAlert } from "@lucide/svelte";
-  import type { CrawlResourceFailure, CrawlRun, WebsiteInfoBlobPage } from "@eneo/eneo-js";
+  import type { CrawlResourceFailure, CrawlRun } from "@eneo/eneo-js";
   import CrawlRunDetails from "$lib/features/knowledge/CrawlRunDetails.svelte";
   import CrawlFailureActions from "$lib/features/knowledge/CrawlFailureActions.svelte";
   import { mergeLatestCrawlRun, pollWebsiteDetail } from "./websiteDetailPolling";
@@ -27,6 +30,7 @@
   export let data;
 
   const eneo = getEneo();
+  const tabs = writable<string>();
   let startDialogOpen = false;
   let selectedRun: CrawlRun | null = null;
   let initialKind: CrawlResourceFailure["kind"] | null = null;
@@ -52,11 +56,7 @@
   let crawlRunPageGeneration = 0;
   let loadingMoreCrawlRuns = false;
   let serverInfoBlobPage = data.infoBlobPage;
-  let infoBlobs = [...data.infoBlobPage.items];
-  let nextInfoBlobCursor = data.infoBlobPage.next_cursor ?? null;
-  let totalInfoBlobCount = data.infoBlobPage.total_count;
-  let infoBlobPageGeneration = 0;
-  let loadingMoreInfoBlobs = false;
+  let infoBlobPage = data.infoBlobPage;
   let pollingCrawlRuns = false;
   let historyRunId = data.crawlRuns[0]?.id;
   let contentRunId = data.crawlRuns.find((run) => !isActiveCrawlRun(run))?.id;
@@ -73,7 +73,7 @@
 
   $: if (data.infoBlobPage !== serverInfoBlobPage) {
     serverInfoBlobPage = data.infoBlobPage;
-    replaceInfoBlobPage(data.infoBlobPage);
+    infoBlobPage = data.infoBlobPage;
     contentRunId = data.crawlRuns.find((run) => !isActiveCrawlRun(run))?.id;
   }
 
@@ -99,13 +99,13 @@
           result.latestRun.id !== contentRunId
         ) {
           try {
-            const infoBlobPage = await eneo.websites.indexedBlobs.listPage({
+            const refreshedPage = await eneo.websites.indexedBlobs.listPage({
               id: websiteId,
               limit: PAGINATION.PAGE_SIZE
             });
             if (!mounted || websiteId !== data.website.id || pageCrawlRuns !== data.crawlRuns)
               return;
-            replaceInfoBlobPage(infoBlobPage);
+            infoBlobPage = refreshedPage;
             contentRunId = result.latestRun.id;
           } catch {
             // Keep old content and retry, independently of the history refresh.
@@ -138,7 +138,6 @@
 
     return () => {
       mounted = false;
-      infoBlobPageGeneration += 1;
       crawlRunPageGeneration += 1;
       clearInterval(interval);
     };
@@ -177,45 +176,6 @@
       if (generation === crawlRunPageGeneration) loadingMoreCrawlRuns = false;
     }
   }
-
-  function replaceInfoBlobPage(page: WebsiteInfoBlobPage) {
-    infoBlobPageGeneration += 1;
-    loadingMoreInfoBlobs = false;
-    infoBlobs = [...page.items];
-    nextInfoBlobCursor = page.next_cursor ?? null;
-    totalInfoBlobCount = page.total_count;
-  }
-
-  async function loadMoreInfoBlobs() {
-    if (nextInfoBlobCursor === null || loadingMoreInfoBlobs) return;
-
-    const generation = infoBlobPageGeneration;
-    const cursor = nextInfoBlobCursor;
-    const websiteId = data.website.id;
-    loadingMoreInfoBlobs = true;
-    try {
-      const page = await eneo.websites.indexedBlobs.listPage({
-        id: websiteId,
-        limit: PAGINATION.PAGE_SIZE,
-        cursor
-      });
-      if (
-        generation !== infoBlobPageGeneration ||
-        websiteId !== data.website.id ||
-        cursor !== nextInfoBlobCursor
-      )
-        return;
-      infoBlobs = [...infoBlobs, ...page.items];
-      nextInfoBlobCursor = page.next_cursor ?? null;
-      totalInfoBlobCount = page.total_count;
-    } catch (error) {
-      if (generation === infoBlobPageGeneration && websiteId === data.website.id) {
-        toastError(error, m.website_indexed_content_load_more_failed());
-      }
-    } finally {
-      if (generation === infoBlobPageGeneration) loadingMoreInfoBlobs = false;
-    }
-  }
 </script>
 
 <svelte:head>
@@ -226,7 +186,7 @@
   >
 </svelte:head>
 
-<Page.Root>
+<Page.Root tabController={tabs}>
   <Page.Header>
     <Page.Title
       parent={{
@@ -237,8 +197,9 @@
       title={formatWebsiteName(data.website)}
     ></Page.Title>
     <Page.Tabbar>
-      <Page.TabTrigger tab="crawls">{m.crawls()}</Page.TabTrigger>
-      <Page.TabTrigger tab="blobs">{m.indexed_content()}</Page.TabTrigger>
+      <Page.TabTrigger tab="blobs">{m.source_tab_content()}</Page.TabTrigger>
+      <Page.TabTrigger tab="problems">{m.source_tab_problems()}</Page.TabTrigger>
+      <Page.TabTrigger tab="crawls">{m.source_tab_activity()}</Page.TabTrigger>
     </Page.Tabbar>
     {#if !data.readonly}
       <CrawlCreateRun
@@ -250,6 +211,45 @@
     {/if}
   </Page.Header>
   <Page.Main>
+    <div class="border-default grid gap-4 border-b py-4 pr-4 sm:grid-cols-3">
+      <div>
+        <p class="text-secondary text-xs">{m.website_source_latest_crawl()}</p>
+        <div class="mt-1">
+          {#if latestKnownRun}<CrawlRunStatus run={latestKnownRun} />{:else}<span
+              class="text-secondary text-sm">{m.this_website_not_crawled_before()}</span
+            >{/if}
+        </div>
+      </div>
+      <div>
+        <p class="text-secondary text-xs">{m.indexed_content()}</p>
+        <p class="mt-1 font-semibold tabular-nums">{infoBlobPage.total_count}</p>
+      </div>
+      <div>
+        <p class="text-secondary text-xs">{m.website_source_latest_completed()}</p>
+        <p class="mt-1 text-sm">
+          {latestCompletedRun
+            ? formatDateTime(latestCompletedRun.finished_at ?? latestCompletedRun.created_at)
+            : "–"}
+        </p>
+      </div>
+    </div>
+    <Page.Tab id="problems">
+      {#if $tabs === "problems"}
+        <div class="max-w-5xl py-5 pr-4">
+          {#if latestCompletedRun}
+            <h2 class="mb-1 text-base font-semibold">{m.website_source_latest_completed()}</h2>
+            <p class="text-secondary mb-5 text-sm">
+              {m.website_source_problems_description({
+                date: formatDateTime(latestCompletedRun.created_at)
+              })}
+            </p>
+            <CrawlRunDetailsContent run={latestCompletedRun} open grouped />
+          {:else}
+            <p class="text-secondary py-6 text-sm">{m.website_source_no_completed()}</p>
+          {/if}
+        </div>
+      {/if}
+    </Page.Tab>
     <Page.Tab id="crawls">
       {#if data.environment.integrationRequestFormUrl}
         <CrawlLimitations></CrawlLimitations>
@@ -309,31 +309,8 @@
           <CrawlFailureActions run={latestCompletedRun} onselect={showContentFailures} />
         </div>
       {/if}
-      <BlobTable
-        blobs={infoBlobs}
-        canEdit={false}
-        resourceName={m.website_indexed_content_resource()}
-        emptyMessage={m.website_no_indexed_content()}
-      ></BlobTable>
-      {#if nextInfoBlobCursor !== null}
-        <div class="mt-4 flex justify-center">
-          <Button
-            variant="outline"
-            disabled={loadingMoreInfoBlobs}
-            aria-busy={loadingMoreInfoBlobs}
-            onclick={loadMoreInfoBlobs}
-          >
-            {#if loadingMoreInfoBlobs}
-              <LoaderCircle class="animate-spin" aria-hidden="true" />
-              {m.loading_more()}
-            {:else}
-              {m.website_indexed_content_load_more({
-                current: infoBlobs.length,
-                total: totalInfoBlobCount
-              })}
-            {/if}
-          </Button>
-        </div>
+      {#if $tabs === "blobs"}
+        <WebsiteContent websiteId={data.website.id} initialPage={infoBlobPage} />
       {/if}
     </Page.Tab>
   </Page.Main>

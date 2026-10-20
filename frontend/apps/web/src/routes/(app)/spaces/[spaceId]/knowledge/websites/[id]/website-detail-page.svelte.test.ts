@@ -1,5 +1,5 @@
 import type { CrawlRun } from "@eneo/eneo-js";
-import { page } from "@vitest/browser/context";
+import { page } from "vitest/browser";
 import { readable } from "svelte/store";
 import { render } from "vitest-browser-svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -18,7 +18,7 @@ vi.mock("$lib/core/errors", async (importOriginal) => ({
 }));
 const route = vi.hoisted(() => ({
   url: new URL("http://localhost/?tab=crawls"),
-  state: { tab: "crawls" }
+  state: { tab: "crawls" } as { tab?: string }
 }));
 vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({
@@ -30,7 +30,7 @@ vi.mock("$lib/core/Eneo", () => ({
         create: createRun,
         failures: listFailures
       },
-      indexedBlobs: { listPage: listBlobs }
+      indexedBlobs: { listPage: listBlobs, folders: async () => ({ items: [], next_cursor: null }) }
     }
   })
 }));
@@ -49,8 +49,8 @@ vi.mock("$app/navigation", () => ({
   preloadCode: vi.fn(),
   preloadData: vi.fn(),
   pushState: vi.fn(),
-  replaceState: (url: URL, state: { tab: string }) => {
-    route.url = url;
+  replaceState: (url: URL | string, state: { tab?: string }) => {
+    route.url = new URL(url, route.url);
     route.state = state;
   }
 }));
@@ -113,6 +113,54 @@ beforeEach(() => {
   showError.mockReset();
 });
 afterEach(() => vi.useRealTimers());
+
+test("opens Content by default without fetching problem details", async () => {
+  route.url = new URL("http://localhost/");
+  route.state = {};
+  render(WebsiteDetailPage, { data: data as never });
+  await expect
+    .element(page.getByRole("tab", { name: m.source_tab_content() }))
+    .toHaveAttribute("aria-selected", "true");
+  expect(listFailures).not.toHaveBeenCalled();
+});
+
+test("loads the latest completed crawl's grouped problems only when selected", async () => {
+  const completed: CrawlRun = {
+    ...terminal,
+    id: "completed",
+    outcome: "partial",
+    pages_failed: 2,
+    failure_summary: { http_404: 2 }
+  };
+  listFailures.mockResolvedValue({
+    ...emptyPage,
+    run: completed,
+    details_available: true,
+    items: [
+      { id: "failure-one", url: "https://example.test/missing", kind: "page", reason: "http_404" }
+    ],
+    total_count: 2,
+    next_cursor: "failure-one"
+  });
+  render(WebsiteDetailPage, { data: { ...data, crawlRuns: [running, completed] } as never });
+  expect(listFailures).not.toHaveBeenCalled();
+  await page.getByRole("tab", { name: m.source_tab_problems() }).click();
+  await expect
+    .element(page.getByRole("link", { name: "https://example.test/missing" }))
+    .toBeVisible();
+  await expect
+    .element(page.getByText(m.website_source_problem_count({ shown: 1, total: 2 })))
+    .toBeVisible();
+  expect(listFailures).toHaveBeenCalledExactlyOnceWith({
+    id: "completed",
+    limit: 100,
+    cursor: null
+  });
+  await page.getByRole("tab", { name: m.source_tab_activity() }).click();
+  await expect
+    .element(page.getByRole("tab", { name: m.source_tab_activity() }))
+    .toHaveAttribute("aria-selected", "true");
+});
 
 test("opens a crawl's failed addresses and retries the next page without losing results", async () => {
   const run = {
@@ -203,7 +251,7 @@ test("older history has a loading state and retries without losing the current r
   rejectPage(new Error("History unavailable"));
   await expect.element(page.getByRole("button", { name: label })).toBeEnabled();
   expect(showError).toHaveBeenCalledOnce();
-  await expect.element(page.getByText(m.in_progress(), { exact: true })).toBeVisible();
+  await expect.element(page.getByText(m.in_progress(), { exact: true }).first()).toBeVisible();
 
   listRuns.mockResolvedValue({
     ...emptyPage,
@@ -214,7 +262,7 @@ test("older history has a loading state and retries without losing the current r
   await expect
     .element(page.getByText(m.crawl_status_empty(), { exact: true }).first())
     .toBeVisible();
-  await expect.element(page.getByText(m.in_progress(), { exact: true })).toBeVisible();
+  await expect.element(page.getByText(m.in_progress(), { exact: true }).first()).toBeVisible();
   await expect.element(page.getByRole("button", { name: label })).not.toBeInTheDocument();
 });
 
@@ -255,7 +303,7 @@ test.each([terminal, null])(
     await vi.advanceTimersByTimeAsync(0);
     if (latest) {
       await expect
-        .element(page.getByText(m.crawl_status_succeeded(), { exact: true }))
+        .element(page.getByText(m.crawl_status_succeeded(), { exact: true }).first())
         .toBeVisible();
     }
     await expect
@@ -269,7 +317,7 @@ test("an idle mounted page discovers and displays a scheduled crawl, then refres
   render(WebsiteDetailPage, { data: data as never });
   await vi.advanceTimersByTimeAsync(10_000);
   expect(latestRun).toHaveBeenCalledOnce();
-  await expect.element(page.getByText(m.in_progress(), { exact: true })).toBeVisible();
+  await expect.element(page.getByText(m.in_progress(), { exact: true }).first()).toBeVisible();
 
   latestRun.mockResolvedValue(terminal);
   listBlobs.mockResolvedValue({
@@ -279,12 +327,14 @@ test("an idle mounted page discovers and displays a scheduled crawl, then refres
     items: [{ id: "blob-1", metadata: { title: "Indexed report", size: 100 }, text: "Content" }]
   });
   await vi.advanceTimersByTimeAsync(10_000);
-  await expect.element(page.getByText(m.crawl_status_succeeded(), { exact: true })).toBeVisible();
+  await expect
+    .element(page.getByText(m.crawl_status_succeeded(), { exact: true }).first())
+    .toBeVisible();
   expect(listBlobs).toHaveBeenCalledOnce();
   await vi.advanceTimersByTimeAsync(10_000);
   expect(listRuns).toHaveBeenCalledOnce();
   expect(listBlobs).toHaveBeenCalledOnce();
-  await page.getByRole("tab", { name: m.indexed_content(), exact: true }).click();
+  await page.getByRole("tab", { name: m.source_tab_content(), exact: true }).click();
   await expect.element(page.getByText("Indexed report", { exact: true })).toBeVisible();
 });
 
@@ -302,7 +352,7 @@ test("polls never overlap, recover after a network error, and stop on unmount", 
   rejectRequest(new Error("Network unavailable"));
   await vi.advanceTimersByTimeAsync(10_000);
   expect(latestRun).toHaveBeenCalledTimes(2);
-  await expect.element(page.getByText(m.in_progress(), { exact: true })).toBeVisible();
+  await expect.element(page.getByText(m.in_progress(), { exact: true }).first()).toBeVisible();
   await view.unmount();
   await vi.advanceTimersByTimeAsync(30_000);
   expect(latestRun).toHaveBeenCalledTimes(2);
@@ -321,8 +371,10 @@ test("a content refresh failure keeps the terminal status and retries without cl
     data: { ...data, crawlRuns: [running], infoBlobPage: oldPage } as never
   });
   await vi.advanceTimersByTimeAsync(10_000);
-  await expect.element(page.getByText(m.crawl_status_succeeded(), { exact: true })).toBeVisible();
-  await page.getByRole("tab", { name: m.indexed_content(), exact: true }).click();
+  await expect
+    .element(page.getByText(m.crawl_status_succeeded(), { exact: true }).first())
+    .toBeVisible();
+  await page.getByRole("tab", { name: m.source_tab_content(), exact: true }).click();
   await expect.element(page.getByText("Previous report", { exact: true })).toBeVisible();
   listBlobs.mockResolvedValue({
     ...oldPage,
@@ -340,7 +392,9 @@ test("history failures do not hide the latest status or block content, and histo
   render(WebsiteDetailPage, { data: data as never });
 
   await vi.advanceTimersByTimeAsync(10_000);
-  await expect.element(page.getByText(m.crawl_status_succeeded(), { exact: true })).toBeVisible();
+  await expect
+    .element(page.getByText(m.crawl_status_succeeded(), { exact: true }).first())
+    .toBeVisible();
   expect(listBlobs).toHaveBeenCalledOnce();
   await vi.advanceTimersByTimeAsync(10_000);
   expect(listRuns).toHaveBeenCalledTimes(2);
@@ -350,9 +404,17 @@ test("history failures do not hide the latest status or block content, and histo
   listRuns.mockResolvedValue({ ...emptyPage, items: [running, older], total_count: 2 });
   await vi.advanceTimersByTimeAsync(10_000);
   expect(listRuns).toHaveBeenCalledTimes(3);
-  await expect.element(page.getByText(m.in_progress(), { exact: true })).not.toBeInTheDocument();
   await expect
-    .poll(() => page.getByText(m.crawl_status_succeeded(), { exact: true }).all().length)
+    .element(page.getByText(m.in_progress(), { exact: true }).first())
+    .not.toBeInTheDocument();
+  await expect
+    .poll(
+      () =>
+        page
+          .getByRole("tabpanel", { name: m.source_tab_activity() })
+          .getByText(m.crawl_status_succeeded(), { exact: true })
+          .all().length
+    )
     .toBe(2);
   await vi.advanceTimersByTimeAsync(10_000);
   expect(listRuns).toHaveBeenCalledTimes(3);
@@ -380,7 +442,7 @@ test("a terminal refresh discards an older load-more response even if the cursor
   render(WebsiteDetailPage, {
     data: { ...data, crawlRuns: [running], infoBlobPage: oldFirstPage } as never
   });
-  await page.getByRole("tab", { name: m.indexed_content(), exact: true }).click();
+  await page.getByRole("tab", { name: m.source_tab_content(), exact: true }).click();
   await page
     .getByRole("button", { name: m.website_indexed_content_load_more({ current: 1, total: 2 }) })
     .click();

@@ -90,6 +90,21 @@ class WebsiteInfoBlobPage:
 
 
 @dataclass(frozen=True, slots=True)
+class WebsiteContentFolder:
+    """A URL prefix, not a page-to-document ownership relationship."""
+
+    path: str
+    count: int
+    has_children: bool
+
+
+@dataclass(frozen=True, slots=True)
+class WebsiteContentFolderPage:
+    items: list[WebsiteContentFolder]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class IntegrationDocumentsPage:
     items: list[InfoBlobInDBNoText]
     total_count: int
@@ -988,11 +1003,22 @@ class InfoBlobRepository:
         *,
         limit: int,
         cursor: UUID | None = None,
+        q: str = "",
+        prefix: str = "",
     ) -> WebsiteInfoBlobPage:
-        conditions = (
+        conditions = [
             InfoBlobs.website_id == website_id,
             active_info_blob_version(),
-        )
+        ]
+        if q.strip():
+            conditions.append(_title_or_path_matches(q.strip(), url_anchor=None))
+        if prefix:
+            # URL paths are case sensitive. Escape LIKE metacharacters in real URLs.
+            conditions.append(
+                self._website_url_path().like(
+                    f"{_like_literal(prefix)}%", escape=_LIKE_ESCAPE
+                )
+            )
         total_count = await self.session.scalar(
             sa.select(sa.func.count()).select_from(InfoBlobs).where(*conditions)
         )
@@ -1018,6 +1044,75 @@ class InfoBlobRepository:
             items=items,
             total_count=total_count or 0,
             next_cursor=items[-1].id if has_more else None,
+        )
+
+    @staticmethod
+    def _website_url_path() -> ColumnElement[str]:
+        # Legacy rows predate website_source_url. Strip queries/fragments only
+        # for navigation; the stored source identity and content links stay intact.
+        path = sa.func.split_part(
+            sa.func.split_part(
+                sa.func.coalesce(InfoBlobs.website_source_url, InfoBlobs.url), "?", 1
+            ),
+            "#",
+            1,
+        )
+        return sa.case((path.op("~")(r"^https?://[^/]+$"), path + "/"), else_=path)
+
+    async def get_website_folders(
+        self,
+        website_id: UUID,
+        *,
+        prefix: str = "",
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> WebsiteContentFolderPage:
+        """List one level across the entire active index, with bounded output."""
+        url = self._website_url_path()
+        conditions = [
+            InfoBlobs.website_id == website_id,
+            active_info_blob_version(),
+            url.op("~")(r"^https?://[^/]+"),
+        ]
+        if prefix:
+            remainder = sa.func.substr(url, len(prefix) + 1)
+            conditions.extend(
+                [
+                    url.like(f"{_like_literal(prefix)}%", escape=_LIKE_ESCAPE),
+                    sa.func.strpos(remainder, "/") > 0,
+                    sa.func.split_part(remainder, "/", 1) != "",
+                ]
+            )
+            path = sa.literal(prefix) + sa.func.split_part(remainder, "/", 1) + "/"
+            tail = sa.func.substr(remainder, sa.func.strpos(remainder, "/") + 1)
+        else:
+            origin = sa.func.substring(url, r"^https?://[^/]+")
+            path = origin + "/"
+            tail = sa.func.substr(url, sa.func.length(origin) + 2)
+
+        groups = (
+            sa.select(
+                path.label("path"),
+                sa.func.count().label("count"),
+                sa.func.bool_or(sa.func.strpos(tail, "/") > 1).label("has_children"),
+            )
+            .where(*conditions)
+            .group_by(path)
+            .subquery()
+        )
+        query = sa.select(groups).order_by(groups.c.path).limit(limit + 1)
+        if cursor is not None:
+            query = query.where(groups.c.path > cursor)
+        rows = (await self.session.execute(query)).all()
+        items = [
+            WebsiteContentFolder(
+                path=row.path, count=row.count, has_children=row.has_children
+            )
+            for row in rows[:limit]
+        ]
+        return WebsiteContentFolderPage(
+            items=items,
+            next_cursor=items[-1].path if len(rows) > limit else None,
         )
 
     @staticmethod

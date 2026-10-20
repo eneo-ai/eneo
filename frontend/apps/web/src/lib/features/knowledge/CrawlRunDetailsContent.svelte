@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { CrawlRun, CrawlResourceFailure, Eneo } from "@eneo/eneo-js";
   import { untrack } from "svelte";
-  import { RefreshCw } from "@lucide/svelte";
+  import { RefreshCw, TriangleAlert } from "@lucide/svelte";
+  import SourceProblemGroup from "./components/SourceProblemGroup.svelte";
   import { cn } from "$lib/utils";
   import CrawlLoadError from "./CrawlLoadError.svelte";
   import CrawlRunCounts from "./CrawlRunCounts.svelte";
@@ -23,7 +24,8 @@
     onrefresh,
     onrunupdate,
     fetchFailures = eneo.websites.crawlRuns.failures,
-    initialKind = null
+    initialKind = null,
+    grouped = false
   }: {
     run: CrawlRun;
     open?: boolean;
@@ -31,6 +33,8 @@
     onrunupdate?: (run: CrawlRun) => void;
     fetchFailures?: Eneo["websites"]["crawlRuns"]["failures"];
     initialKind?: CrawlResourceFailure["kind"] | null;
+    /** Source overview groups reasons; historical dialogs retain their compact list. */
+    grouped?: boolean;
   } = $props();
   const runId = $derived(run.id);
   let loadedRun = $state<CrawlRun | null>(null);
@@ -53,6 +57,12 @@
   ]);
   const displayedRun = $derived(loadedRun ?? run);
   const summary = $derived(Object.entries(displayedRun.failure_summary ?? {}));
+  const reasons = $derived([
+    ...new Set([
+      ...(kind ? [] : summary.map(([reason]) => reason)),
+      ...failures.map((failure) => failure.reason)
+    ])
+  ]);
 
   async function loadFailures(cursor: string | null = null) {
     const request = ++generation;
@@ -162,14 +172,16 @@
         />{m.refresh()}
       </Button>
     </div>
-    <div class="max-w-sm"><CrawlRunCounts run={displayedRun} onshowFailures={selectKind} /></div>
-    <p class="text-secondary text-sm">
-      {displayedRun.origin === "manual"
-        ? m.crawl_origin_manual()
-        : displayedRun.origin === "scheduled"
-          ? m.crawl_origin_scheduled()
-          : m.crawl_origin_legacy()}
-    </p>
+    {#if !grouped}
+      <div class="max-w-sm"><CrawlRunCounts run={displayedRun} onshowFailures={selectKind} /></div>
+      <p class="text-secondary text-sm">
+        {displayedRun.origin === "manual"
+          ? m.crawl_origin_manual()
+          : displayedRun.origin === "scheduled"
+            ? m.crawl_origin_scheduled()
+            : m.crawl_origin_legacy()}
+      </p>
+    {/if}
     {#if isActiveCrawlRun(displayedRun)}
       <p class="text-secondary text-xs">{m.crawl_details_running()}</p>
     {/if}
@@ -194,7 +206,7 @@
   </div>
 
   <div aria-busy={loading}>
-    {#if summary.length > 0}
+    {#if !grouped && summary.length > 0}
       <details class="mb-3 text-sm">
         <summary
           class="cursor-pointer rounded-sm py-1 font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-stronger"
@@ -211,7 +223,55 @@
         </ul>
       </details>
     {/if}
-    {#if failures.length > 0}
+    {#if grouped && reasons.length > 0}
+      <div class="border-default overflow-hidden rounded-lg border">
+        {#each reasons as reason (reason)}
+          {@const matching = failures.filter((failure) => failure.reason === reason)}
+          {@const count = kind
+            ? matching.length
+            : (displayedRun.failure_summary?.[reason] ?? matching.length)}
+          <SourceProblemGroup
+            title={crawlFailureReasonLabel(reason)}
+            advice={crawlFailureReasonHelp(reason)}
+            countLabel={!kind && displayedRun.failure_summary?.[reason] !== undefined
+              ? m.website_source_problem_count({ shown: matching.length, total: count })
+              : m.website_source_problem_shown({ shown: matching.length })}
+            icon={TriangleAlert}
+            open
+          >
+            <ul class="divide-border divide-y px-4 pb-3 pl-15 text-sm">
+              {#each matching as failure (failure.id)}
+                {@const href = resourceLink(failure.url)}
+                <li class="flex flex-wrap items-baseline gap-3 py-2">
+                  <span class="text-secondary text-xs"
+                    >{failure.kind === "page" ? m.page() : m.crawl_failure_file()}</span
+                  >
+                  {#if href}
+                    <!-- eslint-disable svelte/no-navigation-without-resolve -- validated external HTTP(S) address -->
+                    <a
+                      {href}
+                      target="_blank"
+                      rel="noreferrer"
+                      class="text-accent-stronger break-all underline underline-offset-2"
+                      >{failure.url}</a
+                    >
+                    <!-- eslint-enable svelte/no-navigation-without-resolve -->
+                  {:else}<span class="break-all">{failure.url}</span>{/if}
+                </li>
+              {:else}
+                <li class="text-secondary py-2">
+                  {loading
+                    ? m.loading()
+                    : !detailsAvailable
+                      ? m.crawl_failures_unavailable()
+                      : m.website_source_problem_not_loaded()}
+                </li>
+              {/each}
+            </ul>
+          </SourceProblemGroup>
+        {/each}
+      </div>
+    {:else if failures.length > 0}
       <ul aria-label={m.crawl_failed_addresses()} class="divide-border divide-y text-sm">
         {#each failures as failure (failure.id)}
           {@const href = resourceLink(failure.url)}
