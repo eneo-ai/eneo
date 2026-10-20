@@ -73,6 +73,26 @@ async def persist_renewal_failure(
         )
 
 
+async def record_failed_attempt(
+    subscription: SharePointSubscription,
+    container: Container,
+    error: Exception,
+    *,
+    failures_before: int,
+) -> None:
+    """Record a renewal or recreation that failed inside its savepoint.
+
+    The savepoint has rolled back, so the transaction is clean for this
+    write (which uses its own savepoint). When the service already recorded
+    why a recreation failed, the rollback took that write with it, so it is
+    written again rather than counted a second time.
+    """
+    if subscription.consecutive_renewal_failures > failures_before:
+        await persist_renewal_failure(subscription, container)
+    else:
+        await record_renewal_failure(subscription, container, user_visible_error(error))
+
+
 async def get_token_for_subscription(
     subscription: SharePointSubscription,
     container: Container,
@@ -218,12 +238,9 @@ async def _maintain_subscription(
             if not done:
                 raise RuntimeError(f"Microsoft Graph refused to {action}")
     except Exception as exc:
-        if subscription.consecutive_renewal_failures > failures_before:
-            await persist_renewal_failure(subscription, container)
-        else:
-            await record_renewal_failure(
-                subscription, container, user_visible_error(exc)
-            )
+        await record_failed_attempt(
+            subscription, container, exc, failures_before=failures_before
+        )
         return
     if removed or failures_before:
         # Changes made while the subscription was gone, or paused because Graph
@@ -335,17 +352,9 @@ async def _renew_one(
             f"Error renewing subscription {subscription.subscription_id}: {exc}",
             exc_info=True,
         )
-        # The savepoint above has rolled back, so the transaction is clean for
-        # this failure write (which uses its own savepoint).
-        if subscription.consecutive_renewal_failures > failures_before:
-            # The service already recorded why a recreation failed; the
-            # rollback took that write with it, so it is written again
-            # rather than counted a second time.
-            await persist_renewal_failure(subscription, container)
-        else:
-            await record_renewal_failure(
-                subscription, container, user_visible_error(exc)
-            )
+        await record_failed_attempt(
+            subscription, container, exc, failures_before=failures_before
+        )
         return False
     if failures_before:
         await queue_syncs_after_recovery(subscription, container)
