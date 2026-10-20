@@ -41,12 +41,12 @@ from eneo.integration.infrastructure.content_service.sharepoint_sync_ledger impo
     encode_failed_items,
 )
 from eneo.integration.infrastructure.content_service.utils import ExtractionResult
-from tests.unittests.integration.test_sharepoint_content_service import (
-    _delta_file,
-    _http_error,
-    _mock_graph_client,
-    _org_token_provider,
-    _real_integration_knowledge,
+from tests.unittests.integration.infrastructure.content_service.helpers import (
+    delta_file,
+    http_error,
+    mock_graph_client,
+    org_token_provider,
+    real_integration_knowledge,
 )
 
 _CLIENT = "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
@@ -102,7 +102,7 @@ def mock_dependencies():
         "oauth_token_service": AsyncMock(),
         "session": AsyncMock(),
         "tenant_sharepoint_app_repo": AsyncMock(),
-        "org_token_provider": _org_token_provider(),
+        "org_token_provider": org_token_provider(),
         "sync_log_repo": AsyncMock(),
         "change_key_service": AsyncMock(),
     }
@@ -148,7 +148,7 @@ def service(mock_dependencies, ledger, clock):
 
 
 def _knowledge(mock_dependencies, oauth_token, **fields):
-    ik = _real_integration_knowledge(**fields)
+    ik = real_integration_knowledge(**fields)
     mock_dependencies["oauth_token_repo"].one.return_value = oauth_token
     mock_dependencies["integration_knowledge_repo"].one.return_value = ik
     repo = mock_dependencies["info_blob_service"].repo
@@ -163,7 +163,7 @@ def _knowledge(mock_dependencies, oauth_token, **fields):
 
 def _root_file(item_id: str) -> dict:
     return {
-        **_delta_file(item_id, f"{item_id}.docx"),
+        **delta_file(item_id, f"{item_id}.docx"),
         "parentReference": {"driveId": "drive-456", "siteId": "site-123"},
     }
 
@@ -175,7 +175,7 @@ async def _metadata(*, drive_id, item_id):
 def _extract_failing(*failing: str):
     async def extract(*, drive_id, item_id):
         if item_id in failing:
-            raise _http_error(502, "Bad Gateway")
+            raise http_error(502, "Bad Gateway")
         return ExtractionResult.ok("Body", "text/plain")
 
     return extract
@@ -206,13 +206,13 @@ class TestRepeatedFailures:
         clock,
     ):
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
-        changes = [_delta_file("bad", "bad.docx"), _delta_file("good", "good.docx")]
+        changes = [delta_file("bad", "bad.docx"), delta_file("good", "good.docx")]
         after_failed_passes = []
         with (
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
                 get_file_extraction_by_id=AsyncMock(
@@ -260,10 +260,10 @@ class TestRepeatedFailures:
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", AsyncMock(return_value="updated")),
         ):
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(
-                    return_value=([_delta_file("flaky", "flaky.docx")], "token-2")
+                    return_value=([delta_file("flaky", "flaky.docx")], "token-2")
                 ),
                 get_file_extraction_by_id=AsyncMock(
                     return_value=ExtractionResult.ok("Body", "text/plain")
@@ -293,10 +293,10 @@ class TestRepeatedFailures:
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(
-                    return_value=([_delta_file("bad", "bad.docx")], "token-2")
+                    return_value=([delta_file("bad", "bad.docx")], "token-2")
                 ),
                 get_file_extraction_by_id=AsyncMock(
                     side_effect=_extract_failing("bad")
@@ -362,10 +362,10 @@ class TestPacing:
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(
-                    return_value=([_delta_file("bad", "bad.docx")], "token-2")
+                    return_value=([delta_file("bad", "bad.docx")], "token-2")
                 ),
                 get_file_extraction_by_id=AsyncMock(
                     side_effect=_extract_failing("bad")
@@ -414,7 +414,7 @@ class TestOutages:
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", upsert),
         ):
-            client = _mock_graph_client(
+            client = mock_graph_client(
                 client_class,
                 get_drive_root_children=AsyncMock(return_value=files),
                 get_file_extraction_by_id=AsyncMock(
@@ -453,12 +453,12 @@ class TestOutages:
         self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
     ):
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
-        changes = [_delta_file(f"item-{index}", f"{index}.docx") for index in range(4)]
+        changes = [delta_file(f"item-{index}", f"{index}.docx") for index in range(4)]
         with (
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
                 get_file_extraction_by_id=AsyncMock(
@@ -480,13 +480,13 @@ class TestOutages:
         self, service, mock_dependencies, mock_oauth_token, ledger, sqlite_session
     ):
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
-        changes = [_delta_file(f"item-{index}", f"{index}.docx") for index in range(40)]
+        changes = [delta_file(f"item-{index}", f"{index}.docx") for index in range(40)]
         failing = {f"item-{index}" for index in range(0, 40, 3)}
         with (
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
                 get_file_extraction_by_id=AsyncMock(
@@ -510,10 +510,10 @@ class TestStoppingEarly:
         self, service, mock_dependencies, mock_oauth_token, ledger
     ):
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
-        changes = [_delta_file(f"item-{index}", f"{index}.docx") for index in range(30)]
-        extraction = AsyncMock(side_effect=_http_error(503, "Service Unavailable"))
+        changes = [delta_file(f"item-{index}", f"{index}.docx") for index in range(30)]
+        extraction = AsyncMock(side_effect=http_error(503, "Service Unavailable"))
         with patch(_CLIENT) as client_class:
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
                 get_file_extraction_by_id=extraction,
@@ -534,11 +534,11 @@ class TestStoppingEarly:
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token=None)
         files = [_root_file(f"f-{index}") for index in range(30)]
         with patch(_CLIENT) as client_class:
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_drive_root_children=AsyncMock(return_value=files),
                 get_file_extraction_by_id=AsyncMock(
-                    side_effect=_http_error(503, "Service Unavailable")
+                    side_effect=http_error(503, "Service Unavailable")
                 ),
             )
             with pytest.raises(SyncStoppedEarly):
@@ -552,13 +552,13 @@ class TestStoppingEarly:
         self, service, mock_dependencies, mock_oauth_token, ledger
     ):
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
-        changes = [_delta_file(f"item-{index}", f"{index}.docx") for index in range(30)]
+        changes = [delta_file(f"item-{index}", f"{index}.docx") for index in range(30)]
         failing = {f"item-{index}" for index in range(30) if index % 4}
         with (
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
-            client = _mock_graph_client(
+            client = mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
                 get_file_extraction_by_id=AsyncMock(
@@ -594,7 +594,7 @@ class TestSetAsideCoolOff:
         ledger.failed = {"aside": set_aside}
         clock["now"] = NOW + SET_ASIDE_SECONDS - HOUR
         with patch(_CLIENT) as client_class:
-            client = _mock_graph_client(
+            client = mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=([], "token-2")),
             )
@@ -625,7 +625,7 @@ class TestSetAsideCoolOff:
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", upsert),
         ):
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=([], "token-2")),
                 get_file_metadata=AsyncMock(return_value=_root_file("aside")),
@@ -656,7 +656,7 @@ class TestSetAsideCoolOff:
         ledger.failed = {"aside": FailedItem(SET_ASIDE_AFTER, NOW, set_aside_at=NOW)}
         retried_at = clock["now"] = NOW + SET_ASIDE_SECONDS
         with patch(_CLIENT) as client_class:
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=([], "token-2")),
                 get_file_metadata=AsyncMock(return_value=_root_file("aside")),
@@ -690,7 +690,7 @@ class TestFullSyncFailures:
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", upsert),
         ):
-            client = _mock_graph_client(
+            client = mock_graph_client(
                 client_class,
                 get_drive_root_children=AsyncMock(return_value=files),
                 get_file_extraction_by_id=AsyncMock(
@@ -740,7 +740,7 @@ class TestFullSyncFailures:
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
-            client = _mock_graph_client(
+            client = mock_graph_client(
                 client_class,
                 get_drive_root_children=AsyncMock(
                     return_value=[_root_file("a"), _root_file("b")]
@@ -765,7 +765,7 @@ class TestFullSyncFailures:
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_drive_root_children=AsyncMock(return_value=[_root_file("a")]),
                 get_file_extraction_by_id=AsyncMock(side_effect=_extract_failing("a")),
@@ -776,7 +776,7 @@ class TestFullSyncFailures:
                         ]
                     }
                 ),
-                get_page_content=AsyncMock(side_effect=_http_error(502, "Bad Gateway")),
+                get_page_content=AsyncMock(side_effect=http_error(502, "Bad Gateway")),
             )
             with pytest.raises(SyncItemsFailed):
                 await service.pull_content(
@@ -794,10 +794,10 @@ class TestFullSyncFailures:
             "info_blob_service"
         ].repo.delete_by_sharepoint_item_and_integration_knowledge
         with patch(_CLIENT) as client_class:
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=([], "token-2")),
-                get_file_metadata=AsyncMock(side_effect=_http_error(404, "Not Found")),
+                get_file_metadata=AsyncMock(side_effect=http_error(404, "Not Found")),
             )
             await _committed(
                 sqlite_session,
@@ -825,12 +825,12 @@ class TestRetriesWhileAccessIsLost:
             return _root_file(item_id)
 
         with patch(_CLIENT) as client_class:
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=([], "token-2")),
                 get_file_metadata=AsyncMock(side_effect=metadata),
                 get_file_extraction_by_id=AsyncMock(
-                    side_effect=_http_error(403, "Forbidden")
+                    side_effect=http_error(403, "Forbidden")
                 ),
             )
             with pytest.raises(SyncAccessDenied):
@@ -886,13 +886,13 @@ class TestRefusals:
         delete = self._indexed(mock_dependencies, "secret")
         ledger.failed = {"secret": FailedItem(0, 0, refused_at=NOW - since)}
         with patch(_CLIENT) as client_class:
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(
-                    return_value=([_delta_file("secret", "secret.docx")], "token-2")
+                    return_value=([delta_file("secret", "secret.docx")], "token-2")
                 ),
                 get_file_extraction_by_id=AsyncMock(
-                    side_effect=_http_error(403, "Forbidden")
+                    side_effect=http_error(403, "Forbidden")
                 ),
             )
             await _committed(
@@ -919,7 +919,7 @@ class TestRefusals:
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", AsyncMock(return_value="unchanged")),
         ):
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=([], "token-2")),
                 get_file_metadata=AsyncMock(side_effect=_metadata),
@@ -950,10 +950,10 @@ class TestRefusals:
         delete = self._indexed(mock_dependencies, *item_ids)
         ledger.failed = {item_id: _failed(1) for item_id in item_ids}
         with patch(_CLIENT) as client_class:
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=([], "token-2")),
-                get_file_metadata=AsyncMock(side_effect=_http_error(403, "Forbidden")),
+                get_file_metadata=AsyncMock(side_effect=http_error(403, "Forbidden")),
             )
             await _committed(
                 sqlite_session, service, self._delta(service, mock_oauth_token, ik)
@@ -981,16 +981,16 @@ class TestRefusals:
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
         delete = self._indexed(mock_dependencies, "a", "b", "c")
         ledger.failed = {"a": FailedItem(0, 0, refused_at=NOW - HOUR)}
-        changes = [_delta_file(item_id, f"{item_id}.docx") for item_id in "abc"]
+        changes = [delta_file(item_id, f"{item_id}.docx") for item_id in "abc"]
         with patch(_CLIENT) as client_class:
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
                 get_file_extraction_by_id=AsyncMock(
                     side_effect=[
-                        _http_error(403, "Forbidden"),
-                        _http_error(404, "Not Found"),
-                        _http_error(404, "Not Found"),
+                        http_error(403, "Forbidden"),
+                        http_error(404, "Not Found"),
+                        http_error(404, "Not Found"),
                     ]
                 ),
             )
@@ -1017,7 +1017,7 @@ class TestRecordLimit:
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_drive_root_children=AsyncMock(return_value=files),
                 get_file_extraction_by_id=AsyncMock(
@@ -1037,12 +1037,12 @@ class TestRecordLimit:
     ):
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
         ledger.failed = {"old-1": _failed(1), "old-2": _failed(1)}
-        changes = [_delta_file(f"new-{index}", f"{index}.docx") for index in range(2)]
+        changes = [delta_file(f"new-{index}", f"{index}.docx") for index in range(2)]
         with (
             patch.object(content_service_module, "MAX_FAILED_ITEMS", 3),
             patch(_CLIENT) as client_class,
         ):
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
                 get_file_metadata=AsyncMock(side_effect=_metadata),
@@ -1069,9 +1069,9 @@ class TestSmallerGaps:
     ):
         """One item without a download is that item's; all of them is SharePoint's."""
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token="token-1")
-        changes = [_delta_file(f"item-{index}", f"{index}.docx") for index in range(3)]
+        changes = [delta_file(f"item-{index}", f"{index}.docx") for index in range(3)]
         with patch(_CLIENT) as client_class:
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=(changes, "token-2")),
                 get_file_extraction_by_id=AsyncMock(
@@ -1106,17 +1106,17 @@ class TestSmallerGaps:
         )
         ledger.failed = {"x": _failed(1)}
         elsewhere = {
-            **_delta_file("x", "x.docx"),
+            **delta_file("x", "x.docx"),
             "parentReference": {
                 "id": "other",
                 "path": "/drives/drive-456/root:/Elsewhere",
             },
         }
         with patch(_CLIENT) as client_class:
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(return_value=([elsewhere], "token-2")),
-                get_file_metadata=AsyncMock(side_effect=_http_error(404, "Not Found")),
+                get_file_metadata=AsyncMock(side_effect=http_error(404, "Not Found")),
             )
             await _committed(
                 sqlite_session,
@@ -1138,7 +1138,7 @@ class TestSmallerGaps:
             patch.object(service._index, "upsert", AsyncMock(return_value="added")),
             patch.object(service, "_schedule_post_commit_change_keys") as schedule,
         ):
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_drive_root_children=AsyncMock(return_value=[_root_file("a")]),
                 get_file_extraction_by_id=AsyncMock(
@@ -1164,14 +1164,14 @@ class TestDeltaBaselineMint:
             patch(_CLIENT) as client_class,
             patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_drive_root_children=AsyncMock(return_value=[_root_file("a")]),
                 get_file_extraction_by_id=AsyncMock(
                     return_value=ExtractionResult.ok("Body", "text/plain")
                 ),
                 initialize_delta_token=AsyncMock(
-                    side_effect=_http_error(503, "Service Unavailable")
+                    side_effect=http_error(503, "Service Unavailable")
                 ),
             )
             with pytest.raises(DeltaBaselineUnavailable):
@@ -1193,7 +1193,7 @@ class TestDeltaBaselineMint:
     ):
         ik = _knowledge(mock_dependencies, mock_oauth_token, delta_token=None)
         with patch(_CLIENT) as client_class:
-            _mock_graph_client(
+            mock_graph_client(
                 client_class, initialize_delta_token=AsyncMock(return_value=None)
             )
             with pytest.raises(DeltaBaselineUnavailable, match="no delta link"):
@@ -1248,7 +1248,7 @@ class TestFolderWalkCache:
             folder_id="folder-a",
             folder_path="/Documents/A",
         )
-        walk = AsyncMock(return_value=[_delta_file("x-1", "one.docx")])
+        walk = AsyncMock(return_value=[delta_file("x-1", "one.docx")])
 
         def delta():
             return service.process_delta_changes(
@@ -1260,7 +1260,7 @@ class TestFolderWalkCache:
             patch.object(scope_rules, "enumerate_items", walk),
             patch.object(service._index, "upsert", AsyncMock(return_value="added")),
         ):
-            _mock_graph_client(
+            mock_graph_client(
                 client_class,
                 get_delta_changes=AsyncMock(
                     return_value=([self.MOVED_BACK], "token-2")
