@@ -7,7 +7,6 @@ from eneo.flows.flow_authoring_name import (
     FlowNameTakenError,
     flow_name_family,
     normalize_flow_name,
-    normalize_optional_flow_name,
 )
 from eneo.main.exceptions import EXCEPTION_MAP
 from eneo.server.exception_handlers import DOMAIN_EXCEPTION_MAP
@@ -35,14 +34,6 @@ def test_normalize_flow_name_rejects_empty_names() -> None:
 def test_normalize_flow_name_rejects_names_above_length_limit() -> None:
     with pytest.raises(ValueError, match=f"at most {MAX_FLOW_NAME_LENGTH}"):
         normalize_flow_name("a" * (MAX_FLOW_NAME_LENGTH + 1))
-
-
-def test_normalize_optional_flow_name_preserves_absent_value() -> None:
-    assert normalize_optional_flow_name(None) is None
-
-
-def test_normalize_optional_flow_name_normalizes_present_value() -> None:
-    assert normalize_optional_flow_name("  report_pdf  ") == "report_pdf"
 
 
 @pytest.mark.parametrize(

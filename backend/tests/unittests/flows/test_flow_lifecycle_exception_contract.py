@@ -8,12 +8,9 @@ from eneo.flows.domain import review_checkpoint_exceptions
 from eneo.flows.domain.review_checkpoint_exceptions import (
     FLOW_REVIEW_CHECKPOINT_LIFECYCLE_FAILURE_CLASSES,
     FLOW_REVIEW_CHECKPOINT_OPEN_TERMINAL_INVARIANT_CLASSES,
-    FLOW_REVIEW_CHECKPOINT_RUNTIME_INVARIANT_CLASSES,
     FlowReviewCheckpointLifecycleError,
     FlowReviewCheckpointLifecycleFailure,
     FlowReviewCheckpointOpenTerminalInvariantFailure,
-    FlowReviewCheckpointRuntimeInvariantError,
-    FlowReviewCheckpointRuntimeInvariantFailure,
 )
 
 
@@ -70,25 +67,6 @@ def test_review_checkpoint_lifecycle_failure_classes_include_all_domain_subclass
     expected = _module_exception_classes(
         module=review_checkpoint_exceptions,
         base_class=FlowReviewCheckpointLifecycleError,
-    )
-
-    assert actual == expected, _class_diff_message(actual=actual, expected=expected)
-
-
-def test_review_checkpoint_runtime_invariant_classes_match_union() -> None:
-    actual = frozenset(FLOW_REVIEW_CHECKPOINT_RUNTIME_INVARIANT_CLASSES)
-    expected = _union_exception_classes(FlowReviewCheckpointRuntimeInvariantFailure)
-
-    assert actual == expected, _class_diff_message(actual=actual, expected=expected)
-
-
-def test_review_checkpoint_runtime_invariant_classes_include_all_domain_subclasses() -> (
-    None
-):
-    actual = frozenset(FLOW_REVIEW_CHECKPOINT_RUNTIME_INVARIANT_CLASSES)
-    expected = _module_exception_classes(
-        module=review_checkpoint_exceptions,
-        base_class=FlowReviewCheckpointRuntimeInvariantError,
     )
 
     assert actual == expected, _class_diff_message(actual=actual, expected=expected)

@@ -197,10 +197,6 @@ class RetrievedPassage(BaseModel):
             raise ValueError("Withholding requires a withheld disclosure state.")
         return self.model_copy(update={"text": None, "disclosure": disclosure})
 
-    @property
-    def dropped_bytes(self) -> int:
-        return max(0, self.passage_bytes - self.recorded_bytes)
-
 
 class RetrievedSource(BaseModel):
     """A source a step retrieved from, with bounded passage detail."""

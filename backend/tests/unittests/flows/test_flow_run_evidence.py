@@ -66,7 +66,6 @@ from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
     FlowResolvedInputEdges,
     FlowResolvedInputJsonPath,
-    normalize_attempt_provenance,
     normalize_rag_payload,
     parse_attempt_provenance,
     parse_resolved_input_edges,
@@ -1427,8 +1426,8 @@ def test_build_debug_export_handles_empty_steps():
     assert export["definition"]["steps_count"] == 0
 
 
-def test_normalize_attempt_provenance_truncates_large_text_and_json_payloads():
-    normalized = normalize_attempt_provenance(
+def test_parse_attempt_provenance_truncates_large_text_and_json_payloads():
+    normalized = parse_attempt_provenance(
         {
             "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
             "llm": {
@@ -1437,7 +1436,7 @@ def test_normalize_attempt_provenance_truncates_large_text_and_json_payloads():
                 },
             },
         }
-    )
+    ).provenance
 
     assert normalized is not None
     assert normalized.llm is not None

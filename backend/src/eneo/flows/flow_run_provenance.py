@@ -680,13 +680,6 @@ def normalize_json_preview(
     )
 
 
-def normalize_attempt_provenance(
-    raw: dict[str, Any] | None,
-) -> FlowAttemptProvenance | None:
-    parse_result = parse_attempt_provenance(raw)
-    return parse_result.provenance if parse_result.status == "tracked" else None
-
-
 def append_summarization_provenance(
     existing: dict[str, Any] | None,
     incoming: SummarizationProvenance,

@@ -11,7 +11,6 @@ from eneo.flows.flow_metadata import (
     FlowMetadataParseMode,
     parse_flow_form_schema,
     parse_flow_metadata,
-    serialize_flow_form_schema,
     serialize_flow_metadata,
     validate_form_field_runtime_name,
 )
@@ -215,8 +214,8 @@ def test_parse_flow_form_schema_normalizes_legacy_field_types() -> None:
     ]
 
 
-def test_serialize_flow_form_schema_preserves_explicit_shape_and_extra_keys() -> None:
-    parsed = parse_flow_form_schema(
+def test_serialize_flow_metadata_preserves_form_schema_shape_and_extra_keys() -> None:
+    parsed = parse_flow_metadata(
         {
             "form_schema": {
                 "version": 1,
@@ -229,19 +228,20 @@ def test_serialize_flow_form_schema_preserves_explicit_shape_and_extra_keys() ->
                 ],
             }
         },
-        mode=FlowFormSchemaParseMode.WRITE,
+        mode=FlowMetadataParseMode.WRITE,
     )
 
-    assert parsed is not None
-    assert serialize_flow_form_schema(parsed) == {
-        "version": 1,
-        "fields": [
-            {
-                "name": "customer",
-                "type": "text",
-                "x-ui": {"width": "full"},
-            }
-        ],
+    assert serialize_flow_metadata(parsed) == {
+        "form_schema": {
+            "version": 1,
+            "fields": [
+                {
+                    "name": "customer",
+                    "type": "text",
+                    "x-ui": {"width": "full"},
+                }
+            ],
+        }
     }
 
 

@@ -88,7 +88,6 @@ def test_passage_beyond_the_byte_bound_records_what_was_dropped() -> None:
     assert passage.recording == "tail_truncated"
     assert passage.passage_bytes == 800
     assert passage.recorded_bytes == 100  # the split multi-byte character is dropped
-    assert passage.dropped_bytes == 700
     assert passage_text.startswith(passage.text)
     assert evidence.passages_truncated == 1
 

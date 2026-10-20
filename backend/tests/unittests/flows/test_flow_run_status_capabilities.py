@@ -27,8 +27,6 @@ from eneo.flows.enums import (
     FlowRunStatusCapability,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
-    is_active_flow_run_status,
-    is_cancellable_flow_run_status,
     is_terminal_flow_run_status,
 )
 
@@ -78,9 +76,7 @@ def test_flow_run_status_helpers_are_derived_from_capabilities() -> None:
         FlowRunStatus.CANCELLED,
     }
     for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items():
-        assert is_active_flow_run_status(status) is capability.is_active
         assert is_terminal_flow_run_status(status) is capability.is_terminal
-        assert is_cancellable_flow_run_status(status) is capability.is_cancellable
 
     assert CANCELLABLE_FLOW_RUN_STATUSES == {
         status
@@ -113,18 +109,13 @@ def test_flow_run_status_helpers_accept_enum_and_wire_values(
     status: FlowRunStatus,
     capability: FlowRunStatusCapability,
 ) -> None:
-    assert is_active_flow_run_status(status) is capability.is_active
     assert is_terminal_flow_run_status(status) is capability.is_terminal
-    assert is_cancellable_flow_run_status(status) is capability.is_cancellable
-
-    assert is_active_flow_run_status(status.value) is capability.is_active
     assert is_terminal_flow_run_status(status.value) is capability.is_terminal
-    assert is_cancellable_flow_run_status(status.value) is capability.is_cancellable
 
 
 def test_flow_run_status_helpers_reject_unknown_wire_values() -> None:
     with pytest.raises(ValueError):
-        is_active_flow_run_status("not-a-flow-run-status")
+        is_terminal_flow_run_status("not-a-flow-run-status")
 
 
 def test_flow_run_status_capabilities_public_contract() -> None:

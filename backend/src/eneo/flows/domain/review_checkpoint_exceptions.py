@@ -140,25 +140,10 @@ FLOW_REVIEW_CHECKPOINT_LIFECYCLE_FAILURE_CLASSES: Final = (
     FlowReviewCheckpointNotApprovedError,
 )
 
-FlowReviewCheckpointRuntimeInvariantFailure: TypeAlias = (
-    FlowReviewCheckpointRunNotRunningError
-    | FlowReviewOpenBlockedByActiveCheckpointError
-    | FlowReviewCheckpointStepResultIncompleteError
-    | FlowReviewMultipleActiveCheckpointsError
-)
-
 FlowReviewCheckpointOpenTerminalInvariantFailure: TypeAlias = (
     FlowReviewOpenBlockedByActiveCheckpointError
     | FlowReviewCheckpointStepResultIncompleteError
     | FlowReviewMultipleActiveCheckpointsError
-)
-
-# Keep `Final` unparameterized so Pyright preserves exact `except` narrowing.
-FLOW_REVIEW_CHECKPOINT_RUNTIME_INVARIANT_CLASSES: Final = (
-    FlowReviewCheckpointRunNotRunningError,
-    FlowReviewOpenBlockedByActiveCheckpointError,
-    FlowReviewCheckpointStepResultIncompleteError,
-    FlowReviewMultipleActiveCheckpointsError,
 )
 
 # Keep `Final` unparameterized so Pyright preserves exact `except` narrowing.

@@ -247,10 +247,6 @@ def parse_flow_form_schema(
     return FlowFormSchema.model_validate(schema_payload)
 
 
-def serialize_flow_form_schema(schema: FlowFormSchema) -> FlowPersistedJsonObject:
-    return schema.model_dump(mode="json", exclude_unset=True)
-
-
 def parse_flow_metadata(
     metadata_json: FlowPersistedJsonObject | Mapping[str, object] | None,
     *,

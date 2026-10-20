@@ -315,16 +315,8 @@ def normalize_flow_run_status(status: FlowRunStatus | str) -> FlowRunStatus:
     return FlowRunStatus(status)
 
 
-def is_active_flow_run_status(status: FlowRunStatus | str) -> bool:
-    return normalize_flow_run_status(status) in ACTIVE_FLOW_RUN_STATUSES
-
-
 def is_terminal_flow_run_status(status: FlowRunStatus | str) -> bool:
     return normalize_flow_run_status(status) in TERMINAL_FLOW_RUN_STATUSES
-
-
-def is_cancellable_flow_run_status(status: FlowRunStatus | str) -> bool:
-    return normalize_flow_run_status(status) in CANCELLABLE_FLOW_RUN_STATUSES
 
 
 class FlowRunLifecycleSource(str, Enum):

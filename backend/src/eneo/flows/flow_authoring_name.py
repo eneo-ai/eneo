@@ -58,12 +58,6 @@ def flow_name_family(value: str) -> str:
     return _NUMBERED_SUFFIX_RE.sub("", value)
 
 
-def normalize_optional_flow_name(value: str | None) -> str | None:
-    if value is None:
-        return None
-    return normalize_flow_name(value)
-
-
 def _humanize_generated_slug_name(value: str) -> str:
     if not _looks_generated_slug_like(value):
         return value
