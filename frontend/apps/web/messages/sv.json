@@ -1803,8 +1803,6 @@
   "integration_source_watch_off_hint": "Uppdateras bara vid fullständig synk",
   "integration_source_last_attempt_at": "Senaste försök {time}",
   "integration_source_filter_folders": "Filtrera mappar",
-  "integration_source_collapse_folder": "Fäll ihop {name}",
-  "integration_source_expand_folder": "Fäll ut {name}",
   "sharepoint_health_sign_in_refused": "Den sparade inloggningen nekades.",
   "integration_source_folders_table_label": "Mappar i {name}",
   "integration_source_last_up_to_date": "Senast aktuell",
@@ -5181,5 +5179,7 @@
   "audit_action_document_template_deleted_description": "En dokumentmall togs bort ur organisationens bibliotek",
   "audit_action_document_template_default_set": "Standardmall vald",
   "audit_action_document_template_default_set_description": "En dokumentmall gjordes till organisationens standard",
-  "integration_announce_sync_stopped": "Synk av {name} pågår inte längre"
+  "integration_announce_sync_stopped": "Synk av {name} pågår inte längre",
+  "source_tree_expand": "Fäll ut {name}",
+  "source_tree_collapse": "Fäll ihop {name}"
 }
