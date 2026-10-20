@@ -125,6 +125,9 @@ function intervalSeries(spec: PlotSpec, style: ChartStyle) {
       name: clean(band.name),
       type: "line",
       stack: `interval-${index}`,
+      // The width rises from the lower bound whatever its sign; by default ECharts stacks a
+      // value only on values of the same sign, and a bound below zero would shade from zero.
+      stackStrategy: "all",
       symbol: "none",
       silent: true,
       connectNulls: false,
@@ -142,9 +145,35 @@ function intervalSeries(spec: PlotSpec, style: ChartStyle) {
           const high = band.upper[i];
           return low === null || high === null || high === undefined ? null : high - low;
         }),
+        ...isolatedSpans(band.lower, band.upper, color),
       },
     ];
   });
+}
+
+/** The days of a line with no neighbouring value: no segment reaches them. */
+function alone(values: readonly (number | null | undefined)[]): number[] {
+  const known = (i: number) => values[i] !== null && values[i] !== undefined;
+  return values.flatMap((_, i) => (known(i) && !known(i - 1) && !known(i + 1) ? [i] : []));
+}
+
+/**
+ * A line whose points are hidden draws a day between two gaps (or a one-day forecast) as
+ * nothing at all; such days are drawn as a dot of the series' colour.
+ */
+function isolatedDots(values: readonly (number | null)[], size: number) {
+  const data = alone(values).map((i) => ({ coord: [i, values[i]] }));
+  return data.length ? { markPoint: { symbol: "circle", symbolSize: size, silent: true, label: { show: false }, data } } : {};
+}
+
+/** An interval's day with no neighbour has no area to fill; it is drawn as a bar from bound to bound. */
+function isolatedSpans(lower: readonly (number | null)[], upper: readonly (number | null)[], color: string) {
+  const data = alone(lower)
+    .filter((i) => upper[i] !== null && upper[i] !== undefined)
+    .map((i) => [{ coord: [i, lower[i]] }, { coord: [i, upper[i]] }]);
+  return data.length
+    ? { markLine: { silent: true, symbol: "none", label: { show: false }, lineStyle: { color, width: 6, type: "solid", opacity: 1 }, data } }
+    : {};
 }
 
 /** Markers as dashed lines across the plot, carried by the first series. */
@@ -349,7 +378,7 @@ export function chartOptions(
         ...series,
         symbolSize: 7,
         // A day-by-day series is read as a line; its points show under the pointer.
-        ...(spec.dates ? { showSymbol: false } : {}),
+        ...(spec.dates ? { showSymbol: false, ...isolatedDots(spec.series[index]!.values, 7) } : {}),
         ...(index === 0 ? markerLine(spec, style) : {}),
       })),
       ...intervalSeries(spec, style),
@@ -498,6 +527,7 @@ export function imageOptions(
         symbol: "circle",
         symbolSize: Math.round(8 * scale),
         showSymbol: points <= 60,
+        ...(points > 60 || spec.dates ? isolatedDots(spec.series[index]!.values, Math.round(8 * scale)) : {}),
         lineStyle: { width: 2 * scale },
         itemStyle: { borderColor: style.surface, borderWidth: Math.round(2 * scale) },
         ...(direct

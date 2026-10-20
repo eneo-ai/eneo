@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderSvg } from "../../src/tools/charts/engine/render";
-import { PALETTE, chartOptions, imageStyle, type PlotSpec } from "../../src/tools/charts/options";
+import { init } from "../../src/tools/charts/echarts";
+import { PALETTE, chartOptions, imageOptions, imageStyle, type PlotSpec } from "../../src/tools/charts/options";
 
 // Three observed days, then two forecast days with an interval; the forecast line and its
 // interval start at the last observed day so the picture has no gap.
@@ -86,5 +87,64 @@ describe("intervals around a line", () => {
     expect(svg).toContain("Spann (P10–P90)");
     expect(svg).toContain("Prognos");
     expect(svg).toContain("20 okt.");
+  });
+
+  test("shade each interval from its lower to its upper bound, below zero as above", () => {
+    const signed: PlotSpec = {
+      ...plot,
+      labels: ["2026-01-01", "2026-01-02", "2026-01-03"],
+      series: [{ name: "Saldo", values: [0, -4, 2] }],
+      bands: [{ name: "Spann", series: 0, lower: [-2, -5, 1], upper: [1, -3, 3] }],
+      markers: [],
+    };
+    const chart = init(null, undefined, { renderer: "svg", ssr: true, width: 800, height: 400 });
+    chart.setOption(chartOptions(signed, style, view));
+    const width = (chart as any).getModel().getSeries().find((s: any) => s.id === "interval-0-width");
+    const data = width.getData();
+    const top = data.getCalculationInfo("stackResultDimension");
+    expect([0, 1, 2].map((i) => data.get(top, i))).toEqual([1, -3, 3]);
+    chart.dispose();
+  });
+
+  test("draw a day with no neighbour as a dot, and its interval as a bar, in the view and the image", () => {
+    // One forecast day after a history that ends without a value.
+    const alone: PlotSpec = {
+      ...plot,
+      labels: ["2026-10-17", "2026-10-18", "2026-10-19"],
+      series: [
+        { name: "Historik", values: [10, null, null] },
+        { name: "Mest troligt (P50)", values: [null, null, 20] },
+      ],
+      bands: [{ name: "Spann (P10–P90)", series: 1, lower: [null, null, 15], upper: [null, null, 25] }],
+      markers: [{ at: 2, label: "Prognos" }],
+    };
+    for (const option of [chartOptions(alone, style, view), imageOptions(alone, style, { width: 1200, height: 675 })] as any[]) {
+      const [history, median] = option.series;
+      expect(history.markPoint.data).toEqual([{ coord: [0, 10] }]);
+      expect(median.markPoint.data).toEqual([{ coord: [2, 20] }]);
+      const width = option.series.find((s: any) => s.id === "interval-0-width");
+      expect(width.markLine.data).toEqual([[{ coord: [2, 15] }, { coord: [2, 25] }]]);
+    }
+    // ECharts draws them in a picture too long to show its points: 70 days, the last missing,
+    // one day alone between two gaps, then one forecast day.
+    const history = Array.from({ length: 70 }, (_, i) => (i === 64 || i === 66 || i === 69 ? null : 100 + i));
+    const labels = Array.from({ length: 71 }, (_, i) => new Date(Date.UTC(2026, 7, 11 + i)).toISOString().slice(0, 10));
+    const long: PlotSpec = {
+      ...plot,
+      labels,
+      series: [
+        { name: "Historik", values: [...history, null] },
+        { name: "Mest troligt (P50)", values: [...Array(70).fill(null), 180] },
+      ],
+      bands: [{ name: "Spann (P10–P90)", series: 1, lower: [...Array(70).fill(null), 170], upper: [...Array(70).fill(null), 190] }],
+      markers: [{ at: 70, label: "Prognos" }],
+    };
+    const svg = renderSvg(long, { width: 1200, height: 675, locale: "sv-SE" });
+    const dots = (color: string) => svg.match(new RegExp(`<path d="M1 0A1 1 0 1 1 1 -0.1A1 1 0 0 1 1 0"[^>]*fill="${color}"`, "g"))?.length ?? 0;
+    expect(dots(PALETTE.light[0]!)).toBe(1);
+    expect(dots(PALETTE.light[1]!)).toBe(1);
+    // A line with neighbours needs no dots.
+    const option = chartOptions(plot, style, view) as any;
+    expect(option.series[1].markPoint).toBeUndefined();
   });
 });

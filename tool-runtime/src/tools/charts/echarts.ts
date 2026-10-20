@@ -8,6 +8,7 @@ import {
   GridComponent,
   LegendComponent,
   MarkLineComponent,
+  MarkPointComponent,
   TitleComponent,
   TooltipComponent,
 } from "echarts/components";
@@ -23,6 +24,7 @@ use([
   GridComponent,
   LegendComponent,
   MarkLineComponent,
+  MarkPointComponent,
   TitleComponent,
   TooltipComponent,
   SVGRenderer,

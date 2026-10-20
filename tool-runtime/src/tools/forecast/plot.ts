@@ -22,6 +22,17 @@ export function openingDays(horizon: number): number {
   return Math.max(56, 2 * horizon);
 }
 
+/**
+ * Where the view opens, as the zoom's percentages of the axis: from the first day `focused`
+ * keeps to the last forecast day. ECharts spreads a category axis' percentages over its
+ * indices, 0 to the last, so the first day is its index over the last index.
+ */
+export function openingZoom(data: ForecastSeries): { start: number; end: number } {
+  const last = data.recent.values.length + data.forecast.days - 1;
+  const first = Math.max(0, data.recent.values.length - openingDays(data.forecast.days));
+  return { start: last > 0 ? (first / last) * 100 : 0, end: 100 };
+}
+
 /** The forecast with only the history the view opens on, as a picture of it shows. */
 export function focused<T extends ForecastSeries>(data: T): T {
   const values = data.recent.values;

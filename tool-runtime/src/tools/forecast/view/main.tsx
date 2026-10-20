@@ -38,7 +38,7 @@ const infoIcon = (
 );
 import { init, type EChartsType } from "../../charts/echarts";
 import { PALETTE, chartOptions, type ChartStyle } from "../../charts/options";
-import { PLOT_TEXTS, forecastPlot, openingDays } from "../plot";
+import { PLOT_TEXTS, forecastPlot, openingZoom } from "../plot";
 import "./view.css";
 
 /** What a host passes on of a tool's result; larger results never reach the view. */
@@ -50,12 +50,7 @@ const UNZOOMED = { start: 0, end: 100 };
  */
 const NARROW = { scored: 10, share: 0.6 };
 /** The days ahead are the point: the chart opens on them and the last weeks before them. */
-function focus(data: Payload): { start: number; end: number } {
-  const total = data.recent.values.length + data.forecast.days;
-  const before = openingDays(data.forecast.days);
-  const first = Math.max(0, data.recent.values.length - before);
-  return { start: (first / total) * 100, end: 100 };
-}
+const focus = (data: Payload) => openingZoom(data);
 
 const numbers = z.array(z.number().finite()).max(400);
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
