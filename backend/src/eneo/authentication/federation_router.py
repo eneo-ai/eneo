@@ -27,6 +27,10 @@ from eneo.main.container.container import Container
 from eneo.main.exceptions import FederatedLoginDenied
 from eneo.main.logging import get_logger
 from eneo.main.request_context import set_request_context
+from eneo.mcp_servers.application.mcp_oauth_token_provider import (
+    ID_JAG_FEDERATION_FLAG,
+)
+from eneo.mcp_servers.domain.entities.mcp_oauth_connection import IdpUserToken
 from eneo.observability.debug_toggle import is_debug_enabled
 from eneo.observability.redaction import sanitize_payload
 from eneo.server.dependencies.container import get_container
@@ -46,6 +50,38 @@ class OIDCClaimsMapping(TypedDict):
     email: str
 
 
+async def _store_login_id_token(
+    *,
+    container: Container,
+    user_id: UUID,
+    tenant_id: UUID,
+    id_token: str,
+    claims: dict[str, Any],
+) -> None:
+    """Keep the login ID token for later ID-JAG exchanges; never fails login."""
+    issuer = claims.get("iss")
+    subject = claims.get("sub")
+    exp = claims.get("exp")
+    expires_at = (
+        datetime.fromtimestamp(float(exp), tz=timezone.utc)
+        if isinstance(exp, (int, float))
+        else None
+    )
+    try:
+        await container.mcp_oauth_repo().save_idp_token(
+            IdpUserToken(
+                user_id=user_id,
+                tenant_id=tenant_id,
+                idp_issuer=str(issuer) if issuer else "",
+                idp_subject=str(subject) if subject else None,
+                id_token=id_token,
+                id_token_expires_at=expires_at,
+            )
+        )
+    except Exception:
+        logger.exception("Failed to store the login ID token for ID-JAG")
+
+
 class FederationConfig(TypedDict):
     client_id: str
     client_secret: str
@@ -59,6 +95,9 @@ class FederationConfig(TypedDict):
     scopes: NotRequired[list[str]]
     claims_mapping: NotRequired[OIDCClaimsMapping]
     allowed_domains: NotRequired[list[str]]
+    # Opt into the MCP Enterprise-Managed Authorization strategy: keep the
+    # login ID token so OAuth MCP servers can be reached without a popup.
+    id_jag_enabled: NotRequired[bool]
 
 
 class OIDCDiscoveryDocument(TypedDict):
@@ -1588,6 +1627,19 @@ async def auth_callback(
                     event="callback.jit_provisioning",
                     tenant_slug=tenant_slug,
                     email=email,
+                )
+
+            # Tenants on the Enterprise-Managed Authorization strategy keep the
+            # validated ID token: it is the identity assertion Eneo exchanges
+            # at the IdP for MCP server access, so the user never sees a
+            # vendor consent popup. Stored encrypted; off unless opted in.
+            if federation_config.get(ID_JAG_FEDERATION_FLAG):
+                await _store_login_id_token(
+                    container=container,
+                    user_id=user.id,
+                    tenant_id=tenant_id,
+                    id_token=id_token,
+                    claims=payload,
                 )
 
             # Create JWT token for existing user

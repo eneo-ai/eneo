@@ -53,6 +53,13 @@
           icon: KeyRound,
           classes: "bg-accent-dimmer text-accent-stronger"
         };
+      case "oauth":
+        // Eneo obtains tokens as an OAuth client; nothing is stored on the row.
+        return {
+          label: "OAuth 2.1",
+          icon: ShieldCheck,
+          classes: "label-pine bg-label-dimmer text-label-stronger"
+        };
       case "bundled":
         // Bundled tool runtime: shipped with Eneo, credential from the deployment.
         return {

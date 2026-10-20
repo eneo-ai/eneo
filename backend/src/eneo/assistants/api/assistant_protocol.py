@@ -33,6 +33,7 @@ from eneo.sessions.session import (
     SSETokenUsage,
     SSEToolApprovalRequired,
     SSEToolApprovalTimeout,
+    SSEToolAuthorizationRequired,
     SSEToolCall,
     SSEToolCallDelta,
     TokenUsageEvent,
@@ -289,6 +290,36 @@ def to_sse_response(chunk: Completion, session_id: "UUID") -> ServerSentEvent:
                     is_internal=tc.is_internal,
                     is_bundled=tc.is_bundled,
                     app_view=tc.app_view,
+                )
+                for tc in tool_calls
+            ],
+        )
+
+    elif chunk.response_type == ResponseType.TOOL_AUTHORIZATION_REQUIRED:
+        if chunk.authorization_id is None:
+            raise ValueError(
+                "Expected authorization_id for tool authorization SSE event"
+            )
+        tool_calls = cast(
+            Sequence[_SupportsToolCallMetadata], chunk.tool_calls_metadata or []
+        )
+        data = SSEToolAuthorizationRequired(
+            session_id=session_id,
+            authorization_id=chunk.authorization_id,
+            tools=[
+                ToolCallInfo(
+                    server_name=tc.server_name,
+                    tool_name=tc.tool_name,
+                    title=tc.title,
+                    arguments=tc.arguments,
+                    tool_call_id=tc.tool_call_id,
+                    approved=tc.approved,
+                    result_status=tc.result_status,
+                    mcp_tool_name=tc.mcp_tool_name,
+                    purpose=tc.purpose,
+                    is_internal=tc.is_internal,
+                    is_bundled=tc.is_bundled,
+                    meta=tc.meta,
                 )
                 for tc in tool_calls
             ],

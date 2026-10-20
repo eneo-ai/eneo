@@ -2363,3 +2363,160 @@ async def test_provider_file_echo_is_converted_before_next_model_request(streami
     results = [message["content"] for message in messages if message["role"] == "tool"]
     assert results == [file_handle(file_id)]
     assert "synthetic-secret" not in str(messages)
+
+
+class _AuthorizingMCPProxy(_FakeMCPProxy):
+    """An OAuth server nobody has authorized until the user connects mid-turn."""
+
+    def __init__(self, server_id):
+        super().__init__()
+        self.server_id = server_id
+        self.authorized = False
+        self.retried: list[set] = []
+
+    def server_id_for_tool(self, prefixed_tool_name: str):
+        return self.server_id
+
+    async def prepare_calls(self, proxy_calls):
+        if self.authorized:
+            return {}
+        from eneo.main.exceptions import MCPUserActionRequiredError
+
+        return {
+            self.server_id: MCPUserActionRequiredError(
+                "connect first",
+                mcp_server_id=self.server_id,
+                server_name="Vendor",
+                auth_scope="per_user",
+                connect_url="https://eneo.example/mcp-oauth/connect?server=x",
+                reason="not_connected",
+            )
+        }
+
+    async def retry_authorization(self, server_ids):
+        self.retried.append(set(server_ids))
+        self.authorized = True
+        return set(server_ids)
+
+
+class _FakeAuthorizationWaiter:
+    def __init__(self, connect: bool):
+        self.connect = connect
+        self.waited: list[tuple[object, list]] = []
+
+    available = True
+
+    async def wait(self, user_id, server_ids):
+        ids = list(server_ids)
+        self.waited.append((user_id, ids))
+        return set(ids) if self.connect else set()
+
+
+async def test_iterate_stream_pauses_for_authorization_then_runs_the_call():
+    adapter = _make_adapter()
+    server_id = uuid4()
+    mcp_proxy = _AuthorizingMCPProxy(server_id)
+    waiter = _FakeAuthorizationWaiter(connect=True)
+    user_id = uuid4()
+    follow_up_stream = _AsyncChunkStream([_text_chunk("final", finish_reason="stop")])
+
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk(arguments='{"q":"run"}')],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=follow_up_stream),
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            authorization_waiter=waiter,
+            authorization_user_id=user_id,
+        )
+
+    paused = [
+        c
+        for c in completions
+        if c.response_type == ResponseType.TOOL_AUTHORIZATION_REQUIRED
+    ]
+    assert len(paused) == 1
+    assert paused[0].authorization_id
+    (tm,) = paused[0].tool_calls_metadata or []
+    assert tm.tool_call_id == "call_1"
+    assert tm.result_status == "awaiting_authorization"
+    assert tm.meta is not None
+    assert tm.meta["eneo/authorization_required"]["mcp_server_id"] == str(server_id)
+    # The wait happened for this user and server, the server was reconnected,
+    # and the call then ran in the same turn.
+    assert waiter.waited == [(user_id, [server_id])]
+    assert mcp_proxy.retried == [{server_id}]
+    assert mcp_proxy.calls == [[("server__tool", {"q": "run"})]]
+    executed = [
+        c
+        for c in completions
+        if c.response_type == ResponseType.TOOL_CALL
+        and c.tool_calls_metadata
+        and c.tool_calls_metadata[0].result_status == "succeeded"
+    ]
+    assert executed
+
+
+async def test_iterate_stream_proceeds_with_the_remedy_after_the_wait_times_out():
+    adapter = _make_adapter()
+    mcp_proxy = _AuthorizingMCPProxy(uuid4())
+    waiter = _FakeAuthorizationWaiter(connect=False)
+    follow_up_stream = _AsyncChunkStream([_text_chunk("final", finish_reason="stop")])
+
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk(arguments='{"q":"run"}')],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=follow_up_stream),
+    ):
+        completions = await _collect(
+            adapter, stream, authorization_waiter=waiter, authorization_user_id=uuid4()
+        )
+
+    assert any(
+        c.response_type == ResponseType.TOOL_AUTHORIZATION_REQUIRED for c in completions
+    )
+    assert mcp_proxy.retried == []
+    # The call still goes to the proxy, which answers with the remedy result.
+    assert mcp_proxy.calls == [[("server__tool", {"q": "run"})]]
+
+
+async def test_iterate_stream_never_pauses_without_a_waiter():
+    adapter = _make_adapter()
+    mcp_proxy = _AuthorizingMCPProxy(uuid4())
+    follow_up_stream = _AsyncChunkStream([_text_chunk("final", finish_reason="stop")])
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk(arguments='{"q":"run"}')],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=follow_up_stream),
+    ):
+        completions = await _collect(adapter, stream)
+
+    assert not any(
+        c.response_type == ResponseType.TOOL_AUTHORIZATION_REQUIRED for c in completions
+    )

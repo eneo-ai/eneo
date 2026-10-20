@@ -1084,6 +1084,37 @@ export class ChatService {
                 tools: event.tools
               };
             },
+            onToolAuthorizationRequired: (event) => {
+              // The turn is paused while the user connects an OAuth server.
+              // The paused calls render with their connect action (from the
+              // remedy under meta); the tool_call event after the wait takes
+              // over their status either way.
+              if (!ref || isStale()) return;
+              if (!ensureCurrentSession(event)) return;
+              // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
+              if (!ref.mcp_tool_calls) {
+                // @ts-expect-error - mcp_tool_calls is not in the static type
+                ref.mcp_tool_calls = [];
+              }
+              for (const tool of event.tools as Array<{
+                tool_call_id?: string;
+                [key: string]: unknown;
+              }>) {
+                // @ts-expect-error - mcp_tool_calls is a runtime property
+                const existingIndex = ref.mcp_tool_calls.findIndex(
+                  (t: { tool_call_id?: string }) =>
+                    t.tool_call_id && t.tool_call_id === tool.tool_call_id
+                );
+                if (existingIndex >= 0) {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const mcpCalls = (ref as any).mcp_tool_calls;
+                  mcpCalls[existingIndex] = { ...mcpCalls[existingIndex], ...tool };
+                } else {
+                  // @ts-expect-error - mcp_tool_calls is a runtime property
+                  ref.mcp_tool_calls.push(tool);
+                }
+              }
+            },
             onToolApprovalTimeout: (event) => {
               if (isStale()) return;
               if (!ensureCurrentSession(event)) return;

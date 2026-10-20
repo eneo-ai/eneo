@@ -1,5 +1,8 @@
 from enum import Enum, unique
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 from eneo.files.text import (
     CorruptFileError,
@@ -495,6 +498,52 @@ class MCPAuthenticationError(MCPClientError):
     """Raised when upstream MCP authentication fails."""
 
     pass
+
+
+class MCPUserActionRequiredError(MCPAuthenticationError):
+    """An OAuth-protected MCP server cannot be called until someone authorizes.
+
+    For a per-user server the acting user has to connect (once, in the web
+    app); for a shared server an administrator has to. The error carries what
+    a client needs to offer that action, and :meth:`remedy` is the structured
+    form that rides in the tool result's ``_meta`` and the API response.
+    """
+
+    REMEDY_CODE = "mcp_authorization_required"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        mcp_server_id: "UUID",
+        server_name: str,
+        auth_scope: str,
+        scopes: "list[str] | None" = None,
+        connect_url: "str | None" = None,
+        reason: "str | None" = None,
+    ) -> None:
+        super().__init__(message)
+        self.mcp_server_id = mcp_server_id
+        self.server_name = server_name
+        self.auth_scope = auth_scope
+        self.scopes = list(scopes or [])
+        self.connect_url = connect_url
+        self.reason = reason
+
+    def remedy(self) -> "dict[str, object]":
+        payload: dict[str, object] = {
+            "code": self.REMEDY_CODE,
+            "mcp_server_id": str(self.mcp_server_id),
+            "server_name": self.server_name,
+            "auth_scope": self.auth_scope,
+        }
+        if self.scopes:
+            payload["scopes"] = list(self.scopes)
+        if self.connect_url:
+            payload["connect_url"] = self.connect_url
+        if self.reason:
+            payload["reason"] = self.reason
+        return payload
 
 
 # Map exceptions to response codes

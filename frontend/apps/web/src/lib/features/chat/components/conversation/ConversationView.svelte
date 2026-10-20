@@ -28,6 +28,7 @@
   import { editedPassage } from "../../documentVersions";
   import { chatCapabilityAvailable } from "../../chatCapabilities";
   import { initMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
+  import { initMcpOAuthConnect } from "$lib/features/mcp/McpOAuthConnectService.svelte";
   import McpAppPanel from "../../mcp-apps/McpAppPanel.svelte";
   import {
     appViewCalls,
@@ -51,6 +52,9 @@
   let { children, onNewConversation }: Props = $props();
 
   const chat = getChatService();
+  // The popup through which a user authorizes an OAuth MCP server, shared by
+  // the chip above the composer and the connect actions on tool steps.
+  initMcpOAuthConnect();
   const uploadGroups = $derived(conversationUploadGroups(chat.currentConversation.messages ?? []));
   const uploads = $derived(uploadGroups.flatMap((group) => group.files));
   const { user } = getAppContext();

@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
+    MCPUserActionRequiredError,
     NameCollisionException,
     NotFoundException,
     ProviderInactiveException,
@@ -20,6 +21,9 @@ from eneo.mcp_apps.application.view_snapshots import snapshot_app_views
 from eneo.mcp_apps.domain.csp import declared_domains
 from eneo.mcp_apps.domain.mcp_app_view import get_ui_resource_uri
 from eneo.mcp_servers.application.bundled_tools import forget_catalogs
+from eneo.mcp_servers.application.mcp_oauth_client_identity import (
+    CLIENT_AUTH_METHODS,
+)
 from eneo.mcp_servers.domain.credential_transport import (
     CREDENTIAL_TRANSPORT_REQUIREMENT,
     credential_transport_violation,
@@ -28,6 +32,8 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     AUDIENCE_EVERYONE,
     AUDIENCE_GROUPS,
     AUDIENCES,
+    AUTH_SCOPE_PER_USER,
+    AUTH_SCOPES,
     BUILTIN_PROVIDER_PURPOSES,
     BUNDLED_AUTH_TYPE,
     BUNDLED_TOOLS,
@@ -37,6 +43,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
     MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
     MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
+    OAUTH_CONFIG_KEYS,
     MCPServer,
     MCPServerAudienceGroup,
     MCPServerTool,
@@ -44,6 +51,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     is_builtin_provider,
     is_bundled_server,
     is_capability_purpose,
+    is_oauth_server,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
@@ -53,6 +61,10 @@ from eneo.mcp_servers.infrastructure.client.mcp_client import (
     loopback_endpoint,
 )
 from eneo.mcp_servers.infrastructure.identity_headers import build_identity_headers
+from eneo.mcp_servers.infrastructure.oauth.discovery import (
+    OAuthDiscoveryError,
+    discover,
+)
 from eneo.model_providers.infrastructure.litellm_provider import (
     load_active_litellm_provider,
 )
@@ -102,10 +114,18 @@ def _raise_for_integrity_error(error: IntegrityError) -> None:
 
 
 if TYPE_CHECKING:
+    import httpx
+
     from eneo.image_models.domain.image_model import ImageModel
     from eneo.image_models.domain.image_model_repo import ImageModelRepository
     from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
         McpAppViewRepo,
+    )
+    from eneo.mcp_servers.application.mcp_oauth_token_provider import (
+        MCPOAuthTokenProvider,
+    )
+    from eneo.mcp_servers.domain.repositories.mcp_oauth_repo import (
+        MCPOAuthRepository,
     )
     from eneo.mcp_servers.domain.repositories.mcp_server_repo import (
         MCPServerRepository,
@@ -292,6 +312,8 @@ class MCPServerService:
         user_groups_repo: "UserGroupsRepository | None" = None,
         image_model_repo: "ImageModelRepository | None" = None,
         app_view_repo: "McpAppViewRepo | None" = None,
+        oauth_token_provider: "MCPOAuthTokenProvider | None" = None,
+        mcp_oauth_repo: "MCPOAuthRepository | None" = None,
     ):
         super().__init__()
         self.repo = mcp_server_repo
@@ -301,6 +323,9 @@ class MCPServerService:
         self.encryption_service = encryption_service
         self.image_model_repo = image_model_repo
         self.user_groups_repo = user_groups_repo
+        # Tokens for OAuth servers, resolved for the acting administrator.
+        self.oauth_token_provider = oauth_token_provider
+        self.mcp_oauth_repo = mcp_oauth_repo
 
     async def _resolve_audience(
         self,
@@ -348,7 +373,7 @@ class MCPServerService:
         return resolved
 
     # Keys in http_auth_config_schema that contain secrets
-    _SECRET_KEYS = ("token",)
+    _SECRET_KEYS = ("token", "client_secret")
 
     @staticmethod
     def _validate_auth_config(
@@ -376,6 +401,46 @@ class MCPServerService:
                     "A bundled server carries no credentials; Eneo authenticates "
                     "it with the deployment's tool runtime token."
                 )
+            return
+        if is_oauth_server(http_auth_type):
+            # Eneo obtains tokens as an OAuth client; the admin may only pin a
+            # pre-registered client at the vendor's authorization server and a
+            # scope override. A secret without a client id is meaningless.
+            unknown = set(config or {}) - set(OAUTH_CONFIG_KEYS)
+            if unknown:
+                raise BadRequestException(
+                    "OAuth servers accept only client_id, client_secret, "
+                    f"client_auth_method and scope; unexpected: {sorted(unknown)}"
+                )
+            for key in OAUTH_CONFIG_KEYS:
+                value = (config or {}).get(key)
+                if value is None:
+                    continue
+                if not isinstance(value, str) or not value.strip():
+                    raise BadRequestException(f"{key} must be a non-empty string")
+                if any(ord(c) < 0x20 or c == "\x7f" for c in value):
+                    raise BadRequestException(
+                        f"{key} must not contain control characters"
+                    )
+            if (config or {}).get("client_secret") and not (config or {}).get(
+                "client_id"
+            ):
+                raise BadRequestException("client_secret requires a client_id")
+            method = (config or {}).get("client_auth_method")
+            if method is not None:
+                if method not in CLIENT_AUTH_METHODS:
+                    raise BadRequestException(
+                        "client_auth_method must be one of "
+                        f"{', '.join(CLIENT_AUTH_METHODS)}"
+                    )
+                if not (config or {}).get("client_id"):
+                    raise BadRequestException(
+                        "client_auth_method applies to a pre-registered client_id"
+                    )
+                if method != "none" and (config or {}).get("client_secret"):
+                    raise BadRequestException(
+                        "private_key_jwt replaces the client secret; leave it empty"
+                    )
             return
 
         token = (config or {}).get("token")
@@ -407,6 +472,31 @@ class MCPServerService:
             raise BadRequestException(
                 f"Header '{header_name}' is reserved and cannot carry credentials"
             )
+
+    @staticmethod
+    def _validate_auth_scope(http_auth_type: str, auth_scope: str) -> None:
+        if auth_scope not in AUTH_SCOPES:
+            raise BadRequestException(
+                f"auth_scope must be one of {', '.join(AUTH_SCOPES)}"
+            )
+        if auth_scope != AUTH_SCOPE_PER_USER and not is_oauth_server(http_auth_type):
+            raise BadRequestException("auth_scope applies only to OAuth servers")
+
+    async def _oauth_auth_for(self, mcp_server: MCPServer) -> "httpx.Auth":
+        """The acting administrator's token for an OAuth server.
+
+        Raises :class:`MCPUserActionRequiredError` when they have not
+        connected it (or, for a shared server, nobody has).
+        """
+        if self.oauth_token_provider is None:
+            raise MCPUserActionRequiredError(
+                f"'{mcp_server.name}' requires OAuth but no token provider is configured",
+                mcp_server_id=mcp_server.id,
+                server_name=mcp_server.name,
+                auth_scope=mcp_server.auth_scope,
+                reason="no_resolver",
+            )
+        return await self.oauth_token_provider.auth_for(mcp_server)
 
     @staticmethod
     def builtin_provider_url(purpose: str) -> str:
@@ -561,6 +651,7 @@ class MCPServerService:
         user_group_ids: list[UUID] | None = None,
         image_model_id: UUID | None = None,
         activate: bool = False,
+        auth_scope: str = AUTH_SCOPE_PER_USER,
     ) -> MCPServerCreateResult:
         """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport).
 
@@ -577,6 +668,7 @@ class MCPServerService:
             documentation_url = str(documentation_url)
 
         self._validate_auth_config(http_auth_type, http_auth_config_schema)
+        self._validate_auth_scope(http_auth_type, auth_scope)
         if is_builtin_provider(http_auth_type):
             model = await self._resolve_builtin_image_model(purpose, image_model_id)
             image_model_id = model.id
@@ -615,6 +707,7 @@ class MCPServerService:
             name=name,
             http_url=http_url,
             http_auth_type=http_auth_type,
+            auth_scope=auth_scope,
             purpose=purpose,
             is_enabled=not is_capability_purpose(purpose),
             audience=audience,
@@ -660,21 +753,7 @@ class MCPServerService:
         except IntegrityError as e:
             _raise_for_integrity_error(e)
 
-        # Save discovered tools
-        for tool_def in tools:
-            tool = MCPServerTool(
-                mcp_server_id=mcp_server.id,
-                name=tool_def["name"],
-                title=tool_def.get("title"),
-                description=tool_def.get("description"),
-                input_schema=tool_def.get("input_schema"),
-                # Kept from the start so a tool its server offers to its view
-                # only is never offered to the model. A view itself is shown
-                # only after a sync has stored it and it has been approved.
-                meta=tool_def.get("meta"),
-                is_enabled_by_default=True,
-            )
-            await self.tool_repo.upsert_by_server_and_name(tool)
+        await self._accept_initial_catalog(mcp_server, tools)
 
         deactivated_server_ids = []
         if activate:
@@ -767,6 +846,7 @@ class MCPServerService:
         audience_priority: int | None = None,
         user_group_ids: list[UUID] | None = None,
         image_model_id: "UUID | None | NotProvided" = NOT_PROVIDED,
+        auth_scope: str | None = None,
     ) -> MCPServerUpdateResult:
         """Update an MCP server in global catalog (admin only, uses Streamable HTTP transport).
 
@@ -818,6 +898,9 @@ class MCPServerService:
             http_auth_type is not None and http_auth_type != mcp_server.http_auth_type
         )
         credentials_changed = http_auth_config_schema is not None
+        auth_scope_changed = (
+            auth_scope is not None and auth_scope != mcp_server.auth_scope
+        )
         identity_mode_changed = (
             forward_identity is not None
             and forward_identity != mcp_server.forward_identity
@@ -826,6 +909,8 @@ class MCPServerService:
         effective_auth_type = (
             http_auth_type if http_auth_type is not None else mcp_server.http_auth_type
         )
+        if auth_scope is not None:
+            self._validate_auth_scope(effective_auth_type, auth_scope)
         if http_auth_config_schema is not None:
             # A token-only credential replacement keeps the stored header name.
             if (
@@ -908,6 +993,8 @@ class MCPServerService:
             # Switching to a type without stored credentials clears them
             if http_auth_type in ("none", INTERNAL_AUTH_TYPE):
                 mcp_server.http_auth_config_schema = None
+        if auth_scope is not None:
+            mcp_server.auth_scope = auth_scope
         if description is not None:
             mcp_server.description = description
         if forward_identity is not None:
@@ -1034,6 +1121,24 @@ class MCPServerService:
                         ),
                     )
 
+        # Tokens and client identities are bound to the address the row had:
+        # a move to another resource (or away from OAuth) forgets them, so
+        # nothing issued for the old address is ever sent to the new one.
+        if self.mcp_oauth_repo is not None and (
+            (url_changed and is_oauth_server(mcp_server.http_auth_type))
+            or (auth_type_changed and not is_oauth_server(mcp_server.http_auth_type))
+        ):
+            await self.mcp_oauth_repo.delete_server_state(mcp_server_id=mcp_server.id)
+        elif (
+            self.mcp_oauth_repo is not None
+            and auth_scope_changed
+            and is_oauth_server(mcp_server.http_auth_type)
+        ):
+            # Whose identity the server sees changed: the personal tokens of a
+            # server that is now shared, or the service account's token of one
+            # that is now per user, must not be the ones it keeps using.
+            await self.mcp_oauth_repo.delete_connections(mcp_server_id=mcp_server.id)
+
         # Encrypt and apply new credentials after validation passes
         if http_auth_config_schema is not None and mcp_server.http_auth_type != "none":
             mcp_server.http_auth_config_schema = self._encrypt_auth_config(
@@ -1070,6 +1175,20 @@ class MCPServerService:
         Returns:
             Tuple of (list of tool definitions as dicts, connection result)
         """
+        oauth_auth: "httpx.Auth | None" = None
+        if is_oauth_server(mcp_server.http_auth_type):
+            # Without a token for the acting admin, the most a save can prove
+            # is that the URL is an OAuth-protected MCP server whose
+            # authorization server we can talk to. Tools arrive once the
+            # admin has connected and syncs.
+            try:
+                oauth_auth = await self._oauth_auth_for(mcp_server)
+            except MCPUserActionRequiredError:
+                try:
+                    await discover(mcp_server.http_url, force=True)
+                except OAuthDiscoveryError as exc:
+                    return [], ConnectionResult(success=False, error_message=str(exc))
+                return [], ConnectionResult(success=True, tools_discovered=0)
         try:
             logger.info(
                 f"Testing connection to MCP server: {mcp_server.name} at {endpoint_url(mcp_server)}"
@@ -1084,6 +1203,7 @@ class MCPServerService:
                 auth_credentials,
                 timeout=timeout,
                 identity_headers=build_identity_headers(self.user, None),
+                auth=oauth_auth,
             ) as client:
                 tool_defs = await client.list_tools()
 
@@ -1135,6 +1255,9 @@ class MCPServerService:
                 mcp_server,
                 auth_credentials,
                 identity_headers=build_identity_headers(self.user, None),
+                auth=await self._oauth_auth_for(mcp_server)
+                if is_oauth_server(mcp_server.http_auth_type)
+                else None,
             ) as client:
                 tool_defs = await client.list_tools()
                 # A view is reviewed with the definition that declares it, so
@@ -1155,6 +1278,17 @@ class MCPServerService:
             )
             return result
 
+        except MCPUserActionRequiredError as e:
+            logger.info(
+                "Tool sync for %s awaits OAuth authorization (%s)",
+                mcp_server.name,
+                e.reason,
+            )
+            return ToolSyncResult(
+                connection=ConnectionResult(
+                    success=False, error_message=f"{e.REMEDY_CODE}: {e}"
+                )
+            )
         except MCPClientError as e:
             error_msg = str(e)
             if "Connection refused" in error_msg:
@@ -1174,6 +1308,33 @@ class MCPServerService:
                 )
             )
 
+    async def _accept_initial_catalog(
+        self, mcp_server: MCPServer, tool_defs: list[dict[str, Any]]
+    ) -> list[MCPServerTool]:
+        """Store a server's first catalog as its approved definitions.
+
+        Adding a server is the admin's acceptance of what it offers at that
+        moment; review is for what changes afterwards. The catalog may arrive
+        at the save, or at the first sync when the save could not list tools
+        yet, as for a server the admin had to connect to first.
+        """
+        tools: list[MCPServerTool] = []
+        for tool_def in tool_defs:
+            tool = MCPServerTool(
+                mcp_server_id=mcp_server.id,
+                name=tool_def["name"],
+                title=tool_def.get("title"),
+                description=tool_def.get("description"),
+                input_schema=tool_def.get("input_schema"),
+                # Kept from the start so a tool its server offers to its view
+                # only is never offered to the model. A view itself is shown
+                # only after a sync has stored it and it has been approved.
+                meta=tool_def.get("meta"),
+                is_enabled_by_default=True,
+            )
+            tools.append(await self.tool_repo.upsert_by_server_and_name(tool))
+        return tools
+
     async def _sync_discovered_tool_definitions(
         self, mcp_server: MCPServer, tool_defs: list[dict[str, Any]]
     ) -> ToolSyncResult:
@@ -1184,6 +1345,23 @@ class MCPServerService:
         display titles are applied only after that bounded operation succeeds.
         """
         existing_tools = await self.tool_repo.by_server(mcp_server.id)
+        if not existing_tools:
+            accepted = await self._accept_initial_catalog(mcp_server, tool_defs)
+            return ToolSyncResult(
+                connection=ConnectionResult(
+                    success=True, tools_discovered=len(tool_defs)
+                ),
+                new_tools=[
+                    ToolChange(
+                        tool=tool,
+                        change_type="new",
+                        current_description=tool.description,
+                        current_input_schema=tool.input_schema,
+                        current_meta=tool.meta,
+                    )
+                    for tool in accepted
+                ],
+            )
         existing_by_name = {tool.name: tool for tool in existing_tools}
         remote_names = {tool_def["name"] for tool_def in tool_defs}
 

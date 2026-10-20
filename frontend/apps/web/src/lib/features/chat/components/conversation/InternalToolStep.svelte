@@ -29,6 +29,8 @@
   import ShimmerText from "./ShimmerText.svelte";
   import ToolCallDetailsPanel from "./ToolCallDetailsPanel.svelte";
   import ToolStepIcon from "./ToolStepIcon.svelte";
+  import McpConnectAction from "./McpConnectAction.svelte";
+  import type { AuthorizationRemedy } from "$lib/features/mcp/oauthRemedy";
 
   type Status = "preparing" | "running" | "complete" | "failed" | "denied";
 
@@ -46,7 +48,8 @@
     document = null,
     icon = null,
     view = null,
-    draft = null
+    draft = null,
+    authorization = null
   }: {
     /** Present-tense label without ellipsis, e.g. "Söker kunskap". */
     runningLabel: string;
@@ -76,6 +79,8 @@
     view?: { name: string; open: () => void } | null;
     /** The document the running call is writing, which the step shows in the panel on click. */
     draft?: PreviewDraft | null;
+    /** The connect action when the call failed for want of OAuth authorization. */
+    authorization?: AuthorizationRemedy | null;
   } = $props();
 
   const preview = getFilePreview();
@@ -242,6 +247,11 @@
           </span>
         {/if}
       </span>
+      {#if authorization && (isNegative || isActive)}
+        <span class="ml-1 shrink-0" onclick={(event) => event.stopPropagation()} role="none">
+          <McpConnectAction remedy={authorization} live={isActive} />
+        </span>
+      {/if}
       {#if canExpand}
         <ChevronRight
           class="text-muted mt-0.5 h-3.5 w-3.5 shrink-0 transition-transform {open

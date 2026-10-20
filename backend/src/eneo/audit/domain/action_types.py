@@ -141,6 +141,11 @@ class ActionType(str, Enum):
     MCP_SERVER_DISABLED = "mcp_server_disabled"
     MCP_SERVER_TOOL_ENABLED = "mcp_server_tool_enabled"
     MCP_SERVER_TOOL_DISABLED = "mcp_server_tool_disabled"
+    # Eneo as OAuth client toward an MCP server
+    MCP_OAUTH_CONNECTED = "mcp_oauth_connected"
+    MCP_OAUTH_DISCONNECTED = "mcp_oauth_disconnected"
+    MCP_OAUTH_SHARED_CONNECTION_SET = "mcp_oauth_shared_connection_set"
+    MCP_OAUTH_SHARED_CONNECTION_CLEARED = "mcp_oauth_shared_connection_cleared"
     MCP_APP_VIEW_LINK_CREATED = "mcp_app_view_link_created"
 
     # Document Template Actions

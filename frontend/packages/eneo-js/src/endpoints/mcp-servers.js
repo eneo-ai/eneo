@@ -44,7 +44,8 @@ export function initMCPServers(client) {
      * @param {Object} params
      * @param {string} params.name Name of the MCP server
      * @param {string} [params.http_url] HTTP URL to the MCP server (not used by built-in providers)
-     * @param {"none" | "bearer" | "api_key_header" | "internal"} [params.http_auth_type] Authentication type (default: none); "internal" is a built-in provider on Eneo's loopback server
+     * @param {"none" | "bearer" | "api_key_header" | "internal" | "oauth"} [params.http_auth_type] Authentication type (default: none); "internal" is a built-in provider on Eneo's loopback server, "oauth" an OAuth 2.1 protected server Eneo obtains tokens for as a client
+     * @param {"per_user" | "shared"} [params.auth_scope] OAuth servers: whose identity the vendor sees (each user connects, or one shared connection)
      * @param {"general" | "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts"} [params.purpose] Server purpose (default: general)
      * @param {string} [params.description] Description
      * @param {{[key: string]: unknown} | null} [params.http_auth_config_schema] Authentication configuration
@@ -84,7 +85,8 @@ export function initMCPServers(client) {
       audience_priority,
       user_group_ids,
       image_model_id,
-      activate
+      activate,
+      auth_scope
     }) => {
       /** @type {any} */
       const body = {
@@ -107,7 +109,8 @@ export function initMCPServers(client) {
         audience_priority,
         user_group_ids,
         image_model_id,
-        activate
+        activate,
+        auth_scope
       };
       const res = await client.fetch("/api/v1/mcp-servers/", {
         method: "post",
@@ -122,6 +125,7 @@ export function initMCPServers(client) {
      * Update an MCP server in the global catalog (admin only, HTTP-only).
      * @param {Object} params
      * @param {string} params.id The MCP server ID
+     * @param {"per_user" | "shared"} [params.auth_scope] OAuth servers: whose identity the vendor sees
      * @param {string} [params.name] Name of the MCP server
      * @param {string} [params.http_url] HTTP URL to the MCP server
      * @param {"none" | "bearer" | "api_key_header" | "internal"} [params.http_auth_type] Authentication type; "internal" is a built-in provider on Eneo's loopback server
@@ -163,7 +167,8 @@ export function initMCPServers(client) {
       audience,
       audience_priority,
       user_group_ids,
-      image_model_id
+      image_model_id,
+      auth_scope
     }) => {
       /** @type {any} */
       const body = {
@@ -185,7 +190,8 @@ export function initMCPServers(client) {
         audience,
         audience_priority,
         user_group_ids,
-        image_model_id
+        image_model_id,
+        auth_scope
       };
       const res = await client.fetch("/api/v1/mcp-servers/{id}/", {
         method: "post",

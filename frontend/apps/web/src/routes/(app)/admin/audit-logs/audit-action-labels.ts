@@ -577,6 +577,22 @@ const ACTION_MESSAGES = {
     name: m.audit_action_mcp_server_tool_disabled,
     description: m.audit_action_mcp_server_tool_disabled_description
   },
+  mcp_oauth_connected: {
+    name: m.audit_action_mcp_oauth_connected,
+    description: m.audit_action_mcp_oauth_connected_description
+  },
+  mcp_oauth_disconnected: {
+    name: m.audit_action_mcp_oauth_disconnected,
+    description: m.audit_action_mcp_oauth_disconnected_description
+  },
+  mcp_oauth_shared_connection_set: {
+    name: m.audit_action_mcp_oauth_shared_connection_set,
+    description: m.audit_action_mcp_oauth_shared_connection_set_description
+  },
+  mcp_oauth_shared_connection_cleared: {
+    name: m.audit_action_mcp_oauth_shared_connection_cleared,
+    description: m.audit_action_mcp_oauth_shared_connection_cleared_description
+  },
   mcp_app_view_link_created: {
     name: m.audit_action_mcp_app_view_link_created,
     description: m.audit_action_mcp_app_view_link_created_description

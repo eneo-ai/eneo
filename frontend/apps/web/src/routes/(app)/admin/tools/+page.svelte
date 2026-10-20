@@ -102,15 +102,18 @@
   }
 
   async function save(payload: Record<string, unknown>, id?: string) {
+    let created: { mcp_server_id: string } | undefined;
     if (id) await data.eneo.mcpServers.update({ id, ...payload });
     else {
       // The dialog builds the discriminated external/built-in request.
-      await data.eneo.mcpServers.create(
+      const response = await data.eneo.mcpServers.create(
         payload as Parameters<typeof data.eneo.mcpServers.create>[0]
       );
+      created = { mcp_server_id: response.server.id };
       if (payload.purpose !== undefined && !payload.activate) notice = m.tools_saved_inactive();
     }
     await refresh();
+    return created;
   }
 
   /**

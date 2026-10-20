@@ -6749,6 +6749,186 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/mcp-oauth/client.json": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Client Metadata Document
+     * @description Eneo's OAuth Client ID Metadata Document. Authorization servers fetch it to validate Eneo's client id and redirect URI.
+     */
+    get: operations["get_client_metadata_document_api_v1_mcp_oauth_client_json_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-oauth/client-confidential.json": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Confidential Client Metadata Document
+     * @description Eneo's confidential OAuth Client ID Metadata Document: the identity Eneo uses at authorization servers that accept private_key_jwt, verified against the JWKS.
+     */
+    get: operations["get_confidential_client_metadata_document_api_v1_mcp_oauth_client_confidential_json_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-oauth/jwks.json": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Jwks
+     * @description Eneo's public signing keys (RFC 7517), against which authorization servers verify its private_key_jwt client assertions.
+     */
+    get: operations["get_jwks_api_v1_mcp_oauth_jwks_json_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-oauth/servers/{id}/authorize-url/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start Mcp Oauth
+     * @description Start authorizing Eneo at this MCP server's authorization server.
+     */
+    post: operations["start_mcp_oauth_api_v1_mcp_oauth_servers__id__authorize_url__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-oauth/servers/{id}/callback/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Complete Mcp Oauth
+     * @description Finish the authorization with the code the popup received.
+     */
+    post: operations["complete_mcp_oauth_api_v1_mcp_oauth_servers__id__callback__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-oauth/servers/{id}/decline/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Decline Mcp Oauth
+     * @description The user refused or abandoned the vendor's consent page: a turn paused on this authorization proceeds without it.
+     */
+    post: operations["decline_mcp_oauth_api_v1_mcp_oauth_servers__id__decline__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-oauth/servers/{id}/connection/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Disconnect Mcp Oauth
+     * @description Forget the connection (and revoke its tokens when possible).
+     */
+    delete: operations["disconnect_mcp_oauth_api_v1_mcp_oauth_servers__id__connection__delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-oauth/connections/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List My Mcp Connections
+     * @description The caller's state at every OAuth MCP server of the tenant.
+     */
+    get: operations["list_my_mcp_connections_api_v1_mcp_oauth_connections__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-oauth/assistants/{id}/connections/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Assistant Mcp Connections
+     * @description The caller's state at the OAuth servers a turn of this assistant would reach. Powers the connect chip in the chat and integrator pre-checks.
+     */
+    get: operations["list_assistant_mcp_connections_api_v1_mcp_oauth_assistants__id__connections__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/document-templates/": {
     parameters: {
       query?: never;
@@ -9557,6 +9737,10 @@ export interface components {
       | "mcp_server_disabled"
       | "mcp_server_tool_enabled"
       | "mcp_server_tool_disabled"
+      | "mcp_oauth_connected"
+      | "mcp_oauth_disconnected"
+      | "mcp_oauth_shared_connection_set"
+      | "mcp_oauth_shared_connection_cleared"
       | "mcp_app_view_link_created"
       | "document_template_created"
       | "document_template_updated"
@@ -15690,6 +15874,54 @@ export interface components {
       /** Error Message */
       error_message?: string | null;
     };
+    /** MCPOAuthAuthorizeUrl */
+    MCPOAuthAuthorizeUrl: {
+      /** Url */
+      url: string;
+      /** State */
+      state: string;
+    };
+    /** MCPOAuthCallback */
+    MCPOAuthCallback: {
+      /** Code */
+      code: string;
+      /** State */
+      state: string;
+      /** Iss */
+      iss?: string | null;
+    };
+    /** MCPOAuthConnectionList */
+    MCPOAuthConnectionList: {
+      /** Items */
+      items: components["schemas"]["MCPOAuthConnectionPublic"][];
+    };
+    /** MCPOAuthConnectionPublic */
+    MCPOAuthConnectionPublic: {
+      /**
+       * Mcp Server Id
+       * Format: uuid
+       */
+      mcp_server_id: string;
+      /** Server Name */
+      server_name: string;
+      /** Auth Scope */
+      auth_scope: string;
+      /** Status */
+      status: string;
+      /** Strategy */
+      strategy?: string | null;
+      /**
+       * Scopes
+       * @default []
+       */
+      scopes?: string[];
+      /** Connected At */
+      connected_at?: string | null;
+      /** Connected By User Id */
+      connected_by_user_id?: string | null;
+      /** Last Error */
+      last_error?: string | null;
+    };
     /** MCPServerAudienceGroupPublic */
     MCPServerAudienceGroupPublic: {
       /**
@@ -15735,7 +15967,13 @@ export interface components {
        * @default none
        * @enum {string}
        */
-      http_auth_type?: "none" | "bearer" | "api_key_header" | "internal";
+      http_auth_type?: "none" | "bearer" | "api_key_header" | "internal" | "oauth";
+      /**
+       * Auth Scope
+       * @default per_user
+       * @enum {string}
+       */
+      auth_scope?: "per_user" | "shared";
       /**
        * Purpose
        * @default general
@@ -15827,6 +16065,12 @@ export interface components {
       http_url: string;
       /** Http Auth Type */
       http_auth_type: string;
+      /**
+       * Auth Scope
+       * @default per_user
+       * @enum {string}
+       */
+      auth_scope?: "per_user" | "shared";
       /**
        * Purpose
        * @default general
@@ -15957,6 +16201,12 @@ export interface components {
       http_url: string;
       /** Http Auth Type */
       http_auth_type: string;
+      /**
+       * Auth Scope
+       * @default per_user
+       * @enum {string}
+       */
+      auth_scope?: "per_user" | "shared";
       /**
        * Purpose
        * @default general
@@ -16190,7 +16440,9 @@ export interface components {
       /** Http Url */
       http_url?: string | null;
       /** Http Auth Type */
-      http_auth_type?: ("none" | "bearer" | "api_key_header" | "internal") | null;
+      http_auth_type?: ("none" | "bearer" | "api_key_header" | "internal" | "oauth") | null;
+      /** Auth Scope */
+      auth_scope?: ("per_user" | "shared") | null;
       /** Purpose */
       purpose?:
         | (
@@ -24403,7 +24655,12 @@ export interface components {
       set_at: string;
     };
     /** @enum {string} */
-    EneoEventType: "tool_call" | "tool_approval_required" | "tool_approval_timeout" | "token_usage";
+    EneoEventType:
+      | "tool_call"
+      | "tool_approval_required"
+      | "tool_approval_timeout"
+      | "tool_authorization_required"
+      | "token_usage";
     /** SSEText */
     SSEText: {
       /**
@@ -30767,6 +31024,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "tool_authorization_required"
                     | "token_usage";
                   /**
                    * McpToolReferencePublic
@@ -30885,6 +31143,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "tool_authorization_required"
                     | "token_usage";
                   /**
                    * ToolCallInfo
@@ -30955,6 +31214,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "tool_authorization_required"
                     | "token_usage";
                   /**
                    * ToolCallInfo
@@ -47534,6 +47794,400 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MCPServerToolPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_client_metadata_document_api_v1_mcp_oauth_client_json_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_confidential_client_metadata_document_api_v1_mcp_oauth_client_confidential_json_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_jwks_api_v1_mcp_oauth_jwks_json_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            [key: string]: unknown;
+          };
+        };
+      };
+    };
+  };
+  start_mcp_oauth_api_v1_mcp_oauth_servers__id__authorize_url__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPOAuthAuthorizeUrl"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  complete_mcp_oauth_api_v1_mcp_oauth_servers__id__callback__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MCPOAuthCallback"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPOAuthConnectionPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  decline_mcp_oauth_api_v1_mcp_oauth_servers__id__decline__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  disconnect_mcp_oauth_api_v1_mcp_oauth_servers__id__connection__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_my_mcp_connections_api_v1_mcp_oauth_connections__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPOAuthConnectionList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_assistant_mcp_connections_api_v1_mcp_oauth_assistants__id__connections__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPOAuthConnectionList"];
         };
       };
       /** @description Forbidden */

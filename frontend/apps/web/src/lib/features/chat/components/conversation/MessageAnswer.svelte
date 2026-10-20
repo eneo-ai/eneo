@@ -18,6 +18,7 @@
   import { getMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
   import ReasoningTrace from "./ReasoningTrace.svelte";
   import InternalToolStep from "./InternalToolStep.svelte";
+  import { authorizationRemedy } from "$lib/features/mcp/oauthRemedy";
   import ToolStepIcon from "./ToolStepIcon.svelte";
   import SkillActivationStep from "./SkillActivationStep.svelte";
   import { dynamicColour } from "$lib/core/colours";
@@ -79,6 +80,7 @@
           is_bundled?: boolean | null;
           generated_file_ids?: string[] | null;
           app_view?: unknown;
+          meta?: Record<string, unknown> | null;
         }>
       | undefined
   );
@@ -245,6 +247,9 @@
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
         status,
+        // An OAuth server nobody authorized Eneo for: the step offers the
+        // connect action the remedy describes.
+        authorization: authorizationRemedy(tc),
         previousAttempt: status === "failed" && !isSkillActivation(tc) && previousAttempts.has(i),
         // Function steps (capability calls, whichever provider served them)
         // and context steps (Eneo's own lookups) render as slim lines in runs
@@ -444,10 +449,13 @@
   {#each stepRuns as run, runIndex (runIndex)}
     {#if run.kind === "external"}
       <div class="mb-4">
+        <!-- Open while its step runs, not only as the latest run: a call
+             paused for the user's authorization is running too, and its
+             connect action must not sit behind a collapsed header. -->
         <ReasoningTrace
           steps={run.steps}
           reasoning={runIndex === 0 ? reasoningText : ""}
-          working={toolsStillExecuting && runIndex === stepRuns.length - 1}
+          working={runWorking(run, runIndex)}
           loadToolResult={(toolCallId) => chat.getToolCallResult(toolCallId)}
         />
       </div>
@@ -524,6 +532,7 @@
                   icon={step.icon}
                   view={step.view}
                   draft={step.draft}
+                  authorization={step.authorization}
                   onLoadResult={step.toolCallId
                     ? () => chat.getToolCallResult(step.toolCallId!)
                     : undefined}

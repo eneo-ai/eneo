@@ -10,6 +10,7 @@
   MessageAnswer.svelte so a blocking decision is never hidden inside the trace.
 -->
 <script lang="ts">
+  import type { AuthorizationRemedy } from "$lib/features/mcp/oauthRemedy";
   import { m } from "$lib/paraglide/messages";
   import { slide } from "svelte/transition";
   import { Wrench, Brain, ChevronDown, LoaderCircle } from "@lucide/svelte";
@@ -24,6 +25,7 @@
     toolCallId?: string;
     previousAttempt?: boolean;
     status: "preparing" | "running" | "complete" | "failed" | "denied";
+    authorization?: AuthorizationRemedy | null;
   };
 
   let {
@@ -141,6 +143,7 @@
                   toolCallId={step.toolCallId}
                   status={step.status}
                   previousAttempt={step.previousAttempt}
+                  authorization={step.authorization ?? null}
                   onLoadResult={loadToolResult && step.toolCallId
                     ? () => loadToolResult(step.toolCallId!)
                     : undefined}

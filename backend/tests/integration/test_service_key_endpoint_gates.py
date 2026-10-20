@@ -350,6 +350,11 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/v1/roles/", {"name": "x", "permissions": []}),
     ("POST", "/api/v1/mcp-servers/", {"name": "x", "url": "https://example.com"}),
     ("POST", "/api/v1/mcp-servers/bundled/compute/", {}),
+    (
+        "POST",
+        f"/api/v1/mcp-oauth/servers/{_STUB_ID}/callback/",
+        {"code": "x", "state": "x"},
+    ),
     ("POST", "/api/v1/document-templates/", {"name": "x"}),
     (
         "POST",

@@ -309,6 +309,10 @@ class Settings(BaseSettings):
     mcp_tool_approval_timeout_seconds: int = 300
     mcp_tool_approval_ttl_seconds: int = 305
     mcp_tool_approval_denial_reason_max_length: int = 200
+    # How long a streaming turn waits for the user to authorize an OAuth MCP
+    # server before the refused tool call proceeds with its remedy. 0 disables
+    # the pause.
+    mcp_oauth_authorization_wait_seconds: int = 180
     mcp_client_connect_timeout_seconds: int = 30
     mcp_client_list_tools_timeout_seconds: int = 30
     mcp_client_call_timeout_seconds: int = 60

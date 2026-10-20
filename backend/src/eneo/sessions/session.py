@@ -113,6 +113,7 @@ class EneoEventType(str, Enum):
     TOOL_CALL = "tool_call"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
+    TOOL_AUTHORIZATION_REQUIRED = "tool_authorization_required"
     TOKEN_USAGE = "token_usage"
 
 
@@ -233,6 +234,15 @@ class SSEToolApprovalTimeout(SSEBase):
 
     eneo_event_type: EneoEventType = EneoEventType.TOOL_APPROVAL_TIMEOUT
     approval_id: str
+    tools: list[ToolCallInfo]
+
+
+class SSEToolAuthorizationRequired(SSEBase):
+    """The turn is paused: these calls wait for the user to authorize an
+    OAuth MCP server. Each tool's ``meta`` carries the connect remedy."""
+
+    eneo_event_type: EneoEventType = EneoEventType.TOOL_AUTHORIZATION_REQUIRED
+    authorization_id: str
     tools: list[ToolCallInfo]
 
 

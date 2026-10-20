@@ -53,6 +53,17 @@ class _InMemoryToolRepo:
             staged.append(existing)
         return staged
 
+    async def upsert_by_server_and_name(self, tool: MCPServerTool) -> MCPServerTool:
+        for saved in self.tools.values():
+            if saved.mcp_server_id == tool.mcp_server_id and saved.name == tool.name:
+                saved.title = tool.title
+                saved.description = tool.description
+                saved.input_schema = tool.input_schema
+                saved.meta = tool.meta
+                return saved
+        self.tools[tool.id] = tool
+        return tool
+
     async def by_server(self, mcp_server_id: UUID) -> list[MCPServerTool]:
         return [
             tool for tool in self.tools.values() if tool.mcp_server_id == mcp_server_id
@@ -122,6 +133,35 @@ async def test_meta_only_drift_is_staged_as_changed_tool():
     assert staged.meta is None
     assert staged.pending_meta == UI_META
     assert staged.requires_approval is True
+
+
+async def test_first_catalog_of_a_server_without_tools_is_accepted_as_is():
+    # A server whose save could not list tools gets its catalog at the first
+    # sync; that catalog is accepted like one listed at the save, not staged.
+    server = _make_server()
+    server.tools = []
+    tool_repo = _InMemoryToolRepo([])
+    service = _make_service(server, tool_repo)
+
+    result = await service._sync_discovered_tool_definitions(
+        server,
+        [
+            {
+                "name": "get_weather",
+                "description": "Current weather",
+                "input_schema": {"type": "object"},
+                "meta": UI_META,
+            }
+        ],
+    )
+
+    assert [change.tool.name for change in result.new_tools] == ["get_weather"]
+    assert result.changed_tools == []
+    (saved,) = await tool_repo.by_server(server.id)
+    assert saved.requires_approval is False
+    assert saved.description == "Current weather"
+    assert saved.meta == UI_META
+    assert saved.pending_description is None
 
 
 async def test_unchanged_meta_is_not_staged():

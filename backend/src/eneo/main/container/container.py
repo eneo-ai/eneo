@@ -1,5 +1,5 @@
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from contextvars import ContextVar
 
 import redis.asyncio as aioredis
@@ -78,7 +78,7 @@ from eneo.crawler.python_engine import PythonCrawlEngine
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
-from eneo.database.database import AsyncSession
+from eneo.database.database import AsyncSession, sessionmanager
 from eneo.document_templates.repo import DocumentTemplateRepository
 from eneo.document_templates.service import DocumentTemplateService
 from eneo.embedding_models.application.embedding_model_crud_service import (
@@ -267,6 +267,10 @@ from eneo.main.logging import get_logger
 from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
     McpAppViewRepo,
 )
+from eneo.mcp_servers.application.mcp_oauth_service import MCPOAuthService
+from eneo.mcp_servers.application.mcp_oauth_token_provider import (
+    MCPOAuthTokenProvider,
+)
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
@@ -277,6 +281,9 @@ from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
 )
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
     MCPProxySessionFactory,
+)
+from eneo.mcp_servers.infrastructure.repo_impl.mcp_oauth_repo_impl import (
+    MCPOAuthRepoImpl,
 )
 from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
     MCPServerRepoImpl,
@@ -436,6 +443,19 @@ def _build_crawl_engine() -> PythonCrawlEngine:
             block_private_networks=settings.crawler_block_private_networks
         ),
     )
+
+
+def _mcp_oauth_repo_factory(
+    encryption_service: EncryptionService,
+) -> Callable[[], AbstractAsyncContextManager[MCPOAuthRepoImpl]]:
+    """A repository on a fresh session and transaction, for streaming-time use."""
+
+    @asynccontextmanager
+    async def scope() -> AsyncGenerator[MCPOAuthRepoImpl]:
+        async with sessionmanager.session() as session, session.begin():
+            yield MCPOAuthRepoImpl(session, encryption_service)
+
+    return scope
 
 
 def _build_encryption_service() -> EncryptionService:
@@ -758,6 +778,23 @@ class Container(containers.DeclarativeContainer):
         MCPServerToolRepoImpl, session=session, mapper=mcp_server_tool_mapper
     )
     mcp_app_view_repo = providers.Factory(McpAppViewRepo, session=session)
+    mcp_oauth_repo = providers.Factory(
+        MCPOAuthRepoImpl, session=session, encryption_service=encryption_service
+    )
+    # Tokens for OAuth MCP servers, resolved for the acting user. The tenant
+    # comes from the user; a worker or service key has no per-user tokens.
+    # Each database access opens its own short session: the provider runs
+    # while a turn streams, after the request's transaction has ended.
+    mcp_oauth_token_provider = providers.Factory(
+        MCPOAuthTokenProvider,
+        repo_factory=providers.Callable(
+            _mcp_oauth_repo_factory, encryption_service=encryption_service
+        ),
+        encryption_service=encryption_service,
+        settings=providers.Callable(get_settings),
+        user=user,
+        redis_client=redis_client,
+    )
 
     sync_log_repo = providers.Factory(
         SyncLogRepoImpl, session=session, mapper=sync_log_mapper
@@ -905,6 +942,7 @@ class Container(containers.DeclarativeContainer):
         redis_client=redis_client,
         mcp_server_tool_repo=mcp_server_tool_repo,
         audit_service=audit_service,
+        mcp_oauth_token_provider=mcp_oauth_token_provider,
     )
 
     # Datastore
@@ -1454,6 +1492,18 @@ class Container(containers.DeclarativeContainer):
         user_groups_repo=user_groups_repo,
         image_model_repo=image_model_repo,
         app_view_repo=mcp_app_view_repo,
+        oauth_token_provider=mcp_oauth_token_provider,
+        mcp_oauth_repo=mcp_oauth_repo,
+    )
+    mcp_oauth_service = providers.Factory(
+        MCPOAuthService,
+        user=user,
+        mcp_server_repo=mcp_server_repo,
+        repo=mcp_oauth_repo,
+        encryption_service=encryption_service,
+        settings=providers.Callable(get_settings),
+        redis_client=redis_client,
+        token_provider=mcp_oauth_token_provider,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,

@@ -86,6 +86,9 @@ from eneo.limits.limit_router import router as limit_router
 from eneo.logging.logging_router import router as logging_router
 from eneo.main.config import get_settings
 from eneo.mcp_apps.presentation.mcp_apps_router import router as mcp_apps_router
+from eneo.mcp_servers.presentation.mcp_oauth_router import (
+    router as mcp_oauth_router,
+)
 from eneo.mcp_servers.presentation.mcp_server_router import (
     router as mcp_server_router,
 )
@@ -559,6 +562,9 @@ router.include_router(
     tags=["mcp-servers"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
+# Eneo's OAuth client toward MCP servers: per-user connections are made by
+# ordinary members, so this router is not behind the admin API-key guards.
+router.include_router(mcp_oauth_router, prefix="/mcp-oauth", tags=["mcp-oauth"])
 router.include_router(
     document_template_router,
     prefix="/document-templates",

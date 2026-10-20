@@ -5,6 +5,7 @@
 -->
 
 <script lang="ts">
+  import { browser } from "$app/environment";
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -23,6 +24,15 @@
   import AddWizard from "../models/AddWizard/AddWizard.svelte";
   import { writable } from "svelte/store";
   import { readinessMessage } from "$lib/features/mcp/readiness";
+  import McpOAuthConnectStep from "./McpOAuthConnectStep.svelte";
+  import { CircleCheck } from "@lucide/svelte";
+  import {
+    useMcpOAuthConnect,
+    type McpOAuthConnection
+  } from "$lib/features/mcp/McpOAuthConnectService.svelte";
+  import { toastError } from "$lib/core/errors";
+  import { toast } from "$lib/components/toast";
+  import { invalidate } from "$app/navigation";
   import type { ModelProviderPublic } from "@eneo/eneo-js";
   import type { Writable } from "svelte/store";
 
@@ -39,7 +49,11 @@
     lockPurpose?: boolean;
     activateOnSave?: boolean;
     replacesDefault?: string;
-    onSubmit: (data: Record<string, unknown>, id?: string) => Promise<void>;
+    /** Saves the server; a create returns its id so the dialog can offer the connect step. */
+    onSubmit: (
+      data: Record<string, unknown>,
+      id?: string
+    ) => Promise<void | { mcp_server_id: string }>;
   };
 
   const {
@@ -71,6 +85,7 @@
   // A capability provider is edited as the feature it serves, not as an MCP
   // server; the transport is an implementation detail to the admin.
   const dialogTitle = $derived.by(() => {
+    if (connectStep) return m.mcp_oauth_connect_step_heading({ server: connectStep.name });
     if (capability) {
       const label = capability.label().toLocaleLowerCase();
       return isEditMode
@@ -120,9 +135,77 @@
   let name = $state("");
   let description = $state("");
   let http_url = $state("");
-  let http_auth_type = $state<"none" | "bearer" | "api_key_header" | "internal" | "bundled">(
-    "none"
-  );
+  let http_auth_type = $state<
+    "none" | "bearer" | "api_key_header" | "internal" | "bundled" | "oauth"
+  >("none");
+  // OAuth servers: whose identity the vendor sees, and an optional
+  // pre-registered client at its authorization server plus a scope override.
+  let auth_scope = $state<"per_user" | "shared">("per_user");
+  let oauth_client_id = $state("");
+  let oauth_client_secret = $state("");
+  let oauth_scope = $state("");
+  // A pre-registered client that authenticates with Eneo's signing key
+  // (private_key_jwt) instead of a shared secret.
+  let oauth_private_key_jwt = $state(false);
+  const jwksUrl = $derived(browser ? `${window.location.origin}/api/v1/mcp-oauth/jwks.json` : "");
+  const isOauth = $derived(http_auth_type === "oauth");
+  // The acting admin's own connection to this server (or the shared one):
+  // tools can only be synced through it, so the dialog offers it here.
+  const oauthConnect = useMcpOAuthConnect();
+  let oauthConnection = $state<McpOAuthConnection | null>(null);
+  async function loadOauthConnection(serverId: string) {
+    try {
+      const connections = await eneo.mcpOauth.myConnections();
+      oauthConnection = connections.find((c) => c.mcp_server_id === serverId) ?? null;
+    } catch {
+      oauthConnection = null;
+    }
+  }
+  // After a create, the dialog stays open on a connect step: without the
+  // admin's (or the shared) connection the server has no tools to list.
+  let connectStep = $state<{ id: string; name: string } | null>(null);
+  let syncingTools = $state(false);
+  async function syncToolsAfterConnect(serverId: string) {
+    syncingTools = true;
+    try {
+      const result = await eneo.mcpServers.syncTools({ mcp_server_id: serverId });
+      const count =
+        (result.new_tools?.length ?? 0) +
+        (result.changed_tools?.length ?? 0) +
+        (result.unchanged_count ?? 0);
+      await Promise.all([
+        invalidate("admin:layout"),
+        invalidate("spaces:data"),
+        invalidate("admin:tools")
+      ]);
+      toast.success(m.mcp_oauth_tools_synced({ count }));
+    } catch (e) {
+      toastError(e);
+    } finally {
+      syncingTools = false;
+    }
+  }
+  oauthConnect.subscribe(async (serverId, result) => {
+    if (!result.success) {
+      if (result.error.message !== "popup_closed") toastError(result.error);
+      return;
+    }
+    oauthConnection = result.connection;
+    // A fresh connection is what tool discovery was waiting for.
+    await syncToolsAfterConnect(serverId);
+    if (connectStep?.id === serverId) {
+      connectStep = null;
+      $openController = false;
+    }
+  });
+  $effect(() => {
+    if ($openController && mcpServer?.http_auth_type === "oauth") {
+      void loadOauthConnection(mcpServer.mcp_server_id);
+    } else {
+      oauthConnection = null;
+    }
+    if (!$openController) connectStep = null;
+  });
   let documentation_url = $state("");
   let security_classification = $state<SecurityClassification | null>(null);
   let forward_identity = $state(false);
@@ -283,7 +366,8 @@
       http_url = mcpServer.http_url || "";
       http_auth_type =
         (mcpServer.http_auth_type as
-          "none" | "bearer" | "api_key_header" | "internal" | "bundled") || "none";
+          "none" | "bearer" | "api_key_header" | "internal" | "bundled" | "oauth") || "none";
+      auth_scope = (mcpServer.auth_scope as "per_user" | "shared") ?? "per_user";
       source = mcpServer.http_auth_type === "internal" ? "builtin" : "external";
       imageModelId = mcpServer.image_model_id ?? "";
       documentation_url = mcpServer.documentation_url || "";
@@ -306,6 +390,7 @@
       description = "";
       http_url = "";
       http_auth_type = "none";
+      auth_scope = "per_user";
       source = hasBuiltinProvider(initialPurpose) ? "builtin" : "external";
       imageModelId = "";
       documentation_url = "";
@@ -324,6 +409,10 @@
     bearer_token = "";
     api_key_header_name = "";
     api_key_token = "";
+    oauth_client_id = "";
+    oauth_client_secret = "";
+    oauth_scope = "";
+    oauth_private_key_jwt = false;
     errorMessage = "";
   });
 
@@ -349,6 +438,9 @@
       }
       if (!isEditMode || http_auth_type !== mcpServer?.http_auth_type) {
         data.http_auth_type = http_auth_type;
+      }
+      if (isOauth && (!isEditMode || auth_scope !== mcpServer?.auth_scope)) {
+        data.auth_scope = auth_scope;
       }
       if (isBuiltin) {
         data.image_model_id = imageModelId;
@@ -395,11 +487,23 @@
           ? { header_name: api_key_header_name, token: api_key_token }
           : { token: api_key_token };
       }
+      if (isOauth && (oauth_client_id || oauth_client_secret || oauth_scope)) {
+        const config: Record<string, string> = {};
+        if (oauth_client_id) config.client_id = oauth_client_id;
+        if (oauth_client_secret) config.client_secret = oauth_client_secret;
+        if (oauth_client_id && oauth_private_key_jwt && !oauth_client_secret) {
+          config.client_auth_method = "private_key_jwt";
+        }
+        if (oauth_scope) config.scope = oauth_scope;
+        data.http_auth_config_schema = config;
+      }
 
-      await onSubmit(data, mcpServer?.mcp_server_id);
+      const created = await onSubmit(data, mcpServer?.mcp_server_id);
 
       // Reset form on success (for add mode)
       if (!isEditMode) {
+        const createdId = created && "mcp_server_id" in created ? created.mcp_server_id : null;
+        const connectName = name;
         name = "";
         selectedPurpose = initialPurpose;
         description = "";
@@ -409,6 +513,11 @@
         bearer_token = "";
         api_key_header_name = "";
         api_key_token = "";
+        oauth_client_id = "";
+        oauth_client_secret = "";
+        oauth_scope = "";
+        oauth_private_key_jwt = false;
+        auth_scope = "per_user";
         security_classification = null;
         audience = "everyone";
         audiencePriority = 100;
@@ -417,6 +526,11 @@
         tool_catalog_max_count = DEFAULT_TOOL_CATALOG_MAX_COUNT;
         tool_catalog_max_mib = DEFAULT_TOOL_CATALOG_MAX_MIB;
         tool_definition_max_kib = DEFAULT_TOOL_DEFINITION_MAX_KIB;
+        if (createdId && data.http_auth_type === "oauth") {
+          // Stay open: the server exists but has no tools until someone connects.
+          connectStep = { id: createdId, name: connectName };
+          return;
+        }
       }
 
       $openController = false;
@@ -438,7 +552,8 @@
   const authTypeOptions = $derived([
     { value: "none" as const, label: m.mcp_auth_type_none() },
     { value: "bearer" as const, label: m.bearer_token() },
-    { value: "api_key_header" as const, label: m.api_key_header_auth() }
+    { value: "api_key_header" as const, label: m.api_key_header_auth() },
+    { value: "oauth" as const, label: m.mcp_auth_type_oauth() }
   ]);
   // The number input yields null when cleared and accepts negatives; the
   // backend requires a non-negative integer, so gate submit here.
@@ -470,8 +585,14 @@
       <Dialog.Header class={dialogLayout.header}>
         <Dialog.Title>
           <span class="flex items-center gap-3">
-            <span class="bg-accent-dimmer flex h-10 w-10 items-center justify-center rounded-xl">
-              {#if capability}
+            <span
+              class="flex h-10 w-10 items-center justify-center rounded-xl {connectStep
+                ? 'bg-positive-dimmer'
+                : 'bg-accent-dimmer'}"
+            >
+              {#if connectStep}
+                <CircleCheck class="text-positive-default h-5 w-5" aria-hidden="true" />
+              {:else if capability}
                 <capability.icon class="text-accent-default h-5 w-5" aria-hidden="true" />
               {:else}
                 <svg
@@ -496,62 +617,223 @@
       </Dialog.Header>
 
       <div class={dialogLayout.body}>
-        <div class={dialogLayout.section}>
-          <form
-            onsubmit={(e) => {
-              e.preventDefault();
-              handleSubmit();
-            }}
-            class="space-y-5 px-4 pt-2 pb-6"
-          >
-            {#if errorMessage}
-              <div
-                class="border-negative-default/30 bg-negative-dimmer flex items-start gap-3 rounded-lg border px-4 py-3"
-                role="alert"
-              >
-                <svg
-                  class="text-negative-default mt-0.5 h-5 w-5 shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  aria-hidden="true"
+        {#if connectStep}
+          <McpOAuthConnectStep
+            serverName={connectStep.name}
+            shared={auth_scope === "shared"}
+            connecting={oauthConnect.isConnecting(connectStep.id)}
+            syncing={syncingTools}
+          />
+        {:else}
+          <div class={dialogLayout.section}>
+            <form
+              onsubmit={(e) => {
+                e.preventDefault();
+                handleSubmit();
+              }}
+              class="space-y-5 px-4 pt-2 pb-6"
+            >
+              {#if errorMessage}
+                <div
+                  class="border-negative-default/30 bg-negative-dimmer flex items-start gap-3 rounded-lg border px-4 py-3"
+                  role="alert"
                 >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
-                  />
-                </svg>
-                <div class="text-negative-stronger text-sm">{errorMessage}</div>
-              </div>
-            {/if}
+                  <svg
+                    class="text-negative-default mt-0.5 h-5 w-5 shrink-0"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    aria-hidden="true"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
+                    />
+                  </svg>
+                  <div class="text-negative-stronger text-sm">{errorMessage}</div>
+                </div>
+              {/if}
 
-            {#if builtinAvailable}
-              <!-- Source: an external MCP server, or Eneo's built-in provider that
+              {#if builtinAvailable}
+                <!-- Source: an external MCP server, or Eneo's built-in provider that
                calls a tenant model provider directly. -->
-              <fieldset class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3">
-                <legend
-                  class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
+                <fieldset
+                  class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3"
                 >
-                  {m.mcp_source_label()}
-                </legend>
-                {#if !(isEditMode && mcpServer?.is_enabled)}
-                  <Field.Field>
-                    <Field.Label for="mcp-source">{m.mcp_source_label()}</Field.Label>
-                    <Select.Root
-                      type="single"
-                      value={source}
-                      onValueChange={(key) =>
-                        (source =
-                          sourceOptions.find((option) => option.value === key)?.value ?? source)}
+                  <legend
+                    class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
+                  >
+                    {m.mcp_source_label()}
+                  </legend>
+                  {#if !(isEditMode && mcpServer?.is_enabled)}
+                    <Field.Field>
+                      <Field.Label for="mcp-source">{m.mcp_source_label()}</Field.Label>
+                      <Select.Root
+                        type="single"
+                        value={source}
+                        onValueChange={(key) =>
+                          (source =
+                            sourceOptions.find((option) => option.value === key)?.value ?? source)}
+                      >
+                        <Select.Trigger id="mcp-source" class="w-full">
+                          {sourceOptions.find((option) => option.value === source)?.label ??
+                            m.ui_select_placeholder()}
+                        </Select.Trigger>
+                        <Select.Content>
+                          {#each sourceOptions as option (option.value)}
+                            <Select.Item value={option.value} label={option.label}>
+                              {option.label}
+                            </Select.Item>
+                          {/each}
+                        </Select.Content>
+                      </Select.Root>
+                    </Field.Field>
+                  {:else}<p class="text-secondary text-sm">
+                      {m.tools_source_replacement_hint()}
+                    </p>{/if}
+
+                  {#if isBuiltin}
+                    <p class="text-muted text-xs leading-relaxed">{m.mcp_builtin_hint()}</p>
+
+                    <div>
+                      <label
+                        for="mcp-builtin-image-model"
+                        class="text-default mb-1.5 flex items-center gap-1.5 text-sm font-medium"
+                      >
+                        {m.mcp_builtin_image_model()}
+                        <span class="text-negative-default" aria-hidden="true">*</span>
+                      </label>
+                      <select
+                        id="mcp-builtin-image-model"
+                        bind:value={imageModelId}
+                        required
+                        aria-required="true"
+                        disabled={loadingImageModels}
+                        class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
+                      >
+                        <option value="" disabled>{m.select()}</option>
+                        {#if mcpServer?.image_model_id && !imageModelOptions.some((model) => model.id === mcpServer?.image_model_id)}
+                          <option value={mcpServer.image_model_id}
+                            >{mcpServer.image_model?.nickname ||
+                              mcpServer.image_model?.name ||
+                              m.tools_readiness_model_missing()}</option
+                          >
+                        {/if}
+                        {#each imageModelOptions as model (model.id)}
+                          <option value={model.id}>
+                            {model.nickname || model.name}{model.provider_name
+                              ? ` · ${model.provider_name}`
+                              : ""}
+                          </option>
+                        {/each}
+                      </select>
+                      <Button variant="ghost" size="sm" class="mt-2" onclick={addImageModel}
+                        >{m.tools_add_image_model()}</Button
+                      >
+                      {#if mcpServer?.readiness_reason && imageModelId === mcpServer.image_model_id}
+                        <p class="text-warning-default text-xs">
+                          {readinessMessage(mcpServer.readiness_reason)}
+                        </p>
+                      {/if}
+                      {#if imageModels !== null && imageModelOptions.length === 0}
+                        <p class="text-warning-default mt-1.5 text-xs">
+                          {m.mcp_builtin_no_image_models()}
+                          <a href={resolve("/admin/models?tab=image_models")} class="underline"
+                            >{m.mcp_builtin_go_to_image_models()}</a
+                          >
+                        </p>
+                      {/if}
+                      {#if selectedImageModel}
+                        <p class="text-muted mt-1.5 text-xs">
+                          <span class="font-mono">{selectedImageModel.name}</span>
+                          · {m.image_default_size()}: {imageSizeLabel(
+                            selectedImageModel.default_size
+                          )}
+                          · {m.image_default_quality()}: {imageQualityLabel(
+                            selectedImageModel.default_quality
+                          )}
+                        </p>
+                      {/if}
+                    </div>
+                    {#if builtinIncomplete}
+                      <p class="text-warning-default text-xs">{m.mcp_builtin_incomplete()}</p>
+                    {/if}
+                  {/if}
+                </fieldset>
+              {/if}
+
+              <!-- Server Identity Section. A server built into Eneo is named in
+                 the UI language from the tool it serves; its stored row keeps
+                 the backend default and is not edited here. -->
+              {#if isBundled}
+                <p class="text-muted text-xs leading-relaxed">{m.mcp_bundled_identity_hint()}</p>
+              {/if}
+              <fieldset class="space-y-4" class:hidden={isBundled}>
+                <legend class="sr-only">{m.mcp_server_info_legend()}</legend>
+
+                <div>
+                  <label
+                    for="mcp-name"
+                    class="text-default mb-1.5 flex items-center gap-1.5 text-sm font-medium"
+                  >
+                    {m.name()}
+                    <span class="text-negative-default" aria-hidden="true">*</span>
+                  </label>
+                  <input
+                    id="mcp-name"
+                    type="text"
+                    bind:value={name}
+                    required
+                    aria-required="true"
+                    placeholder={capability
+                      ? capability.providerNamePlaceholder()
+                      : m.mcp_name_placeholder()}
+                    class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    for="mcp-description"
+                    class="text-default mb-1.5 block text-sm font-medium"
+                  >
+                    {m.description()}
+                    <span class="text-muted ml-1 text-xs font-normal">{m.mcp_optional_label()}</span
                     >
-                      <Select.Trigger id="mcp-source" class="w-full">
-                        {sourceOptions.find((option) => option.value === source)?.label ??
+                  </label>
+                  <textarea
+                    id="mcp-description"
+                    bind:value={description}
+                    rows="2"
+                    placeholder={capability
+                      ? m.capability_description_placeholder()
+                      : m.mcp_description_placeholder()}
+                    class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full resize-none rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                  ></textarea>
+                </div>
+              </fieldset>
+
+              {#if !lockPurpose}
+                <!-- Purpose Section -->
+                <fieldset
+                  class="border-dimmer bg-secondary/20 space-y-3 rounded-xl border p-4 pt-3"
+                >
+                  <legend
+                    class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
+                  >
+                    {m.mcp_purpose_label()}
+                  </legend>
+                  <Field.Field>
+                    <Field.Label for="mcp-purpose">{m.mcp_purpose_label()}</Field.Label>
+                    <Select.Root type="single" bind:value={selectedPurpose}>
+                      <Select.Trigger id="mcp-purpose" class="w-full">
+                        {purposeOptions.find((option) => option.value === selectedPurpose)?.label ??
                           m.ui_select_placeholder()}
                       </Select.Trigger>
                       <Select.Content>
-                        {#each sourceOptions as option (option.value)}
+                        {#each purposeOptions as option (option.value)}
                           <Select.Item value={option.value} label={option.label}>
                             {option.label}
                           </Select.Item>
@@ -559,616 +841,631 @@
                       </Select.Content>
                     </Select.Root>
                   </Field.Field>
-                {:else}<p class="text-secondary text-sm">
-                    {m.tools_source_replacement_hint()}
-                  </p>{/if}
-
-                {#if isBuiltin}
-                  <p class="text-muted text-xs leading-relaxed">{m.mcp_builtin_hint()}</p>
-
-                  <div>
-                    <label
-                      for="mcp-builtin-image-model"
-                      class="text-default mb-1.5 flex items-center gap-1.5 text-sm font-medium"
-                    >
-                      {m.mcp_builtin_image_model()}
-                      <span class="text-negative-default" aria-hidden="true">*</span>
-                    </label>
-                    <select
-                      id="mcp-builtin-image-model"
-                      bind:value={imageModelId}
-                      required
-                      aria-required="true"
-                      disabled={loadingImageModels}
-                      class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
-                    >
-                      <option value="" disabled>{m.select()}</option>
-                      {#if mcpServer?.image_model_id && !imageModelOptions.some((model) => model.id === mcpServer?.image_model_id)}
-                        <option value={mcpServer.image_model_id}
-                          >{mcpServer.image_model?.nickname ||
-                            mcpServer.image_model?.name ||
-                            m.tools_readiness_model_missing()}</option
-                        >
-                      {/if}
-                      {#each imageModelOptions as model (model.id)}
-                        <option value={model.id}>
-                          {model.nickname || model.name}{model.provider_name
-                            ? ` · ${model.provider_name}`
-                            : ""}
-                        </option>
-                      {/each}
-                    </select>
-                    <Button variant="ghost" size="sm" class="mt-2" onclick={addImageModel}
-                      >{m.tools_add_image_model()}</Button
-                    >
-                    {#if mcpServer?.readiness_reason && imageModelId === mcpServer.image_model_id}
-                      <p class="text-warning-default text-xs">
-                        {readinessMessage(mcpServer.readiness_reason)}
-                      </p>
+                  <p class="text-muted text-xs leading-relaxed">
+                    {#if capability}
+                      {m.mcp_function_source_hint()}
                     {/if}
-                    {#if imageModels !== null && imageModelOptions.length === 0}
-                      <p class="text-warning-default mt-1.5 text-xs">
-                        {m.mcp_builtin_no_image_models()}
-                        <a href={resolve("/admin/models?tab=image_models")} class="underline"
-                          >{m.mcp_builtin_go_to_image_models()}</a
-                        >
-                      </p>
-                    {/if}
-                    {#if selectedImageModel}
-                      <p class="text-muted mt-1.5 text-xs">
-                        <span class="font-mono">{selectedImageModel.name}</span>
-                        · {m.image_default_size()}: {imageSizeLabel(
-                          selectedImageModel.default_size
-                        )}
-                        · {m.image_default_quality()}: {imageQualityLabel(
-                          selectedImageModel.default_quality
-                        )}
-                      </p>
-                    {/if}
-                  </div>
-                  {#if builtinIncomplete}
-                    <p class="text-warning-default text-xs">{m.mcp_builtin_incomplete()}</p>
-                  {/if}
-                {/if}
-              </fieldset>
-            {/if}
-
-            <!-- Server Identity Section. A server built into Eneo is named in
-                 the UI language from the tool it serves; its stored row keeps
-                 the backend default and is not edited here. -->
-            {#if isBundled}
-              <p class="text-muted text-xs leading-relaxed">{m.mcp_bundled_identity_hint()}</p>
-            {/if}
-            <fieldset class="space-y-4" class:hidden={isBundled}>
-              <legend class="sr-only">{m.mcp_server_info_legend()}</legend>
-
-              <div>
-                <label
-                  for="mcp-name"
-                  class="text-default mb-1.5 flex items-center gap-1.5 text-sm font-medium"
-                >
-                  {m.name()}
-                  <span class="text-negative-default" aria-hidden="true">*</span>
-                </label>
-                <input
-                  id="mcp-name"
-                  type="text"
-                  bind:value={name}
-                  required
-                  aria-required="true"
-                  placeholder={capability
-                    ? capability.providerNamePlaceholder()
-                    : m.mcp_name_placeholder()}
-                  class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label for="mcp-description" class="text-default mb-1.5 block text-sm font-medium">
-                  {m.description()}
-                  <span class="text-muted ml-1 text-xs font-normal">{m.mcp_optional_label()}</span>
-                </label>
-                <textarea
-                  id="mcp-description"
-                  bind:value={description}
-                  rows="2"
-                  placeholder={capability
-                    ? m.capability_description_placeholder()
-                    : m.mcp_description_placeholder()}
-                  class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full resize-none rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
-                ></textarea>
-              </div>
-            </fieldset>
-
-            {#if !lockPurpose}
-              <!-- Purpose Section -->
-              <fieldset class="border-dimmer bg-secondary/20 space-y-3 rounded-xl border p-4 pt-3">
-                <legend
-                  class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
-                >
-                  {m.mcp_purpose_label()}
-                </legend>
-                <Field.Field>
-                  <Field.Label for="mcp-purpose">{m.mcp_purpose_label()}</Field.Label>
-                  <Select.Root type="single" bind:value={selectedPurpose}>
-                    <Select.Trigger id="mcp-purpose" class="w-full">
-                      {purposeOptions.find((option) => option.value === selectedPurpose)?.label ??
-                        m.ui_select_placeholder()}
-                    </Select.Trigger>
-                    <Select.Content>
-                      {#each purposeOptions as option (option.value)}
-                        <Select.Item value={option.value} label={option.label}>
-                          {option.label}
-                        </Select.Item>
-                      {/each}
-                    </Select.Content>
-                  </Select.Root>
-                </Field.Field>
-                <p class="text-muted text-xs leading-relaxed">
-                  {#if capability}
-                    {m.mcp_function_source_hint()}
-                  {/if}
-                  {#if purposeChanged && capability}
-                    {m.mcp_purpose_promote_hint({ capability: capability.label() })}
-                  {:else if purposeChanged}
-                    {m.mcp_purpose_demote_hint()}
-                  {:else if capability && !isEditMode}
-                    {capability.providerManagedNote()}
-                    {m.mcp_purpose_create_capability_hint()}
-                  {:else if capability}
-                    {capability.providerManagedNote()}
-                  {:else}
-                    {m.mcp_purpose_hint()}
-                  {/if}
-                </p>
-              </fieldset>
-            {/if}
-            <!-- Audience Section (capability providers only) -->
-            {#if capability}
-              <fieldset class="border-dimmer bg-secondary/20 space-y-3 rounded-xl border p-4 pt-3">
-                <legend
-                  class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
-                >
-                  {m.mcp_audience_label()}
-                </legend>
-                <Field.Field>
-                  <Field.Label for="mcp-audience">{m.mcp_audience_label()}</Field.Label>
-                  <Select.Root
-                    type="single"
-                    value={audience}
-                    onValueChange={(key) =>
-                      (audience =
-                        audienceOptions.find((option) => option.value === key)?.value ?? audience)}
-                  >
-                    <Select.Trigger id="mcp-audience" class="w-full">
-                      {audienceOptions.find((option) => option.value === audience)?.label ??
-                        m.ui_select_placeholder()}
-                    </Select.Trigger>
-                    <Select.Content>
-                      {#each audienceOptions as option (option.value)}
-                        <Select.Item value={option.value} label={option.label}>
-                          {option.label}
-                        </Select.Item>
-                      {/each}
-                    </Select.Content>
-                  </Select.Root>
-                </Field.Field>
-                <p class="text-muted text-xs leading-relaxed">{m.mcp_audience_hint()}</p>
-
-                {#if audience === "groups"}
-                  <div
-                    class="border-default bg-primary max-h-48 space-y-1 overflow-y-auto rounded-lg border p-2"
-                    role="group"
-                    aria-label={m.mcp_audience_groups()}
-                  >
-                    {#if loadingGroups || userGroups === null}
-                      <p class="text-muted px-2 py-1 text-xs">{m.loading()}</p>
-                    {:else if userGroups.length === 0}
-                      <p class="text-muted px-2 py-1 text-xs">{m.mcp_audience_no_groups()}</p>
+                    {#if purposeChanged && capability}
+                      {m.mcp_purpose_promote_hint({ capability: capability.label() })}
+                    {:else if purposeChanged}
+                      {m.mcp_purpose_demote_hint()}
+                    {:else if capability && !isEditMode}
+                      {capability.providerManagedNote()}
+                      {m.mcp_purpose_create_capability_hint()}
+                    {:else if capability}
+                      {capability.providerManagedNote()}
                     {:else}
-                      {#each userGroups as group (group.id)}
-                        <label
-                          class="hover:bg-hover-dimmer flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedGroupIds.includes(group.id)}
-                            onchange={() => toggleGroup(group.id)}
-                            class="border-default text-accent-default ring-accent-default focus:ring-accent-default h-4 w-4 rounded border shadow-sm focus:ring-2"
-                          />
-                          <span class="text-default truncate">{group.name}</span>
-                        </label>
-                      {/each}
+                      {m.mcp_purpose_hint()}
                     {/if}
-                  </div>
-                  {#if audienceIncomplete}
-                    <p class="text-warning-default text-xs">{m.mcp_audience_select_groups()}</p>
-                  {/if}
-
-                  <div>
-                    <label
-                      for="mcp-audience-priority"
-                      class="text-default mb-1.5 block text-sm font-medium"
-                    >
-                      {m.mcp_audience_priority()}
-                    </label>
-                    <input
-                      id="mcp-audience-priority"
-                      type="number"
-                      min="0"
-                      step="1"
-                      required
-                      bind:value={audiencePriority}
-                      aria-invalid={audiencePriorityInvalid}
-                      aria-describedby="mcp-audience-priority-hint"
-                      class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-32 rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
-                    />
-                    <p id="mcp-audience-priority-hint" class="text-muted mt-1.5 text-xs">
-                      {m.mcp_audience_priority_hint()}
-                    </p>
-                    {#if audiencePriorityInvalid}
-                      <p class="text-warning-default mt-1 text-xs">
-                        {m.mcp_audience_priority_invalid()}
-                      </p>
-                    {/if}
-                  </div>
-                {/if}
-              </fieldset>
-            {/if}
-
-            {#if isBundled}
-              <p class="text-muted text-xs leading-relaxed">{m.mcp_bundled_hint()}</p>
-            {:else if !isBuiltin}
-              <fieldset class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3">
-                <legend
-                  class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
-                >
-                  <svg
-                    class="h-3 w-3"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    aria-hidden="true"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244"
-                    />
-                  </svg>
-                  {m.mcp_connection_legend()}
-                </legend>
-
-                <div>
-                  <label
-                    for="mcp-http_url"
-                    class="text-default mb-1.5 flex items-center gap-1.5 text-sm font-medium"
-                  >
-                    {m.server_url_required()}
-                    <span class="text-negative-default" aria-hidden="true">*</span>
-                  </label>
-                  <div class="relative">
-                    <input
-                      id="mcp-http_url"
-                      type="url"
-                      bind:value={http_url}
-                      required
-                      aria-required="true"
-                      aria-invalid={credentialOverPlainHttp}
-                      aria-describedby={credentialOverPlainHttp
-                        ? "url-hint mcp-url-https-error"
-                        : "url-hint"}
-                      placeholder={m.mcp_url_placeholder()}
-                      class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border py-2.5 pr-10 pl-3 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
-                    />
-                    {#if http_url && !credentialOverPlainHttp}
-                      <div class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2">
-                        <span
-                          class="bg-positive-dimmer flex h-5 w-5 items-center justify-center rounded-full"
-                        >
-                          <svg
-                            class="text-positive-default h-3 w-3"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            stroke-width="3"
-                            aria-hidden="true"
-                          >
-                            <path
-                              stroke-linecap="round"
-                              stroke-linejoin="round"
-                              d="M4.5 12.75l6 6 9-13.5"
-                            />
-                          </svg>
-                        </span>
-                      </div>
-                    {/if}
-                  </div>
-                  <p id="url-hint" class="text-muted mt-1.5 text-xs">{m.server_url_hint()}</p>
-                  {#if credentialOverPlainHttp}
-                    <Field.Error id="mcp-url-https-error" class="mt-1.5 text-xs">
-                      {m.mcp_credential_requires_https()}
-                    </Field.Error>
-                  {/if}
-                </div>
-              </fieldset>
-
-              <!-- Authentication Section -->
-              <fieldset class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3">
-                <legend
-                  class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
-                >
-                  <svg
-                    class="h-3 w-3"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    aria-hidden="true"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
-                    />
-                  </svg>
-                  {m.mcp_authentication_legend()}
-                </legend>
-
-                <Field.Field>
-                  <Field.Label for="mcp-auth-type">{m.authentication_type()}</Field.Label>
-                  <Select.Root
-                    type="single"
-                    value={http_auth_type}
-                    onValueChange={(key) =>
-                      (http_auth_type =
-                        authTypeOptions.find((option) => option.value === key)?.value ??
-                        http_auth_type)}
-                  >
-                    <Select.Trigger id="mcp-auth-type" class="w-full">
-                      {authTypeOptions.find((option) => option.value === http_auth_type)?.label ??
-                        m.ui_select_placeholder()}
-                    </Select.Trigger>
-                    <Select.Content>
-                      {#each authTypeOptions as option (option.value)}
-                        <Select.Item value={option.value} label={option.label}>
-                          {option.label}
-                        </Select.Item>
-                      {/each}
-                    </Select.Content>
-                  </Select.Root>
-                </Field.Field>
-
-                {#if http_auth_type === "api_key_header"}
-                  <div>
-                    <label
-                      for="mcp-api_key_header_name"
-                      class="text-default mb-1.5 block text-sm font-medium"
-                      >{m.api_key_header_name()}</label
-                    >
-                    <input
-                      id="mcp-api_key_header_name"
-                      type="text"
-                      bind:value={api_key_header_name}
-                      placeholder={m.api_key_header_name_placeholder()}
-                      autocomplete="off"
-                      class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
-                    />
-                    {#if isEditMode}
-                      <p class="text-muted mt-1.5 text-xs">{m.api_key_header_name_keep_hint()}</p>
-                    {/if}
-                  </div>
-                  <div>
-                    <label
-                      for="mcp-api_key_token"
-                      class="text-default mb-1.5 block text-sm font-medium">{m.api_key()}</label
-                    >
-                    <input
-                      id="mcp-api_key_token"
-                      type="password"
-                      bind:value={api_key_token}
-                      placeholder={authPlaceholder}
-                      autocomplete="off"
-                      class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
-                    />
-                    <p class="text-muted mt-1.5 text-xs">
-                      {#if isEditMode}<span class="text-warning-default"
-                          >{m.leave_empty_keep_existing()}.
-                        </span>{/if}
-                      {m.api_key_header_sent_as()}
-                    </p>
-                  </div>
-                {/if}
-
-                {#if http_auth_type === "bearer"}
-                  <div>
-                    <label
-                      for="mcp-bearer_token"
-                      class="text-default mb-1.5 block text-sm font-medium"
-                      >{m.bearer_token()}</label
-                    >
-                    <input
-                      id="mcp-bearer_token"
-                      type="password"
-                      bind:value={bearer_token}
-                      placeholder={authPlaceholder || "Ange din bearer token..."}
-                      autocomplete="off"
-                      class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
-                    />
-                    <p class="text-muted mt-1.5 text-xs">
-                      {#if isEditMode}<span class="text-warning-default"
-                          >{m.leave_empty_keep_existing()}.
-                        </span>{/if}
-                      {m.will_be_sent_as_bearer()}
-                    </p>
-                  </div>
-                {/if}
-              </fieldset>
-            {/if}
-
-            <!-- Optional Section -->
-            <fieldset>
-              <legend class="sr-only">{m.mcp_optional_details_legend()}</legend>
-              <div>
-                <label
-                  for="mcp-documentation_url"
-                  class="text-default mb-1.5 block text-sm font-medium"
-                >
-                  {m.documentation_url()}
-                  <span class="text-muted ml-1 text-xs font-normal">{m.mcp_optional_label()}</span>
-                </label>
-                <input
-                  id="mcp-documentation_url"
-                  type="url"
-                  bind:value={documentation_url}
-                  placeholder={m.mcp_docs_url_placeholder()}
-                  class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
-                />
-              </div>
-
-              <!-- The backend forces identity forwarding off for built-in and bundled servers. -->
-              {#if !isBuiltin && !isBundled}
-                <div class="mt-4">
-                  <label for="mcp-forward_identity" class="flex items-start gap-2.5">
-                    <input
-                      id="mcp-forward_identity"
-                      type="checkbox"
-                      bind:checked={forward_identity}
-                      aria-describedby="forward-identity-hint"
-                      class="border-default text-accent-default ring-accent-default focus:ring-accent-default mt-0.5 h-4 w-4 rounded border shadow-sm focus:ring-2"
-                    />
-                    <span class="text-default text-sm font-medium">{m.mcp_forward_identity()}</span>
-                  </label>
-                  <p id="forward-identity-hint" class="text-muted mt-1.5 pl-6.5 text-xs">
-                    {capability ? capability.forwardIdentityHint() : m.mcp_forward_identity_hint()}
                   </p>
-                </div>
+                </fieldset>
+              {/if}
+              <!-- Audience Section (capability providers only) -->
+              {#if capability}
+                <fieldset
+                  class="border-dimmer bg-secondary/20 space-y-3 rounded-xl border p-4 pt-3"
+                >
+                  <legend
+                    class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
+                  >
+                    {m.mcp_audience_label()}
+                  </legend>
+                  <Field.Field>
+                    <Field.Label for="mcp-audience">{m.mcp_audience_label()}</Field.Label>
+                    <Select.Root
+                      type="single"
+                      value={audience}
+                      onValueChange={(key) =>
+                        (audience =
+                          audienceOptions.find((option) => option.value === key)?.value ??
+                          audience)}
+                    >
+                      <Select.Trigger id="mcp-audience" class="w-full">
+                        {audienceOptions.find((option) => option.value === audience)?.label ??
+                          m.ui_select_placeholder()}
+                      </Select.Trigger>
+                      <Select.Content>
+                        {#each audienceOptions as option (option.value)}
+                          <Select.Item value={option.value} label={option.label}>
+                            {option.label}
+                          </Select.Item>
+                        {/each}
+                      </Select.Content>
+                    </Select.Root>
+                  </Field.Field>
+                  <p class="text-muted text-xs leading-relaxed">{m.mcp_audience_hint()}</p>
+
+                  {#if audience === "groups"}
+                    <div
+                      class="border-default bg-primary max-h-48 space-y-1 overflow-y-auto rounded-lg border p-2"
+                      role="group"
+                      aria-label={m.mcp_audience_groups()}
+                    >
+                      {#if loadingGroups || userGroups === null}
+                        <p class="text-muted px-2 py-1 text-xs">{m.loading()}</p>
+                      {:else if userGroups.length === 0}
+                        <p class="text-muted px-2 py-1 text-xs">{m.mcp_audience_no_groups()}</p>
+                      {:else}
+                        {#each userGroups as group (group.id)}
+                          <label
+                            class="hover:bg-hover-dimmer flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={selectedGroupIds.includes(group.id)}
+                              onchange={() => toggleGroup(group.id)}
+                              class="border-default text-accent-default ring-accent-default focus:ring-accent-default h-4 w-4 rounded border shadow-sm focus:ring-2"
+                            />
+                            <span class="text-default truncate">{group.name}</span>
+                          </label>
+                        {/each}
+                      {/if}
+                    </div>
+                    {#if audienceIncomplete}
+                      <p class="text-warning-default text-xs">{m.mcp_audience_select_groups()}</p>
+                    {/if}
+
+                    <div>
+                      <label
+                        for="mcp-audience-priority"
+                        class="text-default mb-1.5 block text-sm font-medium"
+                      >
+                        {m.mcp_audience_priority()}
+                      </label>
+                      <input
+                        id="mcp-audience-priority"
+                        type="number"
+                        min="0"
+                        step="1"
+                        required
+                        bind:value={audiencePriority}
+                        aria-invalid={audiencePriorityInvalid}
+                        aria-describedby="mcp-audience-priority-hint"
+                        class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-32 rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
+                      />
+                      <p id="mcp-audience-priority-hint" class="text-muted mt-1.5 text-xs">
+                        {m.mcp_audience_priority_hint()}
+                      </p>
+                      {#if audiencePriorityInvalid}
+                        <p class="text-warning-default mt-1 text-xs">
+                          {m.mcp_audience_priority_invalid()}
+                        </p>
+                      {/if}
+                    </div>
+                  {/if}
+                </fieldset>
               {/if}
 
-              <details class="border-dimmer mt-5 border-t pt-4">
-                <summary class="text-default cursor-pointer text-sm font-medium">
-                  {m.mcp_catalog_safety()}
-                </summary>
-                <p class="text-muted mt-2 text-xs leading-relaxed">
-                  {m.mcp_catalog_safety_hint()}
-                </p>
-                <div
-                  class="mt-4 grid gap-x-4 gap-y-6 sm:grid-cols-3 sm:grid-rows-[auto_auto_auto] sm:gap-y-1.5"
+              {#if isBundled}
+                <p class="text-muted text-xs leading-relaxed">{m.mcp_bundled_hint()}</p>
+              {:else if !isBuiltin}
+                <fieldset
+                  class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3"
                 >
-                  <div class="grid gap-1.5 sm:row-span-3 sm:grid-rows-subgrid">
-                    <label
-                      for="mcp-tool-catalog-max-count"
-                      class="text-default block self-end text-sm font-medium"
-                    >
-                      {m.mcp_catalog_max_count()}
-                    </label>
-                    <input
-                      id="mcp-tool-catalog-max-count"
-                      type="number"
-                      min="1"
-                      max="4096"
-                      step="1"
-                      bind:value={tool_catalog_max_count}
-                      required
-                      aria-describedby="mcp-tool-catalog-max-count-hint"
-                      class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
-                    />
-                    <p id="mcp-tool-catalog-max-count-hint" class="text-muted text-xs">
-                      {m.mcp_catalog_max_count_hint()}
-                    </p>
-                  </div>
-                  <div class="grid gap-1.5 sm:row-span-3 sm:grid-rows-subgrid">
-                    <label
-                      for="mcp-tool-catalog-max-mib"
-                      class="text-default block self-end text-sm font-medium"
-                    >
-                      {m.mcp_catalog_max_mib()}
-                    </label>
-                    <input
-                      id="mcp-tool-catalog-max-mib"
-                      type="number"
-                      min="1"
-                      max="64"
-                      step="1"
-                      bind:value={tool_catalog_max_mib}
-                      required
-                      aria-describedby="mcp-tool-catalog-max-mib-hint"
-                      class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
-                    />
-                    <p id="mcp-tool-catalog-max-mib-hint" class="text-muted text-xs">
-                      {m.mcp_catalog_max_mib_hint()}
-                    </p>
-                  </div>
-                  <div class="grid gap-1.5 sm:row-span-3 sm:grid-rows-subgrid">
-                    <label
-                      for="mcp-tool-definition-max-kib"
-                      class="text-default block self-end text-sm font-medium"
-                    >
-                      {m.mcp_tool_definition_max_kib()}
-                    </label>
-                    <input
-                      id="mcp-tool-definition-max-kib"
-                      type="number"
-                      min="1"
-                      max="1024"
-                      step="1"
-                      bind:value={tool_definition_max_kib}
-                      required
-                      aria-describedby="mcp-tool-definition-max-kib-hint"
-                      class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
-                    />
-                    <p id="mcp-tool-definition-max-kib-hint" class="text-muted text-xs">
-                      {m.mcp_tool_definition_max_kib_hint()}
-                    </p>
-                  </div>
-                </div>
-              </details>
-            </fieldset>
-
-            <!-- Security Classification -->
-            {#if classifications.length > 0}
-              <fieldset class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3">
-                <legend
-                  class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
-                >
-                  <svg
-                    class="h-3 w-3"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    aria-hidden="true"
+                  <legend
+                    class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
                   >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"
-                    />
-                  </svg>
-                  {m.security_classification()}
-                </legend>
+                    <svg
+                      class="h-3 w-3"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      aria-hidden="true"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244"
+                      />
+                    </svg>
+                    {m.mcp_connection_legend()}
+                  </legend>
 
-                {#if isBuiltin}
-                  <!-- Inherited from the image model; shown for reference only. -->
-                  <p class="text-default text-sm">
-                    {selectedImageModel?.security_classification?.name ??
-                      mcpServer?.security_classification?.name ??
-                      m.no_classification()}
-                  </p>
-                  <p class="text-muted text-xs">{m.mcp_builtin_classification_inherited()}</p>
-                {:else}
-                  <div class="classification-select border-default w-full rounded-lg border">
-                    <SelectSecurityClassification
-                      {classifications}
-                      bind:value={security_classification}
-                    />
+                  <div>
+                    <label
+                      for="mcp-http_url"
+                      class="text-default mb-1.5 flex items-center gap-1.5 text-sm font-medium"
+                    >
+                      {m.server_url_required()}
+                      <span class="text-negative-default" aria-hidden="true">*</span>
+                    </label>
+                    <div class="relative">
+                      <input
+                        id="mcp-http_url"
+                        type="url"
+                        bind:value={http_url}
+                        required
+                        aria-required="true"
+                        aria-invalid={credentialOverPlainHttp}
+                        aria-describedby={credentialOverPlainHttp
+                          ? "url-hint mcp-url-https-error"
+                          : "url-hint"}
+                        placeholder={m.mcp_url_placeholder()}
+                        class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border py-2.5 pr-10 pl-3 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                      />
+                      {#if http_url && !credentialOverPlainHttp}
+                        <div class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2">
+                          <span
+                            class="bg-positive-dimmer flex h-5 w-5 items-center justify-center rounded-full"
+                          >
+                            <svg
+                              class="text-positive-default h-3 w-3"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              stroke="currentColor"
+                              stroke-width="3"
+                              aria-hidden="true"
+                            >
+                              <path
+                                stroke-linecap="round"
+                                stroke-linejoin="round"
+                                d="M4.5 12.75l6 6 9-13.5"
+                              />
+                            </svg>
+                          </span>
+                        </div>
+                      {/if}
+                    </div>
+                    <p id="url-hint" class="text-muted mt-1.5 text-xs">{m.server_url_hint()}</p>
+                    {#if credentialOverPlainHttp}
+                      <Field.Error id="mcp-url-https-error" class="mt-1.5 text-xs">
+                        {m.mcp_credential_requires_https()}
+                      </Field.Error>
+                    {/if}
+                  </div>
+                </fieldset>
+
+                <!-- Authentication Section -->
+                <fieldset
+                  class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3"
+                >
+                  <legend
+                    class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
+                  >
+                    <svg
+                      class="h-3 w-3"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      aria-hidden="true"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"
+                      />
+                    </svg>
+                    {m.mcp_authentication_legend()}
+                  </legend>
+
+                  <Field.Field>
+                    <Field.Label for="mcp-auth-type">{m.authentication_type()}</Field.Label>
+                    <Select.Root
+                      type="single"
+                      value={http_auth_type}
+                      onValueChange={(key) =>
+                        (http_auth_type =
+                          authTypeOptions.find((option) => option.value === key)?.value ??
+                          http_auth_type)}
+                    >
+                      <Select.Trigger id="mcp-auth-type" class="w-full">
+                        {authTypeOptions.find((option) => option.value === http_auth_type)?.label ??
+                          m.ui_select_placeholder()}
+                      </Select.Trigger>
+                      <Select.Content>
+                        {#each authTypeOptions as option (option.value)}
+                          <Select.Item value={option.value} label={option.label}>
+                            {option.label}
+                          </Select.Item>
+                        {/each}
+                      </Select.Content>
+                    </Select.Root>
+                  </Field.Field>
+
+                  {#if http_auth_type === "api_key_header"}
+                    <div>
+                      <label
+                        for="mcp-api_key_header_name"
+                        class="text-default mb-1.5 block text-sm font-medium"
+                        >{m.api_key_header_name()}</label
+                      >
+                      <input
+                        id="mcp-api_key_header_name"
+                        type="text"
+                        bind:value={api_key_header_name}
+                        placeholder={m.api_key_header_name_placeholder()}
+                        autocomplete="off"
+                        class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                      />
+                      {#if isEditMode}
+                        <p class="text-muted mt-1.5 text-xs">{m.api_key_header_name_keep_hint()}</p>
+                      {/if}
+                    </div>
+                    <div>
+                      <label
+                        for="mcp-api_key_token"
+                        class="text-default mb-1.5 block text-sm font-medium">{m.api_key()}</label
+                      >
+                      <input
+                        id="mcp-api_key_token"
+                        type="password"
+                        bind:value={api_key_token}
+                        placeholder={authPlaceholder}
+                        autocomplete="off"
+                        class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                      />
+                      <p class="text-muted mt-1.5 text-xs">
+                        {#if isEditMode}<span class="text-warning-default"
+                            >{m.leave_empty_keep_existing()}.
+                          </span>{/if}
+                        {m.api_key_header_sent_as()}
+                      </p>
+                    </div>
+                  {/if}
+
+                  {#if http_auth_type === "bearer"}
+                    <div>
+                      <label
+                        for="mcp-bearer_token"
+                        class="text-default mb-1.5 block text-sm font-medium"
+                        >{m.bearer_token()}</label
+                      >
+                      <input
+                        id="mcp-bearer_token"
+                        type="password"
+                        bind:value={bearer_token}
+                        placeholder={authPlaceholder || "Ange din bearer token..."}
+                        autocomplete="off"
+                        class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                      />
+                      <p class="text-muted mt-1.5 text-xs">
+                        {#if isEditMode}<span class="text-warning-default"
+                            >{m.leave_empty_keep_existing()}.
+                          </span>{/if}
+                        {m.will_be_sent_as_bearer()}
+                      </p>
+                    </div>
+                  {/if}
+
+                  {#if isOauth}
+                    <Field.Field>
+                      <Field.Label for="mcp-auth-scope">{m.mcp_oauth_scope_label()}</Field.Label>
+                      <Select.Root
+                        type="single"
+                        value={auth_scope}
+                        onValueChange={(key) =>
+                          (auth_scope = key === "shared" ? "shared" : "per_user")}
+                      >
+                        <Select.Trigger id="mcp-auth-scope" class="w-full">
+                          {auth_scope === "shared"
+                            ? m.mcp_oauth_scope_shared()
+                            : m.mcp_oauth_scope_per_user()}
+                        </Select.Trigger>
+                        <Select.Content>
+                          <Select.Item value="per_user" label={m.mcp_oauth_scope_per_user()}>
+                            {m.mcp_oauth_scope_per_user()}
+                          </Select.Item>
+                          <Select.Item value="shared" label={m.mcp_oauth_scope_shared()}>
+                            {m.mcp_oauth_scope_shared()}
+                          </Select.Item>
+                        </Select.Content>
+                      </Select.Root>
+                      <p class="text-muted mt-1.5 text-xs">
+                        {auth_scope === "shared"
+                          ? m.mcp_oauth_scope_shared_hint()
+                          : m.mcp_oauth_scope_per_user_hint()}
+                      </p>
+                    </Field.Field>
+
+                    <div>
+                      <label
+                        for="mcp-oauth-client-id"
+                        class="text-default mb-1.5 block text-sm font-medium"
+                      >
+                        {m.mcp_oauth_client_id()}
+                        <span class="text-muted ml-1 text-xs font-normal"
+                          >{m.mcp_optional_label()}</span
+                        >
+                      </label>
+                      <input
+                        id="mcp-oauth-client-id"
+                        type="text"
+                        bind:value={oauth_client_id}
+                        autocomplete="off"
+                        class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                      />
+                      <p class="text-muted mt-1.5 text-xs">{m.mcp_oauth_client_id_hint()}</p>
+                    </div>
+                    <div>
+                      <label
+                        for="mcp-oauth-client-secret"
+                        class="text-default mb-1.5 block text-sm font-medium"
+                      >
+                        {m.mcp_oauth_client_secret()}
+                        <span class="text-muted ml-1 text-xs font-normal"
+                          >{m.mcp_optional_label()}</span
+                        >
+                      </label>
+                      <input
+                        id="mcp-oauth-client-secret"
+                        type="password"
+                        bind:value={oauth_client_secret}
+                        placeholder={authPlaceholder}
+                        autocomplete="off"
+                        class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                      />
+                      {#if isEditMode}
+                        <p class="text-muted mt-1.5 text-xs">
+                          <span class="text-warning-default">{m.leave_empty_keep_existing()}.</span>
+                        </p>
+                      {/if}
+                    </div>
+                    {#if oauth_client_id && !oauth_client_secret}
+                      <div>
+                        <label for="mcp-oauth-private-key-jwt" class="flex items-start gap-2.5">
+                          <input
+                            id="mcp-oauth-private-key-jwt"
+                            type="checkbox"
+                            bind:checked={oauth_private_key_jwt}
+                            aria-describedby="mcp-oauth-private-key-jwt-hint"
+                            class="border-default text-accent-default ring-accent-default focus:ring-accent-default mt-0.5 h-4 w-4 rounded border shadow-sm focus:ring-2"
+                          />
+                          <span class="text-default text-sm font-medium"
+                            >{m.mcp_oauth_private_key_jwt()}</span
+                          >
+                        </label>
+                        <p
+                          id="mcp-oauth-private-key-jwt-hint"
+                          class="text-muted mt-1.5 pl-6.5 text-xs"
+                        >
+                          {m.mcp_oauth_private_key_jwt_hint({ url: jwksUrl })}
+                        </p>
+                      </div>
+                    {/if}
+                    <div>
+                      <label
+                        for="mcp-oauth-scope"
+                        class="text-default mb-1.5 block text-sm font-medium"
+                      >
+                        {m.mcp_oauth_scope_override()}
+                      </label>
+                      <input
+                        id="mcp-oauth-scope"
+                        type="text"
+                        bind:value={oauth_scope}
+                        autocomplete="off"
+                        class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                      />
+                      <p class="text-muted mt-1.5 text-xs">{m.mcp_oauth_scope_override_hint()}</p>
+                    </div>
+
+                    {#if isEditMode && mcpServer}
+                      <div
+                        class="border-dimmer bg-secondary/40 flex items-center gap-3 rounded-lg border px-3 py-2.5"
+                      >
+                        <div class="min-w-0 flex-1">
+                          <p class="text-default text-sm font-medium">
+                            {auth_scope === "shared"
+                              ? m.mcp_oauth_scope_shared()
+                              : m.mcp_oauth_admin_connection_status()}
+                          </p>
+                          <p class="text-muted text-xs">
+                            {oauthConnection?.status === "connected"
+                              ? m.connected()
+                              : oauthConnection?.status === "needs_authorization"
+                                ? m.mcp_oauth_needs_authorization()
+                                : m.mcp_oauth_connect_to_sync()}
+                          </p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={oauthConnect.isConnecting(mcpServer.mcp_server_id)}
+                          onclick={() => oauthConnect.connect(mcpServer.mcp_server_id)}
+                        >
+                          {oauthConnection?.status === "connected"
+                            ? m.mcp_oauth_reconnect()
+                            : m.connect()}
+                        </Button>
+                      </div>
+                    {/if}
+                  {/if}
+                </fieldset>
+              {/if}
+
+              <!-- Optional Section -->
+              <fieldset>
+                <legend class="sr-only">{m.mcp_optional_details_legend()}</legend>
+                <div>
+                  <label
+                    for="mcp-documentation_url"
+                    class="text-default mb-1.5 block text-sm font-medium"
+                  >
+                    {m.documentation_url()}
+                    <span class="text-muted ml-1 text-xs font-normal">{m.mcp_optional_label()}</span
+                    >
+                  </label>
+                  <input
+                    id="mcp-documentation_url"
+                    type="url"
+                    bind:value={documentation_url}
+                    placeholder={m.mcp_docs_url_placeholder()}
+                    class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
+                  />
+                </div>
+
+                <!-- The backend forces identity forwarding off for built-in and bundled servers. -->
+                {#if !isBuiltin && !isBundled}
+                  <div class="mt-4">
+                    <label for="mcp-forward_identity" class="flex items-start gap-2.5">
+                      <input
+                        id="mcp-forward_identity"
+                        type="checkbox"
+                        bind:checked={forward_identity}
+                        aria-describedby="forward-identity-hint"
+                        class="border-default text-accent-default ring-accent-default focus:ring-accent-default mt-0.5 h-4 w-4 rounded border shadow-sm focus:ring-2"
+                      />
+                      <span class="text-default text-sm font-medium"
+                        >{m.mcp_forward_identity()}</span
+                      >
+                    </label>
+                    <p id="forward-identity-hint" class="text-muted mt-1.5 pl-6.5 text-xs">
+                      {capability
+                        ? capability.forwardIdentityHint()
+                        : m.mcp_forward_identity_hint()}
+                    </p>
                   </div>
                 {/if}
+
+                <details class="border-dimmer mt-5 border-t pt-4">
+                  <summary class="text-default cursor-pointer text-sm font-medium">
+                    {m.mcp_catalog_safety()}
+                  </summary>
+                  <p class="text-muted mt-2 text-xs leading-relaxed">
+                    {m.mcp_catalog_safety_hint()}
+                  </p>
+                  <div
+                    class="mt-4 grid gap-x-4 gap-y-6 sm:grid-cols-3 sm:grid-rows-[auto_auto_auto] sm:gap-y-1.5"
+                  >
+                    <div class="grid gap-1.5 sm:row-span-3 sm:grid-rows-subgrid">
+                      <label
+                        for="mcp-tool-catalog-max-count"
+                        class="text-default block self-end text-sm font-medium"
+                      >
+                        {m.mcp_catalog_max_count()}
+                      </label>
+                      <input
+                        id="mcp-tool-catalog-max-count"
+                        type="number"
+                        min="1"
+                        max="4096"
+                        step="1"
+                        bind:value={tool_catalog_max_count}
+                        required
+                        aria-describedby="mcp-tool-catalog-max-count-hint"
+                        class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
+                      />
+                      <p id="mcp-tool-catalog-max-count-hint" class="text-muted text-xs">
+                        {m.mcp_catalog_max_count_hint()}
+                      </p>
+                    </div>
+                    <div class="grid gap-1.5 sm:row-span-3 sm:grid-rows-subgrid">
+                      <label
+                        for="mcp-tool-catalog-max-mib"
+                        class="text-default block self-end text-sm font-medium"
+                      >
+                        {m.mcp_catalog_max_mib()}
+                      </label>
+                      <input
+                        id="mcp-tool-catalog-max-mib"
+                        type="number"
+                        min="1"
+                        max="64"
+                        step="1"
+                        bind:value={tool_catalog_max_mib}
+                        required
+                        aria-describedby="mcp-tool-catalog-max-mib-hint"
+                        class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
+                      />
+                      <p id="mcp-tool-catalog-max-mib-hint" class="text-muted text-xs">
+                        {m.mcp_catalog_max_mib_hint()}
+                      </p>
+                    </div>
+                    <div class="grid gap-1.5 sm:row-span-3 sm:grid-rows-subgrid">
+                      <label
+                        for="mcp-tool-definition-max-kib"
+                        class="text-default block self-end text-sm font-medium"
+                      >
+                        {m.mcp_tool_definition_max_kib()}
+                      </label>
+                      <input
+                        id="mcp-tool-definition-max-kib"
+                        type="number"
+                        min="1"
+                        max="1024"
+                        step="1"
+                        bind:value={tool_definition_max_kib}
+                        required
+                        aria-describedby="mcp-tool-definition-max-kib-hint"
+                        class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border px-3 py-2.5 text-sm shadow-sm focus:ring-2 focus:outline-none"
+                      />
+                      <p id="mcp-tool-definition-max-kib-hint" class="text-muted text-xs">
+                        {m.mcp_tool_definition_max_kib_hint()}
+                      </p>
+                    </div>
+                  </div>
+                </details>
               </fieldset>
-            {/if}
-          </form>
-        </div>
+
+              <!-- Security Classification -->
+              {#if classifications.length > 0}
+                <fieldset
+                  class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3"
+                >
+                  <legend
+                    class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
+                  >
+                    <svg
+                      class="h-3 w-3"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      aria-hidden="true"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z"
+                      />
+                    </svg>
+                    {m.security_classification()}
+                  </legend>
+
+                  {#if isBuiltin}
+                    <!-- Inherited from the image model; shown for reference only. -->
+                    <p class="text-default text-sm">
+                      {selectedImageModel?.security_classification?.name ??
+                        mcpServer?.security_classification?.name ??
+                        m.no_classification()}
+                    </p>
+                    <p class="text-muted text-xs">{m.mcp_builtin_classification_inherited()}</p>
+                  {:else}
+                    <div class="classification-select border-default w-full rounded-lg border">
+                      <SelectSecurityClassification
+                        {classifications}
+                        bind:value={security_classification}
+                      />
+                    </div>
+                  {/if}
+                </fieldset>
+              {/if}
+            </form>
+          </div>
+        {/if}
 
         {#if !isEditMode && isBuiltin && activateOnSave && audience === "everyone" && replacesDefault}
           <p class="text-secondary text-sm">
@@ -1177,43 +1474,63 @@
         {/if}
       </div>
       <Dialog.Footer class={dialogLayout.footer}>
-        <Dialog.Close class={buttonVariants({ variant: "outline" })}>
-          {m.cancel()}
-        </Dialog.Close>
-        <Button
-          onclick={handleSubmit}
-          disabled={submitting ||
-            !name ||
-            (!isBuiltin && !http_url) ||
-            credentialOverPlainHttp ||
-            builtinIncomplete ||
-            audienceIncomplete ||
-            (http_auth_type === "api_key_header" &&
-              !isEditMode &&
-              (!api_key_header_name || !api_key_token))}
-          class="min-w-[140px]"
-        >
-          {#if submitting}
-            <svg class="size-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-              <circle
-                class="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                stroke-width="4"
-              ></circle>
-              <path
-                class="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
-            </svg>
-            {m.loading()}
-          {:else}
-            {submitLabel}
-          {/if}
-        </Button>
+        {#if connectStep}
+          <Button
+            variant="outline"
+            onclick={() => {
+              connectStep = null;
+              $openController = false;
+            }}
+          >
+            {m.mcp_oauth_connect_later()}
+          </Button>
+          <Button
+            onclick={() => connectStep && oauthConnect.connect(connectStep.id)}
+            disabled={syncingTools ||
+              (connectStep ? oauthConnect.isConnecting(connectStep.id) : false)}
+            class="min-w-[140px]"
+          >
+            {syncingTools ? m.syncing() : m.mcp_oauth_connect_server({ server: connectStep.name })}
+          </Button>
+        {:else}
+          <Dialog.Close class={buttonVariants({ variant: "outline" })}>
+            {m.cancel()}
+          </Dialog.Close>
+          <Button
+            onclick={handleSubmit}
+            disabled={submitting ||
+              !name ||
+              (!isBuiltin && !http_url) ||
+              credentialOverPlainHttp ||
+              builtinIncomplete ||
+              audienceIncomplete ||
+              (http_auth_type === "api_key_header" &&
+                !isEditMode &&
+                (!api_key_header_name || !api_key_token))}
+            class="min-w-[140px]"
+          >
+            {#if submitting}
+              <svg class="size-4 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                <circle
+                  class="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  stroke-width="4"
+                ></circle>
+                <path
+                  class="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                ></path>
+              </svg>
+              {m.loading()}
+            {:else}
+              {submitLabel}
+            {/if}
+          </Button>
+        {/if}
       </Dialog.Footer>
     </Dialog.Content>
   </Dialog.Root>

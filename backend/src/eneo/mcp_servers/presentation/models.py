@@ -45,7 +45,9 @@ class MCPServerAudienceGroupPublic(BaseModel):
 # ``image_model_id`` names the catalog image model it calls.
 # A fifth, read-only type, "bundled", marks a server of the bundled tool
 # runtime; only POST /mcp-servers/bundled/{tool}/ creates it.
-MCPServerAuthType = Literal["none", "bearer", "api_key_header", "internal"]
+MCPServerAuthType = Literal["none", "bearer", "api_key_header", "internal", "oauth"]
+# OAuth servers: whose identity the vendor sees.
+MCPServerAuthScope = Literal["per_user", "shared"]
 
 
 class MCPServerBackingModelPublic(BaseModel):
@@ -73,7 +75,11 @@ class MCPServerPublic(BaseModel):
     name: str
     description: Optional[str]
     http_url: str
-    http_auth_type: str  # "none", "bearer", "api_key_header", "internal", "bundled"
+    http_auth_type: (
+        str  # "none", "bearer", "api_key_header", "internal", "bundled", "oauth"
+    )
+    # OAuth servers only: "per_user" (each user connects) or "shared".
+    auth_scope: MCPServerAuthScope = "per_user"
     purpose: MCPServerPurpose = "general"
     # Built-in providers only: the image model the loopback tool calls.
     image_model_id: Optional[UUID] = None
@@ -134,6 +140,7 @@ class MCPServerCreate(BaseModel):
     # is Eneo's own loopback endpoint and is set server-side.
     http_url: Optional[AnyHttpUrl] = None
     http_auth_type: MCPServerAuthType = "none"
+    auth_scope: MCPServerAuthScope = "per_user"
     purpose: MCPServerPurpose = "general"
     description: Optional[str] = None
     http_auth_config_schema: Optional[dict[str, Any]] = None
@@ -180,6 +187,7 @@ class MCPServerUpdate(BaseModel):
     name: Optional[str] = None
     http_url: Optional[AnyHttpUrl] = None
     http_auth_type: Optional[MCPServerAuthType] = None
+    auth_scope: Optional[MCPServerAuthScope] = None
     # Moving into a capability purpose saves the server as an inactive
     # provider; moving back to general makes it an ordinary enabled server.
     purpose: Optional[MCPServerPurpose] = None

@@ -118,6 +118,8 @@ class CompletionModelAdapter(ABC):
         approval_manager: Any | None = None,
         approval_context: dict[str, Any] | None = None,
         pending_approval_ids: set[str] | None = None,
+        authorization_waiter: Any | None = None,
+        authorization_user_id: Any | None = None,
     ) -> "AsyncIterator[Completion]":
         """
         Phase 2 (Iteration): Iterate pre-created stream INSIDE EventSourceResponse.

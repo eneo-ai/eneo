@@ -489,6 +489,27 @@ class AssistantService:
             servers = [*resolution.capability_servers, *resolution.general_servers]
         return assistant, [server for server in servers if server.is_enabled]
 
+    async def mcp_servers_a_turn_reaches(self, assistant_id: UUID) -> "list[MCPServer]":
+        """The servers one of this assistant's turns would be given now.
+
+        Read access to the assistant is required, as for any read of it.
+        """
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+        if not actor.can_read_assistant(assistant=assistant):
+            raise UnauthorizedException(
+                "You do not have permission to read assistants in this space.",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "read",
+                    "auth_layer": "domain_policy",
+                },
+            )
+        _, servers = await self._servers_a_turn_reaches(assistant_id)
+        return servers
+
     async def mcp_server_for_view(
         self, *, assistant_id: UUID, mcp_server_id: UUID
     ) -> "MCPServer | None":
@@ -2628,6 +2649,48 @@ class AssistantService:
                                                 purpose=tc.purpose,
                                                 is_internal=tc.is_internal,
                                                 is_bundled=tc.is_bundled,
+                                            )
+                                        )
+                            yield chunk
+
+                        if (
+                            chunk.response_type
+                            == ResponseType.TOOL_AUTHORIZATION_REQUIRED
+                        ):
+                            # The paused calls are shown with their connect
+                            # remedy; the TOOL_CALL that follows the wait
+                            # replaces status and meta either way.
+                            if chunk.tool_calls_metadata:
+                                for tc in chunk.tool_calls_metadata:
+                                    existing = next(
+                                        (
+                                            t
+                                            for t in tool_calls
+                                            if t.tool_call_id
+                                            and t.tool_call_id == tc.tool_call_id
+                                        ),
+                                        None,
+                                    )
+                                    if existing:
+                                        existing.result_status = tc.result_status
+                                        existing.meta = tc.meta
+                                    else:
+                                        tool_calls.append(
+                                            ToolCallInfo(
+                                                server_name=tc.server_name,
+                                                tool_name=tc.tool_name,
+                                                title=tc.title,
+                                                arguments=cast(
+                                                    dict[str, object] | None,
+                                                    tc.arguments,
+                                                ),
+                                                tool_call_id=tc.tool_call_id,
+                                                result_status=tc.result_status,
+                                                mcp_tool_name=tc.mcp_tool_name,
+                                                purpose=tc.purpose,
+                                                is_internal=tc.is_internal,
+                                                is_bundled=tc.is_bundled,
+                                                meta=tc.meta,
                                             )
                                         )
                             yield chunk

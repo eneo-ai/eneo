@@ -50,6 +50,8 @@ class ResponseType(str, Enum):
     TOOL_CALL_DELTA = "tool_call_delta"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
+    # The turn is paused while the user authorizes an OAuth MCP server.
+    TOOL_AUTHORIZATION_REQUIRED = "tool_authorization_required"
     FILES = "image"
     FIRST_CHUNK = "first_chunk"
     TOKEN_USAGE = "token_usage"
@@ -189,6 +191,7 @@ class Completion:
     arguments_delta: Optional[str] = None
     mcp_tool_references: Optional[list[McpToolReference]] = None
     approval_id: Optional[str] = None  # For TOOL_APPROVAL_REQUIRED events
+    authorization_id: Optional[str] = None  # For TOOL_AUTHORIZATION_REQUIRED events
     image: Optional[GeneratedFile] = None  # For FILES events (streaming)
     generated_images: Optional[list[GeneratedFile]] = None  # Non-streaming
     response_type: Optional[ResponseType] = None

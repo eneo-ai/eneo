@@ -84,6 +84,12 @@ class MCPServers(BasePublic):
         String, nullable=False, server_default="none"
     )
     http_auth_config_schema: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB)
+    # OAuth servers only: whose identity the vendor sees. "per_user" means each
+    # user authorizes once; "shared" means one tenant-level identity (a machine
+    # client or a service account an admin connected) serves every call.
+    auth_scope: Mapped[str] = mapped_column(
+        String, nullable=False, server_default="per_user"
+    )
     # Built-in providers (http_auth_type = "internal") only: the catalog image
     # model the loopback tool calls. RESTRICT: the model's soft delete is
     # refused while referenced, so a hard delete can never reach a live ref.

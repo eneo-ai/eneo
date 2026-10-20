@@ -139,6 +139,9 @@ INTENTIONALLY_UNGUARDED = {
     "/ws": "WebSocket endpoint — separate auth",
     "/audit": "Admin audit endpoints with admin scope + admin key guards",
     "/mcp-servers": "MCP server management is tenant-admin infrastructure with admin scope + admin key guards",
+    "/mcp-oauth": "Eneo's OAuth client toward MCP servers: the metadata document is public, "
+    "connection state is the caller's own, and the mutating routes carry a write key "
+    "guard with the service deciding who may connect a shared server",
     "/document-templates": "Document template library is tenant-admin infrastructure with admin scope + admin key guards; the signed runtime download and the read-only name listing are authenticated per route",
     "/skills": "Skill catalogue and organisation lifecycle endpoints require session authentication; service-layer actor and tenant checks authorize reads, bindings, and admin-only publication",
     "/whats-new": "Per-user What's new read state; session-only (Authentication.SESSION) and scoped to the caller's own row",
@@ -171,6 +174,8 @@ INTENTIONALLY_SCOPE_FREE = {
     "not the URL, so a path-level scope check would not gate anything. The HelperRunService "
     "enforces edit-permission on the body's target_id and actor identity on the run.",
     "/skills": "Skill catalogue and organisation lifecycle endpoints reject API keys with Authentication.SESSION; service-layer checks authorize the authenticated user",
+    "/mcp-oauth": "Connections are keyed to the caller (or the tenant's shared row, admin-only); "
+    "there is no path-level resource a scoped key could be narrowed to",
 }
 
 
@@ -864,6 +869,27 @@ MUTATING_ALLOWLIST_PREFIXES: dict[str, str] = {
 # reason and a rationale for why the basic method→permission + scope check is
 # sufficient for this endpoint.
 MUTATING_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
+    (
+        "POST",
+        "/mcp-oauth/servers/{id}/authorize-url/",
+    ): "Starts an OAuth authorization for the caller at a tenant MCP server; the "
+    "service binds the state to the caller and requires admin for shared servers. "
+    "Write key guard blocks read-only keys; service keys are rejected by identity.",
+    (
+        "POST",
+        "/mcp-oauth/servers/{id}/callback/",
+    ): "Completes the caller's own authorization (single-use state bound to them). "
+    "Write key guard blocks read-only keys; require_user_for_creation blocks service keys.",
+    (
+        "POST",
+        "/mcp-oauth/servers/{id}/decline/",
+    ): "Ends the caller's own paused authorization wait (a Redis mark keyed to them). "
+    "Write key guard blocks read-only keys; service keys are rejected by identity.",
+    (
+        "DELETE",
+        "/mcp-oauth/servers/{id}/connection/",
+    ): "Forgets the caller's own connection (admin-only for a shared one, in the service). "
+    "Write key guard blocks read-only keys; service keys are rejected by identity.",
     (
         "POST",
         "/icons/",
