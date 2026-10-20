@@ -96,12 +96,16 @@ describe("ChatTools", () => {
         servers={servers}
         disabledServerIds={new Set(["diarium"])}
         alwaysOn={[{ id: "flows", name: "Flöden", description: "Alltid på i flödeschatten." }]}
+        capabilities={[{ purpose: "compute", available: true, reason: null }]}
+        capabilitiesNote="Gäller assistenten i chatten."
         autoAcceptTools
         onAutoAcceptToolsChange={() => {}}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: "Verktyg: 2 av 3 aktiva" }));
+    fireEvent.click(screen.getByRole("button", { name: "Verktyg: 3 av 4 aktiva" }));
     const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    // The note says what the function switches govern.
+    expect(within(popover).getByText("Gäller assistenten i chatten.")).toBeTruthy();
 
     const group = within(popover).getByRole("list", { name: "Inbyggda verktyg" });
     const flows = within(group).getByRole("switch", { name: "Flöden" });

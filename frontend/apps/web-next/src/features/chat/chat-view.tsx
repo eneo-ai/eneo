@@ -863,12 +863,15 @@ function ConversationView({
       capabilities={toolChoices.capabilities}
       disabledCapabilities={toolChoices.disabledCapabilities}
       servers={toolChoices.mcpServers}
-      // The flows chat always carries Eneo's flows tools; say so.
+      // The flows chat always carries Eneo's flows tools; say so. Its function
+      // switches govern the assistant's own calls while chatting, not what a
+      // function step of the flow may run (the space decides that).
       alwaysOn={
         flowPanel
           ? [{ id: "flows", name: t("flows"), description: t("flows_tools_always_on") }]
           : undefined
       }
+      capabilitiesNote={flowPanel ? t("flows_tools_functions_note") : undefined}
       disabledServerIds={toolChoices.disabledMcpServerIds}
       autoAcceptTools={toolChoices.autoAcceptTools}
       modelSupportsTools={toolChoices.modelSupportsTools}

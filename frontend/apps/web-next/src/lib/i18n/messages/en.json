@@ -6544,6 +6544,7 @@
   "flow_run_progress": "Step {current} of {total}: {name}",
   "mcp_built_in": "Built-in tools",
   "flows_tools_always_on": "Always on in the flows chat; cannot be switched off.",
+  "flows_tools_functions_note": "Governs what the assistant itself may do here in the chat. Which functions a function step of the flow can run is decided by the space's settings, not by these choices.",
   "flow_run_test": "Test run",
   "flow_run_version_draft": "draft (test run)",
   "flow_run_test_badge": "Test",

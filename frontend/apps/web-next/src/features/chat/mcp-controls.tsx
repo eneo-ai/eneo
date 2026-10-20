@@ -105,10 +105,20 @@ const ROW_CLASS = "flex items-center gap-2.5 py-1.5";
 const ROW_ICON_CLASS =
   "bg-ax-muted text-ax-text-secondary rounded-ax-inner flex size-7 shrink-0 items-center justify-center overflow-hidden text-xs font-semibold";
 
-function ToolGroup({ title, children }: { title: string; children: React.ReactNode }) {
+function ToolGroup({
+  title,
+  note,
+  children
+}: {
+  title: string;
+  /** What the group's switches govern, when that is not obvious. */
+  note?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex flex-col gap-0.5 py-1">
       <p className="text-ax-text-secondary text-xs font-semibold">{title}</p>
+      {note && <p className="text-ax-text-secondary m-0 text-xs leading-snug">{note}</p>}
       <ul aria-label={title} className="flex flex-col">
         {children}
       </ul>
@@ -131,6 +141,7 @@ export function ChatTools({
   servers = [],
   disabledServerIds = new Set(),
   alwaysOn = [],
+  capabilitiesNote,
   autoAcceptTools,
   modelSupportsTools = true,
   onDisabledCapabilitiesChange,
@@ -143,6 +154,8 @@ export function ChatTools({
   disabledServerIds?: Set<string>;
   /** Eneo's own tools for this chat; listed on, never switchable. */
   alwaysOn?: AlwaysOnTool[];
+  /** What the capability switches govern, where it could be mistaken (the flows chat). */
+  capabilitiesNote?: string;
   autoAcceptTools: boolean;
   /** Whether the partner's model can call tools at all; false renders every row unavailable. */
   modelSupportsTools?: boolean;
@@ -268,7 +281,7 @@ export function ChatTools({
             )}
 
             {capabilities.length > 0 && (
-              <ToolGroup title={t("capabilities")}>
+              <ToolGroup title={t("capabilities")} note={capabilitiesNote}>
                 {capabilities.map((capability) => {
                   const Icon = CAPABILITIES.find(
                     (item) => item.purpose === capability.purpose

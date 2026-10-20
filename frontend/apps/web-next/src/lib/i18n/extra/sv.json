@@ -1715,6 +1715,7 @@
   "flow_run_progress": "Steg {current} av {total}: {name}",
   "mcp_built_in": "Inbyggda verktyg",
   "flows_tools_always_on": "Alltid på i flödeschatten; kan inte stängas av.",
+  "flows_tools_functions_note": "Gäller vad assistenten själv får göra här i chatten. Vilka funktioner ett funktionssteg i flödet kan köra avgörs av rummets inställningar, inte av dessa val.",
   "flow_run_test": "Testkör",
   "flow_run_version_draft": "utkast (testkörning)",
   "flow_run_test_badge": "Test",
