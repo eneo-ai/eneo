@@ -750,6 +750,10 @@ async def update_assistant(
     if "icon_id" in request_dict:
         icon_id = assistant.icon_id
 
+    rerank_model_id = NOT_PROVIDED
+    if "rerank_model_id" in request_dict:
+        rerank_model_id = assistant.rerank_model_id
+
     updated_assistant, _ = await service.update_assistant(
         assistant_id=id,
         name=assistant.name,
@@ -771,6 +775,7 @@ async def update_assistant(
         data_retention_days=data_retention_days,
         metadata_json=metadata_json,
         icon_id=icon_id,
+        rerank_model_id=rerank_model_id,
         skill_binding_intents=skill_binding_intents,
         document_template=document_template,
     )

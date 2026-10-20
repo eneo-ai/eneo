@@ -154,8 +154,12 @@ export class FilePreview {
   // The edited text itself, so an editor torn down and mounted again (the
   // layout crosses its breakpoint) shows the document as the reader left it.
   #edits: { fileId: string; text: string } | null = null;
-  /** Whether the document on show marks what it changed against the version before it. */
-  showChanges = $state(true);
+  /**
+   * Whether the document on show marks what it changed against the version
+   * before it. Off until the reader asks: a version that rewrites the
+   * document would otherwise open as a strike-through of all its old text.
+   */
+  showChanges = $state(false);
   /**
    * Something would take the editor away (another file, the panel closing)
    * while edits are unsaved; it waits for the reader to decide.

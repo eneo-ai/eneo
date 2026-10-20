@@ -41,7 +41,8 @@ export function isFocusLost(): boolean {
  */
 export function rescueFocus(target: HTMLElement | null) {
   const check = () => {
-    if (isFocusLost()) target?.focus();
+    // Navigation or unmount may remove the target before either callback runs.
+    if (target?.isConnected && isFocusLost()) target.focus();
   };
   requestAnimationFrame(check);
   window.setTimeout(check, 500);

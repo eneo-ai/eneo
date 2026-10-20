@@ -323,6 +323,14 @@ class AssistantUpdatePublic(AssistantCreatePublic):
         default=NOT_PROVIDED,
         description="Icon ID referencing an uploaded icon. Set to null to remove.",
     )
+    rerank_model_id: Union[UUID, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        description=(
+            "Rerank model that re-scores retrieved knowledge before it reaches "
+            "the model. Must be enabled and meet the space's security "
+            "classification. Set to null to search in vector order only."
+        ),
+    )
     skill_bindings: Optional[list[AssistantSkillBindingInput]] = None
 
 
@@ -449,6 +457,10 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     icon_id: Optional[UUID] = Field(
         default=None,
         description="Icon ID referencing an uploaded icon",
+    )
+    rerank_model_id: Optional[UUID] = Field(
+        default=None,
+        description="ID of the rerank model, or None for vector order only",
     )
     insight_enabled: bool = Field(
         description=(

@@ -7,6 +7,9 @@ export type GeneratedDocument = {
   mimetype: string;
   size: number;
   original_size?: number | null;
+  /** The version a reader's saved edit was made from. */
+  revises_file_id?: string | null;
+  created_at?: string | null;
 };
 
 type DocumentCall = {
@@ -73,12 +76,23 @@ export function editedPassage(args: Record<string, unknown> | null | undefined):
 
 const extension = (name: string) => name.slice(name.lastIndexOf(".") + 1).toLowerCase();
 
+// Earlier first; files made at the same time, or without a time, keep the
+// order the conversation lists them in.
+const byCreation = (a: GeneratedDocument, b: GeneratedDocument) =>
+  a.created_at && b.created_at ? Date.parse(a.created_at) - Date.parse(b.created_at) || 0 : 0;
+
 /**
  * The documents of a conversation, each with its versions in order.
  *
- * A call that revises an earlier file continues that file's document. The same
- * content in another format (a plan handed over as Word) is a document of its
- * own, since both are kept and used.
+ * A call that revises an earlier file continues that file's document, and so
+ * does a version a reader saved of one. The same content in another format (a
+ * plan handed over as Word) is a document of its own, since both are kept and
+ * used.
+ *
+ * The versions of a document are every file its links join, from the oldest
+ * to the newest. Two saves made from the same version (in two tabs, say) are
+ * both versions of it, and the later save is the latest, as the backend
+ * holds it to be.
  */
 export function conversationDocuments(
   messages: readonly { files: GeneratedDocument[]; calls: DocumentCall[] }[]
@@ -96,8 +110,9 @@ export function conversationDocuments(
     }
   }
 
+  // The version each file was made from: named by the tool call that made
+  // it, else by the file itself when a reader saved it.
   const earlierOf = new Map<string, string>();
-  const laterOf = new Map<string, string>();
   for (const message of messages) {
     for (const call of message.calls) {
       const earlier = files.get(revisedFileId(call.input) ?? "");
@@ -108,35 +123,59 @@ export function conversationDocuments(
           continue;
         }
         earlierOf.set(id, earlier.id);
-        laterOf.set(earlier.id, id);
       }
     }
   }
-
-  const documents: ConversationDocument[] = [];
   for (const file of files.values()) {
-    if (laterOf.has(file.id)) continue;
-    const versions = [file];
-    for (let id = earlierOf.get(file.id); id; id = earlierOf.get(id)) {
-      const earlier = files.get(id);
-      if (!earlier || versions.includes(earlier)) break;
-      versions.unshift(earlier);
+    const earlier = files.get(file.revises_file_id ?? "");
+    if (!earlier || earlier.id === file.id || extension(file.name) !== extension(earlier.name)) {
+      continue;
     }
-    documents.push({ latest: file, versions });
+    if (!earlierOf.has(file.id)) earlierOf.set(file.id, earlier.id);
+  }
+
+  // Files linked to each other, however the links run, make one document.
+  const groupOf = new Map<string, string>();
+  const groupHead = (id: string) => {
+    let head = id;
+    for (
+      let next = groupOf.get(head);
+      next !== undefined && next !== head;
+      next = groupOf.get(head)
+    ) {
+      head = next;
+    }
+    return head;
+  };
+  for (const [id, earlier] of earlierOf) {
+    const own = groupHead(id);
+    const other = groupHead(earlier);
+    if (own !== other) groupOf.set(own, other);
+  }
+  const members = new Map<string, GeneratedDocument[]>();
+  for (const file of files.values()) {
+    const head = groupHead(file.id);
+    const group = members.get(head);
+    if (group) group.push(file);
+    else members.set(head, [file]);
+  }
+
+  const order = [...files.keys()];
+  const documents: ConversationDocument[] = [...members.values()]
+    .map((versions) => {
+      versions.sort(byCreation);
+      return { latest: versions[versions.length - 1]!, versions };
+    })
+    // As the conversation came to their newest version, like its answers.
+    .sort((a, b) => order.indexOf(a.latest.id) - order.indexOf(b.latest.id));
+  const documentOf = new Map<string, ConversationDocument>();
+  for (const document of documents) {
+    for (const version of document.versions) documentOf.set(version.id, document);
   }
 
   return {
     documents,
-    latestOf(fileId) {
-      let id = fileId;
-      for (let steps = 0; laterOf.has(id) && steps < files.size; steps++) id = laterOf.get(id)!;
-      return files.get(id);
-    },
-    versionsOf(fileId) {
-      return (
-        documents.find((document) => document.versions.some((file) => file.id === fileId))
-          ?.versions ?? []
-      );
-    }
+    latestOf: (fileId) => documentOf.get(fileId)?.latest,
+    versionsOf: (fileId) => documentOf.get(fileId)?.versions ?? []
   };
 }

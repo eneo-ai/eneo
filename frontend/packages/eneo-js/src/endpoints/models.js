@@ -27,7 +27,8 @@ export function initModels(client) {
         completionModels: res.completion_models,
         embeddingModels: res.embedding_models,
         transcriptionModels: res.transcription_models,
-        imageModels: res.image_models
+        imageModels: res.image_models,
+        rerankModels: res.rerank_models
       };
     },
 
