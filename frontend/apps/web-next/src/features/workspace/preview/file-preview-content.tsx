@@ -3,9 +3,10 @@
 import { Button } from "@astryxdesign/core/Button";
 import { TextQuote } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref } from "react";
 import { useNonce } from "@/components/providers/nonce";
 import { DocxPreview, type DocxPreviewHandle } from "./docx-preview";
+import { DocumentEditor, type DocumentEditorHandle } from "./document-editor";
 import type { PreviewContent } from "./load-preview";
 import { PdfPreview } from "./pdf-preview";
 import type { PreviewPassage } from "./preview-kind";
@@ -19,7 +20,7 @@ import {
   type SelectedPassage
 } from "./selection";
 import { TablePreview } from "./table-preview";
-import { TextPreview } from "./text-preview";
+import { TextPreview, TruncatedNotice } from "./text-preview";
 
 type FilePreviewContentProps = {
   content: PreviewContent;
@@ -30,6 +31,25 @@ type FilePreviewContentProps = {
   onQuote: (text: string, locator: string | null) => void;
   onReady?: () => void;
   onError?: () => void;
+  /** Whether a Markdown document may be edited in place. */
+  editable?: boolean;
+  /** The reader's unsaved text of a Markdown document, shown in place of the file's. */
+  edits?: string | null;
+  /** The version before this one, as Markdown; what changed against it is marked. */
+  previousMarkdown?: string | null;
+  /** The document's text as the reader has it; null once it is the file's again. */
+  onChange?: (text: string | null) => void;
+  /** The reader asked to save the document (Mod+S). */
+  onSave?: () => void;
+  ref?: Ref<FilePreviewContentHandle>;
+};
+
+/** The reader's edits of a Markdown document on show. */
+export type FilePreviewContentHandle = {
+  /** The document as the reader has it now; null unless a Markdown document is shown. */
+  getMarkdown: () => string | null;
+  /** Drops the reader's edits to the document on show. */
+  resetEditor: () => void;
 };
 
 /** A selection and where it is, measured from the preview's top left corner. */
@@ -66,19 +86,38 @@ export function FilePreviewContent({
   highlight,
   onQuote,
   onReady,
-  onError
+  onError,
+  editable = false,
+  edits = null,
+  previousMarkdown = null,
+  onChange,
+  onSave,
+  ref
 }: FilePreviewContentProps) {
   const t = useTranslations();
   const nonce = useNonce();
   const bodyRef = useRef<HTMLDivElement>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const docx = useRef<DocxPreviewHandle>(null);
+  const editor = useRef<DocumentEditorHandle>(null);
   const [frameSelection, setFrameSelection] = useState<Placed | null>(null);
   const [pageSelection, setPageSelection] = useState<Placed | null>(null);
   const [bodySize, setBodySize] = useState<Size>({ width: 0, height: 0 });
   const [popupSize, setPopupSize] = useState<Size>({ width: 0, height: 0 });
   const selection = frameSelection ?? pageSelection;
-  const drawnInPage = content.kind !== "docx" && content.kind !== "pdf";
+  // A Word document, a PDF and the document editor report readiness and
+  // handle their own selection; the other renderers draw into the page.
+  const drawnInPage =
+    content.kind !== "docx" && content.kind !== "pdf" && content.kind !== "markdown";
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      getMarkdown: () => editor.current?.getMarkdown() ?? null,
+      resetEditor: () => editor.current?.reset()
+    }),
+    []
+  );
 
   const callbacks = useRef({ onReady });
   useLayoutEffect(() => {
@@ -93,7 +132,8 @@ export function FilePreviewContent({
 
   function place(passage: SelectedPassage | null): Placed | null {
     const body = bodyRef.current;
-    if (!passage || !body) return null;
+    // The editor floats its own quote action over its selection.
+    if (!passage || !body || content.kind === "markdown") return null;
     const box = body.getBoundingClientRect();
     const top = passage.rect.top - box.top;
     const bottom = passage.rect.bottom - box.top;
@@ -198,8 +238,26 @@ export function FilePreviewContent({
           highlight={highlight}
           onQuote={onQuote}
         />
+      ) : content.kind === "markdown" ? (
+        <>
+          <div className="min-h-0 flex-1 overflow-auto">
+            <DocumentEditor
+              ref={editor}
+              markdown={content.text}
+              edits={edits}
+              editable={editable}
+              highlight={highlight}
+              previousMarkdown={previousMarkdown}
+              onQuote={onQuote}
+              onChange={onChange}
+              onSave={onSave}
+              onReady={onReady}
+            />
+          </div>
+          {content.truncated && <TruncatedNotice />}
+        </>
       ) : (
-        <TextPreview kind={content.kind} text={content.text} truncated={content.truncated} />
+        <TextPreview text={content.text} truncated={content.truncated} />
       )}
 
       {position && (

@@ -6,9 +6,14 @@
   import type { ComponentType } from "svelte";
   import { Navigation } from "$lib/components/layout";
   import { m } from "$lib/paraglide/messages";
+  import { deLocalizeUrl, localizeHref } from "$lib/paraglide/runtime";
+  import { Sparkles } from "@lucide/svelte";
+  import { getWhatsNewStore } from "$lib/features/whats-new/whatsNewStore";
+
+  const { enabled, hasUnseen } = getWhatsNewStore();
 
   let currentRoute = "";
-  $: currentRoute = $page.url.pathname;
+  $: currentRoute = deLocalizeUrl($page.url).pathname;
 
   const menuItems: {
     icon: ComponentType;
@@ -33,13 +38,27 @@
   ];
 </script>
 
-<Navigation.Menu>
+<Navigation.Menu ariaLabel={m.account_and_settings()}>
   {#each menuItems as item (item.url)}
     <Navigation.Link
-      href={item.url}
+      href={localizeHref(item.url)}
       icon={item.icon}
       isActive={currentRoute === item.url}
       label={item.label}
     ></Navigation.Link>
   {/each}
+  {#if $enabled}
+    <Navigation.Link
+      href={localizeHref("/news")}
+      icon={Sparkles}
+      isActive={currentRoute === "/news"}
+      label={m.whats_new()}
+    >
+      {#if $hasUnseen}
+        <span aria-hidden="true" class="bg-positive-default ml-auto size-2 self-center rounded-full"
+        ></span>
+        <span class="sr-only">{m.whats_new_unseen()}</span>
+      {/if}
+    </Navigation.Link>
+  {/if}
 </Navigation.Menu>

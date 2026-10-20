@@ -67,6 +67,10 @@ class RerankModelPublic(BaseModel):
         )
 
 
+class RerankModelSecurityStatus(RerankModelPublic):
+    meets_security_classification: Optional[bool] = None
+
+
 class RerankModelUpdate(BaseModel):
     is_org_enabled: Optional[bool] = None
     is_org_default: Optional[bool] = None

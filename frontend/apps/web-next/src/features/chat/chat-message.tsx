@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 
 import { deriveActivity, modelName } from "./activity";
 import type { ActivityTab } from "./activity-panel";
+import type { DocumentDraft } from "./side-panel/document-draft";
 import { ActivityPill } from "./activity-pill";
 import type { TurnDurations } from "./activity-timings";
 import {
@@ -39,7 +40,7 @@ import {
   DocumentLinksProvider,
   useDocumentNameRemarkPlugins
 } from "./answer-links";
-import { DocumentLine, type DocumentLineKind } from "./document-line";
+import { DocumentLine, DraftLine, type DocumentLineKind } from "./document-line";
 import {
   isDocument,
   revisedFileId,
@@ -47,7 +48,7 @@ import {
   type GeneratedDocument
 } from "./side-panel/document-versions";
 import { messageGeneratedFiles, messageToolCalls } from "./side-panel/message-tool-calls";
-import { parseQuotedQuestion, quotedFileMatches } from "./side-panel/question-quote";
+import { isTableQuote, parseQuotedQuestion, quotedFileMatches } from "./side-panel/question-quote";
 import { useSidePanel } from "./side-panel/use-side-panel";
 import {
   assistantClipboardContent,
@@ -111,9 +112,16 @@ function QuestionQuote({
   const location = tableLocationLabel(quote.locator, (row) => t("table_reference_row", { row }));
   const body = (
     <blockquote className="m-0">
-      <p className="text-ax-text-secondary m-0 line-clamp-6 text-[13.5px] whitespace-pre-wrap">
-        {quote.text}
-      </p>
+      {isTableQuote(quote.text) ? (
+        // Cells quoted from a table carry its header row, and read as a table.
+        <div className="text-ax-text-secondary text-sm">
+          <MessageResponse>{quote.text}</MessageResponse>
+        </div>
+      ) : (
+        <p className="text-ax-text-secondary m-0 line-clamp-6 text-[13.5px] whitespace-pre-wrap">
+          {quote.text}
+        </p>
+      )}
       {quote.fileName && (
         <footer className="text-ax-text-secondary mt-1 text-xs">
           {quote.fileName}
@@ -219,15 +227,28 @@ export function PendingQuestion({
 /**
  * What an answer produced, under its text: images inline, and one line per
  * document that names it and opens it in the side panel. A chart exported
- * only as part of a report is left out.
+ * only as part of a report is left out. A version a reader saved belongs to
+ * the document it revises: it gets no line of its own, and the document's
+ * line opens its newest version.
  */
-function GeneratedFiles({ message }: { message: EneoUIMessage }) {
+function GeneratedFiles({
+  message,
+  documents
+}: {
+  message: EneoUIMessage;
+  documents: ConversationDocument[];
+}) {
   const calls = messageToolCalls(message);
   const hidden = new Set(
     calls.filter(isChartDocumentAsset).flatMap((call) => call.generatedFileIds)
   );
-  const files = messageGeneratedFiles(message).filter((file) => !hidden.has(file.id));
+  const files = messageGeneratedFiles(message).filter(
+    (file) => !hidden.has(file.id) && !file.revises_file_id
+  );
   if (files.length === 0) return null;
+  const latestOf = (file: GeneratedDocument) =>
+    documents.find((document) => document.versions.some((version) => version.id === file.id))
+      ?.latest ?? file;
   const kindOf = (file: GeneratedDocument): DocumentLineKind => {
     const call = calls.find((candidate) => candidate.generatedFileIds.includes(file.id));
     if (call?.purpose !== "file_creation") return "exported";
@@ -240,7 +261,7 @@ function GeneratedFiles({ message }: { message: EneoUIMessage }) {
         !file.mimetype || file.mimetype.startsWith("image/") ? (
           <InlineImage key={file.id} file={file} />
         ) : isDocument(file) ? (
-          <DocumentLine key={file.id} file={file} kind={kindOf(file)} />
+          <DocumentLine key={file.id} file={latestOf(file)} kind={kindOf(file)} />
         ) : null
       )}
     </div>
@@ -441,7 +462,8 @@ function AssistantMessage({
   feedback,
   canDebug,
   sessionId,
-  documents
+  documents,
+  draft
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -456,6 +478,7 @@ function AssistantMessage({
   canDebug: boolean;
   sessionId: string | null;
   documents: ConversationDocument[];
+  draft: DocumentDraft | null;
 }) {
   const panel = useSidePanel();
   const text = messageText(message);
@@ -570,7 +593,8 @@ function AssistantMessage({
         })}
         <McpImageStrip references={mcpReferences} />
         <McpAppFrames message={message} live={isStreaming} sessionId={sessionId} />
-        <GeneratedFiles message={message} />
+        {draft && <DraftLine draft={draft} />}
+        <GeneratedFiles message={message} documents={documents} />
         {hasText && !isStreaming && (
           <AnswerActions
             text={text}
@@ -612,7 +636,8 @@ export function ChatMessage({
   canDebug = false,
   sessionId = null,
   conversationFiles = NO_FILES,
-  documents = NO_DOCUMENTS
+  documents = NO_DOCUMENTS,
+  draft = null
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -633,6 +658,8 @@ export function ChatMessage({
   conversationFiles?: readonly PreviewFile[];
   /** The documents the assistant made in the conversation, so an answer can name them. */
   documents?: ConversationDocument[];
+  /** The document this answer is writing now, which the answer offers to show. */
+  draft?: DocumentDraft | null;
 }) {
   if (message.role === "user") {
     return <UserMessage message={message} conversationFiles={conversationFiles} />;
@@ -652,6 +679,7 @@ export function ChatMessage({
       canDebug={canDebug}
       sessionId={sessionId}
       documents={documents}
+      draft={draft}
     />
   );
 }
