@@ -180,6 +180,7 @@ class PublicReference(InDB):
 
 class ChannelType(str, Enum):
     APP_RUN_UPDATES = "app_run_updates"
+    FLOW_RUN_UPDATES = "flow_run_updates"
     CRAWL_RUN_UPDATES = "crawl_run_updates"
     PULL_CONFLUENCE_CONTENT = "pull_confluence_content"
     PULL_SHAREPOINT_CONTENT = "pull_sharepoint_content"

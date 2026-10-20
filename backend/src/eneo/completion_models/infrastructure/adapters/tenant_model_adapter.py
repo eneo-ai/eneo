@@ -1611,6 +1611,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                         has_app_view = not result.get(
                             "is_error"
                         ) and await _has_app_view(mcp_proxy, call.name)
+                        assert mcp_proxy is not None
+                        keep_structured = has_app_view or mcp_proxy.is_internal_tool(
+                            call.name
+                        )
                         captured_refs.extend(refs_for_call)
                         captured_images.extend(images_for_call)
                         result_status = "succeeded"
@@ -1655,7 +1659,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 meta=result.get("meta") or None,
                                 structured_content=(
                                     result.get("structured_content")
-                                    if has_app_view
+                                    if keep_structured
                                     else None
                                 ),
                             )
@@ -2542,6 +2546,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                             has_app_view = not result_data.get(
                                 "is_error"
                             ) and await _has_app_view(mcp_proxy, tc["function"]["name"])
+                            keep_structured = (
+                                has_app_view
+                                or mcp_proxy.is_internal_tool(tc["function"]["name"])
+                            )
                             captured_refs.extend(refs_for_call)
                             # Generated files ride their own chunks so the
                             # ask path can persist each as a file before the
@@ -2607,7 +2615,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     meta=result_data.get("meta") or None,
                                     structured_content=(
                                         result_data.get("structured_content")
-                                        if has_app_view
+                                        if keep_structured
                                         else None
                                     ),
                                 )

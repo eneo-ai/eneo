@@ -104,6 +104,7 @@ class SpaceResourceType(str, Enum):
     SKILL = "skill"
     GROUP_CHAT = "group_chat"
     APP = "app"
+    FLOW = "flow"
     SERVICE = "service"
     COLLECTION = "collection"
     WEBSITE = "website"
@@ -128,6 +129,7 @@ SHARED_SPACE_PERMISSIONS = {
         SpaceResourceType.SKILL: {SpaceAction.READ},
         SpaceResourceType.GROUP_CHAT: {SpaceAction.READ},
         SpaceResourceType.APP: {SpaceAction.READ},
+        SpaceResourceType.FLOW: {SpaceAction.READ},
         # Only published resources are readable -- enforced in code
         SpaceResourceType.INFO_BLOB: {SpaceAction.READ},
         SpaceResourceType.SPACE: {
@@ -158,6 +160,13 @@ SHARED_SPACE_PERMISSIONS = {
             SpaceAction.INSIGHT_VIEW,
         },
         SpaceResourceType.APP: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,
+        },
+        SpaceResourceType.FLOW: {
             SpaceAction.READ,
             SpaceAction.CREATE,
             SpaceAction.EDIT,
@@ -231,6 +240,13 @@ SHARED_SPACE_PERMISSIONS = {
             SpaceAction.INSIGHT_VIEW,
         },
         SpaceResourceType.APP: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,
+        },
+        SpaceResourceType.FLOW: {
             SpaceAction.READ,
             SpaceAction.CREATE,
             SpaceAction.EDIT,
@@ -324,6 +340,16 @@ PERSONAL_SPACE_PERMISSIONS = {
             SpaceAction.DELETE,
             # Note: No publish
         },
+        SpaceResourceType.FLOW: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            # Unlike apps, publishing a flow is not sharing: it freezes the
+            # runnable version, so personal spaces need it for the core
+            # lifecycle.
+            SpaceAction.PUBLISH,
+        },
         SpaceResourceType.SKILL: {
             SpaceAction.READ,
             SpaceAction.CREATE,
@@ -407,6 +433,13 @@ ORG_SPACE_PERMISSIONS = {
             SpaceAction.DELETE,
             SpaceAction.PUBLISH,
         },
+        SpaceResourceType.FLOW: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,
+        },
         SpaceResourceType.SKILL: {
             SpaceAction.READ,
             SpaceAction.CREATE,
@@ -475,6 +508,7 @@ PERMISSION_RESOURCES = {
     SpaceResourceType.SKILL,
     SpaceResourceType.GROUP_CHAT,
     SpaceResourceType.APP,
+    SpaceResourceType.FLOW,
     SpaceResourceType.SERVICE,
     SpaceResourceType.COLLECTION,
     SpaceResourceType.WEBSITE,
@@ -484,6 +518,7 @@ PUBLISHABLE_RESOURCES = {
     SpaceResourceType.ASSISTANT,
     SpaceResourceType.GROUP_CHAT,
     SpaceResourceType.APP,
+    SpaceResourceType.FLOW,
 }
 INSIGHT_RESOURCES = {
     SpaceResourceType.ASSISTANT,
@@ -515,6 +550,7 @@ class SpaceActor:
             SpaceResourceType.SKILL: Permission.SKILLS,
             SpaceResourceType.GROUP_CHAT: Permission.GROUP_CHATS,
             SpaceResourceType.APP: Permission.APPS,
+            SpaceResourceType.FLOW: Permission.FLOWS,
             SpaceResourceType.SERVICE: Permission.SERVICES,
             SpaceResourceType.COLLECTION: Permission.COLLECTIONS,
             SpaceResourceType.WEBSITE: Permission.WEBSITES,
@@ -977,6 +1013,36 @@ class SpaceActor:
         return self.can_perform_action(
             action=SpaceAction.PUBLISH,
             resource_type=SpaceResourceType.APP,
+        )
+
+    def can_read_flows(self):
+        return self.can_perform_action(
+            action=SpaceAction.READ,
+            resource_type=SpaceResourceType.FLOW,
+        )
+
+    def can_create_flows(self):
+        return self.can_perform_action(
+            action=SpaceAction.CREATE,
+            resource_type=SpaceResourceType.FLOW,
+        )
+
+    def can_edit_flows(self):
+        return self.can_perform_action(
+            action=SpaceAction.EDIT,
+            resource_type=SpaceResourceType.FLOW,
+        )
+
+    def can_delete_flows(self):
+        return self.can_perform_action(
+            action=SpaceAction.DELETE,
+            resource_type=SpaceResourceType.FLOW,
+        )
+
+    def can_publish_flows(self):
+        return self.can_perform_action(
+            action=SpaceAction.PUBLISH,
+            resource_type=SpaceResourceType.FLOW,
         )
 
     def can_read_skills(self):

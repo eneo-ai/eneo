@@ -27,6 +27,7 @@ from eneo.security_classifications.presentation.security_classification_models i
 from eneo.services.service import Service, ServiceSparse
 from eneo.spaces.api.space_models import (
     Applications,
+    ApplicationSummary,
     AppSparse,
     CreateSpaceServiceResponse,
     Knowledge,
@@ -154,6 +155,7 @@ class SpaceAssembler:
                 )
                 for service in space.services
             ),
+            flow_count=space.flow_count,
         )
 
     def from_applications_projection(
@@ -341,6 +343,36 @@ class SpaceAssembler:
             permissions.append(ResourcePermission.PUBLISH)
 
         return permissions
+
+    @staticmethod
+    def _get_flow_permissions_from_actor(
+        actor: "SpaceActor",
+    ) -> list[ResourcePermission]:
+        permissions: list[ResourcePermission] = []
+        if actor.can_read_flows():
+            permissions.append(ResourcePermission.READ)
+        if actor.can_create_flows():
+            permissions.append(ResourcePermission.CREATE)
+        if actor.can_edit_flows():
+            permissions.append(ResourcePermission.EDIT)
+        if actor.can_delete_flows():
+            permissions.append(ResourcePermission.DELETE)
+        if actor.can_publish_flows():
+            permissions.append(ResourcePermission.PUBLISH)
+        return permissions
+
+    @classmethod
+    def _get_flows_summary(
+        cls, projection: SpaceApplicationsProjection, actor: "SpaceActor"
+    ) -> ApplicationSummary:
+        access = projection.access
+        # The organization space has no flows surface.
+        if access.user_id is None and access.tenant_space_id is None:
+            return ApplicationSummary(count=0, permissions=[])
+        return ApplicationSummary(
+            count=projection.flow_count,
+            permissions=cls._get_flow_permissions_from_actor(actor),
+        )
 
     def _get_service_permissions(self, space: Space) -> list[ResourcePermission]:
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -588,6 +620,7 @@ class SpaceAssembler:
                 ],
                 permissions=self._get_app_permissions_from_actor(actor),
             ),
+            flows=self._get_flows_summary(projection, actor),
             services=PaginatedPermissions[ServiceSparse](
                 items=[
                     self._get_service_model(

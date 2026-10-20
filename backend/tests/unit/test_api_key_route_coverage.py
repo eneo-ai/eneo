@@ -970,6 +970,7 @@ RESOURCE_PERM_VOCABULARY: frozenset[str] = frozenset(
     {
         "assistants",
         "apps",
+        "flows",
         "spaces",
         "knowledge",
         "conversations",
@@ -991,6 +992,7 @@ SCOPE_CHECK_VOCABULARY: frozenset[str] = frozenset(
         "conversation",
         "crawl_run",
         "file",
+        "flow",
         "group_chat",
         "info_blob",
         "prompt",

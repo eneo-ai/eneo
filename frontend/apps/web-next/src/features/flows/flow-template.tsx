@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { Fragment } from "react";
-import type { FlowDefinition } from "./types";
+import { formFieldsOf, stepsOf, type FlowDefinition } from "./types";
 
 /** One `{{…}}` placeholder of a template, as the definition explains it. */
 export type TemplateReference =
@@ -20,17 +20,18 @@ export function describeReference(raw: string, definition: FlowDefinition): Temp
   if (raw === "previous") return { kind: "previous" };
   const [source, key, ...rest] = raw.split(".");
   if (source === "form" && key) {
-    const field = definition.form_fields.find((candidate) => candidate.key === key);
+    const field = formFieldsOf(definition).find((candidate) => candidate.key === key);
     return { kind: "form", key, label: field?.label ?? null };
   }
   if (source === "steps" && key) {
-    const index = definition.steps.findIndex((candidate) => candidate.key === key);
+    const steps = stepsOf(definition);
+    const index = steps.findIndex((candidate) => candidate.key === key);
     const path = rest[0] === "json" ? rest.slice(1).join(".") || null : rest.join(".") || null;
     return {
       kind: "step",
       key,
       index: index >= 0 ? index : null,
-      name: index >= 0 ? (definition.steps[index]?.name ?? null) : null,
+      name: index >= 0 ? (steps[index]?.name ?? null) : null,
       path
     };
   }

@@ -1,0 +1,321 @@
+"""Public models for flows: what the REST API and the MCP tools return.
+
+The run-side shapes follow the names the previous flows API used
+(``FlowRunSummaryPublic``, ``FlowRunStepPublic``,
+``FlowRunReviewCheckpointPublic``, ``FlowTranscriptCorrectionsPublic``) so
+API consumers keep working. The authoring side is new: a flow is one
+:class:`~eneo.flows.definition.FlowDefinition`.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from enum import StrEnum
+from typing import Any, Optional
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from eneo.flows.definition import FlowDefinition, FormField, StepKind
+
+
+class FlowRunStatus(StrEnum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    AWAITING_REVIEW = "awaiting_review"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+    @property
+    def is_terminal(self) -> bool:
+        return self in (
+            FlowRunStatus.COMPLETED,
+            FlowRunStatus.FAILED,
+            FlowRunStatus.CANCELLED,
+        )
+
+    @property
+    def is_active(self) -> bool:
+        return not self.is_terminal
+
+
+class StepResultStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    AWAITING_REVIEW = "awaiting_review"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+    SKIPPED = "skipped"
+
+
+class StepAttemptStatus(StrEnum):
+    STARTED = "started"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    OUTCOME_UNKNOWN = "outcome_unknown"
+
+
+class ReviewCheckpointState(StrEnum):
+    AWAITING_REVIEW = "awaiting_review"
+    EDITED = "edited"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    RESUMED = "resumed"
+    CANCELLED = "cancelled"
+    EXPIRED = "expired"
+
+
+class PrincipalType(StrEnum):
+    USER = "user"
+    SERVICE = "service"
+
+
+# --- Flows (authoring side) ---
+
+
+class FlowSparsePublic(BaseModel):
+    """A list row."""
+
+    id: UUID
+    space_id: UUID
+    name: str
+    description: Optional[str] = None
+    published_version: Optional[int] = None
+    step_count: int
+    step_kinds: list[StepKind]
+    conversation_id: Optional[UUID] = None
+    last_run: Optional["FlowRunSummaryPublic"] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowPublic(BaseModel):
+    """A flow with its draft definition; what the panel renders."""
+
+    id: UUID
+    space_id: UUID
+    name: str
+    description: Optional[str] = None
+    definition: FlowDefinition
+    published_version: Optional[int] = None
+    # True when the draft differs from the published version (or is unpublished).
+    has_unpublished_changes: bool = False
+    conversation_id: Optional[UUID] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowAuthoringAssistantPublic(BaseModel):
+    """The hidden assistant the flows chat talks to, for one space."""
+
+    assistant_id: UUID
+    space_id: UUID
+
+
+# --- Run contract (what a client needs to start a run) ---
+
+
+class FlowRunContractStepPublic(BaseModel):
+    step_id: UUID
+    key: str
+    name: str
+    kind: StepKind
+
+
+class FlowFinalOutputContractPublic(BaseModel):
+    kind: StepKind
+    # "text" | "json" | "docx" | "pdf" | "transcript"
+    output_type: str
+
+
+class FlowRunContractPublic(BaseModel):
+    flow_id: UUID
+    published_flow_version: int
+    form_fields: list[FormField]
+    steps_requiring_review: list[FlowRunContractStepPublic]
+    final_output: Optional[FlowFinalOutputContractPublic] = None
+
+
+# --- Runs ---
+
+
+class FlowRunCreateRequest(BaseModel):
+    """Start a run of the published version.
+
+    ``values`` carries text, number and select fields by key; ``files``
+    carries file and audio fields by key as ids of files the caller
+    uploaded (through the runtime-files endpoint or the chat).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    values: dict[str, Any] = Field(default_factory=dict)
+    files: dict[str, list[UUID]] = Field(default_factory=dict)
+    run_label: Optional[str] = Field(default=None, max_length=200)
+    expected_flow_version: Optional[int] = None
+
+
+class FlowRunErrorPublic(BaseModel):
+    code: str
+    message: str
+
+
+class FlowRunFilePublic(BaseModel):
+    id: UUID
+    name: str
+    mimetype: Optional[str] = None
+    size: Optional[int] = None
+    # "input" | "output"
+    role: str
+    field_key: Optional[str] = None
+    step_id: Optional[UUID] = None
+
+
+class FlowRunSummaryPublic(BaseModel):
+    id: UUID
+    flow_id: UUID
+    flow_version: int
+    tenant_id: UUID
+    principal_type: PrincipalType
+    status: FlowRunStatus
+    run_label: Optional[str] = None
+    job_id: Optional[UUID] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowRunStepPublic(BaseModel):
+    step_id: UUID
+    key: str
+    name: str
+    kind: StepKind
+    step_order: int
+    status: StepResultStatus
+    current_attempt_no: int = 0
+    input_payload_json: Optional[dict[str, Any]] = None
+    output_payload_json: Optional[dict[str, Any]] = None
+    result_files: list[FlowRunFilePublic] = Field(
+        default_factory=list[FlowRunFilePublic]
+    )
+    num_tokens_input: Optional[int] = None
+    num_tokens_output: Optional[int] = None
+    error_code: Optional[str] = None
+    error_message: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+
+class FlowRunReviewCheckpointPublic(BaseModel):
+    id: UUID
+    flow_id: UUID
+    flow_run_id: UUID
+    step_id: UUID
+    step_order: int
+    attempt_no: int
+    state: ReviewCheckpointState
+    revision: int
+    # "view" | "edit"
+    review_mode: str
+    # "text" | "json"
+    output_type: str
+    original_payload_json: Optional[dict[str, Any]] = None
+    current_payload_json: Optional[dict[str, Any]] = None
+    requester_principal_type: PrincipalType
+    decided_by_principal_type: Optional[PrincipalType] = None
+    reason: Optional[str] = None
+    edited_at: Optional[datetime] = None
+    approved_at: Optional[datetime] = None
+    rejected_at: Optional[datetime] = None
+    resumed_at: Optional[datetime] = None
+    cancelled_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowRunPublic(FlowRunSummaryPublic):
+    input_payload_json: Optional[dict[str, Any]] = None
+    output_payload_json: Optional[dict[str, Any]] = None
+    error: Optional[FlowRunErrorPublic] = None
+    input_files: list[FlowRunFilePublic] = Field(
+        default_factory=list[FlowRunFilePublic]
+    )
+    result_files: list[FlowRunFilePublic] = Field(
+        default_factory=list[FlowRunFilePublic]
+    )
+    steps: list[FlowRunStepPublic] = Field(default_factory=list[FlowRunStepPublic])
+    review_checkpoint: Optional[FlowRunReviewCheckpointPublic] = None
+
+
+# --- Review checkpoint requests ---
+
+
+class FlowRunReviewCheckpointEditRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_checkpoint_revision: int
+    # Text review: {"text": ...}; JSON review: {"value": ...}
+    current_payload_json: dict[str, Any]
+
+
+class FlowRunReviewCheckpointApproveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_checkpoint_revision: int
+
+
+class FlowRunReviewCheckpointRejectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_checkpoint_revision: int
+    reason: Optional[str] = Field(default=None, max_length=2000)
+
+
+class FlowRunReviewCheckpointResumeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_checkpoint_revision: int
+
+
+class FlowRunReviewCheckpointResumeResponse(BaseModel):
+    checkpoint: FlowRunReviewCheckpointPublic
+    run: FlowRunSummaryPublic
+
+
+# --- Compact run state, shared by the MCP tools and the panel ---
+
+
+class FlowRunStateStepPublic(BaseModel):
+    step_id: UUID
+    key: str
+    name: str
+    kind: StepKind
+    status: StepResultStatus
+    # A short, bounded look at the output (first lines of text, file names).
+    preview: Optional[str] = None
+    error_message: Optional[str] = None
+
+
+class FlowRunStatePublic(BaseModel):
+    """What ``run_flow`` / ``get_run`` return; small enough for a tool result."""
+
+    flow_id: UUID
+    run_id: UUID
+    flow_version: int
+    status: FlowRunStatus
+    run_label: Optional[str] = None
+    steps: list[FlowRunStateStepPublic] = Field(
+        default_factory=list[FlowRunStateStepPublic]
+    )
+    review_checkpoint: Optional[FlowRunReviewCheckpointPublic] = None
+    output_files: list[FlowRunFilePublic] = Field(
+        default_factory=list[FlowRunFilePublic]
+    )
+    error: Optional[FlowRunErrorPublic] = None
+    created_at: datetime
+    updated_at: datetime

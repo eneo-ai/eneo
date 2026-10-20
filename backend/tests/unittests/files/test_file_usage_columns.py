@@ -31,6 +31,8 @@ def test_every_declared_usage_column_is_derived_in_kind_order() -> None:
         (FileUsageKind.ASSISTANT_ATTACHMENT, "assistants_files.file_id"),
         (FileUsageKind.APP_ATTACHMENT, "apps_files.file_id"),
         (FileUsageKind.APP_RUN_INPUT, "app_runs_files.file_id"),
+        (FileUsageKind.FLOW_FILE, "flow_files.file_id"),
+        (FileUsageKind.FLOW_RUN_FILE, "flow_run_files.file_id"),
     ]
 
 

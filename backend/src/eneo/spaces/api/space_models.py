@@ -164,11 +164,18 @@ class UpdateSpaceDryRunResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ApplicationSummary(ResourcePermissionsMixin):
+    """A resource family the space only counts; its own endpoint lists it."""
+
+    count: int = 0
+
+
 class Applications(BaseModel):
     assistants: PaginatedPermissions[AssistantSparse]
     group_chats: PaginatedPermissions[GroupChatSparse]
     services: PaginatedPermissions[ServiceSparse]
     apps: PaginatedPermissions[AppSparse]
+    flows: ApplicationSummary = Field(default_factory=ApplicationSummary)
 
 
 class Knowledge(BaseModel):

@@ -156,6 +156,7 @@ class SpaceFactory:
         apps_in_db: Sequence[Apps],
         services_in_db: Sequence[Services],
         completion_models: Sequence["CompletionModel"],
+        flow_count: int = 0,
     ) -> SpaceApplicationsProjection:
         completion_models_by_id = {model.id: model for model in completion_models}
 
@@ -203,10 +204,19 @@ class SpaceFactory:
             (assistant for assistant in assistants_in_db if assistant.is_default),
             None,
         )
+        purpose_assistant_ids = {
+            assistant.id
+            for assistant in assistants_in_db
+            if isinstance(getattr(assistant, "purpose", None), str)
+        }
         assistants = tuple(
             assistant
             for assistant in all_assistants
-            if default_assistant_row is None or assistant.id != default_assistant_row.id
+            if (
+                default_assistant_row is None
+                or assistant.id != default_assistant_row.id
+            )
+            and assistant.id not in purpose_assistant_ids
         )
 
         def _service_projection(service: Services) -> ServiceApplicationsProjection:
@@ -284,6 +294,7 @@ class SpaceFactory:
             ),
             apps=apps,
             services=services,
+            flow_count=flow_count,
         )
 
     def create_space_from_db(
@@ -305,6 +316,7 @@ class SpaceFactory:
         security_classification: Optional["SecurityClassificationDBModel"] = None,
         integration_knowledge_in_db: Iterable["IntegrationKnowledgeDBModel"]
         | None = None,
+        flow_count: int = 0,
     ) -> Space:
         collections_in_db = list(collections_in_db or [])
         websites_in_db = list(websites_in_db or [])
@@ -531,10 +543,18 @@ class SpaceFactory:
         default_assistant_load_failed = default_assistant is None and any(
             getattr(assistant, "is_default", False) for assistant in assistants_in_db
         )
+        # Assistants Eneo manages for a feature stay reachable by id but are
+        # never listed next to the user's own assistants.
+        purpose_assistants = [
+            assistant
+            for assistant in all_assistants
+            if isinstance(getattr(assistant, "purpose", None), str)
+        ]
         space_assistants = [
             assistant
             for assistant in all_assistants
             if (not default_assistant or assistant.id != default_assistant.id)
+            and not isinstance(getattr(assistant, "purpose", None), str)
         ]
         # Set the tools of the default assistant
         if default_assistant is not None:
@@ -618,6 +638,8 @@ class SpaceFactory:
             default_assistant=default_assistant,
             default_assistant_load_failed=default_assistant_load_failed,
             assistants=space_assistants,
+            purpose_assistants=purpose_assistants,
+            flow_count=flow_count,
             group_chats=space_group_chats,
             apps=space_apps,
             services=space_services,

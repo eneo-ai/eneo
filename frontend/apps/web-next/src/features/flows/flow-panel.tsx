@@ -18,6 +18,7 @@ import { FlowRunDialog } from "./flow-run-dialog";
 import { FlowRunList } from "./flow-run-list";
 import type { FlowNames } from "./flow-step-card";
 import { flowQueryOptions } from "./flows";
+import { stepsOf } from "./types";
 import { useFlowPanel } from "./use-flow-panel";
 
 /** Names for the ids in a definition, from the space's models and knowledge. */
@@ -63,7 +64,7 @@ export function FlowPanel({
   const flowId = store.flowId;
   const flow = useQuery({ ...flowQueryOptions(flowId ?? ""), enabled: flowId !== null });
   const definition = flow.data?.definition ?? null;
-  const stepCount = definition?.steps.length ?? 0;
+  const stepCount = definition ? stepsOf(definition).length : 0;
   const published = flow.data?.published_version != null;
   const detail = flow.data
     ? [

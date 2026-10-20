@@ -51,6 +51,10 @@ class Assistants(BasePublic):
     )
     data_retention_days: Mapped[Optional[int]] = mapped_column()
     metadata_json: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
+    # Marks an assistant Eneo created for a product surface (e.g. "flows"
+    # for the hidden per-space flow authoring chat). Listings skip rows
+    # with a purpose; they are reached through their own feature.
+    purpose: Mapped[Optional[str]] = mapped_column()
     # TODO: refactor since this is a somewhat weird solution having a
     # type column. The reason is bc front-end wants a non-nullable
     # "type" field in a bunch of models. Thus a field with a default

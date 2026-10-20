@@ -100,6 +100,12 @@ from eneo.files.file_size_service import FileSizeService
 from eneo.files.image import ImageExtractor
 from eneo.files.text import TextExtractor
 from eneo.files.transcriber import Transcriber
+from eneo.flows.flow_assistant_service import FlowAuthoringAssistantService
+from eneo.flows.flow_repo import FlowRepository
+from eneo.flows.flow_run_executor import FlowRunExecutor
+from eneo.flows.flow_run_service import FlowRunService
+from eneo.flows.flow_service import FlowService
+from eneo.flows.step_runners import StepRunners
 from eneo.governance_policy.application.effective_config_service import (
     EffectiveConfigService,
 )
@@ -1717,6 +1723,51 @@ class Container(containers.DeclarativeContainer):
         app_service=app_service,
         file_service=file_service,
         job_service=job_service,
+    )
+
+    flow_repo = providers.Factory(FlowRepository, session=session)
+    flow_service = providers.Factory(
+        FlowService,
+        user=user,
+        repo=flow_repo,
+        space_repo=space_repo,
+        actor_manager=actor_manager,
+        completion_model_crud_service=completion_model_crud_service,
+        audit_service=audit_service,
+    )
+    flow_step_runners = providers.Factory(
+        StepRunners,
+        completion_service=completion_service,
+        references_service=references_service,
+        file_service=file_service,
+        space_repo=space_repo,
+    )
+    flow_run_executor = providers.Factory(
+        FlowRunExecutor,
+        repo=flow_repo,
+        runners=flow_step_runners,
+        step_timeout_seconds=providers.Callable(
+            lambda: get_settings().flow_step_timeout_seconds
+        ),
+    )
+    flow_run_service = providers.Factory(
+        FlowRunService,
+        user=user,
+        repo=flow_repo,
+        flow_service=flow_service,
+        job_service=job_service,
+        file_service=file_service,
+        audit_service=audit_service,
+        executor=flow_run_executor,
+    )
+    flow_authoring_assistant_service = providers.Factory(
+        FlowAuthoringAssistantService,
+        user=user,
+        assistant_repo=assistant_repo,
+        assistant_factory=assistant_factory,
+        space_repo=space_repo,
+        actor_manager=actor_manager,
+        prompt_service=prompt_service,
     )
 
     data_retention_service = providers.Factory(

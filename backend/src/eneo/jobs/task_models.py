@@ -57,6 +57,12 @@ class Transcription(UploadTask):
     pass
 
 
+class FlowRunParams(ResourceTaskParams):
+    """``id`` is the flow run; the same id is re-dispatched after a review."""
+
+    flow_id: UUID
+
+
 class UploadInfoBlobDispatchEnvelope(BaseModel):
     version: Literal[2] = 2
     task: Literal[Task.UPLOAD_FILE] = Task.UPLOAD_FILE
@@ -69,19 +75,30 @@ class TranscriptionDispatchEnvelope(BaseModel):
     params: Transcription
 
 
-DispatchEnvelope = UploadInfoBlobDispatchEnvelope | TranscriptionDispatchEnvelope
+class FlowRunDispatchEnvelope(BaseModel):
+    version: Literal[2] = 2
+    task: Literal[Task.RUN_FLOW] = Task.RUN_FLOW
+    params: FlowRunParams
+
+
+DispatchEnvelope = (
+    UploadInfoBlobDispatchEnvelope
+    | TranscriptionDispatchEnvelope
+    | FlowRunDispatchEnvelope
+)
+DurableTaskParams = UploadInfoBlob | Transcription | FlowRunParams
 _DISPATCH_ENVELOPE_ADAPTER: TypeAdapter[DispatchEnvelope] = TypeAdapter(
     DispatchEnvelope
 )
 
 
-def build_dispatch_envelope(
-    task: Task, params: UploadInfoBlob | Transcription
-) -> DispatchEnvelope:
+def build_dispatch_envelope(task: Task, params: DurableTaskParams) -> DispatchEnvelope:
     if task == Task.UPLOAD_FILE and isinstance(params, UploadInfoBlob):
         return UploadInfoBlobDispatchEnvelope(params=params)
     if task == Task.TRANSCRIPTION and isinstance(params, Transcription):
         return TranscriptionDispatchEnvelope(params=params)
+    if task == Task.RUN_FLOW and isinstance(params, FlowRunParams):
+        return FlowRunDispatchEnvelope(params=params)
     raise ValueError(f"Unsupported durable dispatch task: {task.value}")
 
 

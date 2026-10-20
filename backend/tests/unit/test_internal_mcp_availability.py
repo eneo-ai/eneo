@@ -6,11 +6,14 @@ from eneo.files.file_models import FileType
 from eneo.internal_mcp.availability import resolve_internal_mcp_availability
 
 
-def _assistant(*, has_knowledge=True, mode=KnowledgeMode.TOOL, inline=False):
+def _assistant(
+    *, has_knowledge=True, mode=KnowledgeMode.TOOL, inline=False, purpose=None
+):
     return SimpleNamespace(
         knowledge_mode=mode,
         inline_file_text=inline,
         has_knowledge=lambda: has_knowledge,
+        purpose=purpose,
     )
 
 
@@ -115,3 +118,27 @@ def test_files_server_follows_the_per_file_original_flag_only(monkeypatch):
     assert availability.files
     assert availability.referenced_file_ids == {stored_file.id}
     assert availability.url_only_file_ids == {stored_file.id}
+
+
+def test_flows_server_attaches_only_to_the_flows_assistant(monkeypatch):
+    _enable_references(monkeypatch)
+
+    flows_assistant = resolve_internal_mcp_availability(
+        assistant=_assistant(purpose="flows"),
+        completion_model=_model(),
+        conversation_files=[],
+    )
+    ordinary = resolve_internal_mcp_availability(
+        assistant=_assistant(),
+        completion_model=_model(),
+        conversation_files=[],
+    )
+    without_tools = resolve_internal_mcp_availability(
+        assistant=_assistant(purpose="flows"),
+        completion_model=_model(supports_tools=False),
+        conversation_files=[],
+    )
+
+    assert flows_assistant.flows
+    assert not ordinary.flows
+    assert not without_tools.flows

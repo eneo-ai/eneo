@@ -4,7 +4,7 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { useTranslations } from "next-intl";
 import { Chip } from "./flow-fields";
 import { FlowStepCard, type FlowNames } from "./flow-step-card";
-import type { FlowPublic, FormFieldType } from "./types";
+import { formFieldsOf, stepsOf, type FlowPublic, type FormFieldType } from "./types";
 
 const FIELD_TYPE_KEYS: Record<FormFieldType, string> = {
   text: "flow_field_type_text",
@@ -46,6 +46,8 @@ export function FlowStatusBadges({
 export function FlowDefinition({ flow, names }: { flow: FlowPublic; names?: FlowNames }) {
   const t = useTranslations();
   const { definition } = flow;
+  const fields = formFieldsOf(definition);
+  const steps = stepsOf(definition);
   return (
     <div className="flex flex-col gap-5 p-4">
       <section aria-label={t("flow_section_about")} className="flex flex-col gap-2">
@@ -54,7 +56,7 @@ export function FlowDefinition({ flow, names }: { flow: FlowPublic; names?: Flow
         ) : null}
         <div className="flex flex-wrap items-center gap-1.5">
           <FlowStatusBadges flow={flow} />
-          <Chip>{t("flow_steps_count", { count: definition.steps.length })}</Chip>
+          <Chip>{t("flow_steps_count", { count: steps.length })}</Chip>
         </div>
       </section>
 
@@ -65,11 +67,11 @@ export function FlowDefinition({ flow, names }: { flow: FlowPublic; names?: Flow
         >
           {t("flow_section_inputs")}
         </h3>
-        {definition.form_fields.length === 0 ? (
+        {fields.length === 0 ? (
           <p className="text-ax-text-secondary m-0 text-[13px]">{t("flow_inputs_none")}</p>
         ) : (
           <ul className="m-0 flex list-none flex-col gap-1 p-0">
-            {definition.form_fields.map((field) => (
+            {fields.map((field) => (
               <li
                 key={field.key}
                 className="border-ax-border flex items-baseline justify-between gap-3 border-b py-1 text-[13px] last:border-b-0"
@@ -103,11 +105,11 @@ export function FlowDefinition({ flow, names }: { flow: FlowPublic; names?: Flow
         >
           {t("flow_section_steps")}
         </h3>
-        {definition.steps.length === 0 ? (
+        {steps.length === 0 ? (
           <p className="text-ax-text-secondary m-0 text-[13px]">{t("flow_steps_none")}</p>
         ) : (
           <ol className="m-0 flex list-none flex-col gap-2 p-0">
-            {definition.steps.map((step, index) => (
+            {steps.map((step, index) => (
               <li key={step.id ?? step.key}>
                 <FlowStepCard step={step} index={index} definition={definition} names={names} />
               </li>

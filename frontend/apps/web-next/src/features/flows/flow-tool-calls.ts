@@ -34,8 +34,11 @@ export function isFlowsCall(part: ToolLike): boolean {
   return eneo.server_name === FLOWS_SERVER_NAME && eneo.is_internal === true;
 }
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Only a complete id binds the panel; a cut-short one (streamed arguments) does not. */
 const asId = (value: unknown): string | null =>
-  typeof value === "string" && value.length > 0 ? value : null;
+  typeof value === "string" && UUID_PATTERN.test(value) ? value : null;
 
 /**
  * The ids a finished call's `structured_content` names at its top level.

@@ -8,6 +8,7 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.PERSONAL_CHAT: "Use the personal chat. Without this permission the personal chat is unavailable; all other access is unaffected.",
     Permission.GROUP_CHATS: "Management of Group Chats. Create, Update, and Delete Assistants.",
     Permission.APPS: "Management of Apps. Create, Update, and Delete Apps",
+    Permission.FLOWS: "Management of Flows. Create, Update, Publish, Run and Delete Flows.",
     Permission.SERVICES: "Management of Services. Create, Update, and Delete Services.",
     Permission.COLLECTIONS: "Management of Collections. Create, Update, and Delete Collections.",
     Permission.WEBSITES: "Management of Websites. Create, Update, and Delete Websites",

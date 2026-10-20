@@ -130,6 +130,7 @@ class AuthService:
         assistant_id: UUID,
         mcp_server_id: UUID | None = None,
         table_tools: bool = False,
+        session_id: UUID | None = None,
         expires_in: int = 15,
     ) -> str:
         """Mint a short-lived access token for a loopback MCP server.
@@ -150,12 +151,17 @@ class AuthService:
         cannot be chosen by the caller. ``table_tools`` records that the
         completion also attached the file-analysis tools, so the files server
         can point spreadsheets at them instead of dumping their text.
+        ``session_id`` names the chat session the completion runs in, so a
+        tool that creates something during a conversation (a flow) can bind
+        it to that conversation without taking the id as an argument.
         """
         claims: dict[str, object] = {"assistant_id": str(assistant_id)}
         if mcp_server_id is not None:
             claims["mcp_server_id"] = str(mcp_server_id)
         if table_tools:
             claims["table_tools"] = True
+        if session_id is not None:
+            claims["session_id"] = str(session_id)
         return self.create_access_token_for_user(
             user,
             audience=INTERNAL_MCP_AUDIENCE,

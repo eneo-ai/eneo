@@ -56,6 +56,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.websites_table",
     "eneo.database.tables.whats_new_table",
     "eneo.database.tables.workflow_tables",
+    "eneo.database.tables.flow_tables",
 )
 
 for module_name in _TABLE_MODULES:

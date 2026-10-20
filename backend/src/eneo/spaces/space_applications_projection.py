@@ -68,3 +68,5 @@ class SpaceApplicationsProjection:
     group_chats: tuple[GroupChatApplicationsProjection, ...]
     apps: tuple[AppApplicationsProjection, ...]
     services: tuple[ServiceApplicationsProjection, ...]
+    # Flows are listed by their own endpoint; the space only carries the count.
+    flow_count: int = 0

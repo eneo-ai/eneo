@@ -48,12 +48,18 @@ describe("spaceSections", () => {
       overrides: {
         applications: {
           ...makeSpace().applications,
-          flows: { items: [], count: 0, permissions: ["read", "create"] }
+          flows: { count: 2, permissions: ["read", "create"] }
         }
       }
     });
-    const ids = spaceSections(space, canFor(space), "space-1").map((section) => section.id);
-    expect(ids.slice(0, 4)).toEqual(["overview", "assistants", "apps", "flows"]);
+    const sections = spaceSections(space, canFor(space), "space-1");
+    expect(sections.slice(0, 4).map((section) => section.id)).toEqual([
+      "overview",
+      "assistants",
+      "apps",
+      "flows"
+    ]);
+    expect(sections[3]).toEqual({ id: "flows", href: "/spaces/space-1/flows", count: 2 });
 
     const unlisted = makeSpace();
     expect(

@@ -5,6 +5,7 @@ roles:
       - assistants
       - group_chats
       - apps
+      - flows
       - collections
       - shared_spaces
       - web_search
@@ -17,6 +18,7 @@ roles:
       - assistants
       - group_chats
       - apps
+      - flows
       - services
       - collections
       - AI
@@ -39,6 +41,7 @@ roles:
       - skills_management
       - group_chats
       - apps
+      - flows
       - services
       - collections
       - insights

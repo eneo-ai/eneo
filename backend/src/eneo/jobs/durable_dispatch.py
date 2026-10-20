@@ -23,6 +23,7 @@ _QUEUED_SQL = sa.literal_column("'queued'", type_=sa.String())
 _DURABLE_TASKS_SQL = (
     sa.literal_column("'upload_info_blob'", type_=sa.String()),
     sa.literal_column("'transcription'", type_=sa.String()),
+    sa.literal_column("'run_flow'", type_=sa.String()),
 )
 Enqueue = Callable[[Task, UUID, TaskParams], Awaitable[ArqJob | None]]
 

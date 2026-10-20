@@ -51,12 +51,7 @@ import {
 } from "@/features/flows/flow-tool-calls";
 import { invalidateFlow, invalidateFlowLists } from "@/features/flows/flows";
 import { useFlowPanel } from "@/features/flows/use-flow-panel";
-import {
-  appViewSubject,
-  appViewTitle,
-  hasResult,
-  messageAppViewCalls
-} from "@/features/mcp-apps/mcp-apps";
+import { appViewSubject, appViewTitle, messageAppViewCalls } from "@/features/mcp-apps/mcp-apps";
 import { toolCallOutcome } from "@/features/mcp-apps/view-tool-calls";
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { useAnswerFeedback } from "./answer-feedback";
@@ -551,7 +546,12 @@ function ConversationView({
   useEffect(() => {
     if (!flowPanel) return;
     for (const { call, latest, live } of flowCalls) {
-      const fromArguments = flowRefFromArguments(call.input);
+      // Arguments are read only once the model has finished writing them: a
+      // streaming input is a partial JSON document whose ids are cut short.
+      const fromArguments =
+        call.state === "input-streaming"
+          ? { flowId: null, runId: null }
+          : flowRefFromArguments(call.input);
       flowPanel.noteCall(call.toolCallId, fromArguments, { follow: latest });
       if (call.state !== "output-available" && call.state !== "output-error") continue;
       if (flowPanel.refresh(call.toolCallId)) {
@@ -559,7 +559,12 @@ function ConversationView({
         if (flowId) void invalidateFlow(queryClient, flowId);
         void invalidateFlowLists(queryClient);
       }
-      if (!sessionId || !hasResult(call, live) || !flowPanel.settle(call.toolCallId)) continue;
+      // A returned call's stored result is readable once the answer is saved
+      // (`live` is false). The live stream's `result_status` stays at
+      // "approved" until the conversation is refetched, so the part's state,
+      // not that status, says the call has returned.
+      const returned = call.state === "output-available" || call.state === "output-error";
+      if (!sessionId || live || !returned || !flowPanel.settle(call.toolCallId)) continue;
       void toolCallOutcome(queryClient, sessionId, call.toolCallId).then((outcome) => {
         if (!mounted.current || !outcome) return;
         flowPanel.noteCall(call.toolCallId, flowRefFromOutcome(outcome.structuredContent), {

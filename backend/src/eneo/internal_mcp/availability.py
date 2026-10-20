@@ -21,6 +21,9 @@ class InternalMCPAvailability:
     files: bool
     url_only_file_ids: frozenset[UUID]
     referenced_file_ids: frozenset[UUID]
+    # The flow authoring tools attach only to the hidden flows assistant of a
+    # space (``purpose == "flows"``); every other assistant never sees them.
+    flows: bool = False
 
 
 def resolve_internal_mcp_availability(
@@ -40,6 +43,7 @@ def resolve_internal_mcp_availability(
             files=False,
             url_only_file_ids=frozenset(),
             referenced_file_ids=frozenset(),
+            flows=False,
         )
 
     conversation_files = list(conversation_files)
@@ -57,4 +61,5 @@ def resolve_internal_mcp_availability(
         files=bool(referenced_ids),
         url_only_file_ids=url_only_ids,
         referenced_file_ids=referenced_ids,
+        flows=getattr(assistant, "purpose", None) == "flows",
     )

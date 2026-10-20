@@ -14,7 +14,7 @@ import { FileChip } from "@/features/apps/run/upload-input";
 import { useFileUploads, type FileUpload } from "@/features/files/use-file-uploads";
 import { toastApiError } from "@/lib/api/toast";
 import { createFlowRun, flowKeys } from "./flows";
-import type { FlowPublic, FormField, FlowRunPublic } from "./types";
+import { formFieldsOf, type FlowPublic, type FormField, type FlowRunPublic } from "./types";
 
 const FILE_TYPES = new Set(["file", "audio"]);
 
@@ -116,7 +116,7 @@ export function FlowRunDialog({
   const [values, setValues] = useState<Record<string, string>>({});
   const [label, setLabel] = useState("");
   const [problems, setProblems] = useState<Record<string, string>>({});
-  const fields = flow.definition.form_fields;
+  const fields = formFieldsOf(flow.definition);
   const accept = limits.attachments.formats.map((format) => format.mimetype).join(",") || undefined;
 
   const register = useCallback((key: string, handle: FileFieldHandle | null) => {

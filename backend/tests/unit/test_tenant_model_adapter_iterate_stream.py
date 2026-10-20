@@ -2181,6 +2181,13 @@ class _StructuredPlainProxy(_StructuredResultMixin, _FakeMCPProxy):
     pass
 
 
+class _StructuredInternalProxy(_StructuredResultMixin, _FakeMCPProxy):
+    """Proxy routing the call to one of Eneo's own loopback servers."""
+
+    def is_internal_tool(self, prefixed_tool_name):
+        return True
+
+
 async def _executed_tool_call(mcp_proxy):
     adapter = _make_adapter()
     follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
@@ -2225,6 +2232,14 @@ async def test_structured_content_is_dropped_for_a_call_without_a_view():
     call = await _executed_tool_call(_StructuredPlainProxy())
 
     assert call.structured_content is None
+
+
+async def test_structured_content_is_kept_for_an_internal_tool_without_a_view():
+    # Eneo's own loopback tools (flows) feed native panels from it.
+    call = await _executed_tool_call(_StructuredInternalProxy())
+
+    assert call.is_internal is True
+    assert call.structured_content == {"temperature": 12}
 
 
 @pytest.mark.asyncio

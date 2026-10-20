@@ -82,6 +82,8 @@ class Space:
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         group_members: dict[UUID, SpaceGroupMember] | None = None,
         default_assistant_load_failed: bool = False,
+        purpose_assistants: list["Assistant"] | None = None,
+        flow_count: int = 0,
     ):
         super().__init__()
         self.id = id
@@ -101,6 +103,11 @@ class Space:
         # so they don't auto-create a duplicate default. See SpaceInitService.
         self.default_assistant_load_failed = default_assistant_load_failed
         self.assistants = assistants or []
+        # Assistants Eneo manages for a feature (``Assistant.purpose``): reachable
+        # by id, never part of the listed ``assistants``.
+        self.purpose_assistants = purpose_assistants or []
+        # Non-deleted flows in the space; the flows endpoint lists them.
+        self.flow_count = flow_count
         self.group_chats = group_chats or []
         self.apps = apps or []
         self.services = services or []
@@ -601,7 +608,7 @@ class Space:
         if self.default_assistant and self.default_assistant.id == assistant_id:
             return self.default_assistant
 
-        return self._get_entity(assistant_id, self.assistants)
+        return self._get_entity(assistant_id, self.assistants + self.purpose_assistants)
 
     def get_group_chat(self, group_chat_id: UUID) -> "GroupChat":
         return self._get_entity(group_chat_id, self.group_chats)

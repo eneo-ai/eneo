@@ -19,7 +19,7 @@ from eneo.authentication.signed_urls import (
     verify_file_original_download_token,
 )
 from eneo.files.file_content_loader import FileContentLoader
-from eneo.files.file_models import File
+from eneo.files.file_models import File, FileMetadata
 from eneo.main.exceptions import NotFoundException
 
 logger = logging.getLogger(__name__)
@@ -56,18 +56,19 @@ def verify_reference_url(url: str) -> tuple[UUID, dict[str, Any]]:
     return file_id, payload
 
 
-async def load_referenced_file(
+async def referenced_file_metadata(
     file_id: UUID,
     payload: dict[str, Any],
     tool_ctx: Any,
     *,
     log_tag: str,
-) -> File:
-    """The byte-complete file behind a verified reference, tenant-checked.
+) -> FileMetadata:
+    """The file record behind a verified reference, tenant-checked, no bytes.
 
     Missing and inaccessible files are indistinguishable to the caller (no
     existence oracle). Authorization is the signed token plus the tenant
-    match; the loader itself projects bytes only.
+    match. For a tool that only hands the file on (a flow run reads it
+    later, in the worker) this is all it needs.
     """
     try:
         metadata = await tool_ctx.container.file_repo().get_by_id(file_id)
@@ -80,6 +81,24 @@ async def load_referenced_file(
     ):
         logger.info("%s file=%s -> tenant mismatch", log_tag, file_id)
         raise FileReferenceRejected(NOT_FOUND_MESSAGE)
+    return metadata
+
+
+async def load_referenced_file(
+    file_id: UUID,
+    payload: dict[str, Any],
+    tool_ctx: Any,
+    *,
+    log_tag: str,
+) -> File:
+    """The byte-complete file behind a verified reference, tenant-checked.
+
+    The checks are :func:`referenced_file_metadata`'s; the loader itself
+    projects bytes only.
+    """
+    metadata = await referenced_file_metadata(
+        file_id, payload, tool_ctx, log_tag=log_tag
+    )
     loader = FileContentLoader(
         repo=tool_ctx.container.file_repo(),
         object_content=tool_ctx.container.object_content_service(),

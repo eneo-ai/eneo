@@ -61,9 +61,8 @@ export function spaceSections(space: Space, can: Can, routeId: SpaceRouteId): Sp
     );
   }
   if (!isOrg && can("read", "app")) add("apps", space.applications?.apps.count ?? 0);
-  // Shown once the backend lists flows on the space with a read permission
-  // (`applications.flows.permissions`); a backend without flows has no tab.
-  if (!isOrg && can("read", "flow")) add("flows");
+  // A backend without flows lists none on the space, so there is no tab.
+  if (!isOrg && can("read", "flow")) add("flows", space.applications?.flows?.count ?? 0);
   if (can("read", "website") || can("read", "collection")) {
     add("knowledge", ownKnowledgeCount(space));
   }

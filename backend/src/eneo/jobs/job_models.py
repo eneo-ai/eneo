@@ -29,6 +29,7 @@ class Task(str, Enum):
     EMBED_GROUP = "embed_group"
     CRAWL_ALL_WEBSITES = "crawl_all_websites"
     RUN_APP = "run_app"
+    RUN_FLOW = "run_flow"
     PULL_CONFLUENCE_CONTENT = "pull_confluence_content"
     PULL_SHAREPOINT_CONTENT = "pull_sharepoint_content"
     SYNC_SHAREPOINT_DELTA = "sync_sharepoint_delta"

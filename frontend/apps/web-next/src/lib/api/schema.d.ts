@@ -144,6 +144,263 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Flows */
+    get: operations["list_flows_api_v1_flows__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/authoring-assistant/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Authoring Assistant */
+    get: operations["get_authoring_assistant_api_v1_flows_authoring_assistant__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Flow */
+    get: operations["get_flow_api_v1_flows__id___get"];
+    put?: never;
+    post?: never;
+    /** Delete Flow */
+    delete: operations["delete_flow_api_v1_flows__id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/run-contract/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Run Contract */
+    get: operations["get_run_contract_api_v1_flows__id__run_contract__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Runs */
+    get: operations["list_runs_api_v1_flows__id__runs__get"];
+    put?: never;
+    /** Create Run */
+    post: operations["create_run_api_v1_flows__id__runs__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Run */
+    get: operations["get_run_api_v1_flows__id__runs__run_id___get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/status/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Run Status */
+    get: operations["get_run_status_api_v1_flows__id__runs__run_id__status__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/steps/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Run Steps */
+    get: operations["get_run_steps_api_v1_flows__id__runs__run_id__steps__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/cancel/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Cancel Run */
+    post: operations["cancel_run_api_v1_flows__id__runs__run_id__cancel__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Active Checkpoint */
+    get: operations["get_active_checkpoint_api_v1_flows__id__runs__run_id__review_checkpoints_active__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Edit Checkpoint */
+    patch: operations["edit_checkpoint_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id___patch"];
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Approve Checkpoint */
+    post: operations["approve_checkpoint_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id__approve__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Reject Checkpoint */
+    post: operations["reject_checkpoint_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id__reject__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Resume Checkpoint */
+    post: operations["resume_checkpoint_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id__resume__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve-and-continue/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Approve And Continue */
+    post: operations["approve_and_continue_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id__approve_and_continue__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/app-runs/{id}/": {
     parameters: {
       query?: never;
@@ -9485,6 +9742,13 @@ export interface components {
       | "app_executed"
       | "app_published"
       | "app_run_deleted"
+      | "flow_created"
+      | "flow_updated"
+      | "flow_published"
+      | "flow_deleted"
+      | "flow_run_created"
+      | "flow_run_cancelled"
+      | "flow_run_reviewed"
       | "skill_created"
       | "skill_revision_created"
       | "skill_revision_restored"
@@ -10823,12 +11087,29 @@ export interface components {
       /** Skill Bindings */
       skill_bindings?: components["schemas"]["SkillBindingReferenceInput"][] | null;
     };
+    /**
+     * ApplicationSummary
+     * @description A resource family the space only counts; its own endpoint lists it.
+     */
+    ApplicationSummary: {
+      /**
+       * Permissions
+       * @default []
+       */
+      permissions?: components["schemas"]["ResourcePermission"][];
+      /**
+       * Count
+       * @default 0
+       */
+      count?: number;
+    };
     /** Applications */
     Applications: {
       assistants: components["schemas"]["PaginatedPermissions_AssistantSparse_"];
       group_chats: components["schemas"]["PaginatedPermissions_GroupChatSparse_"];
       services: components["schemas"]["PaginatedPermissions_ServiceSparse_"];
       apps: components["schemas"]["PaginatedPermissions_AppSparse_"];
+      flows?: components["schemas"]["ApplicationSummary"];
     };
     /** AskAnalysis */
     AskAnalysis: {
@@ -12515,6 +12796,36 @@ export interface components {
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
+    /**
+     * ComposeStep
+     * @description Deterministic text assembled from a template. No model call.
+     */
+    ComposeStep: {
+      /**
+       * Key
+       * @description Stable identifier other steps use to read this step's output ({{steps.<key>}}). Keep it when editing the flow.
+       */
+      key: string;
+      /**
+       * Id
+       * @description Assigned by Eneo; omit when creating, keep when updating.
+       */
+      id?: string | null;
+      /**
+       * Name
+       * @description Short title shown to the user.
+       */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "compose";
+      /** Template */
+      template: string;
+    };
     /** ConfigurationError */
     ConfigurationError: {
       /** Field */
@@ -13699,6 +14010,65 @@ export interface components {
       format: "docx" | "pdf";
     };
     /**
+     * DocumentFormat
+     * @enum {string}
+     */
+    DocumentFormat: "docx" | "pdf";
+    /**
+     * DocumentStep
+     * @description A document produced by Eneo's tool runtime, always, with bound values.
+     */
+    DocumentStep: {
+      /**
+       * Key
+       * @description Stable identifier other steps use to read this step's output ({{steps.<key>}}). Keep it when editing the flow.
+       */
+      key: string;
+      /**
+       * Id
+       * @description Assigned by Eneo; omit when creating, keep when updating.
+       */
+      id?: string | null;
+      /**
+       * Name
+       * @description Short title shown to the user.
+       */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "document";
+      /** @default docx */
+      format?: components["schemas"]["DocumentFormat"];
+      /**
+       * Template File Id
+       * @description A Word template file to fill; null means compose from content.
+       */
+      template_file_id?: string | null;
+      /** Title */
+      title?: string | null;
+      /**
+       * Filename
+       * @description Template; the extension is added.
+       */
+      filename?: string | null;
+      /**
+       * Content
+       * @description Markdown template for the document body when no template file.
+       */
+      content?: string | null;
+      /**
+       * Values
+       * @description Template field name to template text, for a template file.
+       */
+      values?: {
+        [key: string]: string;
+      };
+    };
+    /**
      * DocumentTemplateChoicePublic
      * @description An assistant's choice for its file-creation capability.
      */
@@ -14259,6 +14629,8 @@ export interface components {
       | "group_chat"
       | "collection"
       | "app_run"
+      | "flow"
+      | "flow_run"
       | "security_classification"
       | "integration"
       | "integration_knowledge"
@@ -14660,13 +15032,500 @@ export interface components {
      * FileUsageKind
      * @enum {string}
      */
-    FileUsageKind: "chat_attachment" | "assistant_attachment" | "app_attachment" | "app_run_input";
+    FileUsageKind:
+      | "chat_attachment"
+      | "assistant_attachment"
+      | "app_attachment"
+      | "app_run_input"
+      | "flow_file"
+      | "flow_run_file";
     /** FileUsageSummary */
     FileUsageSummary: {
       kind: components["schemas"]["FileUsageKind"];
       /** Count */
       count: number;
     };
+    /**
+     * FlowAuthoringAssistantPublic
+     * @description The hidden assistant the flows chat talks to, for one space.
+     */
+    FlowAuthoringAssistantPublic: {
+      /**
+       * Assistant Id
+       * Format: uuid
+       */
+      assistant_id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+    };
+    /**
+     * FlowDefinition
+     * @description The whole definition. ``schema_version`` lets later shapes migrate.
+     */
+    FlowDefinition: {
+      /**
+       * Schema Version
+       * @default 1
+       */
+      schema_version?: number;
+      /** Form Fields */
+      form_fields?: components["schemas"]["FormField"][];
+      /** Steps */
+      steps?: (
+        | components["schemas"]["LlmStep"]
+        | components["schemas"]["ComposeStep"]
+        | components["schemas"]["DocumentStep"]
+        | components["schemas"]["ReviewStep"]
+        | components["schemas"]["TranscribeStep"]
+      )[];
+    };
+    /** FlowFinalOutputContractPublic */
+    FlowFinalOutputContractPublic: {
+      kind: components["schemas"]["StepKind"];
+      /** Output Type */
+      output_type: string;
+    };
+    /**
+     * FlowPublic
+     * @description A flow with its draft definition; what the panel renders.
+     */
+    FlowPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      definition: components["schemas"]["FlowDefinition"];
+      /** Published Version */
+      published_version?: number | null;
+      /**
+       * Has Unpublished Changes
+       * @default false
+       */
+      has_unpublished_changes?: boolean;
+      /** Conversation Id */
+      conversation_id?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /** FlowRunContractPublic */
+    FlowRunContractPublic: {
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /** Published Flow Version */
+      published_flow_version: number;
+      /** Form Fields */
+      form_fields: components["schemas"]["FormField"][];
+      /** Steps Requiring Review */
+      steps_requiring_review: components["schemas"]["FlowRunContractStepPublic"][];
+      final_output?: components["schemas"]["FlowFinalOutputContractPublic"] | null;
+    };
+    /** FlowRunContractStepPublic */
+    FlowRunContractStepPublic: {
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Key */
+      key: string;
+      /** Name */
+      name: string;
+      kind: components["schemas"]["StepKind"];
+    };
+    /**
+     * FlowRunCreateRequest
+     * @description Start a run of the published version.
+     *
+     *     ``values`` carries text, number and select fields by key; ``files``
+     *     carries file and audio fields by key as ids of files the caller
+     *     uploaded (through the runtime-files endpoint or the chat).
+     */
+    FlowRunCreateRequest: {
+      /** Values */
+      values?: {
+        [key: string]: unknown;
+      };
+      /** Files */
+      files?: {
+        [key: string]: string[];
+      };
+      /** Run Label */
+      run_label?: string | null;
+      /** Expected Flow Version */
+      expected_flow_version?: number | null;
+    };
+    /** FlowRunErrorPublic */
+    FlowRunErrorPublic: {
+      /** Code */
+      code: string;
+      /** Message */
+      message: string;
+    };
+    /** FlowRunFilePublic */
+    FlowRunFilePublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Mimetype */
+      mimetype?: string | null;
+      /** Size */
+      size?: number | null;
+      /** Role */
+      role: string;
+      /** Field Key */
+      field_key?: string | null;
+      /** Step Id */
+      step_id?: string | null;
+    };
+    /** FlowRunPublic */
+    FlowRunPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /** Flow Version */
+      flow_version: number;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      principal_type: components["schemas"]["PrincipalType"];
+      status: components["schemas"]["FlowRunStatus"];
+      /** Run Label */
+      run_label?: string | null;
+      /** Job Id */
+      job_id?: string | null;
+      /** Started At */
+      started_at?: string | null;
+      /** Finished At */
+      finished_at?: string | null;
+      /** Cancelled At */
+      cancelled_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Input Payload Json */
+      input_payload_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Payload Json */
+      output_payload_json?: {
+        [key: string]: unknown;
+      } | null;
+      error?: components["schemas"]["FlowRunErrorPublic"] | null;
+      /** Input Files */
+      input_files?: components["schemas"]["FlowRunFilePublic"][];
+      /** Result Files */
+      result_files?: components["schemas"]["FlowRunFilePublic"][];
+      /** Steps */
+      steps?: components["schemas"]["FlowRunStepPublic"][];
+      review_checkpoint?: components["schemas"]["FlowRunReviewCheckpointPublic"] | null;
+    };
+    /** FlowRunReviewCheckpointApproveRequest */
+    FlowRunReviewCheckpointApproveRequest: {
+      /** Expected Checkpoint Revision */
+      expected_checkpoint_revision: number;
+    };
+    /** FlowRunReviewCheckpointEditRequest */
+    FlowRunReviewCheckpointEditRequest: {
+      /** Expected Checkpoint Revision */
+      expected_checkpoint_revision: number;
+      /** Current Payload Json */
+      current_payload_json: {
+        [key: string]: unknown;
+      };
+    };
+    /** FlowRunReviewCheckpointPublic */
+    FlowRunReviewCheckpointPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /**
+       * Flow Run Id
+       * Format: uuid
+       */
+      flow_run_id: string;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Step Order */
+      step_order: number;
+      /** Attempt No */
+      attempt_no: number;
+      state: components["schemas"]["ReviewCheckpointState"];
+      /** Revision */
+      revision: number;
+      /** Review Mode */
+      review_mode: string;
+      /** Output Type */
+      output_type: string;
+      /** Original Payload Json */
+      original_payload_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Current Payload Json */
+      current_payload_json?: {
+        [key: string]: unknown;
+      } | null;
+      requester_principal_type: components["schemas"]["PrincipalType"];
+      decided_by_principal_type?: components["schemas"]["PrincipalType"] | null;
+      /** Reason */
+      reason?: string | null;
+      /** Edited At */
+      edited_at?: string | null;
+      /** Approved At */
+      approved_at?: string | null;
+      /** Rejected At */
+      rejected_at?: string | null;
+      /** Resumed At */
+      resumed_at?: string | null;
+      /** Cancelled At */
+      cancelled_at?: string | null;
+      /** Expires At */
+      expires_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /** FlowRunReviewCheckpointRejectRequest */
+    FlowRunReviewCheckpointRejectRequest: {
+      /** Expected Checkpoint Revision */
+      expected_checkpoint_revision: number;
+      /** Reason */
+      reason?: string | null;
+    };
+    /** FlowRunReviewCheckpointResumeRequest */
+    FlowRunReviewCheckpointResumeRequest: {
+      /** Expected Checkpoint Revision */
+      expected_checkpoint_revision: number;
+    };
+    /** FlowRunReviewCheckpointResumeResponse */
+    FlowRunReviewCheckpointResumeResponse: {
+      checkpoint: components["schemas"]["FlowRunReviewCheckpointPublic"];
+      run: components["schemas"]["FlowRunSummaryPublic"];
+    };
+    /**
+     * FlowRunStatus
+     * @enum {string}
+     */
+    FlowRunStatus: "queued" | "running" | "awaiting_review" | "completed" | "failed" | "cancelled";
+    /** FlowRunStepPublic */
+    FlowRunStepPublic: {
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Key */
+      key: string;
+      /** Name */
+      name: string;
+      kind: components["schemas"]["StepKind"];
+      /** Step Order */
+      step_order: number;
+      status: components["schemas"]["StepResultStatus"];
+      /**
+       * Current Attempt No
+       * @default 0
+       */
+      current_attempt_no?: number;
+      /** Input Payload Json */
+      input_payload_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Output Payload Json */
+      output_payload_json?: {
+        [key: string]: unknown;
+      } | null;
+      /** Result Files */
+      result_files?: components["schemas"]["FlowRunFilePublic"][];
+      /** Num Tokens Input */
+      num_tokens_input?: number | null;
+      /** Num Tokens Output */
+      num_tokens_output?: number | null;
+      /** Error Code */
+      error_code?: string | null;
+      /** Error Message */
+      error_message?: string | null;
+      /** Started At */
+      started_at?: string | null;
+      /** Finished At */
+      finished_at?: string | null;
+    };
+    /** FlowRunSummaryPublic */
+    FlowRunSummaryPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /** Flow Version */
+      flow_version: number;
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      principal_type: components["schemas"]["PrincipalType"];
+      status: components["schemas"]["FlowRunStatus"];
+      /** Run Label */
+      run_label?: string | null;
+      /** Job Id */
+      job_id?: string | null;
+      /** Started At */
+      started_at?: string | null;
+      /** Finished At */
+      finished_at?: string | null;
+      /** Cancelled At */
+      cancelled_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * FlowSparsePublic
+     * @description A list row.
+     */
+    FlowSparsePublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Published Version */
+      published_version?: number | null;
+      /** Step Count */
+      step_count: number;
+      /** Step Kinds */
+      step_kinds: components["schemas"]["StepKind"][];
+      /** Conversation Id */
+      conversation_id?: string | null;
+      last_run?: components["schemas"]["FlowRunSummaryPublic"] | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * FormField
+     * @description One run input the user (or API caller) provides when starting a run.
+     */
+    FormField: {
+      /**
+       * Key
+       * @description Identifier used in templates as {{form.<key>}}.
+       */
+      key: string;
+      /**
+       * Label
+       * @description Shown to the person starting a run.
+       */
+      label: string;
+      /** @description text, number or select take a value; file and audio take uploads (audio is what a transcribe step reads). */
+      type: components["schemas"]["FormFieldType"];
+      /**
+       * Required
+       * @default true
+       */
+      required?: boolean;
+      /** Description */
+      description?: string | null;
+      /**
+       * Options
+       * @description Allowed values for a select field.
+       */
+      options?: string[] | null;
+    };
+    /**
+     * FormFieldType
+     * @enum {string}
+     */
+    FormFieldType: "text" | "number" | "select" | "file" | "audio";
     /** FormatLimit */
     FormatLimit: {
       /** Mimetype */
@@ -15603,6 +16462,21 @@ export interface components {
       finished_at?: string | null;
       failure_code?: components["schemas"]["JobFailureCode"] | null;
     };
+    /** JsonOutput */
+    JsonOutput: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "json";
+      /**
+       * Schema
+       * @description JSON Schema the step's output must satisfy.
+       */
+      schema: {
+        [key: string]: unknown;
+      };
+    };
     /** Knowledge */
     Knowledge: {
       groups: components["schemas"]["PaginatedPermissions_CollectionPublic_"];
@@ -15630,6 +16504,62 @@ export interface components {
     Limits: {
       info_blobs: components["schemas"]["InfoBlobLimits"];
       attachments: components["schemas"]["AttachmentLimits"];
+    };
+    /**
+     * LlmStep
+     * @description One completion with a fixed prompt. Produces text or schema-checked JSON.
+     */
+    LlmStep: {
+      /**
+       * Key
+       * @description Stable identifier other steps use to read this step's output ({{steps.<key>}}). Keep it when editing the flow.
+       */
+      key: string;
+      /**
+       * Id
+       * @description Assigned by Eneo; omit when creating, keep when updating.
+       */
+      id?: string | null;
+      /**
+       * Name
+       * @description Short title shown to the user.
+       */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "llm";
+      /**
+       * Prompt
+       * @description The instructions. Fixed at authoring time, never rewritten.
+       */
+      prompt: string;
+      /**
+       * Input
+       * @description What the model reads, as a template over run inputs and earlier steps. Defaults to the previous step's output.
+       * @default {{previous}}
+       */
+      input?: string;
+      /**
+       * Model Id
+       * @description Completion model; null means the space default.
+       */
+      model_id?: string | null;
+      /** Model Kwargs */
+      model_kwargs?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Files From
+       * @description File or audio form fields whose files the model also sees.
+       */
+      files_from?: string[];
+      knowledge?: components["schemas"]["StepKnowledge"];
+      /** Output */
+      output?: components["schemas"]["TextOutput"] | components["schemas"]["JsonOutput"];
     };
     /** LocalPasswordPolicy */
     LocalPasswordPolicy: {
@@ -17971,6 +18901,32 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[FlowRunSummaryPublic] */
+    PaginatedResponse_FlowRunSummaryPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["FlowRunSummaryPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** PaginatedResponse[FlowSparsePublic] */
+    PaginatedResponse_FlowSparsePublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["FlowSparsePublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[GroupPublicWithMetadata] */
     PaginatedResponse_GroupPublicWithMetadata_: {
       /**
@@ -18796,6 +19752,7 @@ export interface components {
       | "personal_chat"
       | "group_chats"
       | "apps"
+      | "flows"
       | "services"
       | "collections"
       | "insights"
@@ -19055,6 +20012,11 @@ export interface components {
        */
       updated_at: string;
     };
+    /**
+     * PrincipalType
+     * @enum {string}
+     */
+    PrincipalType: "user" | "service";
     /** PrivacyPolicy */
     PrivacyPolicy: {
       /** Url */
@@ -19641,6 +20603,54 @@ export interface components {
        * @description Days to retain audit logs (1 day minimum, 2555 days/7 years maximum). Recommended: 90+ days for compliance
        */
       retention_days: number;
+    };
+    /**
+     * ReviewCheckpointState
+     * @enum {string}
+     */
+    ReviewCheckpointState:
+      "awaiting_review" | "edited" | "approved" | "rejected" | "resumed" | "cancelled" | "expired";
+    /**
+     * ReviewMode
+     * @enum {string}
+     */
+    ReviewMode: "view" | "edit";
+    /**
+     * ReviewStep
+     * @description Pause the run until a person approves (or edits) an earlier output.
+     */
+    ReviewStep: {
+      /**
+       * Key
+       * @description Stable identifier other steps use to read this step's output ({{steps.<key>}}). Keep it when editing the flow.
+       */
+      key: string;
+      /**
+       * Id
+       * @description Assigned by Eneo; omit when creating, keep when updating.
+       */
+      id?: string | null;
+      /**
+       * Name
+       * @description Short title shown to the user.
+       */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "review";
+      /** @default edit */
+      mode?: components["schemas"]["ReviewMode"];
+      /**
+       * Of
+       * @description Step whose output is reviewed; default previous.
+       */
+      of?: string | null;
+      /** Expires After Seconds */
+      expires_after_seconds?: number | null;
     };
     /**
      * RoleAssignmentPublic
@@ -21504,6 +22514,18 @@ export interface components {
       /** Data Retention Days */
       data_retention_days?: number | null;
     };
+    /** SpeakerMapping */
+    SpeakerMapping: {
+      /** Participants Field */
+      participants_field?: string | null;
+      /**
+       * Infer Names
+       * @default true
+       */
+      infer_names?: boolean;
+      /** Model Id */
+      model_id?: string | null;
+    };
     /**
      * StartRunRequest
      * @description Body for ``POST /runs/`` — start a new helper run.
@@ -21541,6 +22563,27 @@ export interface components {
      * @enum {string}
      */
     Status: "in progress" | "queued" | "complete" | "failed" | "not found";
+    /**
+     * StepKind
+     * @enum {string}
+     */
+    StepKind: "llm" | "compose" | "document" | "review" | "transcribe";
+    /**
+     * StepKnowledge
+     * @description Knowledge sources whose matching passages are injected into the prompt.
+     */
+    StepKnowledge: {
+      /** Collection Ids */
+      collection_ids?: string[];
+      /** Website Ids */
+      website_ids?: string[];
+    };
+    /**
+     * StepResultStatus
+     * @enum {string}
+     */
+    StepResultStatus:
+      "pending" | "running" | "awaiting_review" | "completed" | "failed" | "cancelled" | "skipped";
     /** StorageInfoModel */
     StorageInfoModel: {
       /** Count */
@@ -21761,6 +22804,7 @@ export interface components {
       | "embed_group"
       | "crawl_all_websites"
       | "run_app"
+      | "run_flow"
       | "pull_confluence_content"
       | "pull_sharepoint_content"
       | "sync_sharepoint_delta"
@@ -22704,6 +23748,14 @@ export interface components {
       /** Favorite Providers */
       favorite_providers?: string[];
     };
+    /** TextOutput */
+    TextOutput: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      type: "text";
+    };
     /** ToggleRequest */
     ToggleRequest: {
       /** Value */
@@ -22918,6 +23970,51 @@ export interface components {
        * @default 0
        */
       deleted_count?: number;
+    };
+    /**
+     * TranscribeStep
+     * @description Transcribe an audio input with a transcription model.
+     */
+    TranscribeStep: {
+      /**
+       * Key
+       * @description Stable identifier other steps use to read this step's output ({{steps.<key>}}). Keep it when editing the flow.
+       */
+      key: string;
+      /**
+       * Id
+       * @description Assigned by Eneo; omit when creating, keep when updating.
+       */
+      id?: string | null;
+      /**
+       * Name
+       * @description Short title shown to the user.
+       */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "transcribe";
+      /**
+       * Source
+       * @description The audio (or file) form field to transcribe.
+       */
+      source: string;
+      /** Transcription Model Id */
+      transcription_model_id?: string | null;
+      /** Language */
+      language?: string | null;
+      /**
+       * Speaker Labels
+       * @default false
+       */
+      speaker_labels?: boolean;
+      /** Max Speakers */
+      max_speakers?: number | null;
+      speaker_mapping?: components["schemas"]["SpeakerMapping"] | null;
     };
     /** TranscriptionModelPublic */
     TranscriptionModelPublic: {
@@ -25132,6 +26229,962 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AppPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_flows_api_v1_flows__get: {
+    parameters: {
+      query: {
+        space_id: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_FlowSparsePublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_authoring_assistant_api_v1_flows_authoring_assistant__get: {
+    parameters: {
+      query: {
+        space_id: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowAuthoringAssistantPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_flow_api_v1_flows__id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_flow_api_v1_flows__id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_run_contract_api_v1_flows__id__run_contract__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunContractPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_runs_api_v1_flows__id__runs__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_FlowRunSummaryPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  create_run_api_v1_flows__id__runs__post: {
+    parameters: {
+      query?: never;
+      header?: {
+        "Idempotency-Key"?: string | null;
+      };
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_run_api_v1_flows__id__runs__run_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_run_status_api_v1_flows__id__runs__run_id__status__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunSummaryPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_run_steps_api_v1_flows__id__runs__run_id__steps__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunStepPublic"][];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  cancel_run_api_v1_flows__id__runs__run_id__cancel__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_active_checkpoint_api_v1_flows__id__runs__run_id__review_checkpoints_active__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        run_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"] | null;
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  edit_checkpoint_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id___patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        run_id: string;
+        checkpoint_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunReviewCheckpointEditRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  approve_checkpoint_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id__approve__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        run_id: string;
+        checkpoint_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunReviewCheckpointApproveRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunReviewCheckpointResumeResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  reject_checkpoint_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id__reject__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        run_id: string;
+        checkpoint_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunReviewCheckpointRejectRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  resume_checkpoint_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id__resume__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        run_id: string;
+        checkpoint_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunReviewCheckpointResumeRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunReviewCheckpointResumeResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  approve_and_continue_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id__approve_and_continue__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        run_id: string;
+        checkpoint_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunReviewCheckpointApproveRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunReviewCheckpointResumeResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -37622,6 +39675,7 @@ export interface operations {
                 | "embed_group"
                 | "crawl_all_websites"
                 | "run_app"
+                | "run_flow"
                 | "pull_confluence_content"
                 | "pull_sharepoint_content"
                 | "sync_sharepoint_delta"

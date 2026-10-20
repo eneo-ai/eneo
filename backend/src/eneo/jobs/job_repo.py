@@ -206,6 +206,29 @@ class JobRepository:
             await self._announce(id)
         return failed
 
+    async def mark_job_failed_if_running(
+        self, id: UUID, error_message: str | None = None
+    ) -> bool:
+        """Fail a queued or in-progress job (CAS); no-op once it is terminal."""
+        from eneo.main.models import Status
+
+        stmt = (
+            sa.update(Jobs)
+            .where(Jobs.id == id)
+            .where(Jobs.status.in_([Status.IN_PROGRESS, Status.QUEUED]))
+            .values(
+                status=Status.FAILED,
+                result_location=error_message[:512] if error_message else None,
+                finished_at=sa.func.now(),
+                updated_at=sa.func.now(),
+            )
+        )
+        result = await self.delegate.session.execute(stmt)
+        failed = affected_row_count(result) > 0
+        if failed:
+            await self._announce(id)
+        return failed
+
     async def mark_stale_jobs_failed(
         self,
         tasks: list[str],

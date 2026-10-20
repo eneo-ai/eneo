@@ -35,6 +35,9 @@ class FileUsageKind(StrEnum):
     ASSISTANT_ATTACHMENT = "assistant_attachment"
     APP_ATTACHMENT = "app_attachment"
     APP_RUN_INPUT = "app_run_input"
+    # Flow template files and uploads awaiting a run; run inputs and outputs.
+    FLOW_FILE = "flow_file"
+    FLOW_RUN_FILE = "flow_run_file"
 
 
 class FileUsageSummary(BaseModel):

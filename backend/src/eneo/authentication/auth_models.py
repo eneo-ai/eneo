@@ -151,6 +151,7 @@ class ResourcePermissions(BaseModel):
 
     assistants: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     apps: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    flows: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     spaces: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     knowledge: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     conversations: ResourcePermissionLevel = ResourcePermissionLevel.NONE
@@ -164,6 +165,7 @@ class ResourcePermissions(BaseModel):
 RESOURCE_PERMISSION_FIELDS: tuple[str, ...] = (
     "assistants",
     "apps",
+    "flows",
     "spaces",
     "knowledge",
     "conversations",

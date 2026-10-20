@@ -200,6 +200,7 @@ class TestPermissionSemantics:
             "personal_chat",
             "group_chats",
             "apps",
+            "flows",
             "services",
             "collections",
             "insights",

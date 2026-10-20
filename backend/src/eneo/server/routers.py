@@ -47,6 +47,7 @@ from eneo.embedding_models.presentation.tenant_embedding_models_router import (
     router as tenant_embedding_models_router,
 )
 from eneo.files.file_router import router as files_router
+from eneo.flows.api.flow_router import router as flow_router
 from eneo.governance_policy.presentation.governance_policy_router import (
     router as governance_policy_router,
 )
@@ -199,6 +200,15 @@ router.include_router(
             )
         ),
         Depends(require_api_key_scope_check(resource_type="app", path_param="id")),
+    ],
+)
+router.include_router(
+    flow_router,
+    prefix="/flows",
+    tags=["flows"],
+    dependencies=[
+        Depends(require_resource_permission_for_method("flows")),
+        Depends(require_api_key_scope_check(resource_type="flow", path_param="id")),
     ],
 )
 router.include_router(

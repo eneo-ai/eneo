@@ -7,9 +7,8 @@ from eneo.jobs.job_models import KNOWLEDGE_TASKS, Job, JobInDb, JobUpdate, Task
 from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import (
+    DurableTaskParams,
     TaskParams,
-    Transcription,
-    UploadInfoBlob,
     build_dispatch_envelope,
 )
 from eneo.main.exceptions import NotFoundException
@@ -18,6 +17,8 @@ from eneo.main.models import Status
 from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
+
+DURABLE_TASKS = (Task.UPLOAD_FILE, Task.TRANSCRIPTION, Task.RUN_FLOW)
 
 
 class JobService:
@@ -43,23 +44,27 @@ class JobService:
 
         return job_in_db
 
-    async def queue_durable_knowledge_job(
+    async def queue_durable_job(
         self,
         task: Task,
         *,
         name: str,
-        task_params: UploadInfoBlob | Transcription,
+        task_params: DurableTaskParams,
         job_id: UUID | None = None,
     ) -> JobInDb:
+        """Persist a job with its dispatch envelope and enqueue it after commit.
+
+        A durable job survives a lost enqueue: the redispatch cron re-reads
+        the envelope. Knowledge jobs also keep a staging file that is removed
+        on rollback; other tasks have nothing to clean.
+        """
         session = self.job_repo.delegate.session.sync_session
         if session.in_nested_transaction():
-            raise ValueError(
-                "Durable knowledge jobs cannot be created in a nested transaction"
-            )
-        if task not in (Task.UPLOAD_FILE, Task.TRANSCRIPTION):
+            raise ValueError("Durable jobs cannot be created in a nested transaction")
+        if task not in DURABLE_TASKS:
             raise ValueError(f"Task {task.value} does not support durable dispatch")
         if task_params.user_id != self.user.id:
-            raise ValueError("Durable knowledge job user does not match service user")
+            raise ValueError("Durable job user does not match service user")
 
         envelope = build_dispatch_envelope(task, task_params)
         job = Job(task=task, name=name, status=Status.QUEUED, user_id=self.user.id)
@@ -79,6 +84,8 @@ class JobService:
                 )
 
         def cleanup_after_rollback() -> None:
+            if task not in KNOWLEDGE_TASKS:
+                return
             try:
                 job_staging_path(job_in_db.id).unlink(missing_ok=True)
             except Exception:
@@ -93,6 +100,9 @@ class JobService:
             on_rollback=cleanup_after_rollback,
         )
         return job_in_db
+
+    # The knowledge-only name the upload and transcription paths still use.
+    queue_durable_knowledge_job = queue_durable_job
 
     async def set_status(self, job_id: UUID, status: Status):
         job_update = JobUpdate(status=status)

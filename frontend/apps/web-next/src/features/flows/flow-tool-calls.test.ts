@@ -13,6 +13,9 @@ const flowsCall = (toolName: string, input?: unknown, extra: Record<string, unkn
   providerMetadata: { eneo: { server_name: "flows", is_internal: true, ...extra } }
 });
 
+const FLOW_ID = "3f5a9d2e-1c4b-4e8a-9b7d-2a6c8e0f1b3d";
+const RUN_ID = "7c1e4b9a-2d3f-4a5b-8c6d-9e0f1a2b3c4d";
+
 describe("isFlowsCall", () => {
   it("recognises a call routed to Eneo's own flows server", () => {
     expect(isFlowsCall(flowsCall("create_flow"))).toBe(true);
@@ -44,12 +47,12 @@ describe("isFlowsCall", () => {
 
 describe("flow references", () => {
   it("reads the top-level ids of a result", () => {
-    expect(flowRefFromOutcome({ flow_id: "f1", run_id: "r1", steps: [] })).toEqual({
-      flowId: "f1",
-      runId: "r1"
+    expect(flowRefFromOutcome({ flow_id: FLOW_ID, run_id: RUN_ID, steps: [] })).toEqual({
+      flowId: FLOW_ID,
+      runId: RUN_ID
     });
-    expect(flowRefFromOutcome({ flow_id: "f1", run_id: null })).toEqual({
-      flowId: "f1",
+    expect(flowRefFromOutcome({ flow_id: FLOW_ID, run_id: null })).toEqual({
+      flowId: FLOW_ID,
       runId: null
     });
   });
@@ -62,23 +65,42 @@ describe("flow references", () => {
   });
 
   it("reads the ids a call names in its arguments", () => {
-    expect(flowRefFromArguments({ flow_id: "f1", name: "Protokoll" })).toEqual({
-      flowId: "f1",
+    expect(flowRefFromArguments({ flow_id: FLOW_ID, name: "Protokoll" })).toEqual({
+      flowId: FLOW_ID,
       runId: null
     });
-    expect(flowRefFromArguments({ run_id: "r1" })).toEqual({ flowId: null, runId: "r1" });
+    expect(flowRefFromArguments({ run_id: RUN_ID })).toEqual({ flowId: null, runId: RUN_ID });
     expect(flowRefFromArguments(undefined)).toEqual({ flowId: null, runId: null });
-    expect(flowRefFromArguments(["f1"])).toEqual({ flowId: null, runId: null });
+    expect(flowRefFromArguments([FLOW_ID])).toEqual({ flowId: null, runId: null });
   });
 
   it("lets a later reference complete an earlier one", () => {
-    expect(mergeFlowRefs({ flowId: "f1", runId: null }, { flowId: null, runId: "r1" })).toEqual({
-      flowId: "f1",
-      runId: "r1"
+    expect(
+      mergeFlowRefs({ flowId: FLOW_ID, runId: null }, { flowId: null, runId: RUN_ID })
+    ).toEqual({
+      flowId: FLOW_ID,
+      runId: RUN_ID
     });
-    expect(mergeFlowRefs({ flowId: "f1", runId: "r1" }, { flowId: "f2", runId: null })).toEqual({
+    expect(
+      mergeFlowRefs({ flowId: FLOW_ID, runId: RUN_ID }, { flowId: "f2", runId: null })
+    ).toEqual({
       flowId: "f2",
-      runId: "r1"
+      runId: RUN_ID
+    });
+  });
+});
+
+describe("ids", () => {
+  it("ignores a cut-short id from streamed arguments", () => {
+    expect(flowRefFromArguments({ flow_id: "08226886-e851-450d-9" })).toEqual({
+      flowId: null,
+      runId: null
+    });
+    expect(
+      flowRefFromOutcome({ flow_id: "08226886-e851-450d-9b6d-bf5420b60223", run_id: null })
+    ).toEqual({
+      flowId: "08226886-e851-450d-9b6d-bf5420b60223",
+      runId: null
     });
   });
 });

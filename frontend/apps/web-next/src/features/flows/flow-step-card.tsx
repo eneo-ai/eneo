@@ -6,13 +6,15 @@ import type { ReactNode } from "react";
 import { Chip, Field, MonoBlock } from "./flow-fields";
 import { formatDuration, stepKindLabel } from "./flow-labels";
 import { TemplateText } from "./flow-template";
-import type {
-  DocumentStep,
-  FlowDefinition,
-  FlowStep,
-  LlmStep,
-  ReviewStep,
-  TranscribeStep
+import {
+  formFieldsOf,
+  stepsOf,
+  type DocumentStep,
+  type FlowDefinition,
+  type FlowStep,
+  type LlmStep,
+  type ReviewStep,
+  type TranscribeStep
 } from "./types";
 
 /**
@@ -48,13 +50,14 @@ export function schemaFieldNames(schema: Record<string, unknown>): string[] {
 }
 
 function formLabel(definition: FlowDefinition, key: string): string {
-  return definition.form_fields.find((field) => field.key === key)?.label ?? key;
+  return formFieldsOf(definition).find((field) => field.key === key)?.label ?? key;
 }
 
 function stepName(definition: FlowDefinition, key: string, t: ReturnType<typeof useTranslations>) {
-  const index = definition.steps.findIndex((step) => step.key === key);
+  const steps = stepsOf(definition);
+  const index = steps.findIndex((step) => step.key === key);
   if (index < 0) return key;
-  return `${t("flow_ref_step", { index: index + 1 })} · ${definition.steps[index]!.name}`;
+  return `${t("flow_ref_step", { index: index + 1 })} · ${steps[index]!.name}`;
 }
 
 function LlmFields({
@@ -211,8 +214,9 @@ function DocumentFields({
 
 function ReviewFields({ step, definition }: { step: ReviewStep; definition: FlowDefinition }) {
   const t = useTranslations();
-  const index = definition.steps.findIndex((candidate) => candidate.key === step.key);
-  const targetKey = step.of ?? (index > 0 ? definition.steps[index - 1]!.key : null);
+  const steps = stepsOf(definition);
+  const index = steps.findIndex((candidate) => candidate.key === step.key);
+  const targetKey = step.of ?? (index > 0 ? steps[index - 1]!.key : null);
   return (
     <>
       <Field label={t("flow_param_review_mode")}>

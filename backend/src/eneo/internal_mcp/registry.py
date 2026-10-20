@@ -22,6 +22,8 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.internal_mcp.files import FILES_SERVER_NAME
 from eneo.internal_mcp.files import mcp as files_mcp
+from eneo.internal_mcp.flows import FLOWS_SERVER_NAME
+from eneo.internal_mcp.flows import mcp as flows_mcp
 from eneo.internal_mcp.image_generation import IMAGE_GENERATION_SERVER_NAME
 from eneo.internal_mcp.image_generation import mcp as image_generation_mcp
 from eneo.internal_mcp.knowledge import KNOWLEDGE_SERVER_NAME
@@ -53,6 +55,11 @@ INTERNAL_MCP_SERVERS: tuple[InternalMCP, ...] = (
         name=IMAGE_GENERATION_SERVER_NAME,
         mcp=image_generation_mcp,
         app=image_generation_mcp.streamable_http_app(),
+    ),
+    InternalMCP(
+        name=FLOWS_SERVER_NAME,
+        mcp=flows_mcp,
+        app=flows_mcp.streamable_http_app(),
     ),
 )
 

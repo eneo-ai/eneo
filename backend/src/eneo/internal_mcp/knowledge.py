@@ -705,7 +705,7 @@ async def search_knowledge(
     """
     fetch, autocut_cutoff, cap = _resolve_search_params(mode, max_results)
     logger.debug("[RAG] search_knowledge query=%r within=%r", query[:120], within)
-    async with internal_tool_context(ctx) as (container, _user, assistant_id):
+    async with internal_tool_context(ctx) as (container, _user, assistant_id, _):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         # The embedding model comes from the assistant, not the scope: a
         # document scope carries no source to read it from.
@@ -802,7 +802,7 @@ async def read_source(
         return [TextContent(type="text", text="Invalid document_id.")]
     offset = max(0, offset)
 
-    async with internal_tool_context(ctx) as (container, _user, assistant_id):
+    async with internal_tool_context(ctx) as (container, _user, assistant_id, _):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         try:
             blob = await container.info_blob_repo().get(blob_id)
@@ -859,7 +859,7 @@ async def describe_source(
     within=<document_id>.
     """
     offset = max(0, offset)
-    async with internal_tool_context(ctx) as (container, _user, assistant_id):
+    async with internal_tool_context(ctx) as (container, _user, assistant_id, _):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
         sources = _source_scopes(assistant)
         if not sources:
@@ -954,7 +954,7 @@ async def list_knowledge_sources(ctx: Context) -> str:
     what that source contains, or as search_knowledge's "within" to search
     only that source.
     """
-    async with internal_tool_context(ctx) as (container, _user, assistant_id):
+    async with internal_tool_context(ctx) as (container, _user, assistant_id, _):
         assistant, _ = await container.assistant_service().get_assistant(assistant_id)
 
         lines: list[str] = []

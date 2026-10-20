@@ -9,6 +9,7 @@ from eneo.data_retention.infrastructure.data_retention_worker import (
 from eneo.embedding_models.infrastructure.embedding_model_cleanup_worker import (
     worker as embedding_model_cleanup_worker,
 )
+from eneo.flows.flow_run_worker import worker as flow_worker
 from eneo.image_models.infrastructure.image_model_cleanup_worker import (
     worker as image_model_cleanup_worker,
 )
@@ -33,6 +34,7 @@ logger = get_logger(__name__)
 worker = Worker()
 worker.include_subworker(sub_worker)
 worker.include_subworker(app_worker)
+worker.include_subworker(flow_worker)
 worker.include_subworker(integration_worker)
 worker.include_subworker(data_retention_worker)
 worker.include_subworker(sharepoint_subscription_worker)

@@ -43,6 +43,7 @@ from eneo.authentication.endpoint_access import authorize_user
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.collections_table import CollectionsTable
+from eneo.database.tables.flow_tables import Flows
 from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.integration_table import IntegrationKnowledge
@@ -1509,6 +1510,9 @@ class UserService:
             return await session.scalar(stmt)
         elif resource_type == "app_run":
             return await self._resolve_app_run_space_id(resource_id)
+        elif resource_type == "flow":
+            stmt = sa.select(Flows.space_id).where(Flows.id == resource_id)
+            return await session.scalar(stmt)
         elif resource_type == "crawl_run":
             return await self._resolve_crawl_run_space_id(resource_id)
         elif resource_type == "prompt":

@@ -38,7 +38,13 @@ import {
   isActiveRun,
   isOpenCheckpoint
 } from "./flows";
-import type { FlowDefinition, FlowRunPublic, FlowRunStepPublic, StepResultStatus } from "./types";
+import {
+  formFieldsOf,
+  type FlowDefinition,
+  type FlowRunPublic,
+  type FlowRunStepPublic,
+  type StepResultStatus
+} from "./types";
 
 const STEP_ICON: Record<StepResultStatus, { icon: LucideIcon; className: string; spin?: boolean }> =
   {
@@ -64,17 +70,23 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  */
 function Payload({ payload }: { payload: Record<string, unknown> | null | undefined }) {
   if (!payload || Object.keys(payload).length === 0) return null;
-  if (typeof payload.text === "string" && Object.keys(payload).length === 1) {
-    return (
-      <div className="bg-ax-sunken rounded-ax-inner max-h-96 overflow-auto px-3 py-2">
-        <MessageResponse className={cn(ANSWER_TEXT_CLASS, "text-[13.5px] leading-normal")}>
-          {payload.text}
-        </MessageResponse>
-      </div>
-    );
+  // A step's output is {text, value}: the parsed value when the step produced
+  // JSON (the text is its serialisation), else the text, which reads as
+  // Markdown. Any other payload (a step's rendered input) shows as it is.
+  if (payload.value != null) return <MonoBlock>{JSON.stringify(payload.value, null, 2)}</MonoBlock>;
+  if (typeof payload.text === "string") {
+    const rest = Object.keys(payload).filter((key) => key !== "text" && key !== "value");
+    if (rest.length === 0) {
+      return (
+        <div className="bg-ax-sunken rounded-ax-inner max-h-96 overflow-auto px-3 py-2">
+          <MessageResponse className={cn(ANSWER_TEXT_CLASS, "text-[13.5px] leading-normal")}>
+            {payload.text}
+          </MessageResponse>
+        </div>
+      );
+    }
   }
-  const value = "value" in payload && Object.keys(payload).length === 1 ? payload.value : payload;
-  return <MonoBlock>{JSON.stringify(value, null, 2)}</MonoBlock>;
+  return <MonoBlock>{JSON.stringify(payload, null, 2)}</MonoBlock>;
 }
 
 function durationOf(step: FlowRunStepPublic, locale: string): string | null {
@@ -170,7 +182,7 @@ function RunInputs({ run, definition }: { run: FlowRunPublic; definition: FlowDe
   const files = run.input_files ?? [];
   if (values.length === 0 && files.length === 0) return null;
   const labelOf = (key: string) =>
-    definition?.form_fields.find((field) => field.key === key)?.label ?? key;
+    (definition ? formFieldsOf(definition) : []).find((field) => field.key === key)?.label ?? key;
   return (
     <Field label={t("flow_run_inputs")}>
       <div className="flex flex-col gap-1.5">

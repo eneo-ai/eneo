@@ -18,6 +18,7 @@ class Permission(str, Enum):
     PERSONAL_CHAT = "personal_chat"
     GROUP_CHATS = "group_chats"
     APPS = "apps"
+    FLOWS = "flows"
     SERVICES = "services"
     COLLECTIONS = "collections"
     INSIGHTS = "insights"

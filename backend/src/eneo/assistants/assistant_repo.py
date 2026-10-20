@@ -168,6 +168,10 @@ def _exclude_helper_assistants(
 
     published=true does NOT override the exclusion — per PRD §4, helper-ness
     is independent of regular publish visibility.
+
+    Assistants Eneo created for a feature (``purpose`` set, e.g. the hidden
+    flow authoring chat) are excluded for the same reason: they are reached
+    through their feature, never from an assistant list.
     """
     active_role = sa.select(OrgSpaceAssistantRoles.assistant_id).where(
         OrgSpaceAssistantRoles.assistant_id == Assistants.id
@@ -175,7 +179,11 @@ def _exclude_helper_assistants(
     former_helper = sa.select(HelpAssistantAssignmentHistory.assistant_id).where(
         HelpAssistantAssignmentHistory.assistant_id == Assistants.id
     )
-    return query.where(~sa.exists(active_role)).where(~sa.exists(former_helper))
+    return (
+        query.where(~sa.exists(active_role))
+        .where(~sa.exists(former_helper))
+        .where(Assistants.purpose.is_(None))
+    )
 
 
 class AssistantRepository:
@@ -589,6 +597,7 @@ class AssistantRepository:
                 data_retention_days=assistant.data_retention_days,
                 metadata_json=assistant.metadata_json,
                 icon_id=assistant.icon_id,
+                purpose=assistant.purpose,
             )
             .returning(Assistants.id)
         )
@@ -613,6 +622,7 @@ class AssistantRepository:
                 document_template=assistant.document_template,
             ),
         )
+        return assistant_id
 
     async def get_for_user(
         self,

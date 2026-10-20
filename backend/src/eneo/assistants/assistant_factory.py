@@ -74,6 +74,7 @@ class AssistantFactory:
         data_retention_days: int | None = None,
         metadata_json: dict[str, object] | None = None,
         description: str | None = None,
+        purpose: str | None = None,
     ) -> Assistant:
         # Avoid mutable default anti-pattern
         if completion_model_kwargs is None:
@@ -102,6 +103,7 @@ class AssistantFactory:
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
             description=description,
+            purpose=purpose,
         )
 
     def create_assistant_from_db(
@@ -187,6 +189,7 @@ class AssistantFactory:
             inline_file_text=assistant_in_db.inline_file_text,
             knowledge_mode=KnowledgeMode(assistant_in_db.knowledge_mode),
             icon_id=assistant_in_db.icon_id,
+            purpose=assistant_in_db.purpose,
         )
 
     def create_space_assistant_from_db(
@@ -317,4 +320,5 @@ class AssistantFactory:
             data_retention_days=assistant_in_db.data_retention_days,
             metadata_json=assistant_in_db.metadata_json,
             icon_id=assistant_in_db.icon_id,
+            purpose=assistant_in_db.purpose,
         )

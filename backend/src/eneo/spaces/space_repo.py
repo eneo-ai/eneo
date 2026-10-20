@@ -28,6 +28,7 @@ from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.capabilities_table import SpaceCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
+from eneo.database.tables.flow_tables import Flows
 from eneo.database.tables.group_chats_table import (
     GroupChatsTable,
 )
@@ -1201,9 +1202,11 @@ class SpaceRepository:
         )
         group_chats = await self._get_group_chats(space_id=entry_in_db.id)
         services = await self._get_services(space_id=entry_in_db.id)
+        flow_count = await self._count_flows(space_id=entry_in_db.id)
 
         space = self.factory.create_space_from_db(
             entry_in_db,
+            flow_count=flow_count,
             user=self.user,
             collections_in_db=collections,
             websites_in_db=websites,
@@ -1424,7 +1427,16 @@ class SpaceRepository:
             apps_in_db=apps,
             services_in_db=services,
             completion_models=completion_models,
+            flow_count=await self._count_flows(space_id=id),
         )
+
+    async def _count_flows(self, *, space_id: UUID) -> int:
+        count = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(Flows)
+            .where(Flows.space_id == space_id, Flows.deleted_at.is_(None))
+        )
+        return int(count or 0)
 
     async def delete(self, id: UUID):
         query = sa.delete(Spaces).where(Spaces.id == id)
@@ -1754,6 +1766,7 @@ class SpaceRepository:
                         Assistants.space_id == space.id,
                         Assistants.id == key.scope_id,
                         Assistants.is_default.is_(False),
+                        Assistants.purpose.is_(None),
                     )
                 )
             ).all()

@@ -430,6 +430,7 @@ async def test_update_pk_null_resource_permissions_normalizes_to_public_default(
     assert updates["resource_permissions"] == {
         "assistants": "read",
         "apps": "read",
+        "flows": "none",
         "spaces": "none",
         "knowledge": "none",
         "conversations": "none",
@@ -456,6 +457,7 @@ async def test_update_pk_assistant_scope_allows_scoped_resource_permissions():
     assert updates["resource_permissions"] == {
         "assistants": "read",
         "apps": "none",
+        "flows": "none",
         "spaces": "none",
         "knowledge": "none",
         "conversations": "none",

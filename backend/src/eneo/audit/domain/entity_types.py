@@ -24,6 +24,8 @@ class EntityType(str, Enum):
     GROUP_CHAT = "group_chat"
     COLLECTION = "collection"
     APP_RUN = "app_run"
+    FLOW = "flow"
+    FLOW_RUN = "flow_run"
     SECURITY_CLASSIFICATION = "security_classification"
     INTEGRATION = "integration"
     INTEGRATION_KNOWLEDGE = "integration_knowledge"

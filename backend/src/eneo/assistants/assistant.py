@@ -87,6 +87,7 @@ class Assistant(Entity):
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         attachment_inline_text: Mapping[UUID, bool] | None = None,
         document_template: DocumentTemplateChoice | None = None,
+        purpose: str | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -122,6 +123,8 @@ class Assistant(Entity):
             AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
         )
         self._metadata_json = metadata_json
+        # Non-null for assistants Eneo manages for a feature (hidden from lists).
+        self.purpose = purpose
         self.enabled_capabilities: list[CapabilityPurpose] = list(
             enabled_capabilities or []
         )

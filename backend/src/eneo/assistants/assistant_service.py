@@ -58,6 +58,7 @@ from eneo.help_assistants.infrastructure.org_space_assistant_role_repo import (
 from eneo.icons.icon_repo import IconRepository
 from eneo.internal_mcp import (
     build_files_mcp_server,
+    build_flows_mcp_server,
     build_knowledge_mcp_server,
     resolve_internal_mcp_availability,
 )
@@ -2358,6 +2359,12 @@ class AssistantService:
 
         if assistant.is_default:
             raise BadRequestException("The default assistant cannot be deleted")
+        # An assistant with a purpose (the hidden flows assistant of a space)
+        # belongs to a space feature and goes with the space, never alone.
+        if isinstance(getattr(assistant, "purpose", None), str) and assistant.purpose:
+            raise BadRequestException(
+                "This assistant belongs to a space feature and cannot be deleted"
+            )
 
         if self.api_key_scope_revoker is not None:
             try:
@@ -3483,6 +3490,7 @@ class AssistantService:
                     self.user,
                     assistant_id=assistant_to_ask.id,
                     table_tools=table_tools_attached,
+                    session_id=session.id,
                 )
             return scoped_token
 
@@ -3548,6 +3556,20 @@ class AssistantService:
                 assistant_to_ask.id,
                 len(internal_mcp.referenced_file_ids),
                 len(internal_mcp.url_only_file_ids),
+            )
+        internal_mcp_servers = [
+            server for server in (files_mcp_server,) if server is not None
+        ]
+        # The flow authoring tools attach only to the hidden flows assistant
+        # of a space; the flow a tool creates binds to this session.
+        if internal_mcp.flows:
+            internal_mcp_servers.append(
+                await build_flows_mcp_server(
+                    token=mint_scoped_token(), tenant_id=self.user.tenant_id
+                )
+            )
+            logger.info(
+                "[FLOWS] assistant=%s flows tools attached", assistant_to_ask.id
             )
         logger.info(
             "[RAG] assistant=%s knowledge_mode=%s "
@@ -3618,9 +3640,7 @@ class AssistantService:
                 completion_prompt_files=completion_file_inputs.completion_prompt_files,
                 skill_runtime=skill_runtime,
                 knowledge_mcp_server=knowledge_mcp_server,
-                internal_mcp_servers=(
-                    [files_mcp_server] if files_mcp_server is not None else []
-                ),
+                internal_mcp_servers=internal_mcp_servers,
             )
         except Exception:
             failed_snapshot = skill_runtime.snapshot()

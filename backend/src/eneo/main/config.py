@@ -318,6 +318,9 @@ class Settings(BaseSettings):
     # Upper bound for one rerank call to a provider, starting with the
     # registration-time connection test.
     rerank_request_timeout_seconds: int = 10
+    # Upper bound for one flow step (one completion, one document render);
+    # the run fails with flow_step_timeout when a runner exceeds it.
+    flow_step_timeout_seconds: int = 900
     mcp_tool_output_max_chars: int = 32768
     # Decoded size cap for a single MCP image content block; larger images
     # are dropped before they can be persisted as generated files.
