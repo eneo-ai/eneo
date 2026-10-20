@@ -13,6 +13,7 @@ administrator connects a service account.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
@@ -452,13 +453,32 @@ class MCPOAuthService:
                     user_id=user_id,
                 )
             }
-        states: list[dict[str, Any]] = []
-        for server in oauth_servers:
-            connection = (
+        stored = {
+            server.id: (
                 shared.get(server.id) if server.is_shared_oauth else mine.get(server.id)
             )
-            states.append(connection_public_state(server, connection))
-        return states
+            for server in oauth_servers
+        }
+        # A row that says connected may have run out since: verify every
+        # stale one the way a call would, all at once, so the list says what
+        # the next call will find for each server, not only the one it hits.
+        stale = [
+            (server, connection)
+            for server in oauth_servers
+            if (connection := stored[server.id]) is not None
+            and connection.is_connected
+            and not connection.token_is_fresh()
+        ]
+        if stale:
+            verified = await asyncio.gather(
+                *(self._tokens.verify(server, c) for server, c in stale)
+            )
+            for (server, _), connection in zip(stale, verified):
+                stored[server.id] = connection
+        return [
+            connection_public_state(server, stored[server.id])
+            for server in oauth_servers
+        ]
 
     async def my_connections(self) -> list[dict[str, Any]]:
         servers = await self._servers.query(tenant_id=self.user.tenant_id)

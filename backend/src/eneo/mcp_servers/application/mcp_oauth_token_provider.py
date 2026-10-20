@@ -172,6 +172,28 @@ class MCPOAuthTokenProvider:
         self._connections.pop(self._key(server), None)
         self._auths.pop(server.id, None)
 
+    async def verify(
+        self, server: MCPServer, connection: MCPOAuthConnection
+    ) -> MCPOAuthConnection:
+        """The connection as a call right now would find it.
+
+        A stale access token is refreshed and a refresh the vendor refuses
+        marks the connection as needing authorization again, exactly as a
+        call does. A transient failure (the vendor unreachable) leaves the
+        connection as it was: the next call tries again.
+        """
+        key = self._key(server)
+        self._connections[key] = connection
+        try:
+            await self.access_token_for(server)
+        except MCPUserActionRequiredError:
+            pass  # The connection now says why.
+        except Exception as exc:
+            logger.warning(
+                "Could not verify the OAuth connection to '%s': %s", server.name, exc
+            )
+        return self._connections.get(key, connection)
+
     async def auth_for(self, server: MCPServer) -> MCPOAuthBearerAuth:
         """An httpx auth with a fresh token, or the error that explains why not."""
         token = await self.access_token_for(server)

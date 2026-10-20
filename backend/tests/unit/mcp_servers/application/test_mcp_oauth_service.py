@@ -29,6 +29,7 @@ from eneo.roles.permissions import Permission
 from eneo.settings.encryption_service import EncryptionService
 from tests.unit.mcp_servers.application.test_mcp_oauth_token_provider import (
     FakeOAuthRepo,
+    _connection,
 )
 from tests.unit.mcp_servers.infrastructure.oauth.fake_authorization_server import (
     FakeAuthorizationServer,
@@ -449,6 +450,38 @@ async def test_connection_states_cover_every_oauth_server(monkeypatch):
         str(connected.id): "connected",
         str(untouched.id): "not_connected",
     }
+
+
+async def test_connection_states_tell_of_every_session_that_ran_out(monkeypatch):
+    """Stale connections are verified when listed, all of them at once: a
+    refresh the vendor accepts keeps the server connected, one it refuses
+    shows as needing authorization before any tool call hits the server."""
+    vendor = FakeAuthorizationServer()
+    vendor.live_refresh_tokens.add("refresh-0")
+    vendor.install(monkeypatch)
+    user = _user()
+    fresh = _server(vendor, user)
+    renewable = _server(vendor, user)
+    ran_out = _server(vendor, user)
+    repo = FakeOAuthRepo()
+    repo.connections[(fresh.id, user.id)] = _connection(fresh, user.id, expires_in=3600)
+    repo.connections[(renewable.id, user.id)] = _connection(
+        renewable, user.id, expires_in=0
+    )
+    repo.connections[(ran_out.id, user.id)] = _connection(
+        ran_out, user.id, expires_in=0, refresh="refresh-dead"
+    )
+    service, _, _ = _service(user, [fresh, renewable, ran_out], repo=repo)
+
+    states = {s["mcp_server_id"]: s for s in await service.my_connections()}
+
+    assert states[str(fresh.id)]["status"] == "connected"
+    assert states[str(renewable.id)]["status"] == "connected"
+    assert states[str(ran_out.id)]["status"] == "needs_authorization"
+    assert states[str(ran_out.id)]["last_error"] == "invalid_grant"
+    # One token request per stale connection; a fresh token costs nothing.
+    assert len(vendor.token_requests) == 2
+    assert repo.connections[(renewable.id, user.id)].refresh_token == "refresh-1"
 
 
 async def test_registration_stores_no_secret_in_the_payload(monkeypatch):

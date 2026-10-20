@@ -4,10 +4,11 @@
   Licensed under the MIT License.
 
   Above the composer: the OAuth servers of this assistant the user has not
-  authorized Eneo for. Lazy by default: the chat works without connecting,
-  a call to one of these servers simply answers with a connect action. The
-  chip lets the user connect ahead of time, one server or all of them in a
-  single popup window, and can be dismissed for this assistant.
+  authorized Eneo for, or whose connection has run out. Lazy by default: the
+  chat works without connecting, a call to one of these servers simply
+  answers with a connect action. The chip lets the user connect ahead of
+  time, one server or all of them in a single popup window, and can be
+  dismissed for this assistant until another server needs connecting.
 -->
 <script lang="ts">
   import { browser } from "$app/environment";
@@ -39,7 +40,11 @@
     connections.filter((c) => c.auth_scope === "per_user" && c.status !== "connected")
   );
 
+  // The list is verified by the backend: a connection that ran out while the
+  // user was away is reported as such here, not first by a failing call.
   async function load(id: string) {
+    const before = new Set(pending.map((c) => c.mcp_server_id));
+    const reloading = connections.length > 0;
     try {
       connections = await eneo.mcpOauth.assistantConnections({ assistantId: id });
     } catch {
@@ -50,23 +55,39 @@
     } catch {
       dismissed = false;
     }
+    // A dismissal covered the servers pending then; another one is news.
+    if (reloading && pending.some((c) => !before.has(c.mcp_server_id))) undismiss();
   }
 
   $effect(() => {
     void load(assistantId);
   });
 
+  // Sessions run out while the user is away: ask again when they come back.
+  $effect(() => {
+    if (!browser) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load(assistantId);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  });
+
+  function undismiss() {
+    dismissed = false;
+    try {
+      sessionStorage.removeItem(dismissKey);
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
   // The service outlives the chip's props: subscribe once, for the chip's life.
   const unsubscribe = connect?.subscribe((serverId, result) => {
     if (result.success) {
       connections = connections.map((c) => (c.mcp_server_id === serverId ? result.connection : c));
       // A connection that broke reappears: the dismissal was for this round.
-      dismissed = false;
-      try {
-        sessionStorage.removeItem(dismissKey);
-      } catch {
-        /* storage unavailable */
-      }
+      undismiss();
     } else if (result.error.message !== "popup_closed") {
       toastError(result.error);
     }
@@ -79,14 +100,7 @@
     if (!believed || believed.status !== "connected") return;
     await load(assistantId);
     const now = connections.find((c) => c.mcp_server_id === serverId);
-    if (now && now.status !== "connected") {
-      dismissed = false;
-      try {
-        sessionStorage.removeItem(dismissKey);
-      } catch {
-        /* storage unavailable */
-      }
-    }
+    if (now && now.status !== "connected") undismiss();
   });
   onDestroy(() => {
     unsubscribe?.();
@@ -112,7 +126,9 @@
       <Plug class="text-accent-stronger size-4 shrink-0" aria-hidden="true" />
       {#if pending.length === 1}
         <span class="text-accent-stronger min-w-0 flex-1 truncate font-medium">
-          {m.mcp_oauth_chip_title_one({ server: pending[0].server_name })}
+          {pending[0].status === "needs_authorization"
+            ? m.mcp_oauth_chip_title_expired_one({ server: pending[0].server_name })
+            : m.mcp_oauth_chip_title_one({ server: pending[0].server_name })}
         </span>
       {:else}
         <button

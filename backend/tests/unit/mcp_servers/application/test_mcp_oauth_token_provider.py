@@ -6,10 +6,14 @@ from types import SimpleNamespace
 from typing import Optional
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
 from cryptography.fernet import Fernet
 
 from eneo.main.exceptions import MCPUserActionRequiredError
+from eneo.mcp_servers.application import (
+    mcp_oauth_token_provider as provider_module,
+)
 from eneo.mcp_servers.application.mcp_oauth_token_provider import (
     MCPOAuthTokenProvider,
 )
@@ -256,6 +260,50 @@ async def test_a_dead_refresh_token_needs_a_new_authorization(monkeypatch):
     stored = repo.connections[(server.id, user.id)]
     assert stored.status == "needs_authorization"
     assert stored.access_token is None and stored.refresh_token is None
+
+
+async def test_verify_finds_what_a_call_would(monkeypatch):
+    """A stale token is refreshed, a dead one marked, without a tool call."""
+    vendor = FakeAuthorizationServer()
+    vendor.live_refresh_tokens.add("refresh-0")
+    vendor.install(monkeypatch)
+    user = _user()
+    repo = FakeOAuthRepo()
+    renewable = _server(vendor, user)
+    ran_out = _server(vendor, user)
+    live = _connection(renewable, user.id, expires_in=0)
+    dead = _connection(ran_out, user.id, expires_in=0, refresh="refresh-dead")
+    repo.connections[(renewable.id, user.id)] = live
+    repo.connections[(ran_out.id, user.id)] = dead
+    provider = _provider(repo, user)
+
+    renewed = await provider.verify(renewable, live)
+    refused = await provider.verify(ran_out, dead)
+
+    assert renewed.is_connected and renewed.refresh_token == "refresh-1"
+    assert refused.status == "needs_authorization"
+    assert refused.last_error == "invalid_grant"
+    assert repo.connections[(ran_out.id, user.id)].status == "needs_authorization"
+
+
+async def test_verify_keeps_a_connection_the_vendor_cannot_answer_for(monkeypatch):
+    vendor = FakeAuthorizationServer()
+    vendor.install(monkeypatch)
+
+    async def unreachable(**kwargs):
+        raise httpx.ConnectError("vendor down")
+
+    monkeypatch.setattr(provider_module, "refresh_access_token", unreachable)
+    user = _user()
+    repo = FakeOAuthRepo()
+    server = _server(vendor, user)
+    connection = _connection(server, user.id, expires_in=0)
+    repo.connections[(server.id, user.id)] = connection
+
+    kept = await _provider(repo, user).verify(server, connection)
+
+    assert kept.is_connected and kept.refresh_token == "refresh-0"
+    assert repo.saves == 0
 
 
 async def test_no_connection_means_the_user_must_connect(monkeypatch):
