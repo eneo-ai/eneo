@@ -105,7 +105,7 @@
   );
 </script>
 
-<li class="flex flex-col gap-3">
+<li class="widget-enter flex flex-col gap-3">
   <WidgetQuestionBubble text={message.question} />
 
   <div class="flex flex-col gap-2">

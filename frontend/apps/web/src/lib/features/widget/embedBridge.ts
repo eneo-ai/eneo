@@ -15,16 +15,27 @@ export const BRIDGE_VERSION = 1;
 
 import type { LauncherColors } from "./contrast";
 
+/**
+ * How the loader shows the panel right now. `full` is true whenever it covers
+ * the host viewport: forced by a small screen, or because the chat asked to
+ * expand. Loaders from before this message never send it, so the chat offers
+ * its expand control only once a layout has arrived.
+ */
+export type PanelLayout = { full: boolean; expanded: boolean };
+
 export type OutboundMessage =
   | { type: "ready"; payload?: { colors?: LauncherColors; title?: string } }
   | { type: "close" }
   | { type: "conversation_started" }
-  | { type: "unread"; payload: { count: number } };
+  | { type: "unread"; payload: { count: number } }
+  | { type: "expand" }
+  | { type: "collapse" };
 
 export type InboundMessage =
   | { type: "open" }
   | { type: "theme"; payload: { scheme: "light" | "dark" | "auto" } }
-  | { type: "context"; payload: { page_url?: string; page_title?: string } };
+  | { type: "context"; payload: { page_url?: string; page_title?: string } }
+  | { type: "layout"; payload: PanelLayout };
 
 type Envelope<T> = { ns: typeof BRIDGE_NAMESPACE; v: number } & T;
 
@@ -32,6 +43,7 @@ export type EmbedBridgeHandlers = {
   onOpen?: () => void;
   onTheme?: (scheme: "light" | "dark" | "auto") => void;
   onContext?: (context: { page_url?: string; page_title?: string }) => void;
+  onLayout?: (layout: PanelLayout) => void;
 };
 
 /** Parse a raw message event payload into an inbound message, or null. */
@@ -59,6 +71,11 @@ export function parseInbound(data: unknown): InboundMessage | null {
           page_title: typeof payload.page_title === "string" ? payload.page_title : undefined
         }
       };
+    }
+    case "layout": {
+      const payload = (envelope.payload ?? {}) as { full?: unknown; expanded?: unknown };
+      if (typeof payload.full !== "boolean" || typeof payload.expanded !== "boolean") return null;
+      return { type: "layout", payload: { full: payload.full, expanded: payload.expanded } };
     }
     default:
       return null;
@@ -101,6 +118,9 @@ export function createEmbedBridge(options: {
       case "context":
         handlers.onContext?.(message.payload);
         break;
+      case "layout":
+        handlers.onLayout?.(message.payload);
+        break;
     }
   }
 
@@ -130,6 +150,9 @@ export function createEmbedBridge(options: {
           : { type: "ready" }
       ),
     close: () => post({ type: "close" }),
+    /** Ask the loader to grow the panel over the host viewport, or to put it back. */
+    expand: () => post({ type: "expand" }),
+    collapse: () => post({ type: "collapse" }),
     /** The host only learns that a conversation began; the session id stays inside the frame. */
     conversationStarted: () => post({ type: "conversation_started" }),
     destroy: unsubscribe

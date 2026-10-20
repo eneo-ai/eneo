@@ -28,6 +28,16 @@
       "version": "1.0.8",
       "integrity": "sha384-Mu4dy39AbnHaqzmsi2UmQP2DKiH1AHQHaPC4iOplfTBweuI384Zg3HtAD2zUvZTH",
       "css_integrity": "sha384-7IExldFLRnINxAf/hVhS7uIwPHpUuw1ncd+mHs3we7UhvbkCmmWExWh0PXw2Rcxk"
+    },
+    {
+      "version": "1.0.9",
+      "integrity": "sha384-ZhLZPb8irGy/3lV8rSvuGh+ptMTlN6sZuE/lpBl846ofR3ITcUp8SUhce98qUuP+",
+      "css_integrity": "sha384-Rnl7haA3Q1ZOSPwYBLXMGCRjQO5jiAORdV2u+fTa5raoiLA4YkC5TqplMbB7TPUu"
+    },
+    {
+      "version": "1.0.10",
+      "integrity": "sha384-zcAceP6MZvjFZseJe97HEvXZQ7Z57zkWo2NB0+rJINx5yU29/rRZzOIFg/vRi9Gx",
+      "css_integrity": "sha384-PmrLJ8UyZ3VOca823CjCIg4IgqRQXtXTzEIupUFEwTNzsstHSr3EqNR2PPV0HnkW"
     }
   ]
 }
