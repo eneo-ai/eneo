@@ -257,10 +257,6 @@ For a service account with a credential problem, the **SharePoint connection** s
 
 The **SharePoint connection** section lists four checks, each with its state and the fix next to it: **App registration in Entra ID** (the tenant domain and the end of the client ID, with **Change**), **Sign-in to Microsoft** (the credential health above, with what stops while it fails), **Change notifications from SharePoint** (how many watches are active, expired or failing to renew, with **Renew expired** and **Show watches**, see [Managing Webhooks](#managing-webhooks)) and **Test the connection**. A badge in its heading sums up the worst state. Renewing or recreating watches from the watch list updates the counts in the check, and the other way around.
 
-### Sources Across the Organization
-
-Under the connection checks, **Sources across the organization** lists every source imported into a shared space or the organization space, with its space, number of documents, status and when it was last up to date. For a source that needs attention, the reason of its first failed folder is shown under the status. Sources that need attention come first, the status buttons narrow the list, and the search matches the source, its folders and the space. A summary shows how many sources there are, how many need attention and in how many spaces, and how many documents they hold. Sources in personal spaces can hold a person's own OneDrive folders, so they are only counted, with how many of them fail. The source name opens the source page when you can open its space; administrators are not automatically members of every shared space, so for the others the name is plain text.
-
 ---
 
 ## Importing Content from SharePoint

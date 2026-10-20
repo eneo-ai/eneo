@@ -4,7 +4,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from eneo.integration.presentation.models import IntegrationKnowledgePublic
 from eneo.observability.error_text import user_visible_error
 
 
@@ -244,45 +243,4 @@ class ServiceAccountAuthCallback(BaseModel):
     # The issued state is token_urlsafe(32), 43 characters.
     state: str = Field(
         ..., max_length=256, description="OAuth state parameter for verification"
-    )
-
-
-class AdminIntegrationKnowledgeSpace(BaseModel):
-    id: UUID
-    name: str
-    organization: bool = Field(
-        ..., description="True for the tenant's organization space"
-    )
-    can_open: bool = Field(
-        ...,
-        description="Whether the caller may open the space: the organization "
-        "space, or a shared space they belong to directly or through a group. "
-        "The admin permission alone grants no access to a shared space",
-    )
-
-
-class AdminIntegrationKnowledgeItem(BaseModel):
-    space: AdminIntegrationKnowledgeSpace = Field(
-        ..., description="The space that owns the item"
-    )
-    knowledge: IntegrationKnowledgePublic
-
-
-class AdminPersonalIntegrationKnowledge(BaseModel):
-    items: int = Field(..., description="Items in personal spaces")
-    failing: int = Field(
-        ..., description="Items in personal spaces whose latest sync failed"
-    )
-
-
-class AdminIntegrationKnowledgeOverview(BaseModel):
-    items: list[AdminIntegrationKnowledgeItem] = Field(
-        ...,
-        description="Every item of the shared and organization spaces, ordered by "
-        "space name and then creation",
-    )
-    personal: AdminPersonalIntegrationKnowledge = Field(
-        ...,
-        description="Personal spaces are counted, not listed: they can hold a "
-        "person's own OneDrive folders",
     )

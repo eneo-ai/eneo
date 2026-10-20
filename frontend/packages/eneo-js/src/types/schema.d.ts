@@ -8059,26 +8059,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/admin/integrations/knowledge/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    /**
-     * Get Integration Knowledge Overview
-     * @description Every integration knowledge item in the tenant's shared and organization spaces with its sync status. Items in personal spaces are only counted. Requires the admin permission.
-     */
-    get: operations["get_integration_knowledge_overview_api_v1_admin_integrations_knowledge__get"];
-    put?: never;
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/admin/help-assistants/roles/": {
     parameters: {
       query?: never;
@@ -10020,55 +10000,6 @@ export interface components {
       username: string | null;
       /** Email */
       email: string;
-    };
-    /** AdminIntegrationKnowledgeItem */
-    AdminIntegrationKnowledgeItem: {
-      /** @description The space that owns the item */
-      space: components["schemas"]["AdminIntegrationKnowledgeSpace"];
-      knowledge: components["schemas"]["IntegrationKnowledgePublic"];
-    };
-    /** AdminIntegrationKnowledgeOverview */
-    AdminIntegrationKnowledgeOverview: {
-      /**
-       * Items
-       * @description Every item of the shared and organization spaces, ordered by space name and then creation
-       */
-      items: components["schemas"]["AdminIntegrationKnowledgeItem"][];
-      /** @description Personal spaces are counted, not listed: they can hold a person's own OneDrive folders */
-      personal: components["schemas"]["AdminPersonalIntegrationKnowledge"];
-    };
-    /** AdminIntegrationKnowledgeSpace */
-    AdminIntegrationKnowledgeSpace: {
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Name */
-      name: string;
-      /**
-       * Organization
-       * @description True for the tenant's organization space
-       */
-      organization: boolean;
-      /**
-       * Can Open
-       * @description Whether the caller may open the space: the organization space, or a shared space they belong to directly or through a group. The admin permission alone grants no access to a shared space
-       */
-      can_open: boolean;
-    };
-    /** AdminPersonalIntegrationKnowledge */
-    AdminPersonalIntegrationKnowledge: {
-      /**
-       * Items
-       * @description Items in personal spaces
-       */
-      items: number;
-      /**
-       * Failing
-       * @description Items in personal spaces whose latest sync failed
-       */
-      failing: number;
     };
     /** AllowedOriginCreate */
     AllowedOriginCreate: {
@@ -52585,35 +52516,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  get_integration_knowledge_overview_api_v1_admin_integrations_knowledge__get: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody?: never;
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["AdminIntegrationKnowledgeOverview"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
