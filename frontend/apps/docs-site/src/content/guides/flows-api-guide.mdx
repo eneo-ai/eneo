@@ -288,7 +288,7 @@ These are admin surfaces, not end-user runtime endpoints:
 | Flow document render limits | `GET/PATCH /api/v1/settings/flow-document-render-limits`                       | Control generated PDF/DOCX rendering limits                                                                              |
 | Flow runtime policy         | `GET/PATCH /api/v1/settings/flow-runtime-policy`                               | Control step timeouts and the run limit                                                                                  |
 | Mapped execution policy     | `GET/PATCH /api/v1/settings/flow-mapped-execution-policy`                      | Control provider-call fan-out and aggregate estimated-input-token ceilings for each mapped step attempt                  |
-| Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                              | Control stricter raw evidence export behavior for classification-3 spaces                                                |
+| Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                              | Control stricter raw evidence export behavior for classification-3 evidence                                              |
 | Knowledge evidence policy   | `GET/PATCH /api/v1/settings/flow-rag-evidence-policy`                          | Control how much retrieval evidence a run records and exposes                                                            |
 | Flow data eligibility       | `GET/PATCH /api/v1/settings/flow-retention-policy`                             | Inspect and change never-attached-upload and debug-evidence eligibility                                                  |
 | Flow run-history retention  | `GET/PUT /api/v1/settings/flow-run-retention-policy` and its Space/Flow routes | Inspect, replace, or inherit complete run-history policies and read the review queue                                     |
@@ -392,7 +392,7 @@ Omit `scope` for the Organization, or use `{ scope: "flow", flowId }` for one Fl
 
 ### Flow evidence policy shape
 
-`/api/v1/settings/flow-evidence-policy` controls who may make a raw evidence export in a classification-3 space.
+`/api/v1/settings/flow-evidence-policy` controls who may make a raw evidence export of a run whose evidence is held to classification 3: its space is at classification 3 or higher now, the run recorded classification 3 or higher for its evidence, or the run produced evidence without a recorded level. A run records the level before its steps run, at its start and at every resume or retry, and the record only rises, so classifying the space lower afterwards does not lower it.
 
 Key flags currently include:
 
@@ -1704,7 +1704,7 @@ For the full evidence and classification policy model, see <a href="/docs/flows"
 
 - `evidence/` is the inline inspection surface
 - redacted export is the normal support/compliance export
-- raw export is the strictest export surface and may be tightened further in classification-3 spaces
+- raw export is the strictest export surface and may be tightened further for evidence held to classification 3
 
 #### Service keys and evidence
 

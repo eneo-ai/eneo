@@ -33,6 +33,10 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.roles_table import Roles
+from eneo.database.tables.security_classifications_table import (
+    SecurityClassification,
+)
+from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.users_table import users_roles_table
 from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
@@ -392,6 +396,8 @@ async def _seed_flow_run_contract_data(
                 "webhook_url": "https://example.org/hook?token=top-secret",
             },
             output_payload_json={"structured": {"summary": "Completed"}},
+            # What the executor records before a run's first step.
+            evidence_classification_level=0,
         )
         session.add(run)
         await session.flush()
@@ -1717,6 +1723,96 @@ async def test_flow_run_evidence_export_preserves_review_checkpoint_lineage(
         "review_impact"
     ]["events"][0]
     assert redacted_review_event["output_changed"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("recorded_level", "evidence_produced", "raw_export_status"),
+    [
+        # Kills the mutant that reads only the space's level now.
+        pytest.param(3, True, 403, id="recorded_3_in_a_space_now_at_1"),
+        # Kills the mutant that reads an unknown level as 0.
+        pytest.param(None, True, 403, id="unknown_level_with_evidence"),
+        # Kills the mutant that reads every unknown level as classification 3.
+        pytest.param(None, False, 200, id="unknown_level_without_evidence"),
+    ],
+)
+async def test_raw_export_and_passages_are_held_to_the_runs_recorded_evidence_level(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    recorded_level: int | None,
+    evidence_produced: bool,
+    raw_export_status: int,
+):
+    seeded, trace_user, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    run_id = UUID(seeded["run_id"])
+    async with db_container() as container:
+        session = container.session()
+        classification = SecurityClassification(
+            name=f"Level one {uuid4().hex[:8]}",
+            description=None,
+            security_level=1,
+            tenant_id=admin_user.tenant_id,
+        )
+        session.add(classification)
+        await session.flush()
+        await session.execute(
+            sa.update(Spaces)
+            .where(Spaces.id == UUID(seeded["space_id"]))
+            .values(security_classification_id=classification.id)
+        )
+        if not evidence_produced:
+            run = FlowRuns(
+                flow_id=UUID(seeded["flow_id"]),
+                flow_version=1,
+                principal_type="user",
+                principal_user_id=trace_user.id,
+                tenant_id=admin_user.tenant_id,
+                trace_id=uuid4(),
+                status="failed",
+            )
+            session.add(run)
+            await session.flush()
+            run_id = run.id
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .values(evidence_classification_level=recorded_level)
+        )
+    headers = {"Authorization": f"Bearer {trace_token}"}
+    run_url = f"/api/v1/flows/{seeded['flow_id']}/runs/{run_id}"
+
+    raw = await client.get(
+        f"{run_url}/evidence/export?format=json&detail=raw&reason=level-audit",
+        headers=headers,
+    )
+    view = await client.get(f"{run_url}/evidence/", headers=headers)
+
+    assert raw.status_code == raw_export_status, raw.text
+    assert view.status_code == 200, view.text
+    if raw_export_status == 403:
+        assert raw.json()["code"] == "flow_run_evidence_raw_export_forbidden"
+    if evidence_produced:
+        passage = view.json()["knowledge_traces"][0]["rag"]["references"][0][
+            "passages"
+        ][0]
+        assert (passage["text"], passage["disclosure"]) == (
+            None,
+            "text_withheld_classified_space",
+        )
 
 
 @pytest.mark.asyncio

@@ -14,6 +14,7 @@ from eneo.flows.flow_access_policy import (
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowUnauthorizedException
 from eneo.flows.flow_evidence_policy import (
+    CLASSIFIED_SECURITY_LEVEL,
     EvidenceCapabilityLevel,
     FlowEvidencePolicy,
     FlowHistoryAccessContext,
@@ -253,12 +254,14 @@ class FlowRunAccessPolicy:
                         message="Service principal is not authorized to export raw evidence for this run.",
                     )
                 if (
-                    classification_level >= 3
-                    and not policy.allow_service_key_raw_export_class3
+                    not policy.allow_service_key_raw_export_class3
+                    and await self._evidence_held_to_classification_3(
+                        run, space_level=classification_level
+                    )
                 ):
                     self.deny_raw_export_access(
                         auth_layer="flow_run_principal",
-                        message="Raw evidence export is not allowed for service principals in classification 3 spaces.",
+                        message="Raw evidence export is not allowed for service principals when the run's evidence is held to classification 3.",
                     )
                 return
             self.deny_run_access(auth_layer="flow_run_principal")
@@ -285,13 +288,15 @@ class FlowRunAccessPolicy:
                 if role_value == "owner":
                     return
                 if (
-                    classification_level < 3
-                    or policy.allow_space_admin_raw_export_class3
+                    policy.allow_space_admin_raw_export_class3
+                    or not await self._evidence_held_to_classification_3(
+                        run, space_level=classification_level
+                    )
                 ):
                     return
                 self.deny_raw_export_access(
                     auth_layer="space_membership",
-                    message="Raw evidence export is not allowed for space admins in classification 3 spaces.",
+                    message="Raw evidence export is not allowed for space admins when the run's evidence is held to classification 3.",
                 )
 
         if principal.matches_run(run):
@@ -314,11 +319,16 @@ class FlowRunAccessPolicy:
                         code=AccessDenialCode.INSUFFICIENT_TENANT_PERMISSION,
                         context={"auth_layer": "tenant_role"},
                     )
-                if classification_level < 3 or policy.allow_run_owner_raw_export_class3:
+                if (
+                    policy.allow_run_owner_raw_export_class3
+                    or not await self._evidence_held_to_classification_3(
+                        run, space_level=classification_level
+                    )
+                ):
                     return
                 self.deny_raw_export_access(
                     auth_layer="flow_run_owner",
-                    message="Raw evidence export is not allowed for this run in a classification 3 space.",
+                    message="Raw evidence export is not allowed for this run: its evidence is held to classification 3.",
                 )
 
         self.deny_run_access(auth_layer="flow_run_owner")
@@ -342,8 +352,6 @@ class FlowRunAccessPolicy:
         # service, whose membership check a tenant admin is not subject to.
         # A tenant admin bypasses authorization, never the data's classification.
         context = await self._load_flow_context(flow_id=run.flow_id, history=history)
-        if not context.sensitive and not context.classified:
-            return "text_disclosed"
         # A raw export has already cleared the flow's export switch and the
         # classification gates in `ensure_can_access_run`, so reaching here
         # means the reader is entitled to the underlying content.
@@ -351,7 +359,32 @@ class FlowRunAccessPolicy:
             return "text_disclosed"
         if context.sensitive:
             return "text_withheld_sensitive_flow"
-        return "text_withheld_classified_space"
+        if await self._evidence_held_to_classification_3(
+            run, space_level=context.classification_level
+        ):
+            return "text_withheld_classified_space"
+        return "text_disclosed"
+
+    async def _evidence_held_to_classification_3(
+        self, run: FlowRunStatusSnapshot, *, space_level: int
+    ) -> bool:
+        """Whether a reader of the run's evidence must clear classification 3.
+
+        The level to clear is the higher of the space's level now and the level
+        the run recorded for its evidence (`evidence_classification_level`): a
+        space classified lower after the run does not lower it. A run that
+        produced evidence without a recorded level could hold evidence of any
+        level, so it is held to classification 3; a run that produced none
+        answers to its space alone.
+        """
+        recorded_level = run.evidence_classification_level
+        if recorded_level is not None:
+            return max(space_level, recorded_level) >= CLASSIFIED_SECURITY_LEVEL
+        if space_level >= CLASSIFIED_SECURITY_LEVEL:
+            return True
+        return await self.flow_run_repo.has_step_attempts(
+            run_id=run.id, tenant_id=run.tenant_id
+        )
 
     async def _ensure_flow_allows_evidence_export(
         self, *, flow_id: UUID, history: bool

@@ -792,7 +792,7 @@ normalize it.
 Each flow decides whether its run evidence may be exported at all. The setting is `metadata_json.evidence_policy.allow_export`; in the editor it is **Nedladdning av bevisunderlag** (Evidence download) under **Grundinställningar** (Basic settings). It is off for every flow until someone turns it on.
 
 - **Off means nobody.** Both export tiers are refused with `403 flow_run_evidence_export_disabled` for everyone who could otherwise export: the run's owner, space owners and admins, tenant admins and service keys. A caller who may not export gets the ordinary refusal, whatever the setting is. The evidence view is not an export and is not affected.
-- **On means the usual rules decide.** Role, run ownership, service-key capability and the classification-3 rules below apply as before, and a redacted export still withholds verbatim passage text for a sensitive flow or a classified space.
+- **On means the usual rules decide.** Role, run ownership, service-key capability and the classification-3 rules below apply as before, and a redacted export still withholds verbatim passage text for a sensitive flow or for evidence held to classification 3.
 - **The flow's current value applies to all of its runs**, including runs made before the setting was changed. Turning it on opens export of older runs; turning it off closes it again.
 - **Anyone who may edit the flow may change it.** A published flow has to be unpublished before it can be edited, like for any other flow setting; the change applies as soon as it is saved. The flow's audit entry records the old and the new value.
 - **A deleted flow keeps the value it was deleted with.** Turn the setting on before deleting a flow whose evidence may be needed later; the delete dialog warns when it is off.
@@ -800,7 +800,9 @@ Each flow decides whether its run evidence may be exported at all. The setting i
 
 ### What classification 3 changes
 
-The main tightening for classification-3 spaces is on **raw export**.
+The main tightening for classification 3 is on **raw export**; below a raw export, the evidence view and the redacted export also withhold verbatim passage text.
+
+A run's evidence is held to classification 3 when its space is at classification 3 or higher now, or when the run recorded classification 3 or higher for its evidence. A run records the highest classification of its steps before they run, at its start and at every resume or retry, and the record only rises: classifying the space lower afterwards does not lower it. A retry or a regenerated run that takes over another run's steps starts from that run's record. A run that produced evidence without a record, such as one made before runs recorded it, is held to classification 3, because its level is unknown. If none of its steps has completed, its next start or resume records the level as usual.
 
 Tenant flow settings can block raw export for:
 

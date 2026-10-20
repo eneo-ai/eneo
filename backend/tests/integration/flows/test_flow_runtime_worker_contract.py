@@ -1994,7 +1994,10 @@ async def test_seeded_attempt_history_repairs_only_the_latest_failed_attempt(
             expected_revision=context.run_revision,
         )
         await repo.record_evidence_classification_level(
-            run_id=context.run_id, tenant_id=context.tenant_id, level=0
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            level=0,
+            has_completed_steps=False,
         )
         first_status = (
             FlowStepAttemptStatus.COMPLETED

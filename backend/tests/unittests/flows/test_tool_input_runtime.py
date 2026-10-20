@@ -768,7 +768,7 @@ async def test_the_runs_evidence_level_counts_the_level_of_the_tools_server(
     )
 
     flow_run_repo.record_evidence_classification_level.assert_awaited_once_with(
-        run_id=queued.id, tenant_id=user.tenant_id, level=3
+        run_id=queued.id, tenant_id=user.tenant_id, level=3, has_completed_steps=False
     )
 
 

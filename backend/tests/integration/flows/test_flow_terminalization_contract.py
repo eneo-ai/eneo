@@ -292,7 +292,10 @@ async def test_terminal_evidence_keeps_started_steps_when_attempt_page_is_omitte
             step_count=17,
         )
         await repo.record_evidence_classification_level(
-            run_id=run.id, tenant_id=admin_user.tenant_id, level=0
+            run_id=run.id,
+            tenant_id=admin_user.tenant_id,
+            level=0,
+            has_completed_steps=False,
         )
         for step in flow.steps[:3]:
             result = await repo.claim_step_result(

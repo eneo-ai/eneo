@@ -1043,6 +1043,7 @@ class FlowRunExecutor:
             run_id=run_id,
             tenant_id=tenant_id,
             level=evidence_classification_level(step_output_levels),
+            has_completed_steps=bool(state.completed_by_order),
         )
         for step in sorted(steps, key=lambda item: item.step_order):
             latest_run = await self.flow_run_repo.get(

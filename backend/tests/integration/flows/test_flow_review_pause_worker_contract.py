@@ -2046,3 +2046,132 @@ async def test_resume_last_step_review_terminalizes_completed_run(
         "flow_run_review_checkpoint_resumed",
         "flow_run_completed",
     ]
+
+
+async def _recorded_evidence_level(session: AsyncSession, run_id: UUID) -> int | None:
+    return await session.scalar(
+        sa.select(FlowRuns.evidence_classification_level).where(FlowRuns.id == run_id)
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "recorded_before_resume",
+    [
+        # Kills the mutant that overwrites the recorded level with the one the
+        # resume computes from the space and model as they are now (0 here).
+        pytest.param(3, id="recorded_3_stays_3"),
+        # Kills the mutant that gives a run whose steps completed without a
+        # recorded level one now (0 through COALESCE or GREATEST).
+        pytest.param(None, id="unknown_stays_unknown"),
+    ],
+)
+async def test_a_resume_neither_lowers_nor_invents_the_runs_evidence_level(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    recorded_before_resume: int | None,
+):
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(
+                completion="This answer needs review.", total_token_count=17
+            )
+        )
+    )
+    async with sessionmanager.session() as session:
+        context = await _create_review_pause_runtime_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+        )
+        paused = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.initial_run_revision,
+            dispatch_task_id=f"evidence-level-pause-{uuid4()}",
+            retry_count=0,
+        )
+        recorded_at_start = await _recorded_evidence_level(session, context.run_id)
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == context.run_id)
+            .values(evidence_classification_level=recorded_before_resume)
+        )
+        await session.commit()
+        review_service = context.container.flow_run_review_checkpoint_service()
+        checkpoint = await review_service.get_active_review_checkpoint(
+            flow_id=context.flow_id, run_id=context.run_id
+        )
+        assert checkpoint is not None
+        resumed = await review_service.approve_and_resume_review_checkpoint(
+            flow_id=context.flow_id,
+            run_id=context.run_id,
+            checkpoint_id=checkpoint.id,
+            expected_checkpoint_revision=checkpoint.revision,
+            idempotency_key=f"evidence-level-resume-{uuid4()}",
+        )
+        completed = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=resumed.run.revision,
+            dispatch_task_id=f"evidence-level-resume-{uuid4()}",
+            retry_count=0,
+        )
+        recorded_after_resume = await _recorded_evidence_level(session, context.run_id)
+
+    assert paused == {"status": FlowRunStatus.AWAITING_REVIEW.value}
+    assert completed == {"status": FlowRunStatus.COMPLETED.value}
+    # Nothing in the space or the model is classified: the first claim records
+    # 0, a known level (kills the mutant that never records one).
+    assert recorded_at_start == 0
+    assert recorded_after_resume == recorded_before_resume
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_recorded_evidence_level_rises_with_later_evidence(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    # Kills the mutant where the first recorded level wins (COALESCE instead
+    # of GREATEST): evidence produced later at a higher level raises it.
+    async with sessionmanager.session() as session:
+        context = await _create_review_pause_runtime_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=SimpleNamespace(get_response=AsyncMock()),
+        )
+        repo = context.container.flow_run_repo()
+        await repo.record_evidence_classification_level(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            level=1,
+            has_completed_steps=False,
+        )
+        await repo.record_evidence_classification_level(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            level=2,
+            has_completed_steps=True,
+        )
+
+        assert await _recorded_evidence_level(session, context.run_id) == 2

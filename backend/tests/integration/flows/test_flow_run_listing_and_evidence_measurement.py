@@ -317,6 +317,10 @@ async def _write_representative_evidence(
         source="generated_output",
     )
     final_step_order = len(step_ids)
+    # What the executor records before a run's first step.
+    await run_repo.record_evidence_classification_level(
+        run_id=run_id, tenant_id=tenant_id, level=0, has_completed_steps=False
+    )
     for step_order, step_id in enumerate(step_ids, start=1):
         for attempt_no in range(1, attempts_per_step + 1):
             await run_repo.create_or_get_attempt_started(

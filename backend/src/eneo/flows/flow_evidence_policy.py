@@ -13,8 +13,9 @@ from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.flow_metadata import FlowMetadataParseMode, parse_flow_metadata
 from eneo.main.exceptions import BadRequestException
 
-# Spaces at this level or above withhold verbatim evidence content below a
-# raw export. Owned here with the rest of the sensitivity vocabulary.
+# Evidence held to this level or above withholds verbatim passage text below a
+# raw export, and its raw export follows the tenant's classification-3 policy.
+# Owned here with the rest of the sensitivity vocabulary.
 CLASSIFIED_SECURITY_LEVEL: Final[int] = 3
 
 FLOW_EVIDENCE_POLICY_SETTINGS_KEY: Final[str] = "evidence_policy"
@@ -67,10 +68,6 @@ class FlowHistoryAccessContext:
     @property
     def id(self) -> UUID:
         return self.flow_id
-
-    @property
-    def classified(self) -> bool:
-        return self.classification_level >= CLASSIFIED_SECURITY_LEVEL
 
 
 class EvidenceCapabilityLevel(IntEnum):

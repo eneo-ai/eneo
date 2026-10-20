@@ -398,7 +398,7 @@ async def test_seed_validated_prefix_copies_results_without_provider_usage(
         await session.execute(
             sa.update(FlowRuns)
             .where(FlowRuns.id == context.run_id)
-            .values(status="failed")
+            .values(status="failed", evidence_classification_level=None)
         )
         child = await repo.create(
             flow_id=context.flow_id,
@@ -433,6 +433,15 @@ async def test_seed_validated_prefix_copies_results_without_provider_usage(
             run_id=child.id, tenant_id=context.tenant_id
         )
         assert len(results) == 1
+        # Kills: the seed copy reading a source without a recorded level as 0,
+        # which would release the imported evidence as unclassified.
+        assert (
+            await session.scalar(
+                sa.select(FlowRuns.evidence_classification_level).where(
+                    FlowRuns.id == child.id
+                )
+            )
+        ) is None
         imported = results[0]
         assert imported.status == FlowStepResultStatus.COMPLETED
         assert imported.current_attempt_no == 1

@@ -808,6 +808,23 @@ class FlowRunRepository:
                     tenant_id=run.tenant_id,
                     imported_step_ids=imported_step_ids,
                 )
+        # The imported steps are evidence the source run produced, at the
+        # level it recorded (or at an unknown one), so the new run starts from
+        # that level, which its own claims can only raise.
+        source_run = aliased(FlowRuns)
+        await self.session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run.id)
+            .where(FlowRuns.tenant_id == run.tenant_id)
+            .values(
+                evidence_classification_level=sa.select(
+                    source_run.evidence_classification_level
+                )
+                .where(source_run.id == seed.source_run_id)
+                .where(source_run.tenant_id == run.tenant_id)
+                .scalar_subquery()
+            )
+        )
 
     async def _copy_tool_answer_evidence(
         self,
@@ -1575,6 +1592,19 @@ class FlowRunRepository:
         )
         return int(count or 0)
 
+    async def has_step_attempts(self, *, run_id: UUID, tenant_id: UUID) -> bool:
+        """Whether the run holds any step attempt, its own or imported: every
+        step's evidence (input, output, passages, provider calls) hangs off one."""
+        return bool(
+            await self.session.scalar(
+                sa.select(
+                    sa.exists()
+                    .where(FlowStepAttempts.flow_run_id == run_id)
+                    .where(FlowStepAttempts.tenant_id == tenant_id)
+                )
+            )
+        )
+
     async def close_active_step_results_for_terminal_run(
         self,
         *,
@@ -1622,15 +1652,34 @@ class FlowRunRepository:
         return int(getattr(result, "rowcount", 0) or 0)
 
     async def record_evidence_classification_level(
-        self, *, run_id: UUID, tenant_id: UUID, level: int
+        self, *, run_id: UUID, tenant_id: UUID, level: int, has_completed_steps: bool
     ) -> None:
+        """Record the level of the evidence the run is about to produce.
+
+        A recorded level only rises: the run's earlier evidence keeps the level
+        it was produced at when a resume or a retry finds the space or a model
+        classified lower. A run without a recorded level gets one only while
+        none of its steps has completed; steps that completed without one
+        produced evidence of a level nobody recorded, so the run stays unknown.
+        """
         await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
-        await self.session.execute(
+        statement = (
             sa.update(FlowRuns)
             .where(FlowRuns.id == run_id)
             .where(FlowRuns.tenant_id == tenant_id)
-            .values(evidence_classification_level=level)
+            # PostgreSQL's GREATEST skips NULL, so an unrecorded level takes
+            # `level`; the filter below keeps an unknown run unknown.
+            .values(
+                evidence_classification_level=sa.func.greatest(
+                    FlowRuns.evidence_classification_level, level
+                )
+            )
         )
+        if has_completed_steps:
+            statement = statement.where(
+                FlowRuns.evidence_classification_level.is_not(None)
+            )
+        await self.session.execute(statement)
 
     async def update_input_payload(
         self,

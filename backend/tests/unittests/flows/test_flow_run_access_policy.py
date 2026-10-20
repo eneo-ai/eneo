@@ -48,6 +48,8 @@ def _run(user, flow_id) -> FlowRun:
         input_payload_json=None,
         output_payload_json=None,
         job_id=None,
+        # What the executor records before a run's first step.
+        evidence_classification_level=0,
         created_at=now,
         updated_at=now,
     )
@@ -881,13 +883,120 @@ async def test_space_manager_access_matrix_is_role_and_classification_exact(
             with pytest.raises(UnauthorizedException) as exc_info:
                 await policy.ensure_can_access_run(run, access_kind=access_kind)
             assert str(exc_info.value) == (
-                "Raw evidence export is not allowed for space admins in "
-                "classification 3 spaces."
+                "Raw evidence export is not allowed for space admins when the "
+                "run's evidence is held to classification 3."
             )
             assert exc_info.value.code == "flow_run_evidence_raw_export_forbidden"
             assert exc_info.value.context == {"auth_layer": "space_membership"}
             continue
         await policy.ensure_can_access_run(run, access_kind=access_kind)
+
+
+@pytest.mark.parametrize(
+    ("caller", "refusal_layer"),
+    [
+        # Kill the mutants that leave one raw-export gate on the space's level
+        # as it is now (1) instead of the level the run recorded (3).
+        ("service_key", "flow_run_principal"),
+        ("space_admin", "space_membership"),
+        # Kill the mutants that hold the exempt roles to the recorded level, or
+        # that ignore the tenant's classification-3 switch for space admins.
+        ("space_owner", None),
+        ("tenant_admin", None),
+        ("space_admin_allowed_by_tenant", None),
+    ],
+)
+async def test_raw_export_is_held_to_the_level_the_run_recorded(
+    user, caller: str, refusal_layer: str | None
+) -> None:
+    acting_user = user
+    if caller == "tenant_admin":
+        acting_user = user.model_copy(
+            update={"roles": [SimpleNamespace(permissions=[Permission.ADMIN])]}
+        )
+    elif caller == "service_key":
+        acting_user = _service_key_user(
+            user,
+            resource_permissions=ResourcePermissions(
+                flow_evidence=ResourcePermissionLevel.ADMIN
+            ),
+        )
+    elif caller == "space_admin_allowed_by_tenant":
+        acting_user = user.model_copy(
+            update={
+                "tenant": user.tenant.model_copy(
+                    update={
+                        "flow_settings": {
+                            "evidence_policy": {
+                                "classification_3": {
+                                    "allow_space_admin_raw_export": True
+                                }
+                            }
+                        }
+                    }
+                )
+            }
+        )
+    flow_repo = AsyncMock()
+    policy = _policy_with_space(
+        acting_user,
+        flow_repo=flow_repo,
+        flow_run_repo=AsyncMock(),
+        role={
+            "space_admin": "admin",
+            "space_admin_allowed_by_tenant": "admin",
+            "space_owner": "owner",
+        }.get(caller, "viewer"),
+        security_level=1,
+    )
+    run = _run(user, flow_repo.get.return_value.id).model_copy(
+        update={"evidence_classification_level": 3, "principal_user_id": uuid4()}
+    )
+    if caller == "service_key":
+        run = run.model_copy(
+            update={
+                "principal_type": PrincipalType.SERVICE_KEY.value,
+                "principal_user_id": None,
+                "principal_service_id": (
+                    acting_user.active_api_key.service_principal_id
+                ),
+                "created_by_api_key_id": acting_user.active_api_key.id,
+            }
+        )
+
+    if refusal_layer is None:
+        await policy.ensure_can_access_run(run, access_kind="evidence_export_raw")
+        return
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await policy.ensure_can_access_run(run, access_kind="evidence_export_raw")
+    assert exc_info.value.code == "flow_run_evidence_raw_export_forbidden"
+    assert exc_info.value.context == {"auth_layer": refusal_layer}
+
+
+async def test_a_run_without_a_recorded_level_answers_to_a_classified_space(
+    user,
+) -> None:
+    """Kills: an unrecorded run that produced no evidence yet (queued, or
+    failed in preflight) leaving its classification-3 space's rule behind, so a
+    space admin could raw-export its input."""
+    flow_repo = AsyncMock()
+    flow_run_repo = AsyncMock()
+    flow_run_repo.has_step_attempts.return_value = False
+    policy = _policy_with_space(
+        user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        role="admin",
+        security_level=3,
+    )
+    run = _run(user, flow_repo.get.return_value.id).model_copy(
+        update={"evidence_classification_level": None, "principal_user_id": uuid4()}
+    )
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await policy.ensure_can_access_run(run, access_kind="evidence_export_raw")
+    assert exc_info.value.code == "flow_run_evidence_raw_export_forbidden"
+    assert exc_info.value.context == {"auth_layer": "space_membership"}
 
 
 @pytest.mark.parametrize("access_kind", list(get_args(FlowRunAccessKind)))
@@ -1052,8 +1161,8 @@ async def test_service_key_raw_export_fails_closed_in_classification_three(
         await policy.ensure_can_access_run(run, access_kind="evidence_export_raw")
 
     assert str(exc_info.value) == (
-        "Raw evidence export is not allowed for service principals in "
-        "classification 3 spaces."
+        "Raw evidence export is not allowed for service principals when the "
+        "run's evidence is held to classification 3."
     )
     assert exc_info.value.code == "flow_run_evidence_raw_export_forbidden"
     assert exc_info.value.context == {"auth_layer": "flow_run_principal"}

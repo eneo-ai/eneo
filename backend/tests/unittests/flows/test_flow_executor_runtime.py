@@ -1370,7 +1370,10 @@ async def test_execute_records_the_runs_evidence_level_before_the_first_step(use
     )
     assert result == {"status": "skipped", "reason": "step_already_claimed"}
     flow_run_repo.record_evidence_classification_level.assert_awaited_once_with(
-        run_id=queued_run.id, tenant_id=user.tenant_id, level=3
+        run_id=queued_run.id,
+        tenant_id=user.tenant_id,
+        level=3,
+        has_completed_steps=False,
     )
 
 

@@ -4320,7 +4320,10 @@ async def test_get_evidence_separates_source_review_from_debug_counts(user):
     flow_version_repo = AsyncMock()
     flow = _flow(user=user, published_version=1)
     _seed_flow_repo(flow_repo, flow)
-    run = _run(user=user, flow_id=flow.id)
+    # A run that produced evidence carries the level the executor recorded.
+    run = _run(user=user, flow_id=flow.id).model_copy(
+        update={"evidence_classification_level": 0}
+    )
     _seed_flow_repo(flow_repo, flow)
     flow_run_repo.get.return_value = run
     flow_version_repo.get.return_value = _published_flow_version(

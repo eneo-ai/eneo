@@ -233,13 +233,16 @@ async def test_retry_import_copies_bounded_consumed_material_alias(context):
         ),
         seed=seed,
     )
-    # The result's update, then the attempt's insert (which returns its id).
+    # The last result's update, then its attempt's insert (which returns its
+    # id); the run's own update (its evidence level) follows them.
+    result_update = [
+        call
+        for call in session.execute.await_args_list
+        if call.args[0].table.name == "flow_step_results"
+    ][-1]
     copied_inputs = [
         call.args[0].compile(dialect=postgresql.dialect()).params["input_payload_json"]
-        for call in (
-            session.execute.await_args_list[-1],
-            session.scalar.await_args_list[-1],
-        )
+        for call in (result_update, session.scalar.await_args_list[-1])
     ]
     assert copied_inputs == [payload, payload]
     assert payload["text"] == text[:2048]
