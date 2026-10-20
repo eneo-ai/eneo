@@ -44,6 +44,11 @@ import "./view.css";
 /** What a host passes on of a tool's result; larger results never reach the view. */
 const MAX_PAYLOAD_BYTES = 256 * 1024;
 const UNZOOMED = { start: 0, end: 100 };
+/**
+ * The interval stands for about 8 days in 10. With at least 10 days in the check, fewer than
+ * 6 in 10 inside is unlikely by chance: the interval is too narrow for this series.
+ */
+const NARROW = { scored: 10, share: 0.6 };
 /** The days ahead are the point: the chart opens on them and the last weeks before them. */
 function focus(data: Payload): { start: number; end: number } {
   const total = data.recent.values.length + data.forecast.days;
@@ -100,9 +105,13 @@ const TEXTS = {
     table: "Tabell",
     legend: "Visa eller dölj serier",
     day: "Dag",
+    low: "Lågt (P10)",
+    high: "Högt (P90)",
     note: "Prognosen bygger bara på historiken. Väder, lov och helgdagar ingår inte.",
     worse:
       "I testet mot facit träffade prognosen sämre än att upprepa förra veckan. Använd den med försiktighet.",
+    narrow: (inside: number, scored: number) =>
+      `I testet mot facit låg bara ${inside} av ${scored} dagar inom spannet. Utfallet kan variera mer än spannet visar.`,
     error: "Prognosen kunde inte visas.",
     summary: (days: number, from: string, model: string) => `${days} dagar från ${from} · ${model}`,
     method: "Visa metod",
@@ -119,12 +128,12 @@ const TEXTS = {
     },
     source: (file: string, sheet: string | undefined, date: string, value: string) =>
       `${file}${sheet ? `, blad ${sheet}` : ""}, kolumnerna ${date} och ${value}`,
-    history: (from: string, to: string, days: number, used: number | undefined, shown: number) =>
-      `${from} – ${to}, ${days} dagar.${used ? ` Modellen läste de senaste ${used}.` : ""} Diagrammet visar de senaste ${shown}.`,
+    history: (range: string, days: number, used: number | undefined, shown: number) =>
+      `${range}, ${days} dagar.${used ? ` Modellen läste de senaste ${used}.` : ""} Diagrammet visar de senaste ${shown}.`,
     missing: (n: number) =>
       n === 0 ? "Inga" : `${n} ${n === 1 ? "dag" : "dagar"} utan värde. De räknades som okända, inte som noll.`,
-    check: (from: string, to: string, inside: number, scored: number, mae: string, baseline: string) =>
-      `En prognos för ${from}–${to}, gjord på historiken före: ${inside} av ${scored} dagar inom spannet. Medelfel ${mae} per dag, mot ${baseline} om man upprepar förra veckan.`,
+    check: (range: string, inside: number, scored: number, mae: string, baseline: string) =>
+      `En prognos för ${range}, gjord på historiken före: ${inside} av ${scored} dagar inom spannet. Medelfel ${mae} per dag, mot ${baseline} om man upprepar förra veckan.`,
     unavailable: {
       SHORT_HISTORY: "Gick inte att göra: historiken före de sista dagarna är för kort.",
       TOO_MANY_MISSING: "Gick inte att göra: för många dagar före de sista dagarna saknar värde.",
@@ -135,8 +144,8 @@ const TEXTS = {
     ignores: "Väder, lov, helgdagar och planerade förändringar",
     model: (name: string, millions: string) => `${name}, ${millions} miljoner parametrar. Körs i er egen miljö.`,
     caveat: "Spannet är modellens bedömning, inte en garanti.",
-    describe: (from: string, to: string, days: number, start: string) =>
-      `Linjediagram: historik ${from}–${to} och prognos för ${days} dagar från ${start}, med det mest troliga värdet och spannet P10–P90 för varje dag. Samma siffror finns i tabellen.`,
+    describe: (range: string, days: number, start: string) =>
+      `Linjediagram: historik ${range} och prognos för ${days} dagar från ${start}, med det mest troliga värdet och spannet P10–P90 för varje dag. Samma siffror finns i tabellen.`,
   },
   en: {
     label: "Forecast",
@@ -145,9 +154,13 @@ const TEXTS = {
     table: "Table",
     legend: "Show or hide series",
     day: "Day",
+    low: "Low (P10)",
+    high: "High (P90)",
     note: "The forecast rests on the history only. Weather, school breaks and holidays are not included.",
     worse:
       "In the check against the outcome, the forecast missed by more than repeating last week. Use it with care.",
+    narrow: (inside: number, scored: number) =>
+      `In the check against the outcome, only ${inside} of ${scored} days fell inside the interval. Outcomes can vary more than the interval shows.`,
     error: "The forecast could not be displayed.",
     summary: (days: number, from: string, model: string) => `${days} days from ${from} · ${model}`,
     method: "Show method",
@@ -164,12 +177,12 @@ const TEXTS = {
     },
     source: (file: string, sheet: string | undefined, date: string, value: string) =>
       `${file}${sheet ? `, sheet ${sheet}` : ""}, columns ${date} and ${value}`,
-    history: (from: string, to: string, days: number, used: number | undefined, shown: number) =>
-      `${from} – ${to}, ${days} days.${used ? ` The model read the last ${used}.` : ""} The chart shows the last ${shown}.`,
+    history: (range: string, days: number, used: number | undefined, shown: number) =>
+      `${range}, ${days} days.${used ? ` The model read the last ${used}.` : ""} The chart shows the last ${shown}.`,
     missing: (n: number) =>
       n === 0 ? "None" : `${n} ${n === 1 ? "day" : "days"} without a value, read as unknown, not as zero.`,
-    check: (from: string, to: string, inside: number, scored: number, mae: string, baseline: string) =>
-      `A forecast for ${from}–${to}, made from the history before: ${inside} of ${scored} days inside the interval. Mean error ${mae} a day, against ${baseline} for repeating last week.`,
+    check: (range: string, inside: number, scored: number, mae: string, baseline: string) =>
+      `A forecast for ${range}, made from the history before: ${inside} of ${scored} days inside the interval. Mean error ${mae} a day, against ${baseline} for repeating last week.`,
     unavailable: {
       SHORT_HISTORY: "Not possible: the history before the last days is too short.",
       TOO_MANY_MISSING: "Not possible: too many days before the last days lack a value.",
@@ -180,8 +193,8 @@ const TEXTS = {
     ignores: "Weather, school breaks, holidays and planned changes",
     model: (name: string, millions: string) => `${name}, ${millions} million parameters. Runs in your own environment.`,
     caveat: "The interval is the model's judgement, not a guarantee.",
-    describe: (from: string, to: string, days: number, start: string) =>
-      `Line chart: history ${from}–${to} and a forecast of ${days} days from ${start}, with the most likely value and the P10–P90 interval for each day. The same figures are in the table.`,
+    describe: (range: string, days: number, start: string) =>
+      `Line chart: history ${range} and a forecast of ${days} days from ${start}, with the most likely value and the P10–P90 interval for each day. The same figures are in the table.`,
   },
 };
 
@@ -239,6 +252,11 @@ function ForecastView() {
   const locale = context.locale || "sv-SE";
   const dark = context.theme === "dark";
   const format = useMemo(() => numberFormatter(locale), [locale]);
+  // Errors are read as sizes, three digits each, so 61,4 stands beside 186 rather than 186,2.
+  const error = useMemo(
+    () => new Intl.NumberFormat(locale, { maximumSignificantDigits: 3, useGrouping: "min2" }),
+    [locale],
+  );
   const dates = useMemo(() => {
     const short = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", timeZone: "UTC" });
     const long = new Intl.DateTimeFormat(locale, {
@@ -248,15 +266,21 @@ function ForecastView() {
       year: "numeric",
       timeZone: "UTC",
     });
+    // A span names its years, so two years of history do not read as nineteen days.
+    const span = new Intl.DateTimeFormat(locale, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
     const at = (iso: string) => Date.parse(`${iso}T00:00:00Z`);
-    return { short: (iso: string) => short.format(at(iso)), long: (iso: string) => long.format(at(iso)) };
+    return {
+      short: (iso: string) => short.format(at(iso)),
+      long: (iso: string) => long.format(at(iso)),
+      range: (from: string, to: string) => span.formatRange(at(from), at(to)),
+    };
   }, [locale]);
   const spec = useMemo(() => {
     if (!data) return null;
     const recentTo = new Date(Date.parse(`${data.forecast.from}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
     return {
       ...forecastPlot(data, plotTexts, data.title),
-      description: text.describe(dates.short(data.recent.from), dates.short(recentTo), data.forecast.days, dates.short(data.forecast.from)),
+      description: text.describe(dates.range(data.recent.from, recentTo), data.forecast.days, dates.short(data.forecast.from)),
     };
   }, [data, plotTexts, text, dates]);
 
@@ -331,7 +355,7 @@ function ForecastView() {
       p50,
       data.forecast.p90[i],
     ]);
-    const headers = [text.day, "P10", "P50", "P90"];
+    const headers = [text.day, text.low, plotTexts.median, text.high];
     const cell = (value: unknown) => (typeof value === "number" ? format(value) : String(value ?? "–"));
     return {
       columns: headers.map((header, index) => ({
@@ -343,10 +367,14 @@ function ForecastView() {
       })),
       data: rows.map((row, index) => ({ ...row, id: index }) as unknown as Row),
     };
-  }, [data, dates, format, text]);
+  }, [data, dates, format, text, plotTexts]);
 
   const holdout = data?.holdout;
   const worse = !!holdout && "mae" in holdout && holdout.scored > 0 && holdout.mae > holdout.baseline_mae;
+  const narrow =
+    !worse && !!holdout && "mae" in holdout && holdout.scored >= NARROW.scored && holdout.inside < NARROW.share * holdout.scored
+      ? text.narrow(holdout.inside, holdout.scored)
+      : null;
 
   return (
     <ViewFrame
@@ -367,7 +395,11 @@ function ForecastView() {
         failed ? (
           <Banner status="error" container="section" title={text.error} />
         ) : data ? (
-          worse && <Banner status="warning" container="section" title={text.worse} />
+          worse ? (
+            <Banner status="warning" container="section" title={text.worse} />
+          ) : (
+            narrow && <Banner status="warning" container="section" title={narrow} />
+          )
         ) : null
       }
       footer={
@@ -404,8 +436,7 @@ function ForecastView() {
                   )}
                   <MetadataListItem label={text.rows.history}>
                     {text.history(
-                      dates.short(data.history.from),
-                      dates.short(data.history.to),
+                      dates.range(data.history.from, data.history.to),
                       data.history.days,
                       data.history.used_days,
                       data.recent.values.length,
@@ -415,12 +446,11 @@ function ForecastView() {
                   <MetadataListItem label={text.rows.check}>
                     {"mae" in data.holdout
                       ? text.check(
-                          dates.short(data.holdout.from),
-                          dates.short(data.holdout.to),
+                          dates.range(data.holdout.from, data.holdout.to),
                           data.holdout.inside,
                           data.holdout.scored,
-                          format(data.holdout.mae),
-                          format(data.holdout.baseline_mae),
+                          error.format(data.holdout.mae),
+                          error.format(data.holdout.baseline_mae),
                         )
                       : text.unavailable[data.holdout.unavailable]}
                   </MetadataListItem>

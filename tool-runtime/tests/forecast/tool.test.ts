@@ -71,6 +71,7 @@ describe("create_forecast", () => {
     // The forecast starts after the last value, not after the file's last date.
     expect(listed.description).toContain("the day after the last day with a value");
     expect(listed.inputSchema.properties.horizon.description).toContain("after the last day with a value");
+    expect(listed.description).toContain("display=none rather than drawing P10, P50 and P90 with create_chart");
   });
 
   test("runs a call that also repeats the columns in the source", async () => {
@@ -91,6 +92,15 @@ describe("create_forecast", () => {
     expect(result.presentation).toBe("interactive");
     expect(result.shown).toContain("interactive chart");
     expect(result.source).toEqual({ filename: "el.xlsx", sheet: "Data", date_column: "Datum", value_column: "kWh" });
+    // A report gets this chart as an image, not a redrawing of its numbers.
+    expect(result.shown).toContain("display=none");
+  });
+
+  test("names no sheet for a CSV, whatever name a table tool gave it", async () => {
+    const { tool } = setup(outcome(3), true);
+    const csv = { ...source, filename: "el.csv", sheet: "Sheet1" };
+    const result = (await tool.execute({ source: csv, ...columns, horizon: 3 }, { ...ctx, showsViews: true })) as Record<string, any>;
+    expect(result.source).toEqual({ filename: "el.csv", date_column: "Datum", value_column: "kWh" });
   });
 
   test.each([

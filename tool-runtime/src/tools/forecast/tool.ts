@@ -15,7 +15,7 @@ import { DAY_MS, isoDay } from "./series";
 export type ForecastRunner = (job: ForecastJob) => Promise<ForecastResult>;
 
 const SHOWN =
-  "The user sees an interactive chart of the recent history and the forecast with its interval, a table of each day, and the method with the check against the last days. Briefly explain what the forecast says and its limitations; do not repeat every value or draw a separate chart of it.";
+  "The user sees an interactive chart of the recent history and the forecast with its interval, a table of each day, and the method with the check against the last days. Briefly explain what the forecast says and its limitations; do not repeat every value or draw a separate chart of it. For a report, call create_forecast again with the same arguments and display=none: the same forecast, as this chart in an image for create_document.";
 // One image size and number format for every forecast, as Charts draws them by default.
 const IMAGE = chartConfigSchema.parse({});
 
@@ -95,7 +95,7 @@ export function forecastTools(
       name: "create_forecast",
       title: "Create forecast",
       description:
-        "Forecast the coming days of a daily series in a CSV or XLSX file: for each day the most likely value (P50) and an interval (P10-P90), with a check of how the same forecast would have done on the last days of the history. Use it when the user asks what a daily measure (cases, visits, bookings, energy use) will be in the coming days or weeks. The file needs one row per day: a date column (YYYY-MM-DD) and a numeric value column. The forecast starts the day after the last day with a value: empty days at the end of the file (a sheet laid out in advance) are left out, and history.empty_end_days says how many. When the data is per hour or per event, has missing days, or uses another date format, first use query_table to produce one row per day (0 where no activity means zero, empty where the value is unknown) with export=true and display=none, and pass that export. Leave out today if the day is not over. The model knows only the history: not the weather, holidays, school breaks or planned changes. Say so when it matters and add what you know about such days yourself. Never add P10 or P90 across days. Report the check against the last days as it is, including when it is unavailable.",
+        "Forecast the coming days of a daily series in a CSV or XLSX file: for each day the most likely value (P50) and an interval (P10-P90), with a check of how the same forecast would have done on the last days of the history. Use it when the user asks what a daily measure (cases, visits, bookings, energy use) will be in the coming days or weeks. The file needs one row per day: a date column (YYYY-MM-DD) and a numeric value column. The forecast starts the day after the last day with a value: empty days at the end of the file (a sheet laid out in advance) are left out, and history.empty_end_days says how many. When the data is per hour or per event, has missing days, or uses another date format, first use query_table to produce one row per day (0 where no activity means zero, empty where the value is unknown) with export=true and display=none, and pass that export. Leave out today if the day is not over. The model knows only the history: not the weather, holidays, school breaks or planned changes. Say so when it matters and add what you know about such days yourself. Never add P10 or P90 across days. Report the check against the last days as it is, including when it is unavailable. For a picture of the forecast in a document, call this tool with display=none rather than drawing P10, P50 and P90 with create_chart: the same arguments give the same forecast, drawn with its history and interval.",
       ...(resultView ? { view: resultView } : {}),
       inputSchema: input.shape,
       readOnly: true,
@@ -136,7 +136,8 @@ export function forecastTools(
         }
         const source = {
           filename: args.source.filename,
-          ...(args.source.sheet ? { sheet: args.source.sheet } : {}),
+          // A CSV has no sheets, whatever name a table tool gave its one table.
+          ...(file.isXlsx && args.source.sheet ? { sheet: args.source.sheet } : {}),
           date_column: args.date_column,
           value_column: args.value_column,
         };
