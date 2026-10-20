@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
@@ -23,7 +22,6 @@ from eneo.database.tables.integration_table import (
     UserIntegration,
 )
 from eneo.database.tables.spaces_table import Spaces, SpacesEmbeddingModels
-from eneo.database.tables.users_table import Users
 from eneo.integration.application.integration_knowledge_service import (
     IntegrationKnowledgeService,
 )
@@ -37,7 +35,6 @@ from eneo.integration.infrastructure.auth_service.org_token_provider import (
     SharePointCredentialsInvalidError,
 )
 from eneo.integration.presentation.models import IntegrationType
-from eneo.main.exceptions import BadRequestException
 
 
 @dataclass
@@ -350,70 +347,6 @@ async def test_a_resync_survives_a_database_error_in_its_subscription_step(
     assert dispatches.knowledge_ids == [knowledge_id]
     async with db_container() as container:
         assert await container.job_service().get_job(job.id)
-
-
-@pytest.mark.parametrize("owner_state", ["active", "inactive", "deleted"])
-async def test_a_resync_needs_a_connection_owner_who_can_sign_in(
-    db_container, setup, dispatches, owner_state
-):
-    """Anyone who may edit the space can resync a personal connection's source,
-    with the owner's token; that ends when the owner can no longer sign in."""
-    async with db_container() as container:
-        session = container.session()
-        admin = container.user()
-        owner = Users(
-            username=f"owner-{uuid4()}",
-            email=f"owner-{uuid4()}@example.com",
-            state=owner_state,
-            used_tokens=0,
-            tenant_id=admin.tenant_id,
-            deleted_at=datetime.now(timezone.utc) if owner_state == "deleted" else None,
-        )
-        session.add(owner)
-        await session.flush()
-        tenant_integration_id = await session.scalar(
-            sa.select(UserIntegration.tenant_integration_id).where(
-                UserIntegration.id == setup.connection
-            )
-        )
-        connection = UserIntegration(
-            user_id=owner.id,
-            tenant_id=admin.tenant_id,
-            tenant_integration_id=tenant_integration_id,
-            authenticated=True,
-            auth_type="user_oauth",
-        )
-        session.add(connection)
-        await session.flush()
-        knowledge = IntegrationKnowledge(
-            name="Protokoll",
-            url="https://contoso.sharepoint.com/sites/KS/Protokoll",
-            space_id=setup.personal_space,
-            tenant_id=admin.tenant_id,
-            embedding_model_id=setup.embedding_model,
-            user_integration_id=connection.id,
-            site_id="contoso.sharepoint.com,site,web",
-            resource_type="site",
-        )
-        session.add(knowledge)
-        await session.flush()
-        knowledge_id = knowledge.id
-
-    async with db_container() as container:
-        service = _service(container, job_service=container.job_service())
-        if owner_state == "active":
-            await service.trigger_full_sync(setup.personal_space, knowledge_id)
-        else:
-            with pytest.raises(BadRequestException, match="can no longer sign in"):
-                await service.trigger_full_sync(setup.personal_space, knowledge_id)
-            service.oauth_token_repo.one.assert_not_called()
-
-    if owner_state == "active":
-        await dispatches.wait_for(1)
-        assert dispatches.knowledge_ids == [knowledge_id]
-    else:
-        await asyncio.sleep(0.05)
-        assert dispatches.knowledge_ids == []
 
 
 async def test_a_failed_item_in_the_organization_space_loses_its_distribution(

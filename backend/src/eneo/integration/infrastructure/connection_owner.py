@@ -7,10 +7,7 @@ stops syncing everywhere at once. An organization (tenant app) connection has
 no owner and is not subject to it.
 """
 
-from uuid import UUID
-
 import sqlalchemy as sa
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.users_table import Users
 from eneo.users.user import UserState
@@ -24,14 +21,4 @@ def owner_can_sign_in() -> sa.ColumnElement[bool]:
     return sa.and_(
         Users.deleted_at.is_(None),
         Users.state.in_(_STATES_THAT_CAN_SIGN_IN),
-    )
-
-
-async def owner_id_can_sign_in(session: AsyncSession, user_id: UUID | None) -> bool:
-    if user_id is None:
-        return False
-    return bool(
-        await session.scalar(
-            sa.select(sa.exists().where(Users.id == user_id, owner_can_sign_in()))
-        )
     )
