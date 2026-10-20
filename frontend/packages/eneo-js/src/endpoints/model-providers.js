@@ -110,7 +110,7 @@ export function initModelProviders(client) {
      * filtering client-side so consumers (frontend pickers, external API
      * clients) get only what they need.
      *
-     * @param {{id: string, mode?: "completion" | "embedding" | "transcription" | "image"}} args
+     * @param {{id: string, mode?: "completion" | "embedding" | "transcription" | "image" | "rerank"}} args
      * @returns {Promise<any>}
      * @throws {EneoError}
      * */
