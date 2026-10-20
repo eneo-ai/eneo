@@ -242,6 +242,7 @@ if TYPE_CHECKING:
         IntegrationKnowledgeRepository,
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.rerank_models.application.rerank_service import RerankService
     from eneo.sessions.session import SessionInDB
     from eneo.sessions.session_service import SessionService
     from eneo.skills.application.skill_service import SkillService
@@ -372,6 +373,7 @@ class AssistantService:
         skill_service: "SkillService",
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
         effective_config_service: "EffectiveConfigService | None" = None,
+        rerank_service: "RerankService | None" = None,
     ):
         super().__init__()
         self.repo = repo
@@ -399,6 +401,7 @@ class AssistantService:
         self.skill_service = skill_service
         self.api_key_scope_revoker = api_key_scope_revoker
         self.effective_config_service = effective_config_service
+        self.rerank_service = rerank_service
 
     async def _with_builtin_provider_token(
         self, server: "MCPServer", *, assistant_id: UUID
@@ -1551,6 +1554,7 @@ class AssistantService:
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
         skill_binding_intents: list[SkillBindingIntent] | None = None,
         document_template: "DocumentTemplateChoice | None" = None,
+        rerank_model_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
@@ -1646,6 +1650,7 @@ class AssistantService:
                 data_retention_days,
                 metadata_json,
                 icon_id,
+                rerank_model_id,
             )
         )
         if (
@@ -1721,6 +1726,14 @@ class AssistantService:
                     "The completion model is not enabled in the space."
                 )
             completion_model = space.get_completion_model(completion_model_id)
+
+        if is_provided(rerank_model_id) and rerank_model_id is not None:
+            if self.rerank_service is None or not await self.rerank_service.selectable(
+                rerank_model_id, space.security_classification
+            ):
+                raise BadRequestException(
+                    "The rerank model is not available in the space."
+                )
 
         if completion_model_kwargs is not None:
             kwargs_model = completion_model
@@ -1956,6 +1969,7 @@ class AssistantService:
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
             icon_id=icon_id,
+            rerank_model_id=rerank_model_id,
         )
 
         knowledge_changing = (
@@ -2047,6 +2061,7 @@ class AssistantService:
                 data_retention_days=data_retention_days,
                 metadata_json=metadata_json,
                 icon_id=icon_id,
+                rerank_model_id=rerank_model_id,
                 prompt=prompt_obj,
                 document_template=document_template,
             ),
@@ -3599,11 +3614,22 @@ class AssistantService:
                 choice=assistant_to_ask.document_template,
             )
 
+        # The assistant's reranker, checked against the space at ask time. The
+        # personal assistant is governed and has no choice yet (#1035, B4).
+        rerank = None
+        if self.rerank_service is not None and not is_personal_default:
+            rerank = await self.rerank_service.spec_for_model(
+                assistant_to_ask.rerank_model_id,
+                query=cleaned_question,
+                security_classification=space.security_classification,
+            )
+
         try:
             response, datastore_result = await assistant_to_ask.ask(
                 question=cleaned_question,
                 completion_service=self.completion_service,
                 references_service=self.references_service,
+                rerank=rerank,
                 session=session,
                 files=completion_file_inputs.completion_message_files,
                 stream=stream,

@@ -11,6 +11,9 @@ from eneo.embedding_models.presentation.embedding_model_models import (
 from eneo.image_models.presentation.image_model_models import (
     ImageModelSecurityStatus,
 )
+from eneo.rerank_models.presentation.rerank_model_models import (
+    RerankModelSecurityStatus,
+)
 from eneo.transcription_models.presentation.transcription_model_models import (
     TranscriptionModelSecurityStatus,
 )
@@ -23,3 +26,4 @@ class ModelsPresentation(BaseModel):
     embedding_models: List[EmbeddingModelSecurityStatus]
     transcription_models: List[TranscriptionModelSecurityStatus]
     image_models: List[ImageModelSecurityStatus]
+    rerank_models: List[RerankModelSecurityStatus] = []
