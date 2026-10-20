@@ -574,10 +574,6 @@ class RunViewPassageOmission(BaseModel):
     current_attempts_not_loaded: int = 0
     current_step_orders_not_loaded: list[int] = []
 
-    @property
-    def omitted_any(self) -> bool:
-        return self.passages_omitted > 0
-
 
 def omit_passages_beyond_view_budget(
     step_attempts: Sequence[FlowStepAttempt],

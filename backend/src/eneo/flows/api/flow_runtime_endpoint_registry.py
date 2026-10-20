@@ -55,9 +55,6 @@ class FlowRuntimeEndpointContract:
     success_status: int
     runtime_path_fields: tuple[FlowRuntimePathFieldProjection, ...] = ()
 
-    def route_key(self) -> tuple[str, str]:
-        return (self.route_path, self.method)
-
     def prefixed_route_key(self, *, api_prefix: str) -> tuple[str, str]:
         return (
             build_flow_endpoint_template(self.route_path, api_prefix=api_prefix),
@@ -308,22 +305,6 @@ def flow_runtime_path_field_operations() -> dict[
             method=contract.method,
             query_suffix=projection.query_suffix,
         )
-        for contract in FLOW_RUNTIME_ENDPOINT_CONTRACTS
-        for projection in contract.runtime_path_fields
-    }
-
-
-def flow_runtime_endpoint_by_operation_id() -> dict[str, FlowRuntimeEndpointContract]:
-    return {
-        contract.operation_id: contract for contract in FLOW_RUNTIME_ENDPOINT_CONTRACTS
-    }
-
-
-def flow_runtime_endpoint_by_path_field() -> dict[
-    FlowRuntimePathField, FlowRuntimeEndpointContract
-]:
-    return {
-        projection.field_path: contract
         for contract in FLOW_RUNTIME_ENDPOINT_CONTRACTS
         for projection in contract.runtime_path_fields
     }

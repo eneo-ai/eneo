@@ -363,7 +363,6 @@ def test_a_run_view_within_budget_releases_nothing() -> None:
         count_truncated=False,
     )
 
-    assert summary.omitted_any is False
     assert summary.passages_omitted == 0
     assert bounded[0].provenance_json is not None
     assert bounded[0].provenance_json["rag"]["references"][0]["passages"][0][
