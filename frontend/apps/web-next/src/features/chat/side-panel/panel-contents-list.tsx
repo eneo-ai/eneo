@@ -2,7 +2,7 @@
 
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
-import { Activity, AppWindow, Check, Download, Search } from "lucide-react";
+import { Activity, AppWindow, Check, Download, Search, Workflow } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
@@ -202,8 +202,41 @@ export function PanelContentsList({
       )
     : contents.uploads;
 
+  const flows = contents.flows ?? [];
+
   return (
     <div className="flex flex-col p-1">
+      {flows.length > 0 && (
+        <section aria-label={t("flows")}>
+          <Heading text={t("flows")} />
+          <ul className="flex flex-col">
+            {flows.map((entry) => (
+              <li key={entry.id} className="flex">
+                <button
+                  type="button"
+                  aria-current={entry.shown ? "true" : undefined}
+                  onClick={entry.open}
+                  className={cn(ROW_CLASS, entry.shown && CURRENT_CLASS)}
+                >
+                  <Row
+                    tile={
+                      <span
+                        aria-hidden="true"
+                        className="bg-ax-purple-muted text-ax-purple rounded-ax-inner flex size-[22px] shrink-0 items-center justify-center"
+                      >
+                        <Workflow className="size-[13px]" />
+                      </span>
+                    }
+                    name={entry.title}
+                    detail={entry.detail ?? ""}
+                    current={entry.shown}
+                  />
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       {contents.views.length > 0 && (
         <section aria-label={t("conversation_documents_views")}>
           <Heading text={`${t("conversation_documents_views")} · ${contents.views.length}`} />

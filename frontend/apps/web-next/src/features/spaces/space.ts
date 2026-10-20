@@ -24,7 +24,22 @@ export type SpaceResource =
   | "collection"
   | "member"
   | "group_member"
-  | "app";
+  | "app"
+  | "flow";
+
+/**
+ * The flows list the backend puts beside the other applications of a space,
+ * with its permissions. Not in the generated schema yet: until `gen:api`
+ * has picked it up, a space without it has no flows tab.
+ */
+type SpaceApplicationsWithFlows = {
+  flows?: { permissions?: ResourcePermission[] | null } | null;
+};
+
+export function spaceFlowPermissions(space: Space): ResourcePermission[] | null {
+  const applications = space.applications as SpaceApplicationsWithFlows | null | undefined;
+  return applications?.flows?.permissions ?? null;
+}
 
 /**
  * Space-level permission check, ported from the Svelte SpacesManager: each
@@ -46,6 +61,8 @@ export function spaceHasPermission(
       return space.default_assistant?.permissions?.includes(action) ?? false;
     case "app":
       return space.applications?.apps.permissions?.includes(action) ?? false;
+    case "flow":
+      return spaceFlowPermissions(space)?.includes(action) ?? false;
     case "service":
       return space.applications?.services.permissions?.includes(action) ?? false;
     case "skill":

@@ -8,6 +8,7 @@ export const SPACE_SECTION_IDS = [
   "overview",
   "assistants",
   "apps",
+  "flows",
   "knowledge",
   "skills",
   "services",
@@ -60,6 +61,9 @@ export function spaceSections(space: Space, can: Can, routeId: SpaceRouteId): Sp
     );
   }
   if (!isOrg && can("read", "app")) add("apps", space.applications?.apps.count ?? 0);
+  // Shown once the backend lists flows on the space with a read permission
+  // (`applications.flows.permissions`); a backend without flows has no tab.
+  if (!isOrg && can("read", "flow")) add("flows");
   if (can("read", "website") || can("read", "collection")) {
     add("knowledge", ownKnowledgeCount(space));
   }
@@ -71,6 +75,7 @@ export function spaceSections(space: Space, can: Can, routeId: SpaceRouteId): Sp
 }
 
 export type SpaceRoute =
+  /** The chat, or a flow's authoring chat: full-bleed, with a header of its own. */
   | { kind: "chat" }
   /** An assistant, app or group-chat editor: it owns the surface with its own header. */
   | { kind: "editor" }
@@ -99,6 +104,9 @@ function isEditorRoute(first: string | undefined, rest: readonly string[]): bool
 export function spaceRoute(segments: readonly string[]): SpaceRoute {
   const [first, ...rest] = segments;
   if (first === "chat") return { kind: "chat" };
+  // A flow page (`/flows/<id>`, or `/flows/new`) is the chat component bound
+  // to the flow's conversation; the list stays a tab page.
+  if (first === "flows" && rest.length === 1) return { kind: "chat" };
   if (isEditorRoute(first, rest)) return { kind: "editor" };
   // Group chats are edited from the assistants tab.
   if (first === "group-chats") return { kind: "page", section: "assistants", isSectionRoot: false };

@@ -20,6 +20,7 @@ import { ANSWER_TEXT_CLASS, MessageResponse } from "@/components/ai-elements/mes
 import { iconUrl } from "@/components/composites/icon-field";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
+import { FlowLines } from "@/features/flows/flow-line";
 import { McpAppFrames } from "@/features/mcp-apps/mcp-app-frames";
 import { isChartDocumentAsset } from "@/features/mcp-apps/mcp-apps";
 import { tableLocationLabel } from "@/features/workspace/preview/table-reference";
@@ -571,6 +572,7 @@ function AssistantMessage({
         <McpImageStrip references={mcpReferences} />
         <McpAppFrames message={message} live={isStreaming} sessionId={sessionId} />
         <GeneratedFiles message={message} />
+        {!isStreaming && <FlowLines message={message} />}
         {hasText && !isStreaming && (
           <AnswerActions
             text={text}

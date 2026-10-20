@@ -42,7 +42,22 @@ import { composeQuotedQuestion } from "./side-panel/question-quote";
 import { SidePanel } from "./side-panel/side-panel";
 import { SidePanelProvider, useSidePanel } from "./side-panel/use-side-panel";
 import { isExportableDocument } from "./side-panel/file-panel";
-import { appViewSubject, appViewTitle, messageAppViewCalls } from "@/features/mcp-apps/mcp-apps";
+import { FlowPanel } from "@/features/flows/flow-panel";
+import { FLOW_PANEL_ID } from "@/features/flows/flow-panel-store";
+import {
+  flowRefFromArguments,
+  flowRefFromOutcome,
+  isFlowsCall
+} from "@/features/flows/flow-tool-calls";
+import { invalidateFlow, invalidateFlowLists } from "@/features/flows/flows";
+import { useFlowPanel } from "@/features/flows/use-flow-panel";
+import {
+  appViewSubject,
+  appViewTitle,
+  hasResult,
+  messageAppViewCalls
+} from "@/features/mcp-apps/mcp-apps";
+import { toolCallOutcome } from "@/features/mcp-apps/view-tool-calls";
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { useAnswerFeedback } from "./answer-feedback";
 import { disabledCapabilitiesForRequest } from "./chat-capabilities";
@@ -203,6 +218,8 @@ function ConversationView({
     findExisting: (file) => uploadsRef.current.find((uploaded) => matchesUpload(file, uploaded))
   });
   const panel = useSidePanel()!;
+  // On a flow page: the flow the chat is bound to and the panel that shows it.
+  const flowPanel = useFlowPanel();
   // The Felsök tab reads a saved turn's diagnostics; group chats have none.
   const debugAvailable = can("assistant_debug") && partner.type !== "group-chat";
   // Astryx's shared polite live region (mounted empty, cleared after a moment):
@@ -408,7 +425,32 @@ function ConversationView({
     () => [...uploads, ...messages.flatMap(messageGeneratedFiles)],
     [uploads, messages]
   );
+  const flowShown = panel.occupant.kind === "native" && panel.occupant.id === FLOW_PANEL_ID;
   const panelContents: PanelContents = {
+    flows: flowPanel
+      ? [
+          {
+            id: "flow-definition",
+            title: t("flow_tab_definition"),
+            detail: t("flows"),
+            shown: flowShown && flowPanel.tab === "definition",
+            open: () => {
+              flowPanel.showDefinition();
+              panel.openNative(FLOW_PANEL_ID);
+            }
+          },
+          {
+            id: "flow-runs",
+            title: t("flow_tab_runs"),
+            detail: t("flows"),
+            shown: flowShown && flowPanel.tab === "runs",
+            open: () => {
+              flowPanel.showRun(flowPanel.runId);
+              panel.openNative(FLOW_PANEL_ID);
+            }
+          }
+        ]
+      : [],
     views: messages
       .flatMap(messageAppViewCalls)
       .filter((call) => panel.offeredViews.has(call.toolCallId))
@@ -485,6 +527,57 @@ function ConversationView({
       panel.arrive(file, changed ? { text: changed, locator: null } : null, call.toolCallId);
     }
   }, [liveFiles, liveCalls, panel]);
+
+  // On a flow page the panel follows the flows tool calls: a call's arguments
+  // name the flow (or run) as soon as it starts, its stored result names
+  // what it made (`create_flow`'s flow, `run_flow`'s run) once the answer
+  // is saved, and a finished call refetches the flow it changed. Every call
+  // is read once; the store remembers which.
+  const flowCalls = useMemo(
+    () =>
+      flowPanel
+        ? messages.flatMap((message, index) =>
+            messageToolCalls(message)
+              .filter((call) => isFlowsCall(call.part))
+              .map((call) => ({
+                call,
+                latest: index === messages.length - 1,
+                live: busy && index === messages.length - 1
+              }))
+          )
+        : [],
+    [flowPanel, messages, busy]
+  );
+  useEffect(() => {
+    if (!flowPanel) return;
+    for (const { call, latest, live } of flowCalls) {
+      const fromArguments = flowRefFromArguments(call.input);
+      flowPanel.noteCall(call.toolCallId, fromArguments, { follow: latest });
+      if (call.state !== "output-available" && call.state !== "output-error") continue;
+      if (flowPanel.refresh(call.toolCallId)) {
+        const flowId = fromArguments.flowId ?? flowPanel.flowId;
+        if (flowId) void invalidateFlow(queryClient, flowId);
+        void invalidateFlowLists(queryClient);
+      }
+      if (!sessionId || !hasResult(call, live) || !flowPanel.settle(call.toolCallId)) continue;
+      void toolCallOutcome(queryClient, sessionId, call.toolCallId).then((outcome) => {
+        if (!mounted.current || !outcome) return;
+        flowPanel.noteCall(call.toolCallId, flowRefFromOutcome(outcome.structuredContent), {
+          follow: latest
+        });
+        const flowId = flowPanel.refOf(call.toolCallId)?.flowId ?? flowPanel.flowId;
+        if (flowId) void invalidateFlow(queryClient, flowId);
+      });
+    }
+  }, [flowCalls, flowPanel, sessionId, queryClient]);
+  // The flow panel opens beside the conversation when a flow is bound, a run
+  // starts or a line under an answer asks for it; never as a sheet over the
+  // conversation on a narrow screen (the panel button is the way in there).
+  const flowOpenRequests = flowPanel?.openRequests ?? 0;
+  useEffect(() => {
+    if (!flowPanel || flowOpenRequests === 0 || !flowPanel.flowId) return;
+    if (panel.besideConversation) panel.openNative(FLOW_PANEL_ID);
+  }, [flowPanel, flowOpenRequests, panel]);
 
   // A message an interactive view offered lands in the composer.
   useEffect(
@@ -912,6 +1005,14 @@ function ConversationView({
         contents={panelContents}
         versionsOf={versionsOf}
         exportOf={exportOf}
+        native={
+          flowPanel
+            ? {
+                label: t("flow_panel_label"),
+                body: (frame) => <FlowPanel switcher={frame.switcher} maximise={frame.maximise} />
+              }
+            : null
+        }
         latestActivity={latestActivity}
         activity={
           activity && activityMessage && activityForPanel

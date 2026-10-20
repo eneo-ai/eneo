@@ -43,6 +43,24 @@ describe("spaceSections", () => {
     expect(sections[3]?.href).toBe("/spaces/space-1/knowledge");
   });
 
+  it("adds the flows tab when the backend lists flows on the space", () => {
+    const space = makeSpace({
+      overrides: {
+        applications: {
+          ...makeSpace().applications,
+          flows: { items: [], count: 0, permissions: ["read", "create"] }
+        }
+      }
+    });
+    const ids = spaceSections(space, canFor(space), "space-1").map((section) => section.id);
+    expect(ids.slice(0, 4)).toEqual(["overview", "assistants", "apps", "flows"]);
+
+    const unlisted = makeSpace();
+    expect(
+      spaceSections(unlisted, canFor(unlisted), "space-1").map((section) => section.id)
+    ).not.toContain("flows");
+  });
+
   it("keeps the personal space without members and settings, as its permissions say", () => {
     const space = makeSpace({
       permissions: ["read"],
@@ -87,6 +105,12 @@ describe("spaceSections", () => {
 describe("spaceRoute", () => {
   it("renders the chat full-bleed", () => {
     expect(spaceRoute(["chat"])).toEqual({ kind: "chat" });
+  });
+
+  it("renders a flow page like the chat and keeps the flows list a tab page", () => {
+    expect(spaceRoute(["flows", "f1"])).toEqual({ kind: "chat" });
+    expect(spaceRoute(["flows", "new"])).toEqual({ kind: "chat" });
+    expect(spaceRoute(["flows"])).toEqual({ kind: "page", section: "flows", isSectionRoot: true });
   });
 
   it("marks a tab's own page and the pages below it", () => {

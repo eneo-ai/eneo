@@ -30,12 +30,25 @@ export type ActivityOccupant = {
   onClose: () => void;
 };
 
+/**
+ * The page's own content beside the conversation (a flow page's panel),
+ * rendered in the frame whenever the store's occupant is `native`.
+ */
+export type NativeOccupant = {
+  /** The region's accessible name. */
+  label: string;
+  /** Renders the occupant, frame parts included (it draws its own PanelFrame). */
+  body: (frame: { switcher: PanelSwitcher | null; maximise: PanelMaximise | null }) => ReactNode;
+};
+
 export type SidePanelProps = {
   panel: SidePanelStore;
   messages: readonly EneoUIMessage[];
   contents: PanelContents;
   versionsOf: (file: PreviewFile) => PreviewFile[];
   exportOf: (file: PreviewFile) => DocumentExport | null;
+  /** Native content for the `native` occupant; null on pages without any. */
+  native?: NativeOccupant | null;
   activity: ActivityOccupant | null;
   /** The latest answer's activity, for the switcher; null when there is none to show. */
   latestActivity: { detail: string; open: () => void } | null;
@@ -56,6 +69,7 @@ export function SidePanel({
   contents,
   versionsOf,
   exportOf,
+  native = null,
   activity,
   latestActivity,
   children
@@ -74,8 +88,9 @@ export function SidePanel({
   const kind = occupant.kind !== "closed" ? occupant.kind : activity ? "activity" : "closed";
   const shownView = occupant.kind === "view" ? findAppCall(messages, occupant.callId) : null;
   const hasContents = panelContentsCount(contents) > 0;
-  const shown = kind !== "closed" && !(kind === "overview" && !hasContents);
-  const maximised = panel.maximised && (kind === "file" || kind === "view");
+  const shown =
+    kind !== "closed" && !(kind === "overview" && !hasContents) && !(kind === "native" && !native);
+  const maximised = panel.maximised && (kind === "file" || kind === "view" || kind === "native");
   const { width, containerRef, separatorProps } = useResizableSplit({
     storageKey: WIDTH_STORAGE_KEY,
     defaultWidth: 520,
@@ -110,6 +125,7 @@ export function SidePanel({
   const close = () => {
     if (occupant.kind === "view") panel.dismissView();
     else if (occupant.kind === "file") panel.close();
+    else if (occupant.kind === "native") panel.closeNative();
     else if (occupant.kind === "overview") panel.closeOverview();
     else activity?.onClose();
   };
@@ -160,7 +176,7 @@ export function SidePanel({
       : null;
 
   const maximise: PanelMaximise | null =
-    beside && (kind === "file" || kind === "view")
+    beside && (kind === "file" || kind === "view" || kind === "native")
       ? { on: panel.maximised, toggle: () => panel.setMaximised(!panel.maximised) }
       : null;
 
@@ -181,6 +197,8 @@ export function SidePanel({
         return shownView ? (
           <ViewPanel panel={panel} call={shownView.call} switcher={switcher} maximise={maximise} />
         ) : null;
+      case "native":
+        return native ? native.body({ switcher, maximise }) : null;
       case "overview":
         return (
           <PanelFrame
@@ -231,7 +249,9 @@ export function SidePanel({
         ? t("file_preview_title")
         : kind === "activity"
           ? t("chat_activity_panel_label")
-          : t("conversation_panel_title");
+          : kind === "native" && native
+            ? native.label
+            : t("conversation_panel_title");
 
   // The panel's own way in: a button above the conversation while it is closed.
   const launcher = hasContents && !shown && (

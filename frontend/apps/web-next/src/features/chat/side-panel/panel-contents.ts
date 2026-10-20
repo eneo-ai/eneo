@@ -14,16 +14,33 @@ export type PanelView = {
   open: () => void;
 };
 
+/** Native content of the page beside the conversation: a flow's definition, its runs. */
+export type PanelNativeEntry = {
+  id: string;
+  title: string;
+  detail: string | null;
+  /** Whether the panel shows this now. */
+  shown: boolean;
+  open: () => void;
+};
+
 /** Everything of a conversation that the panel can show. */
 export type PanelContents = {
   views: PanelView[];
   documents: ConversationDocument[];
   uploads: PreviewFile[];
+  /** The flow page's own content; empty on every other page. */
+  flows?: PanelNativeEntry[];
 };
 
 export function panelContentsCount(contents: PanelContents | null | undefined): number {
   if (!contents) return 0;
-  return contents.views.length + contents.documents.length + contents.uploads.length;
+  return (
+    contents.views.length +
+    contents.documents.length +
+    contents.uploads.length +
+    (contents.flows?.length ?? 0)
+  );
 }
 
 /**

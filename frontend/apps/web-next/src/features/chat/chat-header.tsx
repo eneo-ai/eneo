@@ -251,6 +251,11 @@ export type ChatHeaderProps = {
   menuItems: HeaderMenuItem[];
   /** Personal assistant start state: the selector lives in the composer instead. */
   minimal?: boolean;
+  /**
+   * Whether the reader can start another conversation or open the history.
+   * Off where the page is one conversation (a flow's authoring chat).
+   */
+  conversationControls?: boolean;
 };
 
 /** Opens the partner's conversation list; named after what it opens, with aria-expanded for the state. */
@@ -296,7 +301,8 @@ export function ChatHeader({
   onToggleHistory,
   onNewConversation,
   menuItems,
-  minimal = false
+  minimal = false,
+  conversationControls = true
 }: ChatHeaderProps) {
   // The chat header carries the phone menu button, so the shell hides its own
   // top bar while this header is mounted.
@@ -304,12 +310,16 @@ export function ChatHeader({
   const t = useTranslations();
   const subtitle = [partner.spaceName, modelName].filter(Boolean).join(" · ") || null;
   const mobileMenu: HeaderMenuItem[] = [
-    {
-      label: historyOpen
-        ? t("chat_history_close")
-        : t("chat_history_with", { name: displayPartnerName(partner, t) }),
-      onClick: onToggleHistory
-    },
+    ...(conversationControls
+      ? [
+          {
+            label: historyOpen
+              ? t("chat_history_close")
+              : t("chat_history_with", { name: displayPartnerName(partner, t) }),
+            onClick: onToggleHistory
+          }
+        ]
+      : []),
     ...(view
       ? [
           {
@@ -364,14 +374,18 @@ export function ChatHeader({
           </SegmentedControl>
         )}
         <div className="flex shrink-0 items-center gap-1">
-          <IconButton
-            label={t("new_conversation")}
-            tooltip={t("new_conversation")}
-            icon={<SquarePen className="size-[18px]" />}
-            variant="ghost"
-            onClick={onNewConversation}
-          />
-          <HistoryButton partner={partner} open={historyOpen} onToggle={onToggleHistory} />
+          {conversationControls && (
+            <>
+              <IconButton
+                label={t("new_conversation")}
+                tooltip={t("new_conversation")}
+                icon={<SquarePen className="size-[18px]" />}
+                variant="ghost"
+                onClick={onNewConversation}
+              />
+              <HistoryButton partner={partner} open={historyOpen} onToggle={onToggleHistory} />
+            </>
+          )}
           {menuItems.length > 0 && (
             <MoreMenu label={t("chat_more_options")} items={menuItems} alignment="end" />
           )}
@@ -388,13 +402,15 @@ export function ChatHeader({
           variant="mobile"
         />
         {title !== null && <h1 className="sr-only">{title}</h1>}
-        <IconButton
-          label={t("new_conversation")}
-          icon={<SquarePen className="size-5" />}
-          variant="ghost"
-          onClick={onNewConversation}
-          className="size-11"
-        />
+        {conversationControls && (
+          <IconButton
+            label={t("new_conversation")}
+            icon={<SquarePen className="size-5" />}
+            variant="ghost"
+            onClick={onNewConversation}
+            className="size-11"
+          />
+        )}
         <MoreMenu
           label={t("chat_more_options")}
           items={mobileMenu}

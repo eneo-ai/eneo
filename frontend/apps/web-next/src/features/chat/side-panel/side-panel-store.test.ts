@@ -231,3 +231,40 @@ it("notifies its subscribers once per change", () => {
   expect(listener).toHaveBeenCalledTimes(1);
   expect(store.getVersion()).toBe(before + 1);
 });
+
+it("shows native content until a file covers it, and again when the file closes", async () => {
+  const store = panel();
+  store.openNative("flow");
+  expect(store.occupant).toEqual({ kind: "native", id: "flow" });
+  expect(store.active).toBe(true);
+
+  store.open(file);
+  expect(store.occupant).toEqual({ kind: "file" });
+  await vi.waitFor(() => expect(store.status).toBe("ready"));
+  store.close();
+  expect(store.occupant).toEqual({ kind: "native", id: "flow" });
+
+  store.closeNative();
+  expect(store.occupant).toEqual({ kind: "closed" });
+});
+
+it("lets a document the assistant writes take the panel over native content", () => {
+  const store = panel();
+  store.openNative("flow");
+  store.write(draft);
+  expect(store.occupant).toEqual({ kind: "file" });
+  expect(store.openedByItself).toBe(true);
+  store.endDraft();
+  expect(store.occupant).toEqual({ kind: "native", id: "flow" });
+});
+
+it("replaces the overview with native content and closes it with everything else", () => {
+  const store = panel();
+  store.showOverview();
+  store.openNative("flow");
+  expect(store.overview).toBeNull();
+  expect(store.occupant).toEqual({ kind: "native", id: "flow" });
+  store.closeAll();
+  expect(store.nativeId).toBeNull();
+  expect(store.occupant).toEqual({ kind: "closed" });
+});

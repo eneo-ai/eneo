@@ -91,6 +91,20 @@ const CAPABILITY_STEPS: Record<string, { label: string; server: string }> = {
   compute: { label: "tool_compute", server: "compute" }
 };
 
+/** The flows server's tools, each with a `tool_flows_<name>` / `_done` label pair. */
+const FLOW_TOOL_LABELS = new Set([
+  "list_flows",
+  "get_flow",
+  "create_flow",
+  "update_flow",
+  "publish_flow",
+  "delete_flow",
+  "run_flow",
+  "get_run",
+  "cancel_run",
+  "review_run"
+]);
+
 function argumentsOf(part: ToolLike): Record<string, unknown> {
   return part.input && typeof part.input === "object" && !Array.isArray(part.input)
     ? (part.input as Record<string, unknown>)
@@ -138,6 +152,9 @@ export function toolPresentation(part: ToolLike, t: Translate, done: boolean) {
   }
   if (ownServer && serverName === "files" && part.toolName === "read_file") {
     return { label: t(`tool_read_file${suffix}`), server: t("internal_files_server") };
+  }
+  if (ownServer && serverName === "flows" && FLOW_TOOL_LABELS.has(part.toolName)) {
+    return { label: t(`tool_flows_${part.toolName}${suffix}`), server: t("flows") };
   }
   // An external provider's own name stays visible as the source; one of
   // Eneo's own (loopback or built in) is not named, the label says it all.

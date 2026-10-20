@@ -80,7 +80,8 @@ export function ChatPage({
   buildSessionUrl,
   modelSelector,
   switcherItems,
-  editHref
+  editHref,
+  singleConversation = false
 }: {
   partner: ChatPartner;
   /**
@@ -97,6 +98,12 @@ export function ChatPage({
   switcherItems?: ChatPartnerSwitcherItem[];
   /** Editor link for partners the user may edit. */
   editHref?: string | null;
+  /**
+   * The page is one conversation (a flow's authoring chat): no history, no
+   * new conversation, and the conversation itself is not renamed or deleted
+   * from here.
+   */
+  singleConversation?: boolean;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -262,7 +269,7 @@ export function ChatPage({
   const contextUsagePinned = useContextUsagePinned();
 
   const menuItems: HeaderMenuItem[] = [
-    ...(sessionId
+    ...(sessionId && !singleConversation
       ? [
           {
             label: t("chat_rename_conversation"),
@@ -277,7 +284,7 @@ export function ChatPage({
       label: contextUsagePinned ? t("context_usage_menu_hide") : t("context_usage_menu_show"),
       onClick: () => setContextUsagePinned(!contextUsagePinned)
     },
-    ...(sessionId
+    ...(sessionId && !singleConversation
       ? [
           {
             label: t("chat_delete_conversation"),
@@ -307,6 +314,7 @@ export function ChatPage({
         onNewConversation={newConversation}
         menuItems={menuItems}
         minimal={isPersonal && !started && pendingSessionId === null && effectiveTab === "chat"}
+        conversationControls={!singleConversation}
       />
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">

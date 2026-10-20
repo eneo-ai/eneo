@@ -29,6 +29,8 @@ export type PreviewStatus = "loading" | "ready" | "too_large" | "failed";
 export type PanelOccupant =
   | { kind: "view"; callId: string }
   | { kind: "file" }
+  /** Content of the app's own beside the conversation (a flow's definition and runs), by its id. */
+  | { kind: "native"; id: string }
   | { kind: "overview"; section: "uploads" | null }
   | { kind: "closed" };
 
@@ -131,6 +133,11 @@ export class SidePanelStore {
    * section it opened on and the element to hand the focus back to.
    */
   overview: { section: "uploads" | null; opener: HTMLElement | null } | null = null;
+  /**
+   * Native content (a flow page's panel) shown when no file or view takes
+   * the panel. A file opened from it covers it and hands it back on close.
+   */
+  nativeId: string | null = null;
 
   constructor(resolveOriginalUrl: (file: PreviewFile) => Promise<string>) {
     this.#resolveOriginalUrl = resolveOriginalUrl;
@@ -154,11 +161,12 @@ export class SidePanelStore {
   get occupant(): PanelOccupant {
     if (this.viewCallId !== null) return { kind: "view", callId: this.viewCallId };
     if (this.shown) return { kind: "file" };
+    if (this.nativeId !== null) return { kind: "native", id: this.nativeId };
     if (this.overview) return { kind: "overview", section: this.overview.section };
     return { kind: "closed" };
   }
 
-  /** Whether the panel holds anything: a file, a document being written, a view or the overview. */
+  /** Whether the panel holds anything: a file, a document being written, a view, native content or the overview. */
   get active() {
     return this.occupant.kind !== "closed";
   }
@@ -204,6 +212,30 @@ export class SidePanelStore {
     const opener = this.overview.opener;
     this.overview = null;
     if (restoreFocus && opener?.isConnected) opener.focus();
+    this.#emit();
+  }
+
+  // ---------------------------------------------------------------------
+  // Native content
+  // ---------------------------------------------------------------------
+
+  /**
+   * Shows the app's own content `id` (a flow panel). A file or view on show
+   * stays in front: it still covers the panel, and the native content is on
+   * show once it closes. The overview gives way.
+   */
+  openNative(id: string) {
+    this.overview = null;
+    if (this.nativeId === id) return this.#emit();
+    this.nativeId = id;
+    this.#emit();
+  }
+
+  /** The user closes the native content; a file beneath it (there is none) is not affected. */
+  closeNative() {
+    if (this.nativeId === null) return;
+    this.nativeId = null;
+    if (!this.shown && this.viewCallId === null) this.maximised = false;
     this.#emit();
   }
 
@@ -535,6 +567,7 @@ export class SidePanelStore {
     if (this.viewCallId !== null) this.#closeView();
     if (this.shown) this.#close();
     this.overview = null;
+    this.nativeId = null;
     this.#emit();
   }
 
