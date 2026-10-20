@@ -45,7 +45,7 @@ test("renders formulas and diagrams through the production CSP and follows theme
   const log = conversationLog(page);
   await expect(log.locator(".katex math")).toHaveCount(2);
   await expect(log.getByText("Priser: $5 och $10.", { exact: false })).toBeVisible();
-  const diagram = log.locator('[data-streamdown="mermaid"] svg');
+  const diagram = log.locator('[data-streamdown="mermaid"] svg[id^="mermaid-"]');
   await expect(diagram).toBeVisible();
   const node = diagram.locator(".node rect").first();
   const lightFill = await node.evaluate((element) => getComputedStyle(element).fill);
@@ -64,7 +64,7 @@ test("renders formulas and diagrams through the production CSP and follows theme
   await expand.click();
   const dialog = page.getByRole("dialog", { name: /diagram/i });
   await expect(dialog).toBeVisible();
-  await expect(dialog.locator('[data-streamdown="mermaid"] svg')).toBeVisible();
+  await expect(dialog.locator('[data-streamdown="mermaid"] svg[id^="mermaid-"]')).toBeVisible();
   await expect
     .poll(() => dialog.evaluate((element) => element.contains(document.activeElement)))
     .toBe(true);
