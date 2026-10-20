@@ -52,7 +52,7 @@ const bundled = {
     state: "ready",
     expected_version: "1.4.0",
     version: "1.4.0",
-    warnings: ["confinement_unavailable"]
+    warnings: ["confinement_unavailable", "forecast_model_unavailable"]
   }
 };
 
@@ -145,10 +145,11 @@ describe("admin function sources", () => {
     show();
     expect(await screen.findByRole("heading", { name: "file_analysis" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "compute" })).toBeTruthy();
-    // The runtime's state and its one warning, said once each.
+    // The runtime's state and its warnings, said once each.
     const status = await screen.findByRole("region", { name: "tools_runtime_title" });
     expect(status.textContent).toContain("tools_runtime_ready");
     expect(status.textContent).toContain("tools_runtime_confinement");
+    expect(status.textContent).toContain("tools_runtime_forecast_model");
     expect(status.textContent).toContain("tools_runtime_versions");
     // Four offers: a deployment without the runtime cannot turn compute on.
     const turnOn = screen.getAllByRole("button", { name: "tools_builtin_turn_on" });

@@ -26,6 +26,11 @@ export type Endpoint = {
    * "forward identity" setting). Listing tools works without them.
    */
   requiresIdentity?: boolean;
+  /**
+   * Whether the tools can run now, for one that needs something the operator provides (the
+   * forecast model). Diagnostics name the endpoints that cannot; calls are not refused here.
+   */
+  ready?: () => Promise<boolean>;
 };
 export type ServerOptions = {
   token: string;
@@ -192,6 +197,7 @@ export function createHandler(options: ServerOptions) {
             execution: scheduler.status,
             native: options.nativeStatus?.() ?? { active: 0, queued: 0 },
             file_origin: fileOrigin,
+            unavailable: await unavailableEndpoints([...endpoints.values()]),
           },
           { headers: { "cache-control": "no-store" } },
         );
@@ -419,4 +425,12 @@ async function boundedJson(request: Request, maxBytes = MAX_BODY_BYTES): Promise
   } catch {
     throw new BodyError("Invalid JSON", 400);
   }
+}
+
+/** The endpoints whose own check says they cannot run now; a failing check counts as cannot. */
+async function unavailableEndpoints(endpoints: Endpoint[]): Promise<string[]> {
+  const checked = await Promise.all(
+    endpoints.map(async (endpoint) => (!endpoint.ready || (await endpoint.ready().catch(() => false)) ? null : endpoint.slug)),
+  );
+  return checked.filter((slug): slug is string => slug !== null);
 }

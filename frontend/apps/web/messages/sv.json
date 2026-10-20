@@ -5016,6 +5016,7 @@
   "tools_runtime_mismatch": "Eneo och verktygstjänsten har olika versioner eller byggen. Verktygen kan fortfarande användas. Be driftansvarig att installera komponenterna från samma versionspaket.",
   "tools_runtime_confinement": "Filisolering för verktygskörningar saknas. Be driftansvarig att kontrollera inställningarna och värdsystemets stöd för isolering.",
   "tools_runtime_file_origin": "Filkällan kunde inte nås eller är inte tillåten. Be driftansvarig att kontrollera filkällans adress och nätverksinställningar. Kontrollen testar inte åtkomst till enskilda filer.",
+  "tools_runtime_forecast_model": "Prognosmodellen finns inte i verktygstjänsten, så Prognos kan inte köras. Be driftansvarig att lägga in modellen enligt dokumentationen.",
   "tools_runtime_versions": "Eneo: {backend} · Verktyg: {runtime}",
   "file_preview_preparing": "Förbereder fil…",
   "file_preview_draft_notice": "Utkast pågår. Den färdiga filen visas här när den är klar.",

@@ -3,6 +3,7 @@ import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { engineResult, forecastAvailable, timestralEngine } from "../../src/tools/forecast/engine/timestral";
+import { forecastConfigSchema, forecastReady } from "../../src/tools/forecast/config";
 import { tinyCheckpoint } from "./checkpoint";
 
 const directory = await mkdtemp(join(tmpdir(), "forecast-engine-test-"));
@@ -96,5 +97,19 @@ describe("the sidecar's answer", () => {
     ["no size of the model", JSON.stringify({ forecast: interval(3) }), false],
   ])("refuses %s as a failed model", (_case, stdout, holdout) => {
     expect(() => engineResult(stdout, 3, holdout)).toThrow(expect.objectContaining({ code: "ENGINE_FAILED" }));
+  });
+});
+
+const sidecar = await forecastAvailable();
+
+describe("whether a forecast can run", () => {
+  test("needs the checkpoint the operator mounts", async () => {
+    const empty = await mkdtemp(join(directory, "no-model-"));
+    expect(await forecastReady(forecastConfigSchema.parse({ model_path: empty }))).toBe(false);
+  });
+
+  test.skipIf(!sidecar)("is ready with the sidecar and a checkpoint", async () => {
+    const modelPath = await tinyCheckpoint(directory);
+    expect(await forecastReady(forecastConfigSchema.parse({ model_path: modelPath }))).toBe(true);
   });
 });

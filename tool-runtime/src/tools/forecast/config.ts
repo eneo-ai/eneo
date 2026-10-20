@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { z } from "zod";
 
 /**
@@ -21,3 +22,16 @@ export const forecastConfigSchema = z
   })
   .strict();
 export type ForecastConfig = z.infer<typeof forecastConfigSchema>;
+
+/** The Python with torch and timestral; the image installs it here, a developer may point elsewhere. */
+export const FORECAST_PYTHON = process.env.FORECAST_PYTHON ?? "/opt/forecast/bin/python3";
+const CHECKPOINT_FILES = ["config.json", "model.safetensors"];
+
+/**
+ * Whether a forecast can run here: the sidecar's Python and the checkpoint the operator mounts
+ * (Eneo ships no weights). Asked on each diagnostic, so a model mounted later counts at once.
+ */
+export async function forecastReady(config: ForecastConfig): Promise<boolean> {
+  const files = [FORECAST_PYTHON, ...CHECKPOINT_FILES.map((file) => join(config.model_path, file))];
+  return (await Promise.all(files.map((file) => Bun.file(file).exists()))).every(Boolean);
+}

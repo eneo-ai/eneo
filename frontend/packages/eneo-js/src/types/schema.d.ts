@@ -20440,6 +20440,7 @@ export interface components {
         | "file_origin_unreachable"
         | "file_origin_not_allowed"
         | "file_origin_unknown"
+        | "forecast_model_unavailable"
       )[];
       /** Files Confined */
       files_confined?: boolean | null;

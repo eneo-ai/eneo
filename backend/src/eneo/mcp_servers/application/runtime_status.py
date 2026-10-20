@@ -26,6 +26,7 @@ RuntimeWarning = Literal[
     "file_origin_unreachable",
     "file_origin_not_allowed",
     "file_origin_unknown",
+    "forecast_model_unavailable",
 ]
 FILE_ORIGIN_WARNING: dict[str, RuntimeWarning] = {
     "unreachable": "file_origin_unreachable",
@@ -69,6 +70,8 @@ class _Diagnostic(BaseModel):
     confinement: _Confinement
     execution: _Counts
     file_origin: Literal["reachable", "unreachable", "not_allowed", "unknown"]
+    # Endpoints that cannot run now; absent from runtimes before it was reported.
+    unavailable: list[str] = Field(default_factory=list[str], max_length=32)
 
 
 _cache: tuple[str, float, RuntimeStatus] | None = None
@@ -172,6 +175,8 @@ async def runtime_status() -> RuntimeStatus:
                                     status.warnings.append(
                                         FILE_ORIGIN_WARNING[data.file_origin]
                                     )
+                                if "forecast" in data.unavailable:
+                                    status.warnings.append("forecast_model_unavailable")
             except (httpx.HTTPError, TimeoutError, ValidationError, ValueError):
                 # Exception text can contain origins or credentials. Log only safe state.
                 status.state = "unreachable"

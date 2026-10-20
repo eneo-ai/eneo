@@ -76,7 +76,8 @@ const WARNING_KEYS: Record<string, string> = {
   confinement_unavailable: "tools_runtime_confinement",
   file_origin_unreachable: "tools_runtime_file_origin",
   file_origin_not_allowed: "tools_runtime_file_origin",
-  file_origin_unknown: "tools_runtime_file_origin"
+  file_origin_unknown: "tools_runtime_file_origin",
+  forecast_model_unavailable: "tools_runtime_forecast_model"
 };
 
 /** What to tell an administrator about the runtime: its state, then each warning once (message keys). */

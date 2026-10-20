@@ -8,10 +8,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { ToolError } from "../../../errors";
+import { FORECAST_PYTHON } from "../config";
 import type { EngineResult, ForecastEngine } from "../ports";
 
-/** The Python with torch and timestral; the image installs it here, a developer may point elsewhere. */
-export const FORECAST_PYTHON = process.env.FORECAST_PYTHON ?? "/opt/forecast/bin/python3";
+export { FORECAST_PYTHON };
+
 const SCRIPT = fileURLToPath(new URL("../../../../scripts/forecast.py", import.meta.url));
 const SIDECAR_TIMEOUT_MS = 25_000;
 const MAX_STDERR = 2_000;
