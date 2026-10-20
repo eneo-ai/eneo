@@ -81,6 +81,8 @@ result guards.
 | `backend/src/eneo/skills/**`, skill permissions in `roles/**`, `frontend/apps/web/src/routes/(app)/admin/skills/**`                                                                                                                                                                                                | `guides/skills.mdx`                                                                                                                   |
 | `backend/src/eneo/integration/**` (SharePoint) , `frontend/apps/web/src/routes/(app)/admin/integrations/**`                                                                                                                                                                                                        | `guides/sharepoint-integration.mdx`                                                                                                   |
 
+| `backend/src/eneo/group_chat/**`, `assistants/delegation.py`, consultation history and `frontend/apps/web/src/lib/features/group-chats/**` | `guides/group-chats.mdx`, `docs/api.mdx`, root `docs/adr/assistant-delegation-execution-boundary.md` |
+
 ## Storage, workers and operations
 
 | Code                                                                                                                                                                               | Pages                                                                                                                   |
@@ -89,7 +91,7 @@ result guards.
 | `backend/src/eneo/worker/**`, `jobs/**`                                                                                                                                            | `docs/architecture.mdx`, `guides/object-content-storage.mdx` (drain procedure)                                          |
 | `backend/src/eneo/audit/**`, `api/audit/**`, `data_retention/**`, `actors/actors/space_actor.py`, `frontend/apps/web/src/routes/(app)/admin/audit-logs/**`                         | `docs/audit-logging.mdx`, `guides/audit-logging.mdx`                                                                    |
 | `backend/src/eneo/conversations/**`, `spaces/**`, `assistants/**`, `analysis/**` (public API and insight access)                                                                   | `docs/api.mdx`                                                                                                          |
-| `backend/src/eneo/assistants/assistant_service.py` (preparation/execution ownership and proposed delegation), `backend/scripts/probe_loopback_cancellation.py`                     | `docs/adr/assistant-delegation-execution-boundary.md` (root repository; planned behavior, not a user guide)             |
+| `backend/src/eneo/assistants/assistant_service.py` (preparation/execution ownership and delegation), `backend/scripts/probe_loopback_cancellation.py`                              | `docs/adr/assistant-delegation-execution-boundary.md` (root repository; execution decision and constraints)             |
 | `.github/workflows/release_sbom.yml`, `.github/workflows/build_and_push_images.yml`, `.github/workflows/application_image.yml`, `scripts/release_bundle.py`, `docker/seaweedfs/**` | `docs/release-sboms.mdx`, `docs/object-content-architecture.mdx`                                                        |
 
 ## Project and contributing

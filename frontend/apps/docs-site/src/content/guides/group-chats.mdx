@@ -1,0 +1,82 @@
+# Group chats with an orchestrator
+
+An orchestrated group chat lets several assistants contribute to one answer. The
+orchestrator chooses which specialists to ask, can ask a follow-up, and writes the
+answer shown in the conversation. Each specialist uses its own instructions,
+model, Skills, knowledge and permitted tools.
+
+## Configure the group
+
+In the group's Space, open the group chat's settings. Add the specialists and
+select a separate assistant as **Orchestrator**. That assistant must belong to the
+same Space and use a model that supports tool calling. Describe each specialist's
+purpose so the orchestrator can choose between them. Give the orchestrator
+instructions for the kind of final answer you want.
+
+Existing groups keep their current routing until an editor selects an
+orchestrator. Clearing that selection restores their previous routing. When
+mentions are enabled, explicitly mentioning a specialist still asks that
+assistant directly.
+
+A configured orchestrator must be replaced or deselected before moving or deleting
+that assistant. Changing its Space, model availability, classification or tool
+configuration during a turn can stop that turn; start a new question after the
+configuration has been corrected.
+
+## Read the answer and its steps
+
+The main answer is the orchestrator's synthesis. Expand **View steps** to
+see each question sent to a specialist, its actual answer, its sources and the
+tools it used. Repeated questions to IT appear as separate steps. Opening a saved
+conversation restores these recorded steps without running the assistants again.
+
+```mermaid
+flowchart TD
+  U[Your question] --> O[Orchestrator]
+  O --> P[Procurement: review requirements]
+  O --> IT[IT: check technical requirements]
+  IT --> K[IT knowledge and Skills]
+  IT --> M[IT's permitted MCP tools]
+  P --> S[Orchestrator's main answer]
+  K --> IT
+  M --> IT
+  IT --> S
+  S -. Expand specialist steps .-> D[Questions, replies, sources and tool results]
+```
+
+Specialists run one at a time. A specialist can make several tool calls, but it
+cannot delegate to another assistant in this first version. The orchestrator can
+ask it another question when the first answer is incomplete.
+
+In the chat's tool menu, turn off automatic tool execution if you want to approve
+external tools before they run. This preference also applies to specialist tool
+calls. Approval requests remain visible outside the collapsed specialist steps.
+Denying a tool call prevents its execution and lets the assistant explain the
+missing evidence. Eneo's existing rules for internal knowledge and file tools
+continue to apply.
+
+## Access and limits
+
+All assistants stay within the group's tenant and Space. Group membership does
+not grant extra permissions: Eneo checks the caller's access, available models,
+Space classification and effective tool settings before execution and later
+handoffs. A specialist's answer does not lower the information's classification.
+
+One question shares a bounded execution budget across the orchestrator and its
+specialists: six consultations, 24 model requests (including locally initiated
+query embeddings and reranking), 48 local tool dispatches, 1 MiB of model request input and
+100,000 characters of model output. Total execution is limited to 180 seconds;
+a consultation is limited to 60 seconds. Approval waiting counts toward these
+deadlines. The limits cover work Eneo dispatches, including the loopback request;
+they do not separately count provider work inside MCP servers, including Eneo's
+HTTP loopback tools. Those tools retain their own request limits.
+
+Stopping the question stops local specialist work and closes its pending streams
+and approvals. Completed actions in an external system remain completed. A
+stopped, timed-out or denied step is shown as such; it is not presented as a
+successful answer. The orchestrator may use available partial results and must
+identify missing evidence.
+
+This version is available through interactive user sessions. API-key execution
+of orchestrated groups is not enabled. The shared Space's default assistant keeps
+its existing behaviour; it does not automatically become an orchestrator.

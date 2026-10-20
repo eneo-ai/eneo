@@ -966,6 +966,38 @@ export class ChatService {
               if (isStale()) return;
               if (!ensureCurrentSession(event)) return;
 
+              if (event.eneo_event_type === "consultation" && "consultations" in event && ref) {
+                const stored = new SvelteMap(
+                  (ref.consultations ?? []).map((item) => [item.id, item])
+                );
+                for (const consultation of event.consultations) {
+                  const previous = stored.get(consultation.id);
+                  stored.set(consultation.id, consultation);
+                  if (consultation.status === "awaiting_approval" && consultation.approval_id) {
+                    this.pendingToolApproval = {
+                      approvalId: consultation.approval_id,
+                      tools: (consultation.tool_calls ?? [])
+                        .filter(
+                          (step) =>
+                            step.approved == null &&
+                            step.result_status !== "succeeded" &&
+                            step.result_status !== "completed"
+                        )
+                        .map((step) => ({
+                          server_name: step.server_name,
+                          tool_name: step.tool_name,
+                          arguments: step.arguments ?? undefined,
+                          tool_call_id: step.tool_call_id ?? undefined
+                        }))
+                    };
+                  } else if (previous?.approval_id === this.pendingToolApproval?.approvalId) {
+                    this.pendingToolApproval = null;
+                  }
+                }
+                ref.consultations = [...stored.values()].sort((a, b) => a.ordinal - b.ordinal);
+                return;
+              }
+
               if (event.eneo_event_type === "token_usage" && "usage" in event) {
                 // Reflect token usage on the live message so reload-from-history
                 // matches the in-memory state, then expose the running context

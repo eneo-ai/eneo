@@ -52,6 +52,8 @@
     internalServers?: InternalMcpServer[];
     /** Whether the partner's model can call tools at all; false renders every row unavailable. */
     modelSupportsTools?: boolean;
+    /** Specialist tools use the same approval preference without exposing their catalogue. */
+    delegatedTools?: boolean;
     /** Server ids the user has switched off for this conversation (mutated in place). */
     disabledServerIds: SvelteSet<string>;
     /** Called after the user changes the external server selection. */
@@ -65,6 +67,7 @@
     capabilityServers = [],
     internalServers = [],
     modelSupportsTools = true,
+    delegatedTools = false,
     disabledServerIds,
     onSelectionChange,
     autoAcceptTools = $bindable()
@@ -110,23 +113,31 @@
   <Popover.Trigger
     class={buttonVariants({ variant: activeCount > 0 ? "secondary" : "ghost", size: "sm" }) +
       " h-9 shrink-0 gap-1 rounded-lg px-2 @[40rem]/composer:gap-1.5 @[40rem]/composer:px-3"}
-    title={m.mcp_servers_status_aria({ active: activeCount, total })}
-    aria-label={m.mcp_servers_status_aria({ active: activeCount, total })}
+    title={delegatedTools
+      ? m.group_delegated_tools()
+      : m.mcp_servers_status_aria({ active: activeCount, total })}
+    aria-label={delegatedTools
+      ? m.group_delegated_tools()
+      : m.mcp_servers_status_aria({ active: activeCount, total })}
   >
     <Plug class="size-4" aria-hidden="true" />
     <span class="hidden @[40rem]/composer:inline">{m.tools()}</span>
-    <Badge
-      variant={activeCount > 0 ? "default" : "outline"}
-      class="hidden px-1.5 tabular-nums @[24rem]/composer:inline-flex"
-      aria-hidden="true">{activeCount}</Badge
-    >
+    {#if !delegatedTools}<Badge
+        variant={activeCount > 0 ? "default" : "outline"}
+        class="hidden px-1.5 tabular-nums @[24rem]/composer:inline-flex"
+        aria-hidden="true">{activeCount}</Badge
+      >{/if}
   </Popover.Trigger>
 
   <Popover.Content side="top" align="start" class="w-80 gap-0 p-0">
     <div class="border-b px-3 py-2.5">
       <Popover.Title class="text-sm">{m.tools()}</Popover.Title>
       <div class="text-muted-foreground mt-0.5 flex items-center justify-between gap-2 text-xs">
-        <span>{m.mcp_servers_active_count({ active: activeCount, total })}</span>
+        <span
+          >{delegatedTools
+            ? m.group_delegated_tools()
+            : m.mcp_servers_active_count({ active: activeCount, total })}</span
+        >
         {#if servers.length > 1 && modelSupportsTools}
           <span class="flex items-center gap-0.5">
             <button
@@ -262,7 +273,7 @@
       </div>
     {/if}
 
-    {#if modelSupportsTools && (servers.length > 0 || capabilityServers.length > 0)}
+    {#if modelSupportsTools && (servers.length > 0 || capabilityServers.length > 0 || delegatedTools)}
       <Separator />
 
       <div class="p-1">

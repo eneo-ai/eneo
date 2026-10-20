@@ -17,9 +17,10 @@
   type AssistantTool = GroupChat["tools"]["assistants"][number];
   type Props = {
     selectedAssistants: GroupChat["tools"]["assistants"];
+    orchestratorId?: string | null;
   };
 
-  let { selectedAssistants = $bindable([]) }: Props = $props();
+  let { selectedAssistants = $bindable([]), orchestratorId = null }: Props = $props();
 
   const {
     state: { currentSpace }
@@ -27,7 +28,9 @@
 
   const availableAssistants: AssistantTool[] = $derived.by(() => {
     return $currentSpace.applications.assistants
-      .filter(({ id }) => !selectedAssistants.some(({ id: _id }) => id === _id))
+      .filter(
+        ({ id }) => id !== orchestratorId && !selectedAssistants.some(({ id: _id }) => id === _id)
+      )
       .map(({ name, id, description }) => {
         return {
           id,

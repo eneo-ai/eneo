@@ -4893,5 +4893,17 @@
   "audit_action_document_template_deleted": "Document Template Removed",
   "audit_action_document_template_deleted_description": "A document template was removed from the organisation's library",
   "audit_action_document_template_default_set": "Default Document Template Set",
-  "audit_action_document_template_default_set_description": "A document template was made the organisation's default"
+  "audit_action_document_template_default_set_description": "A document template was made the organisation's default",
+  "group_orchestrator": "Orchestrator",
+  "group_orchestrator_description": "Consults the specialists and gives the user one combined answer. Choose a separate assistant in this space with a model that supports tools.",
+  "group_orchestrator_unconfigured": "Single-assistant routing (existing behavior)",
+  "group_consultations": "View steps · {assistants} assistants · {count} questions",
+  "group_consultation_question": "Question from the orchestrator",
+  "group_consultation_answer": "Specialist reply",
+  "group_consultation_approval": "Awaiting approval",
+  "group_consultation_denied": "Access denied",
+  "group_consultation_timeout": "Timed out",
+  "group_consultation_cancelled": "Cancelled",
+  "group_consultation_incomplete": "Incomplete result",
+  "group_delegated_tools": "Approvals also apply to the specialists’ external tools."
 }
