@@ -49,9 +49,9 @@
   {/each}
   {#if $enabled}
     <Navigation.Link
-      href={localizeHref("/whats-new")}
+      href={localizeHref("/news")}
       icon={Sparkles}
-      isActive={currentRoute === "/whats-new"}
+      isActive={currentRoute === "/news"}
       label={m.whats_new()}
     >
       {#if $hasUnseen}

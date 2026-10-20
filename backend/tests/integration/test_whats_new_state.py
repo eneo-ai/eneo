@@ -1,6 +1,7 @@
 """The What's new markers are personal, idempotent and session-only."""
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 import pytest
@@ -8,6 +9,60 @@ import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient
 
 from eneo.whats_new.whats_new_repo import WhatsNewRepository
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("resolution", ["seen", "announced"])
+async def test_reminder_persists_for_24_hours_and_is_consumed(
+    api_client, bearer_token, resolution
+):
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+    before = datetime.now(timezone.utc)
+    snoozed = await api_client.put(
+        "/api/v1/whats-new/snooze/", headers=headers, json={"version": "2.3.0"}
+    )
+    assert snoozed.status_code == 200
+    state = snoozed.json()
+    reminder = datetime.fromisoformat(state["remind_after"].replace("Z", "+00:00"))
+    assert (
+        before + timedelta(hours=24)
+        <= reminder
+        <= datetime.now(timezone.utc) + timedelta(hours=24)
+    )
+    assert state["seen_version"] is None
+    assert state["announced_version"] == "2.3.0"
+    persisted = await api_client.get("/api/v1/whats-new/state/", headers=headers)
+    assert persisted.json() == state
+    resolved = await api_client.put(
+        f"/api/v1/whats-new/{resolution}/", headers=headers, json={"version": "2.3.0"}
+    )
+    assert resolved.json()["remind_after"] is None
+    if resolution == "seen":
+        stale = await api_client.put(
+            "/api/v1/whats-new/snooze/", headers=headers, json={"version": "2.3.0"}
+        )
+        assert stale.json()["remind_after"] is None
+
+
+@pytest.mark.integration
+async def test_older_tabs_cannot_replace_or_cancel_a_newer_reminder(
+    api_client, bearer_token
+):
+    headers = {"Authorization": f"Bearer {bearer_token}"}
+    current = await api_client.put(
+        "/api/v1/whats-new/snooze/", headers=headers, json={"version": "2.3.0"}
+    )
+    for action in ("snooze", "announced", "seen"):
+        stale = await api_client.put(
+            f"/api/v1/whats-new/{action}/", headers=headers, json={"version": "2.2.0"}
+        )
+        assert stale.json()["announced_version"] == "2.3.0"
+        assert stale.json()["remind_after"] == current.json()["remind_after"]
+    newer = await api_client.put(
+        "/api/v1/whats-new/announced/", headers=headers, json={"version": "2.4.0"}
+    )
+    assert newer.json()["announced_version"] == "2.4.0"
+    assert newer.json()["remind_after"] is None
 
 
 @pytest.fixture
@@ -37,25 +92,41 @@ async def test_seen_and_announced_are_tracked_independently(api_client, bearer_t
 
     initial = await api_client.get("/api/v1/whats-new/state/", headers=headers)
     assert initial.status_code == 200
-    assert initial.json() == {"seen_version": None, "announced_version": None}
+    assert initial.json() == {
+        "seen_version": None,
+        "announced_version": None,
+        "remind_after": None,
+    }
 
     # The announcement is shown before the page is ever opened.
     announced = await api_client.put(
         "/api/v1/whats-new/announced/", headers=headers, json={"version": "2.2.0"}
     )
     assert announced.status_code == 200
-    assert announced.json() == {"seen_version": None, "announced_version": "2.2.0"}
+    assert announced.json() == {
+        "seen_version": None,
+        "announced_version": "2.2.0",
+        "remind_after": None,
+    }
 
     seen = await api_client.put(
         "/api/v1/whats-new/seen/", headers=headers, json={"version": "2.2.0"}
     )
-    assert seen.json() == {"seen_version": "2.2.0", "announced_version": "2.2.0"}
+    assert seen.json() == {
+        "seen_version": "2.2.0",
+        "announced_version": "2.2.0",
+        "remind_after": None,
+    }
 
     # A later release overwrites the single row instead of adding one.
     later = await api_client.put(
         "/api/v1/whats-new/seen/", headers=headers, json={"version": "2.3.0"}
     )
-    assert later.json() == {"seen_version": "2.3.0", "announced_version": "2.2.0"}
+    assert later.json() == {
+        "seen_version": "2.3.0",
+        "announced_version": "2.2.0",
+        "remind_after": None,
+    }
 
     # An older frontend build cannot move a marker backwards.
     older = await api_client.put(
@@ -64,13 +135,21 @@ async def test_seen_and_announced_are_tracked_independently(api_client, bearer_t
     assert older.json()["seen_version"] == "2.3.0"
 
     final = await api_client.get("/api/v1/whats-new/state/", headers=headers)
-    assert final.json() == {"seen_version": "2.3.0", "announced_version": "2.2.0"}
+    assert final.json() == {
+        "seen_version": "2.3.0",
+        "announced_version": "2.2.0",
+        "remind_after": None,
+    }
 
 
 @pytest.mark.integration
 async def test_markers_reject_malformed_versions(api_client, bearer_token):
     headers = {"Authorization": f"Bearer {bearer_token}"}
-    for path in ("/api/v1/whats-new/seen/", "/api/v1/whats-new/announced/"):
+    for path in (
+        "/api/v1/whats-new/seen/",
+        "/api/v1/whats-new/announced/",
+        "/api/v1/whats-new/snooze/",
+    ):
         response = await api_client.put(
             path, headers=headers, json={"version": "v2.2.0"}
         )
@@ -108,7 +187,11 @@ async def test_markers_are_session_only(api_client, admin_user_api_key):
     read = await api_client.get("/api/v1/whats-new/state/", headers=headers)
     assert read.status_code == 403
 
-    for path in ("/api/v1/whats-new/seen/", "/api/v1/whats-new/announced/"):
+    for path in (
+        "/api/v1/whats-new/seen/",
+        "/api/v1/whats-new/announced/",
+        "/api/v1/whats-new/snooze/",
+    ):
         write = await api_client.put(path, headers=headers, json={"version": "2.2.0"})
         assert write.status_code == 403
 
@@ -130,10 +213,18 @@ async def test_reset_forgets_both_markers_in_development(
     monkeypatch.setattr(get_settings(), "environment", "development")
     reset = await api_client.delete("/api/v1/whats-new/state/", headers=headers)
     assert reset.status_code == 200
-    assert reset.json() == {"seen_version": None, "announced_version": None}
+    assert reset.json() == {
+        "seen_version": None,
+        "announced_version": None,
+        "remind_after": None,
+    }
 
     state = await api_client.get("/api/v1/whats-new/state/", headers=headers)
-    assert state.json() == {"seen_version": None, "announced_version": None}
+    assert state.json() == {
+        "seen_version": None,
+        "announced_version": None,
+        "remind_after": None,
+    }
 
 
 @pytest.mark.integration

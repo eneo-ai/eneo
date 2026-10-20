@@ -1,7 +1,8 @@
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, String
+from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from eneo.database.tables.base_class import BaseWithTableName, TimestampMixin
@@ -21,3 +22,7 @@ class WhatsNewState(TimestampMixin, BaseWithTableName):
     )
     seen_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     announced_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # A reminder belongs to announced_version; newer announcements replace it.
+    remind_after: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )

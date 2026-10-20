@@ -9,13 +9,16 @@ export { getWhatsNewStore, initWhatsNewStore, createWhatsNewStore };
 export type Marker = string | null | undefined;
 
 export interface WhatsNewInit {
-  eneo: { whatsNew: Pick<Eneo["whatsNew"], "markSeen" | "markAnnounced" | "resetState"> };
+  eneo: {
+    whatsNew: Pick<Eneo["whatsNew"], "markSeen" | "markAnnounced" | "snooze" | "resetState">;
+  };
   /** Tenant opt-out (admin setting): off hides the page, dot and announcement. */
   whatsNewEnabled: boolean;
   /** Installed frontend version, including the RC suffix. */
   whatsNewVersion: string;
   whatsNewSeenVersion: Marker;
   whatsNewAnnouncedVersion: Marker;
+  whatsNewRemindAfter: string | null | undefined;
 }
 
 const [getWhatsNewStore, setWhatsNewStore] =
@@ -34,11 +37,13 @@ function createWhatsNewStore(data: WhatsNewInit) {
   const enabled = writable(data.whatsNewEnabled);
   const seenVersion = writable<Marker>(data.whatsNewSeenVersion);
   const announcedVersion = writable<Marker>(data.whatsNewAnnouncedVersion);
+  let remindAfter = data.whatsNewRemindAfter;
   const hasUnseen = derived([enabled, seenVersion], ([$enabled, $seen]) =>
     !$enabled || $seen === undefined ? false : hasUnseenRelease($seen, latest)
   );
 
   let inFlight: Promise<void> | null = null;
+  let announcementWrite: Promise<void> | null = null;
 
   /** Record the newest bundled release as seen. Safe to call repeatedly. */
   function markLatestSeen(): Promise<void> {
@@ -52,7 +57,10 @@ function createWhatsNewStore(data: WhatsNewInit) {
     seenVersion.set(latest.version);
     inFlight = eneo.whatsNew
       .markSeen(latest.version)
-      .then((state) => seenVersion.set(state.seen_version))
+      .then((state) => {
+        seenVersion.set(state.seen_version);
+        remindAfter = state.remind_after;
+      })
       .catch((error: unknown) => {
         seenVersion.set(previous);
         console.error("Could not record What's new as seen", error);
@@ -64,14 +72,25 @@ function createWhatsNewStore(data: WhatsNewInit) {
   }
 
   /**
-   * The release to announce once, or null when the user has already been
-   * shown an announcement for the newest bundled release (or newer).
+   * Announce a new release, or repeat its unread announcement when the saved
+   * reminder is due. A reminder never delays a newer release.
    */
   function pendingAnnouncement() {
     if (!get(enabled) || !latest) return null;
     const announced = get(announcedVersion);
     if (announced === undefined) return null;
-    if (announced && compareVersions(latest.version, announced) <= 0) return null;
+    if (announced) {
+      const order = compareVersions(latest.version, announced);
+      if (order < 0) return null;
+      if (
+        order === 0 &&
+        (!get(hasUnseen) ||
+          !remindAfter ||
+          Date.parse(remindAfter) > Date.now() ||
+          !Number.isFinite(Date.parse(remindAfter)))
+      )
+        return null;
+    }
     return latest;
   }
 
@@ -81,15 +100,34 @@ function createWhatsNewStore(data: WhatsNewInit) {
    * seen marker is untouched because being told is not the same as looking.
    */
   function markLatestAnnounced(): Promise<void> {
+    if (announcementWrite) return announcementWrite;
     const latest = pendingAnnouncement();
     if (!latest) return Promise.resolve();
     announcedVersion.set(latest.version);
-    return eneo.whatsNew
+    remindAfter = null;
+    announcementWrite = eneo.whatsNew
       .markAnnounced(latest.version)
-      .then((state) => announcedVersion.set(state.announced_version))
+      .then((state) => {
+        announcedVersion.set(state.announced_version);
+        remindAfter = state.remind_after;
+      })
       .catch((error: unknown) => {
         console.error("Could not record the What's new announcement", error);
+      })
+      .finally(() => {
+        announcementWrite = null;
       });
+    return announcementWrite;
+  }
+
+  async function snoozeLatest(): Promise<void> {
+    if (!get(enabled) || !latest) return;
+    // Opening and immediately postponing must not race the announcement write.
+    await announcementWrite;
+    const state = await eneo.whatsNew.snooze(latest.version);
+    seenVersion.set(state.seen_version);
+    announcedVersion.set(state.announced_version);
+    remindAfter = state.remind_after;
   }
 
   /** Development only: forget both markers so the announcement and the dot return. */
@@ -97,6 +135,7 @@ function createWhatsNewStore(data: WhatsNewInit) {
     await eneo.whatsNew.resetState();
     seenVersion.set(null);
     announcedVersion.set(null);
+    remindAfter = null;
   }
 
   return {
@@ -109,6 +148,7 @@ function createWhatsNewStore(data: WhatsNewInit) {
     hasUnseen,
     markLatestSeen,
     pendingAnnouncement,
-    markLatestAnnounced
+    markLatestAnnounced,
+    snoozeLatest
   };
 }

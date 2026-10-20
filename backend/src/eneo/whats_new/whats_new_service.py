@@ -25,6 +25,11 @@ class WhatsNewService:
             return await self.get_state()
         return await self.repo.mark_announced(self.user.id, version)
 
+    async def snooze(self, version: str) -> WhatsNewStatePublic:
+        if not can_record_release(version, get_settings().app_version):
+            return await self.get_state()
+        return await self.repo.snooze(self.user.id, version)
+
     async def reset_state(self) -> WhatsNewStatePublic:
         """Developer convenience: forget both markers for the current user so
         the announcement and the dot come back. Only in development."""

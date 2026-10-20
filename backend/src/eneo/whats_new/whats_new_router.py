@@ -68,6 +68,24 @@ async def mark_whats_new_announced(
     return await container.whats_new_service().mark_announced(data.version)
 
 
+@router.put(
+    "/snooze/",
+    response_model=WhatsNewStatePublic,
+    description="Remind the current user about an unread release on a visit after 24 hours.",
+    responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="A user session may postpone only its own release announcement.",
+)
+async def snooze_whats_new_announcement(
+    data: WhatsNewVersionUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    return await container.whats_new_service().snooze(data.version)
+
+
 @router.delete(
     "/state/",
     response_model=WhatsNewStatePublic,

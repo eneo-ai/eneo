@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 from uuid import UUID
 
@@ -20,14 +21,19 @@ class WhatsNewRepository:
         if row is None:
             return WhatsNewStatePublic(seen_version=None, announced_version=None)
         return WhatsNewStatePublic(
-            seen_version=row.seen_version, announced_version=row.announced_version
+            seen_version=row.seen_version,
+            announced_version=row.announced_version,
+            remind_after=row.remind_after,
         )
 
     async def mark_seen(self, user_id: UUID, version: str) -> WhatsNewStatePublic:
-        return await self._advance(user_id, "seen_version", version)
+        return await self._record(user_id, "seen", version)
 
     async def mark_announced(self, user_id: UUID, version: str) -> WhatsNewStatePublic:
-        return await self._advance(user_id, "announced_version", version)
+        return await self._record(user_id, "announced", version)
+
+    async def snooze(self, user_id: UUID, version: str) -> WhatsNewStatePublic:
+        return await self._record(user_id, "snooze", version)
 
     async def reset(self, user_id: UUID) -> WhatsNewStatePublic:
         await self.session.execute(
@@ -35,10 +41,10 @@ class WhatsNewRepository:
         )
         return WhatsNewStatePublic(seen_version=None, announced_version=None)
 
-    async def _advance(
+    async def _record(
         self,
         user_id: UUID,
-        marker: Literal["seen_version", "announced_version"],
+        action: Literal["seen", "announced", "snooze"],
         version: str,
     ) -> WhatsNewStatePublic:
         # The no-op conflict update locks the row until the request transaction
@@ -57,13 +63,33 @@ class WhatsNewRepository:
             .execution_options(populate_existing=True)
         )
         row = (await self.session.execute(stmt)).scalar_one()
-        stored = row.seen_version if marker == "seen_version" else row.announced_version
-        if stored is None or release_order_key(stored) < release_order_key(version):
-            if marker == "seen_version":
+        version_key = release_order_key(version)
+        if action == "seen":
+            if (
+                row.seen_version is None
+                or release_order_key(row.seen_version) < version_key
+            ):
                 row.seen_version = version
-            else:
-                row.announced_version = version
-            await self.session.flush()
+            if row.announced_version is not None and version_key >= release_order_key(
+                row.announced_version
+            ):
+                row.remind_after = None
+        elif row.announced_version is None or version_key >= release_order_key(
+            row.announced_version
+        ):
+            # A stale tab cannot defer an older release or revive already read news.
+            row.announced_version = version
+            unread = row.seen_version is None or version_key > release_order_key(
+                row.seen_version
+            )
+            row.remind_after = (
+                datetime.now(timezone.utc) + timedelta(hours=24)
+                if action == "snooze" and unread
+                else None
+            )
+        await self.session.flush()
         return WhatsNewStatePublic(
-            seen_version=row.seen_version, announced_version=row.announced_version
+            seen_version=row.seen_version,
+            announced_version=row.announced_version,
+            remind_after=row.remind_after,
         )
