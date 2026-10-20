@@ -469,6 +469,10 @@ class QuestionRepository:
             question_values["tool_calls"] = question.model_dump(
                 mode="json", include={"tool_calls"}
             )["tool_calls"]
+        if question.consultations is not None:
+            question_values["consultations"] = question.model_dump(
+                mode="json", include={"consultations"}
+            )["consultations"]
         question_values["skill_activation_data"] = (
             question.skill_activation.model_dump(mode="json")
             if question.skill_activation is not None

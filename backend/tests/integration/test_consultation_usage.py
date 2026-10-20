@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
-from eneo.questions.question import ConsultationInfo
+from eneo.questions.question import ConsultationInfo, QuestionAdd
+from eneo.questions.questions_repo import QuestionRepository
 from eneo.token_usage.infrastructure.question_usage import question_usage_rows
 
 
@@ -44,31 +45,35 @@ async def test_consultation_usage_keeps_each_model_and_does_not_repeat_parent_to
         status="denied",
     )
     now = datetime.now(timezone.utc)
-    question = Questions(
-        question="Parent",
-        answer="Synthesis",
-        tenant_id=test_tenant.id,
-        session_id=session.id,
-        completion_model_id=parent_model.id,
-        num_tokens_question=20,
-        num_tokens_answer=5,
-        consultations=[
-            child.model_dump(mode="json"),
-            unexecuted.model_dump(mode="json"),
-        ],
+    repo = QuestionRepository(async_session)
+    question = await repo.add(
+        QuestionAdd(
+            question="Parent",
+            answer="Synthesis",
+            tenant_id=test_tenant.id,
+            session_id=session.id,
+            completion_model_id=parent_model.id,
+            num_tokens_question=20,
+            num_tokens_answer=5,
+            consultations=[child, unexecuted],
+        )
     )
-    legacy = Questions(
-        question="Earlier turn",
-        answer="Answer",
-        tenant_id=test_tenant.id,
-        session_id=session.id,
-        completion_model_id=parent_model.id,
-        num_tokens_question=10,
-        num_tokens_answer=3,
-        consultations=None,
+    legacy = await repo.add(
+        QuestionAdd(
+            question="Earlier turn",
+            answer="Answer",
+            tenant_id=test_tenant.id,
+            session_id=session.id,
+            completion_model_id=parent_model.id,
+            num_tokens_question=10,
+            num_tokens_answer=3,
+        )
     )
-    async_session.add_all([question, legacy])
-    await async_session.flush()
+    # Ordinary asks store SQL NULL, never a JSON scalar that the usage query
+    # could mistake for a consultation array.
+    assert await async_session.scalar(
+        sa.select(Questions.consultations.is_(None)).where(Questions.id == legacy.id)
+    )
     scope = question_usage_rows(
         test_tenant.id, now - timedelta(minutes=1), now + timedelta(minutes=1)
     )

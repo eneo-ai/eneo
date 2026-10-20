@@ -41,7 +41,7 @@ class Questions(BasePublic):
     skill_context_tokens: Mapped[Optional[int]] = mapped_column(nullable=True)
     tool_calls: Mapped[Optional[list[object]]] = mapped_column(JSONB, nullable=True)
     consultations: Mapped[list[dict[str, object]] | None] = mapped_column(
-        JSONB, nullable=True
+        JSONB(none_as_null=True), nullable=True
     )
     reasoning: Mapped[Optional[str]] = mapped_column(nullable=True)
     skill_provenance: Mapped[Optional[list[dict[str, object]]]] = mapped_column(

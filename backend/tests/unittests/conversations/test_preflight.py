@@ -13,6 +13,7 @@ from eneo.completion_models.infrastructure.context_builder import (
 from eneo.conversations.application.conversation_service import ConversationService
 from eneo.conversations.conversation_models import PreflightResponse
 from eneo.files.file_models import FileType
+from eneo.group_chat.domain.entities.group_chat import GroupChat
 from eneo.main.exceptions import BadRequestException
 
 
@@ -624,7 +625,7 @@ async def test_preflight_baseline_zero_for_group_chat_target():
     """Group-chat targets have no single persistent baseline; fields stay 0."""
     member = MagicMock()
     member.assistant.completion_model = _make_completion_model("gpt-4o")
-    group_chat = MagicMock()
+    group_chat = GroupChat.create(name="Group", space_id=uuid4(), user_id=uuid4())
     group_chat.assistants = [member]
 
     service = _make_service(group_chat=group_chat)
@@ -685,7 +686,7 @@ async def test_preflight_resolves_session_to_group_chat_model():
         "claude-3-5-sonnet", token_limit=200000
     )
 
-    group_chat = MagicMock()
+    group_chat = GroupChat.create(name="Group", space_id=uuid4(), user_id=uuid4())
     group_chat.assistants = [member]
 
     service = _make_service(session=session, group_chat=group_chat)
@@ -720,7 +721,7 @@ async def test_preflight_rejects_assistant_without_model():
 @pytest.mark.asyncio
 async def test_preflight_rejects_empty_group_chat():
     """Group chat with no assistants → 400, matching ask_group_chat behavior."""
-    group_chat = MagicMock()
+    group_chat = GroupChat.create(name="Group", space_id=uuid4(), user_id=uuid4())
     group_chat.assistants = []
 
     service = _make_service(group_chat=group_chat)
@@ -739,7 +740,7 @@ async def test_preflight_group_chat_uses_single_assistant_model():
     member = MagicMock()
     member.assistant.completion_model = _make_completion_model("gpt-4o")
 
-    group_chat = MagicMock()
+    group_chat = GroupChat.create(name="Group", space_id=uuid4(), user_id=uuid4())
     group_chat.assistants = [member]
 
     service = _make_service(group_chat=group_chat)
@@ -766,7 +767,7 @@ async def test_preflight_group_chat_counts_selector_tokens_and_uses_smallest_win
         "small-context-model", token_limit=4096
     )
 
-    group_chat = MagicMock()
+    group_chat = GroupChat.create(name="Group", space_id=uuid4(), user_id=uuid4())
     group_chat.assistants = [first_member, second_member]
 
     service = _make_service(group_chat=group_chat)
@@ -785,6 +786,35 @@ async def test_preflight_group_chat_counts_selector_tokens_and_uses_smallest_win
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("resume_session", [False, True])
+async def test_preflight_uses_configured_orchestrator_window(resume_session):
+    coordinator = _make_assistant("gpt-4o", token_limit=64000)
+    coordinator.id = uuid4()
+    member = MagicMock()
+    member.assistant.completion_model = _make_completion_model(
+        "small-context-model", token_limit=4096
+    )
+    group_chat = GroupChat.create(name="Group", space_id=uuid4(), user_id=uuid4())
+    group_chat.assistants = [member]
+    group_chat.orchestrator_assistant_id = coordinator.id
+    session = SimpleNamespace(group_chat_id=group_chat.id, assistant=None)
+    service = _make_service(
+        assistant=coordinator, group_chat=group_chat, session=session
+    )
+
+    result = await service.preflight_tokens(
+        question="hello",
+        file_ids=[],
+        session_id=uuid4() if resume_session else None,
+        group_chat_id=None if resume_session else group_chat.id,
+    )
+
+    assert result.model_name == "gpt-4o"
+    assert result.context_window == 64000
+    assert result.input_tokens == count_tokens("hello", "gpt-4o")
+
+
+@pytest.mark.asyncio
 async def test_preflight_group_chat_mention_uses_target_assistant_model():
     """Mention-targeted group chat preflight mirrors the actual target assistant."""
     target_id = uuid4()
@@ -799,10 +829,10 @@ async def test_preflight_group_chat_mention_uses_target_assistant_model():
         "target-model", token_limit=32000
     )
 
-    group_chat = MagicMock()
+    group_chat = GroupChat.create(name="Group", space_id=uuid4(), user_id=uuid4())
     group_chat.allow_mentions = True
     group_chat.assistants = [first_member, target_member]
-    group_chat.get_assistant_by_id.return_value = target_member
+    group_chat.orchestrator_assistant_id = uuid4()
 
     service = _make_service(group_chat=group_chat)
 

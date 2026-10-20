@@ -34,7 +34,7 @@ def upgrade() -> None:
     )
     op.add_column(
         "questions",
-        sa.Column("consultations", postgresql.JSONB(), nullable=True),
+        sa.Column("consultations", postgresql.JSONB(none_as_null=True), nullable=True),
     )
 
 
