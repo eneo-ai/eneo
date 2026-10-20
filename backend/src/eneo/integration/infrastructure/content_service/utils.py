@@ -2,9 +2,8 @@
 
 Office and PDF bytes go through the same sandboxed extractor as uploads and
 crawls: a disposable child process with memory, CPU, archive, output and
-deadline limits (``eneo.files.bounded_extraction``). Every skip reason shown
-in the sync history is defined here so the strings stay stable across the
-service, the client and tests.
+deadline limits (``eneo.files.bounded_extraction``). Skip reasons and their
+codes are owned by ``eneo.integration.domain.skip_reasons``.
 """
 
 import tempfile

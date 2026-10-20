@@ -68,7 +68,7 @@ Microsoft also sends lifecycle notifications about a subscription itself, for ex
 SHAREPOINT_WEBHOOK_LIFECYCLE_NOTIFICATION_URL=https://your-eneo-domain.com/api/v1/integrations/sharepoint/webhook/lifecycle/
 ```
 
-Change notifications can be lost, for example while Eneo is unreachable. Every 15 minutes Eneo therefore queues a delta synchronization for sources that have not been synchronized for a while, and for sources whose requested synchronization never ran:
+Change notifications can be lost, for example while Eneo is unreachable. Every 15 minutes Eneo therefore queues a delta synchronization for sources that have change tracking and have not been synchronized for a while, and a synchronization for sources with a requested change that was never picked up:
 
 ```bash
 # Optional: Hours without a synchronization before Eneo catches up on its own
@@ -80,7 +80,7 @@ SHAREPOINT_CATCH_UP_AFTER_HOURS=6
 SHAREPOINT_CATCH_UP_MAX_SYNCS_PER_RUN=25
 ```
 
-The catch-up skips sources that are syncing or queued, whose tenant is suspended, whose connection is no longer signed in, or whose owner is no longer active. It runs as the connection's owner, or as a tenant administrator for the organization's app.
+The catch-up skips sources that are syncing or queued, whose tenant is suspended, whose connection is no longer signed in, whose organization app's sign-in is failing, or whose owner has been removed or deactivated. It runs as the connection's owner, or as a tenant administrator for the organization's app.
 
 You can also tune the maximum file size that Eneo downloads from SharePoint/OneDrive, and how many items the import dialog lists for one folder:
 

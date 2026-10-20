@@ -6,8 +6,8 @@ Index mutations and content identity: SharePointIndex.
 Full-sync orphan and moved-subtree cleanup: SharePointReconciliation.
 Counts and result semantics: sharepoint_results.
 What is kept about items between passes: sharepoint_sync_ledger.
-Graph transport, parsing, credentials, progress and persisted status retain their
-existing owners. Do not add another implementation of their rules here.
+Graph transport, parsing, credentials, progress and persisted status are owned
+elsewhere; do not add another implementation of their rules here.
 """
 
 import asyncio

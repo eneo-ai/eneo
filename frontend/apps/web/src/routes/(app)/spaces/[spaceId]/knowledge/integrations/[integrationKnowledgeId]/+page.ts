@@ -2,7 +2,7 @@ import { error, redirect } from "@sveltejs/kit";
 import { findIntegrationItems } from "$lib/features/integrations/integrationItems";
 import { sourceHref, type SourceTab } from "$lib/features/integrations/sources";
 
-/** The wrapper page's tab for a tab of the item page; the skipped files moved to Problems. */
+/** The wrapper page's tab for a tab of the item page; an old `skipped` link opens Problems. */
 function wrapperTab(tab: string | null): SourceTab | undefined {
   if (tab === "skipped" || tab === "problems") return "problems";
   if (tab === "activity" || tab === "content") return tab;

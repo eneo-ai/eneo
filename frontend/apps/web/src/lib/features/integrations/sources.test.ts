@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   countSourceFilters,
   groupIntegrationSources,
-  groupSourcesBySpace,
   isSyncActive,
   itemState,
   itemWatchState,
@@ -238,22 +237,5 @@ describe("itemWatchState", () => {
 describe("sourceKey", () => {
   it("tells a wrapper from an item with the same id", () => {
     expect(sourceKey({ kind: "wrapper", id: "x" })).not.toBe(sourceKey({ kind: "item", id: "x" }));
-  });
-});
-
-describe("groupSourcesBySpace", () => {
-  it("groups each space's items into its own sources", () => {
-    const spaceA = { id: "s1", name: "Socialtjänsten" };
-    const spaceB = { id: "s2", name: "Stadsbyggnad" };
-    const grouped = groupSourcesBySpace([
-      { space: spaceA, knowledge: item("a", { wrapper_id: "w1", wrapper_name: "KS" }) },
-      { space: spaceB, knowledge: item("b") },
-      { space: spaceA, knowledge: item("c", { wrapper_id: "w1", wrapper_name: "KS" }) }
-    ]);
-
-    expect(grouped.map(({ space, source }) => [space.id, source.id, source.items.length])).toEqual([
-      ["s1", "w1", 2],
-      ["s2", "b", 1]
-    ]);
   });
 });
