@@ -16,12 +16,6 @@ export const FLOW_PANEL_ID = "flow";
 /** Whether the flow is read as it is, or being changed (after "Redigera"). */
 export type FlowPanelMode = "view" | "edit";
 
-/**
- * The part of the side panel the step view steers: whether the panel covers
- * the conversation. The side panel store has this shape.
- */
-export type PanelLayout = { maximised: boolean; setMaximised: (maximised: boolean) => void };
-
 /** What the store knows about one flows tool call. */
 type KnownCall = {
   ref: FlowRef;
@@ -68,8 +62,6 @@ export class FlowPanelStore {
   newStep: { kind: StepKind; index: number } | null = null;
   /** View until the user presses "Redigera"; the flow's own `editing` drives it. */
   mode: FlowPanelMode = "view";
-  // How the panel was laid out before a step maximised it; put back on close.
-  #maximisedBefore: boolean | null = null;
   /**
    * Counts the times the panel asked to be shown: a flow bound, a run
    * started, a line under an answer pressed. The chat view opens the side
@@ -172,23 +164,10 @@ export class FlowPanelStore {
     this.stepKey = null;
     this.stepEditing = false;
     this.newStep = null;
-    this.#maximisedBefore = null;
   }
 
-  #maximise(layout: PanelLayout | null) {
-    if (this.stepKey === null && this.newStep === null && layout) {
-      this.#maximisedBefore = layout.maximised;
-      layout.setMaximised(true);
-    }
-  }
-
-  /**
-   * Opens a step in the step view. The panel maximises over the conversation
-   * (through `layout`, when the layout can) and remembers how it was, so
-   * closing the step puts it back.
-   */
-  openStep(key: string, layout: PanelLayout | null = null, { edit = false } = {}) {
-    this.#maximise(layout);
+  /** Opens a step in the step view, in place of the overview. */
+  openStep(key: string, { edit = false } = {}) {
     this.stepKey = key;
     this.stepEditing = edit;
     this.newStep = null;
@@ -197,8 +176,7 @@ export class FlowPanelStore {
   }
 
   /** Opens the editor for a step that is not in the flow yet, to be inserted at `index`. */
-  openNewStep(kind: StepKind, index: number, layout: PanelLayout | null = null) {
-    this.#maximise(layout);
+  openNewStep(kind: StepKind, index: number) {
     this.stepKey = null;
     this.stepEditing = true;
     this.newStep = { kind, index };
@@ -207,19 +185,17 @@ export class FlowPanelStore {
   }
 
   /** From the editor back to reading the step (a new step goes back to the overview). */
-  closeEditor(layout: PanelLayout | null = null) {
+  closeEditor() {
     if (!this.stepEditing) return;
-    if (this.newStep !== null) return this.closeStep(layout);
+    if (this.newStep !== null) return this.closeStep();
     this.stepEditing = false;
     this.#emit();
   }
 
-  /** Back from the step view to the overview, the panel laid out as before the step. */
-  closeStep(layout: PanelLayout | null = null) {
+  /** Back from the step view to the overview. */
+  closeStep() {
     if (this.stepKey === null && this.newStep === null) return;
-    const before = this.#maximisedBefore;
     this.#leaveSteps();
-    if (layout && before !== null) layout.setMaximised(before);
     this.#emit();
   }
 

@@ -12,15 +12,14 @@ afterEach(cleanup);
 const cardOf = (name: string) => screen.getByRole("button", { name }).closest("li")!;
 
 describe("FlowDefinition", () => {
-  it("shows the status, the oversight strip, every input and one card per step", async () => {
+  it("shows the oversight strip, every input and one card per step, the status being the header's", async () => {
     const onOpenStep = vi.fn();
     const { container } = renderInApp(
       <FlowDefinition flow={flow} names={names} onOpenStep={onOpenStep} canEdit />
     );
 
-    expect(screen.getByText("Publicerad v3")).toBeTruthy();
-    expect(screen.getByText("Opublicerade ändringar")).toBeTruthy();
-    expect(screen.getByText("6 steg")).toBeTruthy();
+    expect(screen.queryByText("Publicerad v3")).toBeNull();
+    expect(screen.queryByText("6 steg")).toBeNull();
 
     // Oversight: counts by kind and the gate sentence.
     const oversight = screen.getByRole("group", { name: "Steg per typ" });
@@ -159,7 +158,6 @@ describe("FlowDefinition", () => {
         }}
       />
     );
-    expect(screen.getByText("Utkast")).toBeTruthy();
     expect(screen.getByText("Flödet tar inga indata vid körning.")).toBeTruthy();
     expect(screen.getByText("Flödet har inga steg ännu.")).toBeTruthy();
     expect(screen.queryByRole("group", { name: "Steg per typ" })).toBeNull();

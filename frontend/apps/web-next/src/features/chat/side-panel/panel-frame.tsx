@@ -2,7 +2,15 @@
 
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Popover } from "@astryxdesign/core/Popover";
-import { ArrowLeft, ChevronDown, Maximize2, Minimize2, X } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronDown,
+  Maximize2,
+  Minimize2,
+  PanelRightClose,
+  PanelRightOpen,
+  X
+} from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -21,7 +29,21 @@ export type PanelSwitcher = {
   onView: (view: PanelView) => void;
 };
 
-export type PanelMaximise = { on: boolean; toggle: () => void };
+/**
+ * The frame's layout toggle. `cover`: the panel covers the conversation
+ * (maximise, restore). `companion`: the panel is the page's main column and
+ * the toggle folds the conversation beside it away (`on`) or shows it;
+ * `controls` is the conversation column's id.
+ */
+export type PanelMaximise = {
+  on: boolean;
+  toggle: () => void;
+  kind?: "cover" | "companion";
+  controls?: string;
+};
+
+/** The level of the frame's title: 1 where the panel is the page's main column. */
+export type PanelHeadingLevel = 1 | 2;
 
 /**
  * The title of what the panel shows, with a line of detail beneath it. When
@@ -32,22 +54,25 @@ export type PanelMaximise = { on: boolean; toggle: () => void };
 function PanelTitle({
   title,
   detail,
-  switcher
+  switcher,
+  headingLevel
 }: {
   title: string;
   detail?: string;
   switcher: PanelSwitcher | null;
+  headingLevel: PanelHeadingLevel;
 }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   const count = switcher ? panelContentsCount(switcher.contents) + (switcher.activity ? 1 : 0) : 0;
+  const Heading = headingLevel === 1 ? "h1" : "h2";
 
   if (!switcher || count < 2) {
     return (
       <>
-        <h2 className="truncate text-sm font-semibold" title={title}>
+        <Heading className="truncate text-sm font-semibold" title={title}>
           {title}
-        </h2>
+        </Heading>
         {detail && <p className="text-ax-text-secondary truncate text-xs tabular-nums">{detail}</p>}
       </>
     );
@@ -63,7 +88,7 @@ function PanelTitle({
     // the button's content and clips the negative margins; letting the anchor
     // fill the title column (and the button fill the anchor) keeps the whole
     // title readable and gives the trigger the full column as its target.
-    <h2 className="flex min-w-0 [&>div]:flex [&>div]:min-w-0 [&>div]:flex-1">
+    <Heading className="flex min-w-0 [&>div]:flex [&>div]:min-w-0 [&>div]:flex-1">
       <Popover
         isOpen={open}
         onOpenChange={setOpen}
@@ -102,14 +127,14 @@ function PanelTitle({
           )}
         </button>
       </Popover>
-    </h2>
+    </Heading>
   );
 }
 
 /**
  * The frame every occupant of the side panel is shown in: a header with a
- * tile, the title (the switcher), the occupant's own actions, maximise and
- * close, then the occupant's content.
+ * tile, the title (the switcher), the occupant's own actions, the layout
+ * toggle and close, then the occupant's content.
  */
 export function PanelFrame({
   icon,
@@ -123,6 +148,7 @@ export function PanelFrame({
   back,
   onClose,
   closeLabel,
+  headingLevel = 2,
   children
 }: {
   icon: ReactNode;
@@ -137,11 +163,24 @@ export function PanelFrame({
   maximise: PanelMaximise | null;
   /** Where closing this leads back to (the flow panel under a file), as a control before the tile. */
   back?: { label: string; onBack: () => void } | null;
-  onClose: () => void;
+  /** Absent where the occupant is the page itself and cannot be closed. */
+  onClose?: () => void;
   closeLabel?: string;
+  /** 1 where the panel is the page's main column: its title is the page's h1. */
+  headingLevel?: PanelHeadingLevel;
   children: ReactNode;
 }) {
   const t = useTranslations();
+  const companion = maximise?.kind === "companion";
+  const toggle = !maximise
+    ? null
+    : companion
+      ? maximise.on
+        ? { label: t("chat_companion_show"), icon: <PanelRightOpen className="size-4" /> }
+        : { label: t("chat_companion_hide"), icon: <PanelRightClose className="size-4" /> }
+      : maximise.on
+        ? { label: t("file_preview_restore_size"), icon: <Minimize2 className="size-4" /> }
+        : { label: t("file_preview_maximise"), icon: <Maximize2 className="size-4" /> };
   return (
     <>
       <header className="border-ax-border flex min-h-14 shrink-0 items-center gap-2.5 border-b py-2 ps-4 pe-2.5">
@@ -166,28 +205,37 @@ export function PanelFrame({
           {icon}
         </span>
         <div className="flex min-w-0 flex-1 flex-col leading-tight">
-          <PanelTitle title={title} detail={detail} switcher={switcher} />
+          <PanelTitle
+            title={title}
+            detail={detail}
+            switcher={switcher}
+            headingLevel={headingLevel}
+          />
           {status}
         </div>
         {actions}
-        {maximise && (
+        {maximise && toggle && (
           <IconButton
-            label={maximise.on ? t("file_preview_restore_size") : t("file_preview_maximise")}
-            tooltip={maximise.on ? t("file_preview_restore_size") : t("file_preview_maximise")}
-            icon={maximise.on ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            label={toggle.label}
+            tooltip={toggle.label}
+            icon={toggle.icon}
             variant="ghost"
             size="sm"
+            aria-expanded={companion ? !maximise.on : undefined}
+            aria-controls={companion && !maximise.on ? maximise.controls : undefined}
             onClick={maximise.toggle}
           />
         )}
-        <IconButton
-          label={closeLabel ?? t("close")}
-          tooltip={closeLabel ?? t("close")}
-          icon={<X className="size-4" />}
-          variant="ghost"
-          size="sm"
-          onClick={onClose}
-        />
+        {onClose && (
+          <IconButton
+            label={closeLabel ?? t("close")}
+            tooltip={closeLabel ?? t("close")}
+            icon={<X className="size-4" />}
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+          />
+        )}
       </header>
       {children}
     </>

@@ -5,12 +5,13 @@ import { Button } from "@astryxdesign/core/Button";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Pencil, Workflow } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { QueryStateBoundary } from "@/components/composites/query-state";
-import type { PanelMaximise, PanelSwitcher } from "@/features/chat/side-panel/panel-frame";
 import { PanelFrame } from "@/features/chat/side-panel/panel-frame";
+import type { OccupantFrame } from "@/features/chat/side-panel/side-panel";
 import { useSidePanel } from "@/features/chat/side-panel/use-side-panel";
 import { useSpace } from "@/features/spaces/use-space";
 import { toastApiError } from "@/lib/api/toast";
@@ -67,25 +68,23 @@ function manualChangeCount(flow: FlowPublic): number {
 }
 
 /**
- * The flow page's panel: the flow's definition, its runs and its history on
- * tabs, a "Testkör" button. A flow opens in view mode: a step opens in the
- * read view, maximised over the conversation, and nothing in the panel or
- * the chat changes the flow until the user presses "Redigera". Edit mode
- * is kept on the server per user until "Klar"; in it a step opens in the
- * editor, steps can be added, moved and removed, and the run inputs changed.
+ * The flow page's own content: the flow's definition, its runs and its
+ * history on tabs, a "Testkör" button. From 1024px it is the page's main
+ * column (`primary`): its frame is the page header, with the way back to
+ * the flow list, and a step opens in place with the navigator beside it.
+ * Below that it is a sheet over the conversation. A flow opens in view
+ * mode: nothing in the panel or the chat changes the flow until the user
+ * presses "Redigera". Edit mode is kept on the server per user until
+ * "Klar"; in it a step opens in the editor, steps can be added, moved and
+ * removed, and the run inputs changed.
  */
-export function FlowPanel({
-  switcher,
-  maximise
-}: {
-  switcher: PanelSwitcher | null;
-  maximise: PanelMaximise | null;
-}) {
+export function FlowPanel({ switcher, maximise, primary, headingLevel }: OccupantFrame) {
   const t = useTranslations();
+  const router = useRouter();
   const panel = useSidePanel()!;
   const store = useFlowPanel()!;
   const names = useFlowNames();
-  const { space, can } = useSpace();
+  const { space, routeId, can } = useSpace();
   const queryClient = useQueryClient();
   // What a function step can call here; shown in the overview, the step view and the editor.
   const functions = useQuery(flowFunctionsQueryOptions(space.id)).data;
@@ -111,19 +110,19 @@ export function FlowPanel({
   const stepGone =
     stepKey !== null && definition !== null && !steps.some((step) => step.key === stepKey);
   useEffect(() => {
-    if (stepGone) store.closeStep(panel);
-  }, [stepGone, store, panel]);
+    if (stepGone) store.closeStep();
+  }, [stepGone, store]);
   // The editor needs edit mode; losing it (another device pressed Klar) ends the edit.
   const editorWithoutMode = store.stepEditing && flow.data !== undefined && !editing;
   useEffect(() => {
-    if (editorWithoutMode) store.closeEditor(panel);
-  }, [editorWithoutMode, store, panel]);
+    if (editorWithoutMode) store.closeEditor();
+  }, [editorWithoutMode, store]);
 
   const stepOpen = (stepKey !== null && !stepGone) || store.newStep !== null;
   const editorOpen = stepOpen && store.stepEditing && editing;
   const stepScreen = store.tab === "definition" && stepOpen && definition !== null;
-  // Maximised and beside the conversation: the step view gets the navigator.
-  const wide = panel.maximised && maximise !== null;
+  // As the main column the step view gets the navigator and side-by-side rows.
+  const wide = primary;
 
   const setFlow = (updated: FlowPublic) => {
     queryClient.setQueryData(flowKeys.flow(updated.id), updated);
@@ -154,10 +153,10 @@ export function FlowPanel({
     }
   });
 
-  const openStep = (key: string) => store.openStep(key, panel, { edit: editing });
+  const openStep = (key: string) => store.openStep(key, { edit: editing });
   const editStep = async (key: string) => {
     if (!editing && flowId) await enter.mutateAsync(flowId);
-    store.openStep(key, panel, { edit: true });
+    store.openStep(key, { edit: true });
   };
   const moveStep = (key: string, direction: -1 | 1) => {
     if (!definition) return;
@@ -187,8 +186,12 @@ export function FlowPanel({
           published
             ? t("flow_status_published", { version: flow.data.published_version! })
             : t("flow_status_draft"),
-          t("flow_mode_view")
-        ].join(" · ")
+          published && flow.data.has_unpublished_changes
+            ? t("flow_status_unpublished_changes")
+            : null
+        ]
+          .filter(Boolean)
+          .join(" · ")
     : undefined;
   const definitionPanel = `${panelId}-definition`;
   const runsPanel = `${panelId}-runs`;
@@ -242,7 +245,17 @@ export function FlowPanel({
       detail={detail}
       switcher={switcher}
       maximise={maximise}
-      onClose={() => panel.closeNative()}
+      headingLevel={headingLevel}
+      // The page's content is not closed; the way out is back to the flow list.
+      back={
+        primary
+          ? {
+              label: t("flow_back_to_flows"),
+              onBack: () => router.push(`/spaces/${routeId}/flows`)
+            }
+          : null
+      }
+      onClose={primary ? undefined : () => panel.closeNative()}
       closeLabel={t("flow_panel_close")}
       actions={actions || undefined}
     >
@@ -265,10 +278,10 @@ export function FlowPanel({
           names={names}
           functions={functions}
           wide={wide}
-          onSaved={(key) => store.openStep(key, panel)}
-          onCancel={() => store.closeEditor(panel)}
+          onSaved={(key) => store.openStep(key)}
+          onCancel={() => store.closeEditor()}
           onOpenRun={(runId) => store.showRun(runId)}
-          onDeleted={() => store.closeStep(panel)}
+          onDeleted={() => store.closeStep()}
         />
       ) : stepScreen && stepKey !== null ? (
         <FlowStepView
@@ -278,7 +291,7 @@ export function FlowPanel({
           names={names}
           functions={functions}
           wide={wide}
-          onClose={() => store.closeStep(panel)}
+          onClose={() => store.closeStep()}
           onSelectStep={openStep}
           onEdit={canEdit ? () => void editStep(stepKey) : undefined}
         />
@@ -328,7 +341,7 @@ export function FlowPanel({
                     functions={functions}
                     mode={editing ? "edit" : "view"}
                     onOpenStep={openStep}
-                    onInsertStep={(kind, index) => store.openNewStep(kind, index, panel)}
+                    onInsertStep={(kind, index) => store.openNewStep(kind, index)}
                     onMoveStep={moveStep}
                     onSaveInputs={(fields) =>
                       saveDefinition.mutateAsync({

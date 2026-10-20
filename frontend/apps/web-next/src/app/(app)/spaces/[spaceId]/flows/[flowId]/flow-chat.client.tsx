@@ -112,19 +112,18 @@ export function FlowChat({ flowId }: { flowId: string }) {
 
   const spaceName = space.personal ? t("personal") : space.name;
   const assistant = assistantQuery.data;
-  // The chat is about one flow: it is named after it, with the assistant and
-  // the space as the line beneath.
+  // The page is the flow; the chat is with the space's flows assistant.
   const partner: ChatPartner | null = assistant
     ? {
         type: "assistant",
         id: assistant.id,
-        name: flowQuery.data?.name ?? t("flows_assistant_name"),
+        name: t("flows_assistant_name"),
         allowedAttachments: assistant.allowed_attachments,
         insightEnabled: false,
         description: t("flows_assistant_description"),
         iconId: assistant.icon_id ?? null,
         knowledge: [],
-        spaceName: `${t("flows_assistant_name")} · ${spaceName}`,
+        spaceName,
         personalSpace: space.personal,
         securityClassification: space.security_classification?.name ?? null,
         mcpServers: assistant.mcp_servers ?? [],
@@ -160,6 +159,7 @@ export function FlowChat({ flowId }: { flowId: string }) {
           ) : undefined
         }
         singleConversation
+        companion={{ title: flowQuery.data.name }}
       />
     </FlowPanelProvider>
   );

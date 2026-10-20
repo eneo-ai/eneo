@@ -232,6 +232,22 @@ it("notifies its subscribers once per change", () => {
   expect(store.getVersion()).toBe(before + 1);
 });
 
+it("folds the conversation away and back, apart from a closing file's reset of the maximised panel", async () => {
+  const store = panel();
+  store.openNative("flow");
+  store.setConversationCollapsed(true);
+  expect(store.conversationCollapsed).toBe(true);
+
+  store.open(file);
+  await vi.waitFor(() => expect(store.status).toBe("ready"));
+  store.close();
+  expect(store.maximised).toBe(false);
+  expect(store.conversationCollapsed).toBe(true);
+
+  store.setConversationCollapsed(false);
+  expect(store.conversationCollapsed).toBe(false);
+});
+
 it("shows native content until a file covers it, and again when the file closes", async () => {
   const store = panel();
   store.openNative("flow");

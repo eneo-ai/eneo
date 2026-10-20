@@ -39,7 +39,7 @@ import { messageGeneratedFiles, messageToolCalls } from "./side-panel/message-to
 import { conversationUploads, type PanelContents } from "./side-panel/panel-contents";
 import type { PreviewQuote } from "./side-panel/side-panel-store";
 import { composeQuotedQuestion } from "./side-panel/question-quote";
-import { SidePanel } from "./side-panel/side-panel";
+import { SidePanel, type ConversationCompanion } from "./side-panel/side-panel";
 import { SidePanelProvider, useSidePanel } from "./side-panel/use-side-panel";
 import { isExportableDocument } from "./side-panel/file-panel";
 import { FlowPanel } from "@/features/flows/flow-panel";
@@ -178,6 +178,8 @@ type ChatViewProps = {
   partnerToken?: ReactNode;
   activity: ActivityState | null;
   onActivityChange: (next: ActivityState | null) => void;
+  /** On a flow page: the conversation is the companion of the page's own content. */
+  companion?: ConversationCompanion | null;
 };
 
 /**
@@ -207,7 +209,8 @@ function ConversationView({
   modelSelector,
   partnerToken,
   activity,
-  onActivityChange
+  onActivityChange,
+  companion = null
 }: ChatViewProps) {
   const t = useTranslations();
   const { featureFlags, can } = useAppContext();
@@ -1027,10 +1030,11 @@ function ConversationView({
           flowPanel
             ? {
                 label: t("flow_panel_label"),
-                body: (frame) => <FlowPanel switcher={frame.switcher} maximise={frame.maximise} />
+                body: (frame) => <FlowPanel {...frame} />
               }
             : null
         }
+        companion={companion}
         latestActivity={latestActivity}
         activity={
           activity && activityMessage && activityForPanel

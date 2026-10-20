@@ -17,7 +17,12 @@ import type { DocumentExport } from "./document-export";
 import { DraftPreview } from "./draft-preview";
 import { ExportMenu } from "./export-menu";
 import { displayFileName } from "./panel-contents-list";
-import { PanelFrame, type PanelMaximise, type PanelSwitcher } from "./panel-frame";
+import {
+  PanelFrame,
+  type PanelHeadingLevel,
+  type PanelMaximise,
+  type PanelSwitcher
+} from "./panel-frame";
 import type { SidePanelStore } from "./side-panel-store";
 
 const extensionOf = (name: string) => {
@@ -37,7 +42,8 @@ export function FilePanel({
   exportOf,
   switcher,
   maximise,
-  narrow
+  narrow,
+  headingLevel = 2
 }: {
   panel: SidePanelStore;
   /** Every version of the document a file belongs to, oldest first. */
@@ -48,6 +54,7 @@ export function FilePanel({
   maximise: PanelMaximise | null;
   /** Shown as a sheet over the conversation, where there is less room. */
   narrow: boolean;
+  headingLevel?: PanelHeadingLevel;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -209,6 +216,7 @@ export function FilePanel({
         panel.nativeId !== null ? { label: t("panel_back"), onBack: () => panel.close() } : null
       }
       onClose={() => panel.close()}
+      headingLevel={headingLevel}
     >
       {versions.length > 1 && narrow && (
         // On a narrow screen the versions get a row of their own.

@@ -2,6 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -11,7 +12,9 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { mapSessionMessages } from "@/lib/chat/map-session";
+import { displayPartnerName } from "@/lib/chat/partner-name";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
+import { cn } from "@/lib/utils";
 import { ChatHeader, PartnerSwitcher, type HeaderMenuItem } from "./chat-header";
 import { ChatView, type ActivityState } from "./chat-view";
 import { setContextUsagePinned, useContextUsagePinned } from "./context-usage-bar";
@@ -82,6 +85,7 @@ export function ChatPage({
   switcherItems,
   editHref,
   singleConversation = false,
+  companion = null,
   onSessionCreated
 }: {
   partner: ChatPartner;
@@ -105,6 +109,13 @@ export function ChatPage({
    * from here.
    */
   singleConversation?: boolean;
+  /**
+   * The page is about its own content (a flow), shown in the side panel:
+   * from 1024px that content is the main column and owns the page header,
+   * and the conversation is a column beside it with a slim header of its
+   * own. Below that the chat header stays, with `title` as the h1.
+   */
+  companion?: { title: string } | null;
   /** The conversation this page started, once the first answer has named it. */
   onSessionCreated?: (sessionId: string) => void;
 }) {
@@ -259,13 +270,15 @@ export function ChatPage({
   // The page has one h1: the conversation title in the header, the start
   // state's greeting (no title here), the loading label while a conversation
   // loads, or the error that it could not be loaded (rendered below).
-  const title = active
-    ? started
-      ? (active.title ?? t("new_conversation"))
-      : null
-    : detail.isError
-      ? null
-      : t("chat_loading_conversation");
+  const title = companion
+    ? companion.title
+    : active
+      ? started
+        ? (active.title ?? t("new_conversation"))
+        : null
+      : detail.isError
+        ? null
+        : t("chat_loading_conversation");
   const isPersonal = partner.type === "default-assistant";
   // The context meter under the composer shows itself only when the window
   // is filling up; this pins it for people who want to watch it.
@@ -302,23 +315,43 @@ export function ChatPage({
     isPersonal && (switcherItems?.length ?? 0) > 1 ? (
       <PartnerSwitcher partner={partner} items={switcherItems} subtitle={null} variant="token" />
     ) : undefined;
+  const modelName = modelSelector ? null : (partner.completionModel?.name ?? null);
+  const conversationCompanion = companion
+    ? {
+        label: t("chat_companion_label", { name: displayPartnerName(partner, t) }),
+        identity: (
+          <PartnerSwitcher
+            partner={partner}
+            subtitle={[partner.spaceName, modelName].filter(Boolean).join(" · ") || null}
+            variant="header"
+          />
+        ),
+        menu:
+          menuItems.length > 0 ? (
+            <MoreMenu label={t("chat_more_options")} items={menuItems} alignment="end" />
+          ) : undefined
+      }
+    : null;
 
   return (
     <div className="bg-ax-surface relative flex min-h-0 flex-1 flex-col">
-      <ChatHeader
-        partner={partner}
-        switcherItems={switcherItems}
-        title={effectiveTab === "insights" ? t("insights") : title}
-        // The personal assistant picks its model in the composer.
-        modelName={modelSelector ? null : (partner.completionModel?.name ?? null)}
-        view={insightPartner ? { value: effectiveTab, onChange: selectTab } : null}
-        historyOpen={historyOpen}
-        onToggleHistory={toggleHistory}
-        onNewConversation={newConversation}
-        menuItems={menuItems}
-        minimal={isPersonal && !started && pendingSessionId === null && effectiveTab === "chat"}
-        conversationControls={!singleConversation}
-      />
+      {/* With a companion the page's content owns the header from 1024px. */}
+      <div className={cn("contents", companion && "lg:hidden")}>
+        <ChatHeader
+          partner={partner}
+          switcherItems={switcherItems}
+          title={effectiveTab === "insights" ? t("insights") : title}
+          // The personal assistant picks its model in the composer.
+          modelName={modelName}
+          view={insightPartner ? { value: effectiveTab, onChange: selectTab } : null}
+          historyOpen={historyOpen}
+          onToggleHistory={toggleHistory}
+          onNewConversation={newConversation}
+          menuItems={menuItems}
+          minimal={isPersonal && !started && pendingSessionId === null && effectiveTab === "chat"}
+          conversationControls={!singleConversation}
+        />
+      </div>
       <div className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {insightPartner && effectiveTab === "insights" && (
@@ -352,6 +385,7 @@ export function ChatPage({
                 }}
                 activity={activity}
                 onActivityChange={onActivityChange}
+                companion={conversationCompanion}
               />
             ) : detail.isError ? (
               <div className="flex flex-col items-center gap-3 p-6 text-center">

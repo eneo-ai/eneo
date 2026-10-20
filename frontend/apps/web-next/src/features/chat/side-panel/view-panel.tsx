@@ -4,7 +4,12 @@ import { AppWindow } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useCallback } from "react";
 import { appViewSubject, appViewTitle, type McpAppCall } from "@/features/mcp-apps/mcp-apps";
-import { PanelFrame, type PanelMaximise, type PanelSwitcher } from "./panel-frame";
+import {
+  PanelFrame,
+  type PanelHeadingLevel,
+  type PanelMaximise,
+  type PanelSwitcher
+} from "./panel-frame";
 import type { SidePanelStore } from "./side-panel-store";
 
 /**
@@ -16,12 +21,14 @@ export function ViewPanel({
   panel,
   call,
   switcher,
-  maximise
+  maximise,
+  headingLevel = 2
 }: {
   panel: SidePanelStore;
   call: McpAppCall;
   switcher: PanelSwitcher | null;
   maximise: PanelMaximise | null;
+  headingLevel?: PanelHeadingLevel;
 }) {
   const t = useTranslations();
   const tool = appViewTitle(call, t);
@@ -43,6 +50,7 @@ export function ViewPanel({
       maximise={maximise}
       onClose={() => panel.dismissView()}
       closeLabel={covered ? t("mcp_app_view_close_to_file", { name: covered }) : t("close")}
+      headingLevel={headingLevel}
     >
       <div ref={anchor} className="min-h-0 flex-1" />
     </PanelFrame>

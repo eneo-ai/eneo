@@ -84,31 +84,6 @@ export function SectionHeading({ id, children }: { id?: string; children: ReactN
   );
 }
 
-/** "Publicerad v3" / "Utkast", and whether the draft has moved on since. */
-export function FlowStatusBadges({
-  flow
-}: {
-  flow: Pick<FlowPublic, "published_version" | "has_unpublished_changes">;
-}) {
-  const t = useTranslations();
-  const published = flow.published_version != null;
-  return (
-    <>
-      <Badge
-        variant={published ? "success" : "neutral"}
-        label={
-          published
-            ? t("flow_status_published", { version: flow.published_version! })
-            : t("flow_status_draft")
-        }
-      />
-      {published && flow.has_unpublished_changes && (
-        <Badge variant="warning" label={t("flow_status_unpublished_changes")} />
-      )}
-    </>
-  );
-}
-
 /** "text · obligatorisk · Nämnd, AU": the type line of a run input. */
 export function fieldTypeLine(field: FormField, t: Translate): string {
   const parts = [
@@ -509,10 +484,6 @@ export function FlowDefinition({
             {flow.description}
           </Text>
         ) : null}
-        <div className="flex flex-wrap items-center gap-1.5">
-          <FlowStatusBadges flow={flow} />
-          <Token size="sm" label={t("flow_steps_count", { count: steps.length })} />
-        </div>
         {steps.length > 0 && <OversightStrip oversight={flowOversight(definition)} />}
       </section>
 

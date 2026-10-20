@@ -111,6 +111,12 @@ export class SidePanelStore {
   /** Whether the panel covers the conversation instead of sharing the width with it. */
   maximised = false;
   /**
+   * On a page where the panel is the main column (a flow page), whether the
+   * conversation beside it is folded away. Independent of `maximised`, which
+   * a closing file resets.
+   */
+  conversationCollapsed = false;
+  /**
    * The interactive tool view shown over the file, by its call. The file
    * stays loaded beneath it and is on show again when the view goes; a file
    * that takes the panel sends the view back to its answer.
@@ -554,6 +560,12 @@ export class SidePanelStore {
   setMaximised(maximised: boolean) {
     if (this.maximised === maximised) return;
     this.maximised = maximised;
+    this.#emit();
+  }
+
+  setConversationCollapsed(collapsed: boolean) {
+    if (this.conversationCollapsed === collapsed) return;
+    this.conversationCollapsed = collapsed;
     this.#emit();
   }
 
