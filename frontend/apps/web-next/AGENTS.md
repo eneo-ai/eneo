@@ -121,6 +121,10 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
     from its own description and status only): use `TextInput` from
     `@/components/astryx/text-input`, which adds the caller's ids after
     Astryx's own (as the password policy checklist needs).
+  - An error or warning `Banner` is `role="alert"`, read out assertively each
+    time it mounts. A notice about a state that lasts, shown on every visit to
+    its page or tab, is `QuietBanner` from `@/components/astryx/banner` (no
+    live region), and what is new is announced politely with `useAnnounce`.
   - CommandPalette marks only a picked value as selected: patched (the
     highlighted option is exposed as selected, as the APG combobox pattern
     says). DateInput's `nativePicker` is deprecated since 0.6.4: use
@@ -219,8 +223,9 @@ the default name on a backend name collision (9017).
   the feed is open; 2 s while it is down and something runs or was just
   started; paused in hidden tabs) and compares snapshots with
   `job-transitions.ts`. Every job
-  the client starts goes through `trackJob(job)` so its completion counts even
-  when the first poll already says "complete". A finished job toasts and
+  the client starts goes through `trackJob(job)` (`trackJob(jobs)` for calls
+  made together) so its completion counts even when the first poll already
+  says "complete". A finished job toasts and
   announces (`job-feedback.ts`), refreshes the query keys in
   `job-invalidation.ts` (add a prefix there when a new kind of job lands
   somewhere new) and records its info-blob in `recent-results.ts`, which the

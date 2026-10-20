@@ -46,6 +46,24 @@ export function rememberActiveJob(ledger: JobLedger, job: Job): JobLedger {
   return next;
 }
 
+/**
+ * Whether a job is over by a loaded snapshot and the ledger `diffJobs` made of
+ * it: listed with an outcome, or no longer listed at all. Only a list the
+ * server sent (`listReceived`) says a job is gone: pushed updates fill the
+ * cache before it arrives. A job the client started that no list has shown
+ * yet is still to come.
+ */
+export function isJobOver(
+  jobId: string,
+  snapshot: readonly Job[],
+  ledger: JobLedger,
+  listReceived: boolean
+): boolean {
+  const job = snapshot.find((candidate) => candidate.id === jobId);
+  if (job) return !isJobActive(job);
+  return listReceived && ledger.get(jobId)?.seeded !== true;
+}
+
 /** Compare a polled snapshot with the ledger and report what finished. */
 export function diffJobs(ledger: JobLedger, snapshot: readonly Job[]): JobDiff {
   const next = new Map<string, LedgerEntry>();

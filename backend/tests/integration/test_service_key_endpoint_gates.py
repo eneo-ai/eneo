@@ -343,6 +343,26 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
     ),
     (
         "POST",
+        f"/api/v1/spaces/{{space_id}}/knowledge/integrations/add/{_STUB_ID}/",
+        {
+            "name": "x",
+            "embedding_model": {"id": _STUB_ID},
+            "url": "https://contoso.sharepoint.com/sites/x",
+        },
+    ),
+    (
+        "POST",
+        f"/api/v1/spaces/{{space_id}}/knowledge/integrations/add/{_STUB_ID}/batch/",
+        {"embedding_model": {"id": _STUB_ID}, "items": []},
+    ),
+    # A sync queues a job owned by the caller, like a create.
+    (
+        "POST",
+        f"/api/v1/spaces/{{space_id}}/knowledge/integrations/{_STUB_ID}/sync/",
+        None,
+    ),
+    (
+        "POST",
         "/api/v1/groups/",
         {"name": "x", "embedding_model": {"id": _STUB_ID}},
     ),

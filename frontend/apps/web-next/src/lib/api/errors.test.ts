@@ -138,6 +138,38 @@ describe("getErrorMessage", () => {
     expect(getErrorMessage(error, t)).toBe("Crawl already running");
   });
 
+  it("names an integration refusal in the viewer's language, keeping Microsoft's code", () => {
+    const refusal = (reason: string, message: string, status = 400) =>
+      getErrorMessage(
+        apiErrorFromResponse(errorResponse(status), {
+          message,
+          eneo_error_code: 9007,
+          code: reason
+        }),
+        translator("en", en)
+      );
+
+    expect(refusal("sharepoint_credentials_invalid", "SharePoint credentials are invalid")).toBe(
+      "Microsoft refused the organization's SharePoint sign-in. An administrator must sign in again or update the app's secret."
+    );
+    expect(refusal("oauth_code_rejected", "Microsoft did not accept the code (AADSTS70008).")).toBe(
+      "Microsoft did not accept the sign-in. Start the sign-in again. (AADSTS70008)"
+    );
+    expect(refusal("oauth_client_rejected", "Refused (AADSTS7000215).")).toBe(
+      "Microsoft did not accept the app's credentials. An administrator must check the app's client ID and client secret. (AADSTS7000215)"
+    );
+    expect(refusal("integration_knowledge_syncing", "Syncing", 409)).toBe(
+      "The source is syncing. Try again when the sync has finished."
+    );
+    // Another reason keeps the usual mapping.
+    expect(refusal("something_else", "Something else")).toBe(
+      getErrorMessage(
+        new EneoApiError("Something else", { status: 400, code: 9007 }),
+        translator("en", en)
+      )
+    );
+  });
+
   it("falls back to the generic message for non-API errors", () => {
     expect(getErrorMessage(new Error("boom"), t)).toBe("t(request_failed)");
     expect(getErrorMessage(undefined, t)).toBe("t(request_failed)");

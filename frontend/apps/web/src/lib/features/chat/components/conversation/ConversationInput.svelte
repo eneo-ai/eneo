@@ -36,6 +36,7 @@
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { modelSupportsToolCalling } from "$lib/features/mcp/readiness";
+  import { getPartnerKnowledgeSources, hasKnowledgeSources } from "../../knowledgeSources";
   import { chatCapabilities } from "../../chatCapabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
   import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
@@ -472,28 +473,8 @@
 
   // Knowledge sources attached to the partner (read-only indicator; knowledge
   // cannot be toggled per conversation the way MCP servers can).
-  type NamedSource = { id: string; name: string };
-  const knowledgeSources = $derived.by(() => {
-    const partner = chat.partner as Record<string, unknown> | null;
-    const named = (value: unknown, fallbackKey?: string): NamedSource[] =>
-      Array.isArray(value)
-        ? value.map((source) => ({
-            id: String(source.id),
-            name: String(source.name ?? (fallbackKey ? (source[fallbackKey] ?? "") : ""))
-          }))
-        : [];
-    return {
-      collections: named(partner?.groups),
-      websites: named(partner?.websites, "url"),
-      integrations: named(partner?.integration_knowledge_list)
-    };
-  });
-  const hasKnowledge = $derived(
-    knowledgeSources.collections.length +
-      knowledgeSources.websites.length +
-      knowledgeSources.integrations.length >
-      0
-  );
+  const knowledgeSources = $derived(getPartnerKnowledgeSources(chat.partner));
+  const hasKnowledge = $derived(hasKnowledgeSources(knowledgeSources));
   const partnerKnowledgeMode = $derived.by(() => {
     const partner = chat.partner as Record<string, unknown> | null;
     return typeof partner?.knowledge_mode === "string" ? partner.knowledge_mode : undefined;

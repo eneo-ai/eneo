@@ -215,6 +215,38 @@ async def test_force_refresh_bypasses_cache(
         assert mock_client.post.call_count == 2
 
 
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        pytest.param("client_secret", "rotated-secret", id="secret"),
+        pytest.param("client_id", "other-client-id", id="client-id"),
+        pytest.param("tenant_domain", "other.onmicrosoft.com", id="tenant-domain"),
+    ],
+)
+async def test_changed_credentials_miss_the_cache_without_a_clear(
+    service, mock_tenant_app, mock_httpx_response, field, value
+):
+    """Another process keeps its cache after a reconfigure; only the
+    credentials themselves can tell it the cached token is stale."""
+    with patch("httpx.AsyncClient") as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.post.return_value = mock_httpx_response
+        mock_client_class.return_value = mock_client
+
+        await service.get_access_token(mock_tenant_app)
+        setattr(mock_tenant_app, field, value)
+        await service.get_access_token(mock_tenant_app)
+        await service.get_access_token(mock_tenant_app)
+
+        assert mock_client.post.call_count == 2
+        sent = mock_client.post.call_args
+        assert any(
+            value in part for part in (sent.args[0], *sent.kwargs["data"].values())
+        )
+
+
 async def test_cache_clear_invalidates_token(
     service, mock_tenant_app, mock_httpx_response
 ):
@@ -348,8 +380,45 @@ async def test_test_credentials_network_error(service, mock_tenant_app):
 
         # Assert
         assert success is False
-        assert error is not None
-        assert "Connection failed" in error
+        assert error == "Connection error"
+
+
+async def test_token_endpoint_refusals_are_logged_without_the_body(
+    service, mock_tenant_app
+):
+    error_response = MagicMock(spec=httpx.Response)
+    error_response.status_code = 401
+    error_response.text = (
+        '{"error_description": "... Trace ID: abc Correlation ID: def"}'
+    )
+    error_response.json.return_value = {
+        "error": "invalid_client",
+        "error_description": "AADSTS7000215: Invalid client secret provided. Trace ID: abc\r\nCorrelation ID: def",
+    }
+    error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "Unauthorized", request=MagicMock(), response=error_response
+    )
+
+    with (
+        patch("httpx.AsyncClient") as mock_client_class,
+        patch(
+            "eneo.integration.infrastructure.auth_service.tenant_app_auth_service.logger"
+        ) as log,
+    ):
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.__aexit__.return_value = None
+        mock_client.post.return_value = error_response
+        mock_client_class.return_value = mock_client
+
+        with pytest.raises(httpx.HTTPStatusError):
+            await service.get_access_token(mock_tenant_app)
+
+    logged = [str(call.args[0]) % call.args[1:] for call in log.error.call_args_list]
+    assert logged == [
+        f"Failed to acquire token for app {mock_tenant_app.id}: "
+        "invalid_client AADSTS7000215"
+    ]
 
 
 async def test_invalid_credentials_raises_error(service, mock_tenant_app):

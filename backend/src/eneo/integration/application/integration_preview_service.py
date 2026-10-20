@@ -1,7 +1,8 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable
 from uuid import UUID
 
 from eneo.integration.domain.entities.integration_preview import IntegrationPreview
+from eneo.integration.infrastructure.graph_errors import user_facing_sharepoint_failure
 from eneo.main.exceptions import BadRequestException
 
 if TYPE_CHECKING:
@@ -39,8 +40,10 @@ class IntegrationPreviewService:
             user_integration_id
         )
         if connection.tenant_app is not None:
-            return await self.sharepoint_preview_service.get_preview_info_with_app(
-                tenant_app=connection.tenant_app
+            return await self._sharepoint_preview(
+                self.sharepoint_preview_service.get_preview_info_with_app(
+                    tenant_app=connection.tenant_app
+                )
             )
 
         token = await self.oauth_token_repo.one(
@@ -49,5 +52,21 @@ class IntegrationPreviewService:
         if token.token_type.is_confluence:
             return await self.confluence_preview_service.get_preview_info(token=token)
         if token.token_type.is_sharepoint:
-            return await self.sharepoint_preview_service.get_preview_info(token=token)
+            return await self._sharepoint_preview(
+                self.sharepoint_preview_service.get_preview_info(token=token)
+            )
         raise BadRequestException(f"Unsupported integration type: {token.token_type}")
+
+    @staticmethod
+    async def _sharepoint_preview(
+        preview: Awaitable[list[IntegrationPreview]],
+    ) -> list[IntegrationPreview]:
+        try:
+            return await preview
+        except BadRequestException:
+            raise
+        except Exception as exc:
+            failure = user_facing_sharepoint_failure(exc)
+            if failure is None:
+                raise
+            raise failure from exc
