@@ -314,22 +314,6 @@ export function countSourceFilters(
   return counts;
 }
 
-/** Sources per space, for a view that spans spaces; a wrapper never crosses a space. */
-export function groupSourcesBySpace<Space extends { id: string }>(
-  entries: readonly { space: Space; knowledge: IntegrationKnowledge }[],
-  compare: Intl.Collator["compare"]
-): { space: Space; source: IntegrationSource }[] {
-  const bySpace = new Map<string, { space: Space; items: IntegrationKnowledge[] }>();
-  for (const { space, knowledge } of entries) {
-    const entry = bySpace.get(space.id);
-    if (entry) entry.items.push(knowledge);
-    else bySpace.set(space.id, { space, items: [knowledge] });
-  }
-  return [...bySpace.values()].flatMap(({ space, items }) =>
-    groupIntegrationSources(items, compare).map((source) => ({ space, source }))
-  );
-}
-
 export type SourceStatus = {
   tone: "success" | "warning" | "error" | "accent" | "neutral";
   labelKey: string;
