@@ -80,7 +80,7 @@ if TYPE_CHECKING:
         OrgSpaceAssistantRoleService,
     )
     from eneo.rerank_models.application.rerank_service import RerankService
-    from eneo.spaces.space_service import SpaceService
+    from eneo.spaces.space_repo import SpaceRepository
 
 
 logger = get_logger(__name__)
@@ -119,7 +119,7 @@ class HelperRunService:
         references_service: ReferencesService,
         factory: HelperAssistantsFactory,
         audit_service: "AuditService",
-        space_service: "SpaceService | None" = None,
+        space_repo: "SpaceRepository | None" = None,
         rerank_service: "RerankService | None" = None,
     ) -> None:
         self.user = user
@@ -132,18 +132,21 @@ class HelperRunService:
         self.references_service = references_service
         self.factory = factory
         self.audit_service = audit_service
-        self.space_service = space_service
+        self.space_repo = space_repo
         self.rerank_service = rerank_service
 
     async def _rerank_for(self, helper_assistant: "Assistant", question: str):
         """The helper assistant's reranker as a spec, or ``None``."""
         if (
             self.rerank_service is None
-            or self.space_service is None
+            or self.space_repo is None
             or helper_assistant.rerank_model_id is None
         ):
             return None
-        space = await self.space_service.get_space(helper_assistant.space_id)
+        # Tenant-scoped read without the membership check: the helper lives in
+        # the org space, which non-admin callers are not members of (see
+        # _load_helper_assistant).
+        space = await self.space_repo.one(helper_assistant.space_id)
         return await self.rerank_service.spec_for_model(
             helper_assistant.rerank_model_id,
             query=question,

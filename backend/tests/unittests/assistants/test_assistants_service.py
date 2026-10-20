@@ -894,6 +894,8 @@ async def test_personal_chat_cannot_store_unsupported_reasoning_effort(
         {"metadata_json": {}},
         {"icon_id": uuid4()},
         {"skill_binding_intents": []},
+        {"rerank_model_id": uuid4()},
+        {"rerank_model_id": None},
     ],
 )
 async def test_personal_chat_cannot_change_extended_default_assistant_fields(

@@ -1650,6 +1650,7 @@ class AssistantService:
                 data_retention_days,
                 metadata_json,
                 icon_id,
+                rerank_model_id,
             )
         )
         if (

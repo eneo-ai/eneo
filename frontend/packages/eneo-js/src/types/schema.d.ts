@@ -11382,11 +11382,6 @@ export interface components {
        * @description ID of the completion model, or None if not configured
        */
       completion_model_id?: string | null;
-      /**
-       * Rerank Model Id
-       * @description ID of the rerank model, or None for vector order only
-       */
-      rerank_model_id?: string | null;
     };
     /**
      * AssistantTemplateAdminCreate

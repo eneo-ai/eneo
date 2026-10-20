@@ -1345,7 +1345,7 @@ class Container(containers.DeclarativeContainer):
         references_service=references_service,
         factory=helper_assistants_factory,
         audit_service=audit_service,
-        space_service=space_service,
+        space_repo=space_repo,
         rerank_service=rerank_service,
     )
     group_chat_service = providers.Factory(

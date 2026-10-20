@@ -412,10 +412,6 @@ class AssistantSparse(ResourcePermissionsMixin, AssistantBase, InDB):
         default=None,
         description="ID of the completion model, or None if not configured",
     )
-    rerank_model_id: Optional[UUID] = Field(
-        default=None,
-        description="ID of the rerank model, or None for vector order only",
-    )
 
 
 class AssistantPublic(InDB, ResourcePermissionsMixin):
