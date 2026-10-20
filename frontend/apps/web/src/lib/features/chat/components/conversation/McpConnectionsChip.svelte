@@ -21,7 +21,7 @@
     type McpOAuthConnection
   } from "$lib/features/mcp/McpOAuthConnectService.svelte";
   import { ChevronRight, Plug, X } from "@lucide/svelte";
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
 
   let { assistantId }: { assistantId: string } = $props();
 
@@ -43,8 +43,12 @@
   // The list is verified by the backend: a connection that ran out while the
   // user was away is reported as such here, not first by a failing call.
   async function load(id: string) {
-    const before = new Set(pending.map((c) => c.mcp_server_id));
-    const reloading = connections.length > 0;
+    // Read, not tracked: the effect that calls this must not rerun on the
+    // very list it fetches.
+    const { before, reloading } = untrack(() => ({
+      before: new Set(pending.map((c) => c.mcp_server_id)),
+      reloading: connections.length > 0
+    }));
     try {
       connections = await eneo.mcpOauth.assistantConnections({ assistantId: id });
     } catch {
