@@ -27,6 +27,8 @@
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { getJobManager } from "$lib/features/jobs/JobManager";
+  import { trackImports } from "$lib/features/integrations/importCompletion";
+  import { integrationDocumentsHref } from "$lib/features/integrations/integrationDocuments";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import type { IntegrationImportDialogProps } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
@@ -125,6 +127,26 @@
   let selectedItems = $state<SelectedImportItem[]>([]);
   let wrapperName = $state("");
   let wrapperNameTouched = $state(false);
+  let importResult = $state<{ queued: number; failed: number; knowledgeIds: string[] } | null>(
+    null
+  );
+
+  // The batch response carries no wrapper id; the refreshed space does.
+  let importResultHref = $derived.by(() => {
+    const integrationsHref = `/spaces/${$currentSpace.routeId}/knowledge?tab=integrations`;
+    if (!importResult) return integrationsHref;
+    const created = $currentSpace.knowledge.integrationKnowledge.filter((item) =>
+      importResult?.knowledgeIds.includes(item.id)
+    );
+    const wrapperId = created.find((item) => item.wrapper_id)?.wrapper_id;
+    if (wrapperId) {
+      return `/spaces/${$currentSpace.routeId}/knowledge/integrations/wrapper/${wrapperId}`;
+    }
+    if (importResult.knowledgeIds.length === 1) {
+      return integrationDocumentsHref($currentSpace.routeId, importResult.knowledgeIds[0]);
+    }
+    return integrationsHref;
+  });
 
   onMount(() => openController.subscribe((value) => (dialogOpen = value)));
   $effect(() => {
@@ -274,6 +296,7 @@
 
   function resetSelection() {
     activeStep = "source";
+    importResult = null;
     sourceFilter = "";
     selectedSite = null;
     selectedItems = [];
@@ -453,7 +476,7 @@
 
     try {
       const site = selectedSite;
-      const resourceType = site.type === "onedrive" ? "onedrive" : "site";
+      const resourceType = site.type === "onedrive" ? ("onedrive" as const) : ("site" as const);
       const batchItems = dedupedSelection.effectiveEntries.map((entry) => ({
         key: site.key,
         name: entry.importName.trim() || entry.item.name,
@@ -477,6 +500,20 @@
       createdItems.forEach((item) => {
         if (item.job) addJob(item.job);
       });
+      trackImports(
+        createdItems.flatMap((item) =>
+          item.job && item.integration_knowledge_id
+            ? [
+                {
+                  jobId: item.job.id,
+                  knowledgeId: item.integration_knowledge_id,
+                  name: item.name,
+                  spaceRouteId: $currentSpace.routeId
+                }
+              ]
+            : []
+        )
+      );
       refreshCurrentSpace();
       startFastUpdatePolling();
 
@@ -492,12 +529,16 @@
             failed: failedItems.length
           })
         );
-      } else {
-        toast.success(m.sharepoint_batch_import_success({ count: createdItems.length }));
       }
 
-      dialogOpen = false;
-      resetFlow();
+      importResult = {
+        queued: createdItems.length,
+        failed: failedItems.length,
+        knowledgeIds: createdItems.flatMap((item) =>
+          item.integration_knowledge_id ? [item.integration_knowledge_id] : []
+        )
+      };
+      activeStep = "complete";
     } catch (error) {
       toastError(error);
     }
@@ -844,16 +885,39 @@
           >
             <CircleCheck class="text-positive-stronger size-8" aria-hidden="true" />
           </span>
-          <div>
-            <h3 id="sharepoint-simulation-complete-heading" class="text-lg font-semibold">
-              {m.sharepoint_fixture_simulation_complete_title()}
-            </h3>
-            <p class="text-muted-foreground mt-1 max-w-md text-sm">
-              {m.sharepoint_fixture_simulation_complete_description({
-                count: dedupedSelection.effectiveEntries.length
-              })}
-            </p>
-          </div>
+          {#if importResult}
+            <div>
+              <h3 id="sharepoint-simulation-complete-heading" class="text-lg font-semibold">
+                {m.integration_import_complete_title()}
+              </h3>
+              <p class="text-muted-foreground mt-1 max-w-md text-sm">
+                {m.integration_import_complete_description({ count: importResult.queued })}
+              </p>
+              {#if importResult.failed > 0}
+                <p class="text-warning-stronger mt-1 max-w-md text-sm">
+                  {m.integration_import_complete_failed({ failed: importResult.failed })}
+                </p>
+              {/if}
+            </div>
+            <Button
+              variant="outline"
+              href={importResultHref}
+              onclick={() => handleDialogOpenChange(false)}
+            >
+              {m.integration_import_view_site()}
+            </Button>
+          {:else}
+            <div>
+              <h3 id="sharepoint-simulation-complete-heading" class="text-lg font-semibold">
+                {m.sharepoint_fixture_simulation_complete_title()}
+              </h3>
+              <p class="text-muted-foreground mt-1 max-w-md text-sm">
+                {m.sharepoint_fixture_simulation_complete_description({
+                  count: dedupedSelection.effectiveEntries.length
+                })}
+              </p>
+            </div>
+          {/if}
         </section>
       {/if}
     </div>

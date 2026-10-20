@@ -16,6 +16,7 @@ from eneo.integration.infrastructure.content_service.sharepoint_content_service 
 )
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 from eneo.worker.worker import Worker
 
 if TYPE_CHECKING:
@@ -31,13 +32,20 @@ async def record_renewal_failure(
     container: Container,
     error_message: str,
 ) -> None:
+    """Record and persist a failed renewal attempt."""
+    subscription.mark_renewal_failure(error_message)
+    await persist_renewal_failure(subscription, container)
+
+
+async def persist_renewal_failure(
+    subscription: SharePointSubscription, container: Container
+) -> None:
     """Persist renewal failure state without failing the maintenance job.
 
     Runs in its own SAVEPOINT so a single failure can never poison the shared
     cron transaction and silently drop later subscriptions' health writes.
     """
     try:
-        subscription.mark_renewal_failure(error_message)
         session = cast("AsyncSession", container.session())
         async with session.begin_nested():
             await container.sharepoint_subscription_repo().update(subscription)
@@ -91,26 +99,9 @@ async def get_token_for_subscription(
             tenant_app = await tenant_sharepoint_app_repo.one(
                 id=user_integration.tenant_app_id
             )
-
-            if tenant_app.is_service_account():
-                service_account_auth_service = container.service_account_auth_service()
-                token_data = await service_account_auth_service.refresh_access_token(
-                    tenant_app
-                )
-                new_refresh_token = token_data.get("refresh_token")
-                if (
-                    new_refresh_token
-                    and new_refresh_token != tenant_app.service_account_refresh_token
-                ):
-                    tenant_app.update_refresh_token(new_refresh_token)
-                    await tenant_sharepoint_app_repo.update(tenant_app)
-                access_token = token_data["access_token"]
-            else:
-                tenant_app_auth_service = container.tenant_app_auth_service()
-                access_token = await tenant_app_auth_service.get_access_token(
-                    tenant_app
-                )
-
+            access_token = await container.org_token_provider().get_access_token(
+                tenant_app
+            )
             return SimpleSharePointToken(access_token=access_token)
 
         except Exception as e:
@@ -181,6 +172,7 @@ async def renew_expiring_subscriptions(container: Container):
     session = cast("AsyncSession", container.session())
 
     for subscription in expiring:
+        failures_before = subscription.consecutive_renewal_failures
         try:
             token = await get_token_for_subscription(subscription, container)
             if not token:
@@ -200,6 +192,17 @@ async def renew_expiring_subscriptions(container: Container):
                     raise RuntimeError(
                         f"Renewal returned false for subscription {subscription.subscription_id}"
                     )
+                # Knowledge rows whose link was lost at import only receive
+                # webhooks once they point at the live subscription again.
+                linked = await container.sharepoint_subscription_repo().link_unreferenced_knowledge(
+                    subscription
+                )
+                if linked:
+                    logger.info(
+                        "Linked %d knowledge row(s) to SharePoint subscription %s",
+                        linked,
+                        subscription.subscription_id,
+                    )
             renewed_count += 1
 
         except Exception as exc:
@@ -209,7 +212,15 @@ async def renew_expiring_subscriptions(container: Container):
             )
             # The savepoint above has rolled back, so the transaction is clean for
             # this failure write (which uses its own savepoint).
-            await record_renewal_failure(subscription, container, str(exc))
+            if subscription.consecutive_renewal_failures > failures_before:
+                # The service already recorded why a recreation failed; the
+                # rollback took that write with it, so it is written again
+                # rather than counted a second time.
+                await persist_renewal_failure(subscription, container)
+            else:
+                await record_renewal_failure(
+                    subscription, container, user_visible_error(exc)
+                )
             failed_count += 1
 
     logger.info(

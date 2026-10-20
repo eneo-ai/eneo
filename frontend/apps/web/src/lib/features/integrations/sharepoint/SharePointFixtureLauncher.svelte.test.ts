@@ -174,11 +174,7 @@ describe("SharePointFixtureLauncher", () => {
       .click();
     await vi.waitFor(() => expect(fetchFixture).toHaveBeenCalledTimes(3));
 
-    await page
-      .getByRole("checkbox", {
-        name: 'sharepoint_select_item {"name":"Security policy.pdf"}'
-      })
-      .click();
+    await page.getByText("Security policy.pdf", { exact: true }).click();
     await page.getByRole("button", { name: "continue" }).click();
 
     await expect.element(page.getByText("sharepoint_review_title")).toBeVisible();

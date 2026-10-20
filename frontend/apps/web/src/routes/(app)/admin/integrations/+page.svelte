@@ -10,9 +10,12 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
-  import type { TenantIntegration } from "@eneo/eneo-js";
+  import type { TenantIntegration, components } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
+  import { toastError } from "$lib/core/errors";
   import SharePointAppConfigDialog from "$lib/features/integrations/sharepoint/SharePointAppConfigDialog.svelte";
+  import SharePointAuthHealth from "$lib/features/integrations/sharepoint/SharePointAuthHealth.svelte";
+  import { followServiceAccountSignIn } from "$lib/features/integrations/sharepoint/serviceAccountAuth";
   import SharePointAppDeleteDialog from "$lib/features/integrations/sharepoint/SharePointAppDeleteDialog.svelte";
   import SharePointSetupFixtureLauncher from "$lib/features/integrations/sharepoint/SharePointSetupFixtureLauncher.svelte";
   import SharePointSubscriptions from "./SharePointSubscriptions.svelte";
@@ -28,6 +31,7 @@
   let sharePointConfigStatus = $state<"loading" | "configured" | "not_configured" | "error">(
     "loading"
   );
+  let sharePointConfig = $state<components["schemas"]["TenantSharePointAppPublic"] | null>(null);
   let showWebhookManagement = $state(false);
 
   const loadSharePointStatus = createAsyncState(async () => {
@@ -36,9 +40,21 @@
       const config = await data.eneo.client.fetch("/api/v1/admin/sharepoint/app", {
         method: "get"
       });
+      sharePointConfig = config ?? null;
       sharePointConfigStatus = config ? "configured" : "not_configured";
     } catch {
+      sharePointConfig = null;
       sharePointConfigStatus = "error";
+    }
+  });
+
+  const reauthServiceAccount = createAsyncState(async () => {
+    try {
+      followServiceAccountSignIn(
+        await data.eneo.integrations.admin.sharepoint.restartServiceAccountAuth()
+      );
+    } catch (error) {
+      toastError(error);
     }
   });
 
@@ -78,11 +94,11 @@
         >
           <IntegrationGrid>
             {#each tenantIntegrations as integration (integration.integration_id)}
-              <IntegrationCard {integration}>
+              <IntegrationCard {integration} tour="admin-integrations">
                 {#snippet action()}
                   <div class="flex flex-col gap-2">
                     {#if isSharePoint(integration)}
-                      <div class="flex items-center gap-2">
+                      <div class="flex flex-wrap items-center gap-2">
                         {#if sharePointConfigStatus === "loading"}
                           <Badge variant="secondary">{m.integration_status_loading()}</Badge>
                         {:else if sharePointConfigStatus === "configured"}
@@ -91,6 +107,9 @@
                           >
                             {m.integration_status_configured()}
                           </Badge>
+                          {#if sharePointConfig}
+                            <SharePointAuthHealth config={sharePointConfig} variant="badge" />
+                          {/if}
                         {:else if sharePointConfigStatus === "error"}
                           <Badge variant="destructive">{m.integration_status_error()}</Badge>
                           <Button
@@ -106,10 +125,29 @@
                         {/if}
                       </div>
 
-                      <div class="flex items-center gap-2">
+                      {#if sharePointConfigStatus === "configured" && sharePointConfig}
+                        <SharePointAuthHealth config={sharePointConfig} variant="details" />
+                      {/if}
+
+                      {@const needsReauth =
+                        sharePointConfigStatus === "configured" &&
+                        sharePointConfig?.auth_method === "service_account" &&
+                        sharePointConfig?.auth_status === "error"}
+                      {#if needsReauth}
+                        <Button
+                          class="w-full"
+                          disabled={reauthServiceAccount.isLoading}
+                          onclick={reauthServiceAccount}
+                        >
+                          {reauthServiceAccount.isLoading
+                            ? m.redirecting()
+                            : m.sharepoint_reauth_with_microsoft()}
+                        </Button>
+                      {/if}
+                      <div class="flex min-w-0 items-center gap-2">
                         <Button
                           variant={sharePointConfigStatus === "configured" ? "outline" : "default"}
-                          class="flex-1"
+                          class="min-w-0 flex-1 truncate"
                           disabled={sharePointConfigStatus === "loading"}
                           onclick={() => ($showSharePointConfigDialog = true)}
                         >

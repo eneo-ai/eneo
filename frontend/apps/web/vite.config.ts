@@ -73,6 +73,10 @@ export default defineConfig({
     projects: [
       {
         extends: "./vite.config.ts",
+        optimizeDeps: {
+          // Pre-bundled up front so the first axe test does not trigger a Vite reload mid-run.
+          include: ["axe-core"]
+        },
         test: {
           name: "client",
           // No `environment`: browser mode runs in a real Chromium, so Vitest

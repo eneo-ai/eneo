@@ -1,5 +1,6 @@
 <script lang="ts">
   import * as Table from "$lib/components/resource-table/index.js";
+  import { sanitizeLinkHref } from "$lib/components/markdown/sanitizeUrl";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { derived } from "svelte/store";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
@@ -8,9 +9,10 @@
   import IntegrationActions from "./IntegrationActions.svelte";
   import SharePointWrapperActions from "./SharePointWrapperActions.svelte";
   import WrapperNameCell from "./WrapperNameCell.svelte";
-  import { integrationData } from "$lib/features/integrations/IntegrationData";
+  import { previewLinkLabel } from "$lib/features/integrations/IntegrationData";
   import { m } from "$lib/paraglide/messages";
   import { SvelteMap } from "svelte/reactivity";
+  import { integrationDocumentsHref } from "$lib/features/integrations/integrationDocuments";
 
   interface Props {
     onSelectIntegrationForSyncHistory?: (integration: IntegrationKnowledge) => void;
@@ -94,6 +96,7 @@
     wrapperId: string;
     wrapperName: string;
     itemCount: number;
+    items: IntegrationKnowledge[];
     counts: SharePointItemTypeCounts;
     canEdit: boolean;
     canDelete: boolean;
@@ -149,6 +152,7 @@
           wrapperId,
           wrapperName,
           itemCount: wrapperItems.length,
+          items: wrapperItems,
           counts,
           canEdit: ownedInCurrentSpace && permissions.includes("edit"),
           canDelete: ownedInCurrentSpace && permissions.includes("delete"),
@@ -230,7 +234,8 @@
           });
         }
         return Table.renderComponent(IntegrationNameCell, {
-          knowledge: di.item
+          knowledge: di.item,
+          href: integrationDocumentsHref($currentSpace.routeId, di.item.id)
         });
       }
     }),
@@ -241,14 +246,11 @@
       cell: (displayItem) => {
         const di = displayItem.value;
         if (di.kind === "wrapper") {
-          const countLabel =
-            di.itemCount === 1
-              ? m.wrapper_items_count_one({ count: di.itemCount })
-              : m.wrapper_items_count_other({ count: di.itemCount });
-          return Table.renderComponent(Table.FormattedCell, { value: countLabel });
+          return Table.renderComponent(IntegrationSyncStatusCell, { knowledge: di.items });
         }
         return Table.renderComponent(IntegrationSyncStatusCell, {
           knowledge: di.item,
+          documentsHref: integrationDocumentsHref($currentSpace.routeId, di.item.id),
           onShowSyncHistory: onSelectIntegrationForSyncHistory
             ? () => onSelectIntegrationForSyncHistory(di.item)
             : undefined
@@ -261,16 +263,13 @@
       header: m.link(),
       cell: (displayItem) => {
         const di = displayItem.value;
-        if (di.kind === "wrapper") {
+        const link = di.kind === "item" ? sanitizeLinkHref(di.item.url) : undefined;
+        if (di.kind === "wrapper" || !link) {
           return Table.renderComponent(Table.FormattedCell, { value: "" });
         }
-        const labelKey = integrationData[di.item.integration_type].previewLinkLabel;
-        const translatedLabel =
-          (m as Record<string, ((...args: unknown[]) => string) | undefined>)[labelKey]?.() ??
-          labelKey;
         return Table.renderComponent(Table.ButtonCell, {
-          link: di.item.url ?? "",
-          label: translatedLabel,
+          link,
+          label: previewLinkLabel(di.item.integration_type),
           linkIsExternal: true
         });
       }
@@ -284,6 +283,7 @@
             wrapperId: di.wrapperId,
             wrapperName: di.wrapperName,
             itemCount: di.itemCount,
+            items: di.items,
             canEdit: di.canEdit,
             canDelete: di.canDelete
           });

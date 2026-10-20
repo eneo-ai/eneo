@@ -1,11 +1,14 @@
 import asyncio
 import hashlib
+import random
 import unicodedata
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Any, Literal, Optional, cast
 from urllib.parse import unquote
 from uuid import UUID
 
+import aiohttp
 from sqlalchemy import event
 
 from eneo.info_blobs.info_blob import InfoBlobAdd, InfoBlobUpdate, SourceMetadataEntry
@@ -14,8 +17,13 @@ from eneo.integration.domain.entities.sync_log import SyncLog
 from eneo.integration.domain.entities.tenant_sharepoint_app import (
     TenantSharePointApp,
 )
+from eneo.integration.domain.repositories.integration_knowledge_repo import (
+    SyncStateFields,
+)
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
+    AccessTokenProvider,
     DeltaTokenExpiredException,
+    MissingDownloadUrlError,
     SharePointContentClient,
 )
 from eneo.integration.infrastructure.content_service.parsing import (
@@ -31,6 +39,9 @@ from eneo.integration.infrastructure.content_service.sharepoint_metadata import 
     extract_source_metadata,
     source_metadata_fingerprint,
 )
+from eneo.integration.infrastructure.content_service.sync_state import (
+    SyncStateRecorder,
+)
 from eneo.integration.infrastructure.content_service.types import (
     SharePointItem,
     SharePointTokenProtocol,
@@ -38,13 +49,19 @@ from eneo.integration.infrastructure.content_service.types import (
     SyncStats,
 )
 from eneo.integration.infrastructure.content_service.utils import (
+    EMPTY_CONTENT_REASON,
+    NO_TEXT_REASONS,
+    error_reason,
     file_extension_to_type,
+    file_too_large_reason,
     is_unextractable_content,
 )
 from eneo.integration.infrastructure.office_change_key_service import (
     OfficeChangeKeyService,
 )
+from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
@@ -67,11 +84,8 @@ if TYPE_CHECKING:
     from eneo.integration.domain.repositories.user_integration_repo import (
         UserIntegrationRepository,
     )
-    from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
-        ServiceAccountAuthService,
-    )
-    from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import (
-        TenantAppAuthService,
+    from eneo.integration.infrastructure.auth_service.org_token_provider import (
+        OrgTokenProvider,
     )
     from eneo.integration.infrastructure.oauth_token_service import (
         OauthTokenService,
@@ -85,10 +99,103 @@ logger = get_logger(__name__)
 # Full-sync reconciliation safety guard: cap deletions at the LARGER of a fraction
 # of the indexed set and a small absolute floor. The floor only lets a tiny KB churn
 # fully; it is kept low so the fraction guard engages for medium KBs too (with the
-# old floor of 50 the fraction was inert below 100 blobs). A diff above the cap almost
-# always means a stale/incomplete enumeration, so we skip rather than mass-delete.
+# old floor of 50 the fraction was inert below 100 blobs). A diff above the cap usually
+# means a stale/incomplete enumeration, so above it the listing is not trusted: each
+# orphan is asked about by id and only those Graph confirms gone are deleted, a
+# bounded number per full sync, so a genuine large deletion is still cleaned.
 _RECONCILE_MAX_DELETE_FRACTION = 0.5
 _RECONCILE_MIN_DELETE_FLOOR = 10
+_RECONCILE_MAX_VERIFIED_ORPHANS = 500
+_GONE_HTTP_STATUSES = frozenset({404, 410})
+
+# skipped_details is persisted in last_sync_summary and SyncLog metadata; cap it so
+# a library full of unsupported files cannot bloat those rows. skipped_total keeps
+# the true count.
+_MAX_SKIPPED_DETAILS = 50
+
+# Download failures that say something about the file itself (gone, or closed to
+# this identity) rather than about Graph or the network; a pass may move past them.
+_ITEM_LEVEL_HTTP_STATUSES = frozenset({403, 404, 410})
+
+# "failed" is an item whose failure was already counted by the delete that failed.
+BlobOutcome = Literal["embedded", "unchanged", "empty", "failed"]
+
+
+class SyncItemsFailed(Exception):
+    """A pass that reached its end but could not finish every item.
+
+    Raised after the pass persisted what it could, so the ordinary failure path
+    records it; the summary rides along so the failure record keeps the counts
+    and the skipped details that name the files.
+    """
+
+    def __init__(
+        self,
+        summary: SyncStats,
+        *,
+        changes_detected: int | None = None,
+        message: str | None = None,
+    ):
+        failed = summary.get("failed_items", 0)
+        super().__init__(
+            message
+            or f"{failed} file{'s' if failed != 1 else ''} could not be processed; "
+            f"the next sync retries {'them' if failed != 1 else 'it'}"
+        )
+        self.summary = summary
+        self.changes_detected = changes_detected
+
+
+class SyncAccessDenied(SyncItemsFailed):
+    """Every download of the pass was refused (HTTP 403).
+
+    One refusal among successes is about that file (a sensitivity label, a
+    broken-inheritance folder) and the pass moves past it. When nothing could
+    be downloaded the problem is the identity (a conditional access policy, a
+    changed Sites.Selected grant), so the pass fails and keeps its token.
+    """
+
+    def __init__(
+        self, summary: SyncStats, *, forbidden: int, changes_detected: int | None = None
+    ):
+        super().__init__(
+            summary,
+            changes_detected=changes_detected,
+            message=(
+                f"SharePoint refused all {forbidden} "
+                f"download{'s' if forbidden != 1 else ''} (HTTP 403); check the "
+                "integration's access to this library, the next sync retries "
+                f"{'them' if forbidden != 1 else 'it'}"
+            ),
+        )
+
+
+class ScopeFolderUnavailable(Exception):
+    """Graph could not tell us where the selected folder is right now.
+
+    Raised before any item of a delta pass is classified: the stored path may
+    be stale (an ancestor renamed or moved), and classifying against it would
+    delete every nested file as out of scope. The pass fails with its token
+    kept and is replayed by the next sync.
+    """
+
+    def __init__(self, cause: Exception) -> None:
+        super().__init__(
+            f"Could not read the selected folder from SharePoint: "
+            f"{user_visible_error(cause)}"
+        )
+
+
+def _failure_summary(failure: Exception) -> SyncStats | None:
+    return failure.summary if isinstance(failure, SyncItemsFailed) else None
+
+
+def _log_pass_failure(context: str, failure: Exception) -> None:
+    """A pass that could not finish every item is a designed outcome, not a fault."""
+    if isinstance(failure, SyncItemsFailed):
+        logger.warning("%s: %s", context, failure)
+    else:
+        logger.error("%s: %s", context, failure, exc_info=True)
 
 
 class SimpleSharePointToken:
@@ -114,14 +221,33 @@ def _require_sharepoint_token(
     raise ValueError("Expected a SharePoint token")
 
 
-def _summary_counts(stats: SyncStats) -> dict[str, int]:
-    return {
+def _summary_counts(stats: SyncStats) -> dict[str, Any]:
+    summary: dict[str, Any] = {
         "files_processed": stats.get("files_processed", 0),
         "files_deleted": stats.get("files_deleted", 0),
         "pages_processed": stats.get("pages_processed", 0),
         "folders_processed": stats.get("folders_processed", 0),
+        "unchanged_items": stats.get("unchanged_items", 0),
         "skipped_items": stats.get("skipped_items", 0),
+        "skipped_total": stats.get("skipped_total", stats.get("skipped_items", 0)),
+        "skipped_truncated": stats.get("skipped_truncated", False),
     }
+    if failed_items := stats.get("failed_items", 0):
+        summary["failed_items"] = failed_items
+    reconcile_warning = stats.get("reconcile_warning")
+    if reconcile_warning:
+        summary["reconcile_warning"] = reconcile_warning
+    return summary
+
+
+def _delta_worth_logging(summary: SyncStats) -> bool:
+    """Delta runs are frequent; only keep the ones that changed something or warned."""
+    return (
+        summary.get("files_processed", 0) > 0
+        or summary.get("files_deleted", 0) > 0
+        or summary.get("skipped_items", 0) > 0
+        or bool(summary.get("reconcile_warning"))
+    )
 
 
 def _sync_metadata(
@@ -139,14 +265,52 @@ def _sync_metadata(
         metadata["out_of_scope_deleted"] = stats.get("out_of_scope_deleted", 0)
         metadata["pages_processed"] = stats.get("pages_processed", 0)
         metadata["folders_processed"] = stats.get("folders_processed", 0)
+        metadata["unchanged_items"] = stats.get("unchanged_items", 0)
         metadata["skipped_items"] = stats.get("skipped_items", 0)
+        metadata["skipped_total"] = stats.get(
+            "skipped_total", stats.get("skipped_items", 0)
+        )
+        metadata["skipped_truncated"] = stats.get("skipped_truncated", False)
         metadata["skipped_details"] = stats.get("skipped_details", [])
+        if failed_items := stats.get("failed_items", 0):
+            metadata["failed_items"] = failed_items
+        reconcile_warning = stats.get("reconcile_warning")
+        if reconcile_warning:
+            metadata["reconcile_warning"] = reconcile_warning
     if recovery:
         metadata["recovery"] = recovery
     if changes_detected is not None:
         metadata["changes_detected"] = changes_detected
 
     return metadata
+
+
+@dataclass
+class _DeltaPass:
+    """What one delta pass carries from entry to entry."""
+
+    content_client: SharePointContentClient
+    integration_knowledge: "IntegrationKnowledge"
+    site_id: Optional[str]
+    drive_id: str
+    stats: SyncStats
+    change_ids: set[str]
+    scope_folder_path: Optional[str]
+    folder_scope_path_unresolved: bool
+    # The change set's folders that lie in scope, placed before any entry is
+    # applied; see _place_folder_entries.
+    known_subfolder_ids: set[str]
+    # Processed (knowledge, item, change_key) triples, written to the Redis
+    # ChangeKey cache only after the DB transaction commits; see
+    # _schedule_post_commit_change_keys.
+    pending_change_keys: list[tuple[UUID, str, str]]
+    # Indexed item ids, read once per pass by the first entry that needs them.
+    indexed_ids: set[str] | None = None
+    # Where Graph put a folder entry that had no path and that the change set
+    # could not place; None when Graph could not say.
+    placements: dict[str, Optional[SharePointItem]] = field(
+        default_factory=dict[str, Optional[SharePointItem]]
+    )
 
 
 class SharePointContentService:
@@ -161,12 +325,12 @@ class SharePointContentService:
         oauth_token_service: "OauthTokenService",
         session: "AsyncSession",
         tenant_sharepoint_app_repo: "TenantSharePointAppRepository",
-        tenant_app_auth_service: "TenantAppAuthService",
-        service_account_auth_service: "ServiceAccountAuthService | None" = None,
+        org_token_provider: "OrgTokenProvider",
         sync_log_repo: "SyncLogRepository | None" = None,
         change_key_service: "OfficeChangeKeyService | None" = None,
     ) -> None:
         super().__init__()
+        self.org_token_provider = org_token_provider
         self.job_service = job_service
         self.oauth_token_repo = oauth_token_repo
         self.user_integration_repo = user_integration_repo
@@ -176,9 +340,8 @@ class SharePointContentService:
         self.oauth_token_service = oauth_token_service
         self.session = session
         self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
-        self.tenant_app_auth_service = tenant_app_auth_service
-        self.service_account_auth_service = service_account_auth_service
         self.sync_log_repo = sync_log_repo
+        self._sync_state = SyncStateRecorder(integration_knowledge_repo, sync_log_repo)
         self.change_key_service = change_key_service
         # Strong refs to in-flight post-commit ChangeKey flush tasks so the event
         # loop does not GC them before they run.
@@ -188,31 +351,67 @@ class SharePointContentService:
         # whose columns cannot be read is asked only once.
         self._column_catalogs: dict[str, Optional[SharePointColumnCatalog]] = {}
 
-    async def _refresh_service_account_access_token(
+    async def _org_access_token(
         self, tenant_app: TenantSharePointApp
-    ) -> str:
-        """Refresh service account token and persist refresh-token rotation."""
-        if not self.service_account_auth_service:
-            raise ValueError("ServiceAccountAuthService not configured")
+    ) -> tuple[str, AccessTokenProvider]:
+        """An organisation token plus a re-acquire callback for long syncs.
 
-        token_data = await self.service_account_auth_service.refresh_access_token(
-            tenant_app
-        )
-        access_token = token_data["access_token"]
-        new_refresh_token = token_data.get("refresh_token")
+        The provider records credential health and lets the Graph client
+        re-acquire on 401, so a sync longer than one token lifetime survives.
+        """
+        access_token = await self.org_token_provider.get_access_token(tenant_app)
+        return access_token, self.org_token_provider.access_token_provider(tenant_app)
 
-        if (
-            new_refresh_token
-            and new_refresh_token != tenant_app.service_account_refresh_token
-        ):
-            tenant_app.update_refresh_token(new_refresh_token)
-            await self.tenant_sharepoint_app_repo.update(tenant_app)
-            logger.debug(
-                "Persisted rotated service account refresh token for tenant_app %s",
-                tenant_app.id,
+    async def _graph_access(
+        self,
+        token_id: Optional[UUID],
+        tenant_app_id: Optional[UUID],
+        *,
+        purpose: str,
+    ) -> tuple[SharePointTokenProtocol, Optional[UUID], Optional[AccessTokenProvider]]:
+        """The token Graph is called with, its OAuth row id and a re-acquire callback.
+
+        A tenant app gets an organisation token from the provider; a personal
+        integration uses the person's OAuth token and refreshes it by row id.
+        """
+        if tenant_app_id:
+            tenant_app = await self.tenant_sharepoint_app_repo.get_by_id(
+                app_id=tenant_app_id
             )
+            if not tenant_app:
+                raise ValueError(f"Tenant app {tenant_app_id} not found")
+            access_token, access_token_provider = await self._org_access_token(
+                tenant_app
+            )
+            logger.info(
+                "Using %s auth for %s tenant_app %s",
+                tenant_app.auth_method,
+                purpose,
+                tenant_app_id,
+            )
+            token = SimpleSharePointToken(access_token=access_token)
+            return token, None, access_token_provider
+        if token_id:
+            token = await self.oauth_token_repo.one(id=token_id)
+            return _require_sharepoint_token(token), token.id, None
+        raise ValueError("Either token_id or tenant_app_id must be provided")
 
-        return access_token
+    def _graph_client(
+        self,
+        token: SharePointTokenProtocol,
+        oauth_token_id: Optional[UUID],
+        access_token_provider: Optional[AccessTokenProvider],
+    ) -> SharePointContentClient:
+        return SharePointContentClient(
+            base_url=token.base_url,
+            api_token=token.access_token,
+            token_id=oauth_token_id,
+            token_refresh_callback=(
+                self.token_refresh_callback if oauth_token_id else None
+            ),
+            access_token_provider=access_token_provider,
+            include_list_item_fields=True,
+        )
 
     async def pull_content(
         self,
@@ -227,37 +426,13 @@ class SharePointContentService:
         sync_trigger: str = "manual",
         recovery: str | None = None,
     ) -> str:
-        sync_log = None
         started_at = datetime.now(timezone.utc)
         resolved_integration_knowledge_id: UUID | None = integration_knowledge_id
 
         try:
-            if tenant_app_id:
-                tenant_app = await self.tenant_sharepoint_app_repo.get_by_id(
-                    app_id=tenant_app_id
-                )
-                if not tenant_app:
-                    raise ValueError(f"Tenant app {tenant_app_id} not found")
-                # Use service account or tenant app auth based on auth_method
-                if tenant_app.is_service_account():
-                    access_token = await self._refresh_service_account_access_token(
-                        tenant_app
-                    )
-                    logger.info(
-                        f"Using service account auth for tenant_app {tenant_app_id}"
-                    )
-                else:
-                    access_token = await self.tenant_app_auth_service.get_access_token(
-                        tenant_app
-                    )
-                    logger.info(f"Using tenant app auth for tenant_app {tenant_app_id}")
-                token = SimpleSharePointToken(access_token=access_token)
-                oauth_token_id = None
-            elif token_id:
-                token = await self.oauth_token_repo.one(id=token_id)
-                oauth_token_id = token.id
-            else:
-                raise ValueError("Either token_id or tenant_app_id must be provided")
+            token, oauth_token_id, access_token_provider = await self._graph_access(
+                token_id, tenant_app_id, purpose="full sync"
+            )
 
             stats = self._initialize_stats()
 
@@ -267,119 +442,81 @@ class SharePointContentService:
             resolved_integration_knowledge_id = integration_knowledge.id
             resolved_site_id = site_id or integration_knowledge.site_id
             resolved_drive_id = drive_id or integration_knowledge.drive_id
+            binding: SyncStateFields = {}
             if site_id and not getattr(integration_knowledge, "site_id", None):
                 integration_knowledge.site_id = site_id
-
+                binding["site_id"] = site_id
             if drive_id:
                 integration_knowledge.drive_id = drive_id
+                binding["drive_id"] = drive_id
             if resource_type:
                 integration_knowledge.resource_type = resource_type
-
+                binding["resource_type"] = resource_type
             if folder_id:
                 integration_knowledge.folder_id = folder_id
-
+                binding["folder_id"] = folder_id
             if folder_path:
                 integration_knowledge.folder_path = folder_path
+                binding["folder_path"] = folder_path
+            await self._sync_state.started(integration_knowledge, started_at, **binding)
 
-            await self.integration_knowledge_repo.update(obj=integration_knowledge)
-
-            await self._pull_content(
-                token=_require_sharepoint_token(token),
+            delta_baseline = await self._pull_content(
+                token=token,
                 oauth_token_id=oauth_token_id,
                 integration_knowledge_id=resolved_integration_knowledge_id,
                 site_id=resolved_site_id,
                 drive_id=resolved_drive_id,
                 resource_type=resource_type,
                 stats=stats,
+                access_token_provider=access_token_provider,
             )
-            summary_stats = self._build_summary_stats(stats)
-
-            integration_knowledge = await self.integration_knowledge_repo.one(
-                id=resolved_integration_knowledge_id
-            )
-
-            files_processed = summary_stats.get("files_processed", 0)
-            files_deleted = summary_stats.get("files_deleted", 0)
+            summary_stats, forbidden = self._summarize_pass(stats)
+            # The baseline is not persisted and an existing token is cleared
+            # by the failure record: the next sync is a full one and retries
+            # the failed files instead of a delta never seeing them again.
+            if forbidden:
+                raise SyncAccessDenied(summary_stats, forbidden=forbidden)
+            if summary_stats.get("failed_items"):
+                raise SyncItemsFailed(summary_stats)
 
             integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
-            if files_processed > 0 or files_deleted > 0:
-                integration_knowledge.last_synced_at = datetime.now(timezone.utc)
+            if delta_baseline:
+                integration_knowledge.delta_token = delta_baseline
+            await self._sync_state.succeeded(
+                integration_knowledge, datetime.now(timezone.utc)
+            )
 
-            if not integration_knowledge.delta_token:
-                try:
-                    base_url = _require_sharepoint_token(token).base_url
-                    async with SharePointContentClient(
-                        base_url=base_url,
-                        api_token=token.access_token,
-                        token_id=oauth_token_id,
-                        token_refresh_callback=(
-                            self.token_refresh_callback if oauth_token_id else None
-                        ),
-                        include_list_item_fields=True,
-                    ) as content_client:
-                        actual_drive_id = resolved_drive_id
-                        if not actual_drive_id and resolved_site_id:
-                            actual_drive_id = await content_client.get_default_drive_id(
-                                resolved_site_id
-                            )
-                        if actual_drive_id:
-                            delta_token = await content_client.initialize_delta_token(
-                                actual_drive_id
-                            )
-                            if delta_token:
-                                integration_knowledge.delta_token = delta_token
-                                logger.info(
-                                    f"Initialized delta token for integration knowledge {resolved_integration_knowledge_id}"
-                                )
-                except Exception as e:
-                    logger.warning(
-                        f"Failed to initialize delta token for integration knowledge {resolved_integration_knowledge_id}: {e}"
-                    )
-
-            await self.integration_knowledge_repo.update(obj=integration_knowledge)
-
-            if self.sync_log_repo:
-                files_processed = summary_stats.get("files_processed", 0)
-                files_deleted = summary_stats.get("files_deleted", 0)
-                skipped_items = summary_stats.get("skipped_items", 0)
-
-                if files_processed > 0 or files_deleted > 0 or skipped_items > 0:
-                    sync_log = SyncLog(
-                        integration_knowledge_id=resolved_integration_knowledge_id,
-                        sync_type="full",
-                        status="success",
-                        started_at=started_at,
-                        completed_at=datetime.now(timezone.utc),
-                        metadata=_sync_metadata(
-                            summary_stats,
-                            trigger=sync_trigger,
-                            recovery=recovery,
-                        ),
-                    )
-                    await self.sync_log_repo.add(sync_log)
-                else:
-                    logger.info(
-                        f"Skipping sync log creation for integration knowledge {resolved_integration_knowledge_id}: "
-                        "no files processed or deleted"
-                    )
+            await self._sync_state.add_log(
+                SyncLog(
+                    integration_knowledge_id=resolved_integration_knowledge_id,
+                    sync_type="full",
+                    status="success",
+                    started_at=started_at,
+                    completed_at=datetime.now(timezone.utc),
+                    metadata=_sync_metadata(
+                        summary_stats,
+                        trigger=sync_trigger,
+                        recovery=recovery,
+                    ),
+                )
+            )
 
             return self._format_summary_for_job(summary_stats)
 
         except Exception as e:
-            # Log failed sync
-            if self.sync_log_repo and resolved_integration_knowledge_id is not None:
-                sync_log = SyncLog(
-                    integration_knowledge_id=resolved_integration_knowledge_id,
-                    sync_type="full",
-                    status="error",
-                    started_at=started_at,
-                    completed_at=datetime.now(timezone.utc),
-                    error_message=str(e),
-                    metadata=_sync_metadata(trigger=sync_trigger, recovery=recovery),
-                )
-                await self.sync_log_repo.add(sync_log)
-
-            logger.error(f"Error in pull_content: {e}")
+            summary = _failure_summary(e)
+            await self._sync_state.failed(
+                resolved_integration_knowledge_id,
+                e,
+                sync_type="full",
+                started_at=started_at,
+                summary_counts=_summary_counts(summary) if summary else None,
+                metadata=_sync_metadata(
+                    summary, trigger=sync_trigger, recovery=recovery
+                ),
+                clear_delta_token=isinstance(e, SyncItemsFailed),
+            )
+            _log_pass_failure("Error in pull_content", e)
             raise
 
     async def process_delta_changes(
@@ -391,79 +528,60 @@ class SharePointContentService:
         drive_id: Optional[str] = None,
         resource_type: str = "site",
         sync_trigger: str = "webhook",
+        record_failure: bool = True,
     ) -> str:
+        """Apply the changes since the stored delta token.
+
+        With ``record_failure`` false the pass is a pending one, run by the
+        holder of the sync lease for a webhook that arrived during its sync. A
+        failure of such a pass is only raised, not written to the knowledge
+        row: it must not turn the owning sync's status into an error. When it
+        succeeds without having processed anything it also keeps the owning
+        sync's summary, which is what the person who started that sync is
+        looking at. ``last_sync_attempted_at`` moves on every pass, pending or
+        not: it tells a failing integration from an idle one. A full sync run
+        as recovery (missing or expired token) is recorded regardless: it was
+        attempted, the token it replaces is gone, and the next sync is a full
+        one, so its failure is the knowledge's current state.
+        """
         started_at = datetime.now(timezone.utc)
         resolved_integration_knowledge_id: UUID | None = integration_knowledge_id
+        delegated_to_full_sync = False
 
         try:
-            if tenant_app_id:
-                tenant_app = await self.tenant_sharepoint_app_repo.get_by_id(
-                    app_id=tenant_app_id
-                )
-                if not tenant_app:
-                    raise ValueError(f"Tenant app {tenant_app_id} not found")
-                # Use service account or tenant app auth based on auth_method
-                if tenant_app.is_service_account():
-                    access_token = await self._refresh_service_account_access_token(
-                        tenant_app
-                    )
-                    logger.info(
-                        f"Using service account auth for delta sync tenant_app {tenant_app_id}"
-                    )
-                else:
-                    access_token = await self.tenant_app_auth_service.get_access_token(
-                        tenant_app
-                    )
-                    logger.info(
-                        f"Using tenant app auth for delta sync tenant_app {tenant_app_id}"
-                    )
-                token = SimpleSharePointToken(access_token=access_token)
-                oauth_token_id = None
-            elif token_id:
-                token = await self.oauth_token_repo.one(id=token_id)
-                oauth_token_id = token.id
-            else:
-                raise ValueError("Either token_id or tenant_app_id must be provided")
+            token, oauth_token_id, access_token_provider = await self._graph_access(
+                token_id, tenant_app_id, purpose="delta sync"
+            )
 
             integration_knowledge = await self.integration_knowledge_repo.one(
                 id=integration_knowledge_id
             )
             resolved_integration_knowledge_id = integration_knowledge.id
+            await self._sync_state.started(integration_knowledge, started_at)
             resolved_site_id = site_id or integration_knowledge.site_id
             resolved_drive_id = drive_id or integration_knowledge.drive_id
-            if integration_knowledge.delta_token is None:
-                site_id = resolved_site_id
-                drive_id = resolved_drive_id
 
             if not integration_knowledge.delta_token:
                 logger.warning(
                     f"No delta token found for integration knowledge {integration_knowledge_id}, "
                     "falling back to full sync"
                 )
-                return await self.pull_content(
+                delegated_to_full_sync = True
+                return await self._recover_with_full_sync(
                     token_id=token_id,
                     tenant_app_id=tenant_app_id,
-                    integration_knowledge_id=resolved_integration_knowledge_id,
+                    integration_knowledge=integration_knowledge,
                     site_id=resolved_site_id,
                     drive_id=resolved_drive_id,
-                    resource_type=resource_type
-                    or integration_knowledge.resource_type
-                    or "site",
+                    resource_type=resource_type,
                     sync_trigger=sync_trigger,
                     recovery="missing_delta_token",
                 )
 
             stats = self._initialize_stats()
 
-            base_url = _require_sharepoint_token(token).base_url
-            async with SharePointContentClient(
-                base_url=base_url,
-                api_token=token.access_token,
-                token_id=oauth_token_id,
-                token_refresh_callback=(
-                    self.token_refresh_callback if oauth_token_id else None
-                ),
-                include_list_item_fields=True,
+            async with self._graph_client(
+                token, oauth_token_id, access_token_provider
             ) as content_client:
                 actual_drive_id = resolved_drive_id
                 if not actual_drive_id and resolved_site_id:
@@ -492,66 +610,23 @@ class SharePointContentService:
                         resolved_integration_knowledge_id,
                     )
                     integration_knowledge.delta_token = None
-                    await self.integration_knowledge_repo.update(
-                        obj=integration_knowledge
+                    await self.integration_knowledge_repo.update_sync_state(
+                        integration_knowledge.id, delta_token=None
                     )
-                    return await self.pull_content(
+                    delegated_to_full_sync = True
+                    return await self._recover_with_full_sync(
                         token_id=token_id,
                         tenant_app_id=tenant_app_id,
-                        integration_knowledge_id=resolved_integration_knowledge_id,
+                        integration_knowledge=integration_knowledge,
                         site_id=resolved_site_id,
                         drive_id=resolved_drive_id,
-                        resource_type=resource_type
-                        or integration_knowledge.resource_type
-                        or "site",
+                        resource_type=resource_type,
                         sync_trigger=sync_trigger,
                         recovery="delta_token_expired",
                     )
                 logger.info(
                     f"Delta query returned {len(changes)} items. New token: {new_delta_token[:20] if new_delta_token else 'None'}..."
                 )
-
-                scope_folder_path = integration_knowledge.folder_path
-                known_subfolder_ids: set[str] = set()
-                folder_scope_path_unresolved = False
-                if (
-                    integration_knowledge.selected_item_type == "folder"
-                    and integration_knowledge.folder_id
-                    and not scope_folder_path
-                ):
-                    # Legacy integrations may miss folder_path. Resolve it once so
-                    # nested delta changes in subfolders stay in scope.
-                    try:
-                        folder_metadata = await content_client.get_file_metadata(
-                            drive_id=actual_drive_id,
-                            item_id=integration_knowledge.folder_id,
-                        )
-                        resolved_folder_path = self._folder_path_from_item(
-                            cast(SharePointItem, folder_metadata)
-                        )
-
-                        if resolved_folder_path:
-                            scope_folder_path = resolved_folder_path
-                            integration_knowledge.folder_path = resolved_folder_path
-                            await self.integration_knowledge_repo.update(
-                                obj=integration_knowledge
-                            )
-                        else:
-                            logger.warning(
-                                "Could not derive folder_path for delta scope "
-                                "(integration_knowledge=%s, folder_id=%s)",
-                                resolved_integration_knowledge_id,
-                                integration_knowledge.folder_id,
-                            )
-                            folder_scope_path_unresolved = True
-                    except Exception as exc:
-                        logger.warning(
-                            "Could not resolve folder_path for delta scope (integration_knowledge=%s, folder_id=%s): %s",
-                            resolved_integration_knowledge_id,
-                            integration_knowledge.folder_id,
-                            exc,
-                        )
-                        folder_scope_path_unresolved = True
 
                 if len(changes) == 0:
                     logger.info(
@@ -562,294 +637,628 @@ class SharePointContentService:
                     if new_delta_token:
                         integration_knowledge.delta_token = new_delta_token
 
-                    summary_stats: SyncStats = {
-                        "files_processed": 0,
-                        "files_deleted": 0,
-                        "out_of_scope_deleted": 0,
-                        "pages_processed": 0,
-                        "folders_processed": 0,
-                        "skipped_items": 0,
-                        "skipped_details": [],
-                    }
+                    summary_stats = self._build_summary_stats(stats)
 
-                    integration_knowledge.last_sync_summary = _summary_counts(
-                        summary_stats
-                    )
-                    await self.integration_knowledge_repo.update(
-                        obj=integration_knowledge
+                    if record_failure:
+                        integration_knowledge.last_sync_summary = _summary_counts(
+                            summary_stats
+                        )
+                    await self._sync_state.succeeded(
+                        integration_knowledge,
+                        datetime.now(timezone.utc),
+                        with_summary=record_failure,
                     )
 
                     logger.info("Delta sync completed: no changes detected")
                     return self._format_summary_for_job(summary_stats)
 
                 logger.info(f"Processing {len(changes)} changed items from delta query")
-                # Accumulate processed (item_id, change_key) pairs and write them to
-                # the Redis ChangeKey cache only after the DB transaction commits.
-                # See _schedule_post_commit_change_keys for why.
-                pending_change_keys: list[tuple[UUID, str, str]] = []
-                for item in changes:
-                    item_name = item.get("name", "")
-                    item_id = item.get("id")
-                    is_deleted = has_graph_facet(item, "deleted")
-                    is_folder = has_graph_facet(item, "folder")
-                    source_metadata: Optional[list[SourceMetadataEntry]] = []
-                    if not is_deleted and not is_folder:
-                        source_metadata = await self._source_metadata_for(
-                            content_client, actual_drive_id, item
-                        )
-                    change_key = self._change_key_with_metadata(
-                        item.get("cTag"), source_metadata, title=item_name
-                    )
-
-                    logger.debug(
-                        f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder}, changeKey={change_key})"
-                    )
-
-                    if not item_id:
-                        stats["skipped_items"] += 1
-                        stats["skipped_details"].append(
-                            {
-                                "file": item_name or "unknown",
-                                "reason": "Missing item id",
-                            }
-                        )
-                        continue
-
-                    # Skip scope check for deleted items — they may lack
-                    # parentReference data.  The DB delete queries already
-                    # filter by integration_knowledge_id so they are safe.
-                    if not is_deleted and not self._is_item_in_folder_scope(
-                        item,
-                        integration_knowledge.folder_id,
-                        scope_folder_path=scope_folder_path,
-                        known_subfolder_ids=known_subfolder_ids,
-                        selected_item_type=integration_knowledge.selected_item_type,
-                    ):
-                        if (
-                            folder_scope_path_unresolved
-                            and integration_knowledge.selected_item_type == "folder"
-                            and integration_knowledge.folder_id
-                            and not scope_folder_path
-                        ):
-                            logger.warning(
-                                "Skipping destructive out-of-scope cleanup for %s "
-                                "(item_id=%s) because folder_path could not be resolved "
-                                "for integration_knowledge %s",
-                                item_name,
-                                item_id,
-                                resolved_integration_knowledge_id,
-                            )
-                            stats["skipped_items"] += 1
-                            stats["skipped_details"].append(
-                                {
-                                    "file": item_name or item_id,
-                                    "reason": "Folder scope path unavailable",
-                                }
-                            )
-                            continue
-
-                        logger.debug(
-                            f"  - Skipping item {item_name}: not in folder scope"
-                        )
-                        await self._delete_local_sharepoint_item(
-                            item_id=item_id,
-                            item_name=item_name,
-                            integration_knowledge=integration_knowledge,
-                            integration_knowledge_id=resolved_integration_knowledge_id,
-                            stats=stats,
-                            reason="out-of-scope",
-                        )
-                        # A folder that left scope still exists in SharePoint, but Graph
-                        # does not re-emit its (unchanged) children — deleting only the
-                        # folder id would orphan every descendant blob. Enumerate the
-                        # folder's current descendants and remove them too.
-                        if is_folder:
-                            await self._delete_out_of_scope_folder_subtree(
-                                content_client=content_client,
-                                resource_type=integration_knowledge.resource_type
-                                or "site",
-                                site_id=resolved_site_id,
-                                drive_id=actual_drive_id,
-                                folder_id=item_id,
-                                folder_name=item_name,
-                                integration_knowledge=integration_knowledge,
-                                integration_knowledge_id=resolved_integration_knowledge_id,
-                                stats=stats,
-                            )
-                        continue
-
-                    if (
-                        is_folder
-                        and item_id
-                        and integration_knowledge.selected_item_type == "folder"
-                    ):
-                        known_subfolder_ids.add(item_id)
-                        if item_id == integration_knowledge.folder_id:
-                            updated_folder_path = self._folder_path_from_item(item)
-                            if updated_folder_path:
-                                scope_folder_path = updated_folder_path
-                                integration_knowledge.folder_path = updated_folder_path
-
-                    if is_deleted:
-                        # Delete the corresponding info_blob if it exists
-                        await self._delete_local_sharepoint_item(
-                            item_id=item_id,
-                            item_name=item_name,
-                            integration_knowledge=integration_knowledge,
-                            integration_knowledge_id=resolved_integration_knowledge_id,
-                            stats=stats,
-                            reason="removed",
-                        )
-                        continue
-
-                    if is_folder:
-                        stats["folders_processed"] += 1
-                        continue
-
-                    should_process = True
-                    if self.change_key_service and item_id and change_key:
-                        should_process = await self.change_key_service.should_process(
-                            integration_knowledge_id=resolved_integration_knowledge_id,
-                            item_id=item_id,
-                            change_key=change_key,
-                        )
-
-                    if not should_process:
-                        logger.info(
-                            f"Skipping item {item_name} (ID: {item_id}): ChangeKey already processed (duplicate)"
-                        )
-                        stats["skipped_items"] += 1
-                        stats["skipped_details"].append(
-                            {"file": item_name, "reason": "Already synced (no changes)"}
-                        )
-                        continue
-
-                    unsupported_reason = unsupported_file_reason(item_name)
-                    if unsupported_reason:
-                        stats["skipped_items"] += 1
-                        stats["skipped_details"].append(
-                            {"file": item_name, "reason": unsupported_reason}
-                        )
-                        continue
-
-                    web_url = item.get("webUrl", "")
-
-                    try:
-                        content, _ = await content_client.get_file_content_by_id(
-                            drive_id=actual_drive_id,
-                            item_id=item_id,
-                        )
-
-                        if content and not is_unextractable_content(content):
-                            await self._process_info_blob(
-                                title=item_name,
-                                text=content,
-                                url=web_url,
-                                integration_knowledge=integration_knowledge,
-                                sharepoint_item_id=item_id,
-                                source_metadata=source_metadata,
-                            )
-                            stats["files_processed"] += 1
-
-                            # Defer the ChangeKey cache write until after commit so a
-                            # rolled-back sync re-processes the item instead of skipping it.
-                            if self.change_key_service and item_id and change_key:
-                                pending_change_keys.append(
-                                    (
-                                        resolved_integration_knowledge_id,
-                                        item_id,
-                                        change_key,
-                                    )
-                                )
-                        else:
-                            await self._delete_local_blob_for_unextractable_item(
-                                item_id=item_id,
-                                item_name=item_name,
-                                integration_knowledge=integration_knowledge,
-                                integration_knowledge_id=resolved_integration_knowledge_id,
-                                stats=stats,
-                            )
-
-                    except ValueError as e:
-                        if "exceeds max download size" in str(e):
-                            reason = "File too large (exceeds 50 MB limit)"
-                        else:
-                            reason = f"Error: {e}"
-                        logger.error(f"Error processing changed file {item_name}: {e}")
-                        stats["skipped_items"] += 1
-                        stats["skipped_details"].append(
-                            {"file": item_name, "reason": reason}
-                        )
-                    except Exception as e:
-                        logger.error(f"Error processing changed file {item_name}: {e}")
-                        stats["skipped_items"] += 1
-                        stats["skipped_details"].append(
-                            {"file": item_name, "reason": f"Error: {e}"}
-                        )
-
-                integration_knowledge.delta_token = new_delta_token
-
-                summary_stats = self._build_summary_stats(stats)
-                integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
-
-                files_processed = summary_stats.get("files_processed", 0)
-                files_deleted = summary_stats.get("files_deleted", 0)
-                if files_processed > 0 or files_deleted > 0:
-                    integration_knowledge.last_synced_at = datetime.now(timezone.utc)
-
-                logger.info(f"Delta sync completed: {summary_stats}")
-
-                await self.integration_knowledge_repo.update(obj=integration_knowledge)
-
-                self._schedule_post_commit_change_keys(pending_change_keys)
-
-                logger.info(
-                    f"Processed {len(changes)} delta changes for integration knowledge {resolved_integration_knowledge_id}"
+                (
+                    scope_folder_path,
+                    folder_scope_path_unresolved,
+                ) = await self._refresh_scope_path(
+                    content_client, actual_drive_id, changes, integration_knowledge
                 )
+                delta_pass = _DeltaPass(
+                    content_client=content_client,
+                    integration_knowledge=integration_knowledge,
+                    site_id=resolved_site_id,
+                    drive_id=actual_drive_id,
+                    stats=stats,
+                    change_ids={
+                        change_id
+                        for change in changes
+                        if (change_id := change.get("id"))
+                    },
+                    scope_folder_path=scope_folder_path,
+                    folder_scope_path_unresolved=folder_scope_path_unresolved,
+                    known_subfolder_ids=set(),
+                    pending_change_keys=[],
+                )
+                await self._place_folder_entries(delta_pass, changes)
+                for item in changes:
+                    await self._apply_delta_change(delta_pass, item)
 
-                if self.sync_log_repo:
-                    files_processed = summary_stats.get("files_processed", 0)
-                    files_deleted = summary_stats.get("files_deleted", 0)
-                    skipped_items = summary_stats.get("skipped_items", 0)
-
-                    if files_processed > 0 or files_deleted > 0 or skipped_items > 0:
-                        sync_log = SyncLog(
-                            integration_knowledge_id=resolved_integration_knowledge_id,
-                            sync_type="delta",
-                            status="success",
-                            started_at=started_at,
-                            completed_at=datetime.now(timezone.utc),
-                            metadata=_sync_metadata(
-                                summary_stats,
-                                trigger=sync_trigger,
-                                changes_detected=len(changes),
-                            ),
-                        )
-                        await self.sync_log_repo.add(sync_log)
-                    else:
-                        logger.info(
-                            f"Skipping sync log creation for integration knowledge {integration_knowledge_id}: "
-                            "no files processed or deleted"
-                        )
-
-                return self._format_summary_for_job(summary_stats)
+                return await self._finish_delta_pass(
+                    delta_pass,
+                    new_delta_token=new_delta_token,
+                    changes_detected=len(changes),
+                    record_failure=record_failure,
+                    started_at=started_at,
+                    sync_trigger=sync_trigger,
+                )
 
         except Exception as e:
-            # Log failed delta sync
-            if self.sync_log_repo and resolved_integration_knowledge_id is not None:
-                sync_log = SyncLog(
+            if delegated_to_full_sync:
+                # The full sync recorded the failure and its sync log itself.
+                raise
+            _log_pass_failure("Error processing delta changes", e)
+            if not record_failure:
+                raise
+            summary = _failure_summary(e)
+            await self._sync_state.failed(
+                resolved_integration_knowledge_id,
+                e,
+                sync_type="delta",
+                started_at=started_at,
+                summary_counts=_summary_counts(summary) if summary else None,
+                metadata=_sync_metadata(
+                    summary,
+                    trigger=sync_trigger,
+                    changes_detected=(
+                        e.changes_detected if isinstance(e, SyncItemsFailed) else None
+                    ),
+                ),
+            )
+            raise
+
+    async def _recover_with_full_sync(
+        self,
+        *,
+        token_id: Optional[UUID],
+        tenant_app_id: Optional[UUID],
+        integration_knowledge: "IntegrationKnowledge",
+        site_id: Optional[str],
+        drive_id: Optional[str],
+        resource_type: str,
+        sync_trigger: str,
+        recovery: str,
+    ) -> str:
+        """A full sync in place of a delta that has no usable token."""
+        return await self.pull_content(
+            token_id=token_id,
+            tenant_app_id=tenant_app_id,
+            integration_knowledge_id=integration_knowledge.id,
+            site_id=site_id,
+            drive_id=drive_id,
+            resource_type=resource_type
+            or integration_knowledge.resource_type
+            or "site",
+            sync_trigger=sync_trigger,
+            recovery=recovery,
+        )
+
+    async def _refresh_scope_path(
+        self,
+        content_client: SharePointContentClient,
+        drive_id: str,
+        changes: list[SharePointItem],
+        integration_knowledge: "IntegrationKnowledge",
+    ) -> tuple[Optional[str], bool]:
+        """The scope folder path this pass classifies against, and whether it is missing.
+
+        Only a folder scope has one; the second value is true when neither Graph
+        nor the change set could say where the folder is and nothing is stored.
+        """
+        scope_folder_path = integration_knowledge.folder_path
+        folder_scope_path_unresolved = False
+        scope_folder_id = integration_knowledge.folder_id
+        if integration_knowledge.selected_item_type == "folder" and scope_folder_id:
+            # The stored path goes stale when an ancestor of the scope
+            # folder is renamed or moved: Graph emits the ancestor, not
+            # the unchanged scope folder, so nothing in the changes
+            # carries the new path, and the next change under the folder
+            # would be classified against the stale path and deleted as
+            # out of scope. Read the current path from Graph each pass.
+            # The folder's own delta entry is the second source (Graph
+            # orders entries arbitrarily, so a descendant can precede it).
+            refreshed_scope_path = await self._current_scope_folder_path(
+                content_client, drive_id, scope_folder_id
+            ) or self._scope_folder_path_from_changes(changes, scope_folder_id)
+            if refreshed_scope_path:
+                if refreshed_scope_path != scope_folder_path:
+                    scope_folder_path = refreshed_scope_path
+                    integration_knowledge.folder_path = refreshed_scope_path
+                    await self.integration_knowledge_repo.update_sync_state(
+                        integration_knowledge.id,
+                        folder_path=refreshed_scope_path,
+                    )
+            elif not scope_folder_path:
+                logger.warning(
+                    "Could not derive folder_path for delta scope "
+                    "(integration_knowledge=%s, folder_id=%s)",
+                    integration_knowledge.id,
+                    scope_folder_id,
+                )
+                folder_scope_path_unresolved = True
+
+        return scope_folder_path, folder_scope_path_unresolved
+
+    async def _apply_delta_change(
+        self, delta_pass: "_DeltaPass", item: SharePointItem
+    ) -> None:
+        """Classify one delta entry and apply it: delete, walk a folder or index a file."""
+        content_client = delta_pass.content_client
+        integration_knowledge = delta_pass.integration_knowledge
+        resolved_integration_knowledge_id = integration_knowledge.id
+        actual_drive_id = delta_pass.drive_id
+        stats = delta_pass.stats
+        scope_folder_path = delta_pass.scope_folder_path
+        known_subfolder_ids = delta_pass.known_subfolder_ids
+        folder_scope = integration_knowledge.selected_item_type == "folder"
+
+        item_name = item.get("name", "")
+        item_id = item.get("id")
+        is_deleted = has_graph_facet(item, "deleted")
+        is_folder = has_graph_facet(item, "folder")
+
+        logger.debug(
+            f"  - Item: {item_name} (deleted={is_deleted}, folder={is_folder})"
+        )
+
+        if not item_id:
+            stats["skipped_items"] += 1
+            stats["skipped_details"].append(
+                {
+                    "file": item_name or "unknown",
+                    "reason": "Missing item id",
+                }
+            )
+            return
+
+        # Graph emits the drive root itself; it carries no parent
+        # path, is never indexed, and for a folder scope would be
+        # classified out of scope and have the whole drive walked.
+        if has_graph_facet(item, "root"):
+            return
+
+        # The same goes for every other ancestor of the scope folder: Graph
+        # lists the parent chain of a changed item unless the delta request
+        # asks it not to, and a renamed ancestor is emitted on its own. An
+        # ancestor is above the scope, not out of it, and its subtree holds
+        # the scope; nothing of its own is indexed.
+        if (
+            is_folder
+            and not is_deleted
+            and folder_scope
+            and self._is_ancestor_of_scope(item, scope_folder_path)
+        ):
+            return
+
+        # Skip scope check for deleted items — they may lack
+        # parentReference data.  The DB delete queries already
+        # filter by integration_knowledge_id so they are safe.
+        in_scope = (
+            is_deleted
+            or item_id in known_subfolder_ids
+            or self._is_item_in_folder_scope(
+                item,
+                integration_knowledge.folder_id,
+                scope_folder_path=scope_folder_path,
+                known_subfolder_ids=known_subfolder_ids,
+                selected_item_type=integration_knowledge.selected_item_type,
+            )
+        )
+        if not in_scope:
+            if (
+                delta_pass.folder_scope_path_unresolved
+                and folder_scope
+                and integration_knowledge.folder_id
+                and not scope_folder_path
+            ):
+                logger.warning(
+                    "Skipping destructive out-of-scope cleanup for %s "
+                    "(item_id=%s) because folder_path could not be resolved "
+                    "for integration_knowledge %s",
+                    item_name,
+                    item_id,
+                    resolved_integration_knowledge_id,
+                )
+                stats["skipped_items"] += 1
+                stats["skipped_details"].append(
+                    {
+                        "file": item_name or item_id,
+                        "reason": "Folder scope path unavailable",
+                    }
+                )
+                return
+
+            # Without a path the entry is out of scope only because its parent
+            # is not in this change set, which says nothing about where it is.
+            if folder_scope and not self._parent_path(item):
+                located = await self._place_unplaced_entry(
+                    delta_pass, item, is_folder=is_folder
+                )
+                if located is None or (
+                    is_folder and self._is_ancestor_of_scope(located, scope_folder_path)
+                ):
+                    return
+                in_scope = self._is_item_in_folder_scope(
+                    located,
+                    integration_knowledge.folder_id,
+                    scope_folder_path=scope_folder_path,
+                    known_subfolder_ids=known_subfolder_ids,
+                    selected_item_type="folder",
+                )
+
+        if not in_scope:
+            logger.debug(f"  - Skipping item {item_name}: not in folder scope")
+            await self._delete_local_sharepoint_item(
+                item_id=item_id,
+                item_name=item_name,
+                integration_knowledge=integration_knowledge,
+                integration_knowledge_id=resolved_integration_knowledge_id,
+                stats=stats,
+                reason="out-of-scope",
+            )
+            # A folder that left scope still exists in SharePoint, but Graph
+            # does not re-emit its (unchanged) children — deleting only the
+            # folder id would orphan every descendant blob. Enumerate the
+            # folder's current descendants and remove them too. Only a
+            # folder scope ever indexes descendants; a file scope has
+            # nothing under any folder.
+            if is_folder and folder_scope:
+                await self._clean_folder_left_scope(delta_pass, item)
+            return
+
+        if is_deleted:
+            # Delete the corresponding info_blob if it exists
+            await self._delete_local_sharepoint_item(
+                item_id=item_id,
+                item_name=item_name,
+                integration_knowledge=integration_knowledge,
+                integration_knowledge_id=resolved_integration_knowledge_id,
+                stats=stats,
+                reason="removed",
+            )
+            return
+
+        if is_folder:
+            stats["folders_processed"] += 1
+            if folder_scope and item_id != integration_knowledge.folder_id:
+                await self._walk_folder_in_scope(delta_pass, item)
+            return
+
+        await self._index_file(
+            client=content_client,
+            drive_id=actual_drive_id,
+            item=item,
+            integration_knowledge=integration_knowledge,
+            stats=stats,
+            pending_change_keys=delta_pass.pending_change_keys,
+        )
+
+    async def _place_folder_entries(
+        self, delta_pass: "_DeltaPass", changes: list[SharePointItem]
+    ) -> None:
+        """Place the change set's folders against the scope before any entry is applied.
+
+        Graph orders a change set arbitrarily and need not give a parent path
+        in delta, so a folder is in scope when its parent is the scope folder
+        or an in-scope folder anywhere in the set, not only one seen earlier. A
+        folder that this leaves unplaced and that has no path of its own is
+        asked about once; its answer decides it and the folders under it.
+        """
+        integration_knowledge = delta_pass.integration_knowledge
+        scope_folder_id = integration_knowledge.folder_id
+        if integration_knowledge.selected_item_type != "folder" or not scope_folder_id:
+            return
+        folders = {
+            folder_id: entry
+            for entry in changes
+            if (folder_id := entry.get("id"))
+            and has_graph_facet(entry, "folder")
+            and not has_graph_facet(entry, "deleted")
+            and not has_graph_facet(entry, "root")
+        }
+        children: dict[str, list[str]] = {}
+        for folder_id, entry in folders.items():
+            if parent_id := entry.get("parentReference", {}).get("id"):
+                children.setdefault(parent_id, []).append(folder_id)
+
+        in_scope = delta_pass.known_subfolder_ids
+
+        def admit(folder_id: str) -> None:
+            pending = [folder_id]
+            while pending:
+                current = pending.pop()
+                if current not in in_scope:
+                    in_scope.add(current)
+                    pending.extend(children.get(current, ()))
+
+        admit(scope_folder_id)
+        for folder_id, entry in folders.items():
+            if self._is_item_in_folder_scope(
+                entry,
+                scope_folder_id,
+                scope_folder_path=delta_pass.scope_folder_path,
+                selected_item_type="folder",
+            ):
+                admit(folder_id)
+
+        if not delta_pass.scope_folder_path:
+            return
+        for folder_id, entry in folders.items():
+            if folder_id in in_scope or self._parent_path(entry):
+                continue
+            located = await self._locate_entry(delta_pass, entry, kind="folder")
+            delta_pass.placements[folder_id] = located
+            if located is not None and self._is_item_in_folder_scope(
+                located,
+                scope_folder_id,
+                scope_folder_path=delta_pass.scope_folder_path,
+                known_subfolder_ids=in_scope,
+                selected_item_type="folder",
+            ):
+                admit(folder_id)
+
+    async def _place_unplaced_entry(
+        self, delta_pass: "_DeltaPass", item: SharePointItem, *, is_folder: bool
+    ) -> Optional[SharePointItem]:
+        """Where an entry without a path is, when that decides anything; else ``None``.
+
+        Folders were placed before the entries were applied. New files need
+        placement too: skipping an unindexed file would advance past its only
+        delta event and leave it missing until a full sync.
+        """
+        item_id = item.get("id", "")
+        if is_folder:
+            return delta_pass.placements.get(item_id)
+        return await self._locate_entry(delta_pass, item, kind="file")
+
+    async def _locate_entry(
+        self, delta_pass: "_DeltaPass", item: SharePointItem, *, kind: str
+    ) -> Optional[SharePointItem]:
+        """The item as Graph has it now, with its path; ``None`` when Graph cannot say.
+
+        Either way nothing of it is deleted. An answer about the item (403,
+        404, 410) or one without a path keeps it for a full sync to reconcile
+        and lets the pass move on; any other failure fails the pass, which
+        keeps its token and is replayed.
+        """
+        item_id = item.get("id", "")
+        item_name = item.get("name") or item_id
+        stats = delta_pass.stats
+        try:
+            located = cast(
+                SharePointItem,
+                await delta_pass.content_client.get_file_metadata(
+                    drive_id=delta_pass.drive_id, item_id=item_id
+                ),
+            )
+        except Exception as exc:
+            if (
+                not isinstance(exc, aiohttp.ClientResponseError)
+                or exc.status not in _ITEM_LEVEL_HTTP_STATUSES
+            ):
+                logger.warning(
+                    "Could not read where %s %s (%s) is: %s",
+                    kind,
+                    item_name,
+                    item_id,
+                    exc,
+                )
+                self._count_failure(
+                    stats,
+                    item_name,
+                    f"Could not confirm where the {kind} is in SharePoint: "
+                    + user_visible_error(exc),
+                )
+                return None
+            unplaced = f" ({user_visible_error(exc)})"
+        else:
+            if self._parent_path(located):
+                return located
+            unplaced = ""
+        logger.warning(
+            "Keeping %s %s (%s): Graph could not place it against the scope",
+            kind,
+            item_name,
+            item_id,
+        )
+        stats["skipped_items"] += 1
+        stats["skipped_details"].append(
+            {
+                "file": item_name,
+                "reason": f"Could not confirm where the {kind} is in SharePoint"
+                f"{unplaced}; kept until the next full sync",
+            }
+        )
+        return None
+
+    async def _pass_indexed_ids(
+        self, delta_pass: "_DeltaPass", item_name: str
+    ) -> set[str] | None:
+        """The indexed item ids, read once per pass; ``None`` when the read failed.
+
+        The failure is counted against the entry that needed them, so the pass
+        keeps its token and is replayed.
+        """
+        if delta_pass.indexed_ids is None:
+            try:
+                indexed = await self.info_blob_service.repo.get_sharepoint_item_ids_for_integration_knowledge(
+                    integration_knowledge_id=delta_pass.integration_knowledge.id
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Could not read the indexed SharePoint items: %s",
+                    exc,
+                    exc_info=True,
+                )
+                self._count_failure(
+                    delta_pass.stats,
+                    item_name,
+                    "Could not read the indexed documents: " + user_visible_error(exc),
+                )
+                return None
+            delta_pass.indexed_ids = {item_id for _, item_id in indexed}
+        return delta_pass.indexed_ids
+
+    async def _walk_folder_in_scope(
+        self, delta_pass: "_DeltaPass", item: SharePointItem
+    ) -> None:
+        """Index what an in-scope folder entry brought in, unless it was walked there before.
+
+        The entry does not say whether the folder moved, so its parent is kept
+        once a walk completed without failures, post-commit like a file's
+        ChangeKey. A folder re-emitted under the same parent (a rename, a
+        permission change, a replayed pass) has its files indexed already.
+        """
+        integration_knowledge = delta_pass.integration_knowledge
+        item_id = item.get("id", "")
+        item_name = item.get("name", "")
+        stats = delta_pass.stats
+        parent_id = item.get("parentReference", {}).get("id")
+        location_key = f"folder-under:{parent_id}" if parent_id else None
+        if location_key and self.change_key_service:
+            try:
+                walked_here = not await self.change_key_service.should_process(
+                    integration_knowledge_id=integration_knowledge.id,
+                    item_id=item_id,
+                    change_key=location_key,
+                )
+            except Exception as exc:
+                logger.warning("Could not read the walk cache for %s: %s", item_id, exc)
+                walked_here = False
+            if walked_here:
+                return
+
+        indexed_ids = await self._pass_indexed_ids(delta_pass, item_name)
+        if indexed_ids is None:
+            return
+        failed_before = stats.get("failed_items", 0)
+        await self._index_folder_subtree_entering_scope(
+            content_client=delta_pass.content_client,
+            resource_type=integration_knowledge.resource_type or "site",
+            site_id=delta_pass.site_id,
+            drive_id=delta_pass.drive_id,
+            folder_id=item_id,
+            folder_name=item_name,
+            integration_knowledge=integration_knowledge,
+            stats=stats,
+            pending_change_keys=delta_pass.pending_change_keys,
+            change_ids=delta_pass.change_ids,
+            indexed_ids=indexed_ids,
+        )
+        if location_key and stats.get("failed_items", 0) == failed_before:
+            delta_pass.pending_change_keys.append(
+                (integration_knowledge.id, item_id, location_key)
+            )
+
+    async def _clean_folder_left_scope(
+        self, delta_pass: "_DeltaPass", item: SharePointItem
+    ) -> None:
+        """Remove what was indexed under a folder entry that is out of scope.
+
+        Only the walk can say what lies under the folder now; it is skipped
+        when nothing can be there: Graph reports the folder empty or nothing
+        is indexed at all.
+        """
+        folder = item.get("folder")
+        if isinstance(folder, dict) and folder.get("childCount") == 0:
+            return
+        item_name = item.get("name", "")
+        indexed_ids = await self._pass_indexed_ids(delta_pass, item_name)
+        if not indexed_ids:
+            return
+        integration_knowledge = delta_pass.integration_knowledge
+        await self._delete_out_of_scope_folder_subtree(
+            content_client=delta_pass.content_client,
+            resource_type=integration_knowledge.resource_type or "site",
+            site_id=delta_pass.site_id,
+            drive_id=delta_pass.drive_id,
+            folder_id=item.get("id", ""),
+            folder_name=item_name,
+            integration_knowledge=integration_knowledge,
+            integration_knowledge_id=integration_knowledge.id,
+            stats=delta_pass.stats,
+            scope_folder_path=delta_pass.scope_folder_path,
+            known_subfolder_ids=delta_pass.known_subfolder_ids,
+            indexed_ids=indexed_ids,
+        )
+
+    async def _finish_delta_pass(
+        self,
+        delta_pass: "_DeltaPass",
+        *,
+        new_delta_token: Optional[str],
+        changes_detected: int,
+        record_failure: bool,
+        started_at: datetime,
+        sync_trigger: str,
+    ) -> str:
+        """Decide the pass's outcome, persist it and write its sync log."""
+        integration_knowledge = delta_pass.integration_knowledge
+        resolved_integration_knowledge_id = integration_knowledge.id
+        stats = delta_pass.stats
+        pending_change_keys = delta_pass.pending_change_keys
+
+        summary_stats, forbidden = self._summarize_pass(stats)
+        if forbidden or summary_stats.get("failed_items"):
+            # Keep the token: Graph never re-emits an item once a pass
+            # moved past it, so the next pass replays this one. Items
+            # indexed now are skipped as unchanged through the
+            # post-commit ChangeKey cache; the scope path refreshed
+            # above was persisted so the replay classifies as this pass did.
+            self._schedule_post_commit_change_keys(pending_change_keys)
+            if forbidden:
+                raise SyncAccessDenied(
+                    summary_stats,
+                    forbidden=forbidden,
+                    changes_detected=changes_detected,
+                )
+            raise SyncItemsFailed(summary_stats, changes_detected=changes_detected)
+
+        integration_knowledge.delta_token = new_delta_token
+        replace_summary = record_failure or _delta_worth_logging(summary_stats)
+        if replace_summary:
+            integration_knowledge.last_sync_summary = _summary_counts(summary_stats)
+        logger.info(f"Delta sync completed: {summary_stats}")
+
+        await self._sync_state.succeeded(
+            integration_knowledge,
+            datetime.now(timezone.utc),
+            with_summary=replace_summary,
+        )
+
+        self._schedule_post_commit_change_keys(pending_change_keys)
+
+        logger.info(
+            f"Processed {changes_detected} delta changes for integration knowledge {resolved_integration_knowledge_id}"
+        )
+
+        if _delta_worth_logging(summary_stats):
+            await self._sync_state.add_log(
+                SyncLog(
                     integration_knowledge_id=resolved_integration_knowledge_id,
                     sync_type="delta",
-                    status="error",
+                    status="success",
                     started_at=started_at,
                     completed_at=datetime.now(timezone.utc),
-                    error_message=str(e),
-                    metadata=_sync_metadata(trigger=sync_trigger),
+                    metadata=_sync_metadata(
+                        summary_stats,
+                        trigger=sync_trigger,
+                        changes_detected=changes_detected,
+                    ),
                 )
-                await self.sync_log_repo.add(sync_log)
+            )
+        else:
+            logger.info(
+                f"Skipping sync log creation for integration knowledge {integration_knowledge.id}: "
+                "no files processed or deleted"
+            )
 
-            logger.error(f"Error processing delta changes: {e}")
-            raise
+        return self._format_summary_for_job(summary_stats)
 
     async def _pull_content(
         self,
@@ -860,9 +1269,17 @@ class SharePointContentService:
         drive_id: Optional[str],
         resource_type: str,
         stats: SyncStats,
-    ) -> SyncStats:
-        """
-        Process content from SharePoint site or OneDrive.
+        access_token_provider: Optional[AccessTokenProvider] = None,
+    ) -> str | None:
+        """Enumerate and index the scope; returns the delta baseline minted for it.
+
+        The baseline is minted before the first listing: a change made while a
+        folder is being enumerated is then replayed by the first delta instead
+        of lost until the item changes again (the replay is idempotent through
+        the content hash and the ChangeKey cache). The caller persists it with
+        the success write only, so a pass that fails leaves the next sync a
+        full one. ``None`` when the knowledge already has a token or the mint
+        failed.
 
         Args:
             token: SharePoint token for authentication (SharePointToken or SimpleSharePointToken)
@@ -875,21 +1292,15 @@ class SharePointContentService:
         integration_knowledge = await self.integration_knowledge_repo.one(
             id=integration_knowledge_id
         )
+        delta_baseline: str | None = None
 
         try:
             site_id_value = site_id
             if resource_type != "onedrive":
                 site_id_value = require_text(site_id_value, "site_id")
 
-            base_url = token.base_url
-            async with SharePointContentClient(
-                base_url=base_url,
-                api_token=token.access_token,
-                token_id=oauth_token_id,
-                token_refresh_callback=(
-                    self.token_refresh_callback if oauth_token_id else None
-                ),
-                include_list_item_fields=True,
+            async with self._graph_client(
+                token, oauth_token_id, access_token_provider
             ) as content_client:
                 actual_drive_id = drive_id
                 if not actual_drive_id and site_id_value:
@@ -902,177 +1313,199 @@ class SharePointContentService:
                         "Could not determine drive_id - need either drive_id or site_id"
                     )
 
+                if not integration_knowledge.delta_token:
+                    delta_baseline = await self._mint_delta_baseline(
+                        content_client, actual_drive_id, integration_knowledge_id
+                    )
+
                 if integration_knowledge.folder_id:
-                    folder_id_value = require_text(
-                        integration_knowledge.folder_id, "folder_id"
-                    )
-                    item_info = await content_client.get_file_metadata(
+                    await self._pull_selected_item(
+                        content_client=content_client,
                         drive_id=actual_drive_id,
-                        item_id=folder_id_value,
-                    )
-
-                    is_folder = item_info.get("folder") is not None
-                    item_name = item_info.get("name", "")
-
-                    if is_folder:
-                        logger.info(
-                            f"Processing folder '{item_name}' (ID: {folder_id_value}) "
-                            f"for integration knowledge {integration_knowledge_id}"
-                        )
-                        integration_knowledge.selected_item_type = "folder"
-                        # A full sync runs on delta recovery (expired/missing
-                        # token). If the selected folder was renamed or moved
-                        # while the token was invalid, the stored folder_path is
-                        # now stale and is never re-emitted as a delta change.
-                        # The next delta would then misclassify valid nested
-                        # descendants as out-of-scope and delete their blobs.
-                        # Refresh the scope path from the freshly fetched folder
-                        # metadata, mirroring the delta-path refresh.
-                        refreshed_folder_path = self._folder_path_from_item(
-                            cast(SharePointItem, item_info)
-                        )
-                        if (
-                            refreshed_folder_path
-                            and refreshed_folder_path
-                            != integration_knowledge.folder_path
-                        ):
-                            integration_knowledge.folder_path = refreshed_folder_path
-                            await self.integration_knowledge_repo.update(
-                                obj=integration_knowledge
-                            )
-                        processed_items: set[str] = set()
-                        await self._fetch_and_process_content(
-                            site_id=site_id_value,
-                            drive_id=actual_drive_id,
-                            resource_type=resource_type,
-                            client=content_client,
-                            token=token,
-                            integration_knowledge_id=integration_knowledge_id,
-                            folder_id=folder_id_value,
-                            processed_items=processed_items,
-                            stats=stats,
-                            is_root_call=True,
-                        )
-                        await self._reconcile_indexed_blobs(
-                            client=content_client,
-                            integration_knowledge=integration_knowledge,
-                            resource_type=resource_type,
-                            site_id=site_id_value,
-                            drive_id=actual_drive_id,
-                            folder_id=folder_id_value,
-                            stats=stats,
-                        )
-                        return stats
-                    else:
-                        logger.info(
-                            f"Processing single file '{item_name}' (ID: {folder_id_value}) "
-                            f"for integration knowledge {integration_knowledge_id}"
-                        )
-                        integration_knowledge.selected_item_type = "file"
-
-                        unsupported_reason = unsupported_file_reason(item_name)
-                        if unsupported_reason:
-                            stats["skipped_items"] += 1
-                            stats["skipped_details"].append(
-                                {"file": item_name, "reason": unsupported_reason}
-                            )
-                            return stats
-
-                        try:
-                            content, _ = await content_client.get_file_content_by_id(
-                                drive_id=actual_drive_id,
-                                item_id=folder_id_value,
-                            )
-                        except Exception as e:
-                            logger.error(
-                                f"Error getting file content for {item_name}: {e}"
-                            )
-                            stats["skipped_items"] += 1
-                            stats["skipped_details"].append(
-                                {"file": item_name, "reason": f"Error: {e}"}
-                            )
-                            return stats
-
-                        if content and not is_unextractable_content(content):
-                            await self._process_info_blob(
-                                title=item_name,
-                                text=content,
-                                url=item_info.get("webUrl", ""),
-                                integration_knowledge=integration_knowledge,
-                                sharepoint_item_id=integration_knowledge.folder_id,
-                                source_metadata=await self._source_metadata_for(
-                                    content_client,
-                                    actual_drive_id,
-                                    cast(SharePointItem, item_info),
-                                ),
-                            )
-                            stats["files_processed"] += 1
-                        else:
-                            await self._delete_local_blob_for_unextractable_item(
-                                item_id=folder_id_value,
-                                item_name=item_name,
-                                integration_knowledge=integration_knowledge,
-                                integration_knowledge_id=integration_knowledge_id,
-                                stats=stats,
-                            )
-
-                        return stats
-                else:
-                    integration_knowledge.selected_item_type = "site_root"
-
-                    if resource_type == "onedrive":
-                        data = await content_client.get_drive_root_children(
-                            actual_drive_id
-                        )
-                    else:
-                        data = await content_client.get_documents_in_drive(
-                            site_id=require_text(site_id_value, "site_id")
-                        )
-
-                    if data:
-                        await self._process_documents(
-                            documents=data,
-                            client=content_client,
-                            integration_knowledge=integration_knowledge,
-                            token=token,
-                            resource_type=resource_type,
-                            stats=stats,
-                        )
-
-                    if resource_type != "onedrive" and site_id_value:
-                        pages = await content_client.get_site_pages(
-                            site_id=require_text(site_id_value, "site_id")
-                        )
-                        if data := pages.get("value", []):
-                            await self._process_pages(
-                                pages=data,
-                                client=content_client,
-                                integration_knowledge=integration_knowledge,
-                                stats=stats,
-                            )
-
-                    await self._reconcile_indexed_blobs(
-                        client=content_client,
-                        integration_knowledge=integration_knowledge,
-                        resource_type=resource_type,
                         site_id=site_id_value,
+                        resource_type=resource_type,
+                        integration_knowledge=integration_knowledge,
+                        stats=stats,
+                    )
+                else:
+                    await self._pull_site_root(
+                        content_client=content_client,
                         drive_id=actual_drive_id,
-                        folder_id=None,
+                        site_id=site_id_value,
+                        resource_type=resource_type,
+                        integration_knowledge=integration_knowledge,
                         stats=stats,
                     )
 
         except Exception as e:
-            logger.error(f"Error processing document {site_id}: {e}")
+            logger.error(f"Error processing document {site_id}: {e}", exc_info=True)
             raise
 
-        return stats
+        return delta_baseline
+
+    async def _pull_selected_item(
+        self,
+        *,
+        content_client: SharePointContentClient,
+        drive_id: str,
+        site_id: Optional[str],
+        resource_type: str,
+        integration_knowledge: "IntegrationKnowledge",
+        stats: SyncStats,
+    ) -> None:
+        """Full sync of a selected folder (with reconciliation) or a single file."""
+        folder_id_value = require_text(integration_knowledge.folder_id, "folder_id")
+        item_info = await content_client.get_file_metadata(
+            drive_id=drive_id,
+            item_id=folder_id_value,
+        )
+        is_folder = item_info.get("folder") is not None
+        item_name = item_info.get("name", "")
+
+        if is_folder:
+            logger.info(
+                f"Processing folder '{item_name}' (ID: {folder_id_value}) "
+                f"for integration knowledge {integration_knowledge.id}"
+            )
+            integration_knowledge.selected_item_type = "folder"
+            # A full sync runs on delta recovery (expired/missing
+            # token). If the selected folder was renamed or moved
+            # while the token was invalid, the stored folder_path is
+            # now stale and is never re-emitted as a delta change.
+            # The next delta would then misclassify valid nested
+            # descendants as out-of-scope and delete their blobs.
+            # Refresh the scope path from the freshly fetched folder
+            # metadata, mirroring the delta-path refresh.
+            refreshed_folder_path = self._folder_path_from_item(
+                cast(SharePointItem, item_info)
+            )
+            scope: SyncStateFields = {"selected_item_type": "folder"}
+            if refreshed_folder_path:
+                integration_knowledge.folder_path = refreshed_folder_path
+                scope["folder_path"] = refreshed_folder_path
+            await self.integration_knowledge_repo.update_sync_state(
+                integration_knowledge.id, **scope
+            )
+            processed_items: set[str] = set()
+            await self._fetch_and_process_content(
+                site_id=site_id,
+                drive_id=drive_id,
+                resource_type=resource_type,
+                client=content_client,
+                integration_knowledge=integration_knowledge,
+                folder_id=folder_id_value,
+                processed_items=processed_items,
+                stats=stats,
+            )
+            await self._reconcile_indexed_blobs(
+                client=content_client,
+                integration_knowledge=integration_knowledge,
+                resource_type=resource_type,
+                site_id=site_id,
+                drive_id=drive_id,
+                folder_id=folder_id_value,
+                stats=stats,
+            )
+            return
+        else:
+            logger.info(
+                f"Processing single file '{item_name}' (ID: {folder_id_value}) "
+                f"for integration knowledge {integration_knowledge.id}"
+            )
+            integration_knowledge.selected_item_type = "file"
+            await self.integration_knowledge_repo.update_sync_state(
+                integration_knowledge.id, selected_item_type="file"
+            )
+
+            await self._index_file(
+                client=content_client,
+                drive_id=drive_id,
+                item=cast(SharePointItem, {**item_info, "id": folder_id_value}),
+                integration_knowledge=integration_knowledge,
+                stats=stats,
+            )
+            return
+
+    async def _pull_site_root(
+        self,
+        *,
+        content_client: SharePointContentClient,
+        drive_id: str,
+        site_id: Optional[str],
+        resource_type: str,
+        integration_knowledge: "IntegrationKnowledge",
+        stats: SyncStats,
+    ) -> None:
+        """Full sync of a whole drive, plus the site pages of a SharePoint site."""
+        integration_knowledge.selected_item_type = "site_root"
+        await self.integration_knowledge_repo.update_sync_state(
+            integration_knowledge.id, selected_item_type="site_root"
+        )
+
+        # Enumerate the drive the knowledge is bound to; asking Graph for
+        # the site's default drive again would silently diverge from the
+        # drive the delta token and reconciliation operate on.
+        data = await content_client.get_drive_root_children(drive_id)
+
+        if data:
+            await self._process_documents(
+                documents=data,
+                client=content_client,
+                integration_knowledge=integration_knowledge,
+                resource_type=resource_type,
+                stats=stats,
+            )
+
+        if resource_type != "onedrive" and site_id:
+            pages = await content_client.get_site_pages(
+                site_id=require_text(site_id, "site_id")
+            )
+            if data := pages.get("value", []):
+                await self._process_pages(
+                    pages=data,
+                    client=content_client,
+                    integration_knowledge=integration_knowledge,
+                    stats=stats,
+                )
+
+        await self._reconcile_indexed_blobs(
+            client=content_client,
+            integration_knowledge=integration_knowledge,
+            resource_type=resource_type,
+            site_id=site_id,
+            drive_id=drive_id,
+            folder_id=None,
+            stats=stats,
+        )
+
+    @staticmethod
+    async def _mint_delta_baseline(
+        content_client: SharePointContentClient,
+        drive_id: str,
+        integration_knowledge_id: UUID,
+    ) -> str | None:
+        """A delta token for the drive as it is now; ``None`` when Graph refused."""
+        try:
+            delta_token = await content_client.initialize_delta_token(drive_id)
+        except Exception as e:
+            logger.warning(
+                "Failed to initialize delta token for integration knowledge %s: %s",
+                integration_knowledge_id,
+                e,
+            )
+            return None
+        if delta_token:
+            logger.info(
+                "Initialized delta token for integration knowledge %s",
+                integration_knowledge_id,
+            )
+        return delta_token
 
     async def _process_documents(
         self,
         documents: list[SharePointItem],
         client: SharePointContentClient,
         integration_knowledge: "IntegrationKnowledge",
-        token: SharePointTokenProtocol,
         resource_type: str,
         stats: SyncStats,
     ):
@@ -1080,9 +1513,9 @@ class SharePointContentService:
             drive_id = document.get("parentReference", {}).get("driveId")
             site_id = document.get("parentReference", {}).get("siteId")
             item_id = document.get("id")
+            if not drive_id or not item_id:
+                continue
             if document.get("folder", {}):
-                if not drive_id or not item_id:
-                    continue
                 stats["folders_processed"] += 1
                 # Recursively process all items in the folder
                 processed_items: set[str] = set()
@@ -1091,57 +1524,19 @@ class SharePointContentService:
                     drive_id=drive_id,
                     resource_type=resource_type,
                     client=client,
-                    token=token,
-                    integration_knowledge_id=integration_knowledge.id,
+                    integration_knowledge=integration_knowledge,
                     folder_id=item_id,
                     processed_items=processed_items,
                     stats=stats,
-                    is_root_call=False,
                 )
             else:
-                # file
-                if not drive_id or not item_id:
-                    continue
-                doc_name = document.get("name", "")
-                unsupported_reason = unsupported_file_reason(doc_name)
-                if unsupported_reason:
-                    stats["skipped_items"] += 1
-                    stats["skipped_details"].append(
-                        {"file": doc_name, "reason": unsupported_reason}
-                    )
-                    continue
-                try:
-                    content, _ = await client.get_file_content_by_id(
-                        drive_id=drive_id, item_id=item_id
-                    )
-                except Exception as e:
-                    logger.error(f"Error getting file content for {doc_name}: {e}")
-                    stats["skipped_items"] += 1
-                    stats["skipped_details"].append(
-                        {"file": doc_name, "reason": f"Error: {e}"}
-                    )
-                    continue
-
-                if content and not is_unextractable_content(content):
-                    await self._process_info_blob(
-                        title=doc_name,
-                        text=content,
-                        url=document.get("webUrl", ""),
-                        integration_knowledge=integration_knowledge,
-                        sharepoint_item_id=item_id,
-                        source_metadata=await self._source_metadata_for(
-                            client, drive_id, document
-                        ),
-                    )
-                    stats["files_processed"] += 1
-                else:
-                    await self._delete_local_blob_for_unextractable_item(
-                        item_id=item_id,
-                        item_name=doc_name,
-                        integration_knowledge=integration_knowledge,
-                        integration_knowledge_id=integration_knowledge.id,
-                        stats=stats,
-                    )
+                await self._index_file(
+                    client=client,
+                    drive_id=drive_id,
+                    item=document,
+                    integration_knowledge=integration_knowledge,
+                    stats=stats,
+                )
 
     async def _process_pages(
         self,
@@ -1155,29 +1550,38 @@ class SharePointContentService:
             page_id = page.get("id")
             if not site_id or not page_id:
                 continue
-            content = await client.get_page_content(site_id=site_id, page_id=page_id)
-            if content:
-                page_text = extract_text_from_canvas_layout(content)
-                if not page_text:
-                    page_text = content.get("description", "")
-                await self._process_info_blob(
+            page_name = (
+                page.get("name", "") or page.get("title", "") or f"Page {page_id}"
+            )
+            try:
+                content = await client.get_page_content(
+                    site_id=site_id, page_id=page_id
+                )
+                page_text = ""
+                if content:
+                    page_text = extract_text_from_canvas_layout(content)
+                    if not page_text:
+                        page_text = content.get("description", "")
+                if not content or not page_text.strip():
+                    stats["skipped_items"] += 1
+                    stats["skipped_details"].append(
+                        {"file": page_name, "reason": EMPTY_CONTENT_REASON}
+                    )
+                    continue
+                outcome = await self._process_info_blob(
                     title=content.get("title", ""),
                     text=page_text,
                     url=content.get("webUrl", ""),
                     integration_knowledge=integration_knowledge,
-                    sharepoint_item_id=page.get("id"),
+                    sharepoint_item_id=page_id,
+                    stats=stats,
                 )
-                stats["pages_processed"] += 1
-            else:
-                page_name = (
-                    page.get("name", "")
-                    or page.get("title", "")
-                    or f"Page {page.get('id', 'unknown')}"
+                self._count_outcome(stats, outcome, page_name, page=True)
+            except Exception as e:
+                logger.error(
+                    f"Error processing site page {page_name}: {e}", exc_info=True
                 )
-                stats["skipped_items"] += 1
-                stats["skipped_details"].append(
-                    {"file": page_name, "reason": "Empty or unreadable content"}
-                )
+                self._count_failure(stats, page_name, error_reason(e))
 
     async def _column_catalog(
         self, client: SharePointContentClient, drive_id: Optional[str]
@@ -1280,9 +1684,29 @@ class SharePointContentService:
         text: str,
         url: str,
         integration_knowledge: "IntegrationKnowledge",
+        *,
+        stats: SyncStats,
         sharepoint_item_id: Optional[str] = None,
         source_metadata: Optional[list[SourceMetadataEntry]] = None,
-    ) -> None:
+    ) -> BlobOutcome:
+        sanitized_text = sanitize_text_for_db(text)
+        if not sanitized_text.strip():
+            # Nothing indexable survives sanitising; treat it like a parser that
+            # found no text so a previously indexed copy does not linger. The
+            # caller counts the skip from the outcome.
+            if sharepoint_item_id:
+                deleted = await self._delete_local_sharepoint_item(
+                    item_id=sharepoint_item_id,
+                    item_name=title,
+                    integration_knowledge=integration_knowledge,
+                    integration_knowledge_id=integration_knowledge.id,
+                    stats=stats,
+                    reason="unextractable",
+                )
+                if deleted is None:
+                    return "failed"
+            return "empty"
+
         existing_blob = None
         if sharepoint_item_id:
             existing_blob = await self.info_blob_service.repo.get_by_sharepoint_item_and_integration_knowledge(
@@ -1297,7 +1721,6 @@ class SharePointContentService:
 
         previous_blob_size = safe_int(existing_blob.size) if existing_blob else 0
 
-        sanitized_text = sanitize_text_for_db(text)
         if source_metadata is None:
             source_metadata = (
                 (existing_blob.source_metadata or []) if existing_blob else []
@@ -1336,7 +1759,7 @@ class SharePointContentService:
                 title,
                 sharepoint_item_id,
             )
-            return
+            return "unchanged"
 
         info_blob_add = InfoBlobAdd(
             title=title,
@@ -1357,12 +1780,43 @@ class SharePointContentService:
             embedding_model=integration_knowledge.embedding_model,
         )
 
-        current_size = safe_int(getattr(integration_knowledge, "size", 0))
         new_blob_size = safe_int(getattr(info_blob, "size", 0))
-        size_delta = new_blob_size - previous_blob_size
-        if size_delta:
-            integration_knowledge.size = max(0, current_size + size_delta)
-            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+        await self._adjust_size(
+            integration_knowledge, new_blob_size - previous_blob_size
+        )
+        return "embedded"
+
+    async def _adjust_size(
+        self, integration_knowledge: "IntegrationKnowledge", delta: int
+    ) -> None:
+        if not delta:
+            return
+        integration_knowledge.size = await self.integration_knowledge_repo.adjust_size(
+            integration_knowledge.id, delta
+        )
+
+    @staticmethod
+    def _count_outcome(
+        stats: SyncStats, outcome: BlobOutcome, item_name: str, *, page: bool = False
+    ) -> None:
+        if outcome == "embedded":
+            stats["pages_processed" if page else "files_processed"] += 1
+        elif outcome == "unchanged":
+            stats["unchanged_items"] += 1
+        elif outcome == "empty":
+            stats["skipped_items"] += 1
+            stats["skipped_details"].append(
+                {"file": item_name, "reason": EMPTY_CONTENT_REASON}
+            )
+
+    @staticmethod
+    def _count_failure(stats: SyncStats, item_name: str, reason: str) -> None:
+        """Count an item the pass could not finish; the pass must not move past it."""
+        stats["failed_items"] = stats.get("failed_items", 0) + 1
+        stats["skipped_items"] += 1
+        stats["skipped_details"].append(
+            {"file": item_name, "reason": f"{reason} (retried by the next sync)"}
+        )
 
     async def _delete_local_sharepoint_item(
         self,
@@ -1373,8 +1827,12 @@ class SharePointContentService:
         integration_knowledge_id: UUID,
         stats: SyncStats,
         reason: str,
-    ) -> int:
-        """Remove a locally indexed SharePoint item from one integration knowledge."""
+    ) -> Optional[int]:
+        """Remove a locally indexed SharePoint item from one integration knowledge.
+
+        Returns the number of blobs removed, or ``None`` when the delete failed;
+        the failure is counted here, so callers add no entry of their own.
+        """
         try:
             deleted_blobs = await self.info_blob_service.repo.delete_by_sharepoint_item_and_integration_knowledge(
                 sharepoint_item_id=item_id,
@@ -1387,11 +1845,10 @@ class SharePointContentService:
                 if blob is not None  # pyright: ignore[reportUnnecessaryComparison]  # defensive guard
             ]
             if valid_deleted_blobs:
-                current_size = safe_int(getattr(integration_knowledge, "size", 0))
                 deleted_size = sum(
                     safe_int(getattr(blob, "size", 0)) for blob in valid_deleted_blobs
                 )
-                integration_knowledge.size = max(0, current_size - deleted_size)
+                await self._adjust_size(integration_knowledge, -deleted_size)
 
             deleted_count = len(valid_deleted_blobs)
             if deleted_count:
@@ -1430,11 +1887,10 @@ class SharePointContentService:
                 item_name,
                 e,
             )
-            stats["skipped_items"] += 1
-            stats["skipped_details"].append(
-                {"file": item_name, "reason": f"Could not remove {reason}: {e}"}
+            self._count_failure(
+                stats, item_name, f"Could not remove {reason}: {user_visible_error(e)}"
             )
-            return 0
+            return None
 
     async def _delete_local_blob_for_unextractable_item(
         self,
@@ -1444,11 +1900,13 @@ class SharePointContentService:
         integration_knowledge: "IntegrationKnowledge",
         integration_knowledge_id: UUID,
         stats: SyncStats,
+        reason: str = EMPTY_CONTENT_REASON,
     ) -> None:
-        reason = "Empty or unreadable content"
-        stats["skipped_items"] += 1
-        stats["skipped_details"].append({"file": item_name, "reason": reason})
-        await self._delete_local_sharepoint_item(
+        # Only a parser that ran to completion on a complete download and
+        # found nothing may remove the local copy; see NO_TEXT_REASONS.
+        if reason not in NO_TEXT_REASONS:
+            raise ValueError(f"Not a no-text reason: {reason}")
+        deleted = await self._delete_local_sharepoint_item(
             item_id=item_id,
             item_name=item_name,
             integration_knowledge=integration_knowledge,
@@ -1456,14 +1914,35 @@ class SharePointContentService:
             stats=stats,
             reason="unextractable",
         )
+        if deleted is None:
+            return
+        stats["skipped_items"] += 1
+        stats["skipped_details"].append({"file": item_name, "reason": reason})
 
-    @staticmethod
-    def _is_positive_unextractable_result(
-        content: Optional[str], skip_reason: Optional[str]
-    ) -> bool:
-        if content is not None:
-            return is_unextractable_content(content)
-        return skip_reason == "Empty or unreadable content"
+    async def _skip_or_remove_unextractable(
+        self,
+        *,
+        item_id: Optional[str],
+        item_name: str,
+        skip_reason: Optional[str],
+        integration_knowledge: "IntegrationKnowledge",
+        integration_knowledge_id: UUID,
+        stats: SyncStats,
+    ) -> None:
+        """Count a file that yielded no text; drop the local copy only for a positive no-text result."""
+        if item_id and skip_reason in NO_TEXT_REASONS:
+            await self._delete_local_blob_for_unextractable_item(
+                item_id=item_id,
+                item_name=item_name,
+                integration_knowledge=integration_knowledge,
+                integration_knowledge_id=integration_knowledge_id,
+                stats=stats,
+                reason=skip_reason or EMPTY_CONTENT_REASON,
+            )
+            return
+        stats["skipped_items"] += 1
+        if skip_reason:
+            stats["skipped_details"].append({"file": item_name, "reason": skip_reason})
 
     async def _delete_out_of_scope_folder_subtree(
         self,
@@ -1477,8 +1956,11 @@ class SharePointContentService:
         integration_knowledge: "IntegrationKnowledge",
         integration_knowledge_id: UUID,
         stats: SyncStats,
+        scope_folder_path: Optional[str],
+        known_subfolder_ids: set[str],
+        indexed_ids: set[str],
     ) -> None:
-        """Remove indexed blobs for every descendant of a folder that left scope.
+        """Remove indexed blobs for the descendants of a folder that left scope.
 
         SharePoint/OneDrive delta only re-emits the moved folder, not its
         unchanged children, so deleting just the folder id would orphan the whole
@@ -1487,12 +1969,19 @@ class SharePointContentService:
         same strict enumeration as reconciliation, which handles both SharePoint
         (needs site_id) and OneDrive (drive-only), so OneDrive subtrees are cleaned
         inline rather than waiting for a full sync that may never come.
+
+        Each descendant is placed against the scope before it goes: the folder's
+        classification is only as good as its own parent path, and a subtree that
+        turns out to contain the scope must not take the scope's documents with
+        it. A descendant without a parent path cannot be placed and is left to the
+        next full sync's reconciliation. Only descendants in ``indexed_ids``
+        have anything to delete.
         """
         if not drive_id:
             return
 
         try:
-            descendant_ids = await self._enumerate_authoritative_item_ids(
+            descendants = await self._enumerate_authoritative_items(
                 client=content_client,
                 resource_type=resource_type,
                 site_id=site_id,
@@ -1502,15 +1991,39 @@ class SharePointContentService:
         except Exception as exc:
             logger.warning(
                 "Failed to enumerate out-of-scope subtree for folder %s (%s): %s; "
-                "descendants will be reconciled on the next full sync",
+                "the next pass replays the folder",
                 folder_name,
                 folder_id,
                 exc,
             )
+            self._count_failure(
+                stats,
+                folder_name,
+                "Could not list folder contents: " + user_visible_error(exc),
+            )
             return
 
-        for descendant_id in descendant_ids:
-            await self._delete_local_sharepoint_item(
+        for descendant in descendants:
+            descendant_id = descendant.get("id")
+            if not descendant_id or descendant_id not in indexed_ids:
+                continue
+            if self._is_item_in_folder_scope(
+                descendant,
+                integration_knowledge.folder_id,
+                scope_folder_path=scope_folder_path,
+                known_subfolder_ids=known_subfolder_ids,
+                selected_item_type="folder",
+            ):
+                continue
+            if not self._parent_path(descendant):
+                logger.warning(
+                    "Keeping item %s under out-of-scope folder %s: Graph gave no "
+                    "parent path to place it by",
+                    descendant_id,
+                    folder_id,
+                )
+                continue
+            deleted = await self._delete_local_sharepoint_item(
                 item_id=descendant_id,
                 item_name=descendant_id,
                 integration_knowledge=integration_knowledge,
@@ -1518,18 +2031,233 @@ class SharePointContentService:
                 stats=stats,
                 reason="out-of-scope-subtree",
             )
+            if deleted is not None:
+                indexed_ids.discard(descendant_id)
+
+    def _is_ancestor_of_scope(
+        self, item: SharePointItem, scope_folder_path: Optional[str]
+    ) -> bool:
+        """Whether the folder entry's own path lies above the scope folder's.
+
+        The scope folder itself is not an ancestor: its own entry (a rename or
+        move) is in scope and counted like any other folder.
+        """
+        if not scope_folder_path:
+            return False
+        own_path = self._folder_path_from_item(item)
+        if not own_path:
+            return False
+        scope = self._normalize_path(scope_folder_path)
+        own = self._normalize_path(own_path)
+        return bool(own) and scope.startswith(own + "/")
+
+    async def _current_scope_folder_path(
+        self,
+        content_client: SharePointContentClient,
+        drive_id: str,
+        scope_folder_id: str,
+    ) -> Optional[str]:
+        """The scope folder's path as Graph has it now; ``None`` when the folder is gone.
+
+        Only a 404 is an answer about the folder; any other failure says nothing
+        about where it is, so it fails the pass instead of letting the stored
+        path, which may be stale, decide what is out of scope.
+        """
+        try:
+            folder_metadata = await content_client.get_file_metadata(
+                drive_id=drive_id, item_id=scope_folder_id
+            )
+        except aiohttp.ClientResponseError as exc:
+            if exc.status != 404:
+                raise ScopeFolderUnavailable(exc) from exc
+            logger.warning(
+                "Scope folder %s is gone (404); classifying against the stored path",
+                scope_folder_id,
+            )
+            return None
+        except Exception as exc:
+            raise ScopeFolderUnavailable(exc) from exc
+        return self._folder_path_from_item(cast(SharePointItem, folder_metadata))
+
+    def _scope_folder_path_from_changes(
+        self, changes: list[SharePointItem], scope_folder_id: str
+    ) -> Optional[str]:
+        for item in changes:
+            if item.get("id") != scope_folder_id or has_graph_facet(item, "deleted"):
+                continue
+            return self._folder_path_from_item(item)
+        return None
+
+    async def _index_file(
+        self,
+        *,
+        client: SharePointContentClient,
+        drive_id: str,
+        item: SharePointItem,
+        integration_knowledge: "IntegrationKnowledge",
+        stats: SyncStats,
+        pending_change_keys: list[tuple[UUID, str, str]] | None = None,
+    ) -> None:
+        """Download, extract and index one file; a failure is counted, not raised.
+
+        The counted failure fails the pass at its end. With ``pending_change_keys``
+        (a delta pass) an item whose ChangeKey was processed before is skipped as
+        unchanged, and the key of an indexed item is queued for the post-commit
+        cache write. A full sync passes none: it re-verifies every file and
+        relies on the content hash alone.
+        """
+        item_name = item.get("name", "")
+        item_id = item.get("id")
+        if not item_id:
+            stats["skipped_items"] += 1
+            stats["skipped_details"].append(
+                {"file": item_name or "unknown", "reason": "Missing item id"}
+            )
+            return
+        integration_knowledge_id = integration_knowledge.id
+        try:
+            source_metadata = await self._source_metadata_for(client, drive_id, item)
+            change_key = None
+            if pending_change_keys is not None and self.change_key_service:
+                change_key = self._change_key_with_metadata(
+                    item.get("cTag"), source_metadata, title=item_name
+                )
+                if change_key and not await self.change_key_service.should_process(
+                    integration_knowledge_id=integration_knowledge_id,
+                    item_id=item_id,
+                    change_key=change_key,
+                ):
+                    logger.info(
+                        f"Skipping item {item_name} (ID: {item_id}): ChangeKey already processed (duplicate)"
+                    )
+                    stats["unchanged_items"] += 1
+                    return
+
+            unsupported_reason = unsupported_file_reason(item_name)
+            if unsupported_reason:
+                stats["skipped_items"] += 1
+                stats["skipped_details"].append(
+                    {"file": item_name, "reason": unsupported_reason}
+                )
+                return
+
+            content, skip_reason = await self._extract_file(
+                client, drive_id, item_id, item_name, stats
+            )
+            if not content or is_unextractable_content(content):
+                await self._skip_or_remove_unextractable(
+                    item_id=item_id,
+                    item_name=item_name,
+                    skip_reason=skip_reason,
+                    integration_knowledge=integration_knowledge,
+                    integration_knowledge_id=integration_knowledge_id,
+                    stats=stats,
+                )
+                return
+
+            outcome = await self._process_info_blob(
+                title=item_name,
+                text=content,
+                url=item.get("webUrl", ""),
+                integration_knowledge=integration_knowledge,
+                sharepoint_item_id=item_id,
+                source_metadata=source_metadata,
+                stats=stats,
+            )
+            self._count_outcome(stats, outcome, item_name)
+            # Defer the ChangeKey cache write until after commit so a
+            # rolled-back sync re-processes the item instead of skipping it.
+            if pending_change_keys is not None and change_key and outcome != "failed":
+                pending_change_keys.append(
+                    (integration_knowledge_id, item_id, change_key)
+                )
+        except Exception as e:
+            logger.error(f"Error processing file {item_name}: {e}", exc_info=True)
+            self._count_failure(stats, item_name, error_reason(e))
+
+    async def _index_folder_subtree_entering_scope(
+        self,
+        *,
+        content_client: SharePointContentClient,
+        resource_type: str,
+        site_id: Optional[str],
+        drive_id: str,
+        folder_id: str,
+        folder_name: str,
+        integration_knowledge: "IntegrationKnowledge",
+        stats: SyncStats,
+        pending_change_keys: list[tuple[UUID, str, str]],
+        change_ids: set[str],
+        indexed_ids: set[str],
+    ) -> None:
+        """Index the files of a folder entry that may have entered the selected scope.
+
+        Graph re-emits only the moved folder, not its unchanged children, so a
+        folder dragged into scope would otherwise never get its files indexed.
+        An in-scope folder entry not walked under its parent before takes this
+        path because the entry does not say whether it moved; children that are
+        already indexed or that arrive as their own entries in this change set
+        are left alone. ``indexed_ids`` is the pass's set; files indexed here
+        are added so a nested folder entering scope does not download them again.
+        """
+        try:
+            descendants = await self._enumerate_authoritative_items(
+                client=content_client,
+                resource_type=resource_type,
+                site_id=site_id,
+                drive_id=drive_id,
+                folder_id=folder_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Could not list folder %s (%s) entering scope; the next pass "
+                "replays the folder: %s",
+                folder_name,
+                folder_id,
+                exc,
+                exc_info=True,
+            )
+            self._count_failure(
+                stats,
+                folder_name,
+                "Could not list folder contents: " + user_visible_error(exc),
+            )
+            return
+
+        for descendant in descendants:
+            descendant_id = descendant.get("id")
+            if (
+                not descendant_id
+                or descendant_id in indexed_ids
+                or descendant_id in change_ids
+            ):
+                continue
+            await self._index_file(
+                client=content_client,
+                drive_id=drive_id,
+                item=descendant,
+                integration_knowledge=integration_knowledge,
+                stats=stats,
+                pending_change_keys=pending_change_keys,
+            )
+            indexed_ids.add(descendant_id)
 
     def _schedule_post_commit_change_keys(
         self, pending: list[tuple[UUID, str, str]]
     ) -> None:
         """Write the Redis ChangeKey cache only after the DB transaction commits.
 
-        Writing inline would let Redis claim an item is processed while its
-        info_blob write is still uncommitted; a rollback (e.g. a lease-loss
-        ``CancelledError`` that bypasses the per-item ``except``) would then skip
-        the item until the 7-day TTL or a 410 resync. Deferring to ``after_commit``
-        means a failed/rolled-back sync simply re-processes the item next time —
-        the safe direction.
+        The worker wrapper commits on a soft failure: ``set_status_on_exception``
+        turns an ``Exception`` from the sync into a FAILED job and the
+        transaction still commits, so info_blobs written before the error stay
+        (content_hash makes the re-run idempotent). The transaction is only
+        rolled back on lease loss or worker shutdown (``CancelledError``, which
+        bypasses the per-item ``except``) and when the commit itself fails.
+        Writing the ChangeKey inline would let Redis claim such an item is
+        processed while its info_blob was rolled back, skipping it until the
+        7-day TTL or a 410 resync. Deferring to ``after_commit`` means a
+        rolled-back sync simply re-processes the item next time — the safe
+        direction.
 
         The flush is a deliberate fire-and-forget task (a sync ``after_commit`` event
         cannot await). If the worker is killed in the tiny window between commit and
@@ -1585,13 +2313,31 @@ class SharePointContentService:
         drive_id: str,
         folder_id: Optional[str],
     ) -> set[str]:
-        """Strictly enumerate every in-scope file (and page) item id.
+        items = await self._enumerate_authoritative_items(
+            client=client,
+            resource_type=resource_type,
+            site_id=site_id,
+            drive_id=drive_id,
+            folder_id=folder_id,
+        )
+        return {item_id for item in items if (item_id := item.get("id"))}
 
-        Unlike _collect_files_recursive, this propagates listing errors instead of
-        swallowing them: an incomplete enumeration must NOT be treated as the
-        authoritative set during reconciliation, or it would delete valid blobs.
+    async def _enumerate_authoritative_items(
+        self,
+        *,
+        client: SharePointContentClient,
+        resource_type: str,
+        site_id: Optional[str],
+        drive_id: str,
+        folder_id: Optional[str],
+    ) -> list[SharePointItem]:
+        """Strictly enumerate every in-scope file (and page) item.
+
+        Listing errors propagate instead of being swallowed: an incomplete
+        enumeration must NOT be treated as the authoritative set during
+        reconciliation, or it would delete valid blobs.
         """
-        item_ids: set[str] = set()
+        items: list[SharePointItem] = []
 
         async def _walk(current_folder_id: Optional[str]) -> None:
             if resource_type == "onedrive":
@@ -1605,7 +2351,7 @@ class SharePointContentService:
             elif not site_id:
                 raise ValueError("site_id required to enumerate SharePoint drive items")
             elif not current_folder_id:
-                results = await client.get_documents_in_drive(site_id=site_id)
+                results = await client.get_drive_root_children(drive_id)
             else:
                 results = await client.get_folder_items(
                     site_id=site_id, drive_id=drive_id, folder_id=current_folder_id
@@ -1617,19 +2363,16 @@ class SharePointContentService:
                     if item_id:
                         await _walk(item_id)
                 elif item_id:
-                    item_ids.add(item_id)
+                    items.append(item)
 
         await _walk(folder_id)
 
         # Site pages live alongside drive documents for site-root SharePoint scopes.
         if resource_type != "onedrive" and site_id and folder_id is None:
             pages = await client.get_site_pages(site_id=site_id)
-            for page in pages.get("value", []):
-                page_id = page.get("id")
-                if page_id:
-                    item_ids.add(page_id)
+            items.extend(page for page in pages.get("value", []) if page.get("id"))
 
-        return item_ids
+        return items
 
     async def _reconcile_indexed_blobs(
         self,
@@ -1687,35 +2430,52 @@ class SharePointContentService:
                 "an authoritative picture (not deleting from a partial list): %s",
                 integration_knowledge.id,
                 exc,
+                exc_info=True,
+            )
+            stats["reconcile_warning"] = (
+                "Orphan cleanup skipped: could not list SharePoint items "
+                f"({user_visible_error(exc)})"
             )
             return
 
         if not orphans:
             return
 
+        orphan_ids = [item_id for _blob_id, item_id in orphans]
         cap = max(
             _RECONCILE_MIN_DELETE_FLOOR,
             int(len(indexed) * _RECONCILE_MAX_DELETE_FRACTION),
         )
         if len(orphans) > cap:
             logger.error(
-                "Skipping reconciliation for integration_knowledge %s: would delete "
-                "%d of %d blobs (> safety cap %d) — likely an incomplete enumeration.",
+                "Reconciliation for integration_knowledge %s would delete %d of %d "
+                "blobs (> safety cap %d); deleting only what Graph confirms gone.",
                 integration_knowledge.id,
                 len(orphans),
                 len(indexed),
                 cap,
             )
-            return
+            orphan_ids = await self._verified_orphans(
+                client, drive_id, orphan_ids, folder_id=folder_id
+            )
+            kept = len(orphans) - len(orphan_ids)
+            if kept:
+                stats["reconcile_warning"] = (
+                    f"Orphan cleanup limited: {len(orphans)} of {len(indexed)} "
+                    "indexed documents are missing from SharePoint (above the safety "
+                    f"cap of {cap}); removed {len(orphan_ids)} SharePoint confirmed "
+                    f"deleted or outside the scope, kept {kept} it could not confirm"
+                )
+            if not orphan_ids:
+                return
 
         logger.info(
             "Reconciliation removing %d orphaned blob(s) for integration_knowledge %s",
-            len(orphans),
+            len(orphan_ids),
             integration_knowledge.id,
         )
-        deleted_count = 0
-        for _blob_id, item_id in orphans:
-            deleted_count += await self._delete_local_sharepoint_item(
+        for item_id in orphan_ids:
+            await self._delete_local_sharepoint_item(
                 item_id=item_id,
                 item_name=item_id,
                 integration_knowledge=integration_knowledge,
@@ -1723,21 +2483,78 @@ class SharePointContentService:
                 stats=stats,
                 reason="reconcile-orphan",
             )
-        if deleted_count:
-            await self.integration_knowledge_repo.update(obj=integration_knowledge)
+
+    async def _verified_orphans(
+        self,
+        client: SharePointContentClient,
+        drive_id: str,
+        orphan_ids: list[str],
+        *,
+        folder_id: str | None,
+    ) -> list[str]:
+        """Confirm deletions or moves out of a folder in bounded Graph batches.
+
+        Refresh the selected folder's path before trusting a returned item's
+        path. A failure to locate the scope disables move-based cleanup, never
+        falls back to its stored path. 403, missing paths and transient errors
+        cannot prove removal. Stop sending batches after an outage/throttle.
+        """
+        if len(orphan_ids) > _RECONCILE_MAX_VERIFIED_ORPHANS:
+            orphan_ids = random.sample(orphan_ids, _RECONCILE_MAX_VERIFIED_ORPHANS)
+        scope_path: str | None = None
+        if folder_id:
+            try:
+                scope_path = await self._current_scope_folder_path(
+                    client, drive_id, folder_id
+                )
+            except ScopeFolderUnavailable as exc:
+                logger.warning("Stopped verifying orphans: %s", exc)
+                return []
+        gone: list[str] = []
+        for offset in range(0, len(orphan_ids), SharePointContentClient.BATCH_SIZE):
+            batch = orphan_ids[offset : offset + SharePointContentClient.BATCH_SIZE]
+            try:
+                results = await client.get_item_metadata_batch(drive_id, batch)
+            except Exception as exc:
+                logger.warning("Stopped verifying orphans: %s", exc)
+                break
+            unavailable = False
+            for item_id in batch:
+                result = results.get(item_id)
+                if result is None:
+                    unavailable = True
+                elif result.status in _GONE_HTTP_STATUSES:
+                    gone.append(item_id)
+                elif result.status == 200:
+                    item = result.item
+                    if (
+                        item is not None
+                        and scope_path
+                        and self._parent_path(item)
+                        and not self._is_item_in_folder_scope(
+                            item, folder_id, scope_path, selected_item_type="folder"
+                        )
+                    ):
+                        gone.append(item_id)
+                elif result.status != 403:
+                    unavailable = True
+            if unavailable:
+                logger.warning(
+                    "Stopped verifying orphans: Graph could not answer a batch"
+                )
+                break
+        return gone
 
     async def _fetch_and_process_content(
         self,
         site_id: Optional[str],
         drive_id: Optional[str],
         resource_type: str,
-        token: SharePointTokenProtocol,
-        integration_knowledge_id: UUID,
+        integration_knowledge: "IntegrationKnowledge",
         client: SharePointContentClient,
         stats: SyncStats,
         folder_id: Optional[str] = None,
         processed_items: set[str] | None = None,
-        is_root_call: bool = True,
     ):
         if processed_items is None:
             processed_items = set()
@@ -1745,7 +2562,7 @@ class SharePointContentService:
         if not drive_id:
             logger.warning(
                 "Missing drive_id for SharePoint content fetch (integration_knowledge_id=%s)",
-                integration_knowledge_id,
+                integration_knowledge.id,
             )
             return
 
@@ -1765,7 +2582,7 @@ class SharePointContentService:
                 )
                 return
             if not folder_id:
-                results = await client.get_documents_in_drive(site_id=site_id)
+                results = await client.get_drive_root_children(drive_id)
             else:
                 results = await client.get_folder_items(
                     site_id=site_id,
@@ -1782,11 +2599,9 @@ class SharePointContentService:
             resource_type=resource_type,
             client=client,
             results=results,
-            integration_knowledge_id=integration_knowledge_id,
-            token=token,
+            integration_knowledge=integration_knowledge,
             processed_items=processed_items,
             stats=stats,
-            is_root_call=is_root_call,
         )
 
     async def _process_folder_results(
@@ -1796,16 +2611,10 @@ class SharePointContentService:
         resource_type: str,
         client: SharePointContentClient,
         results: list[SharePointItem],
-        integration_knowledge_id: UUID,
-        token: SharePointTokenProtocol,
+        integration_knowledge: "IntegrationKnowledge",
         processed_items: set[str],
         stats: SyncStats,
-        is_root_call: bool = True,
     ) -> None:
-        integration_knowledge = await self.integration_knowledge_repo.one(
-            id=integration_knowledge_id
-        )
-
         for item in results:
             item_id = item.get("id")
 
@@ -1815,11 +2624,7 @@ class SharePointContentService:
             if item_id:
                 processed_items.add(item_id)
 
-            item_name = item.get("name", "")
-            item_type = self._get_item_type(item)
-            web_url = item.get("webUrl", "")
-
-            if item_type == "folder":
+            if self._get_item_type(item) == "folder":
                 stats["folders_processed"] += 1
                 # Always recurse into folders to get their contents
                 await self._fetch_and_process_content(
@@ -1827,45 +2632,20 @@ class SharePointContentService:
                     drive_id=drive_id,
                     resource_type=resource_type,
                     client=client,
-                    token=token,
-                    integration_knowledge_id=integration_knowledge_id,
+                    integration_knowledge=integration_knowledge,
                     folder_id=item_id,
                     processed_items=processed_items,
                     stats=stats,
-                    is_root_call=False,
                 )
                 continue
 
-            content, skip_reason = await self._get_file_content(client, item)
-
-            if content and not is_unextractable_content(content):
-                await self._process_info_blob(
-                    title=item_name,
-                    text=content,
-                    url=web_url,
-                    integration_knowledge=integration_knowledge,
-                    sharepoint_item_id=item_id,
-                    source_metadata=await self._source_metadata_for(
-                        client, drive_id, item
-                    ),
-                )
-                stats["files_processed"] += 1
-            elif item_id and self._is_positive_unextractable_result(
-                content, skip_reason
-            ):
-                await self._delete_local_blob_for_unextractable_item(
-                    item_id=item_id,
-                    item_name=item_name,
-                    integration_knowledge=integration_knowledge,
-                    integration_knowledge_id=integration_knowledge_id,
-                    stats=stats,
-                )
-            else:
-                stats["skipped_items"] += 1
-                if skip_reason:
-                    stats["skipped_details"].append(
-                        {"file": item_name, "reason": skip_reason}
-                    )
+            await self._index_file(
+                client=client,
+                drive_id=drive_id,
+                item=item,
+                integration_knowledge=integration_knowledge,
+                stats=stats,
+            )
 
     def _initialize_stats(self) -> SyncStats:
         return {
@@ -1874,23 +2654,50 @@ class SharePointContentService:
             "out_of_scope_deleted": 0,
             "folders_processed": 0,
             "pages_processed": 0,
+            "unchanged_items": 0,
             "skipped_items": 0,
+            "failed_items": 0,
             "skipped_details": [],
         }
 
+    def _summarize_pass(self, stats: SyncStats) -> tuple[SyncStats, int]:
+        """The pass summary, and how many downloads were refused if all of them were.
+
+        Refusals were counted as file-level skips as they came; once the pass
+        shows they were the only outcome they become its failures.
+        """
+        forbidden = 0
+        attempts = stats.get("download_attempts", 0)
+        if attempts and stats.get("download_forbidden", 0) == attempts:
+            forbidden = attempts
+            stats["failed_items"] = stats.get("failed_items", 0) + forbidden
+        return self._build_summary_stats(stats), forbidden
+
     def _build_summary_stats(self, stats: SyncStats) -> SyncStats:
+        skipped_details = stats.get("skipped_details", [])
         summary: SyncStats = {
             "files_processed": stats.get("files_processed", 0),
             "files_deleted": stats.get("files_deleted", 0),
             "out_of_scope_deleted": stats.get("out_of_scope_deleted", 0),
             "pages_processed": stats.get("pages_processed", 0),
             "folders_processed": stats.get("folders_processed", 0),
+            "unchanged_items": stats.get("unchanged_items", 0),
             "skipped_items": stats.get("skipped_items", 0),
-            "skipped_details": [],
+            "skipped_total": stats.get("skipped_items", 0),
+            "skipped_truncated": len(skipped_details) > _MAX_SKIPPED_DETAILS,
+            "skipped_details": [
+                {
+                    "file": detail["file"],
+                    "reason": user_visible_error(detail["reason"]),
+                }
+                for detail in skipped_details[:_MAX_SKIPPED_DETAILS]
+            ],
         }
-        skipped_details = stats.get("skipped_details", [])
-        if skipped_details:
-            summary["skipped_details"] = skipped_details[:50]
+        if failed_items := stats.get("failed_items", 0):
+            summary["failed_items"] = failed_items
+        reconcile_warning = stats.get("reconcile_warning")
+        if reconcile_warning:
+            summary["reconcile_warning"] = user_visible_error(reconcile_warning)
         return summary
 
     def _format_summary_for_job(self, summary: SyncStats) -> str:
@@ -1898,6 +2705,7 @@ class SharePointContentService:
         deleted = summary.get("files_deleted", 0) or 0
         pages = summary.get("pages_processed", 0) or 0
         folders = summary.get("folders_processed", 0) or 0
+        unchanged = summary.get("unchanged_items", 0) or 0
         skipped = summary.get("skipped_items", 0) or 0
 
         processed_parts: list[str] = []
@@ -1915,6 +2723,8 @@ class SharePointContentService:
         extra_parts: list[str] = []
         if folders:
             extra_parts.append(f"{folders} folder{'s' if folders != 1 else ''} scanned")
+        if unchanged:
+            extra_parts.append(f"{unchanged} unchanged")
         if skipped:
             extra_parts.append(f"{skipped} item{'s' if skipped != 1 else ''} skipped")
 
@@ -1968,7 +2778,7 @@ class SharePointContentService:
         if parent_id == scope_folder_id:
             return True
 
-        # Child of a previously-seen subfolder in scope (backward compatibility).
+        # Child of an in-scope folder of the same change set.
         if known_subfolder_ids and parent_id in known_subfolder_ids:
             return True
 
@@ -1994,6 +2804,10 @@ class SharePointContentService:
                 return True
 
         return False
+
+    @staticmethod
+    def _parent_path(item: SharePointItem) -> Optional[str]:
+        return item.get("parentReference", {}).get("path") or None
 
     def _folder_path_from_item(self, item: SharePointItem) -> Optional[str]:
         relative_parent_path = self._extract_relative_graph_path(
@@ -2035,106 +2849,6 @@ class SharePointContentService:
             return "/"
         return parent_path
 
-    async def _get_all_sharepoint_files(
-        self,
-        content_client: SharePointContentClient,
-        site_id: str,
-    ) -> list[SharePointItem]:
-        """
-        Recursively collect all file names from SharePoint for comparison with database.
-        Returns a flat list of all files (not folders) in the drive, including files in subfolders.
-
-        This is used during delta recovery to accurately detect deleted files.
-        """
-        all_files: list[SharePointItem] = []
-
-        try:
-            # Get default drive for the site
-            drive_id = await content_client.get_default_drive_id(site_id=site_id)
-            if not drive_id:
-                logger.warning(f"Could not get drive ID for site {site_id}")
-                return []
-
-            # Recursively collect all files starting from root
-            await self._collect_files_recursive(
-                content_client=content_client,
-                site_id=site_id,
-                drive_id=drive_id,
-                folder_id=None,  # None means root
-                all_files=all_files,
-            )
-
-            # Also get site pages
-            pages = await content_client.get_site_pages(site_id=site_id)
-            if data := pages.get("value", []):
-                all_files.extend(self._flatten_files(data))
-
-        except Exception as e:
-            logger.error(f"Error getting SharePoint files for comparison: {e}")
-            # Return empty list on error - safe default
-            return []
-
-        return all_files
-
-    async def _collect_files_recursive(
-        self,
-        content_client: SharePointContentClient,
-        site_id: str,
-        drive_id: str,
-        folder_id: Optional[str],
-        all_files: list[SharePointItem],
-    ) -> None:
-        """
-        Recursively collect all files from a folder and its subfolders.
-
-        Args:
-            content_client: The SharePoint client
-            site_id: The site ID
-            drive_id: The drive ID
-            folder_id: The folder ID to collect from (None for root)
-            all_files: The list to collect files into (mutated)
-        """
-        try:
-            # Get items in this folder
-            if folder_id:
-                items = await content_client.get_folder_items(
-                    site_id=site_id,
-                    drive_id=drive_id,
-                    folder_id=folder_id,
-                )
-            else:
-                # Root folder
-                items = await content_client.get_documents_in_drive(site_id=site_id)
-
-            for item in items:
-                if item.get("folder"):
-                    # It's a folder - recurse into it
-                    item_id = item.get("id")
-                    if item_id:
-                        await self._collect_files_recursive(
-                            content_client=content_client,
-                            site_id=site_id,
-                            drive_id=drive_id,
-                            folder_id=item_id,
-                            all_files=all_files,
-                        )
-                else:
-                    # It's a file - add to our list
-                    all_files.append(item)
-
-        except Exception as e:
-            logger.warning(f"Error collecting files from folder {folder_id}: {e}")
-            # Continue with other folders on error
-
-    def _flatten_files(self, items: list[SharePointItem]) -> list[SharePointItem]:
-        """Extract all files from a list of items (excluding folders)."""
-        files: list[SharePointItem] = []
-        for item in items:
-            if not item.get("folder", {}):
-                # It's a file
-                files.append(item)
-        return files
-
     async def token_refresh_callback(self, token_id: UUID) -> dict[str, str]:
         token = await self.oauth_token_service.refresh_and_update_token(
             token_id=token_id
@@ -2150,34 +2864,57 @@ class SharePointContentService:
 
         return file_extension_to_type(item.get("name", ""))
 
-    async def _get_file_content(
-        self, client: SharePointContentClient, item: SharePointItem
+    async def _extract_file(
+        self,
+        client: SharePointContentClient,
+        drive_id: str,
+        item_id: str,
+        item_name: str,
+        stats: SyncStats,
     ) -> tuple[Optional[str], Optional[str]]:
-        item_id = item.get("id")
-        item_name = item.get("name", "").lower()
-        item_type = self._get_item_type(item)
-        drive_id = item.get("parentReference", {}).get("driveId")
+        """``(text, None)`` or ``(None, skip_reason)`` for an outcome of the file itself.
 
-        if not item_id or item_type == "folder" or not drive_id:
-            return None, None
-
-        skip_reason = unsupported_file_reason(item_name)
-        if skip_reason:
-            return None, skip_reason
-
+        Graph or network trouble (5xx, throttling past its retries, connection
+        and timeout errors, an item served without a download URL, anything
+        unexpected) propagates: it says nothing about the file, so the caller
+        must not move past it.
+        """
+        stats["download_attempts"] = stats.get("download_attempts", 0) + 1
         try:
-            content, _ = await client.get_file_content_by_id(
+            result = await client.get_file_extraction_by_id(
                 drive_id=drive_id, item_id=item_id
             )
-            if not content:
-                return None, "Empty or unreadable content"
-            return content, None
-
+        except MissingDownloadUrlError:
+            raise
         except ValueError as e:
             if "exceeds max download size" in str(e):
-                return None, "File too large (exceeds 50 MB limit)"
-            logger.error(f"Error getting file content for {item_name}: {e}")
-            return None, f"Error: {e}"
-        except Exception as e:
-            logger.error(f"Error getting file content for {item_name}: {e}")
-            return None, f"Error: {e}"
+                return None, file_too_large_reason(
+                    get_settings().sharepoint_max_download_bytes
+                )
+            logger.error(
+                f"Error getting file content for {item_name}: {e}", exc_info=True
+            )
+            return None, error_reason(e)
+        except aiohttp.ClientResponseError as e:
+            if e.status not in _ITEM_LEVEL_HTTP_STATUSES:
+                raise
+            if e.status == 403:
+                stats["download_forbidden"] = stats.get("download_forbidden", 0) + 1
+            logger.warning(
+                "File %s (item_id=%s) is gone or not accessible: %s",
+                item_name,
+                item_id,
+                user_visible_error(e),
+            )
+            return None, error_reason(e)
+
+        if result.text is not None:
+            return result.text, None
+        if result.failed:
+            logger.warning(
+                "Extraction failed for %s (item_id=%s): %s",
+                item_name,
+                item_id,
+                result.skip_reason,
+            )
+        return None, result.skip_reason

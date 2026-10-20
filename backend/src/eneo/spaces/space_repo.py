@@ -76,6 +76,9 @@ from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites as WebsitesTable
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
 from eneo.files.file_models import File, FileMetadata
+from eneo.integration.infrastructure.repo_impl.document_counts import (
+    active_document_counts,
+)
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -1105,7 +1108,9 @@ class SpaceRepository:
 
         return apps_db
 
-    async def _get_from_query(self, query: sa.Select[tuple[Spaces]]) -> Space | None:
+    async def _get_from_query(
+        self, query: sa.Select[tuple[Spaces]], *, with_document_counts: bool = False
+    ) -> Space | None:
         entry_in_db = await self._get_record_with_options(query)
         if not entry_in_db:
             return
@@ -1115,7 +1120,7 @@ class SpaceRepository:
         collections = await self._get_collections(space_ids)
         websites = await self._get_websites(space_ids)
         integration_knowledge_union = await self._get_integration_knowledge_union(
-            space_ids
+            space_ids, with_document_counts=with_document_counts
         )
 
         completion_models = await self.completion_model_repo.all(with_deprecated=True)
@@ -1336,7 +1341,7 @@ class SpaceRepository:
     async def one_or_none(self, id: UUID) -> Optional[Space]:
         query = self._in_caller_tenant(sa.select(Spaces).where(Spaces.id == id))
 
-        return await self._get_from_query(query)
+        return await self._get_from_query(query, with_document_counts=True)
 
     async def one(self, id: UUID) -> Space:
         space = await self.one_or_none(id=id)
@@ -1510,7 +1515,7 @@ class SpaceRepository:
             sa.select(Spaces).where(Spaces.user_id == user_id)
         )
 
-        return await self._get_from_query(query)
+        return await self._get_from_query(query, with_document_counts=True)
 
     async def get_space_by_assistant(self, assistant_id: UUID) -> Space:
         query = self._in_caller_tenant(
@@ -1826,9 +1831,16 @@ class SpaceRepository:
             )
 
     async def _get_integration_knowledge_union(
-        self, space_ids: list[UUID]
+        self, space_ids: list[UUID], *, with_document_counts: bool = False
     ) -> list[IntegrationKnowledge]:
-        """Integration knowledge owned by the spaces or distributed to them."""
+        """Integration knowledge owned by the spaces or distributed to them.
+
+        ``document_count`` is a COUNT over info_blobs per item, so it is only
+        attached for lookups whose knowledge list is served to the UI (``one``,
+        ``one_or_none``, ``get_personal_space``, ``get_space_by_name_and_tenant``
+        for the organization space). Assistant, app, session and other
+        resource lookups on the chat path leave it unset.
+        """
         ik = IntegrationKnowledge
 
         stmt = (
@@ -1844,7 +1856,14 @@ class SpaceRepository:
             .order_by(ik.created_at)
         )
         rows = await self.session.execute(stmt)
-        return list(rows.scalars().all())
+        records = list(rows.scalars().all())
+        if with_document_counts:
+            counts = await active_document_counts(
+                self.session, [record.id for record in records]
+            )
+            for record in records:
+                setattr(record, "document_count", counts.get(record.id, 0))
+        return records
 
     async def get_space_by_name_and_tenant(
         self, name: str, tenant_id: UUID
@@ -1855,7 +1874,7 @@ class SpaceRepository:
             Spaces.user_id.is_(None),
             Spaces.tenant_space_id.is_(None),
         )
-        return await self._get_from_query(q)
+        return await self._get_from_query(q, with_document_counts=True)
 
     async def create_org_space_for_tenant(
         self, name: str, description: str, tenant_id: UUID

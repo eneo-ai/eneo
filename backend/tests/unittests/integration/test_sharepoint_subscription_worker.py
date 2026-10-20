@@ -14,6 +14,9 @@ import pytest
 from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
 )
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    OrgTokenProvider,
+)
 from eneo.integration.infrastructure.sharepoint_subscription_worker import (
     SHAREPOINT_SYNC_STALE_TIMEOUT_MINUTES,
     SHAREPOINT_SYNC_TASKS,
@@ -62,6 +65,13 @@ def mock_container():
     container.tenant_app_auth_service = MagicMock(return_value=AsyncMock())
     container.service_account_auth_service = MagicMock(return_value=AsyncMock())
     container.sharepoint_subscription_service = MagicMock(return_value=AsyncMock())
+    container.org_token_provider = MagicMock(
+        side_effect=lambda: OrgTokenProvider(
+            tenant_app_repo=container.tenant_sharepoint_app_repo(),
+            tenant_app_auth_service=container.tenant_app_auth_service(),
+            service_account_auth_service=container.service_account_auth_service(),
+        )
+    )
 
     # Mock session — begin/begin_nested return async context managers
     mock_session = AsyncMock()
@@ -145,7 +155,7 @@ class TestGetTokenForSubscription:
         assert token is not None
         assert token.access_token == "tenant-app-access-token"
         mock_container.tenant_app_auth_service().get_access_token.assert_called_once_with(
-            tenant_app
+            tenant_app, force_refresh=False
         )
 
     @pytest.mark.asyncio
@@ -186,7 +196,7 @@ class TestGetTokenForSubscription:
         assert token is not None
         assert token.access_token == "service-account-access-token"
         mock_container.service_account_auth_service().refresh_access_token.assert_called_once_with(
-            tenant_app
+            tenant_app, force_refresh=False
         )
         tenant_app.update_refresh_token.assert_called_once_with("new-refresh-token")
         mock_container.tenant_sharepoint_app_repo().update.assert_called_once_with(
@@ -383,6 +393,9 @@ class TestRenewExpiringSubscriptions:
         mock_container.sharepoint_subscription_service().renew_subscription = AsyncMock(
             return_value=True
         )
+        mock_container.sharepoint_subscription_repo().link_unreferenced_knowledge = (
+            AsyncMock(return_value=2)
+        )
 
         # Patch sessionmanager and worker._create_container
         with patch(
@@ -399,6 +412,9 @@ class TestRenewExpiringSubscriptions:
         assert result["renewed"] == 1
         assert result["failed"] == 0
         mock_container.sharepoint_subscription_service().renew_subscription.assert_called_once()
+        mock_container.sharepoint_subscription_repo().link_unreferenced_knowledge.assert_awaited_once_with(
+            subscription
+        )
 
     @pytest.mark.asyncio
     async def test_returns_early_when_no_expiring_subscriptions(self, mock_container):
@@ -523,6 +539,123 @@ class TestRenewExpiringSubscriptions:
         assert subscription.last_renewal_failed_at is not None
         assert "Renewal returned false" in (subscription.last_renewal_error or "")
         mock_container.sharepoint_subscription_repo().update.assert_called_once_with(
+            subscription
+        )
+        mock_container.sharepoint_subscription_repo().link_unreferenced_knowledge.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_recorded_renewal_errors_carry_no_internal_text(self, mock_container):
+        """The admin page shows last_renewal_error; URLs and tokens stay out of it."""
+        subscription = SharePointSubscription(
+            id=uuid4(),
+            user_integration_id=uuid4(),
+            site_id="site-123,web-123,list-123",
+            subscription_id="sub-123",
+            drive_id="drive-123",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        )
+        mock_container.sharepoint_subscription_service().list_expiring_subscriptions = (
+            AsyncMock(return_value=[subscription])
+        )
+        user_integration = MagicMock()
+        user_integration.auth_type = "tenant_app"
+        user_integration.tenant_app_id = uuid4()
+        mock_container.user_integration_repo().one = AsyncMock(
+            return_value=user_integration
+        )
+        tenant_app = MagicMock()
+        tenant_app.is_service_account = MagicMock(return_value=False)
+        mock_container.tenant_sharepoint_app_repo().one = AsyncMock(
+            return_value=tenant_app
+        )
+        mock_container.tenant_app_auth_service().get_access_token = AsyncMock(
+            return_value="access-token"
+        )
+        mock_container.sharepoint_subscription_service().renew_subscription = AsyncMock(
+            side_effect=RuntimeError(
+                "PATCH https://graph.microsoft.com/v1.0/subscriptions/x?token=abc"
+            )
+        )
+        mock_container.sharepoint_subscription_repo().update = AsyncMock(
+            return_value=subscription
+        )
+
+        with patch(
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            new_callable=AsyncMock,
+            return_value=mock_container,
+        ):
+            with patch(
+                "eneo.worker.worker.sessionmanager.session",
+                return_value=mock_session_context(),
+            ):
+                result = await renew_expiring_subscriptions({})
+
+        assert result["failed"] == 1
+        assert subscription.last_renewal_error is not None
+        assert "token=abc" not in subscription.last_renewal_error
+        assert (
+            "graph.microsoft.com/v1.0/subscriptions/x"
+            in subscription.last_renewal_error
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_failure_the_service_recorded_is_persisted_once(
+        self, mock_container
+    ):
+        """The savepoint rolls the service's write back; it is rewritten, not recounted."""
+        subscription = SharePointSubscription(
+            id=uuid4(),
+            user_integration_id=uuid4(),
+            site_id="site-123,web-123,list-123",
+            subscription_id="sub-123",
+            drive_id="drive-123",
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        )
+        mock_container.sharepoint_subscription_service().list_expiring_subscriptions = (
+            AsyncMock(return_value=[subscription])
+        )
+        user_integration = MagicMock()
+        user_integration.auth_type = "tenant_app"
+        user_integration.tenant_app_id = uuid4()
+        mock_container.user_integration_repo().one = AsyncMock(
+            return_value=user_integration
+        )
+        tenant_app = MagicMock()
+        tenant_app.is_service_account = MagicMock(return_value=False)
+        mock_container.tenant_sharepoint_app_repo().one = AsyncMock(
+            return_value=tenant_app
+        )
+        mock_container.tenant_app_auth_service().get_access_token = AsyncMock(
+            return_value="access-token"
+        )
+
+        async def recreation_fails(subscription, token):
+            subscription.mark_renewal_failure("Graph refused the replacement")
+            return False
+
+        mock_container.sharepoint_subscription_service().renew_subscription = AsyncMock(
+            side_effect=recreation_fails
+        )
+        mock_container.sharepoint_subscription_repo().update = AsyncMock(
+            return_value=subscription
+        )
+
+        with patch(
+            "eneo.integration.infrastructure.sharepoint_subscription_worker.worker._create_container",
+            new_callable=AsyncMock,
+            return_value=mock_container,
+        ):
+            with patch(
+                "eneo.worker.worker.sessionmanager.session",
+                return_value=mock_session_context(),
+            ):
+                result = await renew_expiring_subscriptions({})
+
+        assert result["failed"] == 1
+        assert subscription.consecutive_renewal_failures == 1
+        assert subscription.last_renewal_error == "Graph refused the replacement"
+        mock_container.sharepoint_subscription_repo().update.assert_awaited_once_with(
             subscription
         )
 

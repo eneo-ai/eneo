@@ -43,8 +43,13 @@ class SyncMetadata(TypedDict, total=False):
     out_of_scope_deleted: int
     pages_processed: int
     folders_processed: int
+    unchanged_items: int
     skipped_items: int
+    skipped_total: int
+    skipped_truncated: bool
     skipped_details: list[SkippedDetail]
+    failed_items: int
+    reconcile_warning: str
     trigger: str
     recovery: str
     changes_detected: int

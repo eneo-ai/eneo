@@ -2,7 +2,7 @@ from enum import Enum
 from typing import Any, Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModelPublic,
@@ -22,6 +22,16 @@ from eneo.embedding_models.presentation.embedding_model_models import (
 from eneo.group_chat.presentation.models import GroupChatSparse
 from eneo.groups_legacy.api.group_models import GroupMetadata, GroupPublicWithMetadata
 from eneo.integration.presentation.models import IntegrationKnowledgePublic
+from eneo.integration.presentation.validation import (
+    FOLDER_PATH_MAX_LENGTH,
+    FOLDER_PATH_PATTERN,
+    GRAPH_ID_MAX_LENGTH,
+    GRAPH_ID_PATTERN,
+    INTEGRATION_KEY_PATTERN,
+    SELECTED_ITEM_TYPE_MAX_LENGTH,
+    SELECTED_ITEM_TYPE_PATTERN,
+    validate_folder_path,
+)
 from eneo.jobs.job_models import JobPublic
 from eneo.main.models import (
     NOT_PROVIDED,
@@ -348,29 +358,41 @@ class UpdateSpaceGroupMemberRequest(BaseModel):
     role: SpaceRoleValue
 
 
-class CreateSpaceIntegrationKnowledge(BaseModel):
+class _IntegrationKnowledgeSelection(BaseModel):
+    """Where in SharePoint/OneDrive (or Confluence) a knowledge item points."""
+
+    # Site id for SharePoint, drive id for OneDrive, space key for Confluence.
+    key: Optional[str] = Field(
+        None, max_length=GRAPH_ID_MAX_LENGTH, pattern=INTEGRATION_KEY_PATTERN
+    )
+    folder_id: Optional[str] = Field(
+        None, max_length=GRAPH_ID_MAX_LENGTH, pattern=GRAPH_ID_PATTERN
+    )
+    folder_path: Optional[str] = Field(
+        None, max_length=FOLDER_PATH_MAX_LENGTH, pattern=FOLDER_PATH_PATTERN
+    )
+    selected_item_type: Optional[str] = Field(
+        None,
+        max_length=SELECTED_ITEM_TYPE_MAX_LENGTH,
+        pattern=SELECTED_ITEM_TYPE_PATTERN,
+    )
+    resource_type: Optional[Literal["site", "onedrive"]] = "site"
+
+    @field_validator("folder_path")
+    @classmethod
+    def _folder_path_without_traversal(cls, value: Optional[str]) -> Optional[str]:
+        return validate_folder_path(value)
+
+
+class CreateSpaceIntegrationKnowledge(_IntegrationKnowledgeSelection):
     name: str
     embedding_model: ModelId
     url: str
-    key: Optional[str] = None
-    folder_id: Optional[str] = None
-    folder_path: Optional[str] = None
-    selected_item_type: Optional[str] = None  # "file", "folder", or "site_root"
-    resource_type: Optional[str] = (
-        "site"  # "site" for SharePoint, "onedrive" for OneDrive
-    )
 
 
-class CreateSpaceIntegrationKnowledgeBatchItem(BaseModel):
+class CreateSpaceIntegrationKnowledgeBatchItem(_IntegrationKnowledgeSelection):
     name: str
     url: str
-    key: Optional[str] = None
-    folder_id: Optional[str] = None
-    folder_path: Optional[str] = None
-    selected_item_type: Optional[str] = None  # "file", "folder", or "site_root"
-    resource_type: Optional[str] = (
-        "site"  # "site" for SharePoint, "onedrive" for OneDrive
-    )
 
 
 class CreateSpaceIntegrationKnowledgeBatchRequest(BaseModel):

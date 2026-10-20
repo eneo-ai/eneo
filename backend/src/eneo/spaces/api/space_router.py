@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
@@ -22,12 +23,25 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
+from eneo.info_blobs.info_blob_repo import IntegrationDocumentSort
+from eneo.integration.application.integration_documents import (
+    SortOrder,
+    document_items,
+    document_url_anchor,
+    ordered_by_relative_path,
+    skipped_documents,
+)
 from eneo.integration.presentation.assemblers.integration_knowledge_assembler import (
     IntegrationKnowledgeAssembler,
 )
-from eneo.integration.presentation.models import IntegrationKnowledgePublic
+from eneo.integration.presentation.models import (
+    IntegrationDocumentsPage,
+    IntegrationKnowledgePublic,
+    IntegrationSkippedDocuments,
+)
 from eneo.jobs.job_models import JobPublic
 from eneo.main.container.container import Container
+from eneo.main.exceptions import UnauthorizedException
 from eneo.main.models import NOT_PROVIDED, ModelId, PaginatedResponse, is_provided
 from eneo.roles.permissions import Permission
 from eneo.server import protocol
@@ -62,6 +76,9 @@ from eneo.spaces.api.space_models import (
 from eneo.websites.presentation.website_models import WebsiteCreate, WebsitePublic
 
 if TYPE_CHECKING:
+    from eneo.integration.domain.entities.integration_knowledge import (
+        IntegrationKnowledge,
+    )
     from eneo.spaces.space import Space
 
 logger = logging.getLogger(__name__)
@@ -105,15 +122,15 @@ async def forbid_org_space(
     id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    logger.warning(f"forbid_org_space called with space_id={id}")
+    logger.debug(f"forbid_org_space called with space_id={id}")
     try:
         space = await container.space_service().get_space(id)
-        logger.warning(
+        logger.debug(
             f"forbid_org_space check: space_id={id}, user_id={space.user_id}, "
             f"tenant_space_id={space.tenant_space_id}, is_org={space.user_id is None and space.tenant_space_id is None}"
         )
         if space.user_id is None and space.tenant_space_id is None:
-            logger.warning(f"Blocking org space access: space_id={id}")
+            logger.debug(f"Blocking org space access: space_id={id}")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
         return True
     except Exception as e:
@@ -865,6 +882,29 @@ async def create_space_websites(
     return WebsitePublic.from_domain(created_website)
 
 
+async def _audit_integration_knowledge(
+    container: Container,
+    *,
+    action: ActionType,
+    knowledge: "IntegrationKnowledge",
+    space: "Space | None",
+    description: str,
+    extra: Mapping[str, object] | None = None,
+) -> None:
+    user = container.user()
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=action,
+        entity_type=EntityType.INTEGRATION_KNOWLEDGE,
+        entity_id=knowledge.id,
+        description=description,
+        metadata=AuditMetadata.standard(
+            actor=user, target=knowledge, space=space, extra=extra
+        ),
+    )
+
+
 @router.post(
     "/{id}/knowledge/integrations/add/{user_integration_id}/",
     response_model=JobPublic,
@@ -884,7 +924,6 @@ async def create_space_integration_knowledge(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
-    user = container.user()
 
     knowledge, job = await service.create_space_integration_knowledge(
         user_integration_id=user_integration_id,
@@ -917,18 +956,13 @@ async def create_space_integration_knowledge(
         },
     }
 
-    # Audit logging
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=user.tenant_id,
-        user=user,
+    await _audit_integration_knowledge(
+        container,
         action=ActionType.INTEGRATION_KNOWLEDGE_CREATED,
-        entity_type=EntityType.INTEGRATION_KNOWLEDGE,
-        entity_id=knowledge.id,
+        knowledge=knowledge,
+        space=space,
         description=f"Added {knowledge.integration_type} knowledge '{knowledge.name}' to space '{space.name if space else 'unknown'}'",
-        metadata=AuditMetadata.standard(
-            actor=user, target=knowledge, space=space, extra=extra
-        ),
+        extra=extra,
     )
 
     # Return job for frontend to track progress (like file upload does)
@@ -955,7 +989,6 @@ async def create_space_integration_knowledge_batch(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
-    user = container.user()
 
     batch_results = await service.create_space_integration_knowledge_batch(
         user_integration_id=user_integration_id,
@@ -984,7 +1017,6 @@ async def create_space_integration_knowledge_batch(
     except Exception:
         pass
 
-    audit_service = container.audit_service()
     response_items: list[CreateSpaceIntegrationKnowledgeBatchResult] = []
     created_count = 0
     failed_count = 0
@@ -1019,19 +1051,13 @@ async def create_space_integration_knowledge_batch(
                 "batch": {"total_items": len(data.items)},
             }
 
-            await audit_service.log_async(
-                tenant_id=user.tenant_id,
-                user=user,
+            await _audit_integration_knowledge(
+                container,
                 action=ActionType.INTEGRATION_KNOWLEDGE_CREATED,
-                entity_type=EntityType.INTEGRATION_KNOWLEDGE,
-                entity_id=knowledge.id,
+                knowledge=knowledge,
+                space=space,
                 description=f"Added {knowledge.integration_type} knowledge '{knowledge.name}' to space '{space.name if space else 'unknown'}' (batch)",
-                metadata=AuditMetadata.standard(
-                    actor=user,
-                    target=knowledge,
-                    space=space,
-                    extra=extra,
-                ),
+                extra=extra,
             )
             continue
 
@@ -1071,37 +1097,30 @@ async def delete_space_integration_knowledge(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
-    user = container.user()
 
-    # Get integration knowledge info BEFORE deletion (for audit log context)
-    space_repo = container.space_repo()
-    space = await space_repo.one(id=id)
+    # Membership before the item, so a non-member learns nothing about the
+    # space's items. Snapshotted before deletion for the audit log.
+    space = await container.space_repo().one(id=id)
+    actor = container.actor_manager().get_space_actor_from_space(space)
+    if not actor.can_delete_integrations():
+        raise UnauthorizedException(
+            "User does not have permission to remove integration knowledge from this space"
+        )
     knowledge = space.get_integration_knowledge(
         integration_knowledge_id=integration_knowledge_id
     )
 
-    # Delete integration knowledge
     await service.remove_knowledge(
         space_id=id, integration_knowledge_id=integration_knowledge_id
     )
 
-    # Build extra context with integration-specific information
-    extra = {
-        "integration_type": knowledge.integration_type,
-    }
-
-    # Audit logging
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=user.tenant_id,
-        user=user,
+    await _audit_integration_knowledge(
+        container,
         action=ActionType.INTEGRATION_KNOWLEDGE_DELETED,
-        entity_type=EntityType.INTEGRATION_KNOWLEDGE,
-        entity_id=integration_knowledge_id,
+        knowledge=knowledge,
+        space=space,
         description=f"Removed {knowledge.integration_type} knowledge '{knowledge.name}' from space '{space.name}'",
-        metadata=AuditMetadata.standard(
-            actor=user, target=knowledge, space=space, extra=extra
-        ),
+        extra={"integration_type": knowledge.integration_type},
     )
 
 
@@ -1183,6 +1202,84 @@ async def update_integration_knowledge(
     return IntegrationKnowledgeAssembler.to_space_knowledge_model(knowledge)
 
 
+@router.get(
+    "/{id}/knowledge/integrations/{integration_knowledge_id}/documents/",
+    response_model=IntegrationDocumentsPage,
+    description="List the indexed documents of an integration knowledge item, "
+    "with their folder relative to the imported item.",
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_INTEGRATION_KNOWLEDGE_ACCESS_REASON,
+)
+async def get_integration_knowledge_documents(
+    id: UUID,
+    integration_knowledge_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    q: Annotated[
+        str | None,
+        Query(max_length=200, description="Matches the title or the path"),
+    ] = None,
+    sort: Annotated[IntegrationDocumentSort, Query()] = "path",
+    order: Annotated[SortOrder, Query()] = "asc",
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    service = container.integration_knowledge_service()
+    knowledge = await service.get_readable_knowledge(
+        space_id=id, integration_knowledge_id=integration_knowledge_id
+    )
+    descending = order == "desc"
+    page = await container.info_blob_repo().get_integration_knowledge_page(
+        knowledge.id,
+        q=q,
+        url_anchor=document_url_anchor(knowledge),
+        sort=sort,
+        descending=descending,
+        limit=limit,
+        offset=offset,
+    )
+    items = document_items(page.items, knowledge)
+    if sort == "path":
+        items = ordered_by_relative_path(items, descending=descending)
+    return IntegrationDocumentsPage(
+        items=items,
+        total_count=page.total_count,
+        limit=limit,
+        offset=offset,
+        total_size=page.total_size,
+    )
+
+
+@router.get(
+    "/{id}/knowledge/integrations/{integration_knowledge_id}/documents/skipped/",
+    response_model=IntegrationSkippedDocuments,
+    description="Files the latest sync of an integration knowledge item skipped, "
+    "with the reason for each.",
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_INTEGRATION_KNOWLEDGE_ACCESS_REASON,
+)
+async def get_integration_knowledge_skipped_documents(
+    id: UUID,
+    integration_knowledge_id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    service = container.integration_knowledge_service()
+    knowledge = await service.get_readable_knowledge(
+        space_id=id, integration_knowledge_id=integration_knowledge_id
+    )
+    sync_logs = await container.sync_log_repo().get_by_integration_knowledge(
+        knowledge.id, tenant_id=container.user().tenant_id, limit=1
+    )
+    return skipped_documents(sync_logs[0] if sync_logs else None)
+
+
 @router.post(
     "/{id}/knowledge/integrations/{integration_knowledge_id}/sync/",
     response_model=JobPublic,
@@ -1201,29 +1298,30 @@ async def trigger_integration_full_sync(
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     service = container.integration_knowledge_service()
-    user = container.user()
+
+    # Membership before the item, so a non-member learns nothing about the
+    # space's items. The same snapshot serves the audit log.
+    space = await container.space_repo().one(id=id)
+    actor = container.actor_manager().get_space_actor_from_space(space)
+    if not actor.can_edit_integrations():
+        raise UnauthorizedException(
+            "User does not have permission to sync integration knowledge in this space"
+        )
+    knowledge = space.get_integration_knowledge(
+        integration_knowledge_id=integration_knowledge_id
+    )
 
     job = await service.trigger_full_sync(
         space_id=id,
         integration_knowledge_id=integration_knowledge_id,
     )
 
-    # Audit logging
-    space_repo = container.space_repo()
-    space = await space_repo.one(id=id)
-    knowledge = space.get_integration_knowledge(
-        integration_knowledge_id=integration_knowledge_id
-    )
-
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=user.tenant_id,
-        user=user,
+    await _audit_integration_knowledge(
+        container,
         action=ActionType.INTEGRATION_KNOWLEDGE_SYNCED,
-        entity_type=EntityType.INTEGRATION_KNOWLEDGE,
-        entity_id=integration_knowledge_id,
+        knowledge=knowledge,
+        space=space,
         description=f"Triggered full sync for {knowledge.integration_type} knowledge '{knowledge.name}' in space '{space.name}'",
-        metadata=AuditMetadata.standard(actor=user, target=knowledge, space=space),
     )
 
     return job

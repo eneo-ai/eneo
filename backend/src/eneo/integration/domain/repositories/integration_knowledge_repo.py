@@ -1,12 +1,34 @@
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from datetime import datetime
+from typing import TYPE_CHECKING, Any
+
+from typing_extensions import TypedDict, Unpack
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from uuid import UUID
 
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
+
+
+class SyncStateFields(TypedDict, total=False):
+    """The columns a sync pass owns; nothing a user edits (name, wrapper) is here."""
+
+    site_id: str | None
+    drive_id: str | None
+    resource_type: str | None
+    folder_id: str | None
+    folder_path: str | None
+    selected_item_type: str | None
+    delta_token: str | None
+    size: int
+    last_sync_status: str
+    last_sync_error: str | None
+    last_sync_attempted_at: datetime | None
+    last_synced_at: datetime | None
+    last_sync_summary: dict[str, Any] | None
 
 
 class IntegrationKnowledgeRepository(ABC):
@@ -27,7 +49,37 @@ class IntegrationKnowledgeRepository(ABC):
     async def get_by_ids(self, ids: list["UUID"]) -> list["IntegrationKnowledge"]: ...
 
     @abstractmethod
+    async def attach_document_counts(
+        self, items: "Sequence[IntegrationKnowledge]"
+    ) -> None:
+        """Set ``document_count`` (active info_blobs) on each item in one query.
+
+        Fetches do not compute it; call this where an item is served to the UI.
+        """
+        ...
+
+    @abstractmethod
     async def remove(self, id: "UUID") -> None: ...
 
     @abstractmethod
     async def update(self, obj: "IntegrationKnowledge") -> "IntegrationKnowledge": ...
+
+    @abstractmethod
+    async def update_sync_state(
+        self, id: "UUID", **fields: Unpack[SyncStateFields]
+    ) -> None:
+        """Write only the given sync-owned columns.
+
+        A sync holds its entity copy for minutes; ``update`` would write every
+        column from that copy and undo a rename committed meanwhile.
+        """
+        ...
+
+    @abstractmethod
+    async def adjust_size(self, id: "UUID", delta: int) -> int:
+        """Atomically add ``delta`` bytes (floored at zero) and return the new size.
+
+        Several entity copies take part in one sync; a read-modify-write on any
+        of them would overwrite the others' changes.
+        """
+        ...

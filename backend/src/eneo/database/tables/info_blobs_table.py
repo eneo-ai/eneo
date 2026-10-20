@@ -59,6 +59,12 @@ class InfoBlobs(BasePublic):
             "id",
             postgresql_where=text("version_state = 'active'"),
         ),
+        # Serves active_document_counts; its predicate must stay identical.
+        Index(
+            "ix_info_blobs_active_integration_knowledge",
+            "integration_knowledge_id",
+            postgresql_where=text("version_state = 'active'"),
+        ),
         Index(
             "ix_info_blobs_active_website_source_url",
             "website_id",

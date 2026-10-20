@@ -58,6 +58,7 @@
   let showIntegrationsNotice = $state(
     untrack(() => data.environment.integrationRequestFormUrl !== undefined)
   );
+  // The selection stays while the dialog closes so its title does not flash empty.
   let selectedIntegrationForSyncHistory: IntegrationKnowledge | null = $state(null);
   let showSyncHistoryDialog = $state(false);
   let isOrgSpace = $currentSpace.organization;
@@ -246,13 +247,6 @@
   let userCanSeeIntegrations = $derived(
     $currentSpace.hasPermission("read", "integrationKnowledge")
   );
-
-  // Reset selected integration when dialog closes
-  $effect(() => {
-    if (!showSyncHistoryDialog) {
-      selectedIntegrationForSyncHistory = null;
-    }
-  });
 </script>
 
 <svelte:head>

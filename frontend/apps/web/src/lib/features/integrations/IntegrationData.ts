@@ -15,8 +15,8 @@ export type IntegrationData = {
   importHint: string;
   /** The actual Dialog component that handles the importing for that integrtaion */
   ImportDialog: Component<IntegrationImportDialogProps>;
-  /** Label shown for the preview link in the table of IntegrationKnowledge */
-  previewLinkLabel: string;
+  /** Message of the label on links that open an item at its source */
+  previewLinkLabel: () => string;
 };
 
 export type IntegrationImportDialogProps = {
@@ -31,3 +31,8 @@ export const integrationData: Record<IntegrationType, IntegrationData> = {
   confluence: ConfluenceIntegrationData,
   sharepoint: SharepointIntegrationData
 };
+
+/** The label of a link that opens an item of this integration at its source. */
+export function previewLinkLabel(type: IntegrationType): string {
+  return integrationData[type].previewLinkLabel();
+}

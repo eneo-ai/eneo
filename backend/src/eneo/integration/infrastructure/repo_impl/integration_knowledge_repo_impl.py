@@ -1,9 +1,11 @@
-from typing import TYPE_CHECKING, Optional
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Optional, cast
 
 import sqlalchemy as sa
 from sqlalchemy.orm import selectinload
-from typing_extensions import override
+from typing_extensions import Unpack, override
 
+from eneo.database.affected_rows import affected_row_count
 from eneo.database.tables.integration_table import (
     IntegrationKnowledge as IntegrationKnowledgeDBModel,
 )
@@ -18,11 +20,16 @@ from eneo.integration.domain.entities.integration_knowledge import (
 )
 from eneo.integration.domain.repositories.integration_knowledge_repo import (
     IntegrationKnowledgeRepository,
+    SyncStateFields,
 )
 from eneo.integration.infrastructure.mappers.integration_knowledge_mapper import (
     IntegrationKnowledgeMapper,
 )
 from eneo.integration.infrastructure.repo_impl.base_repo_impl import BaseRepoImpl
+from eneo.integration.infrastructure.repo_impl.document_counts import (
+    active_document_counts,
+)
+from eneo.main.exceptions import NotFoundException
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -61,11 +68,11 @@ class IntegrationKnowledgeRepoImpl(
     async def one_or_none(
         self, id: Optional["UUID"] = None, **filters: object
     ) -> IntegrationKnowledge | None:
-        query = (
-            sa.select(self._db_model)
-            .where(self._db_model.id == id)
-            .options(*self._options)
-        )
+        if id is not None:
+            filters = {**filters, "id": id}
+        if not filters:
+            raise ValueError("No filter is specified")
+        query = sa.select(self._db_model).filter_by(**filters).options(*self._options)
         record = await self.session.scalar(query)
 
         if not record:
@@ -84,12 +91,59 @@ class IntegrationKnowledgeRepoImpl(
             .where(self._db_model.id.in_(ids))
             .options(*self._options)
         )
-        records = (await self.session.scalars(query)).all()
+        return await self._entities_for((await self.session.scalars(query)).all())
 
+    async def _entities_for(
+        self, records: Sequence[IntegrationKnowledgeDBModel]
+    ) -> list[IntegrationKnowledge]:
+        if not records:
+            return []
         embedding_models = await self.embedding_model_repo.all()
-
         return self.mapper.to_entities(records, embedding_models=embedding_models)
+
+    @override
+    async def attach_document_counts(
+        self, items: Sequence[IntegrationKnowledge]
+    ) -> None:
+        # document_count is a projection over info_blobs, not a column. Fetches
+        # leave it at zero so sync and webhook paths never pay for it; callers
+        # that serve an item to the UI attach it here.
+        counts = await active_document_counts(self.session, [item.id for item in items])
+        for item in items:
+            item.document_count = counts.get(item.id, 0)
 
     @override
     async def remove(self, id: "UUID") -> None:
         await self.delete(id=id)
+
+    @override
+    async def update_sync_state(
+        self, id: "UUID", **fields: Unpack[SyncStateFields]
+    ) -> None:
+        if not fields:
+            return
+        stmt = (
+            sa.update(self._db_model)
+            .where(self._db_model.id == id)
+            .values(**cast(dict[str, object], fields))
+        )
+        result = await self.session.execute(stmt)
+        if affected_row_count(result) == 0:
+            raise NotFoundException(f"{self._db_model.__name__} not found")
+
+    @override
+    async def adjust_size(self, id: "UUID", delta: int) -> int:
+        stmt = (
+            sa.update(self._db_model)
+            .where(self._db_model.id == id)
+            .values(
+                size=sa.func.greatest(
+                    0, sa.func.coalesce(self._db_model.size, 0) + delta
+                )
+            )
+            .returning(self._db_model.size)
+        )
+        new_size = await self.session.scalar(stmt)
+        if new_size is None:
+            raise NotFoundException(f"{self._db_model.__name__} not found")
+        return int(new_size)
