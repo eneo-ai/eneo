@@ -541,7 +541,7 @@
   status={chat.askQuestion.isLoading || sendPending ? "streaming" : "ready"}
   onSubmit={ask}
   onStop={() => abortController?.abort("User cancelled")}
-  class="max-w-[74ch] md:w-full"
+  class="min-w-0"
 >
   {#if quote && filePreview}
     {@const location = tableLocationLabel(quote.locator, (row) => m.table_reference_row({ row }))}
@@ -658,9 +658,12 @@
     </div>
   {/if}
 
-  <PromptInput.Footer>
+  <PromptInput.Footer class="flex-wrap gap-1 px-1.5 @[36rem]/composer:gap-2 @[36rem]/composer:px-2">
     <PromptInput.Tools
-      class={chat.askQuestion.isLoading ? "pointer-events-none opacity-40" : undefined}
+      class={[
+        "shrink-0 gap-0.5 @[36rem]/composer:gap-1",
+        chat.askQuestion.isLoading && "pointer-events-none opacity-40"
+      ]}
     >
       <AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
       {#if shouldShowMentionButton}
@@ -690,13 +693,15 @@
     </PromptInput.Tools>
 
     <!-- Right cluster: model + send/stop -->
-    <div class="flex items-center gap-2">
+    <div
+      class="flex min-w-[7rem] flex-1 items-center justify-end gap-0.5 @[26rem]/composer:min-w-0 @[36rem]/composer:gap-2"
+    >
       {#if showModelSelect}
         <ChatModelSelect />
         <ChatReasoningSelect />
       {/if}
 
-      <PromptInput.Submit disabled={isAskingDisabled} name="ask" />
+      <PromptInput.Submit class="shrink-0" disabled={isAskingDisabled} name="ask" />
     </div>
   </PromptInput.Footer>
 </PromptInput.Root>
