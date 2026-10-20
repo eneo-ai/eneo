@@ -589,10 +589,19 @@ class FileRepository:
         return FileMetadata.model_validate(row)
 
     async def get_by_id_for_update(self, file_id: UUID) -> FileMetadata:
+        """Lock a file row for a content write such as saving a transcript.
+
+        ``FOR NO KEY UPDATE``: the write never touches the row's key, and a
+        row that references the file from another connection (a question
+        placeholder written while the ask's ambient transaction still holds
+        this lock) must not wait on it. Plain ``FOR UPDATE`` blocks that
+        foreign-key share lock until the request ends: a deadlock in the ask
+        path, which writes the placeholder on its own connection.
+        """
         row = await self.session.scalar(
             sa.select(Files)
             .where(Files.id == file_id, await self._visible_family())
-            .with_for_update()
+            .with_for_update(key_share=True)
         )
         if row is None:
             raise NotFoundException()

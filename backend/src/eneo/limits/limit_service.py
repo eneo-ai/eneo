@@ -58,6 +58,17 @@ class LimitService:
                 )
             )
 
+        # Audio reaches the model as its transcript, so it needs no vision.
+        for item in AudioMimeTypes.values():
+            formats.append(
+                FormatLimit(
+                    mimetype=item,
+                    size=self.upload_admission.session_audio_maximum_bytes,
+                    extensions=MIMETYPE_EXTENSIONS_MAPPER[item],
+                    vision=False,
+                )
+            )
+
         return AttachmentLimits(
             formats=formats,
         )

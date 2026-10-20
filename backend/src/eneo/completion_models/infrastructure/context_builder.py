@@ -31,7 +31,7 @@ from eneo.completion_models.infrastructure.static_prompts import (
     TRANSCRIPTION_PROMPT,
 )
 from eneo.completion_models.infrastructure.table_selection import parse_table_selection
-from eneo.files.file_models import File, FileType
+from eneo.files.file_models import File, FileType, inlines_as_text
 from eneo.files.model_file_references import file_handle, model_file_references
 from eneo.info_blobs.info_blob import SourceMetadataEntry
 from eneo.info_blobs.source_metadata import format_source_metadata_lines
@@ -291,7 +291,7 @@ def build_files_string(
             header = f"{header} ({file.mimetype})"
         # Sent whole, never silently truncated: attachments that don't fit the
         # model's window are rejected up front (see attachment_token_ceiling).
-        blocks.append(f"{header}\n{file.text or ''}")
+        blocks.append(f"{header}\n{file.inline_text or ''}")
 
     files_string = "\n\n---\n\n".join(blocks)
     return f"{preamble}\n\n{files_string}"
@@ -701,14 +701,15 @@ class ContextBuilder:
             files = []
         if transcription_inputs is None:
             transcription_inputs = []
-        # Only TEXT files inline; images ride as vision parts but still get a
-        # reference entry below so an image tool can take them as input.
-        # When the assistant has inlining disabled, files whose original is
-        # reachable via a signed URL are represented by that URL only (skips the
-        # extracted text — e.g. a large CSV that would blow the context window).
-        # Files without a URL are always inlined so the model still sees them.
+        # TEXT files and transcribed audio inline; images ride as vision parts
+        # but still get a reference entry below so an image tool can take them
+        # as input. When the assistant has inlining disabled, files whose
+        # original is reachable via a signed URL are represented by that URL
+        # only (skips the extracted text — e.g. a large CSV that would blow the
+        # context window). Files without a URL are always inlined so the model
+        # still sees them.
         selection = parse_table_selection(input_str)
-        text_files = self._get_files_by_type(files, FileType.TEXT)
+        text_files = [file for file in files if inlines_as_text(file)]
         if (
             selection
             and file_reference_urls

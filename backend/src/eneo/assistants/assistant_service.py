@@ -235,6 +235,7 @@ if TYPE_CHECKING:
     )
     from eneo.document_templates.domain import DocumentTemplateChoice
     from eneo.files.file_models import File
+    from eneo.files.transcriber import Transcriber
     from eneo.governance_policy.application.effective_config_service import (
         EffectiveConfigService,
     )
@@ -373,6 +374,7 @@ class AssistantService:
         skill_service: "SkillService",
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
         effective_config_service: "EffectiveConfigService | None" = None,
+        transcriber: "Transcriber | None" = None,
     ):
         super().__init__()
         self.repo = repo
@@ -400,6 +402,7 @@ class AssistantService:
         self.skill_service = skill_service
         self.api_key_scope_revoker = api_key_scope_revoker
         self.effective_config_service = effective_config_service
+        self.transcriber = transcriber
 
     async def _with_builtin_provider_token(
         self, server: "MCPServer", *, assistant_id: UUID
@@ -3130,6 +3133,37 @@ class AssistantService:
                     f"Embedding Model {item.embedding_model.name} is not in space."
                 )
 
+    async def _transcribe_audio_attachments(
+        self, *, files: list["File"], space: "Space"
+    ) -> None:
+        """Give each audio upload of this message its transcript.
+
+        The model reads an audio attachment as its transcript, inlined like a
+        document's text on this turn and on every replay. The transcript is
+        stored on the file, so a follow-up never transcribes it again.
+        """
+        pending = [
+            file
+            for file in files
+            if file.file_type is FileType.AUDIO and file.transcription is None
+        ]
+        if not pending:
+            return
+        transcription_model = space.get_default_transcription_model()
+        if transcription_model is None:
+            raise BadRequestException(
+                "Audio attachments need a transcription model enabled in this "
+                "space. Enable one, or remove the audio file."
+            )
+        if self.transcriber is None:
+            raise RuntimeError(
+                "AssistantService needs a transcriber to accept audio attachments"
+            )
+        for file in pending:
+            file.transcription = await self.transcriber.transcribe(
+                file, transcription_model
+            )
+
     async def ask(
         self,
         question: str,
@@ -3373,6 +3407,11 @@ class AssistantService:
                 )
                 for server in resolution.capability_servers
             ]
+
+        # An audio upload is read as its transcript, so transcribe it before the
+        # fit check counts it. This runs after every policy and model check so a
+        # rejected turn never pays for a transcription.
+        await self._transcribe_audio_attachments(files=files, space=space)
 
         # This message's own uploads have no save-time fit gate and are inlined
         # whole, so reject an upload that can't fit before any session/question

@@ -9,6 +9,7 @@ import {
   ChevronUp,
   Download,
   File,
+  FileAudio,
   FileSpreadsheet,
   FileText,
   ImageIcon,
@@ -27,6 +28,7 @@ import type { Attachment } from "./use-attachments";
 /** A representative icon for an attachment, chosen from its mime type. */
 export function FileKindIcon({ mimetype, className }: { mimetype: string; className?: string }) {
   if (mimetype.startsWith("image/")) return <ImageIcon aria-hidden className={className} />;
+  if (mimetype.startsWith("audio/")) return <FileAudio aria-hidden className={className} />;
   if (mimetype === "application/pdf") return <FileText aria-hidden className={className} />;
   if (mimetype.includes("sheet") || mimetype.includes("csv") || mimetype.includes("excel")) {
     return <FileSpreadsheet aria-hidden className={className} />;
@@ -193,10 +195,11 @@ export function AttachmentPreviewDialog({
 
 type PendingPreview = { name: string; mimetype: string; url: string };
 
-type FileKind = "pdf" | "doc" | "sheet" | "image" | "other";
+type FileKind = "pdf" | "doc" | "sheet" | "image" | "audio" | "other";
 
 function fileKind(mimetype: string): FileKind {
   if (mimetype.startsWith("image/")) return "image";
+  if (mimetype.startsWith("audio/")) return "audio";
   if (mimetype === "application/pdf") return "pdf";
   if (mimetype.includes("sheet") || mimetype.includes("csv") || mimetype.includes("excel")) {
     return "sheet";
@@ -213,6 +216,7 @@ const FILE_TONE: Record<FileKind, string> = {
   doc: "bg-ax-blue-muted text-ax-blue",
   sheet: "bg-ax-green-muted text-ax-green",
   image: "bg-ax-purple-muted text-ax-purple",
+  audio: "bg-ax-orange-muted text-ax-orange",
   other: "bg-ax-muted text-ax-text-secondary"
 };
 

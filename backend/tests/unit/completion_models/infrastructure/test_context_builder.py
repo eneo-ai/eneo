@@ -356,3 +356,38 @@ def test_a_revision_cycle_ends_at_the_last_unseen_version():
     a.revises_file_id = b.id
 
     assert current_user_revisions([a.id], [a, b]) == {a.id: b.id}
+
+
+def _audio(name: str, transcription: str | None) -> File:
+    now = datetime.now(timezone.utc)
+    return File(
+        id=uuid4(),
+        created_at=now,
+        updated_at=now,
+        name=name,
+        checksum="0",
+        size=1,
+        mimetype="audio/mpeg",
+        file_type=FileType.AUDIO,
+        blob=b"",
+        transcription=transcription,
+        user_id=uuid4(),
+        tenant_id=uuid4(),
+    )
+
+
+def test_transcribed_audio_inlines_its_transcript_like_a_document():
+    built = ContextBuilder()._build_input(
+        "What was decided?", files=[_audio("meeting.mp3", "We ship on Friday.")]
+    )
+
+    assert "FILE: meeting.mp3 (audio/mpeg)\nWe ship on Friday." in built
+    assert built.endswith("What was decided?")
+
+
+def test_audio_without_a_transcript_inlines_nothing():
+    built = ContextBuilder()._build_input(
+        "What was decided?", files=[_audio("meeting.mp3", None)]
+    )
+
+    assert built == "What was decided?"

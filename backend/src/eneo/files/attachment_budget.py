@@ -6,7 +6,7 @@ from eneo.completion_models.infrastructure.context_builder import (
     count_attachment_tokens,
     count_tokens,
 )
-from eneo.files.file_models import File, FileType
+from eneo.files.file_models import File, FileType, inlines_as_text
 from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
 
@@ -29,7 +29,7 @@ def assert_prompt_and_files_fit_context(
     """Check the baseline first, then each named alternative against one ceiling."""
     ceiling = attachment_token_ceiling(max_input_tokens)
     attachment_tokens = count_attachment_tokens(
-        text_files=[file for file in files if file.file_type == FileType.TEXT],
+        text_files=[file for file in files if inlines_as_text(file)],
         image_files=[file for file in files if file.file_type == FileType.IMAGE],
         model_name=model_name,
     )

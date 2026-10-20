@@ -12,7 +12,7 @@ from eneo.completion_models.infrastructure.static_prompts import (
     SET_TITLE_OF_CONVERSATION_PROMPT,
 )
 from eneo.conversations.conversation_models import PreflightResponse
-from eneo.files.file_models import FileType
+from eneo.files.file_models import FileType, inlines_as_text
 from eneo.files.file_reference import (
     inline_file_text_for_model,
     url_only_attachment_ids,
@@ -301,8 +301,9 @@ class ConversationService:
         # Document uploads (PDF/DOCX/PPTX) are TEXT-type. An image-only PDF
         # has no extractable text of its own but still yields derived vision
         # images, so key derived-image lookup on every document — not only the
-        # ones with inlinable text.
-        document_files = [f for f in files if f.file_type == FileType.TEXT]
+        # ones with inlinable text. A transcribed audio file inlines its
+        # transcript the same way (one not yet transcribed inlines nothing).
+        document_files = [f for f in files if inlines_as_text(f)]
 
         # A URL-only document is sent as its signed URL (a tiny block), not its
         # extracted text or derived images — so it must not be counted here at
@@ -343,7 +344,7 @@ class ConversationService:
         # text and (for documents on a vision model) no derived images. Its
         # FILE header block is still sent — and counted below.
         counted_ids = (
-            {f.id for f in document_files if f.text}
+            {f.id for f in document_files if f.inline_text}
             | {f.id for f in image_files}
             | derived_parent_ids
         )

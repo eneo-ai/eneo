@@ -107,6 +107,27 @@ class FileBaseWithContent(FileBase):
 
         return self
 
+    @property
+    def inline_text(self) -> Optional[str]:
+        """The text the model reads for this file: a document's extracted
+        text, or an audio file's transcription once it has one."""
+        if self.file_type is FileType.AUDIO:
+            return self.transcription
+        if self.file_type is FileType.TEXT:
+            return self.text
+        return None
+
+
+def inlines_as_text(file: FileBaseWithContent) -> bool:
+    """Whether the model reads ``file`` as text in the prompt.
+
+    Documents always do (an image-only PDF still sends its FILE header);
+    audio does once it carries a transcription. Images ride as vision parts.
+    """
+    if file.file_type is FileType.TEXT:
+        return True
+    return file.file_type is FileType.AUDIO and file.transcription is not None
+
 
 class FileInfo(InDB, FileBase):
     user_id: UUID
