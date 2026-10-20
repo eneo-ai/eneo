@@ -7762,26 +7762,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/whats-new/snooze/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    /**
-     * Snooze Whats New Announcement
-     * @description Remind the current user about an unread release on a visit after 24 hours.
-     */
-    put: operations["snooze_whats_new_announcement_api_v1_whats_new_snooze__put"];
-    post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/integrations/sharepoint/webhook/": {
     parameters: {
       query?: never;
@@ -24152,11 +24132,6 @@ export interface components {
        * @description Newest release the user has been shown the announcement for; null before the first one.
        */
       announced_version: string | null;
-      /**
-       * Remind After
-       * @description Show the announced release again on a visit after this UTC time, unless already seen; null means no reminder.
-       */
-      remind_after?: string | null;
     };
     /** WhatsNewVersionUpdate */
     WhatsNewVersionUpdate: {
@@ -51131,48 +51106,6 @@ export interface operations {
     };
   };
   mark_whats_new_announced_api_v1_whats_new_announced__put: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["WhatsNewVersionUpdate"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["WhatsNewStatePublic"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  snooze_whats_new_announcement_api_v1_whats_new_snooze__put: {
     parameters: {
       query?: never;
       header?: never;

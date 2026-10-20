@@ -1,6 +1,6 @@
 import { latestRelease } from "@eneo/whats-new";
 import { get } from "svelte/store";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createWhatsNewStore, type Marker } from "./whatsNewStore";
 
 const latest = latestRelease();
@@ -12,108 +12,140 @@ function makeStore(
   announced: Marker = null,
   enabled = true,
   installedVersion = version,
-  remindAfter: string | null = null
+  userId = "user-1"
 ) {
   const client = {
     markSeen: vi.fn(async (_version: string) => ({
       seen_version: _version,
-      announced_version: null,
-      remind_after: null
+      announced_version: null
     })),
     markAnnounced: vi.fn(async (_version: string) => ({
       seen_version: null,
-      announced_version: _version,
-      remind_after: null
+      announced_version: _version
     })),
-    snooze: vi.fn(async (_version: string) => ({
-      seen_version: null,
-      announced_version: _version,
-      remind_after: new Date(Date.now() + 86400000).toISOString()
-    })),
-    resetState: vi.fn(async () => ({
-      seen_version: null,
-      announced_version: null,
-      remind_after: null
-    }))
+    resetState: vi.fn(async () => ({ seen_version: null, announced_version: null }))
   };
   return {
     client,
     store: createWhatsNewStore({
+      user: { id: userId },
       eneo: { whatsNew: client },
       whatsNewEnabled: enabled,
       whatsNewVersion: installedVersion,
       whatsNewSeenVersion: seen,
-      whatsNewAnnouncedVersion: announced,
-      whatsNewRemindAfter: remindAfter
+      whatsNewAnnouncedVersion: announced
     })
   };
 }
 
+beforeEach(() => {
+  const values = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      values.set(key, value);
+    },
+    removeItem: (key: string) => {
+      values.delete(key);
+    }
+  });
+});
+
 afterEach(() => {
   vi.restoreAllMocks();
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("whatsNewStore", () => {
-  it("restores an unread reminder after 24 hours and consumes it when shown", async () => {
+  it("restores a local reminder after reload, waits 24 hours and consumes it when shown", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-20T10:00:00Z"));
-    const { store, client } = makeStore(null, version);
-    await store.snoozeLatest();
-    expect(client.snooze).toHaveBeenCalledExactlyOnceWith(version);
-    expect(store.pendingAnnouncement()).toBeNull();
-    const reminder = (await client.snooze.mock.results[0].value).remind_after;
+    makeStore(null, version).store.snoozeLatest();
     vi.setSystemTime(new Date("2026-10-21T09:59:59Z"));
-    expect(
-      makeStore(null, version, true, version, reminder).store.pendingAnnouncement()
-    ).toBeNull();
+    expect(makeStore(null, version).store.pendingAnnouncement()).toBeNull();
     vi.setSystemTime(new Date("2026-10-21T10:00:00Z"));
-    const returning = makeStore(null, version, true, version, reminder).store;
+    const returning = makeStore(null, version).store;
     expect(returning.pendingAnnouncement()?.version).toBe(version);
     await returning.markLatestAnnounced();
-    expect(returning.pendingAnnouncement()).toBeNull();
+    expect(makeStore(null, version).store.pendingAnnouncement()).toBeNull();
   });
 
-  it("suppresses read reminders but lets a newer release announce immediately", () => {
-    const past = "2020-01-01T00:00:00Z";
-    const future = "2099-01-01T00:00:00Z";
-    expect(makeStore(version, version, true, version, past).store.pendingAnnouncement()).toBeNull();
-    expect(makeStore(null, "999.0.0", true, version, past).store.pendingAnnouncement()).toBeNull();
+  it("isolates reminders by account and release, including newer versions and rollback", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-20T10:00:00Z"));
+    makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1").store.snoozeLatest();
     expect(
-      makeStore(null, "0.0.1", true, version, future).store.pendingAnnouncement()?.version
-    ).toBe(version);
+      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.2").store.pendingAnnouncement()?.version
+    ).toBe("2.3.0-rc.2");
+    vi.setSystemTime(new Date("2026-10-21T10:00:00Z"));
+    expect(
+      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1").store.pendingAnnouncement()?.version
+    ).toBe("2.3.0-rc.1");
+    expect(
+      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1", "user-2").store.pendingAnnouncement()
+    ).toBeNull();
+    expect(
+      makeStore(null, "2.3.0-rc.2", true, "2.3.0-rc.1").store.pendingAnnouncement()
+    ).toBeNull();
   });
 
-  it("cancels a reminder when news is read and clears it on developer reset", async () => {
-    const { store } = makeStore(null, version, true, version, "2020-01-01T00:00:00Z");
+  it("cancels reminders when news is read, including read progress from another browser", async () => {
+    makeStore(null, version).store.snoozeLatest();
+    const readElsewhere = makeStore(version, version).store;
+    expect(readElsewhere.pendingAnnouncement()).toBeNull();
+    // Clearing the local reminder remains effective even with stale read progress.
+    expect(makeStore(null, version).store.pendingAnnouncement()).toBeNull();
+    const { store } = makeStore(null, version);
+    store.snoozeLatest();
     await store.markLatestSeen();
     expect(store.pendingAnnouncement()).toBeNull();
+  });
+
+  it("reset clears local postponement and server markers so the announcement returns immediately", async () => {
+    const { store, client } = makeStore(null, version);
+    store.snoozeLatest();
+    expect(store.pendingAnnouncement()).toBeNull();
     await store.resetState();
+    expect(client.resetState).toHaveBeenCalledOnce();
     expect(store.pendingAnnouncement()?.version).toBe(version);
   });
 
-  it("reports a failed reminder write instead of pretending it was saved", async () => {
+  it("keeps a reminder if an older backend does not accept the read marker", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-20T10:00:00Z"));
     const { store, client } = makeStore(null, version);
-    client.snooze.mockRejectedValueOnce(new Error("offline"));
-    await expect(store.snoozeLatest()).rejects.toThrow("offline");
+    store.snoozeLatest();
+    client.markSeen.mockResolvedValueOnce({ seen_version: "0.0.1", announced_version: null });
+    await store.markLatestSeen();
     expect(store.pendingAnnouncement()).toBeNull();
+    vi.setSystemTime(new Date("2026-10-21T10:00:00Z"));
+    expect(store.pendingAnnouncement()?.version).toBe(version);
   });
 
-  it("finishes recording the announcement before postponing it", async () => {
-    const { store, client } = makeStore();
-    let finish: (() => void) | undefined;
-    client.markAnnounced.mockImplementationOnce(async (_version) => {
-      await new Promise<void>((resolve) => {
-        finish = resolve;
-      });
-      return { seen_version: null, announced_version: _version, remind_after: null };
+  it("reports failed storage writes and reset instead of claiming success", async () => {
+    const { store, client } = makeStore(null, version);
+    vi.spyOn(globalThis.localStorage, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
     });
-    const announced = store.markLatestAnnounced();
-    const postponed = store.snoozeLatest();
-    expect(client.snooze).not.toHaveBeenCalled();
-    finish?.();
-    await Promise.all([announced, postponed]);
-    expect(client.snooze).toHaveBeenCalledOnce();
+    expect(() => store.snoozeLatest()).toThrow("blocked");
+    vi.spyOn(globalThis.localStorage, "removeItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    await expect(store.resetState()).rejects.toThrow("blocked");
+    expect(client.resetState).not.toHaveBeenCalled();
+  });
+
+  it("ignores invalid or unavailable local storage without breaking normal announcements", () => {
+    vi.spyOn(globalThis.localStorage, "getItem").mockReturnValue("invalid");
+    expect(makeStore(null, version).store.pendingAnnouncement()).toBeNull();
+    expect(makeStore().store.pendingAnnouncement()?.version).toBe(version);
+    vi.spyOn(globalThis.localStorage, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    expect(makeStore().store.pendingAnnouncement()?.version).toBe(version);
+    vi.stubGlobal("localStorage", undefined);
+    expect(makeStore().store.pendingAnnouncement()?.version).toBe(version);
   });
 
   it("announces every RC and the final once, and keeps read progress independent", async () => {
@@ -198,15 +230,10 @@ describe("whatsNewStore", () => {
 
   it("accepts the backend's newer marker after a write from an older frontend", async () => {
     const { store, client } = makeStore();
-    client.markSeen.mockResolvedValueOnce({
-      seen_version: "999.0.0",
-      announced_version: null,
-      remind_after: null
-    });
+    client.markSeen.mockResolvedValueOnce({ seen_version: "999.0.0", announced_version: null });
     client.markAnnounced.mockResolvedValueOnce({
       seen_version: null,
-      announced_version: "999.0.0",
-      remind_after: null
+      announced_version: "999.0.0"
     });
     await store.markLatestSeen();
     await store.markLatestAnnounced();
@@ -217,12 +244,12 @@ describe("whatsNewStore", () => {
   it("stays quiet when the state could not be read", async () => {
     const { client } = makeStore();
     const store = createWhatsNewStore({
+      user: { id: "user-1" },
       eneo: { whatsNew: client },
       whatsNewEnabled: true,
       whatsNewVersion: version,
       whatsNewSeenVersion: undefined,
-      whatsNewAnnouncedVersion: undefined,
-      whatsNewRemindAfter: undefined
+      whatsNewAnnouncedVersion: undefined
     });
     expect(get(store.hasUnseen)).toBe(false);
     expect(store.pendingAnnouncement()).toBeNull();

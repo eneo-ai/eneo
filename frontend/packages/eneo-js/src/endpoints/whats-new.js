@@ -45,20 +45,7 @@ export function initWhatsNew(client) {
     },
 
     /**
-     * Remind the user about this unread release on a visit after 24 hours.
-     * @param {string} version Installed release id
-     * @returns {Promise<WhatsNewState>}
-     * @throws {EneoError}
-     */
-    snooze: async (version) => {
-      return client.fetch("/api/v1/whats-new/snooze/", {
-        method: "put",
-        requestBody: { "application/json": { version } }
-      });
-    },
-
-    /**
-     * Development only: forget markers and reminders so the announcement and dot return.
+     * Development only: forget both markers so the announcement and the dot return.
      * @returns {Promise<WhatsNewState>}
      * @throws {EneoError} 404 developer_tools_disabled outside development
      */

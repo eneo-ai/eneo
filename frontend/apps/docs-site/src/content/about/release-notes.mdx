@@ -19,10 +19,12 @@ What's new page marks that installed version as read; dismissing the popup
 alone does not mark it as read.
 
 Choose **Remind me tomorrow** to see the announcement again on your first visit
-after 24 hours, unless you have already opened the news. The reminder follows
-your account across devices. Choose **Not interested** to dismiss this version;
+after 24 hours, unless you have already opened the news. The reminder is saved
+for your account in the current browser. Choose **Not interested** to dismiss this version;
 the next version can still announce its news. Escape also dismisses the dialog.
-Opening the news cancels its reminder, and a new version replaces an older reminder.
+Opening the news cancels its reminder; a reminder never delays a newer version.
+In development, **Reset and reload** clears both the browser's current reminder
+and the server's seen/announced markers so the announcement can appear immediately.
 
 In the app, **What's new** shares the account sidebar with **My account**,
 **Integrations** and **API keys**. Select **What's new** there to browse releases.

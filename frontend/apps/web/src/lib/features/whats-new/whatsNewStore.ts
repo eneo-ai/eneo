@@ -9,16 +9,14 @@ export { getWhatsNewStore, initWhatsNewStore, createWhatsNewStore };
 export type Marker = string | null | undefined;
 
 export interface WhatsNewInit {
-  eneo: {
-    whatsNew: Pick<Eneo["whatsNew"], "markSeen" | "markAnnounced" | "snooze" | "resetState">;
-  };
+  user: { id: string };
+  eneo: { whatsNew: Pick<Eneo["whatsNew"], "markSeen" | "markAnnounced" | "resetState"> };
   /** Tenant opt-out (admin setting): off hides the page, dot and announcement. */
   whatsNewEnabled: boolean;
   /** Installed frontend version, including the RC suffix. */
   whatsNewVersion: string;
   whatsNewSeenVersion: Marker;
   whatsNewAnnouncedVersion: Marker;
-  whatsNewRemindAfter: string | null | undefined;
 }
 
 const [getWhatsNewStore, setWhatsNewStore] =
@@ -34,16 +32,36 @@ function createWhatsNewStore(data: WhatsNewInit) {
   const { eneo } = data;
   const releases = releasesForVersion(data.whatsNewVersion);
   const latest = releases[0];
+  // Local reminders are isolated by account and installed release (including RCs).
+  const reminderKey = `eneo:whats-new:remind-after:${data.user.id}:${latest?.version}`;
   const enabled = writable(data.whatsNewEnabled);
   const seenVersion = writable<Marker>(data.whatsNewSeenVersion);
   const announcedVersion = writable<Marker>(data.whatsNewAnnouncedVersion);
-  let remindAfter = data.whatsNewRemindAfter;
   const hasUnseen = derived([enabled, seenVersion], ([$enabled, $seen]) =>
     !$enabled || $seen === undefined ? false : hasUnseenRelease($seen, latest)
   );
 
   let inFlight: Promise<void> | null = null;
-  let announcementWrite: Promise<void> | null = null;
+
+  function reminderTime(): number | null {
+    try {
+      const raw = globalThis.localStorage?.getItem(reminderKey);
+      if (!raw) return null;
+      const timestamp = Number(raw);
+      return Number.isFinite(timestamp) && timestamp > 0 ? timestamp : null;
+    } catch {
+      // Storage may be unavailable; ordinary announcements must still work.
+      return null;
+    }
+  }
+
+  function forgetReminder(): void {
+    try {
+      globalThis.localStorage?.removeItem(reminderKey);
+    } catch {
+      // Storage failures must not prevent reading or announcing news.
+    }
+  }
 
   /** Record the newest bundled release as seen. Safe to call repeatedly. */
   function markLatestSeen(): Promise<void> {
@@ -59,7 +77,7 @@ function createWhatsNewStore(data: WhatsNewInit) {
       .markSeen(latest.version)
       .then((state) => {
         seenVersion.set(state.seen_version);
-        remindAfter = state.remind_after;
+        if (!hasUnseenRelease(state.seen_version, latest)) forgetReminder();
       })
       .catch((error: unknown) => {
         seenVersion.set(previous);
@@ -72,25 +90,23 @@ function createWhatsNewStore(data: WhatsNewInit) {
   }
 
   /**
-   * Announce a new release, or repeat its unread announcement when the saved
-   * reminder is due. A reminder never delays a newer release.
+   * Announce new releases or due local reminders. A reminder never delays
+   * a different release, and server-side read progress cancels it.
    */
   function pendingAnnouncement() {
     if (!get(enabled) || !latest) return null;
     const announced = get(announcedVersion);
     if (announced === undefined) return null;
-    if (announced) {
-      const order = compareVersions(latest.version, announced);
-      if (order < 0) return null;
-      if (
-        order === 0 &&
-        (!get(hasUnseen) ||
-          !remindAfter ||
-          Date.parse(remindAfter) > Date.now() ||
-          !Number.isFinite(Date.parse(remindAfter)))
-      )
+    if (announced && compareVersions(latest.version, announced) < 0) return null;
+    const remindAfter = reminderTime();
+    if (remindAfter !== null) {
+      if (!get(hasUnseen)) {
+        forgetReminder();
         return null;
+      }
+      return Date.now() >= remindAfter ? latest : null;
     }
+    if (announced && compareVersions(latest.version, announced) <= 0) return null;
     return latest;
   }
 
@@ -100,42 +116,31 @@ function createWhatsNewStore(data: WhatsNewInit) {
    * seen marker is untouched because being told is not the same as looking.
    */
   function markLatestAnnounced(): Promise<void> {
-    if (announcementWrite) return announcementWrite;
     const latest = pendingAnnouncement();
     if (!latest) return Promise.resolve();
+    forgetReminder();
     announcedVersion.set(latest.version);
-    remindAfter = null;
-    announcementWrite = eneo.whatsNew
+    return eneo.whatsNew
       .markAnnounced(latest.version)
-      .then((state) => {
-        announcedVersion.set(state.announced_version);
-        remindAfter = state.remind_after;
-      })
+      .then((state) => announcedVersion.set(state.announced_version))
       .catch((error: unknown) => {
         console.error("Could not record the What's new announcement", error);
-      })
-      .finally(() => {
-        announcementWrite = null;
       });
-    return announcementWrite;
   }
 
-  async function snoozeLatest(): Promise<void> {
-    if (!get(enabled) || !latest) return;
-    // Opening and immediately postponing must not race the announcement write.
-    await announcementWrite;
-    const state = await eneo.whatsNew.snooze(latest.version);
-    seenVersion.set(state.seen_version);
-    announcedVersion.set(state.announced_version);
-    remindAfter = state.remind_after;
+  function snoozeLatest(): void {
+    if (!get(enabled) || !latest || !get(hasUnseen)) return;
+    // Let blocked/full storage throw: the dialog stays open and explains failure.
+    globalThis.localStorage.setItem(reminderKey, String(Date.now() + 24 * 60 * 60 * 1000));
   }
 
-  /** Development only: forget both markers so the announcement and the dot return. */
+  /** Development only: forget server markers and this browser's reminder. */
   async function resetState(): Promise<void> {
+    // Unlike best-effort cleanup, reset must not claim success if removal fails.
+    globalThis.localStorage?.removeItem(reminderKey);
     await eneo.whatsNew.resetState();
     seenVersion.set(null);
     announcedVersion.set(null);
-    remindAfter = null;
   }
 
   return {
