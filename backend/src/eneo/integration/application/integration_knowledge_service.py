@@ -11,6 +11,7 @@ from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.integration.domain.entities.oauth_token import OauthToken
+from eneo.integration.infrastructure.connection_owner import owner_id_can_sign_in
 from eneo.integration.infrastructure.content_service.types import (
     SharePointTokenProtocol,
 )
@@ -787,6 +788,13 @@ class IntegrationKnowledgeService:
             token_id = None
             tenant_app_id = tenant_app.id
         else:
+            if not await owner_id_can_sign_in(
+                self.space_repo.session, user_integration.user_id
+            ):
+                raise BadRequestException(
+                    "The person who connected this SharePoint source can no "
+                    "longer sign in. Connect it again with an active account."
+                )
             oauth_token = await self.oauth_token_repo.one(
                 user_integration_id=user_integration.id
             )

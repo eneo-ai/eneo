@@ -31,6 +31,7 @@ from eneo.integration.domain.repositories.oauth_token_repo import OauthTokenRepo
 from eneo.integration.domain.repositories.sharepoint_subscription_repo import (
     SharePointSubscriptionRepository,
 )
+from eneo.integration.infrastructure.connection_owner import owner_can_sign_in
 from eneo.integration.infrastructure.content_service.types import (
     SharePointWebhookNotification,
     SharePointWebhookPayload,
@@ -57,7 +58,7 @@ from eneo.jobs.job_service import JobService
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 from eneo.tenants.tenant import TenantState
-from eneo.users.user import UserInDB, UserState
+from eneo.users.user import UserInDB
 from eneo.users.user_repo import UsersRepository
 
 if TYPE_CHECKING:
@@ -87,7 +88,6 @@ _MAINTENANCE_WINDOW_SECONDS = 10 * 60
 _MARKER_CATCH_UP_WINDOW_SECONDS = 60 * 60
 # Catch-up reads the sync state of this many sources per Redis round trip.
 _SYNC_STATE_BATCH = 500
-_USERS_WHO_CAN_SIGN_IN = (UserState.ACTIVE.value, UserState.INVITED.value)
 
 
 @dataclass(frozen=True)
@@ -390,7 +390,8 @@ class SharepointWebhookService:
         knowledge_records = await self._fetch_knowledge_by_subscription(subscription.id)
         if not knowledge_records:
             logger.info(
-                "No integration knowledge references SharePoint subscription %s (%s %s)",
+                "No integration knowledge that may sync references SharePoint "
+                "subscription %s (%s %s)",
                 subscription.subscription_id,
                 resource_type,
                 resource_id,
@@ -507,7 +508,8 @@ class SharepointWebhookService:
         )
         if not records:
             logger.info(
-                "Not queuing a sync for knowledge %s: it no longer exists",
+                "Not queuing a sync for knowledge %s: it no longer exists, or "
+                "its connection's owner can no longer sign in",
                 knowledge_id,
             )
             return None
@@ -852,8 +854,7 @@ class SharepointWebhookService:
                     ),
                     sa.and_(
                         connection.auth_type == "user_oauth",
-                        Users.deleted_at.is_(None),
-                        Users.state.in_(_USERS_WHO_CAN_SIGN_IN),
+                        owner_can_sign_in(),
                     ),
                 ),
             )
@@ -1004,6 +1005,11 @@ class SharepointWebhookService:
     async def _fetch_knowledge(
         self, condition: sa.ColumnElement[bool]
     ) -> list[tuple[IntegrationKnowledgeDBModel, UserIntegrationDBModel]]:
+        """The rows matching ``condition`` that may still sync.
+
+        Every path that queues a sync loads its rows here, so a personal
+        connection whose owner can no longer sign in is left out of all of them.
+        """
         stmt = (
             sa.select(IntegrationKnowledgeDBModel, UserIntegrationDBModel)
             .join(
@@ -1011,7 +1017,14 @@ class SharepointWebhookService:
                 IntegrationKnowledgeDBModel.user_integration_id
                 == UserIntegrationDBModel.id,
             )
-            .where(condition)
+            .outerjoin(Users, UserIntegrationDBModel.user_id == Users.id)
+            .where(
+                condition,
+                sa.or_(
+                    UserIntegrationDBModel.auth_type == "tenant_app",
+                    owner_can_sign_in(),
+                ),
+            )
         )
 
         result = await self.session.execute(stmt)

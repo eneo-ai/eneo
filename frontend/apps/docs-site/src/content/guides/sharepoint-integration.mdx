@@ -313,6 +313,8 @@ Personal spaces use OAuth authentication, allowing each user to import from thei
 
 Your OAuth token is stored securely and refreshed automatically using the `offline_access` permission. If your token expires (for example, after password changes or revoked consent), you'll be prompted to sign in again.
 
+A personal connection synchronizes only while the person who connected it can sign in to Eneo. Once that account is deactivated or removed, its sources stop updating: change notifications, the periodic catch-up and follow-up synchronizations skip them, and a **Full Sync** is refused. The documents already imported can still be searched. To keep a source current, import it again with an active account.
+
 ### Supported File Types
 
 Files from SharePoint are read with the same parsers and extraction limits as files uploaded directly to Eneo, so a PDF with tables or a spreadsheet yields the same text whichever way it arrives:

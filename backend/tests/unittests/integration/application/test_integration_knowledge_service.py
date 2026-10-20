@@ -1908,6 +1908,10 @@ class _Savepoints:
         self.fail_release: set[int] = set()
         self._opened = 0
 
+    async def scalar(self, _statement: object) -> bool:
+        # The only query: whether the connection's owner can still sign in.
+        return True
+
     def begin_nested(self):
         number = self._opened
         self._opened += 1
