@@ -31,7 +31,7 @@ function blockStart(src: string) {
   return -1;
 }
 
-type InlineText = { src: string; forEmphasis?: string; forStrikethrough?: string };
+type InlineText = { src: string; forDelimiters?: string };
 
 /**
  * Keeps the inline text marked is lexing, so emphasis and strikethrough can
@@ -170,16 +170,18 @@ export function eneoMarkdownLexer({
       },
       emStrong(src, maskedSrc, prevChar) {
         const text = inlineText(this);
-        if (!text || (src[0] !== "*" && src[0] !== "_")) return false;
-        text.forEmphasis ??= hideMathDelimiters(text.src, maskedSrc);
-        return Tokenizer.prototype.emStrong.call(this, src, text.forEmphasis, prevChar);
+        if (!text || (src[0] !== "*" && src[0] !== "_" && src[0] !== "~")) return false;
+        // marked calls emStrong before del. Share its code/link/tag mask with
+        // strikethrough so dollars inside code cannot hide a real closing ~~.
+        text.forDelimiters ??= hideMathDelimiters(text.src, maskedSrc);
+        if (src[0] === "~") return false;
+        return Tokenizer.prototype.emStrong.call(this, src, text.forDelimiters, prevChar);
       },
       // marked's own, read where the formulas' delimiters are hidden.
       del(src) {
         const text = inlineText(this);
-        if (!text || src[0] !== "~") return false;
-        text.forStrikethrough ??= hideMathDelimiters(text.src);
-        const cap = this.rules.inline.del.exec(text.forStrikethrough.slice(-src.length));
+        if (!text?.forDelimiters || src[0] !== "~") return false;
+        const cap = this.rules.inline.del.exec(text.forDelimiters.slice(-src.length));
         if (!cap) return;
         const raw = src.slice(0, cap[0].length);
         const inner = raw.slice(cap[1].length, -cap[1].length);

@@ -57,6 +57,14 @@ describe("Math in answers", () => {
     expect(container.querySelector("p [data-math='inline'] .katex")).not.toBeNull();
   });
 
+  it("strikes through code with a dollar without pairing it with another code span", () => {
+    const { container } = render(Markdown, { source: "~~`$x`~~ + `y$`" });
+    expect(container.querySelector("del code")?.textContent).toBe("$x");
+    expect(container.querySelectorAll("code")).toHaveLength(2);
+    expect(container.querySelector("[data-math]")).toBeNull();
+    expect(container.textContent).not.toContain("~~");
+  });
+
   it("does not typeset a finished formula again while the answer streams", async () => {
     const typeset = vi.spyOn(katex, "renderToString");
     const { container, rerender } = render(Markdown, { source: "Låt $x^2$ vara" });

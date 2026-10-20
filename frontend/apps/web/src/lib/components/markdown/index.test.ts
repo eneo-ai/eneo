@@ -33,6 +33,17 @@ describe("eneoMarkdownLexer", () => {
     const tokens = eneo.lex("Rubrik\n$$\nx\n$$\n===");
     expect(tokens.map((token) => token.type)).toEqual(["paragraph", "eneoMath", "paragraph"]);
   });
+
+  it("keeps code-span dollars out of strikethrough math detection", () => {
+    const source = "~~`$x`~~ + `y$`";
+    expect(eneo.lex(source)).toEqual(plain.lexer(source));
+    expect(types(eneo.lex(source))).toContain("del");
+    expect(types(eneo.lex(source))).not.toContain("eneoMath");
+  });
+
+  it("keeps formula tildes inside strikethrough", () => {
+    expect(types(eneo.lex("~~$x~~y$~~"))).toEqual(["paragraph", "del", "eneoMath"]);
+  });
 });
 
 function fastest(lex: (source: string) => unknown, source: string) {
