@@ -58,8 +58,20 @@ from eneo.settings.encryption_service import EncryptionService
 SPACE_ID = uuid.UUID("5a0e5a0e-0000-4000-8000-000000000001")
 SECOND_SPACE_ID = uuid.UUID("5a0e5a0e-0000-4000-8000-000000000002")
 SECOND_SPACE_NAME = "SharePoint – HR och nämnd"
+# Shared spaces the seed creates, so the admin overview has several to list.
+SHARED_SPACES = {
+    "main": (SPACE_ID, "SharePoint – storskaligt"),
+    "second": (SECOND_SPACE_ID, SECOND_SPACE_NAME),
+    "school": (
+        uuid.UUID("5a0e5a0e-0000-4000-8000-000000000003"),
+        "SharePoint – Utbildningsförvaltningen",
+    ),
+    "council": (
+        uuid.UUID("5a0e5a0e-0000-4000-8000-000000000004"),
+        "SharePoint – Kommunledningskontoret",
+    ),
+}
 # One source goes into the user's personal space, so admin views have one to count.
-PERSONAL_KNOWLEDGE_KEY = "knowledge/personal-notes"
 SPACE_NAME = "SharePoint – storskaligt"
 # Every id the script creates is derived from this namespace, so a rerun
 # replaces the same rows instead of piling up new ones.
@@ -87,6 +99,12 @@ SKIP_REASONS: list[tuple[str, str, int]] = [
     ("Error: Password-protected file", ".xlsx", 3),
     ("Error: Corrupt or malformed file", ".docx", 2),
     ("Error: TimeoutError while extracting pdf", ".pdf", 1),
+    ("Unsupported file type (OneNote)", ".one", 2),
+    ("Error: HTTP 403 Forbidden", ".docx", 2),
+    ("Error: SharePoint offers no download for this item", ".url", 1),
+    ("Set aside after 3 failed attempts, tried again later: HTTP 500", ".pdf", 1),
+    # Written by 2.2.x for unchanged files; shown as unchanged, never as a problem.
+    ("Already synced (no changes)", ".docx", 2),
 ]
 MAX_LISTED_SKIPPED = 50
 
@@ -137,7 +155,7 @@ class Source:
     site_id: str
     wrapper: bool
     folders: list[Folder]
-    space: str = "main"  # main | second | personal
+    space: str = "main"  # a SHARED_SPACES key, "org" or "personal"
 
 
 def site_folder(site: str, library: str, path: str) -> str:
@@ -324,6 +342,102 @@ def build_sources(rng: random.Random) -> list[Source]:
                 )
             ],
         ),
+        Source(
+            "Skolor",
+            "showcase-site-skola",
+            True,
+            space="school",
+            folders=[
+                Folder(
+                    key=f"skola/{name}",
+                    name=name,
+                    folder_path=f"/{name}",
+                    url=site_folder("utbildning", "Delade dokument", f"/{name}"),
+                    state=state,
+                    documents=0
+                    if state in ("never", "empty")
+                    else rng.randint(30, 400),
+                    skipped=rng.randint(10, 40)
+                    if state == "empty"
+                    else rng.choice([0, 3, 9]),
+                    error=error,
+                    subfolders=["", "Läsår 2025-26", "Läsår 2026-27"],
+                    subscription="skola",
+                )
+                for name, state, error in [
+                    ("Grundskola", "ok", None),
+                    ("Gymnasium", "ok", None),
+                    (
+                        "Elevhälsa",
+                        "error",
+                        "Graph request failed: 503 Service Unavailable after 5 retries",
+                    ),
+                    ("Förskola", "empty", None),
+                    ("Vuxenutbildning", "never", None),
+                ]
+            ],
+        ),
+        Source(
+            "Styrdokument",
+            "showcase-site-styrdokument",
+            False,
+            space="council",
+            folders=[
+                Folder(
+                    key="styrdokument",
+                    name="Styrdokument",
+                    folder_path="/Styrdokument",
+                    url=site_folder(
+                        "kommunledning", "Delade dokument", "/Styrdokument"
+                    ),
+                    state="ok",
+                    documents=320,
+                    skipped=14,
+                    subfolders=["", "Policyer", "Riktlinjer", "Planer"],
+                    subscription="kommunledning",
+                    with_properties=True,
+                )
+            ],
+        ),
+        Source(
+            "Kommunfullmäktige",
+            "showcase-site-kf",
+            False,
+            space="council",
+            folders=[
+                Folder(
+                    key="kf",
+                    name="Kommunfullmäktige",
+                    folder_path="/Sammanträden",
+                    url=site_folder(
+                        "kommunledning", "Delade dokument", "/Sammanträden"
+                    ),
+                    state="credentials",
+                    documents=410,
+                    error=CREDENTIALS_INVALID,
+                    subfolders=["", "2025", "2026"],
+                )
+            ],
+        ),
+        Source(
+            "Gemensamma rutiner",
+            "showcase-site-org",
+            False,
+            space="org",
+            folders=[
+                Folder(
+                    key="org/rutiner",
+                    name="Gemensamma rutiner",
+                    folder_path="/Rutiner",
+                    url=site_folder("intranat", "Delade dokument", "/Rutiner"),
+                    state="ok",
+                    documents=95,
+                    skipped=7,
+                    subfolders=["", "IT", "Säkerhet"],
+                    subscription="intranat",
+                )
+            ],
+        ),
     ]
 
 
@@ -411,11 +525,17 @@ def one(cur: psycopg2.extensions.cursor, query: str, *params: Any) -> Any:
 
 
 def remove_showcase(cur: psycopg2.extensions.cursor) -> None:
-    spaces = [str(SPACE_ID), str(SECOND_SPACE_ID)]
+    spaces = [str(space_id) for space_id, _ in SHARED_SPACES.values()]
+    # Items outside the seeded spaces (personal, organization) by their seeded ids.
+    seeded = [
+        str(sid(f"knowledge/{folder.key}"))
+        for source in build_sources(random.Random(0))
+        for folder in source.folders
+    ]
     cur.execute(
         """SELECT id FROM integration_knowledge
-           WHERE space_id = ANY(%s::uuid[]) OR id = %s""",
-        (spaces, str(sid(PERSONAL_KNOWLEDGE_KEY))),
+           WHERE space_id = ANY(%s::uuid[]) OR id = ANY(%s::uuid[])""",
+        (spaces, seeded),
     )
     ids = [row[0] for row in cur.fetchall()]
     if ids:
@@ -604,10 +724,7 @@ def seed(settings: Settings, email: str) -> None:
             cur, settings, tenant_id, user_id
         )
 
-        for space_id, space_name in (
-            (SPACE_ID, SPACE_NAME),
-            (SECOND_SPACE_ID, SECOND_SPACE_NAME),
-        ):
+        for space_id, space_name in SHARED_SPACES.values():
             cur.execute(
                 """INSERT INTO spaces (id, name, description, tenant_id, user_id, tenant_space_id)
                    VALUES (%s, %s, %s, %s, NULL, %s)""",
@@ -634,11 +751,11 @@ def seed(settings: Settings, email: str) -> None:
             tenant_id,
             user_id,
         )
-        space_ids = {
-            "main": str(SPACE_ID),
-            "second": str(SECOND_SPACE_ID),
-            "personal": str(personal_space_id) if personal_space_id else None,
+        space_ids: dict[str, str | None] = {
+            key: str(space_id) for key, (space_id, _) in SHARED_SPACES.items()
         }
+        space_ids["org"] = str(org_space_id) if org_space_id else None
+        space_ids["personal"] = str(personal_space_id) if personal_space_id else None
 
         subscriptions = {
             "social": dict(expires=now + timedelta(days=2), failures=0),
@@ -652,6 +769,12 @@ def seed(settings: Settings, email: str) -> None:
                 expires=now + timedelta(hours=6),
                 failures=1,
                 error="Graph throttled the renewal (429); retried later",
+            ),
+            "skola": dict(expires=now + timedelta(days=20), failures=0),
+            "kommunledning": dict(
+                expires=now + timedelta(days=1, hours=2),
+                failures=2,
+                error="Microsoft Graph refused to reauthorize the subscription (403)",
             ),
         }
         subscription_ids: dict[str, str] = {}
@@ -813,9 +936,10 @@ def seed(settings: Settings, email: str) -> None:
                         ],
                     )
         connection.commit()
+    names = ", ".join(repr(name) for _, name in SHARED_SPACES.values())
     print(
-        f"Seeded {SPACE_NAME!r} and {SECOND_SPACE_NAME!r}: {knowledge_count} items, "
-        f"{document_count} documents, {log_count} sync logs."
+        f"Seeded {names}, the organization space and the personal space: "
+        f"{knowledge_count} items, {document_count} documents, {log_count} sync logs."
     )
     print(f"Open /spaces/{SPACE_ID}/knowledge?tab=integrations")
 
@@ -1110,7 +1234,7 @@ def main() -> None:
             remove_showcase(cur)
             kept = remove_connection(cur)
             connection.commit()
-        print(f"Removed {SPACE_NAME!r}, {SECOND_SPACE_NAME!r} and the personal source.")
+        print("Removed the showcase spaces and the sources the seed placed elsewhere.")
         for row in kept:
             print(f"Kept {row}.")
         return
