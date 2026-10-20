@@ -16,12 +16,20 @@ export async function executeForecast(
   engine: ForecastEngine,
 ): Promise<ForecastResult> {
   // As text: dates and numbers are validated here, not guessed by the reader.
-  const { columns, rows } = await readSource(job.source, { asText: true });
-  const series = dailySeries(
-    rows,
-    column(columns, job.source.dateColumn),
-    column(columns, job.source.valueColumn),
+  const { columns, rows, uncalculated } = await readSource(job.source, { asText: true });
+  const dateAt = column(columns, job.source.dateColumn);
+  const valueAt = column(columns, job.source.valueColumn);
+  // An unsaved formula result reads as an empty cell, which would count as a day without a value.
+  const unread = (uncalculated ?? []).filter((cell) =>
+    [dateAt, valueAt].includes(columnIndex(cell)),
   );
+  if (unread.length)
+    throw new ToolError(
+      "UNCALCULATED_FORMULAS",
+      `${unread.slice(0, 5).join(", ")}${unread.length > 5 ? ` and ${unread.length - 5} more` : ""} ` +
+        "hold formulas without a saved result. Open the workbook in Excel, let it calculate, save it and attach it again.",
+    );
+  const series = dailySeries(rows, dateAt, valueAt);
   const { config } = job;
   const days = series.values.length;
   if (days < config.min_history_days)
@@ -78,6 +86,12 @@ function holdoutOf(prediction: EngineResult): Interval {
   if (!prediction.holdout)
     throw new ToolError("ENGINE_FAILED", "The forecast model returned no comparison forecast.");
   return prediction.holdout;
+}
+
+/** The zero-based column of an A1 address: B11 is 1. */
+function columnIndex(address: string): number {
+  const letters = /^[A-Z]+/.exec(address)?.[0] ?? "";
+  return [...letters].reduce((n, letter) => n * 26 + letter.charCodeAt(0) - 64, 0) - 1;
 }
 
 function column(columns: string[], name: string): number {

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { forecastAvailable, timestralEngine } from "../../src/tools/forecast/engine/timestral";
@@ -41,6 +41,24 @@ describe.skipIf(!(await forecastAvailable()))("the Timestral engine", async () =
     await expect(missing({ values: daily(60), horizon: 3, holdout: false })).rejects.toMatchObject({
       code: "MODEL_UNAVAILABLE",
     });
+  });
+
+  test.each([
+    ["weights that are not a safetensors file", async (path: string) => writeFile(join(path, "model.safetensors"), "not weights")],
+    ["weights it may not read", async (path: string) => chmod(join(path, "model.safetensors"), 0o000)],
+  ])("refuses a Timestral config with %s", async (_case, spoil) => {
+    // Permissions do not stop root (a container's test run): only the decoding case applies.
+    if (_case.includes("may not read") && process.getuid?.() === 0) return;
+    const path = join(directory, `spoiled-${_case.length}`);
+    await mkdir(path, { recursive: true });
+    await copyFile(join(modelPath, "config.json"), join(path, "config.json"));
+    await copyFile(join(modelPath, "model.safetensors"), join(path, "model.safetensors"));
+    await spoil(path);
+    const spoiled = timestralEngine({ modelPath: path, threads: 1 });
+    await expect(spoiled({ values: daily(60), horizon: 3, holdout: false })).rejects.toMatchObject({
+      code: "MODEL_UNAVAILABLE",
+    });
+    await chmod(join(path, "model.safetensors"), 0o600);
   });
 
   test("refuses a directory that is not a Timestral checkpoint", async () => {

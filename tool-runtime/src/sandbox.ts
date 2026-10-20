@@ -21,10 +21,6 @@ const LANDRUN = [join(RUNTIME_ROOT, "bin", "landrun"), "/usr/local/bin/landrun"]
 const PDF_PYTHON = process.env.PDF_PYTHON ?? "/opt/pdf/bin/python3";
 const PDF_PYTHON_ROOT = dirname(dirname(PDF_PYTHON));
 const PDF_PYTHON_BINARY = realBinary(PDF_PYTHON);
-// The Python that forecasts (tools/forecast/engine/timestral.ts), the same way.
-const FORECAST_PYTHON = process.env.FORECAST_PYTHON ?? "/opt/forecast/bin/python3";
-const FORECAST_PYTHON_ROOT = dirname(dirname(FORECAST_PYTHON));
-const FORECAST_PYTHON_BINARY = realBinary(FORECAST_PYTHON);
 
 function realBinary(path: string): string {
   try {
@@ -53,9 +49,6 @@ const BASE_RULES = [
   // The PDF sidecar: its Python, fontconfig's configuration and prebuilt cache.
   ["--rox", PDF_PYTHON_ROOT],
   ["--rox", PDF_PYTHON_BINARY],
-  // The forecast sidecar: its Python, with torch's native libraries inside the venv.
-  ["--rox", FORECAST_PYTHON_ROOT],
-  ["--rox", FORECAST_PYTHON_BINARY],
   ["--ro", "/etc/fonts"],
   ["--ro", "/var/cache/fontconfig"],
   ["--ro", "/etc/mime.types"],
@@ -67,6 +60,15 @@ const BASE_RULES = [
   ["--ro", "/dev/urandom"],
   ["--rw", "/dev/null"],
 ].flat();
+
+/**
+ * The forecast sidecar's Python (tools/forecast/engine/timestral.ts) with torch's native
+ * libraries inside its venv, as the environment names it when a child is started.
+ */
+function forecastPythonRules(): string[] {
+  const python = process.env.FORECAST_PYTHON ?? "/opt/forecast/bin/python3";
+  return ["--rox", dirname(dirname(python)), "--rox", realBinary(python)];
+}
 
 /** The files one job may touch beyond its private directory. */
 export type JobPaths = { read?: string[]; write?: string[] };
@@ -133,6 +135,7 @@ export function confinement(job: SandboxJob, directory: string): string[] {
     "--ignore-missing",
     ...["--env", "PATH", "--env", "TMPDIR", "--env", "PDF_PYTHON", "--env", "FORECAST_PYTHON"],
     ...BASE_RULES,
+    ...forecastPythonRules(),
     ...["--rw", directory],
     ...(paths.read ?? []).flatMap((path) => ["--ro", path]),
     ...(paths.write ?? []).flatMap((path) => ["--rw", path]),

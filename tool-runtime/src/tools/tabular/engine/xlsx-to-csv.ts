@@ -33,6 +33,11 @@ export type SheetCsv = {
   /** UTF-8 CSV bytes ready to write to S3. */
   csv: Buffer;
   calculation?: CalculationDiagnostics;
+  /**
+   * Cells (A1 addresses) holding a formula with no saved result, which the CSV writes as empty:
+   * for a caller that must tell them from empty cells. Not part of a sheet's metadata.
+   */
+  uncalculated?: string[];
   sourceRows?: number[];
   explicitHeader?: boolean;
 };
@@ -95,6 +100,7 @@ export async function convertXlsxToCsvSheets(
       missing_cached_results: 0,
       recalculated: false,
     };
+    const uncalculated: string[] = [];
     worksheet.eachRow((row) =>
       row.eachCell((cell) => {
         if (selection && !selection.source_rows.includes(row.number)) return;
@@ -105,8 +111,10 @@ export async function convertXlsxToCsvSheets(
           ("formula" in value || "sharedFormula" in value)
         ) {
           calculation.formula_cells++;
-          if (value.result === undefined || value.result === null)
+          if (value.result === undefined || value.result === null) {
             calculation.missing_cached_results++;
+            uncalculated.push(cell.address);
+          }
         }
       }),
     );
@@ -120,6 +128,7 @@ export async function convertXlsxToCsvSheets(
         ? { sourceRows: selection.source_rows, explicitHeader: true }
         : {}),
       ...(calculation.formula_cells ? { calculation } : {}),
+      ...(uncalculated.length ? { uncalculated } : {}),
     });
   }
   return out;

@@ -75,7 +75,8 @@ jobs:
       - name: Install forecast sidecar
         run: |
           sudo python3 -m venv /opt/forecast
-          sudo /opt/forecast/bin/pip install --no-cache-dir --require-hashes -r scripts/requirements-forecast.txt
+          sudo /opt/forecast/bin/pip install --no-cache-dir --require-hashes -r scripts/requirements-forecast-build.txt
+          sudo /opt/forecast/bin/pip install --no-cache-dir --require-hashes --no-build-isolation -r scripts/requirements-forecast.txt
 
       - name: Typecheck
         run: bun run typecheck

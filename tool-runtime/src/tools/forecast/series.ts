@@ -43,6 +43,8 @@ export function dailySeries(rows: Cell[][], dateAt: number, valueAt: number): Da
 }
 
 const NUMBER = /^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$/;
+/** The model reads single precision: a larger value would reach it as unknown. */
+const LARGEST = 3.4028234663852886e38;
 
 /**
  * A value as the file holds it. An empty cell is a day without a value; anything else must be
@@ -50,10 +52,15 @@ const NUMBER = /^[-+]?(\d+(\.\d*)?|\.\d+)([eE][-+]?\d+)?$/;
  */
 function valueOf(cell: Cell, row: number): number | null {
   if (cell === null || cell === undefined) return null;
-  if (typeof cell === "number" && Number.isFinite(cell)) return cell;
   const text = String(cell).trim();
   if (text === "") return null;
-  if (NUMBER.test(text)) return Number(text);
+  const value = typeof cell === "number" ? cell : NUMBER.test(text) ? Number(text) : NaN;
+  if (Number.isFinite(value) && Math.abs(value) <= LARGEST) return value;
+  if (NUMBER.test(text) || typeof cell === "number")
+    throw new ToolError(
+      "INVALID_VALUES",
+      `Row ${row}: "${text.slice(0, 40)}" is too large to forecast. Check the value in the file.`,
+    );
   const comma = /^[-+]?\d+,\d+$/.test(text);
   throw new ToolError(
     "INVALID_VALUES",

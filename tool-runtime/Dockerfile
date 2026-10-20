@@ -59,10 +59,13 @@ RUN python3 -m venv /opt/pdf \
 # Forecasts run Timestral (scripts/forecast.py) with CPU-only torch in its own venv at
 # /opt/forecast. The image holds no model weights: the operator mounts a checkpoint they may
 # use at FORECAST_MODEL_PATH (default /models/forecast), read-only.
-COPY scripts/requirements-forecast.txt /tmp/requirements-forecast.txt
+# Its build backend is installed first, with hashes, and the archive built without isolation,
+# so no unpinned package is fetched during the build.
+COPY scripts/requirements-forecast-build.txt scripts/requirements-forecast.txt /tmp/
 RUN python3 -m venv /opt/forecast \
-    && /opt/forecast/bin/pip install --no-cache-dir --require-hashes -r /tmp/requirements-forecast.txt \
-    && rm /tmp/requirements-forecast.txt
+    && /opt/forecast/bin/pip install --no-cache-dir --require-hashes -r /tmp/requirements-forecast-build.txt \
+    && /opt/forecast/bin/pip install --no-cache-dir --require-hashes --no-build-isolation -r /tmp/requirements-forecast.txt \
+    && rm /tmp/requirements-forecast-build.txt /tmp/requirements-forecast.txt
 WORKDIR /app
 ENV NODE_ENV=production \
     APP_VERSION=${VERSION} \

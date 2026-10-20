@@ -42,7 +42,7 @@ async function resolveSheet(sheet: SheetRequest): Promise<SheetSpec> {
 export async function readSource(
   source: SheetSource,
   options: { asText?: boolean } = {},
-): Promise<{ columns: string[]; rows: Cell[][] }> {
+): Promise<{ columns: string[]; rows: Cell[][]; uncalculated?: string[] }> {
   const { path, isXlsx } = source;
   if (!path) throw new ToolError("RENDER_FAILED", "A source file was not downloaded.");
   const bytes = await readFile(path);
@@ -62,6 +62,8 @@ export async function readSource(
     if (!picked) throw new ToolError("UNKNOWN_SHEET", "Unknown sheet in the source workbook.");
     csvPath = join(dirname(path), `${source.index}.csv`);
     await writeFile(csvPath, picked.csv, { mode: 0o600 });
+    const table = await readTypedCsv(csvPath, options.asText === true);
+    return picked.uncalculated ? { ...table, uncalculated: picked.uncalculated } : table;
   } else {
     if (bytes.includes(0))
       throw new ToolError("INVALID_FILE", "The source is not a text CSV file.");

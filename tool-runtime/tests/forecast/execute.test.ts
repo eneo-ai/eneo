@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import ExcelJS from "exceljs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -89,6 +90,37 @@ describe("forecast job", () => {
     expect(calls[0]!.values.slice(9, 13)).toEqual([50, null, null, 50]);
   });
 
+  describe("workbooks", () => {
+    async function workbook(name: string, value: (day: number) => ExcelJS.CellValue) {
+      const book = new ExcelJS.Workbook();
+      const sheet = book.addWorksheet("Data");
+      sheet.addRow(["Datum", "kWh", "Not"]);
+      for (let day = 0; day < 40; day++)
+        sheet.addRow([new Date(Date.UTC(2026, 7, 1 + day)), value(day), { formula: "1+1" }]);
+      const path = join(directory, name);
+      await book.xlsx.writeFile(path);
+      return { index: 0, path, isXlsx: true, dateColumn: "Datum", valueColumn: "kWh" };
+    }
+
+    test("read real dates and formula results, a zero result included", async () => {
+      const source = await workbook("formulas.xlsx", (day) => (day === 5 ? { formula: "1-1", result: 0 } : 10 + day));
+      const { engine, calls } = constantEngine();
+      const result = await executeForecast({ kind: "forecast", source, horizon: 3, config }, engine);
+      expect(result.history).toMatchObject({ from: "2026-08-01", days: 40, missing: 0 });
+      expect(calls[0]!.values[5]).toBe(0);
+    });
+
+    test("refuse a formula without a saved result in the forecast's columns, naming the cell", async () => {
+      const source = await workbook("uncalculated.xlsx", (day) => (day === 9 ? { formula: "B2*2" } : 10 + day));
+      const error = await refusal(
+        executeForecast({ kind: "forecast", source, horizon: 3, config }, constantEngine().engine),
+      );
+      expect(error.code).toBe("UNCALCULATED_FORMULAS");
+      expect(error.message).toContain("B11");
+      expect(error.message).toContain("save it");
+    });
+  });
+
   describe("comparison with the outcome", () => {
     // An exact weekly pattern: 100, 110, ..., 160. Last week's same weekday is a perfect guess.
     const weekly = (day: number) => 100 + (day % 7) * 10;
@@ -116,7 +148,29 @@ describe("forecast job", () => {
       expect(result.holdout).toEqual({ from: "2026-08-25", to: "2026-09-28", scored: 35, inside: 15, mae: 30, baseline_mae: 0 });
     });
 
+    test("scores only the last days that have a value, with errors in fractions", async () => {
+      // Day 117 (a 160-day) has no value; the median 100.5 misses the other six by 0.5 to 59.5.
+      const source = await csv("partial.csv", "2026-06-01", 120, (d) => (d === 117 ? null : weekly(d)));
+      const { engine } = constantEngine({ p10: 90, p50: 100.5, p90: 120 });
+      const result = await executeForecast({ kind: "forecast", source, horizon: 7, config }, engine);
+      expect(result.holdout).toMatchObject({ scored: 6, inside: 3, baseline_mae: 0 });
+      expect((result.holdout as { mae: number }).mae).toBeCloseTo((9.5 + 19.5 + 29.5 + 39.5 + 0.5 + 59.5) / 6, 10);
+    });
+
+    test("takes a weekday from an earlier week when the last week lacks it", async () => {
+      // Day 106 is empty: the weekday of the first last day is then read from day 99.
+      const source = await csv("fallback.csv", "2026-06-01", 120, (d) => (d === 106 ? null : weekly(d)));
+      const result = await executeForecast({ kind: "forecast", source, horizon: 7, config }, constantEngine().engine);
+      expect(result.holdout).toMatchObject({ scored: 7, baseline_mae: 0 });
+    });
+
     test.each([
+      [
+        "too many days before the last days lack a value",
+        // 23 of the 90 days before the last 30 are empty (26 %); the whole history stays under 20 %.
+        { start: "2026-06-01", days: 120, horizon: 30, value: (d: number) => (d >= 60 && d < 90 && d % 2 === 0 ? null : d >= 60 && d < 77 ? null : weekly(d)) },
+        "TOO_MANY_MISSING",
+      ],
       [
         "the history before the last days is too short",
         { start: "2026-08-01", days: 40, horizon: 30, value: weekly },
@@ -194,6 +248,9 @@ describe("forecast job", () => {
     // A reader that guesses formats would take 1/9/2026 for one of two different days.
     ["a date that is not ISO", "Datum,kWh\n1/9/2026,1\n2/9/2026,2\n", "INVALID_DATES", 'Row 1: "1/9/2026"'],
     ["a value that is not a number", "Datum,kWh\n2026-09-01,100\n2026-09-02,#DIV/0!\n", "INVALID_VALUES", 'Row 2: "#DIV/0!"'],
+    // Beyond what the model's single precision holds, a value would silently become unknown.
+    ["a value too large to be a number", "Datum,kWh\n2026-09-01,100\n2026-09-02,1e309\n", "INVALID_VALUES", 'Row 2: "1e309"'],
+    ["a value too large for the model", "Datum,kWh\n2026-09-01,100\n2026-09-02,1e40\n", "INVALID_VALUES", 'Row 2: "1e40"'],
     ["a time of day", "Datum,kWh\n2026-09-01 08:00:00,1\n2026-09-02 08:00:00,2\n", "INVALID_DATES", "Row 1"],
     ["dates out of order", "Datum,kWh\n2026-09-02,1\n2026-09-01,2\n", "UNORDERED_DATES", "2026-09-01"],
     ["a repeated date", "Datum,kWh\n2026-09-01,1\n2026-09-01,2\n", "UNORDERED_DATES", "2026-09-01"],

@@ -221,15 +221,16 @@ and only `http(s)` hyperlinks are kept.
 
 **Forecasts** read their source as text and accept only one ISO date per row,
 in order, with no missing days, and numbers or empty cells as values, so a
-reader's guess at a date format or a formula error never reaches the model.
+reader's guess at a date format, a formula error or a formula without a saved
+result never reaches the model.
 The numbers go to Timestral in a Python sidecar the child spawns, under the
-same Landlock domain: an interpreter started in isolated mode, a minimal
-environment with its thread count fixed and the Hugging Face Hub switched to
-offline, its venv and the mounted checkpoint as the only paths it may read
-beyond what every child may, and a 25 s kill. The sidecar receives only
-numbers, never the file or its column names, and loads the checkpoint only
-from its directory: a missing or foreign checkpoint is refused, never
-downloaded.
+same Landlock domain as the forecast job: what every child may read, the
+sidecar's venv, the mounted checkpoint, and the job's own source directory.
+The interpreter starts in isolated mode with a minimal environment, its
+thread count fixed and the Hugging Face Hub switched to offline, and is
+killed after 25 s. It is handed only the validated numbers, never the file
+or its column names, and it loads the checkpoint only from its directory: a
+missing or foreign checkpoint is refused, never downloaded.
 
 **Charts** are drawn from a validated specification, never from ECharts
 options or HTML written by the model: at most 8 series, 12 pie slices, 2,000

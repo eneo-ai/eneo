@@ -39,32 +39,14 @@ def main() -> int:
 
 
 def forecast(job: dict) -> dict:
-    checkpoint = Path(job["model_path"])
-    missing = [name for name in CHECKPOINT_FILES if not (checkpoint / name).is_file()]
-    if missing:
-        # A missing mount must never fall through to the loader's Hugging Face Hub lookup.
-        raise Refusal(
-            "MODEL_UNAVAILABLE",
-            f"The forecast model is not installed: {checkpoint} has no {' or '.join(missing)}.",
-        )
-
     import torch
 
     # Before any work: the runtime decides how many cores one forecast may use.
     torch.set_num_threads(int(job["threads"]))
     torch.set_num_interop_threads(1)
     import numpy as np
-    from timestral import TimestralForecaster
 
-    try:
-        forecaster = TimestralForecaster.from_pretrained(checkpoint, local_files_only=True)
-    except (ValueError, KeyError, RuntimeError, OSError, AssertionError) as error:
-        raise Refusal(
-            "MODEL_UNAVAILABLE",
-            f"The forecast model at {checkpoint} could not be loaded as a Timestral checkpoint: {error}",
-        ) from error
-    if not all(level in forecaster.quantile_levels for level in LEVELS):
-        raise Refusal("MODEL_UNAVAILABLE", "The forecast model does not predict P10, P50 and P90.")
+    forecaster = load(Path(job["model_path"]))
 
     values = np.array([math.nan if v is None else float(v) for v in job["values"]], dtype=np.float32)
     horizon = int(job["horizon"])
@@ -91,6 +73,37 @@ def forecast(job: dict) -> dict:
     if job["holdout"]:
         result["holdout"] = interval(1)
     return result
+
+
+def load(checkpoint: Path):
+    """The checkpoint at ``checkpoint``, or a refusal saying why it cannot be used.
+
+    Everything that can go wrong while reading it (missing or unreadable files, a config that
+    is not Timestral's, weights that do not decode or do not fit) means the operator must
+    install another checkpoint, so all of it is MODEL_UNAVAILABLE. A missing directory never
+    reaches the loader, which would take its name for a Hugging Face Hub repository.
+    """
+    try:
+        missing = [name for name in CHECKPOINT_FILES if not (checkpoint / name).is_file()]
+        if missing:
+            raise Refusal(
+                "MODEL_UNAVAILABLE",
+                f"The forecast model is not installed: {checkpoint} has no {' or '.join(missing)}.",
+            )
+        from timestral import TimestralForecaster
+
+        forecaster = TimestralForecaster.from_pretrained(checkpoint, local_files_only=True)
+    except Refusal:
+        raise
+    except Exception as error:  # noqa: BLE001 - every loading failure is the checkpoint's
+        raise Refusal(
+            "MODEL_UNAVAILABLE",
+            f"The forecast model at {checkpoint} could not be loaded as a Timestral checkpoint: "
+            f"{type(error).__name__}: {str(error)[:300]}",
+        ) from error
+    if not all(level in forecaster.quantile_levels for level in LEVELS):
+        raise Refusal("MODEL_UNAVAILABLE", "The forecast model does not predict P10, P50 and P90.")
+    return forecaster
 
 
 if __name__ == "__main__":

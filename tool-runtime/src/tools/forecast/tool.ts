@@ -151,14 +151,15 @@ function readable(result: ForecastResult, config: ForecastConfig, title?: string
 }
 
 /**
- * The recent history and the forecast, one row per day. Values keep the model's own precision
- * (single precision, about seven digits), not the rounding the model reads.
+ * The recent history and the forecast, one row per day. History is written as the file holds
+ * it; the forecast in the shortest digits that read back as the model's own single-precision
+ * value, so nothing is lost and no float noise is added.
  */
 function csv(result: ForecastResult): string {
   const start = Date.parse(`${result.recent.from}T00:00:00Z`);
   const rows: unknown[][] = result.recent.values.map((value, day) => [
     isoDay(start + day * DAY_MS),
-    value === null ? null : significant(value, 7),
+    value,
     null,
     null,
     null,
@@ -168,11 +169,21 @@ function csv(result: ForecastResult): string {
     rows.push([
       isoDay(first + day * DAY_MS),
       null,
-      significant(result.forecast.p10[day]!, 7),
-      significant(result.forecast.p50[day]!, 7),
-      significant(result.forecast.p90[day]!, 7),
+      single(result.forecast.p10[day]!),
+      single(result.forecast.p50[day]!),
+      single(result.forecast.p90[day]!),
     ]);
   return toCsv(["date", "actual", "p10", "p50", "p90"], rows);
+}
+
+/** The shortest number that is the same single-precision value as `value`. */
+function single(value: number): number {
+  const target = Math.fround(value);
+  for (let digits = 1; digits < 9; digits++) {
+    const short = Number(value.toPrecision(digits));
+    if (Math.fround(short) === target) return short;
+  }
+  return target;
 }
 
 function significant(value: number, digits: number): number {

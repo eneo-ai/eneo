@@ -77,21 +77,26 @@ describe("create_forecast", () => {
     });
   });
 
-  test("exports the forecast with the history before it as CSV", async () => {
-    const { tool } = setup(outcome(2));
-    const result = await tool.execute({ source, horizon: 2, export: true }, ctx);
-    expect(result).toBeInstanceOf(RichResult);
-    const file = (result as RichResult).files[0]!;
+  test("exports the history as the file holds it and the forecast at the model's precision", async () => {
+    const f32 = Math.fround;
+    const result = outcome(2);
+    result.recent = { from: "2026-03-30", values: [123456789, null] };
+    result.forecast = { ...result.forecast, p10: [f32(1.2345678806304932), f32(1600.5)], p50: [f32(1834.567), f32(1835)], p90: [f32(2100.25), f32(2101)] };
+    const { tool } = setup(result);
+    const exported = await tool.execute({ source, horizon: 2, export: true }, ctx);
+    expect(exported).toBeInstanceOf(RichResult);
+    const file = (exported as RichResult).files[0]!;
     expect(file.mimeType).toBe("text/csv");
     expect(file.uri).toEndWith("/prognos.csv");
     expect(Buffer.from(file.blob, "base64").toString()).toBe(
       "date,actual,p10,p50,p90\r\n" +
-        "2026-03-29,1700.123,,,\r\n" +
-        "2026-03-30,1701.123,,,\r\n" +
+        "2026-03-30,123456789,,,\r\n" +
         "2026-03-31,,,,\r\n" +
-        "2026-04-01,,1600.123,1834.123,2100.123\r\n" +
-        "2026-04-02,,1601.123,1835.123,2101.123\r\n",
+        "2026-04-01,,1.2345679,1834.567,2100.25\r\n" +
+        "2026-04-02,,1600.5,1835,2101\r\n",
     );
+    // Each forecast value reads back as the same single-precision number the model returned.
+    expect(f32(1.2345679)).toBe(f32(1.2345678806304932));
   });
 
   test("refuses a horizon beyond the limit before downloading anything", async () => {
