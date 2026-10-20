@@ -271,9 +271,10 @@ async def test_jobs_reach_the_worker_only_after_the_commit_and_only_for_kept_ite
     db_container, setup, dispatches
 ):
     async with db_container() as container:
-        service = _service(
-            container, job_service=_jobs(None, RuntimeError("queue down"), None)
-        )
+        # The real hand-over to the worker; only the job rows are faked.
+        job_service = container.job_service()
+        job_service.queue_job = _jobs(None, RuntimeError("queue down"), None).queue_job
+        service = _service(container, job_service=job_service)
         results = await service.create_space_integration_knowledge_batch(
             user_integration_id=setup.connection,
             embedding_model_id=setup.embedding_model,

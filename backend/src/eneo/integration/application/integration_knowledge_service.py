@@ -24,7 +24,6 @@ from eneo.integration.presentation.validation import (
     KNOWLEDGE_NAME_LENGTH_REASON,
     KNOWLEDGE_NAME_MAX_LENGTH,
 )
-from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import JobInDb, Task
 from eneo.main.exceptions import (
     BadRequestException,
@@ -302,7 +301,9 @@ class IntegrationKnowledgeService:
             wrapper_id=wrapper_id,
             wrapper_name=wrapper_name,
         )
-        self._dispatch_after_commit(dispatch)
+        await self.job_service.dispatch_after_commit(
+            dispatch.task, dispatch.job_id, dispatch.params
+        )
         return knowledge, job
 
     async def _prepare_import(
@@ -378,8 +379,8 @@ class IntegrationKnowledgeService:
         """Write one item and its first sync's job row.
 
         The job is not handed to the worker here: the caller dispatches it
-        once the item's writes are kept (``_dispatch_after_commit``), so an
-        item rolled back later never leaves the worker a job.
+        once the item's writes are kept (``JobService.dispatch_after_commit``),
+        so an item rolled back later never leaves the worker a job.
         """
         if not key:
             raise BadRequestException("Integration key is required")
@@ -453,15 +454,6 @@ class IntegrationKnowledgeService:
                 context, knowledge, key=key, is_onedrive=resource_type == "onedrive"
             )
         return knowledge, job, _PendingDispatch(task, job.id, params)
-
-    def _dispatch_after_commit(self, dispatch: _PendingDispatch) -> None:
-        """Hand a queued job to the worker once the request commits; never
-        after a rollback. Must run outside any savepoint."""
-
-        async def enqueue() -> None:
-            await job_manager.enqueue(dispatch.task, dispatch.job_id, dispatch.params)
-
-        run_after_commit(self.space_repo.session, enqueue)
 
     async def _link_subscription_on_import(
         self,
@@ -568,7 +560,9 @@ class IntegrationKnowledgeService:
                 )
                 results.append(_failed_batch_item(index, item, user_visible_error(exc)))
                 continue
-            self._dispatch_after_commit(dispatch)
+            await self.job_service.dispatch_after_commit(
+                dispatch.task, dispatch.job_id, dispatch.params
+            )
             results.append(
                 BatchIntegrationKnowledgeCreateResult(
                     index=index,
