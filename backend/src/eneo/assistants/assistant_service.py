@@ -260,6 +260,34 @@ class AssistantCompletionFileInputs:
 
 
 @dataclass(frozen=True)
+class _PreparedAssistantTurn:
+    """Request-local authorization and configuration, before history writes.
+
+    Only AssistantService creates and consumes this value. It is neither a
+    persisted authorization grant nor safe to reuse in a later request.
+    """
+
+    active_assistant: "Assistant"
+    assistant_to_ask: "Assistant"
+    space: "Space"
+    files: "list[File]"
+    cleaned_question: "str"
+    effective_completion_model: "CompletionModel"
+    completion_model_override: "CompletionModel | None"
+    model_kwargs_override: "ModelKwargs | None"
+    mcp_servers_override: "list[MCPServer]"
+    capability_mcp_servers: "list[MCPServer]"
+    prompt_override: "str | None"
+    skill_plan: "SkillTurnPlan"
+    skill_runtime: "SkillActivationRuntime"
+    skill_composition: "SkillComposition"
+    skill_activation: "SkillActivationEvidenceV1"
+    model_route: "str"
+    initial_skill_context_tokens: "int"
+    is_personal_default: "bool"
+
+
+@dataclass(frozen=True)
 class NonStreamingAnswer:
     """A complete answer, with the files its tools made, for a non-streaming ask."""
 
@@ -3138,21 +3166,16 @@ class AssistantService:
                     f"Embedding Model {item.embedding_model.name} is not in space."
                 )
 
-    async def ask(
+    async def _prepare_turn(
         self,
         question: str,
-        assistant_id: "UUID",
-        group_chat_id: Optional["UUID"] = None,
-        session_id: "UUID | None" = None,
-        file_ids: list["UUID"] | None = None,
-        stream: bool = False,
-        tool_assistant_id: Optional["UUID"] = None,
-        version: int = 1,
-        assistant_selector_tokens: int = 0,
-        require_tool_approval: bool = False,
-        disabled_mcp_server_ids: list["UUID"] | None = None,
+        assistant_id: UUID,
+        file_ids: list[UUID] | None = None,
+        tool_assistant_id: UUID | None = None,
+        disabled_mcp_server_ids: list[UUID] | None = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
-    ):
+    ) -> _PreparedAssistantTurn:
+        """Resolve the ordinary ask policy without creating conversation rows."""
         # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
         # Assistant via the normal ask path. Both ``POST /assistants/{id}/sessions/``
         # and ``POST /assistants/{id}/sessions/{session_id}/`` flow through
@@ -3399,87 +3422,50 @@ class AssistantService:
             ),
         )
 
-        question_id: UUID | None = None
-        question_created_at: datetime | None = None
-        is_new_session = session_id is None
-        if not is_new_session:
-            assert session_id is not None
-            if group_chat_id is not None:
-                session = await self.session_service.get_session_by_uuid(
-                    id=session_id, group_chat_id=group_chat_id
-                )
-            else:
-                session = await self.session_service.get_session_by_uuid(
-                    id=session_id, assistant_id=assistant_id
-                )
-        else:
-            # Set the name as the question or the filenames
-            name = question
-            if not name and files:
-                name = " ".join(file.name for file in files)
-            if group_chat_id is not None:
-                (
-                    session,
-                    question_id,
-                    question_created_at,
-                ) = await self.session_service.create_session_with_question_placeholder(
-                    name=name,
-                    question=question,
-                    files=files,
-                    question_assistant_id=assistant_to_ask.id,
-                    group_chat_id=group_chat_id,
-                    completion_model=cast(
-                        "AICompletionModel", effective_completion_model
-                    ),
-                    skill_provenance=skill_composition.provenance or None,
-                    skill_activation=skill_activation,
-                )
-            else:
-                (
-                    session,
-                    question_id,
-                    question_created_at,
-                ) = await self.session_service.create_session_with_question_placeholder(
-                    name=name,
-                    question=question,
-                    files=files,
-                    session_assistant_id=active_assistant.id,
-                    question_assistant_id=assistant_to_ask.id,
-                    completion_model=cast(
-                        "AICompletionModel", effective_completion_model
-                    ),
-                    skill_provenance=skill_composition.provenance or None,
-                    skill_activation=skill_activation,
-                )
-
-        assert session is not None
-        for _question in session.questions:
-            _question.question = clean_eneo_tag(_question.question)
-
-        # `files` is what gets persisted on the question. The completion inputs
-        # may additionally contain rendered document images that only the model sees.
-        completion_file_inputs = await self._build_completion_file_inputs(
+        return _PreparedAssistantTurn(
+            active_assistant=active_assistant,
+            assistant_to_ask=assistant_to_ask,
+            space=space,
             files=files,
-            session=session,
-            assistant=assistant_to_ask,
-            completion_model=effective_completion_model,
+            cleaned_question=cleaned_question,
+            effective_completion_model=effective_completion_model,
+            completion_model_override=completion_model_override,
+            model_kwargs_override=model_kwargs_override,
+            mcp_servers_override=mcp_servers_override,
+            capability_mcp_servers=capability_mcp_servers,
+            prompt_override=prompt_override,
+            skill_plan=skill_plan,
+            skill_runtime=skill_runtime,
+            skill_composition=skill_composition,
+            skill_activation=skill_activation,
+            model_route=model_route,
+            initial_skill_context_tokens=initial_skill_snapshot.measurement.tokens,
+            is_personal_default=is_personal_default,
         )
 
-        if not is_new_session:
-            # Existing conversations need only the new placeholder transaction.
-            (
-                question_id,
-                question_created_at,
-            ) = await self.session_service.create_question_placeholder(
-                question=question,
-                session=session,
-                files=files,
-                assistant_id=assistant_to_ask.id,
-                completion_model=cast("AICompletionModel", effective_completion_model),
-                skill_provenance=skill_composition.provenance or None,
-                skill_activation=skill_activation,
-            )
-        assert question_id is not None
+    async def _execute_turn(
+        self,
+        prepared: _PreparedAssistantTurn,
+        session: "SessionInDB",
+        completion_file_inputs: AssistantCompletionFileInputs,
+        *,
+        stream: bool,
+        version: int,
+        require_tool_approval: bool,
+    ) -> tuple["CompletionModelResponse", "DatastoreResult"]:
+        """Run the existing assistant engine; the caller owns response persistence."""
+        assistant_to_ask = prepared.assistant_to_ask
+        space = prepared.space
+        files = prepared.files
+        cleaned_question = prepared.cleaned_question
+        effective_completion_model = prepared.effective_completion_model
+        completion_model_override = prepared.completion_model_override
+        model_kwargs_override = prepared.model_kwargs_override
+        mcp_servers_override = prepared.mcp_servers_override
+        capability_mcp_servers = prepared.capability_mcp_servers
+        prompt_override = prepared.prompt_override
+        skill_runtime = prepared.skill_runtime
+        is_personal_default = prepared.is_personal_default
 
         # Internal (loopback) MCP servers are scoped by one short-lived token
         # per completion, minted only when some server actually attaches.
@@ -3624,29 +3610,155 @@ class AssistantService:
                 security_classification=space.security_classification,
             )
 
-        try:
-            response, datastore_result = await assistant_to_ask.ask(
-                question=cleaned_question,
-                completion_service=self.completion_service,
-                references_service=self.references_service,
-                rerank=rerank,
+        response, datastore_result = await assistant_to_ask.ask(
+            question=cleaned_question,
+            completion_service=self.completion_service,
+            references_service=self.references_service,
+            rerank=rerank,
+            session=session,
+            files=completion_file_inputs.completion_message_files,
+            stream=stream,
+            version=version,
+            capability_mcp_servers=capability_mcp_servers,
+            document_template=document_template,
+            require_tool_approval=require_tool_approval,
+            completion_model_override=completion_model_override,
+            model_kwargs_override=model_kwargs_override,
+            mcp_servers_override=mcp_servers_override,
+            prompt_override=prompt_override,
+            completion_prompt_files=completion_file_inputs.completion_prompt_files,
+            skill_runtime=skill_runtime,
+            knowledge_mcp_server=knowledge_mcp_server,
+            internal_mcp_servers=(
+                [files_mcp_server] if files_mcp_server is not None else []
+            ),
+        )
+
+        return response, datastore_result
+
+    async def ask(
+        self,
+        question: str,
+        assistant_id: "UUID",
+        group_chat_id: Optional["UUID"] = None,
+        session_id: "UUID | None" = None,
+        file_ids: list["UUID"] | None = None,
+        stream: bool = False,
+        tool_assistant_id: Optional["UUID"] = None,
+        version: int = 1,
+        assistant_selector_tokens: int = 0,
+        require_tool_approval: bool = False,
+        disabled_mcp_server_ids: list["UUID"] | None = None,
+        disabled_capabilities: list[CapabilityPurpose] | None = None,
+    ):
+        prepared = await self._prepare_turn(
+            question=question,
+            assistant_id=assistant_id,
+            file_ids=file_ids,
+            tool_assistant_id=tool_assistant_id,
+            disabled_mcp_server_ids=disabled_mcp_server_ids,
+            disabled_capabilities=disabled_capabilities,
+        )
+        active_assistant = prepared.active_assistant
+        assistant_to_ask = prepared.assistant_to_ask
+        files = prepared.files
+        effective_completion_model = prepared.effective_completion_model
+        skill_plan = prepared.skill_plan
+        skill_runtime = prepared.skill_runtime
+        skill_composition = prepared.skill_composition
+        skill_activation = prepared.skill_activation
+        model_route = prepared.model_route
+
+        question_id: UUID | None = None
+        question_created_at: datetime | None = None
+        is_new_session = session_id is None
+        if not is_new_session:
+            assert session_id is not None
+            if group_chat_id is not None:
+                session = await self.session_service.get_session_by_uuid(
+                    id=session_id, group_chat_id=group_chat_id
+                )
+            else:
+                session = await self.session_service.get_session_by_uuid(
+                    id=session_id, assistant_id=assistant_id
+                )
+        else:
+            # Set the name as the question or the filenames
+            name = question
+            if not name and files:
+                name = " ".join(file.name for file in files)
+            if group_chat_id is not None:
+                (
+                    session,
+                    question_id,
+                    question_created_at,
+                ) = await self.session_service.create_session_with_question_placeholder(
+                    name=name,
+                    question=question,
+                    files=files,
+                    question_assistant_id=assistant_to_ask.id,
+                    group_chat_id=group_chat_id,
+                    completion_model=cast(
+                        "AICompletionModel", effective_completion_model
+                    ),
+                    skill_provenance=skill_composition.provenance or None,
+                    skill_activation=skill_activation,
+                )
+            else:
+                (
+                    session,
+                    question_id,
+                    question_created_at,
+                ) = await self.session_service.create_session_with_question_placeholder(
+                    name=name,
+                    question=question,
+                    files=files,
+                    session_assistant_id=active_assistant.id,
+                    question_assistant_id=assistant_to_ask.id,
+                    completion_model=cast(
+                        "AICompletionModel", effective_completion_model
+                    ),
+                    skill_provenance=skill_composition.provenance or None,
+                    skill_activation=skill_activation,
+                )
+
+        assert session is not None
+        for _question in session.questions:
+            _question.question = clean_eneo_tag(_question.question)
+
+        # `files` is what gets persisted on the question. The completion inputs
+        # may additionally contain rendered document images that only the model sees.
+        completion_file_inputs = await self._build_completion_file_inputs(
+            files=files,
+            session=session,
+            assistant=assistant_to_ask,
+            completion_model=effective_completion_model,
+        )
+
+        if not is_new_session:
+            # Existing conversations need only the new placeholder transaction.
+            (
+                question_id,
+                question_created_at,
+            ) = await self.session_service.create_question_placeholder(
+                question=question,
                 session=session,
-                files=completion_file_inputs.completion_message_files,
+                files=files,
+                assistant_id=assistant_to_ask.id,
+                completion_model=cast("AICompletionModel", effective_completion_model),
+                skill_provenance=skill_composition.provenance or None,
+                skill_activation=skill_activation,
+            )
+        assert question_id is not None
+
+        try:
+            response, datastore_result = await self._execute_turn(
+                prepared,
+                session,
+                completion_file_inputs,
                 stream=stream,
                 version=version,
-                capability_mcp_servers=capability_mcp_servers,
-                document_template=document_template,
                 require_tool_approval=require_tool_approval,
-                completion_model_override=completion_model_override,
-                model_kwargs_override=model_kwargs_override,
-                mcp_servers_override=mcp_servers_override,
-                prompt_override=prompt_override,
-                completion_prompt_files=completion_file_inputs.completion_prompt_files,
-                skill_runtime=skill_runtime,
-                knowledge_mcp_server=knowledge_mcp_server,
-                internal_mcp_servers=(
-                    [files_mcp_server] if files_mcp_server is not None else []
-                ),
             )
         except Exception:
             failed_snapshot = skill_runtime.snapshot()
@@ -3688,7 +3800,7 @@ class AssistantService:
             skill_plan=skill_plan,
             skill_runtime=skill_runtime,
             selected_model_route=model_route,
-            initial_skill_context_tokens=(initial_skill_snapshot.measurement.tokens),
+            initial_skill_context_tokens=prepared.initial_skill_context_tokens,
             version=version,
             assistant_selector_tokens=assistant_selector_tokens,
         )
