@@ -57,6 +57,7 @@ regexes = ['''^sk-test-12345678$''']
 description = "Keyword-argument pair in SharePoint sync tests that the generic rule reads as a token"
 condition = "AND"
 paths = [
+  '''^backend/tests/unittests/integration/test_sharepoint_content_service\.py$''',
   '''^backend/tests/unittests/integration/infrastructure/content_service/test_sharepoint_(?:content_service|index|reconciliation)\.py$''',
   '''^backend/tests/unittests/integration/test_sharepoint_sync_ledger\.py$''',
   '''^backend/tests/unittests/integration/test_sharepoint_failed_items\.py$''',
