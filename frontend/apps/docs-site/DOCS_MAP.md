@@ -9,9 +9,10 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 
 ## Release announcements
 
-| Code                                                                 | Pages                                                                                                     |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `frontend/packages/whats-new/**` (on branches containing What's new) | `about/release-notes.mdx` renders the shared release data; edit `releases.json`, not a duplicate MDX list |
+| Code                                                                                               | Pages                                                                                                     |
+| -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `frontend/packages/whats-new/**` (on branches containing What's new)                               | `about/release-notes.mdx` renders the shared release data; edit `releases.json`, not a duplicate MDX list |
+| `frontend/apps/web/src/lib/features/account/**`, `frontend/apps/web/src/routes/(app)/whats-new/**` | `about/release-notes.mdx` describes access through the shared account sidebar                             |
 
 ## Deployment and configuration
 

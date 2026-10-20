@@ -4,7 +4,7 @@ import { page } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { releases, releasesForVersion, visibleEntries, type Locale } from "@eneo/whats-new";
-import { getLocale, overwriteGetLocale } from "$lib/paraglide/runtime";
+import { getLocale, localizeHref, overwriteGetLocale } from "$lib/paraglide/runtime";
 import { m } from "$lib/paraglide/messages";
 import { announcementSummary } from "$lib/features/whats-new/announcement";
 import { tourSteps } from "$lib/features/whats-new/tour";
@@ -12,6 +12,7 @@ import "../../../app.css";
 
 const state = vi.hoisted(() => ({
   admin: false,
+  enabled: true,
   installedVersion: "2.3.0",
   markSeen: vi.fn().mockResolvedValue(undefined),
   markAnnounced: vi.fn().mockResolvedValue(undefined),
@@ -20,10 +21,17 @@ const state = vi.hoisted(() => ({
 
 vi.mock("$lib/core/AppContext", () => ({
   getAppContext: () => ({
-    user: { hasPermission: () => state.admin },
-    settings: { developer_tools_available: false }
+    user: { id: "test-user", email: "user@example.com", hasPermission: () => state.admin },
+    settings: { developer_tools_available: false },
+    featureFlags: { showHelpCenter: false },
+    environment: {},
+    versions: { frontend: "2.3.0", backend: "2.3.0", client: "test" }
   })
 }));
+vi.mock("$app/stores", async () => {
+  const { readable } = await import("svelte/store");
+  return { page: readable({ url: new URL("https://eneo.test/whats-new") }) };
+});
 vi.mock("$app/state", () => ({
   page: { state: {}, url: new URL("https://eneo.test/whats-new") }
 }));
@@ -42,7 +50,8 @@ vi.mock("$lib/features/whats-new/whatsNewStore", async () => {
       markLatestSeen: state.markSeen,
       seenVersion: writable(null),
       resetState: vi.fn(),
-      enabled: writable(true),
+      enabled: writable(state.enabled),
+      hasUnseen: writable(state.enabled),
       pendingAnnouncement: () => releasesForVersion(state.installedVersion)[0],
       markLatestAnnounced: state.markAnnounced
     })
@@ -68,12 +77,55 @@ afterEach(() => {
 beforeEach(async () => {
   vi.clearAllMocks();
   state.installedVersion = "2.3.0";
+  state.enabled = true;
   document.documentElement.dataset.theme = "light";
   await page.viewport(1280, 900);
 });
 
 for (const locale of ["sv", "en"] satisfies Locale[]) {
   describe(locale, () => {
+    it("shares account navigation and marks news as the current page", async () => {
+      overwriteGetLocale(() => locale);
+      render(WhatsNewPage);
+      const navigation = page.getByRole("navigation", { name: m.account_and_settings() });
+      for (const [name, href] of [
+        [m.my_account(), "/account"],
+        [m.integrations(), "/account/integrations"],
+        [m.api_keys(), "/account/api-keys"],
+        [m.whats_new(), "/whats-new"]
+      ]) {
+        await expect
+          .element(navigation.getByRole("link", { name, exact: href !== "/whats-new" }))
+          .toHaveAttribute("href", localizeHref(href));
+      }
+      await expect
+        .element(navigation.getByRole("link", { name: m.whats_new() }))
+        .toHaveAttribute("aria-current", "page");
+      await expect.element(navigation.getByText(m.whats_new_unseen())).toBeInTheDocument();
+    });
+
+    it("uses the full mobile width while account navigation is closed", async () => {
+      overwriteGetLocale(() => locale);
+      await page.viewport(320, 800);
+      const screen = render(WhatsNewPage);
+      const toggle = page.getByRole("button", { name: m.account_and_settings(), exact: true });
+      await expect.element(toggle).toBeVisible();
+      const content = screen.container.querySelector<HTMLElement>("#content")!;
+      expect(content.getBoundingClientRect().width).toBeGreaterThanOrEqual(319);
+      const navigation = page.getByRole("navigation", { name: m.account_and_settings() });
+      await expect.element(navigation).not.toBeInTheDocument();
+      await toggle.click();
+      await expect.element(navigation).toBeVisible();
+      const newsLink = navigation.getByRole("link", { name: m.whats_new() });
+      // Keep the component harness on its test URL while exercising menu dismissal.
+      newsLink
+        .element()
+        .addEventListener("click", (event) => event.preventDefault(), { once: true });
+      await newsLink.click();
+      await expect.element(navigation).not.toBeInTheDocument();
+      expect(content.getBoundingClientRect().width).toBeGreaterThanOrEqual(319);
+    });
+
     it("announces the four main workflows in a usable dialog", async () => {
       state.admin = false;
       overwriteGetLocale(() => locale);
@@ -178,6 +230,17 @@ for (const locale of ["sv", "en"] satisfies Locale[]) {
     });
   });
 }
+
+it("hides news in the account sidebar when the organisation disables it", async () => {
+  state.enabled = false;
+  render(WhatsNewPage);
+  const navigation = page.getByRole("navigation", { name: m.account_and_settings() });
+  await expect.element(navigation.getByRole("link", { name: m.my_account() })).toBeVisible();
+  await expect
+    .element(navigation.getByRole("link", { name: m.whats_new() }))
+    .not.toBeInTheDocument();
+  await expect.element(navigation.getByText(m.whats_new_unseen())).not.toBeInTheDocument();
+});
 
 it("shows the installed RC in both the announcement and release picker", async () => {
   state.installedVersion = "2.3.0-rc.1";
