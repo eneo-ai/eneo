@@ -1,6 +1,6 @@
 import { latestRelease } from "@eneo/whats-new";
 import { get } from "svelte/store";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createWhatsNewStore, type Marker } from "./whatsNewStore";
 
 const latest = latestRelease();
@@ -11,7 +11,8 @@ function makeStore(
   seen: Marker = null,
   announced: Marker = null,
   enabled = true,
-  installedVersion = version
+  installedVersion = version,
+  userId = "user-1"
 ) {
   const client = {
     markSeen: vi.fn(async (_version: string) => ({
@@ -27,6 +28,7 @@ function makeStore(
   return {
     client,
     store: createWhatsNewStore({
+      user: { id: userId },
       eneo: { whatsNew: client },
       whatsNewEnabled: enabled,
       whatsNewVersion: installedVersion,
@@ -36,9 +38,116 @@ function makeStore(
   };
 }
 
-afterEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  const values = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      values.set(key, value);
+    },
+    removeItem: (key: string) => {
+      values.delete(key);
+    }
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("whatsNewStore", () => {
+  it("restores a local reminder after reload, waits 24 hours and consumes it when shown", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-20T10:00:00Z"));
+    makeStore(null, version).store.snoozeLatest();
+    vi.setSystemTime(new Date("2026-10-21T09:59:59Z"));
+    expect(makeStore(null, version).store.pendingAnnouncement()).toBeNull();
+    vi.setSystemTime(new Date("2026-10-21T10:00:00Z"));
+    const returning = makeStore(null, version).store;
+    expect(returning.pendingAnnouncement()?.version).toBe(version);
+    await returning.markLatestAnnounced();
+    expect(makeStore(null, version).store.pendingAnnouncement()).toBeNull();
+  });
+
+  it("isolates reminders by account and release, including newer versions and rollback", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-20T10:00:00Z"));
+    makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1").store.snoozeLatest();
+    expect(
+      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.2").store.pendingAnnouncement()?.version
+    ).toBe("2.3.0-rc.2");
+    vi.setSystemTime(new Date("2026-10-21T10:00:00Z"));
+    expect(
+      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1").store.pendingAnnouncement()?.version
+    ).toBe("2.3.0-rc.1");
+    expect(
+      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1", "user-2").store.pendingAnnouncement()
+    ).toBeNull();
+    expect(
+      makeStore(null, "2.3.0-rc.2", true, "2.3.0-rc.1").store.pendingAnnouncement()
+    ).toBeNull();
+  });
+
+  it("cancels reminders when news is read, including read progress from another browser", async () => {
+    makeStore(null, version).store.snoozeLatest();
+    const readElsewhere = makeStore(version, version).store;
+    expect(readElsewhere.pendingAnnouncement()).toBeNull();
+    // Clearing the local reminder remains effective even with stale read progress.
+    expect(makeStore(null, version).store.pendingAnnouncement()).toBeNull();
+    const { store } = makeStore(null, version);
+    store.snoozeLatest();
+    await store.markLatestSeen();
+    expect(store.pendingAnnouncement()).toBeNull();
+  });
+
+  it("reset clears local postponement and server markers so the announcement returns immediately", async () => {
+    const { store, client } = makeStore(null, version);
+    store.snoozeLatest();
+    expect(store.pendingAnnouncement()).toBeNull();
+    await store.resetState();
+    expect(client.resetState).toHaveBeenCalledOnce();
+    expect(store.pendingAnnouncement()?.version).toBe(version);
+  });
+
+  it("keeps a reminder if an older backend does not accept the read marker", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-20T10:00:00Z"));
+    const { store, client } = makeStore(null, version);
+    store.snoozeLatest();
+    client.markSeen.mockResolvedValueOnce({ seen_version: "0.0.1", announced_version: null });
+    await store.markLatestSeen();
+    expect(store.pendingAnnouncement()).toBeNull();
+    vi.setSystemTime(new Date("2026-10-21T10:00:00Z"));
+    expect(store.pendingAnnouncement()?.version).toBe(version);
+  });
+
+  it("reports failed storage writes and reset instead of claiming success", async () => {
+    const { store, client } = makeStore(null, version);
+    vi.spyOn(globalThis.localStorage, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    expect(() => store.snoozeLatest()).toThrow("blocked");
+    vi.spyOn(globalThis.localStorage, "removeItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    await expect(store.resetState()).rejects.toThrow("blocked");
+    expect(client.resetState).not.toHaveBeenCalled();
+  });
+
+  it("ignores invalid or unavailable local storage without breaking normal announcements", () => {
+    vi.spyOn(globalThis.localStorage, "getItem").mockReturnValue("invalid");
+    expect(makeStore(null, version).store.pendingAnnouncement()).toBeNull();
+    expect(makeStore().store.pendingAnnouncement()?.version).toBe(version);
+    vi.spyOn(globalThis.localStorage, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    expect(makeStore().store.pendingAnnouncement()?.version).toBe(version);
+    vi.stubGlobal("localStorage", undefined);
+    expect(makeStore().store.pendingAnnouncement()?.version).toBe(version);
+  });
+
   it("announces every RC and the final once, and keeps read progress independent", async () => {
     let seen: Marker = "2.2.0";
     let announced: Marker = "2.2.0";
@@ -135,6 +244,7 @@ describe("whatsNewStore", () => {
   it("stays quiet when the state could not be read", async () => {
     const { client } = makeStore();
     const store = createWhatsNewStore({
+      user: { id: "user-1" },
       eneo: { whatsNew: client },
       whatsNewEnabled: true,
       whatsNewVersion: version,

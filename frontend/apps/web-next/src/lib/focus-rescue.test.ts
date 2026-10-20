@@ -40,6 +40,16 @@ it("leaves focus alone when it is still on something", () => {
   expect(document.activeElement).toBe(other);
 });
 
+it("does not restore focus after the target has been unmounted", () => {
+  const focus = vi.spyOn(panel, "focus");
+  rescueFocus(panel);
+  panel.remove();
+
+  vi.advanceTimersByTime(500);
+
+  expect(focus).not.toHaveBeenCalled();
+});
+
 it("leaves focus in a menu the user opened in the meantime", () => {
   const row = document.createElement("button");
   document.body.append(row);
