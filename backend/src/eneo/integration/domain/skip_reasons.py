@@ -307,3 +307,32 @@ def visible_skip_params(params: Mapping[str, str | int]) -> SkipReasonParams:
         key: user_visible_error(value) if isinstance(value, str) else value
         for key, value in params.items()
     }
+
+
+# Skips of delta items never placed in the item's scope: older syncs named
+# their file, which may lie anywhere in the drive. "Could not remove:" is what
+# releases before 2.2 wrote for deleted items, which were never placed either.
+_UNPLACED_SKIP_REASONS = (
+    "Folder scope path unavailable",
+    "Missing item id",
+    "Could not remove out-of-scope",
+    "Could not remove removed:",
+    "Could not remove:",
+)
+
+
+def visible_skip(detail: Mapping[str, Any]) -> SkippedDetail:
+    """The detail as served: coded, its text cleaned, unplaced items unnamed."""
+    stored = detail.get("reason")
+    cleaned = user_visible_error(stored) if isinstance(stored, str) else ""
+    coded = with_code({**detail, "reason": cleaned})
+    reason = coded["reason"]
+    visible: SkippedDetail = {
+        "file": "" if reason.startswith(_UNPLACED_SKIP_REASONS) else coded["file"],
+        "reason": reason,
+        "code": coded.get("code", "error"),
+        "params": visible_skip_params(coded.get("params", {})),
+    }
+    if coded.get("retry"):
+        visible["retry"] = True
+    return visible

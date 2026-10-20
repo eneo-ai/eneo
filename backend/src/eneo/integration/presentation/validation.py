@@ -30,12 +30,6 @@ RESOURCE_TYPES = ("site", "onedrive")
 SELECTED_ITEM_TYPE_PATTERN = r"^[a-z_]*$"
 SELECTED_ITEM_TYPE_MAX_LENGTH = 32
 
-# A display name a person types or a SharePoint item name, as long as the
-# names of assistant templates and uploaded files.
-KNOWLEDGE_NAME_MAX_LENGTH = 255
-KNOWLEDGE_NAME_LENGTH_REASON = (
-    f"The name must be 1 to {KNOWLEDGE_NAME_MAX_LENGTH} characters long"
-)
 # A batch item's name is checked per item, so one long SharePoint name fails
 # only its item; past this the request body itself is malformed.
 BATCH_ITEM_NAME_MAX_LENGTH = FOLDER_PATH_MAX_LENGTH

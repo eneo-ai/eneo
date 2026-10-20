@@ -21,11 +21,11 @@ from pydantic import TypeAdapter, ValidationError
 from redis.exceptions import RedisError
 
 from eneo.integration.domain.skip_reasons import SkippedDetail
-from eneo.integration.infrastructure.content_service.types import SyncStats
-from eneo.integration.presentation.models import (
+from eneo.integration.domain.sync_progress import (
     IntegrationSyncProgress,
     IntegrationSyncProgressFile,
 )
+from eneo.integration.infrastructure.content_service.types import SyncStats
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)

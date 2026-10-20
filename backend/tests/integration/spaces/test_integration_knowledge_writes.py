@@ -271,9 +271,10 @@ async def test_jobs_reach_the_worker_only_after_the_commit_and_only_for_kept_ite
     db_container, setup, dispatches
 ):
     async with db_container() as container:
-        service = _service(
-            container, job_service=_jobs(None, RuntimeError("queue down"), None)
-        )
+        # The real hand-over to the worker; only the job rows are faked.
+        job_service = container.job_service()
+        job_service.queue_job = _jobs(None, RuntimeError("queue down"), None).queue_job
+        service = _service(container, job_service=job_service)
         results = await service.create_space_integration_knowledge_batch(
             user_integration_id=setup.connection,
             embedding_model_id=setup.embedding_model,
@@ -341,7 +342,7 @@ async def test_a_resync_survives_a_database_error_in_its_subscription_step(
 
         subscriptions = service.sharepoint_subscription_service
         subscriptions.ensure_subscription_for_site.side_effect = failing_ensure
-        job = await service.trigger_full_sync(setup.personal_space, knowledge_id)
+        job, _ = await service.trigger_full_sync(setup.personal_space, knowledge_id)
 
     await dispatches.wait_for(1)
     assert dispatches.knowledge_ids == [knowledge_id]

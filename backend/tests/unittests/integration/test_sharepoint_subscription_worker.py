@@ -23,6 +23,7 @@ from eneo.integration.infrastructure.sharepoint_subscription_worker import (
     cleanup_orphaned_subscriptions,
     fail_stale_sharepoint_sync_jobs,
     get_token_for_subscription,
+    record_failed_attempt,
     renew_expiring_subscriptions,
 )
 
@@ -846,6 +847,45 @@ class TestFailStaleSharePointSyncJobs:
                 result = await fail_stale_sharepoint_sync_jobs({})
 
         assert result["failed_stale_jobs"] == 0
+
+
+class TestRecordFailedAttempt:
+    """The failure write a renewal and a lifecycle event share."""
+
+    async def test_a_failure_is_counted_with_its_visible_reason(
+        self, mock_container, mock_subscription
+    ):
+        await record_failed_attempt(
+            mock_subscription,
+            mock_container,
+            RuntimeError("Renewal failed for https://graph.microsoft.com/x?token=1"),
+            failures_before=0,
+        )
+
+        assert mock_subscription.consecutive_renewal_failures == 1
+        assert "Renewal failed" in (mock_subscription.last_renewal_error or "")
+        assert "token=1" not in (mock_subscription.last_renewal_error or "")
+        mock_container.sharepoint_subscription_repo().update.assert_awaited_once_with(
+            mock_subscription
+        )
+
+    async def test_a_failure_the_service_counted_is_written_not_recounted(
+        self, mock_container, mock_subscription
+    ):
+        mock_subscription.mark_renewal_failure("Graph refused the replacement")
+
+        await record_failed_attempt(
+            mock_subscription,
+            mock_container,
+            RuntimeError("Microsoft Graph refused"),
+            failures_before=0,
+        )
+
+        assert mock_subscription.consecutive_renewal_failures == 1
+        assert mock_subscription.last_renewal_error == "Graph refused the replacement"
+        mock_container.sharepoint_subscription_repo().update.assert_awaited_once_with(
+            mock_subscription
+        )
 
 
 class TestLifecycleMaintenance:

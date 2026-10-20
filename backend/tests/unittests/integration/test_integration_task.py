@@ -7,8 +7,12 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.integration.infrastructure.sharepoint_sync_keys import (
+    SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+)
 from eneo.integration.tasks import integration_task
 
 KNOWLEDGE_ID = uuid4()
@@ -129,10 +133,7 @@ async def test_delta_blocked_by_a_running_sync_leaves_a_pending_marker(
     assert result.startswith("Skipped")
     service.process_delta_changes.assert_not_called()
     assert fake_redis.store[PENDING_KEY] == "1"
-    assert (
-        fake_redis.ttls[PENDING_KEY]
-        == integration_task.SHAREPOINT_SYNC_PENDING_TTL_SECONDS
-    )
+    assert fake_redis.ttls[PENDING_KEY] == SHAREPOINT_SYNC_PENDING_TTL_SECONDS
     assert fake_redis.store[LOCK_KEY] == "someone-else"
     assert fake_redis.closed
 
@@ -208,6 +209,36 @@ async def test_no_pending_marker_means_a_single_pass(
     assert PENDING_KEY not in fake_redis.store
 
 
+@pytest.mark.parametrize(
+    ("task", "marker"),
+    [
+        pytest.param(delta_task, PENDING_KEY, id="delta"),
+        pytest.param(full_task, PENDING_FULL_KEY, id="full"),
+    ],
+)
+async def test_a_task_that_cannot_leave_its_marker_fails_its_job(
+    fake_redis, service, container, params, monkeypatch, task, marker
+):
+    """The lease holder would never hear of the change; the job must not
+    report it handled."""
+    fake_redis.store[LOCK_KEY] = "someone-else"
+    original_set = fake_redis.set
+
+    async def refuse_the_marker(key, value, nx=False, ex=None):
+        if key == marker:
+            raise RedisConnectionError("refused")
+        return await original_set(key, value, nx=nx, ex=ex)
+
+    monkeypatch.setattr(fake_redis, "set", refuse_the_marker)
+
+    with pytest.raises(integration_task.IntegrationSyncError):
+        await task(params, container)
+
+    service.process_delta_changes.assert_not_called()
+    service.pull_content.assert_not_called()
+    assert fake_redis.closed
+
+
 async def test_holder_released_before_retry_so_the_marker_is_drained_now(
     fake_redis, service, container, params, monkeypatch
 ):
@@ -276,10 +307,7 @@ async def test_failing_pending_pass_keeps_the_marker_for_a_follow_up(
     service.process_delta_changes.assert_awaited_once()
     assert service.process_delta_changes.await_args.kwargs["record_failure"] is False
     assert fake_redis.store[PENDING_KEY] == "1"
-    assert (
-        fake_redis.ttls[PENDING_KEY]
-        == integration_task.SHAREPOINT_SYNC_PENDING_TTL_SECONDS
-    )
+    assert fake_redis.ttls[PENDING_KEY] == SHAREPOINT_SYNC_PENDING_TTL_SECONDS
     assert LOCK_KEY not in fake_redis.store
     follow_ups.assert_awaited_once_with(KNOWLEDGE_ID, full=False)
 
@@ -519,10 +547,7 @@ async def test_a_full_sync_blocked_by_a_running_sync_is_deferred_not_skipped(
     assert result == integration_task.DEFERRED_FULL_SYNC_RESULT
     service.pull_content.assert_not_called()
     assert fake_redis.store[PENDING_FULL_KEY] == "1"
-    assert (
-        fake_redis.ttls[PENDING_FULL_KEY]
-        == integration_task.SHAREPOINT_SYNC_PENDING_TTL_SECONDS
-    )
+    assert fake_redis.ttls[PENDING_FULL_KEY] == SHAREPOINT_SYNC_PENDING_TTL_SECONDS
     assert fake_redis.store[LOCK_KEY] == "someone-else"
     follow_ups.assert_not_awaited()
 

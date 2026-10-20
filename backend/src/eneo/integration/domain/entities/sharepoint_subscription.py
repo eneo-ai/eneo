@@ -45,6 +45,11 @@ class SharePointSubscription(Entity):
         self.last_renewal_error = last_renewal_error
         self.last_webhook_received_at = last_webhook_received_at
 
+    @property
+    def is_onedrive(self) -> bool:
+        """OneDrive subscriptions store the drive id as their site as well."""
+        return bool(self.site_id) and self.site_id == self.drive_id
+
     def mark_renewal_success(self) -> None:
         """Clear renewal failure state after Graph accepts renewal/recreation."""
         self.consecutive_renewal_failures = 0

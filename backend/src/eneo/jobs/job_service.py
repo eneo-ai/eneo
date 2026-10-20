@@ -58,22 +58,36 @@ class JobService:
 
         if not enqueue:
             return job_in_db
-        session = cast(object, self.job_repo.delegate.session)
-        if not after_commit or not isinstance(session, AsyncSession):
+        if after_commit:
+            await self.dispatch_after_commit(task, job_in_db.id, task_params)
+        else:
             await job_manager.enqueue(task, job_in_db.id, task_params)
-            return job_in_db
+        return job_in_db
 
-        async def dispatch_after_commit() -> None:
+    async def dispatch_after_commit(
+        self, task: Task, job_id: UUID, task_params: TaskParams
+    ) -> None:
+        """Hand a job queued with ``enqueue=False`` to the worker once the
+        surrounding transaction has committed; never after a rollback.
+
+        Must be called outside any savepoint. Sessions that are not
+        ``AsyncSession`` (tests with fakes) dispatch immediately.
+        """
+        session = cast(object, self.job_repo.delegate.session)
+        if not isinstance(session, AsyncSession):
+            await job_manager.enqueue(task, job_id, task_params)
+            return
+
+        async def dispatch() -> None:
             try:
-                await job_manager.enqueue(task, job_in_db.id, task_params)
+                await job_manager.enqueue(task, job_id, task_params)
             except Exception:
                 logger.exception(
                     "Job dispatch after commit failed; the stale-job reaper fails it",
-                    extra={"job_id": str(job_in_db.id), "task": task.value},
+                    extra={"job_id": str(job_id), "task": task.value},
                 )
 
-        after_outer_transaction(session.sync_session, on_commit=dispatch_after_commit)
-        return job_in_db
+        after_outer_transaction(session.sync_session, on_commit=dispatch)
 
     async def queue_durable_knowledge_job(
         self,
