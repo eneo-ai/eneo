@@ -5,6 +5,7 @@
     CompletionModel,
     EmbeddingModel,
     ImageModel,
+    RerankModel,
     TranscriptionModel
   } from "@eneo/eneo-js";
   import { getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
@@ -17,9 +18,9 @@
     ariaLabel: string;
   };
 
-  export function getStatusIcons(
-    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel
-  ): StatusIcon[] {
+  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
+
+  export function getStatusIcons(model: AnyModel): StatusIcon[] {
     const icons: StatusIcon[] = [];
 
     if ("deprecation_date" in model) {
@@ -77,7 +78,7 @@
   import { TriangleAlert, Brain, Eye, Wrench, Clock } from "@lucide/svelte";
   import ModelCostBadge from "./ModelCostBadge.svelte";
 
-  export let model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+  export let model: AnyModel;
   /** Suppress the cost badge — used by surfaces where cost is shown elsewhere. */
   export let showCost: boolean = true;
 
