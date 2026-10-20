@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 from eneo.integration.domain.entities.tenant_sharepoint_app import (
@@ -10,15 +10,30 @@ from eneo.integration.domain.repositories.tenant_sharepoint_app_repo import (
     TenantSharePointAppRepository,
 )
 
+if TYPE_CHECKING:
+    from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import (
+        TenantAppAuthService,
+    )
+
 logger = logging.getLogger(__name__)
 
 
 class TenantSharePointAppService:
     """Service for managing tenant SharePoint application credentials."""
 
-    def __init__(self, tenant_app_repo: TenantSharePointAppRepository) -> None:
+    def __init__(
+        self,
+        tenant_app_repo: TenantSharePointAppRepository,
+        tenant_app_auth_service: Optional["TenantAppAuthService"] = None,
+    ) -> None:
         super().__init__()
         self.tenant_app_repo = tenant_app_repo
+        self.tenant_app_auth_service = tenant_app_auth_service
+
+    def _forget_cached_token(self, app: Optional[TenantSharePointApp]) -> None:
+        # A token minted with the previous secret must not outlive the change.
+        if app is not None and self.tenant_app_auth_service:
+            self.tenant_app_auth_service.clear_cache(str(app.id))
 
     async def get_active_app_for_tenant(
         self, tenant_id: UUID
@@ -73,6 +88,7 @@ class TenantSharePointAppService:
                 existing_app.certificate_path = certificate_path
 
             existing_app.activate()  # Ensure it's active after update
+            self._forget_cached_token(existing_app)
             return await self.tenant_app_repo.update(existing_app)
         else:
             logger.info(f"Creating new SharePoint app for tenant {tenant_id}")
@@ -97,6 +113,7 @@ class TenantSharePointAppService:
             True if deactivated, False if not found
         """
         logger.warning(f"Deactivating SharePoint app for tenant {tenant_id}")
+        self._forget_cached_token(await self.tenant_app_repo.get_by_tenant(tenant_id))
         return await self.tenant_app_repo.deactivate(tenant_id)
 
     async def delete_app(self, tenant_id: UUID) -> bool:
@@ -113,6 +130,7 @@ class TenantSharePointAppService:
             return False
 
         logger.warning(f"Deleting SharePoint app for tenant {tenant_id}")
+        self._forget_cached_token(app)
         return await self.tenant_app_repo.delete(app.id)
 
     async def update(self, app: TenantSharePointApp) -> TenantSharePointApp:
@@ -178,6 +196,7 @@ class TenantSharePointAppService:
                 existing_app.certificate_path = certificate_path
 
             existing_app.activate()  # Ensure it's active after update
+            self._forget_cached_token(existing_app)
             return await self.tenant_app_repo.update(existing_app)
         else:
             logger.info(

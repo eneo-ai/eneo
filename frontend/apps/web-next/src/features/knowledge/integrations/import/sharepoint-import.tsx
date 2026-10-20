@@ -26,6 +26,8 @@ import { toast } from "@/lib/toast";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { useSpace } from "@/features/spaces/use-space";
 import { EmbeddingModelSelect } from "../../embedding-model-select";
+import { trackImports } from "../import-completion";
+import { KNOWLEDGE_NAME_MAX_LENGTH } from "../knowledge-names";
 import {
   integrationPreviewQueryOptions,
   type IntegrationPreview,
@@ -197,13 +199,48 @@ export function SharePointImportDialog({
       );
     },
     onSuccess: (result) => {
-      trackJob();
+      // Each created item's first sync is reported with its counts once its job
+      // is over; several are reported together, under the first job's id.
+      const created = result.items.filter((item) => item.status === "created" && item.job);
+      const firstJob = created[0]?.job;
+      const batch =
+        created.length > 1 && firstJob && site
+          ? {
+              batchId: firstJob.id,
+              batchName: requiresWrapperName ? wrapperName.trim() : site.name
+            }
+          : {};
+      trackImports(
+        created.flatMap((item) =>
+          item.job && item.integration_knowledge_id
+            ? [
+                {
+                  jobId: item.job.id,
+                  knowledgeId: item.integration_knowledge_id,
+                  name: item.name,
+                  spaceRouteId: routeId,
+                  ...batch
+                }
+              ]
+            : []
+        )
+      );
+      trackJob(result.items.flatMap((item) => (item.job ? [item.job] : [])));
       void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
       if (result.created_count === 0) {
         toast.error(
           t("sharepoint_batch_import_all_failed", { failed: String(result.failed_count) })
         );
         return;
+      }
+      if (result.failed_count > 0) {
+        toast.warning(
+          t("sharepoint_batch_import_partial", {
+            created: String(result.created_count),
+            total: String(result.items.length),
+            failed: String(result.failed_count)
+          })
+        );
       }
       reset();
       onOpenChange(false);
@@ -387,6 +424,7 @@ export function SharePointImportDialog({
                     <Input
                       id="sharepoint-wrapper-name"
                       value={wrapperName}
+                      maxLength={KNOWLEDGE_NAME_MAX_LENGTH}
                       placeholder={t("sharepoint_wrapper_name_placeholder")}
                       onChange={(event) => setWrapperName(event.target.value)}
                       {...fieldProblemProps(
@@ -410,6 +448,7 @@ export function SharePointImportDialog({
                           className="h-8 min-w-0 flex-1 text-sm"
                           aria-label={t("sharepoint_import_name_for", { name: entry.item.name })}
                           value={entry.importName}
+                          maxLength={KNOWLEDGE_NAME_MAX_LENGTH}
                           onChange={(event) =>
                             updateImportName(entry.selectionKey, event.target.value)
                           }

@@ -8,9 +8,11 @@
   type Props = {
     integration: Omit<Integration, "id"> | UserIntegration;
     action: Snippet;
+    /** What's new "Show me" anchor, rendered as `data-tour`. */
+    tour?: string;
   };
 
-  let { integration, action }: Props = $props();
+  let { integration, action, tour }: Props = $props();
 
   const descriptionKey = $derived(integrationData[integration.integration_type].descriptionKey);
   const description = $derived(
@@ -32,6 +34,7 @@
   class="border-default flex flex-col overflow-y-auto rounded-lg border p-4 shadow-md hover:shadow-lg {!isTenantAppConfigured
     ? 'opacity-60'
     : ''}"
+  data-tour={tour}
 >
   <div
     class="from-accent-dimmer -mx-4 -mt-4 bg-gradient-to-b to-[var(--background-primary)] px-4 pt-4"

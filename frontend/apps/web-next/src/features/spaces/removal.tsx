@@ -1,9 +1,10 @@
 "use client";
 
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, type MutationKey } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { createContext, use, type RefObject } from "react";
+import { createContext, use, useRef, type RefObject } from "react";
 import { toastApiError } from "@/lib/api/toast";
+import { focusAfterRemoval } from "@/lib/focus-after-removal";
 import { rescueFocus } from "@/lib/focus-rescue";
 
 type FocusTarget = RefObject<HTMLElement | null>;
@@ -33,33 +34,46 @@ export function RemovalFocusScope({
  * would leave keyboard focus on <body> (ACCESSIBILITY.md rule 2). On success
  * it waits for `refresh` (the list's invalidation, so the dialog stays pending
  * until the item is gone), then runs `onRemoved` (close the dialog) and moves
- * focus to `focusTarget`, or the nearest `RemovalFocusScope` target;
- * `rescueFocus` only acts when focus was actually lost. Errors are toasted
- * unless `onError` is given.
+ * focus to the row that took the removed one's place when `anchor` (a control
+ * in the row) is given, else to `focusTarget` or the nearest
+ * `RemovalFocusScope` target; `rescueFocus` only acts when focus was actually
+ * lost. Errors are toasted unless `onError` is given.
  */
 export function useRemovalMutation<TData = unknown, TVariables = void>({
+  mutationKey,
   mutationFn,
   refresh,
   onRemoved,
   onError,
-  focusTarget
+  focusTarget,
+  anchor
 }: {
+  /** For a page that must tell its own removal from the item vanishing otherwise. */
+  mutationKey?: MutationKey;
   mutationFn: (variables: TVariables) => Promise<TData>;
   refresh: () => Promise<unknown>;
   onRemoved?: (data: TData, variables: TVariables) => void;
   onError?: (error: Error) => void;
   /** For a list that owns the mutation itself (so no scope is above it). */
   focusTarget?: FocusTarget;
+  /** A control in the removed item's row (its menu), to find the neighbouring row by. */
+  anchor?: FocusTarget;
 }) {
   const t = useTranslations();
   const scopeTarget = use(RemovalFocusContext);
   const target = focusTarget ?? scopeTarget;
+  const neighbour = useRef<() => HTMLElement | null>(() => null);
   return useMutation({
+    mutationKey,
     mutationFn,
+    onMutate: () => {
+      neighbour.current = focusAfterRemoval(anchor?.current ?? null);
+    },
     onSuccess: async (data, variables) => {
       await refresh();
       onRemoved?.(data, variables);
-      rescueFocus(target?.current ?? document.getElementById("main-content"));
+      const next = neighbour.current;
+      rescueFocus(() => next() ?? target?.current ?? document.getElementById("main-content"));
     },
     onError: onError ?? ((error) => toastApiError(error, t))
   });

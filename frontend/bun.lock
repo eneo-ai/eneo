@@ -120,6 +120,7 @@
         "@ai-sdk/react": "3.0.294",
         "@astryxdesign/core": "0.6.4",
         "@astryxdesign/theme-neutral": "0.6.4",
+        "@eneo/eneo-js": "workspace:*",
         "@eneo/whats-new": "workspace:*",
         "@modelcontextprotocol/ext-apps": "2.0.3",
         "@radix-ui/react-use-controllable-state": "^1.2.3",

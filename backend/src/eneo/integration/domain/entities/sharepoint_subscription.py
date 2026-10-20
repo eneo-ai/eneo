@@ -26,11 +26,15 @@ class SharePointSubscription(Entity):
         last_renewal_failed_at: datetime | None = None,
         last_renewal_error: str | None = None,
         last_webhook_received_at: datetime | None = None,
+        notification_url: str | None = None,
+        lifecycle_notification_url: str | None = None,
         id: Optional[UUID] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
+        self.notification_url = notification_url
+        self.lifecycle_notification_url = lifecycle_notification_url
         self.user_integration_id = user_integration_id
         self.site_id = site_id
         self.subscription_id = subscription_id
@@ -40,6 +44,11 @@ class SharePointSubscription(Entity):
         self.last_renewal_failed_at = last_renewal_failed_at
         self.last_renewal_error = last_renewal_error
         self.last_webhook_received_at = last_webhook_received_at
+
+    @property
+    def is_onedrive(self) -> bool:
+        """OneDrive subscriptions store the drive id as their site as well."""
+        return bool(self.site_id) and self.site_id == self.drive_id
 
     def mark_renewal_success(self) -> None:
         """Clear renewal failure state after Graph accepts renewal/recreation."""

@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from pydantic import (
     Field,
     ValidationError,
+    ValidationInfo,
     computed_field,
     field_validator,
     model_validator,
@@ -679,9 +680,22 @@ class Settings(BaseSettings):
     sharepoint_scopes: Optional[str] = None
     sharepoint_webhook_client_state: Optional[str] = None
     sharepoint_webhook_notification_url: Optional[str] = None
+    # Where Graph posts subscription lifecycle events (reauthorization, removal,
+    # missed notifications). Defaults to the notification URL itself; the
+    # webhook's "lifecycle/" path serves them too.
+    sharepoint_webhook_lifecycle_notification_url: Optional[str] = None
     # Max SharePoint/OneDrive file size to download and process (bytes)
     # Default: 50 MB
     sharepoint_max_download_bytes: int = 50 * 1024 * 1024
+    # Most items the import picker lists for one folder before asking to narrow
+    sharepoint_browse_max_items: int = 2000
+    # Hours without any sync after which the periodic catch-up queues a delta
+    # sync for a SharePoint source, in case Graph dropped its notifications.
+    # 0 turns the catch-up off; markers left by interrupted syncs are then only
+    # picked up by the next sync of that source.
+    sharepoint_catch_up_after_hours: int = 6
+    # Most syncs one catch-up run (every 15 minutes) queues
+    sharepoint_catch_up_max_syncs_per_run: int = 25
 
     # Generic encryption key for sensitive data (HTTP auth, tenant API keys, etc.)
     # Required when TENANT_CREDENTIALS_ENABLED=true or FEDERATION_ENABLED=true
@@ -759,11 +773,24 @@ class Settings(BaseSettings):
             )
         return v
 
-    @field_validator("sharepoint_max_download_bytes")
+    @field_validator(
+        "sharepoint_max_download_bytes",
+        "sharepoint_browse_max_items",
+        "sharepoint_catch_up_max_syncs_per_run",
+    )
     @classmethod
-    def validate_sharepoint_max_download_bytes(cls, v: int):
+    def validate_sharepoint_positive_limits(cls, v: int, info: ValidationInfo):
         if v <= 0:
-            raise ValueError("sharepoint_max_download_bytes must be greater than 0")
+            raise ValueError(f"{info.field_name} must be greater than 0")
+        return v
+
+    @field_validator("sharepoint_catch_up_after_hours")
+    @classmethod
+    def validate_sharepoint_catch_up_after_hours(cls, v: int):
+        if v < 0:
+            raise ValueError(
+                "sharepoint_catch_up_after_hours must be 0 (off) or a number of hours"
+            )
         return v
 
     @model_validator(mode="after")

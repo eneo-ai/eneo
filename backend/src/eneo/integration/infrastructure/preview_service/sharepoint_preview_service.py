@@ -5,6 +5,9 @@ from typing_extensions import override
 
 from eneo.integration.domain.entities.integration_preview import IntegrationPreview
 from eneo.integration.domain.entities.oauth_token import OauthToken, SharePointToken
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    OrgTokenProvider,
+)
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
     SharePointContentClient,
 )
@@ -16,15 +19,6 @@ from eneo.main.logging import get_logger
 if TYPE_CHECKING:
     from eneo.integration.domain.entities.tenant_sharepoint_app import (
         TenantSharePointApp,
-    )
-    from eneo.integration.domain.repositories.tenant_sharepoint_app_repo import (
-        TenantSharePointAppRepository,
-    )
-    from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
-        ServiceAccountAuthService,
-    )
-    from eneo.integration.infrastructure.auth_service.tenant_app_auth_service import (
-        TenantAppAuthService,
     )
     from eneo.integration.infrastructure.oauth_token_service import OauthTokenService
 
@@ -44,14 +38,10 @@ class SharePointPreviewService(BasePreviewService):
     def __init__(
         self,
         oauth_token_service: "OauthTokenService",
-        tenant_app_auth_service: Optional["TenantAppAuthService"] = None,
-        service_account_auth_service: Optional["ServiceAccountAuthService"] = None,
-        tenant_sharepoint_app_repo: Optional["TenantSharePointAppRepository"] = None,
+        org_token_provider: OrgTokenProvider,
     ):
         super().__init__(oauth_token_service)
-        self.tenant_app_auth_service = tenant_app_auth_service
-        self.service_account_auth_service = service_account_auth_service
-        self.tenant_sharepoint_app_repo = tenant_sharepoint_app_repo
+        self.org_token_provider = org_token_provider
 
     @override
     async def get_preview_info(
@@ -97,56 +87,20 @@ class SharePointPreviewService(BasePreviewService):
         tenant_app: "TenantSharePointApp",
     ) -> List[IntegrationPreview]:
         """Get preview information from SharePoint using tenant app credentials"""
-
-        # Get access token based on auth method
-        if tenant_app.is_service_account():
-            if not self.service_account_auth_service:
-                raise ValueError("ServiceAccountAuthService not configured")
-            logger.info(
-                "Refreshing service account token",
-                extra={
-                    "tenant_app_id": str(tenant_app.id),
-                    "auth_method": tenant_app.auth_method,
-                },
-            )
-            token_data = await self.service_account_auth_service.refresh_access_token(
-                tenant_app
-            )
-            new_refresh_token = token_data.get("refresh_token")
-            if (
-                new_refresh_token
-                and new_refresh_token != tenant_app.service_account_refresh_token
-            ):
-                tenant_app.update_refresh_token(new_refresh_token)
-                if self.tenant_sharepoint_app_repo:
-                    await self.tenant_sharepoint_app_repo.update(tenant_app)
-            access_token = token_data["access_token"]
-            logger.info(
-                "Service account token refreshed successfully",
-                extra={
-                    "tenant_app_id": str(tenant_app.id),
-                    "token_length": len(access_token) if access_token else 0,
-                },
-            )
-        else:
-            if not self.tenant_app_auth_service:
-                raise ValueError("TenantAppAuthService not configured")
-            access_token = await self.tenant_app_auth_service.get_access_token(
-                tenant_app
-            )
-            logger.info(
-                "Using tenant app authentication for preview",
-                extra={
-                    "tenant_app_id": str(tenant_app.id),
-                    "auth_method": tenant_app.auth_method,
-                },
-            )
+        provider = self.org_token_provider
+        access_token = await provider.get_access_token(tenant_app)
+        logger.info(
+            "Organisation token acquired for preview",
+            extra={
+                "tenant_app_id": str(tenant_app.id),
+                "auth_method": tenant_app.auth_method,
+            },
+        )
 
         async with SharePointContentClient(
             base_url="https://graph.microsoft.com",
             api_token=access_token,
-            token_id=None,  # No token_id for app auth
-            token_refresh_callback=None,  # No refresh callback needed for app auth
+            access_token_provider=provider.access_token_provider(tenant_app),
         ) as content_client:
             try:
                 return await self._load_site_previews(

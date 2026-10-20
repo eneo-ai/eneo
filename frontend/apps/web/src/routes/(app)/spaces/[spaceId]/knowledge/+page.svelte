@@ -16,13 +16,12 @@
   import { IconStop } from "@eneo/icons/stop";
   import { IconTrash } from "@eneo/icons/trash";
   import IntegrationsTable from "./integrations/IntegrationsTable.svelte";
-  import SyncHistoryDialog from "./integrations/SyncHistoryDialog.svelte";
   import ImportKnowledgeDialog from "$lib/features/integrations/components/import/ImportKnowledgeDialog.svelte";
   import SharePointFixtureLauncher from "$lib/features/integrations/sharepoint/SharePointFixtureLauncher.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
-  import type { IntegrationKnowledge, WebsiteSparse } from "@eneo/eneo-js";
+  import type { WebsiteSparse } from "@eneo/eneo-js";
   import { getJobManager, jobCompletionEvents } from "$lib/features/jobs/JobManager";
   import { untrack } from "svelte";
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
@@ -58,8 +57,6 @@
   let showIntegrationsNotice = $state(
     untrack(() => data.environment.integrationRequestFormUrl !== undefined)
   );
-  let selectedIntegrationForSyncHistory: IntegrationKnowledge | null = $state(null);
-  let showSyncHistoryDialog = $state(false);
   let isOrgSpace = $currentSpace.organization;
   let isPersonalSpace = $currentSpace.personal;
 
@@ -70,11 +67,6 @@
         role.permissions?.includes("admin")
       ) ?? false
   );
-
-  function handleSelectIntegration(integration: IntegrationKnowledge) {
-    selectedIntegrationForSyncHistory = integration;
-    showSyncHistoryDialog = true;
-  }
 
   // Website selection state (shared with WebsiteTable)
   let selectedWebsiteIds = $state.raw(writable<Set<string>>(new Set()));
@@ -246,13 +238,6 @@
   let userCanSeeIntegrations = $derived(
     $currentSpace.hasPermission("read", "integrationKnowledge")
   );
-
-  // Reset selected integration when dialog closes
-  $effect(() => {
-    if (!showSyncHistoryDialog) {
-      selectedIntegrationForSyncHistory = null;
-    }
-  });
 </script>
 
 <svelte:head>
@@ -439,12 +424,8 @@
             </div>
           </div>
         {/if}
-        <IntegrationsTable onSelectIntegrationForSyncHistory={handleSelectIntegration}
-        ></IntegrationsTable>
-        <SyncHistoryDialog
-          knowledge={selectedIntegrationForSyncHistory}
-          bind:open={showSyncHistoryDialog}
-        ></SyncHistoryDialog>
+        <!-- The tabs keep their content mounted; only poll sync progress on this one. -->
+        <IntegrationsTable active={$selectedTab === "integrations"}></IntegrationsTable>
       </Page.Tab>
     {/if}
   </Page.Main>

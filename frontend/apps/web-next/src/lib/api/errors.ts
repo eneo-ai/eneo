@@ -193,9 +193,32 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
  * backend error → backend's (English) message; anything else → generic
  * "request failed" fallback.
  */
+/**
+ * An integration refusal names its cause in the payload's `code`. A Microsoft
+ * error code (AADSTS…) in the backend's message is kept: an administrator looks
+ * it up.
+ */
+const INTEGRATION_FAILURE_MESSAGES: Record<string, (t: (key: string) => string) => string> = {
+  sharepoint_credentials_invalid: (t) => t("integration_error_credentials_invalid"),
+  oauth_code_rejected: (t) => t("integration_error_oauth_code_rejected"),
+  oauth_client_rejected: (t) => t("integration_error_oauth_client_rejected"),
+  integration_knowledge_syncing: (t) => t("integration_error_syncing")
+};
+const AADSTS_CODE = /\bAADSTS\d+\b/;
+
+function getIntegrationFailureMessage(
+  error: EneoApiError,
+  t: (key: string) => string
+): string | null {
+  const describe = error.reason ? INTEGRATION_FAILURE_MESSAGES[error.reason] : undefined;
+  if (!describe) return null;
+  const microsoft = AADSTS_CODE.exec(error.message)?.[0];
+  return microsoft ? `${describe(t)} (${microsoft})` : describe(t);
+}
+
 export function getErrorMessage(error: unknown, t: (key: string) => string): string {
   if (error instanceof EneoApiError) {
-    const message = getErrorMessageForCode(error.code, t);
+    const message = getIntegrationFailureMessage(error, t) ?? getErrorMessageForCode(error.code, t);
     if (message) return message;
     if (error.message) return error.message;
   }
