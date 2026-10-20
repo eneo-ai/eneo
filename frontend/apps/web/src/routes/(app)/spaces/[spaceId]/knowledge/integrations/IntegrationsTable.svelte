@@ -65,8 +65,12 @@
   // change notifications' background syncs belong to the source's own page.
   let announcement = $state("");
   let announcers: Record<string, SourceAnnouncer> = {};
+  // Rows that never record an outcome bring no new summary; ask again when a wait ends.
+  let recheck = $state(0);
   $effect(() => {
     const current = $rows;
+    void recheck;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     untrack(() => {
       const now = Date.now();
       const next: Record<string, SourceAnnouncer> = {};
@@ -81,7 +85,14 @@
       }
       announcers = next;
       if (messages.length > 0) announcement = messages.join(". ");
+      const waits = Object.values(next)
+        .map((announcer) => announcer.awaitingUntil)
+        .filter((until): until is number => until !== null);
+      if (waits.length > 0) {
+        timer = setTimeout(() => recheck++, Math.max(0, Math.min(...waits) - Date.now()));
+      }
     });
+    return () => clearTimeout(timer);
   });
 
   const statusFilter = writable<SourceFilter>("all");

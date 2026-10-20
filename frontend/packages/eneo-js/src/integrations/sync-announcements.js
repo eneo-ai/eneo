@@ -48,6 +48,13 @@ export class SyncAnnouncer {
   #previous = null;
   #progressAt = 0;
   #startedHere = false;
+  /**
+   * The failing parts when this sync was queued or started. Rows re-read while
+   * it runs already carry its new attempt time, so they cannot tell a part that
+   * failed again from one that was failing before.
+   * @type {string[] | null}
+   */
+  #baseline = null;
   /** @type {{outcome: string, failures: string[], at: number, speak: boolean} | null} */
   #awaiting = null;
 
@@ -61,6 +68,15 @@ export class SyncAnnouncer {
   }
 
   /**
+   * When an ended sync stops waiting for its outcome, so a caller whose
+   * snapshots stop changing can call `next` again then; null when not waiting.
+   * @returns {number | null}
+   */
+  get awaitingUntil() {
+    return this.#awaiting ? this.#awaiting.at + OUTCOME_WAIT_MS : null;
+  }
+
+  /**
    * @param {Snapshot} next
    * @param {number} now
    * @returns {Transition | null}
@@ -69,42 +85,48 @@ export class SyncAnnouncer {
     const previous = this.#previous;
     this.#previous = next;
     if (!previous) return null;
-    if (next.state === "queued") this.#startedHere = true;
+    if (next.state === "queued") {
+      this.#startedHere = true;
+      this.#baseline ??= previous.failures;
+    }
 
     const was = previous.progress;
     const current = next.progress;
     const speak = this.#speaks(was ?? current);
 
+    if (current && !was) {
+      this.#baseline ??= previous.failures;
+      this.#awaiting = null;
+      this.#progressAt = now;
+      return speak ? { kind: "started" } : null;
+    }
+    // A sync ended: its progress went away, or a queued sync ended before any
+    // progress was read (a small folder, or one that failed at once).
+    const ended =
+      !current && (was !== null || (previous.state === "queued" && next.state !== "queued"));
+    if (ended) {
+      this.#awaiting = {
+        outcome: previous.outcome,
+        failures: this.#baseline ?? previous.failures,
+        at: now,
+        speak
+      };
+    }
     if (this.#awaiting && !current) {
       const awaiting = this.#awaiting;
       if (next.outcome !== awaiting.outcome) {
-        this.#awaiting = null;
-        this.#startedHere = false;
+        this.#settle();
         if (!awaiting.speak) return null;
         const failedNow = next.failures.some((failure) => !awaiting.failures.includes(failure));
         return { kind: failedNow ? "failed" : "finished" };
       }
       if (now - awaiting.at >= OUTCOME_WAIT_MS) {
-        this.#awaiting = null;
-        this.#startedHere = false;
+        this.#settle();
         return awaiting.speak ? { kind: "stopped" } : null;
       }
+      if (ended) return null;
     }
 
-    if (current && !was) {
-      this.#awaiting = null;
-      this.#progressAt = now;
-      return speak ? { kind: "started" } : null;
-    }
-    if (!current && was) {
-      this.#awaiting = {
-        outcome: previous.outcome,
-        failures: previous.failures,
-        at: now,
-        speak
-      };
-      return null;
-    }
     if (current && was) {
       if (!speak || !this.speakProgress) return null;
       const reachedFinishing = current.phase === FINISHING && was.phase !== FINISHING;
@@ -118,6 +140,12 @@ export class SyncAnnouncer {
       return { kind: "queued" };
     }
     return null;
+  }
+
+  #settle() {
+    this.#awaiting = null;
+    this.#startedHere = false;
+    this.#baseline = null;
   }
 
   /** @param {SnapshotProgress | null} progress */

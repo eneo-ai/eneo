@@ -167,16 +167,23 @@
   let announcement = $state("");
   const announcer = new SourceAnnouncer();
   let previousProblemCount: number | null = null;
+  // Rows that never record an outcome bring no new summary; ask again when the wait ends.
+  let recheck = $state(0);
   $effect(() => {
     const current = summary;
     const nextProblemCount = problems ? problemCount : null;
+    void recheck;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     untrack(() => {
       const text = announcer.next(source.name, current, Date.now());
       const problemText = announceProblemCount(previousProblemCount, nextProblemCount);
       if (nextProblemCount !== null) previousProblemCount = nextProblemCount;
       const message = [text, problemText].filter(Boolean).join(". ");
       if (message) announcement = message;
+      const until = announcer.awaitingUntil;
+      if (until !== null) timer = setTimeout(() => recheck++, Math.max(0, until - Date.now()));
     });
+    return () => clearTimeout(timer);
   });
 
   // Counted over the current items: a removed folder's list stays in skippedByItem.

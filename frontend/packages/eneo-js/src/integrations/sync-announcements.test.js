@@ -157,7 +157,58 @@ test("a list speaks only what was started from it, and no counts", () => {
       [idle("after"), 61_000],
       [idle("later"), 62_000]
     ]),
-    [{ kind: "queued" }, { kind: "started" }, null, null, { kind: "finished" }]
+    [{ kind: "queued" }, { kind: "started" }, null, { kind: "finished" }, null]
+  );
+});
+
+test("a queued sync that ends before any progress is read still gets its end spoken", () => {
+  const announcer = new SyncAnnouncer();
+  assert.deepEqual(
+    run(announcer, [
+      [idle(), 0],
+      [queued, 500],
+      [idle("after", ["b@2"]), 3_000]
+    ]),
+    [null, { kind: "queued" }, { kind: "failed" }]
+  );
+  const silent = new SyncAnnouncer();
+  run(silent, [
+    [idle(), 0],
+    [queued, 500],
+    [idle("before"), 3_000]
+  ]);
+  assert.equal(silent.awaitingUntil, 3_000 + OUTCOME_WAIT_MS);
+  assert.deepEqual(silent.next(idle("before"), 3_000 + OUTCOME_WAIT_MS), { kind: "stopped" });
+  assert.equal(silent.awaitingUntil, null);
+  // That sync is over: a later change notification's sync is not taken for one started here.
+  assert.equal(silent.next(syncing(1, { background: true }), 40_000), null);
+});
+
+test("progress and outcome arriving in one snapshot are spoken at once", () => {
+  const announcer = new SyncAnnouncer();
+  assert.deepEqual(
+    run(announcer, [
+      [idle(), 0],
+      [syncing(1), 1_000],
+      [idle("after"), 5_000]
+    ]).at(-1),
+    { kind: "finished" }
+  );
+});
+
+test("a folder that fails again is a failure even when its rows were re-read mid-sync", () => {
+  const announcer = new SyncAnnouncer();
+  const before = ["b@1"];
+  assert.deepEqual(
+    run(announcer, [
+      [idle("before", before), 0],
+      [syncing(1, { failures: before }), 1_000],
+      // A space refresh while it runs already shows the new attempt time.
+      [syncing(5, { failures: ["b@2"] }), 3_000],
+      [idle("before", ["b@2"]), 5_000],
+      [idle("after", ["b@2"]), 6_000]
+    ]).at(-1),
+    { kind: "failed" }
   );
 });
 

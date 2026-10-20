@@ -8,6 +8,7 @@ import { m } from "$lib/paraglide/messages";
 import { expectNoAxeViolations } from "$lib/test/axe";
 import type { IntegrationSkippedDocuments } from "$lib/features/integrations/integrationDocuments";
 import { groupIntegrationSources } from "$lib/features/integrations/sources";
+import { OUTCOME_WAIT_MS } from "$lib/features/integrations/syncAnnouncements";
 import type { IntegrationSyncProgress } from "$lib/features/integrations/syncProgress";
 
 const api = vi.hoisted(() => ({
@@ -324,6 +325,32 @@ describe("source page", () => {
     );
     await rerender({ source: groupIntegrationSources([synced, skannade])[0] });
     await expect.poll(live).toBe(m.integration_announce_sync_finished({ name: "Kommunstyrelsen" }));
+  });
+
+  it("says a sync is no longer running when its rows never tell how it ended", async () => {
+    showWrapper();
+    await expect
+      .element(page.getByRole("navigation", { name: m.integration_source_folders() }))
+      .toBeVisible();
+    const live = () =>
+      document.querySelector('[role="status"][aria-live="polite"]')?.textContent?.trim();
+
+    api.getSyncProgress.mockResolvedValue({ items: [progressFor("ik-a")] });
+    currentSpace.set({ ...space });
+    await expect.poll(live).toBe(m.integration_announce_sync_started({ name: "Kommunstyrelsen" }));
+
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      api.getSyncProgress.mockResolvedValue({ items: [] });
+      currentSpace.set({ ...space });
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(live()).toBe(m.integration_announce_sync_started({ name: "Kommunstyrelsen" }));
+      // Nothing else changes; the wait for the rows' outcome runs out.
+      await vi.advanceTimersByTimeAsync(OUTCOME_WAIT_MS);
+      expect(live()).toBe(m.integration_announce_sync_stopped({ name: "Kommunstyrelsen" }));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("puts focus on the view that replaced the one focus was in", async () => {
