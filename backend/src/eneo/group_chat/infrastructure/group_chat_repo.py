@@ -84,6 +84,36 @@ class GroupChatRepository:
         )
         if found is None:
             raise NotFoundException("Group chat not found")
+        if members is not None or is_provided(orchestrator_assistant_id):
+            # Validate the final relationship under the write lock. An editor
+            # may have prepared a member replacement before another editor
+            # selected the orchestrator.
+            selected_orchestrator = (
+                orchestrator_assistant_id
+                if is_provided(orchestrator_assistant_id)
+                else await self.session.scalar(
+                    sa.select(GroupChatsTable.orchestrator_assistant_id).where(
+                        GroupChatsTable.id == chat_id
+                    )
+                )
+            )
+            if selected_orchestrator is not None:
+                is_member = (
+                    selected_orchestrator in members
+                    if members is not None
+                    else await self.session.scalar(
+                        sa.select(GroupChatsAssistantsMapping.assistant_id).where(
+                            GroupChatsAssistantsMapping.group_chat_id == chat_id,
+                            GroupChatsAssistantsMapping.assistant_id
+                            == selected_orchestrator,
+                        )
+                    )
+                    is not None
+                )
+                if is_member:
+                    raise BadRequestException(
+                        "The orchestrator must be separate from the specialists."
+                    )
         values: dict[str, object] = {
             key: value
             for key, value in {

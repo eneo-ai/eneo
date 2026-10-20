@@ -540,6 +540,64 @@ async def test_chat_rename_preserves_hidden_seats_but_explicit_empty_clears_them
     assert len(list(persisted.connection.scalars(sa.select(Assistants.id)))) == 2
 
 
+async def test_member_replacement_rechecks_the_persisted_orchestrator(persisted):
+    await persisted.chat_repo.update(
+        persisted.chat_id,
+        persisted.space_id,
+        members={persisted.corrupt_id: "Specialist"},
+        orchestrator_assistant_id=persisted.assistant_id,
+    )
+    before = snapshot(persisted)
+    # A stale editor submits only members, unaware that a coordinator was set.
+    with pytest.raises(BadRequestException, match="separate"):
+        await persisted.chat_repo.update(
+            persisted.chat_id,
+            persisted.space_id,
+            members={persisted.assistant_id: "Stale selection"},
+        )
+    assert snapshot(persisted) == before
+    with pytest.raises(BadRequestException, match="orchestrator"):
+        await persisted.assistant_repo.delete(
+            persisted.assistant_id, persisted.space_id
+        )
+    with pytest.raises(BadRequestException, match="orchestrator"):
+        await persisted.assistant_repo.move(
+            persisted.assistant_id, persisted.space_id, uuid4()
+        )
+    assert snapshot(persisted) == before
+
+
+async def test_orchestrator_selection_rechecks_existing_seats_and_allows_clearing(
+    persisted,
+):
+    with pytest.raises(BadRequestException, match="separate"):
+        await persisted.chat_repo.update(
+            persisted.chat_id,
+            persisted.space_id,
+            orchestrator_assistant_id=persisted.assistant_id,
+        )
+    await persisted.chat_repo.update(
+        persisted.chat_id,
+        persisted.space_id,
+        members={},
+        orchestrator_assistant_id=persisted.assistant_id,
+    )
+    await persisted.chat_repo.update(
+        persisted.chat_id,
+        persisted.space_id,
+        orchestrator_assistant_id=None,
+        members={persisted.assistant_id: "Specialist again"},
+    )
+    assert (
+        persisted.connection.scalar(
+            sa.select(GroupChatsTable.orchestrator_assistant_id).where(
+                GroupChatsTable.id == persisted.chat_id
+            )
+        )
+        is None
+    )
+
+
 async def test_foreign_space_cannot_change_an_assistant(persisted):
     before = snapshot(persisted)
     with pytest.raises(NotFoundException):
