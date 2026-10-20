@@ -82,9 +82,10 @@ describe("forecast job in a sandbox child", () => {
 
   /**
    * A stand-in sidecar that waits far past any deadline: a venv whose python is the forecast
-   * interpreter itself, with a sitecustomize that sleeps before any script runs (Python loads it
-   * even in isolated mode). The child starts it exactly as it starts the real sidecar, under the
-   * same rules: its venv and the interpreter, nothing around them.
+   * interpreter itself, with a .pth file that sleeps before any script runs (site runs it for the
+   * venv's site-packages even in isolated mode; a sitecustomize would lose to Debian's own in the
+   * standard library). The child starts it exactly as it starts the real sidecar, under the same
+   * rules: its venv and the interpreter, nothing around them.
    */
   async function standIn(name: string): Promise<string> {
     const real = realpathSync(FORECAST_PYTHON);
@@ -94,7 +95,7 @@ describe("forecast job in a sandbox child", () => {
     await mkdir(join(venv, "bin"), { recursive: true });
     await mkdir(join(venv, "lib", `python${version}`, "site-packages"), { recursive: true });
     await writeFile(join(venv, "pyvenv.cfg"), `home = ${dirname(real)}\ninclude-system-site-packages = false\n`);
-    await writeFile(join(venv, "lib", `python${version}`, "site-packages", "sitecustomize.py"), "import time\ntime.sleep(60)\n");
+    await writeFile(join(venv, "lib", `python${version}`, "site-packages", "stand-in.pth"), "import time; time.sleep(60)\n");
     await symlink(real, python);
     return python;
   }
