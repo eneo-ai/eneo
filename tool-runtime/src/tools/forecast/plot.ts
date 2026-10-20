@@ -5,8 +5,8 @@ import type { PlotSpec } from "../charts/options";
 export type ForecastPlotTexts = { history: string; median: string; interval: string; start: string };
 
 export const PLOT_TEXTS: Record<"sv" | "en", ForecastPlotTexts> = {
-  sv: { history: "Historik", median: "Mest troligt (P50)", interval: "Spann (P10–P90)", start: "Prognos" },
-  en: { history: "History", median: "Most likely (P50)", interval: "Interval (P10–P90)", start: "Forecast" },
+  sv: { history: "Historik", median: "Mittvärde (P50)", interval: "Spann (P10–P90)", start: "Prognos" },
+  en: { history: "History", median: "Median (P50)", interval: "Interval (P10–P90)", start: "Forecast" },
 };
 
 /** What a forecast's chart needs of the tool's result: the recent days and the days ahead. */

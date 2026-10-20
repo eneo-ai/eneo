@@ -1,6 +1,6 @@
 /// <reference lib="dom" />
 /**
- * The view create_forecast brings (an MCP App): the recent history, the most likely value and
+ * The view create_forecast brings (an MCP App): the recent history, the median (P50) and
  * its interval for each day ahead, drawn by Charts; the same figures as a table; and, behind
  * a disclosure, what the forecast rests on and how it did against the last days.
  *
@@ -140,7 +140,7 @@ const TEXTS = {
     model: (name: string, millions: string) => `${name}, ${millions} miljoner parametrar. Körs i er egen miljö.`,
     caveat: "Spannet är modellens bedömning, inte en garanti.",
     describe: (range: string, days: number, start: string) =>
-      `Linjediagram: historik ${range} och prognos för ${days} dagar från ${start}, med det mest troliga värdet och spannet P10–P90 för varje dag. Samma siffror finns i tabellen.`,
+      `Linjediagram: historik ${range} och prognos för ${days} dagar från ${start}, med mittvärdet och spannet P10–P90 för varje dag. Samma siffror finns i tabellen.`,
   },
   en: {
     label: "Forecast",
@@ -189,7 +189,7 @@ const TEXTS = {
     model: (name: string, millions: string) => `${name}, ${millions} million parameters. Runs in your own environment.`,
     caveat: "The interval is the model's judgement, not a guarantee.",
     describe: (range: string, days: number, start: string) =>
-      `Line chart: history ${range} and a forecast of ${days} days from ${start}, with the most likely value and the P10–P90 interval for each day. The same figures are in the table.`,
+      `Line chart: history ${range} and a forecast of ${days} days from ${start}, with the median and the P10–P90 interval for each day. The same figures are in the table.`,
   },
 };
 

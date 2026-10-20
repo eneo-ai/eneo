@@ -11,7 +11,7 @@ const plot: PlotSpec = {
   labels: ["2026-10-17", "2026-10-18", "2026-10-19", "2026-10-20", "2026-10-21"],
   series: [
     { name: "Historik", values: [1800, 900, 1850, null, null] },
-    { name: "Mest troligt (P50)", values: [null, null, 1850, 1820, 1790] },
+    { name: "Mittvärde (P50)", values: [null, null, 1850, 1820, 1790] },
   ],
   unit: "kWh",
   stacked: false,
@@ -49,7 +49,7 @@ describe("intervals around a line", () => {
     // Swedish numbers group with no-break spaces; compare the words, not the kind of space.
     const read = (index: number) => option.tooltip.formatter(at(index)).replace(/\s/g, " ");
     expect(read(3)).toContain("tis 20 okt. 2026");
-    expect(read(3)).toContain("Mest troligt (P50): 1 820 kWh");
+    expect(read(3)).toContain("Mittvärde (P50): 1 820 kWh");
     expect(read(3)).toContain("Spann (P10–P90): 1 600–2 100 kWh");
     expect(read(3)).not.toContain("500");
     expect(read(0)).toContain("Historik: 1 800 kWh");
@@ -113,7 +113,7 @@ describe("intervals around a line", () => {
       labels: ["2026-10-17", "2026-10-18", "2026-10-19"],
       series: [
         { name: "Historik", values: [10, null, null] },
-        { name: "Mest troligt (P50)", values: [null, null, 20] },
+        { name: "Mittvärde (P50)", values: [null, null, 20] },
       ],
       bands: [{ name: "Spann (P10–P90)", series: 1, lower: [null, null, 15], upper: [null, null, 25] }],
       markers: [{ at: 2, label: "Prognos" }],
@@ -134,7 +134,7 @@ describe("intervals around a line", () => {
       labels,
       series: [
         { name: "Historik", values: [...history, null] },
-        { name: "Mest troligt (P50)", values: [...Array(70).fill(null), 180] },
+        { name: "Mittvärde (P50)", values: [...Array(70).fill(null), 180] },
       ],
       bands: [{ name: "Spann (P10–P90)", series: 1, lower: [...Array(70).fill(null), 170], upper: [...Array(70).fill(null), 190] }],
       markers: [{ at: 70, label: "Prognos" }],
