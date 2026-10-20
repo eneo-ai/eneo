@@ -204,6 +204,10 @@ export function FilePanel({
       }
       switcher={switcher}
       maximise={maximise}
+      // A file opened from the flow panel sits over it; back closes the file and the flow shows again.
+      back={
+        panel.nativeId !== null ? { label: t("panel_back"), onBack: () => panel.close() } : null
+      }
       onClose={() => panel.close()}
     >
       {versions.length > 1 && narrow && (

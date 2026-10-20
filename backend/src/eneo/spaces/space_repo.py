@@ -1234,8 +1234,11 @@ class SpaceRepository:
             space.enabled_capabilities = [
                 s.purpose for s in space.available_capabilities if s.available
             ]
+        # Purpose assistants (a space's flows assistant) are reached the same
+        # way as listed ones, so their chats need the same readiness.
         assistants_with_default = [
             *space.assistants,
+            *space.purpose_assistants,
             *([space.default_assistant] if space.default_assistant else []),
         ]
         if assistants_with_default:

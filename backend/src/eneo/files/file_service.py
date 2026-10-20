@@ -152,6 +152,18 @@ class FileService:
         self._content_loader = FileContentLoader(repo, object_content)
         self._usage = FileUsageRepository(repo.session)
 
+    def as_user(self, user: UserInDB) -> "FileService":
+        """The same service acting as ``user``: for a file an automation
+        principal (a service key, which owns no rows) gives a flow, stored as
+        the flow's author."""
+        return FileService(
+            user=user,
+            repo=self.repo,
+            protocol=self.protocol,
+            object_content=self._object_content,
+            upload_admission=self._upload_admission,
+        )
+
     @asynccontextmanager
     async def _write_transaction(self) -> AsyncGenerator[None]:
         session = self.repo.session
@@ -804,9 +816,18 @@ class FileService:
             range_header=range_header,
         )
 
-    async def ensure_original_available(self, file_id: UUID) -> FileMetadata:
+    async def ensure_original_available(
+        self, file_id: UUID, *, require_owner: bool = True
+    ) -> FileMetadata:
+        """The file's metadata when its exact original can be served.
+
+        ``require_owner=False`` is for callers that authorized the file
+        through the resource holding it (a flow run's files are readable by
+        every reader of the flow, not only their uploader).
+        """
         metadata = await self.repo.get_by_id(file_id=file_id)
-        self._require_owner(metadata, action="read")
+        if require_owner:
+            self._require_owner(metadata, action="read")
         references = await self.repo.get_content_references([file_id])
         if self._first_reference(references, FileContentVariant.ORIGINAL) is not None:
             return metadata

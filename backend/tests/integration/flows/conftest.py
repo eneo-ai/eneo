@@ -86,3 +86,26 @@ def publish_flow():
 
 def topic_field() -> FormField:
     return FormField(key="topic", label="Topic", type="text", required=True)
+
+
+FLOWS_FLAG = "flows_core"
+
+
+@pytest.fixture
+async def flows_enabled(db_container, admin_user):
+    """The tenant has the flows feature on, so the HTTP routes answer."""
+    async with db_container() as container:
+        service = container.feature_flag_service()
+        if await service.feature_flag_repo.one_or_none(name=FLOWS_FLAG) is None:
+            await service.create_feature_flag(FLOWS_FLAG)
+        flag = await service.feature_flag_repo.one(name=FLOWS_FLAG)
+        assert flag.feature_id is not None
+        await service.enable_tenant(flag.feature_id, admin_user.tenant_id)
+
+
+@pytest.fixture
+async def bearer(db_container, patch_auth_service_jwt, admin_user):
+    """Authorization header of the admin user's session."""
+    async with db_container() as container:
+        token = container.auth_service().create_access_token_for_user(admin_user)
+    return {"Authorization": f"Bearer {token}"}

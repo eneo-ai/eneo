@@ -93,10 +93,10 @@ export function FlowPanel({
       actions={
         flow.data ? (
           <Button
-            label={t("run")}
+            label={published && !flow.data.has_unpublished_changes ? t("run") : t("flow_run_test")}
             variant="primary"
             size="sm"
-            isDisabled={!published}
+            isDisabled={stepCount === 0}
             onClick={() => setRunDialogOpen(true)}
           />
         ) : undefined

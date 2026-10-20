@@ -14,6 +14,7 @@ from eneo.assistants.assistant_update import AssistantUpdate
 from eneo.flows.authoring_prompt import AUTHORING_PROMPT, AUTHORING_PROMPT_VERSION
 from eneo.flows.flow_models import FlowAuthoringAssistantPublic
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 from eneo.prompts.prompt_service import PromptService
 
 if TYPE_CHECKING:
@@ -31,6 +32,17 @@ if TYPE_CHECKING:
 FLOWS_PURPOSE = "flows"
 FLOWS_ASSISTANT_NAME = "Flows"
 PROMPT_VERSION_KEY = "flows_prompt_version"
+# The capabilities document and function steps resolve their providers
+# through: a step runs as a call of this assistant, so it holds every one
+# (which of them a run may use is the space's and the user's decision).
+REQUIRED_CAPABILITIES: list[CapabilityPurpose] = [
+    "web_search",
+    "image_generation",
+    "file_analysis",
+    "file_creation",
+    "charts",
+    "compute",
+]
 
 
 class FlowAuthoringAssistantService:
@@ -92,6 +104,7 @@ class FlowAuthoringAssistantService:
                 metadata_json={PROMPT_VERSION_KEY: AUTHORING_PROMPT_VERSION},
                 purpose=FLOWS_PURPOSE,
             )
+            assistant.enabled_capabilities = list(REQUIRED_CAPABILITIES)
             assistant_id = await self.assistant_repo.add(assistant)
             return FlowAuthoringAssistantPublic(
                 assistant_id=assistant_id, space_id=space.id
@@ -108,7 +121,8 @@ class FlowAuthoringAssistantService:
     async def _repair(
         self, assistant: Assistant, space: Space, default_model: CompletionModel
     ) -> Optional[AssistantUpdate]:
-        """Point the assistant back at a usable model and the current prompt."""
+        """Point the assistant back at a usable model, the current prompt and
+        the capabilities its document steps resolve through."""
         model = assistant.completion_model
         model_id = (
             default_model.id
@@ -117,18 +131,27 @@ class FlowAuthoringAssistantService:
         )
         recorded = (assistant.metadata_json or {}).get(PROMPT_VERSION_KEY)
         prompt_stale = recorded != AUTHORING_PROMPT_VERSION
-        if model_id is None and not prompt_stale:
+        missing: list[CapabilityPurpose] = [
+            purpose
+            for purpose in REQUIRED_CAPABILITIES
+            if purpose not in assistant.enabled_capabilities
+        ]
+        capabilities: list[CapabilityPurpose] | None = (
+            [*assistant.enabled_capabilities, *missing] if missing else None
+        )
+        if model_id is None and not prompt_stale and capabilities is None:
             return None
         if not prompt_stale:
-            return AssistantUpdate(completion_model_id=model_id)
+            return AssistantUpdate(
+                completion_model_id=model_id, enabled_capabilities=capabilities
+            )
         metadata: dict[str, object] = {
             **(assistant.metadata_json or {}),
             PROMPT_VERSION_KEY: AUTHORING_PROMPT_VERSION,
         }
-        if model_id is None:
-            return AssistantUpdate(prompt=await self._prompt(), metadata_json=metadata)
         return AssistantUpdate(
             prompt=await self._prompt(),
             metadata_json=metadata,
             completion_model_id=model_id,
+            enabled_capabilities=capabilities,
         )

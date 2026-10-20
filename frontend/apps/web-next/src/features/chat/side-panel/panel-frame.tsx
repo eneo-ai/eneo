@@ -2,7 +2,7 @@
 
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Popover } from "@astryxdesign/core/Popover";
-import { ChevronDown, Maximize2, Minimize2, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, Maximize2, Minimize2, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -120,6 +120,7 @@ export function PanelFrame({
   actions,
   switcher,
   maximise,
+  back,
   onClose,
   closeLabel,
   children
@@ -134,6 +135,8 @@ export function PanelFrame({
   switcher: PanelSwitcher | null;
   /** Null where there is nothing to maximise over (a sheet over the conversation). */
   maximise: PanelMaximise | null;
+  /** Where closing this leads back to (the flow panel under a file), as a control before the tile. */
+  back?: { label: string; onBack: () => void } | null;
   onClose: () => void;
   closeLabel?: string;
   children: ReactNode;
@@ -142,6 +145,17 @@ export function PanelFrame({
   return (
     <>
       <header className="border-ax-border flex min-h-14 shrink-0 items-center gap-2.5 border-b py-2 ps-4 pe-2.5">
+        {back && (
+          <IconButton
+            label={back.label}
+            tooltip={back.label}
+            icon={<ArrowLeft className="size-4" />}
+            variant="ghost"
+            size="sm"
+            className="-ms-2"
+            onClick={back.onBack}
+          />
+        )}
         <span
           aria-hidden="true"
           className={cn(

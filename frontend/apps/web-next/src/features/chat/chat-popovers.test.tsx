@@ -90,6 +90,32 @@ describe("ChatTools", () => {
     await expectNoAxeViolations(popover);
   });
 
+  it("lists an always-on tool locked on and counts it", async () => {
+    renderInChat(
+      <ChatTools
+        servers={servers}
+        disabledServerIds={new Set(["diarium"])}
+        alwaysOn={[{ id: "flows", name: "Flöden", description: "Alltid på i flödeschatten." }]}
+        autoAcceptTools
+        onAutoAcceptToolsChange={() => {}}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Verktyg: 2 av 3 aktiva" }));
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+
+    const group = within(popover).getByRole("list", { name: "Inbyggda verktyg" });
+    const flows = within(group).getByRole("switch", { name: "Flöden" });
+    expect((flows as HTMLInputElement).checked).toBe(true);
+    expect(flows.hasAttribute("disabled") || flows.getAttribute("aria-disabled") === "true").toBe(
+      true
+    );
+    expect(within(group).getByText("Alltid på i flödeschatten.")).toBeTruthy();
+    // "Alla av" leaves it on.
+    fireEvent.click(within(popover).getByRole("button", { name: "Alla av" }));
+    expect((flows as HTMLInputElement).checked).toBe(true);
+    await expectNoAxeViolations(popover);
+  });
+
   it("renders every tool unavailable when the model cannot call tools", async () => {
     renderInChat(<McpHarness modelSupportsTools={false} />);
     fireEvent.click(screen.getByRole("button", { name: "Verktyg: 0 av 2 aktiva" }));

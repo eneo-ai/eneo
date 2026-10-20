@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -197,11 +197,13 @@ class FlowRunContractPublic(BaseModel):
 
 
 class FlowRunCreateRequest(BaseModel):
-    """Start a run of the published version.
+    """Start a run of the published version, or a test run of the draft.
 
     ``values`` carries text, number and select fields by key; ``files``
     carries file and audio fields by key as ids of files the caller
-    uploaded (through the runtime-files endpoint or the chat).
+    uploaded (through the runtime-files endpoint or the chat). ``draft``
+    runs the current draft without publishing it: for editors trying a flow
+    out while building it; ``expected_flow_version`` does not apply then.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -210,6 +212,7 @@ class FlowRunCreateRequest(BaseModel):
     files: dict[str, list[UUID]] = Field(default_factory=dict)
     run_label: Optional[str] = Field(default=None, max_length=200)
     expected_flow_version: Optional[int] = None
+    draft: bool = False
 
 
 class FlowRunErrorPublic(BaseModel):
@@ -228,10 +231,22 @@ class FlowRunFilePublic(BaseModel):
     step_id: Optional[UUID] = None
 
 
+class FlowArtifactPublic(BaseModel):
+    """A file a run of the flow produced, listed across runs."""
+
+    file: FlowRunFilePublic
+    run_id: UUID
+    run_label: Optional[str] = None
+    created_at: datetime
+
+
 class FlowRunSummaryPublic(BaseModel):
     id: UUID
     flow_id: UUID
-    flow_version: int
+    # The published version the run executes; null for a test run of the draft.
+    flow_version: Optional[int] = None
+    # Started on the draft, without publishing, by an editor trying the flow.
+    is_test: bool = False
     tenant_id: UUID
     principal_type: PrincipalType
     status: FlowRunStatus
@@ -342,6 +357,76 @@ class FlowRunReviewCheckpointResumeResponse(BaseModel):
     run: FlowRunSummaryPublic
 
 
+# --- Transcript corrections (a transcribe step's transcript, corrected on read) ---
+
+
+class TranscriptCorrectionOccurrencePublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    segment_index: int = Field(ge=0)
+    char_start: int = Field(ge=0)
+    char_end: int = Field(ge=0)
+    original: str
+    corrected: str = ""
+
+
+class TranscriptSpeakerEditPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    segment_index: int = Field(ge=0)
+    char_start: Optional[int] = None
+    char_end: Optional[int] = None
+    original: Optional[str] = None
+    original_speaker: Optional[str] = None
+    speaker: Optional[str] = None
+    decision: Literal["confirmed", "unresolved"] = "confirmed"
+
+
+class FlowTranscriptCorrectionsEditRequest(BaseModel):
+    """Replace a step's corrections; ``expected_revision`` null creates the row."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int = 3
+    segments_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_revision: Optional[int] = None
+    occurrences: list[TranscriptCorrectionOccurrencePublic] = Field(
+        default_factory=list[TranscriptCorrectionOccurrencePublic]
+    )
+    speaker_edits: list[TranscriptSpeakerEditPublic] = Field(
+        default_factory=list[TranscriptSpeakerEditPublic]
+    )
+    speaker_names: Optional[dict[str, Optional[str]]] = None
+
+
+class FlowTranscriptCorrectionsPublic(BaseModel):
+    schema_version: int
+    segments_hash: str
+    flow_run_id: UUID
+    step_id: UUID
+    occurrences: list[TranscriptCorrectionOccurrencePublic]
+    speaker_edits: list[TranscriptSpeakerEditPublic]
+    speaker_names: dict[str, Optional[str]]
+    revision: int
+    # The transcript was re-made since these were written; do not apply them.
+    stale: bool
+    edited_by_principal_type: PrincipalType
+    created_at: datetime
+    updated_at: datetime
+
+
+class FlowTranscriptPublic(BaseModel):
+    """A transcribe step's transcript with the corrections applied on read."""
+
+    flow_run_id: UUID
+    step_id: UUID
+    segments_hash: str
+    segments: list[dict[str, Any]]
+    speaker_names: dict[str, Optional[str]]
+    text: str
+    corrections_revision: Optional[int] = None
+
+
 # --- Compact run state, shared by the MCP tools and the panel ---
 
 
@@ -361,7 +446,8 @@ class FlowRunStatePublic(BaseModel):
 
     flow_id: UUID
     run_id: UUID
-    flow_version: int
+    flow_version: Optional[int] = None
+    is_test: bool = False
     status: FlowRunStatus
     run_label: Optional[str] = None
     steps: list[FlowRunStateStepPublic] = Field(

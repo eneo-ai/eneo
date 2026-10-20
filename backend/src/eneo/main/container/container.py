@@ -106,6 +106,9 @@ from eneo.flows.flow_run_executor import FlowRunExecutor
 from eneo.flows.flow_run_service import FlowRunService
 from eneo.flows.flow_service import FlowService
 from eneo.flows.step_runners import StepRunners
+from eneo.flows.transcript_corrections_service import (
+    FlowTranscriptCorrectionsService,
+)
 from eneo.governance_policy.application.effective_config_service import (
     EffectiveConfigService,
 )
@@ -1298,6 +1301,15 @@ class Container(containers.DeclarativeContainer):
         mcp_server_settings_service=mcp_server_settings_service,
         skill_service=skill_service,
     )
+    transcriber = providers.Factory(
+        Transcriber,
+        file_service=file_service,
+        tenant=tenant,
+        user=user,
+        config=config,
+        encryption_service=encryption_service,
+        session=session,
+    )
     assistant_service = providers.Factory(
         AssistantService,
         user=user,
@@ -1323,6 +1335,7 @@ class Container(containers.DeclarativeContainer):
         api_key_scope_revoker=api_key_scope_revoker,
         effective_config_service=effective_config_service,
         skill_service=skill_service,
+        transcriber=transcriber,
     )
     org_space_assistant_role_service = providers.Factory(
         OrgSpaceAssistantRoleService,
@@ -1676,15 +1689,6 @@ class Container(containers.DeclarativeContainer):
         extractor=text_extractor,
         info_blob_service=info_blob_service,
     )
-    transcriber = providers.Factory(
-        Transcriber,
-        file_service=file_service,
-        tenant=tenant,
-        user=user,
-        config=config,
-        encryption_service=encryption_service,
-        session=session,
-    )
     crawler = providers.Singleton(_build_crawl_engine)
 
     # Worker dependent services
@@ -1734,6 +1738,8 @@ class Container(containers.DeclarativeContainer):
         actor_manager=actor_manager,
         completion_model_crud_service=completion_model_crud_service,
         audit_service=audit_service,
+        file_service=file_service,
+        user_repo=user_repo,
     )
     flow_step_runners = providers.Factory(
         StepRunners,
@@ -1741,6 +1747,11 @@ class Container(containers.DeclarativeContainer):
         references_service=references_service,
         file_service=file_service,
         space_repo=space_repo,
+        flow_repo=flow_repo,
+        assistant_service=assistant_service,
+        proxy_factory=mcp_proxy_session_factory,
+        user=user,
+        transcriber=transcriber,
     )
     flow_run_executor = providers.Factory(
         FlowRunExecutor,
@@ -1759,6 +1770,13 @@ class Container(containers.DeclarativeContainer):
         file_service=file_service,
         audit_service=audit_service,
         executor=flow_run_executor,
+        user_repo=user_repo,
+    )
+    flow_transcript_corrections_service = providers.Factory(
+        FlowTranscriptCorrectionsService,
+        repo=flow_repo,
+        run_service=flow_run_service,
+        audit_service=audit_service,
     )
     flow_authoring_assistant_service = providers.Factory(
         FlowAuthoringAssistantService,

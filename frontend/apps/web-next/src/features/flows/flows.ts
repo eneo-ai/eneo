@@ -2,6 +2,7 @@ import { infiniteQueryOptions, queryOptions, type QueryClient } from "@tanstack/
 import { unwrap } from "@/lib/api/errors";
 import { flowsApi } from "./flows-api";
 import type {
+  FlowArtifactPublic,
   FlowPublic,
   FlowRunCreateRequest,
   FlowRunPublic,
@@ -40,6 +41,7 @@ export const RUN_POLL_INTERVAL_MS = 3000;
 export const flowKeys = {
   all: ["flows"] as const,
   list: (spaceId: string) => ["flows", "list", spaceId] as const,
+  artifacts: (flowId: string) => ["flows", flowId, "artifacts"] as const,
   authoringAssistant: (spaceId: string) => ["flows", "authoring-assistant", spaceId] as const,
   flow: (flowId: string) => ["flows", flowId] as const,
   runs: (flowId: string) => ["flows", flowId, "runs"] as const,
@@ -76,6 +78,17 @@ export function flowQueryOptions(flowId: string) {
     queryKey: flowKeys.flow(flowId),
     queryFn: ({ signal }) =>
       unwrap(flowsApi.GET("/api/v1/flows/{id}/", { params: { path: { id: flowId } }, signal }))
+  });
+}
+
+/** Files the flow's runs produced, newest first (a result is found here after its run). */
+export function flowArtifactsQueryOptions(flowId: string) {
+  return queryOptions({
+    queryKey: flowKeys.artifacts(flowId),
+    queryFn: ({ signal }) =>
+      unwrap(
+        flowsApi.GET("/api/v1/flows/{id}/artifacts/", { params: { path: { id: flowId } }, signal })
+      )
   });
 }
 

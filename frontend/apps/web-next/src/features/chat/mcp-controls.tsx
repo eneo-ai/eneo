@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Popover } from "@astryxdesign/core/Popover";
 import { Switch } from "@/components/astryx/switch";
-import { Plug, ShieldCheck } from "lucide-react";
+import { Lock, Plug, ShieldCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { CAPABILITIES, readinessKey, type Capability } from "@/features/capabilities/capabilities";
@@ -15,6 +15,13 @@ export type McpServerSummary = Pick<
   Schema<"MCPServerPublicDict">,
   "id" | "name" | "description" | "icon_url"
 > & { is_enabled?: boolean };
+
+/**
+ * A tool the conversation always has, which the person cannot switch off:
+ * Eneo's own server for the chat's purpose (the flows chat's flows tools).
+ * Shown so the list is honest about what the model can call.
+ */
+export type AlwaysOnTool = { id: string; name: string; description: string };
 
 /**
  * Why a server cannot be used in this conversation, or null. An administrator
@@ -123,6 +130,7 @@ export function ChatTools({
   disabledCapabilities = new Set(),
   servers = [],
   disabledServerIds = new Set(),
+  alwaysOn = [],
   autoAcceptTools,
   modelSupportsTools = true,
   onDisabledCapabilitiesChange,
@@ -133,6 +141,8 @@ export function ChatTools({
   disabledCapabilities?: Set<Capability>;
   servers?: McpServerSummary[];
   disabledServerIds?: Set<string>;
+  /** Eneo's own tools for this chat; listed on, never switchable. */
+  alwaysOn?: AlwaysOnTool[];
   autoAcceptTools: boolean;
   /** Whether the partner's model can call tools at all; false renders every row unavailable. */
   modelSupportsTools?: boolean;
@@ -142,10 +152,11 @@ export function ChatTools({
 }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
-  const total = capabilities.length + servers.length;
+  const total = capabilities.length + servers.length + alwaysOn.length;
   const activeCount =
     activeCapabilityCount(capabilities, disabledCapabilities) +
-    activeMcpServerCount(servers, disabledServerIds, modelSupportsTools);
+    activeMcpServerCount(servers, disabledServerIds, modelSupportsTools) +
+    (modelSupportsTools ? alwaysOn.length : 0);
   const activeLabel = t("mcp_servers_active_count", { active: activeCount, total });
 
   function setCapability(purpose: Capability, enabled: boolean) {
@@ -226,6 +237,36 @@ export function ChatTools({
           </div>
 
           <div className="flex max-h-72 flex-col overflow-y-auto">
+            {alwaysOn.length > 0 && (
+              <ToolGroup title={t("mcp_built_in")}>
+                {alwaysOn.map((tool) => (
+                  <li key={tool.id} className={ROW_CLASS}>
+                    <span aria-hidden="true" className={ROW_ICON_CLASS}>
+                      <Lock className="size-4" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      {/* On whenever the model can call tools; the switch is
+                          shown locked so the row reads like the others. */}
+                      <Switch
+                        label={tool.name}
+                        description={
+                          modelSupportsTools
+                            ? tool.description
+                            : t(readinessKey("model_no_tool_calling"))
+                        }
+                        labelPosition="start"
+                        labelSpacing="spread"
+                        size="sm"
+                        value={modelSupportsTools}
+                        isDisabled
+                        onChange={() => {}}
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ToolGroup>
+            )}
+
             {capabilities.length > 0 && (
               <ToolGroup title={t("capabilities")}>
                 {capabilities.map((capability) => {

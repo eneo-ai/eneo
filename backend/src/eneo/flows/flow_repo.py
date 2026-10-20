@@ -22,6 +22,7 @@ from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FLOW_REVIEW_CHECKPOINT_ACTIVE_STATES,
+    FlowFiles,
     FlowRevisions,
     FlowRunFiles,
     FlowRunReviewCheckpoints,
@@ -29,6 +30,7 @@ from eneo.database.tables.flow_tables import (
     Flows,
     FlowStepAttempts,
     FlowStepResults,
+    FlowTranscriptCorrections,
     FlowVersions,
 )
 from eneo.database.tables.sessions_table import Sessions
@@ -87,6 +89,16 @@ class RunFileRow:
     role: str
     field_key: Optional[str]
     step_id: Optional[UUID]
+
+
+@dataclass(frozen=True)
+class FlowArtifactRow:
+    """A file a run of the flow produced, with the run it belongs to."""
+
+    file: RunFileRow
+    run_id: UUID
+    run_label: Optional[str]
+    created_at: datetime
 
 
 class FlowRepository:
@@ -359,9 +371,11 @@ class FlowRepository:
         self,
         *,
         flow_id: UUID,
-        flow_version: int,
+        flow_version: Optional[int],
+        definition: dict[str, Any],
         tenant_id: UUID,
         principal_type: str,
+        is_test: bool = False,
         principal_user_id: Optional[UUID],
         principal_service_id: Optional[UUID] = None,
         created_by_api_key_id: Optional[UUID] = None,
@@ -374,6 +388,8 @@ class FlowRepository:
             .values(
                 flow_id=flow_id,
                 flow_version=flow_version,
+                definition=definition,
+                is_test=is_test,
                 tenant_id=tenant_id,
                 principal_type=principal_type,
                 principal_user_id=principal_user_id,
@@ -414,9 +430,24 @@ class FlowRepository:
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def list_runs(
-        self, flow_id: UUID, tenant_id: UUID, *, limit: int = 20, offset: int = 0
+        self,
+        flow_id: UUID,
+        tenant_id: UUID,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        principal_service_id: Optional[UUID] = None,
+        statuses: Optional[tuple[FlowRunStatus, ...]] = None,
     ) -> tuple[list[FlowRuns], int]:
-        where = (FlowRuns.flow_id == flow_id, FlowRuns.tenant_id == tenant_id)
+        """The flow's runs, newest first; a service principal sees only its own."""
+        where: tuple[Any, ...] = (
+            FlowRuns.flow_id == flow_id,
+            FlowRuns.tenant_id == tenant_id,
+        )
+        if principal_service_id is not None:
+            where = (*where, FlowRuns.principal_service_id == principal_service_id)
+        if statuses:
+            where = (*where, FlowRuns.status.in_([s.value for s in statuses]))
         total = (
             await self.session.execute(
                 sa.select(sa.func.count()).select_from(FlowRuns).where(*where)
@@ -541,6 +572,66 @@ class FlowRepository:
                 step_id=step_id,
             )
             for file_id, name, mimetype, size, role, field_key, step_id in rows
+        ]
+
+    async def list_flow_artifacts(
+        self,
+        flow_id: UUID,
+        tenant_id: UUID,
+        *,
+        limit: int = 50,
+        principal_service_id: Optional[UUID] = None,
+    ) -> list[FlowArtifactRow]:
+        """Files the flow's runs produced, newest first (a service principal's own runs)."""
+        stmt = (
+            sa.select(
+                FlowRunFiles.file_id,
+                Files.name,
+                Files.mimetype,
+                FlowRunFiles.field_key,
+                FlowRunFiles.step_id,
+                FlowRuns.id,
+                FlowRuns.run_label,
+                FlowRunFiles.created_at,
+            )
+            .join(FlowRuns, FlowRuns.id == FlowRunFiles.flow_run_id)
+            .join(Files, Files.id == FlowRunFiles.file_id)
+            .where(
+                FlowRuns.flow_id == flow_id,
+                FlowRuns.tenant_id == tenant_id,
+                FlowRunFiles.role == "output",
+            )
+            .order_by(FlowRunFiles.created_at.desc(), FlowRunFiles.ordinal)
+            .limit(limit)
+        )
+        if principal_service_id is not None:
+            stmt = stmt.where(FlowRuns.principal_service_id == principal_service_id)
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            FlowArtifactRow(
+                file=RunFileRow(
+                    file_id=file_id,
+                    name=name,
+                    mimetype=mimetype,
+                    size=None,
+                    role="output",
+                    field_key=field_key,
+                    step_id=step_id,
+                ),
+                run_id=run_id,
+                run_label=run_label,
+                created_at=created_at,
+            )
+            for (
+                file_id,
+                name,
+                mimetype,
+                field_key,
+                step_id,
+                run_id,
+                run_label,
+                created_at,
+            ) in rows
         ]
 
     # --- Step results ---
@@ -918,4 +1009,179 @@ class FlowRepository:
             checkpoint_id,
             state=ReviewCheckpointState.RESUMED,
             from_states=(ReviewCheckpointState.APPROVED,),
+        )
+
+    # --- Transcript corrections ---
+
+    async def get_transcript_corrections(
+        self, run_id: UUID, step_id: UUID
+    ) -> Optional[FlowTranscriptCorrections]:
+        stmt = (
+            sa.select(FlowTranscriptCorrections)
+            .where(
+                FlowTranscriptCorrections.flow_run_id == run_id,
+                FlowTranscriptCorrections.step_id == step_id,
+            )
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def list_transcript_corrections(
+        self, run_id: UUID
+    ) -> list[FlowTranscriptCorrections]:
+        stmt = (
+            sa.select(FlowTranscriptCorrections)
+            .where(FlowTranscriptCorrections.flow_run_id == run_id)
+            .order_by(FlowTranscriptCorrections.created_at)
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def save_transcript_corrections(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        tenant_id: UUID,
+        step_id: UUID,
+        expected_revision: Optional[int],
+        occurrences_json: list[dict[str, Any]],
+        speaker_edits_json: list[dict[str, Any]],
+        speaker_names: dict[str, Any],
+        segments_hash: str,
+        schema_version: int,
+        principal_type: str,
+        principal_user_id: Optional[UUID],
+        principal_service_id: Optional[UUID],
+    ) -> Optional[FlowTranscriptCorrections]:
+        """Create (expected None) or replace (expected = stored revision) the
+        step's corrections; None when the revision did not match."""
+        if expected_revision is None:
+            if await self.get_transcript_corrections(run_id, step_id) is not None:
+                return None
+            await self.session.execute(
+                sa.insert(FlowTranscriptCorrections).values(
+                    flow_run_id=run_id,
+                    flow_id=flow_id,
+                    tenant_id=tenant_id,
+                    step_id=step_id,
+                    revision=1,
+                    schema_version=schema_version,
+                    segments_hash=segments_hash,
+                    occurrences_json=occurrences_json,
+                    speaker_edits_json=speaker_edits_json,
+                    speaker_names=speaker_names,
+                    edited_by_principal_type=principal_type,
+                    edited_by_user_id=principal_user_id,
+                    edited_by_service_id=principal_service_id,
+                )
+            )
+            return await self.get_transcript_corrections(run_id, step_id)
+        result = await self.session.execute(
+            sa.update(FlowTranscriptCorrections)
+            .where(
+                FlowTranscriptCorrections.flow_run_id == run_id,
+                FlowTranscriptCorrections.step_id == step_id,
+                FlowTranscriptCorrections.revision == expected_revision,
+            )
+            .values(
+                revision=FlowTranscriptCorrections.revision + 1,
+                schema_version=schema_version,
+                segments_hash=segments_hash,
+                occurrences_json=occurrences_json,
+                speaker_edits_json=speaker_edits_json,
+                speaker_names=speaker_names,
+                edited_by_principal_type=principal_type,
+                edited_by_user_id=principal_user_id,
+                edited_by_service_id=principal_service_id,
+                updated_at=_now(),
+            )
+        )
+        if _rowcount(result) != 1:
+            return None
+        return await self.get_transcript_corrections(run_id, step_id)
+
+    # --- Flow files (templates, runtime uploads) ---
+
+    async def add_flow_file(
+        self,
+        *,
+        flow_id: UUID,
+        file_id: UUID,
+        role: str,
+        step_id: Optional[UUID] = None,
+        principal_type: str = "user",
+        principal_user_id: Optional[UUID] = None,
+        principal_service_id: Optional[UUID] = None,
+    ) -> None:
+        await self.session.execute(
+            sa.insert(FlowFiles).values(
+                flow_id=flow_id,
+                file_id=file_id,
+                role=role,
+                step_id=step_id,
+                principal_type=principal_type,
+                principal_user_id=principal_user_id,
+                principal_service_id=principal_service_id,
+            )
+        )
+
+    async def get_flow_file(
+        self, flow_id: UUID, file_id: UUID, *, role: str
+    ) -> Optional[FlowFiles]:
+        stmt = sa.select(FlowFiles).where(
+            FlowFiles.flow_id == flow_id,
+            FlowFiles.file_id == file_id,
+            FlowFiles.role == role,
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def list_flow_files(self, flow_id: UUID, *, role: str) -> list[FlowFiles]:
+        stmt = (
+            sa.select(FlowFiles)
+            .where(FlowFiles.flow_id == flow_id, FlowFiles.role == role)
+            .order_by(FlowFiles.created_at)
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    async def delete_flow_file(
+        self, flow_id: UUID, file_id: UUID, *, role: str
+    ) -> bool:
+        result = await self.session.execute(
+            sa.delete(FlowFiles).where(
+                FlowFiles.flow_id == flow_id,
+                FlowFiles.file_id == file_id,
+                FlowFiles.role == role,
+            )
+        )
+        return _rowcount(result) == 1
+
+    async def set_flow_file_step(
+        self, flow_id: UUID, file_id: UUID, *, role: str, step_id: Optional[UUID]
+    ) -> None:
+        await self.session.execute(
+            sa.update(FlowFiles)
+            .where(
+                FlowFiles.flow_id == flow_id,
+                FlowFiles.file_id == file_id,
+                FlowFiles.role == role,
+            )
+            .values(step_id=step_id)
+        )
+
+    async def file_used_by_runs(self, file_id: UUID) -> bool:
+        stmt = (
+            sa.select(FlowRunFiles.id).where(FlowRunFiles.file_id == file_id).limit(1)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none() is not None
+
+    async def get_run_file(
+        self, run_id: UUID, file_id: UUID, *, role: str
+    ) -> Optional[RunFileRow]:
+        return next(
+            (
+                row
+                for row in await self.list_run_files(run_id)
+                if row.file_id == file_id and row.role == role
+            ),
+            None,
         )

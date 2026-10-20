@@ -1,0 +1,27 @@
+# Flow error reference
+
+Errors come back as JSON with `message`, `eneo_error_code` (a number) and,
+where it matters, a string `code` with a `context` object.
+
+| Status | `code`                                             | Meaning                                                                                                                                                                                                                           | What to do                                 |
+| ------ | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| 400    | (none)                                             | Inputs do not fit the run contract; the message lists every problem                                                                                                                                                               | Fix the inputs                             |
+| 400    | (none)                                             | `expected_flow_version` is behind the published version                                                                                                                                                                           | Re-read the contract, resubmit             |
+| 400    | `flow_transcript_corrections_stale_revision`       | The transcript or the corrections changed since you read them                                                                                                                                                                     | Re-read the transcript and the corrections |
+| 400    | `flow_transcript_corrections_segments_unavailable` | The step has no transcript                                                                                                                                                                                                        | Nothing to correct                         |
+| 400    | `flow_transcript_corrections_invalid_occurrence`   | A correction does not fit a segment (`context.reason`: `segment_index_out_of_range`, `char_range_invalid`, `original_mismatch`, `overlapping_ranges`, `crosses_speaker_boundary`, `too_many_occurrences`)                         | Re-anchor the correction                   |
+| 400    | `flow_transcript_corrections_invalid_speaker_edit` | A speaker edit or name does not fit (`invalid_speaker_label`, `original_speaker_mismatch`, `invalid_decision`, `whole_segment_conflicts_with_span`, `overlapping_speaker_spans`, `unknown_speaker_label`, `invalid_speaker_name`) | Re-anchor the edit                         |
+| 403    | `insufficient_permission`                          | The key's permission level does not allow the verb (DELETE needs admin)                                                                                                                                                           | Use a key with the right level             |
+| 403    | (none)                                             | A service key tried to author, or to test-run a draft                                                                                                                                                                             | Authoring is for people                    |
+| 404    | (none)                                             | No such flow or run in your scope; a draft is invisible to a key                                                                                                                                                                  | Check the id and the key's scope           |
+| 409    | `flow_runtime_file_in_use`                         | A run took the upload                                                                                                                                                                                                             | Leave it with the run                      |
+
+A failed run carries `error.code` and `error.message`; the failed step
+carries `error_code` too. Codes you may see: `flow_step_timeout`,
+`flow_step_model_unavailable`, `flow_step_output_invalid_json`,
+`flow_step_document_failed`, `flow_step_function_unavailable`,
+`flow_step_function_failed`, `flow_step_transcription_model_unavailable`,
+`flow_step_speaker_service_unavailable`, `flow_step_speaker_mapping_failed`,
+`flow_step_outcome_unknown` (the worker died mid-call; the call is not
+repeated), `flow_run_rejected_in_review`,
+`flow_run_interrupted_outcome_unknown`.

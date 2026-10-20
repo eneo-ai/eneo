@@ -140,7 +140,7 @@ export function PanelContentsList({
       .filter(Boolean)
       .join(" · ");
 
-  const entry = (file: PreviewFile, versions: PreviewFile[]) => {
+  const entry = (file: PreviewFile, versions: PreviewFile[], detail?: string) => {
     const current = versions.some((version) => panel.isOpen(version));
     const tile = <FileTypeTile mimetype={file.mimetype} size="sm" />;
     return (
@@ -156,7 +156,7 @@ export function PanelContentsList({
             <Row
               tile={tile}
               name={displayFileName(file)}
-              detail={description(file, versions.length)}
+              detail={detail ?? description(file, versions.length)}
               current={current}
             />
           </button>
@@ -165,7 +165,7 @@ export function PanelContentsList({
             <Row
               tile={tile}
               name={displayFileName(file)}
-              detail={description(file, versions.length)}
+              detail={detail ?? description(file, versions.length)}
               current={false}
             />
           </div>
@@ -203,6 +203,7 @@ export function PanelContentsList({
     : contents.uploads;
 
   const flows = contents.flows ?? [];
+  const flowFiles = contents.flowFiles ?? [];
 
   return (
     <div className="flex flex-col p-1">
@@ -234,6 +235,14 @@ export function PanelContentsList({
                 </button>
               </li>
             ))}
+          </ul>
+        </section>
+      )}
+      {flowFiles.length > 0 && (
+        <section aria-label={t("flow_files")}>
+          <Heading text={`${t("flow_files")} · ${flowFiles.length}`} />
+          <ul className="flex flex-col">
+            {flowFiles.map(({ file, detail }) => entry(file, [file], detail))}
           </ul>
         </section>
       )}

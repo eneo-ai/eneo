@@ -6,7 +6,7 @@ import { ChatLayout, ChatMessageList, ChatSystemMessage } from "@astryxdesign/co
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Selector } from "@astryxdesign/core/Selector";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
@@ -50,6 +50,10 @@ import {
   isFlowsCall
 } from "@/features/flows/flow-tool-calls";
 import { invalidateFlow, invalidateFlowLists } from "@/features/flows/flows";
+import { runDisplayName } from "@/features/flows/flow-labels";
+import { previewFileOf } from "@/features/flows/flow-run-files";
+import { flowArtifactsQueryOptions } from "@/features/flows/flows";
+import type { FlowArtifactPublic } from "@/features/flows/types";
 import { useFlowPanel } from "@/features/flows/use-flow-panel";
 import { appViewSubject, appViewTitle, messageAppViewCalls } from "@/features/mcp-apps/mcp-apps";
 import { toolCallOutcome } from "@/features/mcp-apps/view-tool-calls";
@@ -67,6 +71,8 @@ import { historyQueryKey } from "./session-actions";
 import { StartState } from "./start-state";
 import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
 import { useToolChoices } from "./use-tool-choices";
+
+const NO_ARTIFACTS: FlowArtifactPublic[] = [];
 
 const NO_MENTION = "__none__";
 /** The current time as ISO 8601 (the timestamp of a question sent now). */
@@ -421,31 +427,29 @@ function ConversationView({
     [uploads, messages]
   );
   const flowShown = panel.occupant.kind === "native" && panel.occupant.id === FLOW_PANEL_ID;
+  // What the flow's runs produced, so a result is found again after leaving its run.
+  const flowArtifactsQuery = useQuery({
+    ...flowArtifactsQueryOptions(flowPanel?.flowId ?? ""),
+    enabled: flowPanel?.flowId != null
+  });
+  const flowArtifacts = flowArtifactsQuery.data ?? NO_ARTIFACTS;
   const panelContents: PanelContents = {
+    // One entry for the flow panel; its tabs choose between definition and runs.
     flows: flowPanel
       ? [
           {
-            id: "flow-definition",
-            title: t("flow_tab_definition"),
+            id: "flow",
+            title: t("flow_panel_entry"),
             detail: t("flows"),
-            shown: flowShown && flowPanel.tab === "definition",
-            open: () => {
-              flowPanel.showDefinition();
-              panel.openNative(FLOW_PANEL_ID);
-            }
-          },
-          {
-            id: "flow-runs",
-            title: t("flow_tab_runs"),
-            detail: t("flows"),
-            shown: flowShown && flowPanel.tab === "runs",
-            open: () => {
-              flowPanel.showRun(flowPanel.runId);
-              panel.openNative(FLOW_PANEL_ID);
-            }
+            shown: flowShown,
+            open: () => panel.openNative(FLOW_PANEL_ID)
           }
         ]
       : [],
+    flowFiles: flowArtifacts.map((artifact) => ({
+      file: previewFileOf(artifact.file),
+      detail: runDisplayName({ id: artifact.run_id, run_label: artifact.run_label })
+    })),
     views: messages
       .flatMap(messageAppViewCalls)
       .filter((call) => panel.offeredViews.has(call.toolCallId))
@@ -859,6 +863,12 @@ function ConversationView({
       capabilities={toolChoices.capabilities}
       disabledCapabilities={toolChoices.disabledCapabilities}
       servers={toolChoices.mcpServers}
+      // The flows chat always carries Eneo's flows tools; say so.
+      alwaysOn={
+        flowPanel
+          ? [{ id: "flows", name: t("flows"), description: t("flows_tools_always_on") }]
+          : undefined
+      }
       disabledServerIds={toolChoices.disabledMcpServerIds}
       autoAcceptTools={toolChoices.autoAcceptTools}
       modelSupportsTools={toolChoices.modelSupportsTools}

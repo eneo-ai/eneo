@@ -1,5 +1,6 @@
 # MIT License
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -11,6 +12,7 @@ from tenacity import (
 )
 
 from eneo.files.audio import AudioFile
+from eneo.files.transcript import TranscriptSegment
 from eneo.main.logging import get_logger
 from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.model_providers.infrastructure import litellm_transport
@@ -28,6 +30,19 @@ if TYPE_CHECKING:
     from eneo.transcription_models.domain import TranscriptionModel
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class AdapterTranscription:
+    """What one transcription produced: the Markdown text and timed segments."""
+
+    text: str
+    segments: tuple[TranscriptSegment, ...]
+
+
+def _clock(seconds: float) -> str:
+    whole = max(0, int(seconds))
+    return f"{whole // 60}:{whole % 60:02d}"
 
 
 class LiteLLMTranscriptionAdapter:
@@ -94,39 +109,43 @@ class LiteLLMTranscriptionAdapter:
         return kwargs
 
     async def get_text_from_file(self, audio_file: AudioFile) -> str:
+        """The transcript as Markdown: one block per 5-minute chunk with its window."""
+        return (await self.transcribe_file(audio_file)).text
+
+    async def transcribe_file(
+        self, audio_file: AudioFile, *, language: str | None = None
+    ) -> AdapterTranscription:
+        """Transcribe an audio file in 5-minute chunks.
+
+        Returns the Markdown text and one timed segment per non-empty chunk
+        (the provider's own timestamps are not requested; the chunk windows
+        are the only timing trusted). ``language`` is the ISO code to pin the
+        provider to; None lets it detect, except for KB-Whisper (Swedish).
         """
-        Transcribe an audio file, splitting into 5-minute chunks with timestamps.
-        """
-        text = ""
         five_minutes = 60 * 5
-        chunk_index = 0
-        total_duration_seconds = int(audio_file.duration)
+        total_duration_seconds = float(audio_file.duration)
+        blocks: list[str] = []
+        segments: list[TranscriptSegment] = []
 
         async with audio_file.asplit_file(seconds=five_minutes) as files:
             total_chunks = len(files)
-
-            for i, path in enumerate(files):
-                block_text = await self._transcribe_chunk(path)
-                start_time = chunk_index * five_minutes
-
-                # For the last chunk, calculate the correct end time based on total duration
-                if i == total_chunks - 1:
-                    end_time = total_duration_seconds
-                else:
-                    end_time = (chunk_index + 1) * five_minutes
-
-                start_time_formatted = f"{start_time // 60}:{start_time % 60:02d}"
-                end_time_formatted = f"{end_time // 60}:{end_time % 60:02d}"
-
-                # Add markdown formatting with timestamp
-                if chunk_index > 0:
-                    text += "\n\n"
-                text += (
-                    f"### {start_time_formatted} - {end_time_formatted}\n\n{block_text}"
+            for index, path in enumerate(files):
+                block_text = await self._transcribe_chunk(path, language=language)
+                start = float(index * five_minutes)
+                end = (
+                    total_duration_seconds
+                    if index == total_chunks - 1
+                    else float((index + 1) * five_minutes)
                 )
-                chunk_index += 1
+                chunk_text = block_text.strip()
+                if not chunk_text:
+                    continue
+                segments.append(
+                    TranscriptSegment(text=chunk_text, start=start, end=end)
+                )
+                blocks.append(f"### {_clock(start)} - {_clock(end)}\n\n{block_text}")
 
-        return text
+        return AdapterTranscription(text="\n\n".join(blocks), segments=tuple(segments))
 
     @retry(
         wait=wait_random_exponential(min=1, max=20),
@@ -136,14 +155,18 @@ class LiteLLMTranscriptionAdapter:
         ),
         reraise=True,
     )
-    async def _transcribe_chunk(self, file_path: Path) -> str:
+    async def _transcribe_chunk(
+        self, file_path: Path, *, language: str | None = None
+    ) -> str:
         """
         Transcribe a single audio chunk using LiteLLM.
         """
         kwargs = self._prepare_kwargs()
 
+        if language is not None:
+            kwargs["language"] = language
         # Set language for Swedish models (KB-Whisper)
-        if "kb-whisper" in self.model.model_name.lower():
+        elif "kb-whisper" in self.model.model_name.lower():
             kwargs["language"] = "sv"
             logger.debug(
                 f"[LiteLLM] {self.litellm_model}: Setting language=sv for KB-Whisper"

@@ -241,26 +241,30 @@ async def test_viewer_cannot_create_flows_and_unpublished_flow_cannot_run(
             )
 
 
-async def test_publish_refuses_unavailable_step_kinds(
+async def test_publish_refuses_a_transcribe_step_without_a_transcription_model(
     db_container, member_space, completion_model_factory, provider
 ):
-    from eneo.flows.definition import DocumentStep
+    from eneo.flows.definition import FormField, TranscribeStep
 
     async with db_container() as container:
         session = container.session()
-        model = await completion_model_factory(session, "doc-model")
-        space = await member_space(session, "Doc Space", [model.id])
+        model = await completion_model_factory(session, "transcribe-model")
+        space = await member_space(session, "Transcribe Space", [model.id])
         definition = FlowDefinition(
+            form_fields=[FormField(key="recording", label="Recording", type="audio")],
             steps=[
-                LlmStep(key="a", name="A", prompt="p", input="x", model_id=model.id),
-                DocumentStep(key="d", name="Doc", content="{{previous}}"),
-            ]
+                TranscribeStep(key="t", name="Transcribe", source="recording"),
+                LlmStep(key="a", name="A", prompt="p", model_id=model.id),
+            ],
         )
         flow_service = container.flow_service()
         flow = await flow_service.create_flow(
-            space_id=space.id, name="Doc flow", description=None, definition=definition
+            space_id=space.id,
+            name="Audio flow",
+            description=None,
+            definition=definition,
         )
-        with pytest.raises(BadRequestException, match="cannot run document"):
+        with pytest.raises(BadRequestException, match="needs a transcription model"):
             await flow_service.publish_flow(flow.id)
 
 
@@ -282,3 +286,54 @@ async def test_soft_deleted_flow_disappears_but_its_runs_stay_readable(
         with pytest.raises(NotFoundException):
             await container.flow_service().get_flow(flow.id)
         assert (await run_service.get_run(run.id)).id == run.id
+
+
+async def test_a_draft_can_be_test_run_without_publishing(
+    db_container, member_space, completion_model_factory, provider
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "draft-run-model")
+        space = await member_space(session, "Draft Run Space", [model.id])
+        flow_service = container.flow_service()
+        draft = await flow_service.create_flow(
+            space_id=space.id,
+            name="Draft flow",
+            description=None,
+            definition=_three_steps(model.id),
+        )
+        run_service = container.flow_run_service()
+
+        # Without the draft flag an unpublished flow cannot run.
+        with pytest.raises(BadRequestException, match="not published"):
+            await run_service.create_run(draft.id, values={"topic": "x"}, files={})
+        with pytest.raises(BadRequestException, match="does not apply"):
+            await run_service.create_run(
+                draft.id,
+                values={"topic": "x"},
+                files={},
+                draft=True,
+                expected_flow_version=1,
+            )
+
+        run = await run_service.create_run(
+            draft.id, values={"topic": "the draft"}, files={}, draft=True
+        )
+        assert run.is_test is True
+        assert run.flow_version is None
+        await run_service.execute_run(run.id)
+
+        finished = await run_service.get_run(run.id, flow_id=draft.id)
+        assert finished.status == FlowRunStatus.COMPLETED
+        assert finished.output_payload_json["text"].startswith("LLM[summarize|")
+        # The flow is still a draft; the run kept the definition it executed.
+        assert (await flow_service.get_flow(draft.id)).published_version is None
+        state = await run_service.get_run_state(run.id)
+        assert state.is_test is True and state.flow_version is None
+        listed, _ = await run_service.list_runs(draft.id)
+        assert listed[0].is_test is True
+
+        # A draft that could not be published cannot be test run either.
+        await flow_service.update_flow(draft.id, definition=FlowDefinition())
+        with pytest.raises(BadRequestException, match="at least one step"):
+            await run_service.create_run(draft.id, values={}, files={}, draft=True)

@@ -11,12 +11,21 @@ export type JobFeedback = {
   description?: string;
 };
 
+/** Jobs whose progress the page shows itself: no toast, the panel is the feedback. */
+const SELF_REPORTING_TASKS = new Set(["run_flow"]);
+
 /**
  * The words for a job that just ended: shown as a toast and announced to
  * screen readers. Uploads say the file is searchable, since the earlier
- * "uploaded" toast only meant the bytes had arrived.
+ * "uploaded" toast only meant the bytes had arrived. Null for a job the
+ * page reports on its own (a flow run, whose panel polls it).
  */
-export function describeJobOutcome(job: Job, outcome: JobOutcome, t: Translate): JobFeedback {
+export function describeJobOutcome(
+  job: Job,
+  outcome: JobOutcome,
+  t: Translate
+): JobFeedback | null {
+  if (SELF_REPORTING_TASKS.has(job.task)) return null;
   const name = job.name ?? job.id;
   if (outcome === "completed") {
     return {

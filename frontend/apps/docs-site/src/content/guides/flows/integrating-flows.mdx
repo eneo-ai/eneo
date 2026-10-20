@@ -1,0 +1,146 @@
+# Integrating Flows
+
+Run a published flow from your application. Every path below is relative
+to the deployment's API prefix (`/api/v1` unless the operator says
+otherwise) and every example uses a service API key in the `X-API-Key`
+header; a user's session token in `Authorization: Bearer` works the same.
+
+## 1. Discover the flow
+
+```bash
+curl -H "X-API-Key: $KEY" "$ENEO/api/v1/flows/$FLOW/published/"
+```
+
+The answer carries the flow's name, its `published_version` and
+`runtime_paths`: every path the rest of this guide uses, already filled
+with the flow id. A draft answers 404 to an API key.
+
+Then read the run contract:
+
+```bash
+curl -H "X-API-Key: $KEY" "$ENEO/api/v1/flows/$FLOW/run-contract/"
+```
+
+`form_fields` lists the run inputs (`key`, `label`, `type` text / number /
+select / file / audio, `required`, `options`), `steps_requiring_review`
+the steps that pause the run, `final_output` what the last step produces
+and `published_flow_version` the version to pin.
+
+## 2. Upload files
+
+A file or audio field takes ids of files uploaded for this flow:
+
+```bash
+curl -H "X-API-Key: $KEY" -F "upload_file=@recording.wav" \
+  "$ENEO/api/v1/flows/$FLOW/runtime-files/"
+```
+
+The 201 answer is the file; keep its `id`. An upload no run has used can be
+deleted (`DELETE …/runtime-files/{file_id}/`, admin-level keys); once a run
+took it, the delete answers 409.
+
+## 3. Start a run
+
+```bash
+curl -H "X-API-Key: $KEY" -H "Idempotency-Key: order-4711" \
+  -H "Content-Type: application/json" \
+  -d '{"values": {"topic": "hamnar", "prioritet": "hög"},
+       "files": {"recording": ["<file id>"]},
+       "run_label": "order 4711",
+       "expected_flow_version": 2}' \
+  "$ENEO/api/v1/flows/$FLOW/runs/"
+```
+
+`values` carries text, number and select fields by key; `files` carries
+file and audio fields as lists of file ids. `expected_flow_version` makes
+the call fail with 400 when the flow was republished since you read the
+contract. The same `Idempotency-Key` replays the same run instead of
+creating another.
+
+The 201 answer is the run: `id`, `status` (`queued`), `flow_version`, the
+step list with every step `pending`, and your inputs.
+
+## 4. Follow it
+
+Poll the status path (small, no payloads):
+
+```bash
+curl -H "X-API-Key: $KEY" "$ENEO/api/v1/flows/$FLOW/runs/$RUN/status/"
+```
+
+`status` is one of `queued`, `running`, `awaiting_review`, `completed`,
+`failed`, `cancelled`. The full run (`GET …/runs/{run_id}/`) adds
+`input_payload_json`, `output_payload_json` (the last step's output),
+`result_files`, `steps` with each step's input and output and
+`review_checkpoint` while a review waits. `GET …/runs/{run_id}/steps/`
+returns the steps alone. `GET …/runs/?status=running&status=queued` lists
+what is still going.
+
+## 5. Review
+
+When the status is `awaiting_review`, read the active checkpoint:
+
+```bash
+curl -H "X-API-Key: $KEY" \
+  "$ENEO/api/v1/flows/$FLOW/runs/$RUN/review-checkpoints/active/"
+```
+
+It carries `revision`, `review_mode` (`view` or `edit`), `output_type`
+(`text` or `json`), `original_payload_json` and `current_payload_json`.
+Send `expected_checkpoint_revision` with every decision; it must match the
+revision you read.
+
+- `PATCH …/review-checkpoints/{id}/` with `current_payload_json`
+  (`{"text": …}` or `{"value": …}`) replaces the reviewed output (edit
+  mode only) and bumps the revision.
+- `POST …/approve-and-continue/` approves and resumes the run.
+- `POST …/approve/` then `POST …/resume/` do the same in two steps.
+- `POST …/reject/` with an optional `reason` fails the run.
+
+## 6. Results
+
+A step that produced a file (a document, an image, a chart) lists it in
+`result_files`; the run's `result_files` is the union. Mint a link:
+
+```bash
+curl -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"expires_in": 600, "content_disposition": "attachment"}' \
+  "$ENEO/api/v1/flows/$FLOW/runs/$RUN/artifacts/$FILE/signed-url/"
+```
+
+The answer's `url` downloads the exact original for `expires_in` seconds
+(at most seven days). `…/input-files/{file_id}/signed-url/` does the same
+for a file the run was given.
+
+A transcribe step keeps its segments in the step's
+`input_payload_json.transcription.segments`
+(`{file_index, start, end, speaker, text}`). `GET
+…/steps/{step_id}/transcript/` returns them with corrections applied and a
+rendered `text`. To correct:
+
+```bash
+curl -X PATCH -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"schema_version": 3, "segments_hash": "<from the transcript>",
+       "expected_revision": null,
+       "occurrences": [{"segment_index": 1, "char_start": 0, "char_end": 4,
+                        "original": "Tack", "corrected": "Tack så mycket"}],
+       "speaker_edits": [], "speaker_names": {"SPEAKER_00": "Anna"}}' \
+  "$ENEO/api/v1/flows/$FLOW/runs/$RUN/steps/$STEP/transcript-corrections/"
+```
+
+Send the full lists each time; `expected_revision` is null to create and
+the stored revision to replace. `GET …/runs/{run_id}/transcript-corrections/`
+lists what is stored; an entry flagged `stale` anchors to a transcript
+that has since changed.
+
+## 7. Cancel
+
+`POST …/runs/{run_id}/cancel/` stops a queued, running or waiting run at
+the next step boundary.
+
+## Rules worth keeping
+
+- Pin `expected_flow_version` and use an `Idempotency-Key`.
+- Poll the status path, read the full run only when you need its content.
+- A service key sees only the runs it started; use one key per integration.
+- Never embed a service key in a browser or a mobile binary.

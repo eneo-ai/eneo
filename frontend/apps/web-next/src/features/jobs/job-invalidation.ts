@@ -18,6 +18,8 @@ export const JOB_INVALIDATION_KEYS: readonly (readonly string[])[] = [
   ["info-blobs"],
   // App runs and their results.
   ["apps"],
+  // Flow runs (a finished run_flow job) and the flow list's last run.
+  ["flows"],
   // Integration sync history (Confluence and SharePoint pulls).
   ["integrations"],
   // Tenant storage figures shown to admins (every upload moves them).

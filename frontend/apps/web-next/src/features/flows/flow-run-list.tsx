@@ -8,7 +8,7 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { cn } from "@/lib/utils";
-import { runDisplayName, runStatusLabel, runStatusTone } from "./flow-labels";
+import { runDisplayName, runStatusLabel, runStatusTone, runVersionLabel } from "./flow-labels";
 import { flowRunsQueryOptions, isActiveRun } from "./flows";
 
 const ROW_CLASS =
@@ -67,7 +67,7 @@ export function FlowRunList({
                         <span className="text-ax-text-secondary ms-2 text-xs font-normal">
                           <ClientTime value={run.created_at} format="auto" />
                           {" · "}
-                          {t("flow_run_version", { version: run.flow_version })}
+                          {runVersionLabel(run, t)}
                         </span>
                       </span>
                       <StatusLabel

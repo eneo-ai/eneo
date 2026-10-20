@@ -186,7 +186,9 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
       const diff = diffJobs(ledger.current, snapshot);
       ledger.current = diff.ledger;
       for (const { job, outcome } of diff.transitions) {
+        recordFinishedJob(job);
         const feedback = describeJobOutcome(job, outcome, t);
+        if (!feedback) continue;
         if (feedback.tone === "success") {
           toast.success(feedback.title);
         } else if (feedback.tone === "error") {
@@ -195,7 +197,6 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
           toast.info(feedback.title);
         }
         announce(feedback.title);
-        recordFinishedJob(job);
       }
       // A vanished job finished (or was cleaned up) without reporting; its
       // data may still have changed, so refresh as for a reported outcome.

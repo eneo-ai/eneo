@@ -10,6 +10,7 @@ const meta: MetaRecord = {
   "knowledge-retrieval-and-mcp": "Knowledge Retrieval and MCP",
   "builtin-tool-servers": "Built-in Tool Servers",
   "tool-runtime-security": "Tool Runtime Security",
+  flows: "Flows",
   "object-content-architecture": "Object Content Architecture",
   "audit-logging": "Audit Logging",
   "api-key-management": "API Key Management",

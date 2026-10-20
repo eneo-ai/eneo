@@ -112,17 +112,19 @@ export function FlowChat({ flowId }: { flowId: string }) {
 
   const spaceName = space.personal ? t("personal") : space.name;
   const assistant = assistantQuery.data;
+  // The chat is about one flow: it is named after it, with the assistant and
+  // the space as the line beneath.
   const partner: ChatPartner | null = assistant
     ? {
         type: "assistant",
         id: assistant.id,
-        name: t("flows_assistant_name"),
+        name: flowQuery.data?.name ?? t("flows_assistant_name"),
         allowedAttachments: assistant.allowed_attachments,
         insightEnabled: false,
         description: t("flows_assistant_description"),
         iconId: assistant.icon_id ?? null,
         knowledge: [],
-        spaceName,
+        spaceName: `${t("flows_assistant_name")} · ${spaceName}`,
         personalSpace: space.personal,
         securityClassification: space.security_classification?.name ?? null,
         mcpServers: assistant.mcp_servers ?? [],

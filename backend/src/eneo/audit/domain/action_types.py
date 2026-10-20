@@ -70,6 +70,7 @@ class ActionType(str, Enum):
     FLOW_RUN_CREATED = "flow_run_created"
     FLOW_RUN_CANCELLED = "flow_run_cancelled"
     FLOW_RUN_REVIEWED = "flow_run_reviewed"
+    FLOW_RUN_TRANSCRIPT_CORRECTIONS_EDITED = "flow_run_transcript_corrections_edited"
     SKILL_CREATED = "skill_created"
     SKILL_REVISION_CREATED = "skill_revision_created"
     SKILL_REVISION_RESTORED = "skill_revision_restored"

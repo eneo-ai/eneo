@@ -321,6 +321,13 @@ class Settings(BaseSettings):
     # Upper bound for one flow step (one completion, one document render);
     # the run fails with flow_step_timeout when a runner exceeds it.
     flow_step_timeout_seconds: int = 900
+    # The external speaker-labelling service a flow's transcribe step sends
+    # its audio and chunk windows to when speaker_labels is on (POST /v1/jobs,
+    # GET /v1/jobs/{id}, GET /v1/jobs/{id}/result). Unset: speaker labels
+    # cannot be published.
+    flow_speaker_service_url: str | None = None
+    flow_speaker_service_api_key: str | None = None
+    flow_speaker_service_poll_seconds: float = 5.0
     mcp_tool_output_max_chars: int = 32768
     # Decoded size cap for a single MCP image content block; larger images
     # are dropped before they can be persisted as generated files.

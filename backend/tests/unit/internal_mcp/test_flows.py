@@ -76,6 +76,7 @@ NOW = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
 CTX = SimpleNamespace()
 
 EXPECTED_TOOLS = [
+    "list_functions",
     "list_flows",
     "get_flow",
     "update_flow",
@@ -473,6 +474,7 @@ class TestToolSurface:
             "llm",
             "compose",
             "document",
+            "function",
             "review",
             "transcribe",
         }
@@ -496,7 +498,8 @@ class TestToolSurface:
             "{{previous}}",
             "deterministic",
             "publish_flow",
-            "cannot be published yet",
+            "list_functions",
+            "speaker_labels",
             "revision",
             "note",
         ):

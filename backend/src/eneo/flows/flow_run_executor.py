@@ -23,7 +23,7 @@ import asyncio
 import contextlib
 from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, cast
 from uuid import UUID
 
 from eneo.flows.definition import (
@@ -33,7 +33,7 @@ from eneo.flows.definition import (
     Step,
     review_target_key,
 )
-from eneo.flows.flow_assembler import definition_from_json
+from eneo.flows.flow_assembler import run_definition
 from eneo.flows.flow_models import (
     FlowRunStatus,
     ReviewCheckpointState,
@@ -48,6 +48,7 @@ from eneo.flows.step_runners import (
     PreparedStep,
     RunContext,
     StepOutcome,
+    signed_links_for,
 )
 from eneo.flows.templating import StepOutput, TemplateContext
 from eneo.main.exceptions import NotFoundException
@@ -80,6 +81,7 @@ class FlowRunExecutor:
         self.repo = repo
         self.runners = runners
         self.step_timeout_seconds = step_timeout_seconds
+        self._tenant_id: Optional[UUID] = None
 
     def _scope(self) -> AbstractAsyncContextManager[object]:
         """Short-transaction boundary.
@@ -109,15 +111,12 @@ class FlowRunExecutor:
                 FlowRunStatus.RUNNING.value,
             ):
                 return
-            version = await self.repo.get_version(run.flow_id, run.flow_version)
-            if version is None:
-                raise NotFoundException("Published flow version not found")
             flow = await self.repo.get_flow(
                 run.flow_id, tenant_id, include_deleted=True
             )
             if flow is None:
                 raise NotFoundException("Flow not found")
-            definition = definition_from_json(version.definition)
+            definition = await run_definition(self.repo, run)
             files = await self.repo.list_run_files(run.id)
             ctx = RunContext(
                 run_id=run.id,
@@ -134,6 +133,7 @@ class FlowRunExecutor:
                 expected_statuses=(FlowRunStatus.QUEUED, FlowRunStatus.RUNNING),
             )
 
+        self._tenant_id = ctx.tenant_id
         context = self._initial_context(ctx, definition)
         last_output: Optional[dict[str, Any]] = None
 
@@ -214,6 +214,41 @@ class FlowRunExecutor:
                 )
                 return
 
+            if outcome.transcription is not None:
+                prepared.input_payload = {
+                    **prepared.input_payload,
+                    "transcription": outcome.transcription,
+                }
+            if outcome.documents or outcome.transcriptions:
+                # Produced bytes become files of the run's principal before
+                # the step is recorded, so a stored result always names
+                # files that exist; a transcript is kept on its audio file.
+                try:
+                    async with self._scope():
+                        stored = (
+                            await self.runners.store_documents(outcome.documents)
+                            if outcome.documents
+                            else []
+                        )
+                        if outcome.transcriptions:
+                            await self.runners.store_transcriptions(
+                                outcome.transcriptions
+                            )
+                except Exception as exc:
+                    await self._fail_run(
+                        ctx,
+                        step,
+                        attempt_no,
+                        exc,
+                        input_payload=prepared.input_payload,
+                    )
+                    return
+                outcome.output_file_ids = [*outcome.output_file_ids, *stored]
+                outcome.output_payload = {
+                    **outcome.output_payload,
+                    "file_ids": [str(file_id) for file_id in outcome.output_file_ids],
+                }
+
             try:
                 async with self._scope():
                     if outcome.output_file_ids:
@@ -258,7 +293,7 @@ class FlowRunExecutor:
             )
 
     async def _invoke(self, step: Step, prepared: PreparedStep) -> StepOutcome:
-        if prepared.output_payload is not None:
+        if prepared.output_payload is not None or not prepared.io_needs_session:
             return await self.runners.invoke(step, prepared)
         # The completion service resolves its provider adapter from the
         # database inside the call, so the call itself needs a short scope;
@@ -288,15 +323,25 @@ class FlowRunExecutor:
                 form[field.key] = str(value)
         return TemplateContext(form=form)
 
-    @staticmethod
     def _remember(
+        self,
         context: TemplateContext,
         definition: FlowDefinition,
         step: Step,
         output: dict[str, Any],
     ) -> None:
         text = str(output.get("text") or "")
-        result = StepOutput(text=text, value=output.get("value"))
+        raw_ids = output.get("file_ids")
+        file_ids = (
+            [UUID(str(item)) for item in cast(list[Any], raw_ids)]
+            if isinstance(raw_ids, list)
+            else []
+        )
+        result = StepOutput(
+            text=text,
+            value=output.get("value"),
+            file_urls=signed_links_for(self._tenant_id, file_ids),
+        )
         context.steps[step.key] = result
         if isinstance(step, ReviewStep):
             # Downstream steps read the reviewed (possibly edited) output when

@@ -12,12 +12,16 @@ runs or whether a document is produced.
 
 from __future__ import annotations
 
+import json
+import re
 from enum import StrEnum
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal, Union, cast
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
+from eneo.authentication.signed_urls import parse_file_reference_url
+from eneo.files.model_file_references import HANDLE_PATTERN, HANDLE_PREFIX
 from eneo.flows.templating import (
     KEY_PATTERN,
     Reference,
@@ -33,6 +37,27 @@ MAX_NAME_LENGTH = 200
 KeyStr = Annotated[str, Field(pattern=KEY_PATTERN.pattern, max_length=64)]
 NameStr = Annotated[str, Field(min_length=1, max_length=MAX_NAME_LENGTH)]
 TextStr = Annotated[str, Field(max_length=MAX_TEXT_LENGTH)]
+
+_HANDLE = re.compile(HANDLE_PATTERN)
+
+
+def _file_id_from_reference(value: Any) -> Any:
+    """A file id, also when given as the file's handle or its reference url.
+
+    The model knows an attached file by its ``eneo-file:<id>`` handle (or,
+    after resolution, a signed reference url); either names the file as well
+    as its bare id does, so the model never has to pick the id out itself.
+    """
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if _HANDLE.fullmatch(text):
+        return text[len(HANDLE_PREFIX) :]
+    parsed = parse_file_reference_url(text)
+    return parsed[0] if parsed is not None else value
+
+
+FileIdRef = Annotated[UUID, BeforeValidator(_file_id_from_reference)]
 
 
 class FormFieldType(StrEnum):
@@ -70,8 +95,29 @@ class StepKind(StrEnum):
     LLM = "llm"
     COMPOSE = "compose"
     DOCUMENT = "document"
+    FUNCTION = "function"
     REVIEW = "review"
     TRANSCRIBE = "transcribe"
+
+
+# The capability purposes a function step can call (Eneo's "functions").
+FunctionPurpose = Literal[
+    "web_search",
+    "image_generation",
+    "file_analysis",
+    "file_creation",
+    "charts",
+    "compute",
+]
+FUNCTION_PURPOSES: tuple[str, ...] = (
+    "web_search",
+    "image_generation",
+    "file_analysis",
+    "file_creation",
+    "charts",
+    "compute",
+)
+MAX_FUNCTION_ARGUMENT_BYTES = 65_536
 
 
 class _StepBase(BaseModel):
@@ -160,15 +206,29 @@ class DocumentFormat(StrEnum):
 
 
 class DocumentStep(_StepBase):
-    """A document produced by Eneo's tool runtime, always, with bound values."""
+    """A document produced by Eneo's tool runtime, always, with bound values.
+
+    Two shapes: ``content`` (a Markdown template rendered into a Word or PDF
+    file with the organisation's document template) or ``template_file_id``
+    (a Word, text or Markdown form attached in the chat whose fields are
+    filled from ``values``; the result keeps the form's own format).
+    """
 
     kind: Literal["document"] = "document"
-    format: DocumentFormat = DocumentFormat.DOCX
-    template_file_id: UUID | None = Field(
-        default=None,
-        description="A Word template file to fill; null means compose from content.",
+    format: DocumentFormat = Field(
+        default=DocumentFormat.DOCX,
+        description="docx or pdf for a content document; a template file keeps its own.",
     )
-    title: TextStr | None = None
+    template_file_id: FileIdRef | None = Field(
+        default=None,
+        description=(
+            "A .docx, .txt or .md form attached in this chat, by its file_ref "
+            "(eneo-file:<id>) or id; null means compose from content."
+        ),
+    )
+    title: TextStr | None = Field(
+        default=None, description="Template; defaults to the step name."
+    )
     filename: TextStr | None = Field(
         default=None, description="Template; the extension is added."
     )
@@ -178,7 +238,45 @@ class DocumentStep(_StepBase):
     )
     values: dict[str, TextStr] = Field(
         default_factory=dict,
-        description="Template field name to template text, for a template file.",
+        description=(
+            "Template field name (a content control tag or {{placeholder}}) to "
+            "template text, for a template file."
+        ),
+    )
+
+
+class FunctionStep(_StepBase):
+    """One call to one of Eneo's functions (web search, image generation,
+    charts, compute, file analysis, file creation) with bound arguments.
+
+    The tool and its arguments are fixed at authoring time; string
+    arguments are templates over run inputs and earlier steps, including
+    ``{{files.<key>}}`` and ``{{steps.<key>.file}}`` for arguments that take
+    a file link. Whatever the tool returns is the step's output: its text,
+    its structured value (readable with {{steps.<key>.json.<path>}}) and
+    the files it produced.
+    """
+
+    kind: Literal["function"] = "function"
+    purpose: FunctionPurpose = Field(
+        description="The function the tool belongs to; list_functions shows them."
+    )
+    tool: Annotated[str, Field(min_length=1, max_length=128)] = Field(
+        description="The tool's name as list_functions shows it."
+    )
+    arguments: dict[str, Any] = Field(
+        default_factory=dict,
+        description=(
+            "The tool's arguments as list_functions describes them; every string "
+            "inside is a template."
+        ),
+    )
+    files_from: list[KeyStr] = Field(
+        default_factory=list[str],
+        description=(
+            "File or audio form fields whose files the tool may be handed "
+            "(their links render from {{files.<key>}})."
+        ),
     )
 
 
@@ -219,7 +317,7 @@ class TranscribeStep(_StepBase):
 
 
 Step = Annotated[
-    Union[LlmStep, ComposeStep, DocumentStep, ReviewStep, TranscribeStep],
+    Union[LlmStep, ComposeStep, DocumentStep, FunctionStep, ReviewStep, TranscribeStep],
     Field(discriminator="kind"),
 ]
 
@@ -272,6 +370,29 @@ def _templates_of(step: Step) -> list[tuple[str, str]]:
             templates.append(("filename", step.filename))
         templates.extend((f"values.{name}", text) for name, text in step.values.items())
         return templates
+    if isinstance(step, FunctionStep):
+        return [
+            (f"arguments.{path}", text) for path, text in _string_leaves(step.arguments)
+        ]
+    return []
+
+
+def _string_leaves(value: Any, path: str = "") -> list[tuple[str, str]]:
+    """Every string inside a JSON value with its dotted path (templates)."""
+    if isinstance(value, str):
+        return [(path, value)]
+    if isinstance(value, dict):
+        leaves: list[tuple[str, str]] = []
+        for key, item in cast(dict[str, Any], value).items():
+            leaves.extend(_string_leaves(item, f"{path}.{key}" if path else str(key)))
+        return leaves
+    if isinstance(value, list):
+        leaves = []
+        for index, item in enumerate(cast(list[Any], value)):
+            leaves.extend(
+                _string_leaves(item, f"{path}.{index}" if path else str(index))
+            )
+        return leaves
     return []
 
 
@@ -281,6 +402,7 @@ def _check_reference(
     step_index: int,
     steps: list[Step],
     form_keys: set[str],
+    file_keys: frozenset[str] | set[str] = frozenset(),
 ) -> str | None:
     if reference.source == "previous":
         return None if step_index > 0 else "{{previous}} has no previous step"
@@ -289,13 +411,23 @@ def _check_reference(
         if reference.key not in form_keys:
             return f"{{{{form.{reference.key}}}}} names no form field"
         return None
+    if reference.source == "files":
+        assert reference.key is not None
+        if reference.key not in file_keys:
+            return f"{{{{files.{reference.key}}}}} names no file form field"
+        if not isinstance(steps[step_index], (FunctionStep, DocumentStep)):
+            return f"{{{{{reference.raw}}}}} is only for a function or document step"
+        return None
     assert reference.key is not None
     earlier = {step.key: step for step in steps[:step_index]}
     target = earlier.get(reference.key)
     if target is None:
         return f"{{{{{reference.raw}}}}} must name an earlier step"
+    if reference.wants_file and not isinstance(target, (FunctionStep, DocumentStep)):
+        return f"{{{{{reference.raw}}}}} reads a file from a step that produces none"
     if reference.wants_json and not (
-        isinstance(target, LlmStep) and target.output.type == "json"
+        (isinstance(target, LlmStep) and target.output.type == "json")
+        or isinstance(target, FunctionStep)
     ):
         return f"{{{{{reference.raw}}}}} reads JSON from a step that produces text"
     return None
@@ -322,6 +454,7 @@ def validate_definition(definition: FlowDefinition) -> None:
     step_keys = [step.key for step in definition.steps]
     for key in sorted({key for key in step_keys if step_keys.count(key) > 1}):
         errors.append(f"step key '{key}' is used more than once")
+    file_keys = {field.key for field in definition.file_fields()}
 
     steps = list(definition.steps)
     for index, step in enumerate(steps):
@@ -334,7 +467,11 @@ def validate_definition(definition: FlowDefinition) -> None:
                 continue
             for reference in references:
                 problem = _check_reference(
-                    reference, step_index=index, steps=steps, form_keys=set(form_keys)
+                    reference,
+                    step_index=index,
+                    steps=steps,
+                    form_keys=set(form_keys),
+                    file_keys=file_keys,
                 )
                 if problem:
                     errors.append(f"{where} {label}: {problem}")
@@ -348,6 +485,19 @@ def validate_definition(definition: FlowDefinition) -> None:
                     errors.append(f"{where} files_from '{key}' is not a file field")
             if step.output.type == "json" and not step.output.schema_:
                 errors.append(f"{where} json output needs a schema object")
+        elif isinstance(step, FunctionStep):
+            for key in step.files_from:
+                field = form_by_key.get(key)
+                if field is None:
+                    errors.append(f"{where} files_from names no form field '{key}'")
+                elif field.type not in FILE_FIELD_TYPES:
+                    errors.append(f"{where} files_from '{key}' is not a file field")
+            size = len(json.dumps(step.arguments, ensure_ascii=False))
+            if size > MAX_FUNCTION_ARGUMENT_BYTES:
+                errors.append(
+                    f"{where} arguments are {size} bytes; at most "
+                    f"{MAX_FUNCTION_ARGUMENT_BYTES} are allowed"
+                )
         elif isinstance(step, DocumentStep):
             if (step.template_file_id is None) == (step.content is None):
                 errors.append(
@@ -355,6 +505,10 @@ def validate_definition(definition: FlowDefinition) -> None:
                 )
             if step.template_file_id is None and step.values:
                 errors.append(f"{where} values only apply with a template file")
+            if step.template_file_id is not None and step.format != DocumentFormat.DOCX:
+                errors.append(
+                    f"{where} a template file keeps its own format; use format docx"
+                )
         elif isinstance(step, ReviewStep):
             if index == 0:
                 errors.append(f"{where} cannot be the first step")

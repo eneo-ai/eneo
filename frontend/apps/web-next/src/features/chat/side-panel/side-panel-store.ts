@@ -161,8 +161,10 @@ export class SidePanelStore {
   get occupant(): PanelOccupant {
     if (this.viewCallId !== null) return { kind: "view", callId: this.viewCallId };
     if (this.shown) return { kind: "file" };
-    if (this.nativeId !== null) return { kind: "native", id: this.nativeId };
+    // The overview is asked for (a file bundle's "show in panel"): it shows
+    // over native content, which is back once the overview closes.
     if (this.overview) return { kind: "overview", section: this.overview.section };
+    if (this.nativeId !== null) return { kind: "native", id: this.nativeId };
     return { kind: "closed" };
   }
 

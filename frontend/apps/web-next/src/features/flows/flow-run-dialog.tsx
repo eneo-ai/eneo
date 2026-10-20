@@ -116,6 +116,14 @@ export function FlowRunDialog({
   const [values, setValues] = useState<Record<string, string>>({});
   const [label, setLabel] = useState("");
   const [problems, setProblems] = useState<Record<string, string>>({});
+  const published = flow.published_version != null;
+  // Published and unchanged: the published version runs. Unpublished: the
+  // draft runs as a test. Published with later changes: the person picks.
+  const canChoose = published && flow.has_unpublished_changes;
+  const [target, setTarget] = useState<"draft" | "published">(
+    published && !flow.has_unpublished_changes ? "published" : "draft"
+  );
+  const draft = !published || (canChoose && target === "draft");
   const fields = formFieldsOf(flow.definition);
   const accept = limits.attachments.formats.map((format) => format.mimetype).join(",") || undefined;
 
@@ -146,7 +154,8 @@ export function FlowRunDialog({
         values: payload,
         files,
         run_label: label.trim() || null,
-        expected_flow_version: flow.published_version ?? null
+        expected_flow_version: draft ? null : flow.published_version,
+        draft
       });
       // The run owns the files now; the fields must not delete them.
       for (const handle of fileFields.current.values()) handle.detach();
@@ -165,6 +174,7 @@ export function FlowRunDialog({
     setValues({});
     setLabel("");
     setProblems({});
+    setTarget(published && !flow.has_unpublished_changes ? "published" : "draft");
   }
 
   function requestOpenChange(next: boolean) {
@@ -213,6 +223,27 @@ export function FlowRunDialog({
           open ? (
             <LayoutContent>
               <form id={formId} onSubmit={submit} noValidate className="flex flex-col gap-4">
+                {canChoose && (
+                  <Selector
+                    label={t("flow_run_target_label")}
+                    options={[
+                      { value: "draft", label: t("flow_run_target_draft") },
+                      {
+                        value: "published",
+                        label: t("flow_run_target_published", {
+                          version: flow.published_version!
+                        })
+                      }
+                    ]}
+                    value={target}
+                    onChange={(value) => setTarget(value === "published" ? "published" : "draft")}
+                  />
+                )}
+                {draft && (
+                  <p role="note" className="text-ax-text-secondary m-0 text-[13px]">
+                    {t("flow_run_draft_hint")}
+                  </p>
+                )}
                 {fields.map((field) => {
                   const common = {
                     label: field.label,
@@ -295,7 +326,7 @@ export function FlowRunDialog({
                   type="submit"
                   form={formId}
                   variant="primary"
-                  label={t("flow_run_start")}
+                  label={draft ? t("flow_run_test") : t("flow_run_start")}
                   isLoading={start.isPending}
                   isInterruptible
                 />

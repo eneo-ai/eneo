@@ -1,0 +1,86 @@
+import { Callout } from "nextra/components";
+
+# Flows
+
+A flow is a fixed, ordered list of typed steps that a space runs unattended
+once someone starts it with its run inputs. Nothing is decided while it
+runs: the step kind decides what executes, the prompts and arguments are
+fixed when the flow is written, and the same inputs run the same steps.
+
+Flows are not edited by hand. A flow is written in a conversation with the
+space's flows assistant, which authors it through Eneo's own tools, and the
+panel beside the conversation shows every parameter, every run and the
+flow's history. API consumers run published flows through the REST API.
+
+<Callout type="info">
+  Building an application on flows? Continue with the [consumer
+  guide](/guides/flows). This page explains the model behind it.
+</Callout>
+
+## Three objects
+
+| Object            | What it is                                                                                    | Who owns it                                 |
+| ----------------- | --------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| Draft             | The flow as it is being written; every save is a revision that can be restored                | People in the space with edit rights        |
+| Published version | An immutable snapshot the API runs                                                            | Frozen from the draft by a publisher        |
+| Run               | One execution, with the definition it executed, its inputs, every step's result and its files | The person who started it, or a service key |
+
+A draft can be tried without publishing: a **test run** executes the draft
+as it is and is marked as such. A test run never changes what API
+consumers run.
+
+## Steps
+
+| Kind         | What it does                                                                                                                                                                                                                 |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `llm`        | One completion with a fixed prompt. Reads run inputs, earlier outputs and, when asked, the files of a file field and the space's knowledge. Produces text or JSON checked against a schema.                                  |
+| `compose`    | Text assembled from a template. No model.                                                                                                                                                                                    |
+| `document`   | A Word or PDF file: Markdown content rendered with the organisation's document template, or a form attached in the conversation filled with values.                                                                          |
+| `function`   | One call to one of Eneo's functions (web search, image generation, charts, compute, file analysis, file creation) with arguments fixed in the flow. The tool's text, structured value and files become the step's output.    |
+| `transcribe` | The audio of a form field transcribed with the space's transcription model, in timed segments. Speaker labels through the configured speaker service; speaker names from a participant list or from the conversation itself. |
+| `review`     | Pauses the run until a person approves, edits and approves, or rejects an earlier step's output.                                                                                                                             |
+
+Templates read `{{form.<key>}}`, `{{steps.<key>}}`,
+`{{steps.<key>.json.<path>}}`, `{{steps.<key>.file}}`, `{{files.<key>}}`
+and `{{previous}}`; a step only reads what comes before it.
+
+## Who may do what
+
+| Space role       | Flows                                                  |
+| ---------------- | ------------------------------------------------------ |
+| Viewer           | Read published flows, start and review runs            |
+| Editor and above | Also create, edit, publish, delete and test-run drafts |
+
+A service API key is an automation principal: in its scope it reads
+published flows, starts runs, reviews, uploads files for runs and reads the
+runs it started. It never authors, and it does not see drafts or other
+principals' runs. The job and the files of a service key's run belong to the
+flow's author.
+
+## Running
+
+A run is a durable job. Each step is claimed, prepared, executed and
+recorded in short transactions, so a worker that dies mid-call leaves a
+step marked `outcome_unknown` and the run failed; a provider call is never
+repeated. A review step parks the run as `awaiting_review`; approving
+resumes it with the same run id. A run can be cancelled while it is
+queued, running or waiting for review.
+
+Everything a run touches is a file in Eneo: inputs, templates, produced
+documents and images. Readers of the flow open them through signed links
+minted for the run.
+
+## Transcripts
+
+A transcribe step keeps its segments with the step result. A reviewer
+corrects a transcript without rewriting it: corrections, speaker edits and
+speaker names are an overlay anchored to the segments by a hash, applied
+when the transcript is read, so the original stays auditable.
+
+## Settings
+
+| Setting                                                    | Meaning                                                                      |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `flows_core` (tenant feature flag)                         | Shows flows to a tenant                                                      |
+| `FLOW_STEP_TIMEOUT_SECONDS`                                | Upper bound for one step (900)                                               |
+| `FLOW_SPEAKER_SERVICE_URL`, `FLOW_SPEAKER_SERVICE_API_KEY` | The speaker-labelling service; without it speaker labels cannot be published |

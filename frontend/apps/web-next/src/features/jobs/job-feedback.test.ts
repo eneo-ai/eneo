@@ -24,9 +24,9 @@ describe("describeJobOutcome", () => {
       "failed",
       t
     );
-    expect(feedback.tone).toBe("error");
-    expect(feedback.title).toBe("job_toast_failed:Avtal.pdf");
-    expect(feedback.description).toBeTruthy();
+    expect(feedback!.tone).toBe("error");
+    expect(feedback!.title).toBe("job_toast_failed:Avtal.pdf");
+    expect(feedback!.description).toBeTruthy();
   });
 
   it("treats a stopped crawl as information, not an error", () => {
@@ -37,8 +37,13 @@ describe("describeJobOutcome", () => {
   });
 
   it("falls back to the id when the job has no name", () => {
-    expect(describeJobOutcome(job({ name: null, task: "crawl" }), "completed", t).title).toBe(
+    expect(describeJobOutcome(job({ name: null, task: "crawl" }), "completed", t)?.title).toBe(
       "job_toast_completed:j"
     );
+  });
+
+  it("says nothing about a flow run, whose panel reports it", () => {
+    expect(describeJobOutcome(job({ task: "run_flow" }), "completed", t)).toBeNull();
+    expect(describeJobOutcome(job({ task: "run_flow" }), "failed", t)).toBeNull();
   });
 });

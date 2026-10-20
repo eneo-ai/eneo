@@ -4,20 +4,27 @@ The MCP tools and the REST router both call this service; ``channel`` says
 which one, for the audit trail. Validation errors are returned as one
 ``BadRequestException`` whose message lists every problem, since the model
 repairs a definition from that text in the same turn.
+
+The service also keeps the flow's files: the document templates its steps
+name (pinned to the flow so the file lifecycle keeps them) and the runtime
+uploads API consumers give a run before starting it.
 """
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.auth_models import is_service_api_key
 from eneo.flows.definition import (
     DocumentStep,
     FlowDefinition,
     FlowDefinitionError,
+    FunctionStep,
     LlmStep,
     StepKind,
     TranscribeStep,
@@ -42,28 +49,43 @@ from eneo.flows.flow_models import (
     FlowSparsePublic,
     PrincipalType,
 )
+from eneo.flows.flow_runtime_paths import FlowRuntimePublic, build_flow_runtime_paths
+from eneo.flows.speaker_service import configured_speaker_service
+from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     FlowConversationConflictException,
+    FlowRuntimeFileInUseException,
     NotFoundException,
     UnauthorizedException,
 )
 
 if TYPE_CHECKING:
+    from fastapi import UploadFile
+
     from eneo.actors.actor_manager import ActorManager
     from eneo.audit.application.audit_service import AuditService
     from eneo.completion_models.application.completion_model_crud_service import (
         CompletionModelCRUDService,
     )
     from eneo.database.tables.flow_tables import FlowRevisions, Flows
+    from eneo.files.file_models import FilePublic
+    from eneo.files.file_service import FileService
     from eneo.flows.flow_repo import FlowRepository
     from eneo.spaces.space import Space
     from eneo.spaces.space_repo import SpaceRepository
     from eneo.users.user import UserInDB
+    from eneo.users.user_repo import UsersRepository
 
 # Step kinds whose runners are not shipped yet; publishing refuses them so a
 # run can never reach a step that cannot execute.
-UNAVAILABLE_STEP_KINDS = (StepKind.DOCUMENT, StepKind.TRANSCRIBE)
+UNAVAILABLE_STEP_KINDS: tuple[StepKind, ...] = ()
+# The capability a document step's provider is resolved through.
+DOCUMENT_CAPABILITY = "file_creation"
+# Forms the document provider can fill (Word content controls or {{placeholders}}).
+TEMPLATE_EXTENSIONS = (".docx", ".txt", ".md")
+TEMPLATE_ROLE = "template"
+RUNTIME_UPLOAD_ROLE = "runtime_upload"
 MAX_REVISION_PAGE = 100
 NOTE_MAX_LENGTH = 500
 DEFAULT_FLOW_NAME = "Nytt flöde"
@@ -78,6 +100,8 @@ class FlowService:
         actor_manager: ActorManager,
         completion_model_crud_service: CompletionModelCRUDService,
         audit_service: AuditService,
+        file_service: FileService,
+        user_repo: UsersRepository,
     ):
         self.user = user
         self.repo = repo
@@ -85,10 +109,55 @@ class FlowService:
         self.actor_manager = actor_manager
         self.completion_model_crud_service = completion_model_crud_service
         self.audit_service = audit_service
+        self.file_service = file_service
+        self.user_repo = user_repo
+
+    # --- Principals ---
+
+    @property
+    def service_key_id(self) -> Optional[UUID]:
+        """The key id when the caller is a service API key, else None.
+
+        A service key is an automation principal: it runs published flows
+        and reads what they produce, but never authors (flows are written by
+        people, in their chat), and it owns no rows, so what it uploads is
+        stored as the flow author's.
+        """
+        if is_service_api_key(self.user) and self.user.active_api_key is not None:
+            return self.user.active_api_key.id
+        return None
+
+    async def flow_author(self, flow: Flows) -> UserInDB:
+        """The person who built the flow, who stands in for a service principal."""
+        author = (
+            await self.user_repo.get_user_by_id(id=flow.user_id)
+            if flow.user_id is not None
+            else None
+        )
+        if author is None or author.tenant_id != self.user.tenant_id:
+            raise BadRequestException(
+                "The flow has no author to act as; a person in the space has to "
+                "save it before an API key can use it."
+            )
+        return author
+
+    def _transaction(self) -> contextlib.AbstractAsyncContextManager[object]:
+        """A write block: the ambient transaction when one is open, else a new one
+        (the runtime upload path runs outside one, since object-store uploads
+        cannot be made inside a transaction)."""
+        session = self.repo.session
+        if session.in_transaction():
+            return contextlib.nullcontext()
+        return session.begin()
 
     # --- Authorization ---
 
     async def authorize_space(self, space_id: UUID, action: str = "read") -> Space:
+        if action != "read" and self.service_key_id is not None:
+            raise UnauthorizedException(
+                "Service API keys run flows; they do not create, edit, publish "
+                "or delete them."
+            )
         space = await self.space_repo.one(space_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
         checks = {
@@ -106,7 +175,11 @@ class FlowService:
 
     async def _require_flow(self, flow_id: UUID) -> Flows:
         flow = await self.repo.get_flow(flow_id, self.user.tenant_id)
-        if flow is None:
+        # A draft is not a thing an automation can see: only published flows
+        # exist for a service principal.
+        if flow is None or (
+            self.service_key_id is not None and flow.published_version is None
+        ):
             raise NotFoundException("Flow not found")
         return flow
 
@@ -190,6 +263,122 @@ class FlowService:
             for step in definition.steps
             if step.kind in UNAVAILABLE_STEP_KINDS
         ]
+
+    @staticmethod
+    def _document_steps(definition: FlowDefinition) -> list[DocumentStep]:
+        return [step for step in definition.steps if isinstance(step, DocumentStep)]
+
+    async def _template_problems(
+        self, flow_id: Optional[UUID], definition: FlowDefinition
+    ) -> list[str]:
+        """Template files a document step names must be files the author
+        attached (their own) or files already pinned to the flow, and forms
+        the provider can fill."""
+        problems: list[str] = []
+        for step in self._document_steps(definition):
+            file_id = step.template_file_id
+            if file_id is None:
+                continue
+            where = f"step '{step.key}'"
+            if (
+                flow_id is not None
+                and await self.repo.get_flow_file(flow_id, file_id, role=TEMPLATE_ROLE)
+                is not None
+            ):
+                continue
+            try:
+                info = await self.file_service.get_file_by_id(file_id)
+            except (NotFoundException, UnauthorizedException):
+                problems.append(
+                    f"{where} template_file_id {file_id} is not a file attached in "
+                    "this chat (use the file_ref of an attached .docx, .txt or .md)"
+                )
+                continue
+            if not info.name.lower().endswith(TEMPLATE_EXTENSIONS):
+                problems.append(
+                    f"{where} template file '{info.name}' is not a .docx, .txt or "
+                    ".md form"
+                )
+        return problems
+
+    async def _sync_template_files(
+        self, flow_id: UUID, definition: FlowDefinition
+    ) -> None:
+        """Pin every template the definition names to the flow.
+
+        A template a step stops naming stays pinned (a published version may
+        still run with it); it only loses its step. The flow's deletion is
+        what releases its files.
+        """
+        wanted: dict[UUID, Optional[UUID]] = {
+            step.template_file_id: step.id
+            for step in self._document_steps(definition)
+            if step.template_file_id is not None
+        }
+        pinned = {
+            row.file_id: row
+            for row in await self.repo.list_flow_files(flow_id, role=TEMPLATE_ROLE)
+        }
+        for file_id, step_id in wanted.items():
+            row = pinned.get(file_id)
+            if row is None:
+                await self.repo.add_flow_file(
+                    flow_id=flow_id,
+                    file_id=file_id,
+                    role=TEMPLATE_ROLE,
+                    step_id=step_id,
+                    principal_type=PrincipalType.USER.value,
+                    principal_user_id=self.user.id,
+                )
+            elif row.step_id != step_id:
+                await self.repo.set_flow_file_step(
+                    flow_id, file_id, role=TEMPLATE_ROLE, step_id=step_id
+                )
+        for file_id in pinned.keys() - wanted.keys():
+            if pinned[file_id].step_id is not None:
+                await self.repo.set_flow_file_step(
+                    flow_id, file_id, role=TEMPLATE_ROLE, step_id=None
+                )
+
+    @staticmethod
+    def _document_capability_problems(
+        definition: FlowDefinition, space: Space
+    ) -> list[str]:
+        """A document or function step runs as a call of the space for a
+        capability; the space must allow it (a personal space always does).
+        A transcribe step needs a transcription model and, for speaker
+        labels, the configured speaker service."""
+        problems: list[str] = []
+        needed: dict[str, list[str]] = {}
+        for step in definition.steps:
+            if isinstance(step, DocumentStep):
+                needed.setdefault(DOCUMENT_CAPABILITY, []).append(step.key)
+            elif isinstance(step, FunctionStep):
+                needed.setdefault(step.purpose, []).append(step.key)
+        for purpose, keys in needed.items():
+            if space.is_personal() or purpose in space.enabled_capabilities:
+                continue
+            problems.append(
+                f"the {purpose} function is not enabled in this space, which "
+                f"step(s) {', '.join(keys)} need; enable it in the space settings"
+            )
+        for step in definition.steps:
+            if not isinstance(step, TranscribeStep):
+                continue
+            if (
+                step.transcription_model_id is None
+                and space.get_default_transcription_model() is None
+            ):
+                problems.append(
+                    f"step '{step.key}' needs a transcription model, but the space "
+                    "has none enabled"
+                )
+            if step.speaker_labels and configured_speaker_service() is None:
+                problems.append(
+                    f"step '{step.key}' asks for speaker labels, but no speaker "
+                    "service is configured for this Eneo (FLOW_SPEAKER_SERVICE_URL)"
+                )
+        return problems
 
     # --- Audit ---
 
@@ -327,6 +516,11 @@ class FlowService:
     ) -> FlowPublic:
         space = await self.authorize_space(space_id, "create")
         self._validate(definition, space)
+        problems = await self._template_problems(None, definition)
+        if problems:
+            raise BadRequestException(
+                "The flow definition has problems:\n- " + "\n- ".join(problems)
+            )
         definition = assign_step_ids(definition)
         flow = await self.repo.add_flow(
             name=name,
@@ -337,6 +531,7 @@ class FlowService:
             user_id=self.user.id,
             conversation_id=conversation_id,
         )
+        await self._sync_template_files(flow.id, definition)
         await self._add_revision(flow, channel=channel, note=None)
         await self._audit(
             ActionType.FLOW_CREATED,
@@ -421,6 +616,11 @@ class FlowService:
         definition_json: Optional[dict[str, Any]] = None
         if definition is not None:
             self._validate(definition, space)
+            problems = await self._template_problems(flow.id, definition)
+            if problems:
+                raise BadRequestException(
+                    "The flow definition has problems:\n- " + "\n- ".join(problems)
+                )
             previous = definition_from_json(flow.definition)
             definition = assign_step_ids(
                 definition, previous, keep_unknown_ids=restored_from is not None
@@ -440,6 +640,8 @@ class FlowService:
         await self.repo.update_flow(
             flow.id, name=name, description=description, definition=definition_json
         )
+        if definition is not None:
+            await self._sync_template_files(flow.id, definition)
         refreshed = await self._require_flow(flow.id)
         kept = await self._add_revision(refreshed, channel=channel, note=note)
         extra: dict[str, Any] = {"changed": changed, "revision": kept.revision}
@@ -472,6 +674,8 @@ class FlowService:
     async def list_flows(self, space_id: UUID) -> list[FlowSparsePublic]:
         await self.authorize_space(space_id)
         rows = await self.repo.list_flows(space_id, self.user.tenant_id)
+        if self.service_key_id is not None:
+            rows = [row for row in rows if row.flow.published_version is not None]
         return [flow_sparse_public(row.flow, row.last_run) for row in rows]
 
     async def publish_flow(self, flow_id: UUID, channel: str = "api") -> FlowPublic:
@@ -479,17 +683,7 @@ class FlowService:
         flow = await self._require_flow(flow_id)
         space = await self.authorize_space(flow.space_id, "publish")
         definition = definition_from_json(flow.definition)
-        if not definition.steps:
-            raise BadRequestException("a flow needs at least one step to be published")
-        self._validate(definition, space)
-        unavailable = self._unavailable_kinds(definition)
-        if unavailable:
-            raise BadRequestException(
-                "This version of Eneo cannot run document or transcribe steps yet, "
-                "so the flow cannot be published: "
-                + "; ".join(unavailable)
-                + ". Replace them with llm, compose or review steps for now."
-            )
+        await self._require_runnable(flow, definition, space, action="published")
         if flow.published_version is not None:
             current = await self.repo.get_version(flow.id, flow.published_version)
             if current is not None and current.definition == flow.definition:
@@ -511,6 +705,39 @@ class FlowService:
             extra={"version": version},
         )
         return await self._to_public(refreshed)
+
+    async def _require_runnable(
+        self, flow: Flows, definition: FlowDefinition, space: Space, *, action: str
+    ) -> None:
+        """What a run needs beyond a valid shape: steps, runnable kinds, the
+        template files and the document capability. Shared by publishing and
+        test runs, so a draft that runs is a draft that can be published."""
+        if not definition.steps:
+            raise BadRequestException(f"a flow needs at least one step to be {action}")
+        self._validate(definition, space)
+        unavailable = self._unavailable_kinds(definition)
+        if unavailable:
+            raise BadRequestException(
+                "This version of Eneo cannot run transcribe steps yet, so the "
+                f"flow cannot be {action}: "
+                + "; ".join(unavailable)
+                + ". Replace them with llm, compose, document or review steps for now."
+            )
+        problems = await self._template_problems(flow.id, definition)
+        problems.extend(self._document_capability_problems(definition, space))
+        if problems:
+            raise BadRequestException(
+                f"The flow cannot be {action}:\n- " + "\n- ".join(problems)
+            )
+
+    async def get_runnable_draft(self, flow_id: UUID) -> FlowDefinition:
+        """The draft as a test run executes it; needs edit rights and a draft
+        that could be published as it is."""
+        flow = await self._require_flow(flow_id)
+        space = await self.authorize_space(flow.space_id, "edit")
+        definition = definition_from_json(flow.definition)
+        await self._require_runnable(flow, definition, space, action="test run")
+        return definition
 
     async def delete_flow(self, flow_id: UUID, channel: str = "api") -> None:
         flow = await self._require_flow(flow_id)
@@ -563,4 +790,121 @@ class FlowService:
             form_fields=definition.form_fields,
             steps_requiring_review=reviews,
             final_output=final,
+        )
+
+    # --- Published runtime view (API consumers) ---
+
+    async def get_published_runtime(self, flow_id: UUID) -> FlowRuntimePublic:
+        """The flow's metadata and every run-side path, for a published flow."""
+        flow = await self._require_flow(flow_id)
+        await self.authorize_space(flow.space_id)
+        if flow.published_version is None:
+            raise NotFoundException("Published flow not found")
+        return FlowRuntimePublic(
+            id=flow.id,
+            space_id=flow.space_id,
+            name=flow.name,
+            description=flow.description,
+            published_version=flow.published_version,
+            created_at=flow.created_at,
+            updated_at=flow.updated_at,
+            runtime_paths=build_flow_runtime_paths(
+                flow.id, api_prefix=get_settings().api_prefix
+            ),
+        )
+
+    # --- Runtime files (uploads a run is given) ---
+
+    async def add_runtime_file(
+        self, flow_id: UUID, upload: UploadFile, *, channel: str = "api"
+    ) -> FilePublic:
+        """Keep an upload for a run of this flow; the run request binds it to
+        a file form field by id. Anyone who may run the flow may upload."""
+        async with self._transaction():
+            flow = await self._require_flow(flow_id)
+            await self.authorize_space(flow.space_id)
+            if flow.published_version is None:
+                raise BadRequestException(
+                    "Flow must be published before runtime files can be uploaded."
+                )
+            # The commit expires the row; keep what the audit entry needs.
+            flow_name = flow.name
+            service_id = self.service_key_id
+            # A service principal owns no rows: its upload is the author's file.
+            file_service = (
+                self.file_service.as_user(await self.flow_author(flow))
+                if service_id is not None
+                else self.file_service
+            )
+        # The upload manages its own transactions (an object-store write
+        # cannot happen inside one).
+        file = await file_service.save_file(upload)
+        async with self._transaction():
+            await self.repo.add_flow_file(
+                flow_id=flow_id,
+                file_id=file.id,
+                role=RUNTIME_UPLOAD_ROLE,
+                principal_type=(
+                    PrincipalType.SERVICE.value
+                    if service_id is not None
+                    else PrincipalType.USER.value
+                ),
+                principal_user_id=None if service_id is not None else self.user.id,
+                principal_service_id=service_id,
+            )
+            await self.audit_service.log_async(
+                tenant_id=self.user.tenant_id,
+                user=self.user,
+                action=ActionType.FILE_UPLOADED,
+                entity_type=EntityType.FILE,
+                entity_id=file.id,
+                description=f"Uploaded runtime file '{file.name}' for flow '{flow_name}'",
+                metadata=AuditMetadata.standard(
+                    actor=self.user,
+                    target=file,
+                    extra={
+                        "channel": channel,
+                        "flow_id": str(flow_id),
+                        "size_bytes": file.size,
+                        "mimetype": file.mimetype,
+                    },
+                ),
+            )
+            return await file_service.get_public_file_by_id(file.id)
+
+    async def delete_runtime_file(
+        self, flow_id: UUID, file_id: UUID, *, channel: str = "api"
+    ) -> None:
+        """Remove an upload no run has used (409 once a run took it as input)."""
+        flow = await self._require_flow(flow_id)
+        await self.authorize_space(flow.space_id)
+        row = await self.repo.get_flow_file(flow.id, file_id, role=RUNTIME_UPLOAD_ROLE)
+        if row is None:
+            raise NotFoundException("Runtime file not found for this flow")
+        service_id = self.service_key_id
+        if service_id is not None and row.principal_service_id != service_id:
+            raise NotFoundException("Runtime file not found for this flow")
+        if await self.repo.file_used_by_runs(file_id):
+            raise FlowRuntimeFileInUseException(
+                "The file was given to a run and stays with it."
+            )
+        await self.repo.delete_flow_file(flow.id, file_id, role=RUNTIME_UPLOAD_ROLE)
+        file_service = (
+            self.file_service.as_user(await self.flow_author(flow))
+            if service_id is not None
+            else self.file_service
+        )
+        file = await file_service.delete_file(file_id)
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.FILE_DELETED,
+            entity_type=EntityType.FILE,
+            entity_id=file_id,
+            description=f"Deleted runtime file '{file.name}' of flow '{flow.name}'",
+            metadata=AuditMetadata.standard(
+                actor=self.user,
+                target=file,
+                extra={"channel": channel, "flow_id": str(flow.id)},
+            ),
         )

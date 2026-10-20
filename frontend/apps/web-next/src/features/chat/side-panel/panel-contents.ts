@@ -24,6 +24,9 @@ export type PanelNativeEntry = {
   open: () => void;
 };
 
+/** A file a flow's run produced, with the run it came from. */
+export type PanelFlowFile = { file: PreviewFile; detail: string };
+
 /** Everything of a conversation that the panel can show. */
 export type PanelContents = {
   views: PanelView[];
@@ -31,6 +34,8 @@ export type PanelContents = {
   uploads: PreviewFile[];
   /** The flow page's own content; empty on every other page. */
   flows?: PanelNativeEntry[];
+  /** Files the flow's runs produced, newest first; empty off the flow page. */
+  flowFiles?: PanelFlowFile[];
 };
 
 export function panelContentsCount(contents: PanelContents | null | undefined): number {
@@ -39,7 +44,8 @@ export function panelContentsCount(contents: PanelContents | null | undefined): 
     contents.views.length +
     contents.documents.length +
     contents.uploads.length +
-    (contents.flows?.length ?? 0)
+    (contents.flows?.length ?? 0) +
+    (contents.flowFiles?.length ?? 0)
   );
 }
 

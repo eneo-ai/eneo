@@ -83,6 +83,7 @@ __all__ = [
     "get_flow",
     "get_run",
     "list_flows",
+    "list_functions",
     "list_revisions",
     "mcp",
     "publish_flow",
@@ -123,17 +124,22 @@ one from the flows page.
 
 Step kinds: llm (one completion with a fixed prompt; output is text or JSON
 checked against a schema), compose (text assembled from a template, no model),
-review (pauses the run until a person approves or edits an earlier step's
-output). document and transcribe steps exist in the schema but cannot be
-published yet; say so instead of using them.
+document (a Word or PDF file Eneo's document engine renders from a Markdown
+template, or a form attached in this chat filled with values), function (one
+call to one of Eneo's functions: web search, image generation, charts,
+compute, file analysis, file creation; list_functions shows the tools and
+their arguments), transcribe (the audio of a form field transcribed, with
+speaker labels and names when asked), review (pauses the run until a person
+approves or edits an earlier step's output).
 
 Templates read run inputs and earlier steps with {{form.<key>}},
 {{steps.<key>}}, {{steps.<key>.json.<path>}} and {{previous}}. A step can
 only read form fields and steps that come before it.
 
 A saved flow is a draft until publish_flow; run_flow runs the published
-version. run_flow only queues the run and returns at once; get_run is how to
-follow its progress. Validation problems come back as text starting with
+version, or with draft=true a test run of the draft while the user is still
+building it. run_flow only queues the run and returns at once; get_run is how
+to follow its progress. Validation problems come back as text starting with
 "Could not": fix the definition and call again.
 
 Every save (update_flow) is kept as a numbered revision the user can read in
@@ -412,11 +418,17 @@ def _run_contract_text(contract: FlowRunContractPublic) -> str:
     return "\n".join(lines)
 
 
+def _version_text(state: FlowRunStatePublic) -> str:
+    if state.is_test:
+        return "test run of the draft"
+    return f"version {state.flow_version}"
+
+
 def _run_text(state: FlowRunStatePublic, lead: str | None = None) -> str:
     lines = [
         lead
         or f"Run {state.run_id} of flow {state.flow_id} "
-        f"(version {state.flow_version}): {state.status.value}."
+        f"({_version_text(state)}): {state.status.value}."
     ]
     if state.run_label:
         lines.append(f"Label: {state.run_label}")
@@ -447,6 +459,95 @@ def _run_text(state: FlowRunStatePublic, lead: str | None = None) -> str:
 
 
 # --- Tools ---
+
+
+@mcp.tool(title="List functions")
+async def list_functions(ctx: Context) -> CallToolResult:
+    """The functions (web search, image generation, charts, compute, file
+    analysis, file creation) a function step can call in this space, with
+    each tool's name, what it does and its arguments as a JSON Schema.
+
+    Call it before writing a function step: a step names a purpose, a tool
+    and arguments that must fit the schema. A function that is not enabled
+    in the space is listed as unavailable; the user enables it in the
+    space settings.
+    """
+    try:
+        async with internal_tool_context(ctx) as tool_ctx:
+            space_id = await _authoring_space_id(tool_ctx)
+            functions = await _available_functions(tool_ctx, space_id)
+    except _REPAIRABLE as exc:
+        return _failure("list functions", exc)
+    return _result(_functions_text(functions), functions=functions)
+
+
+async def _available_functions(
+    tool_ctx: ToolContext, space_id: UUID
+) -> list[dict[str, Any]]:
+    """Each purpose with its provider's tools as the flows assistant reaches them."""
+    from eneo.flows.definition import FUNCTION_PURPOSES
+
+    container = tool_ctx.container
+    space = await container.space_repo().one(space_id)
+    functions: list[dict[str, Any]] = []
+    for purpose in FUNCTION_PURPOSES:
+        enabled = space.is_personal() or purpose in space.enabled_capabilities
+        server = (
+            await container.assistant_service().capability_server(
+                assistant_id=tool_ctx.assistant_id, purpose=purpose
+            )
+            if enabled
+            else None
+        )
+        functions.append(
+            {
+                "purpose": purpose,
+                "enabled_in_space": enabled,
+                "available": server is not None,
+                "provider": server.name if server is not None else None,
+                "tools": [
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "input_schema": tool.input_schema,
+                    }
+                    for tool in (server.tools if server is not None else [])
+                ],
+            }
+        )
+    return functions
+
+
+def _functions_text(functions: list[dict[str, Any]]) -> str:
+    lines: list[str] = ["Functions a function step can call in this space:"]
+    for function in functions:
+        purpose = function["purpose"]
+        if not function["enabled_in_space"]:
+            lines.append(f"- {purpose}: not enabled in this space.")
+            continue
+        if not function["available"]:
+            lines.append(f"- {purpose}: enabled but no provider is available.")
+            continue
+        lines.append(f"- {purpose} (provider '{function['provider']}'):")
+        for tool in function["tools"]:
+            description = (tool.get("description") or "").strip().split("\n")[0]
+            lines.append(f"  - {tool['name']}: {description[:200]}")
+            schema = tool.get("input_schema") or {}
+            properties = schema.get("properties") if isinstance(schema, dict) else None
+            if isinstance(properties, dict):
+                required = set(schema.get("required") or [])
+                lines.append(
+                    "    arguments: "
+                    + ", ".join(
+                        f"{name}{'*' if name in required else ''}"
+                        for name in properties
+                    )
+                )
+    lines.append(
+        "Arguments marked * are required; the structured result carries each "
+        "tool's full JSON Schema."
+    )
+    return "\n".join(lines)
 
 
 @mcp.tool(title="List flows")
@@ -517,10 +618,32 @@ async def update_flow(
       form fields the model also sees; knowledge names collections and
       websites whose matching passages are injected.
     - compose: text assembled from template, no model call.
+    - document: a file Eneo's document engine produces, always, with the
+      values bound. Either content (a Markdown template for the body; title
+      and filename are templates too; format docx or pdf; the organisation's
+      document template applies) or template_file_id (a .docx, .txt or .md
+      form the user attached in this chat, named by its file_ref such as
+      eneo-file:<id>; values maps each of the form's fields, a content
+      control tag or {{placeholder}}, to a template; format stays docx). The
+      file is the step's output; {{steps.<key>}} is its filename.
+    - function: one call to a tool of one of Eneo's functions (purpose
+      web_search, image_generation, charts, compute, file_analysis or
+      file_creation) with arguments fixed here; call list_functions first to
+      see the tools and the exact argument names. Every string in arguments
+      is a template; {{files.<key>}} (with files_from naming the field) and
+      {{steps.<key>.file}} give a tool a file link. The step's output is the
+      tool's text, its structured value ({{steps.<key>.json.<path>}}) and
+      the files or images it made ({{steps.<key>.file}}).
+    - transcribe: transcribes the audio of form field source (type audio or
+      file) with the space's transcription model; language is an ISO code or
+      null. speaker_labels true labels who speaks (needs the speaker service
+      this Eneo is configured with) and speaker_mapping names the labels:
+      participants_field names a text form field listing the participants,
+      infer_names lets the conversation itself name them. The output is the
+      transcript text; a reviewer can correct it afterwards through the API.
     - review: pauses the run until a person approves (mode view) or edits
       and approves (mode edit) the output of step `of` (default the previous
       step). Cannot be the first step, cannot review another review.
-    - document and transcribe: in the schema but cannot be published yet.
 
     Keys are short lower-case identifiers (letters, digits, underscore) that
     stay stable across edits; templates read {{form.<key>}}, {{steps.<key>}},
@@ -699,14 +822,18 @@ async def run_flow(
     flow_id: UUID | None = None,
     files: dict[str, list[str]] | None = None,
     run_label: str | None = None,
+    draft: bool = False,
 ) -> CallToolResult:
-    """Start a run of the flow's published version with the given inputs.
+    """Start a run of the flow's published version with the given inputs,
+    or with draft=true a test run of the draft as it is now.
 
     Omit flow_id to work on this chat's flow (the usual case). inputs maps text, number and select form field keys to their values;
     files maps file and audio form field keys to the attachment reference
     URLs from this conversation (the exact "url" values of the file
     reference entries, never constructed). Every required field needs a
-    value or a file.
+    value or a file. draft=true is how the user tries a flow out while
+    building it: nothing is published, the run is marked as a test, and
+    the draft must be complete enough to publish.
 
     The run is queued and this returns at once with its id and initial
     state; it then executes in the background and may take minutes. The
@@ -732,6 +859,7 @@ async def run_flow(
                 values=dict(inputs),
                 files=file_ids,
                 run_label=run_label,
+                draft=draft,
                 channel=CHANNEL,
             )
             state = await run_service.get_run_state(run.id)
@@ -739,7 +867,7 @@ async def run_flow(
         return _failure("run flow", exc, flow_id=flow_id)
     logger.info("[FLOWS] queued run %s of flow %s", state.run_id, flow.id)
     lead = (
-        f"Run {state.run_id} of '{flow.name}' (version {state.flow_version}) is "
+        f"Run {state.run_id} of '{flow.name}' ({_version_text(state)}) is "
         f"{state.status.value}. It executes in the background; call get_run "
         "with this run_id to follow it."
     )

@@ -2,16 +2,20 @@
 
 Authoring happens through the loopback ``flows`` MCP tools, so this router
 only reads flows, exposes the hidden authoring assistant and carries the
-run side of the API (runs, status, steps, cancel, review checkpoints) that
-external consumers integrate against.
+run side of the API (published view, run contract, runtime uploads, runs,
+status, steps, cancel, review checkpoints, signed file links) that external
+consumers integrate against. The run-side paths are the ones
+:mod:`eneo.flows.flow_runtime_paths` advertises.
 """
 
 from __future__ import annotations
 
+import time
 from typing import Annotated, Optional
+from urllib.parse import urlencode
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Response
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, UploadFile
 
 from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.endpoint_access import (
@@ -19,8 +23,11 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
+from eneo.authentication.signed_urls import generate_file_original_download_token
+from eneo.files.file_models import FilePublic, SignedURLRequest, SignedURLResponse
 from eneo.flows.api.dependencies import require_flows_enabled
 from eneo.flows.flow_models import (
+    FlowArtifactPublic,
     FlowAuthoringAssistantPublic,
     FlowConversationBindRequest,
     FlowCreateRequest,
@@ -36,9 +43,21 @@ from eneo.flows.flow_models import (
     FlowRunReviewCheckpointRejectRequest,
     FlowRunReviewCheckpointResumeRequest,
     FlowRunReviewCheckpointResumeResponse,
+    FlowRunStatus,
     FlowRunStepPublic,
     FlowRunSummaryPublic,
     FlowSparsePublic,
+    FlowTranscriptCorrectionsEditRequest,
+    FlowTranscriptCorrectionsPublic,
+    FlowTranscriptPublic,
+)
+from eneo.flows.flow_runtime_paths import (
+    DELETE_RUNTIME_FILE_PATH,
+    FLOW_RUN_ARTIFACT_SIGNED_URL_PATH,
+    FLOW_RUN_INPUT_FILE_SIGNED_URL_PATH,
+    PUBLISHED_FLOW_RUNTIME_PATH,
+    UPLOAD_RUNTIME_FILE_PATH,
+    FlowRuntimePublic,
 )
 from eneo.main.container.container import Container
 from eneo.main.models import PaginatedResponse
@@ -48,6 +67,33 @@ from eneo.server.protocol import responses
 router = APIRouter(dependencies=[Depends(require_flows_enabled)])
 
 _Container = Annotated[Container, Depends(get_container(with_user=True))]
+# An upload writes to the object store, which cannot happen inside a
+# transaction; the service opens its own short ones around the rows.
+_UploadContainer = Annotated[
+    Container,
+    Depends(
+        get_container(
+            with_user=True, with_transaction=False, with_upload_admission=True
+        )
+    ),
+]
+
+
+_UPLOAD_OPENAPI_EXTRA: dict[str, object] = {
+    "requestBody": {
+        "content": {
+            "multipart/form-data": {
+                "schema": {
+                    "type": "object",
+                    "required": ["upload_file"],
+                    "properties": {
+                        "upload_file": {"type": "string", "format": "binary"}
+                    },
+                }
+            }
+        }
+    }
+}
 _READ_REASON = "FlowService enforces space membership and flow read permission."
 _RUN_REASON = (
     "FlowRunService enforces flow read permission; runs resolve only "
@@ -168,6 +214,23 @@ async def bind_conversation(
 
 
 @router.get(
+    PUBLISHED_FLOW_RUNTIME_PATH,
+    response_model=FlowRuntimePublic,
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_READ_REASON,
+)
+async def get_published_flow_runtime(
+    id: UUID, container: _Container
+) -> FlowRuntimePublic:
+    """A published flow's metadata and every run-side path a client needs."""
+    return await container.flow_service().get_published_runtime(id)
+
+
+@router.get(
     "/{id}/run-contract/",
     response_model=FlowRunContractPublic,
     responses=responses.get_responses([400, 403, 404]),
@@ -179,6 +242,50 @@ async def bind_conversation(
 )
 async def get_run_contract(id: UUID, container: _Container) -> FlowRunContractPublic:
     return await container.flow_service().get_run_contract(id)
+
+
+# --- Runtime files ---
+
+
+@router.post(
+    UPLOAD_RUNTIME_FILE_PATH,
+    response_model=FilePublic,
+    status_code=201,
+    openapi_extra=_UPLOAD_OPENAPI_EXTRA,
+    responses=responses.get_responses([400, 403, 404, 413, 415]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="FlowService enforces flow read permission; the file is the caller's.",
+)
+async def upload_runtime_file(
+    id: UUID, upload_file: UploadFile, container: _UploadContainer
+) -> FilePublic:
+    """Upload a file to give a run; bind its id to a file form field in the run.
+
+    Open to service keys: the file is stored as the flow author's, so the
+    creation guard for user-owned rows does not apply.
+    """
+    return await container.flow_service().add_runtime_file(id, upload_file)
+
+
+@router.delete(
+    DELETE_RUNTIME_FILE_PATH,
+    status_code=204,
+    responses=responses.get_responses([403, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="FlowService enforces flow read permission and file ownership.",
+)
+async def delete_runtime_file(
+    id: UUID, file_id: UUID, container: _Container
+) -> Response:
+    """Remove an upload no run has used yet (409 once a run took it)."""
+    await container.flow_service().delete_runtime_file(id, file_id)
+    return Response(status_code=204)
 
 
 # --- Revisions ---
@@ -243,6 +350,25 @@ async def restore_revision(
 # --- Runs ---
 
 
+@router.get(
+    "/{id}/artifacts/",
+    response_model=list[FlowArtifactPublic],
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RUN_REASON,
+)
+async def list_artifacts(
+    id: UUID,
+    container: _Container,
+    limit: Annotated[int, Query(ge=1, le=MAX_RUN_PAGE)] = 50,
+) -> list[FlowArtifactPublic]:
+    """Files the flow's runs produced, newest first."""
+    return await container.flow_run_service().list_artifacts(id, limit=limit)
+
+
 @router.post(
     "/{id}/runs/",
     response_model=FlowRunPublic,
@@ -269,6 +395,7 @@ async def create_run(
         run_label=request.run_label,
         expected_flow_version=request.expected_flow_version,
         idempotency_key=idempotency_key,
+        draft=request.draft,
     )
 
 
@@ -287,9 +414,13 @@ async def list_runs(
     container: _Container,
     limit: Annotated[int, Query(ge=1, le=MAX_RUN_PAGE)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
+    status: Annotated[
+        Optional[list[FlowRunStatus]],
+        Query(description="Only runs in these statuses (repeat the parameter)."),
+    ] = None,
 ) -> PaginatedResponse[FlowRunSummaryPublic]:
     runs, _total = await container.flow_run_service().list_runs(
-        id, limit=limit, offset=offset
+        id, limit=limit, offset=offset, statuses=tuple(status) if status else None
     )
     return PaginatedResponse(items=runs)
 
@@ -499,4 +630,164 @@ async def approve_and_continue(
         expected_revision=request.expected_checkpoint_revision,
         flow_id=id,
         resume=True,
+    )
+
+
+# --- Transcripts and their corrections ---
+
+
+@router.get(
+    "/{id}/runs/{run_id}/transcript-corrections/",
+    response_model=list[FlowTranscriptCorrectionsPublic],
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RUN_REASON,
+)
+async def list_transcript_corrections(
+    id: UUID, run_id: UUID, container: _Container
+) -> list[FlowTranscriptCorrectionsPublic]:
+    """The stored corrections of the run's transcribe steps (``stale`` ones
+    anchor to a transcript that has since changed and must not be applied)."""
+    return await container.flow_transcript_corrections_service().list_for_run(
+        run_id, flow_id=id
+    )
+
+
+@router.patch(
+    "/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/",
+    response_model=FlowTranscriptCorrectionsPublic,
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RUN_REASON,
+)
+async def edit_transcript_corrections(
+    id: UUID,
+    run_id: UUID,
+    step_id: UUID,
+    request: FlowTranscriptCorrectionsEditRequest,
+    container: _Container,
+) -> FlowTranscriptCorrectionsPublic:
+    """Replace one transcribe step's corrections: send the full lists, the
+    ``segments_hash`` of the transcript they anchor to and
+    ``expected_revision`` (null to create)."""
+    return await container.flow_transcript_corrections_service().save(
+        run_id,
+        step_id,
+        flow_id=id,
+        schema_version=request.schema_version,
+        segments_hash=request.segments_hash,
+        expected_revision=request.expected_revision,
+        occurrences=request.occurrences,
+        speaker_edits=request.speaker_edits,
+        speaker_names=request.speaker_names,
+    )
+
+
+@router.get(
+    "/{id}/runs/{run_id}/steps/{step_id}/transcript/",
+    response_model=FlowTranscriptPublic,
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RUN_REASON,
+)
+async def get_transcript(
+    id: UUID, run_id: UUID, step_id: UUID, container: _Container
+) -> FlowTranscriptPublic:
+    """A transcribe step's transcript with its corrections applied."""
+    return await container.flow_transcript_corrections_service().get_transcript(
+        run_id, step_id, flow_id=id
+    )
+
+
+# --- Signed links to a run's files ---
+
+
+def _signed_download(
+    request: Request,
+    *,
+    file_id: UUID,
+    tenant_id: UUID,
+    signed_url_req: SignedURLRequest,
+) -> SignedURLResponse:
+    issued_at = int(time.time())
+    expires_at = issued_at + signed_url_req.expires_in
+    token = generate_file_original_download_token(
+        file_id=file_id,
+        expires_at=expires_at,
+        content_disposition=signed_url_req.content_disposition,
+        tenant_id=tenant_id,
+        issued_at=issued_at,
+    )
+    url = request.url_for("download_original_file_signed", id=str(file_id))
+    return SignedURLResponse(
+        url=f"{url}?{urlencode({'token': token})}", expires_at=expires_at
+    )
+
+
+@router.post(
+    FLOW_RUN_ARTIFACT_SIGNED_URL_PATH,
+    response_model=SignedURLResponse,
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RUN_REASON,
+)
+async def generate_run_artifact_signed_url(
+    id: UUID,
+    run_id: UUID,
+    file_id: UUID,
+    request: Request,
+    signed_url_req: SignedURLRequest,
+    container: _Container,
+) -> SignedURLResponse:
+    """A time-limited link to a file the run produced."""
+    file = await container.flow_run_service().run_file_for_download(
+        run_id, file_id, role="output", flow_id=id
+    )
+    return _signed_download(
+        request,
+        file_id=file.id,
+        tenant_id=file.tenant_id,
+        signed_url_req=signed_url_req,
+    )
+
+
+@router.post(
+    FLOW_RUN_INPUT_FILE_SIGNED_URL_PATH,
+    response_model=SignedURLResponse,
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RUN_REASON,
+)
+async def generate_run_input_file_signed_url(
+    id: UUID,
+    run_id: UUID,
+    file_id: UUID,
+    request: Request,
+    signed_url_req: SignedURLRequest,
+    container: _Container,
+) -> SignedURLResponse:
+    """A time-limited link to a file the run was given."""
+    file = await container.flow_run_service().run_file_for_download(
+        run_id, file_id, role="input", flow_id=id
+    )
+    return _signed_download(
+        request,
+        file_id=file.id,
+        tenant_id=file.tenant_id,
+        signed_url_req=signed_url_req,
     )

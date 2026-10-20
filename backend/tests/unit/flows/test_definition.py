@@ -304,3 +304,91 @@ def test_definition_summary_lists_steps_in_order():
     assert (
         definition_summary(definition) == "1. [llm] A (key: a)\n2. [compose] B (key: b)"
     )
+
+
+class TestDocumentStepTemplateFile:
+    def test_template_file_is_named_by_handle_url_or_id(self):
+        file_id = uuid4()
+        by_handle = DocumentStep(
+            key="d", name="D", template_file_id=f"eneo-file:{file_id.hex}"
+        )
+        by_url = DocumentStep(
+            key="d",
+            name="D",
+            template_file_id=(
+                f"https://eneo.example/api/v1/files/{file_id}/original/download/"
+                "?token=abc"
+            ),
+        )
+        by_id = DocumentStep(key="d", name="D", template_file_id=str(file_id))
+        assert by_handle.template_file_id == file_id
+        assert by_url.template_file_id == file_id
+        assert by_id.template_file_id == file_id
+
+    def test_other_strings_are_not_file_ids(self):
+        with pytest.raises(ValidationError):
+            DocumentStep(key="d", name="D", template_file_id="mall.docx")
+
+    def test_a_template_file_keeps_its_own_format(self):
+        definition = FlowDefinition(
+            steps=[
+                DocumentStep(
+                    key="d",
+                    name="D",
+                    template_file_id=str(uuid4()),
+                    format="pdf",
+                    values={"namn": "x"},
+                )
+            ]
+        )
+        assert _errors(definition) == [
+            "step 'd' a template file keeps its own format; use format docx"
+        ]
+
+
+class TestFunctionAndFileReferences:
+    def test_function_steps_read_files_and_earlier_outputs(self):
+        from eneo.flows.definition import FunctionStep
+
+        definition = FlowDefinition(
+            form_fields=[
+                _text_field(),
+                FormField(key="bild", label="Bild", type="file"),
+            ],
+            steps=[
+                FunctionStep(
+                    key="chart",
+                    name="Diagram",
+                    purpose="charts",
+                    tool="create_chart",
+                    files_from=["bild"],
+                    arguments={"source": "{{files.bild}}", "title": "{{form.topic}}"},
+                ),
+                DocumentStep(
+                    key="doc",
+                    name="Doc",
+                    content="Se {{steps.chart.json.series}} och {{steps.chart.file}}",
+                ),
+            ],
+        )
+        validate_definition(definition)
+
+    def test_file_references_need_a_file_field_and_a_file_producing_step(self):
+        from eneo.flows.definition import FunctionStep
+
+        definition = FlowDefinition(
+            form_fields=[_text_field()],
+            steps=[
+                _llm("a"),
+                FunctionStep(
+                    key="f",
+                    name="F",
+                    purpose="compute",
+                    tool="run",
+                    arguments={"x": "{{files.topic}} {{steps.a.file}}"},
+                ),
+            ],
+        )
+        errors = _errors(definition)
+        assert "{{files.topic}} names no file form field" in errors[0]
+        assert "reads a file from a step that produces none" in errors[1]

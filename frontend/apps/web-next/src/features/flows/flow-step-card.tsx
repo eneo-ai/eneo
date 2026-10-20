@@ -4,7 +4,7 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import { Chip, Field, MonoBlock } from "./flow-fields";
-import { formatDuration, stepKindLabel } from "./flow-labels";
+import { formatDuration, functionPurposeLabel, stepKindLabel } from "./flow-labels";
 import { TemplateText } from "./flow-template";
 import {
   formFieldsOf,
@@ -12,6 +12,7 @@ import {
   type DocumentStep,
   type FlowDefinition,
   type FlowStep,
+  type FunctionStep,
   type LlmStep,
   type ReviewStep,
   type TranscribeStep
@@ -212,6 +213,55 @@ function DocumentFields({
   );
 }
 
+/** The arguments of a function step, each string shown as the template it is. */
+function FunctionFields({ step, definition }: { step: FunctionStep; definition: FlowDefinition }) {
+  const t = useTranslations();
+  const files = step.files_from ?? [];
+  const entries = Object.entries(step.arguments ?? {});
+  return (
+    <>
+      <Field label={t("flow_param_function")}>
+        {functionPurposeLabel(step.purpose, t)}
+        <span className="text-ax-text-secondary">
+          {" · "}
+          <span className="font-mono text-xs">{step.tool}</span>
+        </span>
+      </Field>
+      <Field label={t("flow_param_arguments")}>
+        {entries.length === 0 ? (
+          t("flow_param_none")
+        ) : (
+          <dl className="m-0 flex flex-col gap-1">
+            {entries.map(([name, value]) => (
+              <div key={name} className="flex flex-wrap items-baseline gap-x-2">
+                <dt className="font-mono text-xs">{name}</dt>
+                <dd className="m-0 min-w-0">
+                  {typeof value === "string" ? (
+                    <TemplateText template={value} definition={definition} />
+                  ) : (
+                    <span className="font-mono text-xs">{JSON.stringify(value)}</span>
+                  )}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </Field>
+      {files.length > 0 && (
+        <Field label={t("flow_param_files")}>
+          <ChipList>
+            {files.map((key) => (
+              <Chip key={key} tone="accent">
+                {t("flow_ref_input")} · {formLabel(definition, key)}
+              </Chip>
+            ))}
+          </ChipList>
+        </Field>
+      )}
+    </>
+  );
+}
+
 function ReviewFields({ step, definition }: { step: ReviewStep; definition: FlowDefinition }) {
   const t = useTranslations();
   const steps = stepsOf(definition);
@@ -317,6 +367,7 @@ export function FlowStepDetails({
         {step.kind === "document" && (
           <DocumentFields step={step} definition={definition} names={names} />
         )}
+        {step.kind === "function" && <FunctionFields step={step} definition={definition} />}
         {step.kind === "review" && <ReviewFields step={step} definition={definition} />}
         {step.kind === "transcribe" && (
           <TranscribeFields step={step} definition={definition} names={names} />
@@ -354,6 +405,8 @@ export function stepSummary(
         : null;
       return template ? `${format} · ${template}` : format;
     }
+    case "function":
+      return `${functionPurposeLabel(step.purpose, t)} · ${step.tool}`;
     case "review":
       return step.mode === "view"
         ? t("flow_step_summary_review_view")

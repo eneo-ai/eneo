@@ -2,8 +2,16 @@
 
 Read access follows ``can_read_flows`` on the flow's space; starting a run
 and reviewing need read; cancelling needs read plus ownership of the run or
-edit rights. Execution itself lives in :class:`FlowRunExecutor`; this
-service only queues the durable job and exposes state.
+edit rights. A run's files (inputs it was given, documents it produced) are
+readable by every reader of the flow through signed links minted here.
+Execution itself lives in :class:`FlowRunExecutor`; this service only
+queues the durable job and exposes state.
+
+A service API key is an automation principal: it owns no ``users`` row, so
+a run it starts is recorded as ``principal_type='service'`` with the key's
+id, while the job and every file the run produces belong to the flow's
+author (the person who built it). A service principal sees only the runs
+it started and runs published versions only.
 """
 
 from __future__ import annotations
@@ -16,6 +24,7 @@ import jsonschema
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.auth_models import is_service_api_key
 from eneo.flows.definition import (
     FILE_FIELD_TYPES,
     FlowDefinition,
@@ -26,13 +35,16 @@ from eneo.flows.definition import (
 )
 from eneo.flows.flow_assembler import (
     checkpoint_public,
-    definition_from_json,
+    definition_to_json,
+    run_definition,
+    run_file_public,
     run_public,
     run_state_public,
     run_summary_public,
     step_public,
 )
 from eneo.flows.flow_models import (
+    FlowArtifactPublic,
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
     FlowRunReviewCheckpointResumeResponse,
@@ -46,6 +58,7 @@ from eneo.flows.flow_models import (
 from eneo.flows.flow_repo import RunFileEntry
 from eneo.flows.flow_run_executor import REVIEW_REJECTED
 from eneo.jobs.job_models import Task
+from eneo.jobs.job_service import JobService
 from eneo.jobs.task_models import FlowRunParams
 from eneo.main.exceptions import (
     BadRequestException,
@@ -55,13 +68,18 @@ from eneo.main.exceptions import (
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
-    from eneo.database.tables.flow_tables import FlowRunReviewCheckpoints, FlowRuns
+    from eneo.database.tables.flow_tables import (
+        FlowRunReviewCheckpoints,
+        FlowRuns,
+        Flows,
+    )
+    from eneo.files.file_models import FileMetadata
     from eneo.files.file_service import FileService
     from eneo.flows.flow_repo import FlowRepository
     from eneo.flows.flow_run_executor import FlowRunExecutor
     from eneo.flows.flow_service import FlowService
-    from eneo.jobs.job_service import JobService
     from eneo.users.user import UserInDB
+    from eneo.users.user_repo import UsersRepository
 
 ACTIVE_RUN_STATUSES = (
     FlowRunStatus.QUEUED,
@@ -72,6 +90,8 @@ OPEN_CHECKPOINT_STATES = (
     ReviewCheckpointState.AWAITING_REVIEW,
     ReviewCheckpointState.EDITED,
 )
+RUNTIME_UPLOAD_ROLE = "runtime_upload"
+RUN_FILE_ROLES = {"input": "Input file", "output": "Artifact"}
 
 
 class FlowRunService:
@@ -84,6 +104,7 @@ class FlowRunService:
         file_service: FileService,
         audit_service: AuditService,
         executor: FlowRunExecutor,
+        user_repo: UsersRepository,
     ):
         self.user = user
         self.repo = repo
@@ -92,6 +113,45 @@ class FlowRunService:
         self.file_service = file_service
         self.audit_service = audit_service
         self.executor = executor
+        self.user_repo = user_repo
+
+    # --- Principals ---
+
+    @property
+    def service_key_id(self) -> Optional[UUID]:
+        """The key id when the caller is a service API key, else None."""
+        if is_service_api_key(self.user) and self.user.active_api_key is not None:
+            return self.user.active_api_key.id
+        return None
+
+    @property
+    def _principal_type(self) -> PrincipalType:
+        return (
+            PrincipalType.SERVICE
+            if self.service_key_id is not None
+            else PrincipalType.USER
+        )
+
+    @property
+    def _principal_user_id(self) -> Optional[UUID]:
+        return None if self.service_key_id is not None else self.user.id
+
+    async def _job_owner(self, flow: Flows) -> UserInDB:
+        """Who the run's job (and its files) belong to: the caller, or for a
+        service principal the flow's author."""
+        if self.service_key_id is None:
+            return self.user
+        author = (
+            await self.user_repo.get_user_by_id(id=flow.user_id)
+            if flow.user_id is not None
+            else None
+        )
+        if author is None or author.tenant_id != self.user.tenant_id:
+            raise BadRequestException(
+                "The flow has no author to run as; a person in the space has to "
+                "save it before an API key can run it."
+            )
+        return author
 
     # --- Lookups and authorization ---
 
@@ -100,8 +160,12 @@ class FlowRunService:
     ) -> FlowRuns:
         run = await self.repo.get_run(run_id, self.user.tenant_id)
         # A run is only addressable through its own flow: a valid run id
-        # under another flow of the same tenant must not resolve.
+        # under another flow of the same tenant must not resolve, and a
+        # service principal reaches only the runs it started.
         if run is None or (flow_id is not None and run.flow_id != flow_id):
+            raise NotFoundException("Flow run not found")
+        service_id = self.service_key_id
+        if service_id is not None and run.principal_service_id != service_id:
             raise NotFoundException("Flow run not found")
         flow = await self.repo.get_flow(
             run.flow_id, self.user.tenant_id, include_deleted=True
@@ -112,10 +176,7 @@ class FlowRunService:
         return run
 
     async def _definition_for(self, run: FlowRuns) -> FlowDefinition:
-        version = await self.repo.get_version(run.flow_id, run.flow_version)
-        if version is None:
-            raise NotFoundException("Published flow version not found")
-        return definition_from_json(version.definition)
+        return await run_definition(self.repo, run)
 
     def _owns(self, run: FlowRuns) -> bool:
         return run.principal_user_id == self.user.id
@@ -150,8 +211,22 @@ class FlowRunService:
 
     # --- Run creation ---
 
+    async def _usable_file_ids(self, flow_id: UUID, ids: list[UUID]) -> set[UUID]:
+        """Files a run may be given: the caller's own, or runtime uploads of
+        the flow (an API consumer's uploads, whoever starts the run)."""
+        usable: set[UUID] = set()
+        for info in await self.file_service.get_file_infos(ids):
+            if info.user_id == self.user.id:
+                usable.add(info.id)
+            elif await self.repo.get_flow_file(
+                flow_id, info.id, role=RUNTIME_UPLOAD_ROLE
+            ):
+                usable.add(info.id)
+        return usable
+
     async def _validate_run_input(
         self,
+        flow_id: UUID,
         definition: FlowDefinition,
         *,
         values: dict[str, Any],
@@ -200,8 +275,8 @@ class FlowRunService:
                 problems.append(f"form field '{key}' takes a value, not files")
                 continue
             if ids:
-                infos = await self.file_service.get_file_infos(list(set(ids)))
-                if len(infos) != len(set(ids)):
+                usable = await self._usable_file_ids(flow_id, list(set(ids)))
+                if usable != set(ids):
                     problems.append(f"form field '{key}' references unknown files")
         for field in definition.form_fields:
             if not field.required:
@@ -219,13 +294,17 @@ class FlowRunService:
             )
         return normalized
 
-    async def _queue(self, run: FlowRuns, flow_name: str, *, name: str) -> None:
-        job = await self.job_service.queue_durable_job(
+    async def _queue(self, run: FlowRuns, flow: Flows, *, name: str) -> None:
+        owner = await self._job_owner(flow)
+        job_service = (
+            self.job_service
+            if owner.id == self.user.id
+            else JobService(user=owner, job_repo=self.job_service.job_repo)
+        )
+        job = await job_service.queue_durable_job(
             Task.RUN_FLOW,
-            name=f"{name}: {flow_name}",
-            task_params=FlowRunParams(
-                id=run.id, flow_id=run.flow_id, user_id=self.user.id
-            ),
+            name=f"{name}: {flow.name}",
+            task_params=FlowRunParams(id=run.id, flow_id=run.flow_id, user_id=owner.id),
         )
         await self.repo.set_run_job(run.id, job.id)
 
@@ -238,14 +317,32 @@ class FlowRunService:
         run_label: str | None = None,
         expected_flow_version: int | None = None,
         idempotency_key: str | None = None,
+        draft: bool = False,
         channel: str = "api",
     ) -> FlowRunPublic:
-        version, definition = await self.flow_service.get_published_definition(flow_id)
-        if expected_flow_version is not None and expected_flow_version != version:
-            raise BadRequestException(
-                "Flow was republished since the run contract was read. "
-                f"Expected version {expected_flow_version}, active version {version}."
+        """Start a run of the published version, or with ``draft`` a test run
+        of the draft as it is now (editors only; nothing is published)."""
+        version: int | None
+        service_id = self.service_key_id
+        if draft and service_id is not None:
+            raise UnauthorizedException("Service API keys run published versions only.")
+        if draft:
+            if expected_flow_version is not None:
+                raise BadRequestException(
+                    "A test run executes the draft; expected_flow_version does not apply."
+                )
+            version = None
+            definition = await self.flow_service.get_runnable_draft(flow_id)
+        else:
+            version, definition = await self.flow_service.get_published_definition(
+                flow_id
             )
+            if expected_flow_version is not None and expected_flow_version != version:
+                raise BadRequestException(
+                    "Flow was republished since the run contract was read. "
+                    f"Expected version {expected_flow_version}, active version "
+                    f"{version}."
+                )
         if idempotency_key:
             existing = await self.repo.get_run_by_idempotency_key(
                 flow_id, idempotency_key
@@ -255,14 +352,21 @@ class FlowRunService:
         flow = await self.repo.get_flow(flow_id, self.user.tenant_id)
         assert flow is not None
         normalized = await self._validate_run_input(
-            definition, values=values, files=files
+            flow_id, definition, values=values, files=files
         )
         run = await self.repo.add_run(
             flow_id=flow_id,
             flow_version=version,
+            definition=definition_to_json(definition),
+            is_test=draft,
             tenant_id=self.user.tenant_id,
-            principal_type=PrincipalType.USER.value,
-            principal_user_id=self.user.id,
+            principal_type=(
+                PrincipalType.SERVICE.value
+                if service_id is not None
+                else PrincipalType.USER.value
+            ),
+            principal_user_id=None if service_id is not None else self.user.id,
+            principal_service_id=service_id,
             created_by_api_key_id=(
                 self.user.active_api_key.id if self.user.active_api_key else None
             ),
@@ -285,13 +389,13 @@ class FlowRunService:
         ]
         if entries:
             await self.repo.add_run_files(run.id, entries)
-        await self._queue(run, flow.name, name="Run flow")
+        await self._queue(run, flow, name="Test flow" if draft else "Run flow")
         await self._audit_run(
             ActionType.FLOW_RUN_CREATED,
             run,
-            "Started flow run",
+            "Started flow test run" if draft else "Started flow run",
             channel=channel,
-            extra={"run_label": run_label},
+            extra={"run_label": run_label, "is_test": draft},
         )
         refreshed = await self.repo.get_run(run.id, self.user.tenant_id)
         assert refreshed is not None
@@ -330,14 +434,24 @@ class FlowRunService:
         ]
 
     async def list_runs(
-        self, flow_id: UUID, *, limit: int = 20, offset: int = 0
+        self,
+        flow_id: UUID,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        statuses: Optional[tuple[FlowRunStatus, ...]] = None,
     ) -> tuple[list[FlowRunSummaryPublic], int]:
         flow = await self.repo.get_flow(flow_id, self.user.tenant_id)
         if flow is None:
             raise NotFoundException("Flow not found")
         await self.flow_service.authorize_space(flow.space_id, "read")
         runs, total = await self.repo.list_runs(
-            flow_id, self.user.tenant_id, limit=limit, offset=offset
+            flow_id,
+            self.user.tenant_id,
+            limit=limit,
+            offset=offset,
+            principal_service_id=self.service_key_id,
+            statuses=statuses,
         )
         return [run_summary_public(run) for run in runs], total
 
@@ -347,6 +461,70 @@ class FlowRunService:
         files = await self.repo.list_run_files(run.id)
         checkpoint = await self.repo.get_active_checkpoint(run.id)
         return run_state_public(run, definition, files, checkpoint)
+
+    # --- Run files ---
+
+    async def list_artifacts(
+        self, flow_id: UUID, *, limit: int = 50
+    ) -> list[FlowArtifactPublic]:
+        """Every file the flow's runs produced, newest first, so a result can
+        be found again without opening the run that made it."""
+        flow = await self.repo.get_flow(flow_id, self.user.tenant_id)
+        if flow is None:
+            raise NotFoundException("Flow not found")
+        await self.flow_service.authorize_space(flow.space_id, "read")
+        rows = await self.repo.list_flow_artifacts(
+            flow.id,
+            self.user.tenant_id,
+            limit=limit,
+            principal_service_id=self.service_key_id,
+        )
+        return [
+            FlowArtifactPublic(
+                file=run_file_public(row.file),
+                run_id=row.run_id,
+                run_label=row.run_label,
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+
+    async def run_file_for_download(
+        self, run_id: UUID, file_id: UUID, *, role: str, flow_id: UUID | None = None
+    ) -> FileMetadata:
+        """The file behind a run's input or output, for a signed download link.
+
+        Reading the flow is what authorizes the file (its uploader or the
+        run's principal need not be the caller); the link itself is minted by
+        the caller with the metadata returned here.
+        """
+        run = await self._require_run(run_id, flow_id=flow_id)
+        row = await self.repo.get_run_file(run.id, file_id, role=role)
+        if row is None:
+            raise NotFoundException(
+                f"{RUN_FILE_ROLES.get(role, 'File')} not found for this run."
+            )
+        metadata = await self.file_service.ensure_original_available(
+            file_id, require_owner=False
+        )
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED,
+            entity_type=EntityType.FILE,
+            entity_id=file_id,
+            description=f"Created a download link for flow run file '{metadata.name}'",
+            metadata=AuditMetadata.standard(
+                actor=self.user,
+                target=metadata,
+                extra={
+                    "flow_id": str(run.flow_id),
+                    "run_id": str(run.id),
+                    "role": role,
+                },
+            ),
+        )
+        return metadata
 
     # --- Execution (worker side, also used inline by tests) ---
 
@@ -388,8 +566,9 @@ class FlowRunService:
                     ReviewCheckpointState.EDITED,
                     ReviewCheckpointState.APPROVED,
                 ),
-                decided_by_principal_type=PrincipalType.USER.value,
-                decided_by_user_id=self.user.id,
+                decided_by_principal_type=self._principal_type.value,
+                decided_by_user_id=self._principal_user_id,
+                decided_by_service_id=self.service_key_id,
             )
         await self.repo.cancel_pending_step_results(run.id)
         await self._audit_run(
@@ -511,7 +690,7 @@ class FlowRunService:
             run.flow_id, self.user.tenant_id, include_deleted=True
         )
         assert flow is not None
-        await self._queue(run, flow.name, name="Resume flow run")
+        await self._queue(run, flow, name="Resume flow run")
         refreshed_run = await self.repo.get_run(run.id, self.user.tenant_id)
         refreshed_checkpoint = await self._require_checkpoint(run, checkpoint.id)
         assert refreshed_run is not None
@@ -541,8 +720,9 @@ class FlowRunService:
             state=ReviewCheckpointState.APPROVED,
             from_states=OPEN_CHECKPOINT_STATES,
             expected_revision=expected_revision,
-            decided_by_principal_type=PrincipalType.USER.value,
-            decided_by_user_id=self.user.id,
+            decided_by_principal_type=self._principal_type.value,
+            decided_by_user_id=self._principal_user_id,
+            decided_by_service_id=self.service_key_id,
         )
         if not moved:
             raise BadRequestException("Review checkpoint was already decided.")
@@ -597,8 +777,9 @@ class FlowRunService:
             state=ReviewCheckpointState.REJECTED,
             from_states=OPEN_CHECKPOINT_STATES,
             expected_revision=expected_revision,
-            decided_by_principal_type=PrincipalType.USER.value,
-            decided_by_user_id=self.user.id,
+            decided_by_principal_type=self._principal_type.value,
+            decided_by_user_id=self._principal_user_id,
+            decided_by_service_id=self.service_key_id,
             reason=reason,
         )
         if not moved:

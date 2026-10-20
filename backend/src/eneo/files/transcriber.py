@@ -14,6 +14,7 @@ from eneo.model_providers.infrastructure.litellm_provider import (
     load_active_litellm_provider,
 )
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    AdapterTranscription,
     LiteLLMTranscriptionAdapter,
 )
 
@@ -172,3 +173,28 @@ class Transcriber:
     ) -> str:
         async with audio.to_wav(str(filepath)) as wav_file:
             return await adapter.get_text_from_file(wav_file)
+
+    async def transcribe_prepared_bytes(
+        self,
+        data: bytes,
+        *,
+        adapter: LiteLLMTranscriptionAdapter,
+        language: str | None = None,
+    ) -> AdapterTranscription:
+        """Transcribe audio bytes with a prepared adapter into text and segments.
+
+        Needs no session: the adapter was built inside one. Nothing is
+        stored; the caller keeps what it needs (a flow step keeps the
+        segments with its result).
+        """
+        temp_file_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
+                temp_file_path = Path(temp_file.name)
+                temp_file.write(data)
+            async with audio.to_wav(str(temp_file_path)) as wav_file:
+                return await adapter.transcribe_file(wav_file, language=language)
+        finally:
+            if temp_file_path is not None:
+                with contextlib.suppress(FileNotFoundError):
+                    temp_file_path.unlink()

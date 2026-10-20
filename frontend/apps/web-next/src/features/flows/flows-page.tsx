@@ -182,9 +182,9 @@ export function FlowsPage() {
             href={`${base}/${flow.id}?tab=runs`}
           />
           <Button
-            label={t("run")}
+            label={flow.published_version != null ? t("run") : t("flow_run_test")}
             size="sm"
-            isDisabled={flow.published_version == null}
+            isDisabled={flow.step_count === 0}
             onClick={() => setRunTarget(flow.id)}
           />
           {can("delete", "flow") && (

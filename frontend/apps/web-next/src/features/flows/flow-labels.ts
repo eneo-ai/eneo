@@ -7,9 +7,25 @@ const KIND_KEYS: Record<StepKind, string> = {
   llm: "flow_step_kind_llm",
   compose: "flow_step_kind_compose",
   document: "flow_step_kind_document",
+  function: "flow_step_kind_function",
   review: "flow_step_kind_review",
   transcribe: "flow_step_kind_transcribe"
 };
+
+const PURPOSE_KEYS: Record<string, string> = {
+  web_search: "web_search",
+  image_generation: "image_generation",
+  file_analysis: "file_analysis",
+  file_creation: "file_creation",
+  charts: "charts",
+  compute: "compute"
+};
+
+/** The human name of a function (the capability's own label); unknown ones show as they are. */
+export function functionPurposeLabel(purpose: string, t: Translate): string {
+  const key = PURPOSE_KEYS[purpose];
+  return key ? t(key) : purpose;
+}
 
 /** The human name of a step kind ("Modell", "Granskning"); an unknown kind shows as it is. */
 export function stepKindLabel(kind: string, t: Translate): string {
@@ -61,6 +77,15 @@ const STEP_STATUS_KEYS: Record<StepResultStatus, string> = {
 export function stepStatusLabel(status: string, t: Translate): string {
   const key = STEP_STATUS_KEYS[status as StepResultStatus];
   return key ? t(key) : status;
+}
+
+/** "version 3", or "utkast (testkörning)" for a test run of the draft. */
+export function runVersionLabel(
+  run: { flow_version?: number | null; is_test?: boolean },
+  t: Translate
+): string {
+  if (run.is_test || run.flow_version == null) return t("flow_run_version_draft");
+  return t("flow_run_version", { version: run.flow_version });
 }
 
 /** A short identifier for a run: its label, else the first characters of its id. */

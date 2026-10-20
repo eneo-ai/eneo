@@ -251,3 +251,74 @@ async def test_cancel_stops_an_active_run_and_closes_its_checkpoint(
         # Nothing left to execute: the worker returns without touching it.
         await run_service.execute_run(run.id)
         assert (await run_service.get_run(run.id)).status == FlowRunStatus.CANCELLED
+
+
+async def test_reconciler_terminalizes_a_run_whose_worker_went_silent(
+    db_container, member_space, completion_model_factory, publish_flow, provider
+):
+    """A run left running with an old heartbeat fails with outcome_unknown
+    attempts; a run with a fresh heartbeat is left alone."""
+    from eneo.flows.flow_run_worker import FLOW_RUN_STALE_AFTER, RUN_INTERRUPTED
+
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "reconcile-model")
+        space = await member_space(session, "Reconcile Space", [model.id])
+        flow = await publish_flow(container, space, _simple(model.id))
+        run_service = container.flow_run_service()
+        repo = container.flow_repo()
+
+        stale = await run_service.create_run(flow.id, values={"topic": "a"}, files={})
+        fresh = await run_service.create_run(flow.id, values={"topic": "b"}, files={})
+        for run in (stale, fresh):
+            step_id = run.steps[0].step_id
+            await repo.update_run_status(run.id, FlowRunStatus.RUNNING)
+            assert await repo.claim_step_result(run.id, step_id)
+            await repo.open_attempt(run.id, step_id)
+        long_ago = datetime.now(UTC) - FLOW_RUN_STALE_AFTER - timedelta(minutes=1)
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == stale.id)
+            .values(heartbeat_at=long_ago)
+        )
+
+        stale_before = datetime.now(UTC) - FLOW_RUN_STALE_AFTER
+        found = await repo.get_stale_running_runs(stale_before=stale_before)
+        assert [r.id for r in found] == [stale.id]
+        for run in found:
+            await repo.mark_started_attempts_outcome_unknown(run.id)
+            await repo.fail_running_step_results(
+                run.id, error_code=OUTCOME_UNKNOWN, error_message="worker lost"
+            )
+            await repo.update_run_status(
+                run.id,
+                FlowRunStatus.FAILED,
+                error={"code": RUN_INTERRUPTED, "message": "interrupted"},
+                expected_statuses=(FlowRunStatus.RUNNING,),
+            )
+
+        reconciled = await run_service.get_run(stale.id)
+        assert reconciled.status == FlowRunStatus.FAILED
+        assert reconciled.error.code == RUN_INTERRUPTED
+        assert reconciled.steps[0].status == StepResultStatus.FAILED
+        attempts = (
+            (
+                await session.execute(
+                    sa.select(FlowStepAttempts.status).where(
+                        FlowStepAttempts.flow_run_id == stale.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert attempts == [StepAttemptStatus.OUTCOME_UNKNOWN.value]
+        untouched = await run_service.get_run(fresh.id)
+        assert untouched.status == FlowRunStatus.RUNNING
+        # A terminal run is not resurrected by a late heartbeat.
+        assert await repo.touch_heartbeat(stale.id) is False
+        # The status filter finds what is still going.
+        active, _ = await run_service.list_runs(
+            flow.id, statuses=(FlowRunStatus.RUNNING, FlowRunStatus.QUEUED)
+        )
+        assert [r.id for r in active] == [fresh.id]

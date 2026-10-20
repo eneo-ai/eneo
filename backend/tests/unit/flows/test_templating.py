@@ -63,8 +63,8 @@ def test_render_substitutes_every_reference_kind():
 
 
 def test_render_serializes_json_containers_as_json():
-    rendered = render_template("{{steps.facts.json.tags}}", _context())
-    assert rendered == '[\n  "x",\n  "y"\n]'
+    rendered = render_template("{{steps.facts.json.items}}", _context())
+    assert rendered == '[\n  {\n    "title": "One"\n  }\n]'
 
 
 def test_render_leaves_plain_text_untouched():
@@ -85,3 +85,20 @@ def test_render_leaves_plain_text_untouched():
 def test_render_errors_name_the_problem(template, message):
     with pytest.raises(TemplateError, match=message):
         render_template(template, _context())
+
+
+def test_a_list_of_values_renders_as_bullet_lines():
+    context = TemplateContext(form={})
+    context.steps["klassa"] = StepOutput(
+        text="{}",
+        value={
+            "atgarder": ["Kontrollera ansökan", "Begär medgivande"],
+            "nested": [{"a": 1}],
+            "empty": [],
+        },
+    )
+    assert render_template("{{steps.klassa.json.atgarder}}", context) == (
+        "- Kontrollera ansökan\n- Begär medgivande"
+    )
+    assert render_template("{{steps.klassa.json.nested}}", context).startswith("[")
+    assert render_template("{{steps.klassa.json.empty}}", context) == "[]"

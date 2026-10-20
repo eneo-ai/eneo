@@ -15,11 +15,13 @@ export type LlmStep = Schema<"LlmStep">;
 export type ComposeStep = Schema<"ComposeStep">;
 export type DocumentFormat = Schema<"DocumentFormat">;
 export type DocumentStep = Schema<"DocumentStep">;
+export type FunctionStep = Schema<"FunctionStep">;
 export type ReviewMode = Schema<"ReviewMode">;
 export type ReviewStep = Schema<"ReviewStep">;
 export type SpeakerMapping = Schema<"SpeakerMapping">;
 export type TranscribeStep = Schema<"TranscribeStep">;
-export type FlowStep = LlmStep | ComposeStep | DocumentStep | ReviewStep | TranscribeStep;
+export type FlowStep =
+  LlmStep | ComposeStep | DocumentStep | FunctionStep | ReviewStep | TranscribeStep;
 export type FlowDefinition = Schema<"FlowDefinition">;
 
 export type FlowRunStatus = Schema<"FlowRunStatus">;
@@ -34,6 +36,7 @@ export type FlowRunContractPublic = Schema<"FlowRunContractPublic">;
 export type FlowRunCreateRequest = Schema<"FlowRunCreateRequest">;
 export type FlowRunErrorPublic = Schema<"FlowRunErrorPublic">;
 export type FlowRunFilePublic = Schema<"FlowRunFilePublic">;
+export type FlowArtifactPublic = Schema<"FlowArtifactPublic">;
 export type FlowRunSummaryPublic = Schema<"FlowRunSummaryPublic">;
 export type FlowRunStepPublic = Schema<"FlowRunStepPublic">;
 export type FlowRunReviewCheckpointPublic = Schema<"FlowRunReviewCheckpointPublic">;

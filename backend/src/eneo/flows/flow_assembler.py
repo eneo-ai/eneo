@@ -33,7 +33,8 @@ from eneo.flows.flow_models import (
     ReviewCheckpointState,
     StepResultStatus,
 )
-from eneo.flows.flow_repo import RunFileRow
+from eneo.flows.flow_repo import FlowRepository, RunFileRow
+from eneo.main.exceptions import NotFoundException
 
 PREVIEW_CHARS = 300
 
@@ -44,6 +45,19 @@ def definition_to_json(definition: FlowDefinition) -> dict[str, Any]:
 
 def definition_from_json(data: dict[str, Any]) -> FlowDefinition:
     return FlowDefinition.model_validate(data)
+
+
+async def run_definition(repo: FlowRepository, run: FlowRuns) -> FlowDefinition:
+    """The definition a run executes: its own snapshot, else (for runs that
+    predate snapshots) the published version it pinned."""
+    if run.definition is not None:
+        return definition_from_json(run.definition)
+    if run.flow_version is None:
+        raise NotFoundException("Flow run definition not found")
+    version = await repo.get_version(run.flow_id, run.flow_version)
+    if version is None:
+        raise NotFoundException("Published flow version not found")
+    return definition_from_json(version.definition)
 
 
 def flow_public(
@@ -208,6 +222,7 @@ def run_summary_public(run: FlowRuns) -> FlowRunSummaryPublic:
         id=run.id,
         flow_id=run.flow_id,
         flow_version=run.flow_version,
+        is_test=run.is_test,
         tenant_id=run.tenant_id,
         principal_type=PrincipalType(run.principal_type),
         status=FlowRunStatus(run.status),
@@ -371,6 +386,7 @@ def run_state_public(
         flow_id=run.flow_id,
         run_id=run.id,
         flow_version=run.flow_version,
+        is_test=run.is_test,
         status=FlowRunStatus(run.status),
         run_label=run.run_label,
         steps=steps,

@@ -97,6 +97,8 @@ class ErrorCodes(int, Enum):
     PROMPT_IN_USE_BY_GOVERNANCE = 9069
     # A flow is already bound to another chat.
     FLOW_CONVERSATION_CONFLICT = 9070
+    # A flow runtime upload a run already uses cannot be deleted.
+    FLOW_RUNTIME_FILE_IN_USE = 9071
 
 
 class NotFoundException(Exception):
@@ -401,6 +403,10 @@ class FlowConversationConflictException(Exception):
     """The flow is bound to a different chat already (a flow has one chat)."""
 
 
+class FlowRuntimeFileInUseException(Exception):
+    """A runtime upload a run already took as input stays with that run."""
+
+
 class SkillRevisionConflictException(Exception):
     pass
 
@@ -556,6 +562,11 @@ EXCEPTION_MAP = {
         409,
         None,
         ErrorCodes.FLOW_CONVERSATION_CONFLICT,
+    ),
+    FlowRuntimeFileInUseException: (
+        409,
+        None,
+        ErrorCodes.FLOW_RUNTIME_FILE_IN_USE,
     ),
     ProvisioningNotAllowed: (403, None, ErrorCodes.PROVISIONING_NOT_ENABLED),
     UserInactiveException: (403, None, ErrorCodes.USER_INACTIVE),

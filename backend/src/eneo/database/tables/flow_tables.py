@@ -154,7 +154,12 @@ class FlowFiles(BasePublic):
 
 
 class FlowRuns(BasePublic):
-    flow_version: Mapped[int] = mapped_column()
+    # The published version the run executes; NULL for a test run of the draft.
+    flow_version: Mapped[Optional[int]] = mapped_column()
+    # The definition the run executes, frozen when it was started.
+    definition: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
+    # A test run of the draft: started by an editor without publishing.
+    is_test: Mapped[bool] = mapped_column(server_default=sa_text("false"))
     # 'user' | 'service'. A service principal is an API key with no users row.
     principal_type: Mapped[str] = mapped_column(server_default=sa_text("'user'"))
     principal_user_id: Mapped[Optional[UUID]] = mapped_column(

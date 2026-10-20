@@ -14,6 +14,7 @@ import pytest
 
 from eneo.flows.definition import (
     ComposeStep,
+    DocumentStep,
     FlowDefinition,
     FormField,
     LlmStep,
@@ -31,6 +32,7 @@ from eneo.flows.flow_run_executor import OUTCOME_UNKNOWN, FlowRunExecutor
 from eneo.flows.step_runners import (
     STEP_TIMEOUT,
     FlowStepError,
+    GeneratedDocument,
     PreparedStep,
     StepOutcome,
 )
@@ -63,6 +65,8 @@ class FakeRepo:
             id=uuid4(),
             flow_id=uuid4(),
             flow_version=1,
+            definition=None,
+            is_test=False,
             tenant_id=TENANT,
             principal_user_id=USER,
             status=FlowRunStatus.QUEUED.value,
@@ -206,16 +210,30 @@ class FakeRepo:
 
 
 class FakeRunners:
-    def __init__(self, *, fail_with: Optional[Exception] = None, delay: float = 0):
+    def __init__(
+        self,
+        *,
+        fail_with: Optional[Exception] = None,
+        delay: float = 0,
+        store_fails: bool = False,
+    ):
         self.calls: list[str] = []
         self.fail_with = fail_with
         self.delay = delay
+        self.store_fails = store_fails
+        self.stored: list[GeneratedDocument] = []
 
     async def prepare(self, step, ctx, context):
         if isinstance(step, ComposeStep):
             return PreparedStep(
                 input_payload={"template": step.template},
                 output_payload={"text": render_template(step.template, context)},
+            )
+        if isinstance(step, DocumentStep):
+            return PreparedStep(
+                input_payload={"tool": "create_document"},
+                text_input=render_template(step.content or "", context),
+                io_needs_session=False,
             )
         assert isinstance(step, LlmStep)
         return PreparedStep(
@@ -232,10 +250,27 @@ class FakeRunners:
         if self.fail_with is not None:
             raise self.fail_with
         self.calls.append(prepared.text_input)
+        if isinstance(step, DocumentStep):
+            return StepOutcome(
+                output_payload={"text": "Rapport.docx", "value": None},
+                documents=[
+                    GeneratedDocument(
+                        data=prepared.text_input.encode(),
+                        filename="Rapport.docx",
+                        mime_type="application/docx",
+                    )
+                ],
+            )
         return StepOutcome(
             output_payload={"text": f"LLM[{prepared.prompt}|{prepared.text_input}]"},
             num_tokens_input=7,
         )
+
+    async def store_documents(self, documents):
+        if self.store_fails:
+            raise ValueError("file store refused the document")
+        self.stored.extend(documents)
+        return [uuid4() for _ in documents]
 
 
 def _definition(*steps) -> FlowDefinition:
@@ -453,3 +488,39 @@ async def test_review_of_a_json_step_opens_a_json_checkpoint(output):
     await _executor(repo, FakeRunners()).execute_run(repo.run.id, TENANT)
     assert repo.checkpoints[0].output_type == "json"
     assert repo.checkpoints[0].review_mode == "view"
+
+
+async def test_document_step_stores_its_file_before_the_step_is_recorded():
+    repo = FakeRepo(
+        _definition(
+            LlmStep(key="draft", name="Draft", prompt="draft", input="{{form.topic}}"),
+            DocumentStep(key="doc", name="Report", content="# {{previous}}"),
+        )
+    )
+    runners = FakeRunners()
+    await _executor(repo, runners).execute_run(repo.run.id, TENANT)
+
+    assert repo.run.status == FlowRunStatus.COMPLETED.value
+    assert [d.data for d in runners.stored] == [b"# LLM[draft|harbours]"]
+    doc_step = repo.definition.steps[1]
+    assert len(repo.run_files) == 1
+    entry = repo.run_files[0]
+    assert (entry.role, entry.step_id, entry.ordinal) == ("output", doc_step.id, 0)
+    recorded = repo.results[doc_step.id].output_payload_json
+    assert recorded["text"] == "Rapport.docx"
+    assert recorded["file_ids"] == [str(entry.file_id)]
+    assert repo.run.output_payload_json["file_ids"] == [str(entry.file_id)]
+
+
+async def test_a_document_the_file_store_refuses_fails_the_run():
+    repo = FakeRepo(
+        _definition(DocumentStep(key="doc", name="Report", content="{{form.topic}}"))
+    )
+    runners = FakeRunners(store_fails=True)
+    await _executor(repo, runners).execute_run(repo.run.id, TENANT)
+
+    assert repo.run.status == FlowRunStatus.FAILED.value
+    assert repo.run.error_json["code"] == "flow_step_failed"
+    assert "file store refused" in repo.run.error_json["message"]
+    assert repo.run_files == []
+    assert [a.status for a in repo.attempts] == ["failed"]

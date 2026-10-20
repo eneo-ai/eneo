@@ -4,10 +4,10 @@ import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { FILE_TOKEN_CLASS, FileTokenBody } from "@/features/chat/message-parts";
 import { useSidePanel } from "@/features/chat/side-panel/use-side-panel";
-import { signedOriginalUrl } from "@/features/files/signed-original-url";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
+import { signedRunFileUrl } from "./run-file-url";
 import type { FlowRunFilePublic } from "./types";
 
 /** A run's file as the preview panel wants it; the backend may leave type and size out. */
@@ -18,9 +18,19 @@ export function previewFileOf(file: FlowRunFilePublic) {
 /**
  * Files a run took in or put out, as chips. A file the panel can show opens
  * there (over the flow panel, which comes back when it closes); any other
- * file downloads.
+ * file downloads, through the run so every reader of the flow may.
  */
-export function FlowRunFiles({ files, label }: { files: FlowRunFilePublic[]; label: string }) {
+export function FlowRunFiles({
+  flowId,
+  runId,
+  files,
+  label
+}: {
+  flowId: string;
+  runId: string;
+  files: FlowRunFilePublic[];
+  label: string;
+}) {
   const t = useTranslations();
   const panel = useSidePanel();
   const [downloading, setDownloading] = useState<string | null>(null);
@@ -29,7 +39,7 @@ export function FlowRunFiles({ files, label }: { files: FlowRunFilePublic[]; lab
   async function download(file: FlowRunFilePublic) {
     setDownloading(file.id);
     try {
-      const url = await signedOriginalUrl(browserApi, file.id);
+      const url = await signedRunFileUrl(browserApi, flowId, runId, file);
       Object.assign(document.createElement("a"), { href: url, download: file.name }).click();
     } catch {
       toast.error(t("attachment_error_loading_content"));

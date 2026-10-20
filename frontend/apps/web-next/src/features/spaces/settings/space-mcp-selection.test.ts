@@ -17,6 +17,18 @@ describe("visibleSpaceMcpServers", () => {
       visibleSpaceMcpServers(servers, ["disabled-selected"]).map((server) => server.id)
     ).toEqual(["enabled", "disabled-selected"]);
   });
+
+  it("leaves a function's provider out: functions are enabled as capabilities", () => {
+    const withProviders = [
+      ...servers,
+      { id: "images", is_available: true, purpose: "image_generation" },
+      { id: "general", is_available: true, purpose: "general" }
+    ];
+    expect(visibleSpaceMcpServers(withProviders, []).map((server) => server.id)).toEqual([
+      "enabled",
+      "general"
+    ]);
+  });
 });
 
 describe("selectedVisibleMcpServerCount", () => {

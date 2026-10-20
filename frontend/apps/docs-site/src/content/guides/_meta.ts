@@ -9,6 +9,7 @@ const meta: MetaRecord = {
   "ai-providers": "AI Provider Configuration",
   "mcp-servers": "MCP Servers",
   capabilities: "Functions",
+  flows: "Flows",
   deployment: "Deploy Eneo",
   "file-icon-storage-upgrade": "Upgrade File & Icon Storage",
   "object-content-storage": "Choose Content Storage",
