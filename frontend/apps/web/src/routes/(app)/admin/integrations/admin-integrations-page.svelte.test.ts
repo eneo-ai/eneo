@@ -218,15 +218,3 @@ describe("admin integrations page: SharePoint credential health", () => {
     ).toBeNull();
   });
 });
-
-describe("admin integrations page: sources overview", () => {
-  it("is named by its row's heading, without a second heading", async () => {
-    show(null);
-
-    const overview = page.getByRole("region", { name: m.admin_sources_heading() });
-    await expect.element(overview).toBeVisible();
-    expect(page.getByRole("heading", { name: m.admin_sources_heading() }).elements()).toHaveLength(
-      1
-    );
-  });
-});

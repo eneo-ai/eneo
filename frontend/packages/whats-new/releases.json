@@ -143,24 +143,6 @@
           }
         },
         {
-          "id": "sharepoint-sources-overview",
-          "type": "new",
-          "area": "admin",
-          "audience": "admin",
-          "title": {
-            "en": "See every SharePoint source in the organization",
-            "sv": "Se alla SharePoint-källor i organisationen"
-          },
-          "body": {
-            "en": "Under Admin > Integrations, a list shows every source imported into shared spaces and the organization space, with its status, documents and why it needs attention, so you can see what has stopped updating without opening each space. Sources in personal spaces are only counted.",
-            "sv": "Under Administration > Integrationer visar en lista alla källor som importerats till delade ytor och organisationsytan, med status, antal dokument och varför en källa behöver åtgärd, så att du ser vad som slutat uppdateras utan att öppna varje yta. Källor i personliga ytor räknas bara."
-          },
-          "showMe": {
-            "href": "/admin/integrations",
-            "anchor": "admin-integration-sources"
-          }
-        },
-        {
           "id": "sharepoint-webhook-recovery",
           "type": "fixed",
           "area": "admin",

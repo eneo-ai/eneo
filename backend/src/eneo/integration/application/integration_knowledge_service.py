@@ -33,7 +33,7 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import get_logger
 from eneo.observability.error_text import user_visible_error
-from eneo.roles.permissions import Permission, validate_permission
+from eneo.roles.permissions import Permission
 from eneo.spaces.space_repo import INTEGRATION_KNOWLEDGE_SOURCE
 
 if TYPE_CHECKING:
@@ -51,7 +51,6 @@ if TYPE_CHECKING:
     from eneo.integration.domain.entities.user_integration import UserIntegration
     from eneo.integration.domain.repositories.integration_knowledge_repo import (
         IntegrationKnowledgeLocation,
-        IntegrationKnowledgePlacement,
         IntegrationKnowledgeRepository,
     )
     from eneo.integration.domain.repositories.oauth_token_repo import (
@@ -97,20 +96,6 @@ class BatchIntegrationKnowledgeCreateResult(TypedDict):
     integration_knowledge_id: UUID | None
     job: "JobInDb | None"
     error: str | None
-
-
-@dataclass(frozen=True)
-class PlacedIntegrationKnowledge:
-    placement: "IntegrationKnowledgePlacement"
-    knowledge: IntegrationKnowledge
-    can_open_space: bool
-
-
-@dataclass(frozen=True)
-class TenantIntegrationKnowledgeOverview:
-    items: list[PlacedIntegrationKnowledge]
-    personal_items: int
-    personal_failing: int
 
 
 @dataclass(frozen=True)
@@ -232,67 +217,6 @@ class IntegrationKnowledgeService:
             if actor.can_read_space() and actor.can_read_integrations():
                 return
         raise NotFoundException("Integration knowledge not found")
-
-    async def tenant_overview(self) -> TenantIntegrationKnowledgeOverview:
-        """Every item of the tenant's shared and organization spaces, for admins.
-
-        Personal spaces can hold a person's own OneDrive folders, so their items
-        are only counted.
-        """
-        validate_permission(self.user, Permission.ADMIN)
-        placements = await self.integration_knowledge_repo.list_placements(
-            self.user.tenant_id
-        )
-        personal = [placement for placement in placements if placement.personal]
-        listed = [placement for placement in placements if not placement.personal]
-        found = (
-            await self.integration_knowledge_repo.get_by_ids(
-                [placement.integration_knowledge_id for placement in listed]
-            )
-            if listed
-            else []
-        )
-        await self.integration_knowledge_repo.attach_document_counts(found)
-        knowledge = {item.id: item for item in found}
-        openable = await self._openable_spaces(listed)
-        return TenantIntegrationKnowledgeOverview(
-            # An item removed between the two reads is left out.
-            items=[
-                PlacedIntegrationKnowledge(
-                    placement=placement,
-                    knowledge=knowledge[placement.integration_knowledge_id],
-                    can_open_space=placement.space_id in openable,
-                )
-                for placement in listed
-                if placement.integration_knowledge_id in knowledge
-            ],
-            personal_items=len(personal),
-            personal_failing=sum(
-                1 for placement in personal if placement.last_sync_status == "error"
-            ),
-        )
-
-    async def _openable_spaces(
-        self, placements: "list[IntegrationKnowledgePlacement]"
-    ) -> set[UUID]:
-        """Spaces of ``placements`` the caller may open.
-
-        Being an admin grants no access to a shared space, so a shared space
-        opens only through membership, direct or through a group. Opening the
-        organization space makes every tenant admin its admin
-        (``SpaceService.ensure_org_admin_members``), so it always opens.
-        """
-        openable = {
-            placement.space_id for placement in placements if placement.organization
-        }
-        shared = {placement.space_id for placement in placements} - openable
-        access = await self.space_repo.get_spaces_access_facts(list(shared))
-        openable.update(
-            space_id
-            for space_id, facts in access.items()
-            if self.actor_manager.get_space_actor(facts).can_read_space()
-        )
-        return openable
 
     async def get_readable_knowledge(
         self, space_id: UUID, integration_knowledge_id: UUID
