@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from datetime import datetime
 from enum import Enum
-from typing import AsyncIterable, Optional, Union
+from typing import Optional, Union
 from uuid import UUID
 
 from pydantic import (
@@ -383,7 +384,7 @@ class AssistantResponse(BaseModel):
     # The files the answer's tools made; only known up front for a complete
     # (non-streaming) answer, since a stream delivers each file as it comes.
     generated_files: list[File] = Field(default_factory=_empty_file_list)
-    answer: str | AsyncIterable[Completion]
+    answer: str | AsyncGenerator[Completion, None]
     info_blobs: list[InfoBlobInDBWithScore]
     completion_model: CompletionModel | CompletionModelPublic
     tools: UseTools

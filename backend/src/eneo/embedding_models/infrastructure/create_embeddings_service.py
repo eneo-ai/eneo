@@ -230,5 +230,15 @@ class CreateEmbeddingsService:
             model: Either an EmbeddingModel ORM object or EmbeddingModelSpec DTO.
             query: Search query string to embed.
         """
+        from eneo.assistants.delegation import authorize_current_execution
+        from eneo.completion_models.domain.execution_budget import (
+            current_execution_budget,
+        )
+
+        budget = current_execution_budget()
+        if budget is not None:
+            budget.check_active()
+            await authorize_current_execution()
+            budget.reserve_model_request(len(query.encode("utf-8")))
         adapter = await self._get_adapter(model)
         return await adapter.get_embedding_for_query(query)

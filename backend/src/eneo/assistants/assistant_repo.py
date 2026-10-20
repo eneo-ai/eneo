@@ -1052,6 +1052,7 @@ class AssistantRepository:
                     )
 
     async def delete(self, assistant_id: UUID, space_id: UUID) -> None:
+        await self._require_unassigned_orchestrator(assistant_id)
         await self.session.execute(
             sa.delete(Assistants).where(
                 Assistants.id == assistant_id,
@@ -1062,6 +1063,7 @@ class AssistantRepository:
     async def move(
         self, assistant_id: UUID, source_space_id: UUID, target_space_id: UUID
     ) -> None:
+        await self._require_unassigned_orchestrator(assistant_id)
         # The service locks and reauthorizes the current owner before moving.
         # Move the FK, then remove seats in the source; never delete the assistant.
         await self.session.execute(
@@ -1082,3 +1084,14 @@ class AssistantRepository:
                 ),
             )
         )
+
+    async def _require_unassigned_orchestrator(self, assistant_id: UUID) -> None:
+        assigned = await self.session.scalar(
+            sa.select(GroupChatsTable.id)
+            .where(GroupChatsTable.orchestrator_assistant_id == assistant_id)
+            .limit(1)
+        )
+        if assigned is not None:
+            raise BadRequestException(
+                "Choose another group-chat orchestrator before moving or deleting this assistant."
+            )

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Optional, Union
 
 from eneo.ai_models.completion_models.completion_model import Completion, ResponseType
 from eneo.assistants.api.assistant_models import AssistantResponse
+from eneo.assistants.delegation import AssistantCandidate, AssistantDelegationPlan
 from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.group_chat.domain.entities.group_chat import (
     GroupChat,
@@ -16,7 +17,8 @@ from eneo.group_chat.domain.entities.group_chat import (
 )
 from eneo.group_chat.infrastructure.group_chat_repo import GroupChatRepository
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
-from eneo.main.models import NOT_PROVIDED, NotProvided
+from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 from eneo.questions.question import ToolAssistant, UseTools
 
 if TYPE_CHECKING:
@@ -136,6 +138,7 @@ class GroupChatService:
         insight_enabled: Optional[bool] = None,
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union["UUID", None, NotProvided] = NOT_PROVIDED,
+        orchestrator_assistant_id: Union["UUID", None, NotProvided] = NOT_PROVIDED,
     ) -> "GroupChat":
         space = await self.space_service.get_space_by_group_chat(group_chat_id=id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
@@ -171,6 +174,33 @@ class GroupChatService:
                 for assistant in current_assistants
             ]
 
+        selected_orchestrator = (
+            orchestrator_assistant_id
+            if is_provided(orchestrator_assistant_id)
+            else group_chat.orchestrator_assistant_id
+        )
+        if selected_orchestrator is not None:
+            orchestrator = space.get_assistant(selected_orchestrator)
+            if not actor.can_read_assistant(orchestrator):
+                raise UnauthorizedException("The orchestrator is unavailable.")
+            space.can_ask_assistant(orchestrator)
+            if (
+                orchestrator.completion_model is None
+                or not orchestrator.completion_model.supports_tool_calling
+            ):
+                raise BadRequestException(
+                    "The orchestrator needs a model with tool calling."
+                )
+            if selected_orchestrator in [
+                item.assistant.id
+                for item in (
+                    assistants if assistants is not None else group_chat.assistants
+                )
+            ]:
+                raise BadRequestException(
+                    "The orchestrator must be separate from the specialists."
+                )
+
         group_chat.update(
             name=name,
             allow_mentions=allow_mentions,
@@ -180,6 +210,7 @@ class GroupChatService:
             insight_enabled=insight_enabled,
             metadata_json=metadata_json,
             icon_id=icon_id,
+            orchestrator_assistant_id=orchestrator_assistant_id,
         )
 
         await self.group_chat_repo.update(
@@ -192,6 +223,7 @@ class GroupChatService:
             insight_enabled=insight_enabled,
             metadata_json=metadata_json,
             icon_id=icon_id,
+            orchestrator_assistant_id=orchestrator_assistant_id,
             members=(
                 {member.id: member.user_description for member in current_assistants}
                 if current_assistants is not None
@@ -454,6 +486,9 @@ class GroupChatService:
         stream: bool = False,
         version: int = 1,
         tool_assistant_id: Optional["UUID"] = None,
+        require_tool_approval: bool = False,
+        disabled_mcp_server_ids: list["UUID"] | None = None,
+        disabled_capabilities: list[CapabilityPurpose] | None = None,
     ) -> AssistantResponse:
         """Ask a question to the most appropriate assistant in a group chat
 
@@ -465,6 +500,40 @@ class GroupChatService:
         response_from_selector = None
         if not group_chat.assistants:
             raise BadRequestException("No assistants in the group chat")
+
+        if (
+            group_chat.orchestrator_assistant_id is not None
+            and tool_assistant_id is None
+        ):
+            return await self.assistant_service.ask(
+                question=question,
+                assistant_id=group_chat.orchestrator_assistant_id,
+                group_chat_id=group_chat.id,
+                session_id=session_id,
+                file_ids=file_ids,
+                stream=stream,
+                version=version,
+                require_tool_approval=require_tool_approval,
+                disabled_mcp_server_ids=disabled_mcp_server_ids,
+                disabled_capabilities=disabled_capabilities,
+                delegation_plan=AssistantDelegationPlan(
+                    group_chat_id=group_chat.id,
+                    space_id=group_chat.space_id,
+                    orchestrator_id=group_chat.orchestrator_assistant_id,
+                    candidates=tuple(
+                        AssistantCandidate(
+                            item.assistant.id,
+                            item.assistant.name,
+                            item.user_description or item.assistant.description or "",
+                        )
+                        for item in group_chat.assistants
+                    ),
+                ),
+            )
+        if require_tool_approval and group_chat.orchestrator_assistant_id is None:
+            raise BadRequestException(
+                "Tool approval requires an orchestrated group chat."
+            )
 
         # Existing conversations contribute history to assistant selection. A
         # new conversation is not persisted until its first question can be
@@ -564,6 +633,9 @@ class GroupChatService:
                 file_ids=file_ids or [],
                 stream=stream,
                 version=version,
+                require_tool_approval=require_tool_approval,
+                disabled_mcp_server_ids=disabled_mcp_server_ids,
+                disabled_capabilities=disabled_capabilities,
                 assistant_selector_tokens=selection_result.assistant_selector_tokens
                 if selection_result is not None
                 else 0,

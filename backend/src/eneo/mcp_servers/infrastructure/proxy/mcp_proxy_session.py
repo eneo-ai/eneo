@@ -17,9 +17,14 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
+from eneo.assistants.delegation import authorize_current_execution
 from eneo.authentication.signed_urls import (
     reference_file_ids,
     use_current_file_references,
+)
+from eneo.completion_models.domain.execution_budget import (
+    ExecutionLimitReached,
+    current_execution_budget,
 )
 from eneo.files.model_file_references import (
     FILE_HANDLE_INSTRUCTION,
@@ -548,6 +553,9 @@ class MCPProxySession:
         ]
         if not probe_servers:
             return
+        # Authorize once in the owning task before concurrent catalog reads;
+        # the request's database session cannot be shared by those probe tasks.
+        await authorize_current_execution()
 
         probe_tasks = [
             asyncio.create_task(self._discover_identity_scoped_tools(server))
@@ -621,6 +629,7 @@ class MCPProxySession:
         }
         if not target_ids:
             return False
+        await authorize_current_execution()
 
         servers_by_id = {s.id: s for s in self.mcp_servers}
         changed = False
@@ -1041,6 +1050,7 @@ class MCPProxySession:
         Raises:
             MCPClientError: If connection fails or called from a non-owner task
         """
+        await authorize_current_execution()
         server_id = server.id
 
         self._capture_owner_task()
@@ -1356,6 +1366,12 @@ class MCPProxySession:
             self._mark_server_failed(server.id)
             return self._unavailable_result(tool_name, arguments)
 
+        budget = current_execution_budget()
+        if budget is not None:
+            budget.check_active()
+            await authorize_current_execution()
+            budget.reserve_tool_call()
+
         try:
             # Execute tool with timing
             start_time = time.perf_counter()
@@ -1423,6 +1439,14 @@ class MCPProxySession:
         if not tool_calls:
             return []
 
+        budget = current_execution_budget()
+        if budget is not None:
+            budget.check_active()
+            if budget.tool_calls + len(tool_calls) > budget.limits.tool_calls:
+                raise ExecutionLimitReached("tool_calls")
+
+        await authorize_current_execution()
+
         # Log all tools being called
         tool_names = [name for name, _ in tool_calls]
         logger.debug(f"[MCPProxy] Executing {len(tool_calls)} tool(s): {tool_names}")
@@ -1460,6 +1484,8 @@ class MCPProxySession:
         ) -> dict[str, Any]:
             try:
                 return await self.call_tool(tool_name, arguments)
+            except ExecutionLimitReached:
+                raise
             except Exception:
                 logger.error(f"[MCPProxy] Tool {tool_name} failed")
                 return {
@@ -1467,9 +1493,15 @@ class MCPProxySession:
                     "is_error": True,
                 }
 
-        results = await asyncio.gather(
-            *[execute_single(name, args) for name, args in tool_calls]
-        )
+        if budget is not None:
+            # The first orchestration delivery has one active tool at a time.
+            # Keep MCP connection scopes in their owning task and spend the
+            # shared allowance before each dispatch, including nested rounds.
+            results = [await execute_single(name, args) for name, args in tool_calls]
+        else:
+            results = await asyncio.gather(
+                *[execute_single(name, args) for name, args in tool_calls]
+            )
 
         total_elapsed_ms = (time.perf_counter() - total_start) * 1000
         error_count = sum(1 for r in results if r.get("is_error"))

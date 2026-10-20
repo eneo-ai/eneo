@@ -115,9 +115,6 @@ class ConversationService:
         if not file_ids:
             file_ids = []
 
-        if require_tool_approval and group_chat_id is not None:
-            raise BadRequestException("Tool approval is not supported for group chats.")
-
         # case 1: continuing a conversation (session_id is provided)
         if session_id:
             # get session information to determine where it belongs
@@ -125,14 +122,13 @@ class ConversationService:
             assert session is not None
 
             if session.group_chat_id:
-                if require_tool_approval:
-                    raise BadRequestException(
-                        "Tool approval is not supported for group chats."
-                    )
                 # this is a group chat conversation
                 return await self.group_chat_service.ask_group_chat(  # type: ignore[return-value]
                     question=question,
                     group_chat_id=session.group_chat_id,
+                    require_tool_approval=require_tool_approval,
+                    disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    disabled_capabilities=disabled_capabilities,
                     file_ids=file_ids,
                     stream=stream,
                     session_id=session_id,
@@ -162,6 +158,9 @@ class ConversationService:
                 return await self.group_chat_service.ask_group_chat(  # type: ignore[return-value]
                     question=question,
                     group_chat_id=group_chat_id,
+                    require_tool_approval=require_tool_approval,
+                    disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    disabled_capabilities=disabled_capabilities,
                     file_ids=file_ids,
                     stream=stream,
                     session_id=None,  # explicitly None for new conversation
@@ -472,6 +471,12 @@ class ConversationService:
                     "The specified assistant is not part of this group chat"
                 )
             return selected.assistant.completion_model, 0
+
+        if group_chat.orchestrator_assistant_id is not None:
+            model, _ = await self._assistant_preflight_settings(
+                group_chat.orchestrator_assistant_id
+            )
+            return model, 0
 
         models = [
             group_chat_assistant.assistant.completion_model

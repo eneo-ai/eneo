@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence
+from contextlib import aclosing
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
 from uuid import UUID
@@ -13,11 +14,14 @@ from eneo.ai_models.completion_models.completion_model import (
     CompletionModelResponse,
     ModelKwargs,
     ResponseType,
+    function_definition_to_tool,
 )
+from eneo.assistants.delegation import current_assistant_delegation
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.signed_urls import build_signed_original_download_url
+from eneo.completion_models.domain.execution_budget import current_execution_budget
 from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
 from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
@@ -403,17 +407,18 @@ class CompletionService:
         )
 
     async def _typed_chunks(self, completion: AsyncGenerator[Completion]):
-        async for chunk in completion:
-            # Adapter events name their own type (tool calls and their argument
-            # deltas, approvals and their timeouts, reasoning, images, errors)
-            # and pass through whether or not they carry text. An untyped chunk
-            # is answer text, or the closing stop chunk that carries usage.
-            if chunk.response_type is None:
-                if chunk.text:
-                    chunk.response_type = ResponseType.TEXT
-                elif not chunk.stop:
-                    continue
-            yield chunk
+        async with aclosing(completion):
+            async for chunk in completion:
+                # Adapter events name their own type (tool calls and their argument
+                # deltas, approvals and their timeouts, reasoning, images, errors)
+                # and pass through whether or not they carry text. An untyped chunk
+                # is answer text, or the closing stop chunk that carries usage.
+                if chunk.response_type is None:
+                    if chunk.text:
+                        chunk.response_type = ResponseType.TEXT
+                    elif not chunk.stop:
+                        continue
+                yield chunk
 
     async def get_response(
         self,
@@ -457,6 +462,11 @@ class CompletionService:
         # The governed personal-default path already filters is_enabled upstream
         # (effective_config_service), so re-filtering here is idempotent.
         mcp_servers = [server for server in mcp_servers if server.is_enabled]
+        budget = current_execution_budget()
+        if budget is not None:
+            budget.reference_prefixes.update(
+                str(chunk.info_blob_id)[:8] for chunk in info_blob_chunks
+            )
         model_adapter = await self._get_adapter(model)
         initial_skill_tokens = (
             skill_runtime.snapshot().measurement.tokens
@@ -540,6 +550,15 @@ class CompletionService:
                 f"[MCP] Proxy created with {mcp_proxy.get_tool_count()} tools from {len(mcp_servers)} server(s)"
             )
 
+        extra_tools = (
+            mcp_proxy.get_tools_for_llm()
+            if mcp_proxy and model.supports_tool_calling
+            else []
+        )
+        delegation = current_assistant_delegation()
+        if delegation is not None:
+            extra_tools.append(function_definition_to_tool(delegation.tool_definition))
+
         try:
             context = self.context_builder.build_context(
                 input_str=text_input,
@@ -560,11 +579,7 @@ class CompletionService:
                 ),
                 knowledge_catalog=knowledge_catalog,
                 vision=model.vision,
-                extra_tool_dicts=(
-                    mcp_proxy.get_tools_for_llm()
-                    if mcp_proxy and model.supports_tool_calling
-                    else None
-                ),
+                extra_tool_dicts=extra_tools,
                 file_reference_urls=file_reference_urls,
                 inline_file_text=inline_file_text,
                 url_only_prompt_file_ids={file.id for file in referenced_prompt_files},
@@ -655,33 +670,38 @@ class CompletionService:
                             ),
                         }
 
-                    async for chunk in model_adapter.iterate_stream(
-                        stream=stream_obj,
-                        context=context,
-                        model_kwargs=model_kwargs,
-                        require_tool_approval=require_tool_approval,
-                        approval_manager=approval_manager,
-                        approval_context=approval_context,
-                        pending_approval_ids=pending_approval_ids,
-                    ):
-                        await _name_app_views(chunk, mcp_proxy)
-                        yield chunk
-                        # The ask path has saved the file by the time the
-                        # consumer returns control. Mint its reference URL now,
-                        # before the adapter resumes and hands the tool result
-                        # to the model, so another tool can take the file in
-                        # the same turn.
-                        if (
-                            chunk.response_type == ResponseType.FILES
-                            and chunk.generated_file is not None
-                        ):
-                            chunk.reference_url = await self._mint_generated_file_url(
-                                chunk.generated_file, session
-                            )
-                            if mcp_proxy and chunk.reference_url:
-                                mcp_proxy.allow_file_references(
-                                    {chunk.generated_file.id: chunk.reference_url}
+                    async with aclosing(
+                        model_adapter.iterate_stream(
+                            stream=stream_obj,
+                            context=context,
+                            model_kwargs=model_kwargs,
+                            require_tool_approval=require_tool_approval,
+                            approval_manager=approval_manager,
+                            approval_context=approval_context,
+                            pending_approval_ids=pending_approval_ids,
+                        )
+                    ) as adapter_stream:
+                        async for chunk in adapter_stream:
+                            await _name_app_views(chunk, mcp_proxy)
+                            yield chunk
+                            # The ask path has saved the file by the time the
+                            # consumer returns control. Mint its reference URL now,
+                            # before the adapter resumes and hands the tool result
+                            # to the model, so another tool can take the file in
+                            # the same turn.
+                            if (
+                                chunk.response_type == ResponseType.FILES
+                                and chunk.generated_file is not None
+                            ):
+                                chunk.reference_url = (
+                                    await self._mint_generated_file_url(
+                                        chunk.generated_file, session
+                                    )
                                 )
+                                if mcp_proxy and chunk.reference_url:
+                                    mcp_proxy.allow_file_references(
+                                        {chunk.generated_file.id: chunk.reference_url}
+                                    )
                 finally:
                     if approval_manager:
                         for approval_id in list(pending_approval_ids):

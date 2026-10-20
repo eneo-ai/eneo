@@ -47,6 +47,7 @@ class GroupChatFactory:
             published=group_chat.published,
             insight_enabled=group_chat.insight_enabled,
             icon_id=group_chat.icon_id,
+            orchestrator_assistant_id=group_chat.orchestrator_assistant_id,
         )
 
     @classmethod
@@ -94,4 +95,5 @@ class GroupChatFactory:
             insight_enabled=group_chat_db.insight_enabled,
             metadata_json=metadata_json,
             icon_id=group_chat_db.icon_id,
+            orchestrator_assistant_id=group_chat_db.orchestrator_assistant_id,
         )

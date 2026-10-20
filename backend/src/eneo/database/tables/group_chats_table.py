@@ -38,6 +38,12 @@ class GroupChatsTable(BasePublic):
         ForeignKey(Icons.id, ondelete="SET NULL"), nullable=True
     )
 
+    orchestrator_assistant_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey(
+            Assistants.id, ondelete="NO ACTION", deferrable=True, initially="DEFERRED"
+        ),
+        nullable=True,
+    )
     space_id: Mapped[UUID] = mapped_column(ForeignKey(Spaces.id, ondelete="CASCADE"))
     user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"))
     group_chat_assistants: Mapped[list["GroupChatsAssistantsMapping"]] = relationship(

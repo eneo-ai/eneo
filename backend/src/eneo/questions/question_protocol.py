@@ -33,6 +33,9 @@ def to_question_public(question: Question) -> Message:
                 "mcp_tool_references",
                 "skill_activation",
                 "tool_calls",
+                "consultations",
+                "num_tokens_question",
+                "num_tokens_answer",
             }
         ),
         references=[
@@ -45,6 +48,11 @@ def to_question_public(question: Question) -> Message:
         tools=tools,
         mcp_tool_references=list(question.mcp_tool_references),
         tool_calls=public_tool_calls,
+        consultations=[item.public() for item in question.consultations or []],
+        num_tokens_question=question.num_tokens_question
+        + sum(item.input_tokens or 0 for item in question.consultations or []),
+        num_tokens_answer=question.num_tokens_answer
+        + sum(item.output_tokens or 0 for item in question.consultations or []),
     )
 
 

@@ -26,6 +26,7 @@ def _group_chat_db(group_chat_assistants):
         published=False,
         insight_enabled=False,
         icon_id=None,
+        orchestrator_assistant_id=None,
     )
 
 

@@ -56,6 +56,7 @@ class GroupChat(Entity):
         insight_enabled: bool = False,
         metadata_json: Optional[dict[str, object]] = None,
         icon_id: Optional["UUID"] = None,
+        orchestrator_assistant_id: "UUID | None" = None,
     ) -> None:
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.user_id = user_id
@@ -69,6 +70,7 @@ class GroupChat(Entity):
         self.type = "group-chat"
         self._metadata_json = metadata_json
         self.icon_id = icon_id
+        self.orchestrator_assistant_id = orchestrator_assistant_id
 
     @overload
     @classmethod
@@ -151,6 +153,7 @@ class GroupChat(Entity):
         insight_enabled: Optional[bool] = None,
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union["UUID", None, NotProvided] = NOT_PROVIDED,
+        orchestrator_assistant_id: Union["UUID", None, NotProvided] = NOT_PROVIDED,
     ):
         if name is not None:
             self.name = name
@@ -168,5 +171,7 @@ class GroupChat(Entity):
             self.metadata_json = metadata_json
         if is_provided(icon_id):
             self.icon_id = icon_id
+        if is_provided(orchestrator_assistant_id):
+            self.orchestrator_assistant_id = orchestrator_assistant_id
 
         return self

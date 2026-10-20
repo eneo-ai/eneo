@@ -1,6 +1,6 @@
 # Assistant delegation execution boundary
 
-- Status: proposed transport decision; preparation/execution separation implemented
+- Status: local delegation implemented; integration/visual deployment checks required before release
 - Date: 2026-10-20
 - Scope: #1150, #1151; mechanical prerequisite #1155
 - Baseline: `db8d37d048cf9083ccbda941d996aa10d8441792` (`develop`)
@@ -92,87 +92,88 @@ python3 /Users/maxeriksson/.codex/scripts/run-guarded.py --seconds 120 -- \
   backend/scripts/probe_loopback_cancellation.py
 ```
 
-## Security and lifecycle requirements for the next slice
+## Implemented execution and persistence contract
 
-The current refactor does not claim these delegation requirements are delivered:
+`AssistantService` remains the canonical owner of assistant preparation and
+execution. `AssistantDelegation` exposes one typed local function to the parent
+adapter; specialists receive no delegation function. The adapter reuses its
+existing Skill and MCP tool loop. Loopback knowledge/files and the MCP proxy
+remain the tool transport, including tools nested under a specialist.
 
-- Bind caller, tenant, space, parent turn and permitted candidates on the server.
-  Recheck each candidate with the existing space actor. Group membership alone
-  is not a substitute for permission to use a specialist.
-- Apply the effective space classification to the parent model, child model,
-  retrieval providers and tool providers. Recheck before evidence is given to
-  the parent; summarization does not reduce the requirement.
-- Share limits across all parent and child model/tool work and bound the total
-  duration and context/output. `MAX_TOOL_ROUNDS` currently resets for every
-  adapter invocation, so it is not a run-wide budget.
-- Keep one active specialist and no recursive delegation initially.
-- Propagate caller tool opt-outs. The current approval-wait mechanism is in the
-  streaming path; a child called with `stream=False` must not silently lose the
-  parent's approval requirement. Either carry approval events through the
-  parent or explicitly deny those operations before enabling delegation.
-- Use typed success, denial, timeout, cancellation and incomplete outcomes.
-  Cancel local child work when the parent stops; remote completed effects cannot
-  be rolled back by cancellation.
-- Persist each actual subquestion/reply and its source identity once beneath
-  the parent. Use existing question/tool-step persistence if it can represent
-  the contract without overloading unrelated fields. Decide this in the proof,
-  before any migration or UI implementation.
-- Lead the UI with the synthesized answer; retain expandable authorized steps.
-  Reopening history must not regenerate specialist replies.
+The plan binds the interactive caller, tenant, Space, group, orchestrator,
+candidate IDs and permitted attachment IDs on the server. Each later model,
+query-embedding, reranking and MCP boundary rechecks current access/configuration in a short
+transaction. The parent is checked again before receiving specialist evidence.
+Changes to user eligibility, group membership, effective model, prompt, Skills
+or tool configuration stop the affected execution. Prepared values are not
+persisted authorization grants.
 
-## Smallest reviewable implementation
+The group ask returns a lazy execution stream from the request's preparation
+transaction. Provider and retrieval repositories own short reads when there is
+no ambient transaction. Model and MCP calls happen after those scopes exit.
+Non-streaming HTTP requests drain the same execution, so they cannot bypass the
+specialist's ordinary streaming tool loop.
 
-The first code change stays in `AssistantService`:
+`ExecutionBudget` is one context shared across the root and its serial children.
+It bounds consultations, model requests/input, local tool dispatches, model
+output and total/child time. MCP transports still enforce their own per-call
+limits. Provider work inside an HTTP MCP request, including Eneo's loopback
+leaf tools, is not separately charged to these in-process counters: the shared
+budget admits the tool dispatch, and its existing server-side limits apply.
+Distributed provider accounting is not implemented by passing Python context
+across HTTP. No child
+can recursively delegate. Tool approval uses the parent's session and existing
+approval manager; cancellation closes child generators before proxy cleanup and
+partial history saving. Already completed remote side effects are not undone.
 
-1. `_prepare_turn` resolves authorization, effective configuration, Skills,
-   classification and tool opt-outs before creating conversation records.
-2. `_execute_turn` attaches the existing tools and calls `Assistant.ask`.
-3. `ask` retains ordinary session creation, placeholders, response persistence,
-   streaming and failure-state ownership.
+The parent Question owns a nullable versioned `consultations` JSONB column.
+Snapshots retain actual questions/replies, statuses, sources and server-generated
+step UUIDs. Provider IDs are only round-local and cannot identify history steps.
+Raw tool results are fetched through the existing authorized result endpoint;
+public events/history strip them and do not include specialist reasoning.
+Existing file persistence links generated specialist files to the parent.
 
-The typed request-local prepared value connects those phases. Code is moved
-within its canonical owner; policy/configuration resolution is not copied.
-Nothing is enabled in group chats, no new endpoint or database schema is added,
-and the shared-space default assistant keeps its existing behavior.
+Question token columns retain the root model's usage. The shared usage SQL
+projection adds executed consultations with their own model IDs; public chat
+usage totals sum both. This avoids billing all specialist work at the root
+model's rate. Unexecuted consultations contribute no model row.
 
-Acceptance for this mechanical slice: ordinary new/resumed asks keep their
-answer, source, usage and history contracts; preparation performs no model call
-or conversation write; denied access/classification fail before those effects;
-tool opt-outs and local cancellation remain effective.
+## Configuration, compatibility and rollout
 
-## Validation and remaining evidence
+The nullable `GroupChats.orchestrator_assistant_id` is explicit opt-in. The
+existing selector remains owned by `GroupChatService` for persisted groups that
+have no orchestrator. It is not an error fallback: a configured run never
+silently switches to the selector. Delete that selector only after product
+owners have migrated the existing groups and confirmed that clearing the
+orchestrator no longer needs to restore their saved behaviour.
 
-The focused tests use real `Assistant`, `Space`, actor checks, context building,
-`CompletionService` and `TenantModelAdapter`, replacing database repositories
-and the outbound provider. They prove the extraction's runtime behavior, not
-database commit semantics, a distributed transport, live-model synthesis quality
-or the full #1151 delegation proof.
+The coordinator is a separate assistant in the same Space. Individual deletion
+or movement requires reassignment first. A deferred foreign key also protects
+that relationship while allowing the whole Space to be deleted atomically.
+Direct mentions keep their existing behaviour. Shared-Space default assistant
+orchestration and API-key execution remain future work.
 
-From `backend`, with an existing synchronized environment:
+The migration adds two nullable columns; it does not migrate or rewrite existing
+groups or question history. For recovery, deselect the orchestrator and retain
+history. A database downgrade drops consultation history and configuration, so
+export them before deliberately downgrading. Deploy the migration before the
+new backend and ship the matching client that renders consultation events.
 
-```sh
-python3 /Users/maxeriksson/.codex/scripts/run-guarded.py --seconds 120 -- \
-  uv run --no-sync pytest -q \
-  tests/unit/assistants/test_assistant_turn_preparation.py \
-  tests/unit/assistants/test_assistant_service_attachment_references.py \
-  tests/unit/assistants/test_assistant_service_builtin_providers.py \
-  tests/unit/test_group_chat_selector_repro.py
-```
+The Svelte client leads with the synthesis and provides collapsed specialist
+steps with nested tool results. Blocking approvals stay outside that collapsed
+trace. The beta client is outside this implementation scope; API v3 publishes
+the data part for a future renderer.
 
-Before enabling group-chat orchestration, #1151 still requires its
-procurement → IT → IT-follow-up proof through the real model/tool loop, shared
-budget exhaustion, parent/child cancellation, classification changes, approval
-behavior and round-trip persistence. Follow with focused integration checks in
-CI or an explicitly authorized environment; do not infer those results from
-unit tests.
+## Validation boundary
 
-## Risk and recovery
+Focused tests run the actual assistant preparation, actor checks, model context,
+Skill activation, tool loop, MCP proxy, response protocol and history projection.
+Database/outbound provider boundaries are substituted in local unit tests;
+PostgreSQL JSON expansion has an integration test for CI. The loopback transport
+probe above remains the evidence for choosing local delegation.
 
-The extraction touches the ordinary ask path, so lost configuration or a changed
-history write order is the primary regression risk. Keep its diff separate from
-delegation behavior. It can be reverted without migrating stored conversations.
-Later run/step persistence and rollout changes need their own recovery plan.
-
-The intended result is one execution owner with two explicit lifecycles:
-ordinary user turns and bounded specialist consultations. No duplicate runtime,
-policy algorithm or legacy routing fallback is created in this first slice.
+These checks do not establish live-model routing quality, production transport
+behaviour, a visual browser review or applied migration correctness in a running
+environment. No local application server, browser suite or production build is
+required for the focused proof. Run deployment integration checks and review the
+rendered chat before release.

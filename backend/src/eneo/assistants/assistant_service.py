@@ -1,7 +1,9 @@
+import asyncio
 import copy
 import re
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable, Collection, Sequence
+from contextlib import aclosing, nullcontext
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, TypeVar, Union, cast
@@ -25,9 +27,20 @@ from eneo.assistants.assistant_repo import (
     PersonalDefaultValidationInput,
 )
 from eneo.assistants.assistant_update import AssistantUpdate
+from eneo.assistants.delegation import (
+    AssistantDelegation,
+    AssistantDelegationPlan,
+    ConsultationRequest,
+    current_assistant_delegation,
+)
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.authentication.auth_service import AuthService
+from eneo.completion_models.domain.execution_budget import (
+    ExecutionBudget,
+    ExecutionLimitReached,
+    current_execution_budget,
+)
 from eneo.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
@@ -95,7 +108,12 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
 from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.prompts.prompt import Prompt
 from eneo.prompts.prompt_service import PromptService
-from eneo.questions.question import ToolAssistant, ToolCallInfo, UseTools
+from eneo.questions.question import (
+    ConsultationInfo,
+    ToolAssistant,
+    ToolCallInfo,
+    UseTools,
+)
 from eneo.roles.permissions import (
     Permission,
     validate_permission,
@@ -132,7 +150,8 @@ from eneo.templates.assistant_template.assistant_template_service import (
     AssistantTemplateService,
 )
 from eneo.tokens.token_utils import log_token_count_drift, measure_provider_input_tokens
-from eneo.users.user import UserInDB
+from eneo.users.user import UserInDB, UserState
+from eneo.users.user_repo import UsersRepository
 from eneo.workflows.step_repo import StepRepository
 
 logger = get_logger(__name__)
@@ -232,7 +251,10 @@ if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
-    from eneo.document_templates.domain import DocumentTemplateChoice
+    from eneo.document_templates.domain import (
+        DocumentTemplateChoice,
+        DocumentTemplateReference,
+    )
     from eneo.files.file_models import File
     from eneo.governance_policy.application.effective_config_service import (
         EffectiveConfigService,
@@ -243,6 +265,7 @@ if TYPE_CHECKING:
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.rerank_models.application.rerank_service import RerankService
+    from eneo.rerank_models.domain.rerank_spec import RerankSpec
     from eneo.sessions.session import SessionInDB
     from eneo.sessions.session_service import SessionService
     from eneo.skills.application.skill_service import SkillService
@@ -285,6 +308,16 @@ class _PreparedAssistantTurn:
     model_route: "str"
     initial_skill_context_tokens: "int"
     is_personal_default: "bool"
+
+
+@dataclass(frozen=True)
+class _AssistantTurnResources:
+    knowledge: "MCPServer | None"
+    files: "MCPServer | None"
+    document_template: "DocumentTemplateReference | None"
+    rerank: "RerankSpec | None"
+    mcp_servers: "list[MCPServer]"
+    capabilities: "list[MCPServer]"
 
 
 @dataclass(frozen=True)
@@ -2494,6 +2527,8 @@ class AssistantService:
                 stream_context_input_token_estimate: int | None = None
                 stream_output_token_estimate: int | None = None
                 stream_context_output_token_estimate: int | None = None
+                consultations: dict[UUID, ConsultationInfo] = {}
+                persisted_steps: tuple[object, ...] = ()
                 completed = False
 
                 try:
@@ -2518,7 +2553,33 @@ class AssistantService:
                                 chunk.context_output_token_estimate
                             )
 
+                        if chunk.consultations:
+                            for item in chunk.consultations:
+                                consultations[item.id] = (
+                                    ConsultationInfo.from_execution(item)
+                                )
+                            progress = tuple(
+                                (
+                                    item.id,
+                                    item.status,
+                                    tuple(
+                                        (step.step_id, step.result_status)
+                                        for step in item.tool_calls
+                                    ),
+                                )
+                                for item in consultations.values()
+                            )
+                            if progress != persisted_steps:
+                                await self.session_service.record_consultations(
+                                    question_id, list(consultations.values())
+                                )
+                                persisted_steps = progress
+                            yield chunk
+
                         if chunk.response_type == ResponseType.TEXT:
+                            budget = current_execution_budget()
+                            if budget is not None:
+                                budget.record_output(chunk.text or "")
                             response_string = f"{response_string}{chunk.text}"
                             chunk.reference_chunks = get_references(
                                 response_string=response_string,
@@ -2528,6 +2589,9 @@ class AssistantService:
                             yield chunk
 
                         if chunk.response_type == ResponseType.REASONING:
+                            budget = current_execution_budget()
+                            if budget is not None:
+                                budget.record_output(chunk.reasoning_content or "")
                             # Reasoning/thinking text — pass through to SSE and
                             # accumulate separately so it can be persisted on the
                             # question without ever landing in the answer.
@@ -2547,7 +2611,10 @@ class AssistantService:
                             # The image chunk precedes the tool-call chunk that
                             # references it; the ids are attached to the tool
                             # call once the stream has ended.
-                            if chunk.image.tool_call_id:
+                            if (
+                                chunk.image.tool_call_id
+                                and chunk.consultation_id is None
+                            ):
                                 generated_file_ids_by_call.setdefault(
                                     chunk.image.tool_call_id, []
                                 ).append(image_file.id)
@@ -2810,6 +2877,7 @@ class AssistantService:
                         logging_details=response.extended_logging
                         or LoggingDetails(model_kwargs={}),
                         tool_calls=tool_calls if tool_calls else None,
+                        consultations=list(consultations.values()) or None,
                         mcp_tool_references=filter_mcp_tool_references(
                             response_string=response_string,
                             references=mcp_tool_references,
@@ -2828,13 +2896,39 @@ class AssistantService:
                         response_type=ResponseType.TOKEN_USAGE,
                         skill_context_tokens=skill_activation.skill_context_tokens,
                         usage=TokenUsage(
-                            prompt_tokens=num_tokens_question,
-                            completion_tokens=num_tokens_answer,
+                            prompt_tokens=num_tokens_question
+                            + sum(
+                                item.input_tokens or 0
+                                for item in consultations.values()
+                            ),
+                            completion_tokens=num_tokens_answer
+                            + sum(
+                                item.output_tokens or 0
+                                for item in consultations.values()
+                            ),
                             context_prompt_tokens=context_prompt_tokens,
                             context_completion_tokens=context_completion_tokens,
                         ),
                     )
                 finally:
+                    # Close nested generators in the owning task before recording
+                    # cancellation, including any MCP connection context scopes.
+                    await cast(
+                        AsyncGenerator[Completion, None], response.completion
+                    ).aclose()
+                    active_delegation = current_assistant_delegation()
+                    if active_delegation is not None and not completed:
+                        active_delegation.budget.stopped = True
+                        for item in active_delegation.consultations:
+                            if item.status in {"running", "awaiting_approval"}:
+                                item.status = (
+                                    "timeout"
+                                    if active_delegation.budget.remaining_seconds <= 0
+                                    else "cancelled"
+                                )
+                            consultations[item.id] = ConsultationInfo.from_execution(
+                                item
+                            )
                     # Stream did not reach normal completion: client abort, LLM
                     # error, network drop, etc. The placeholder row already captures
                     # the user's question, so nothing streamed means there is
@@ -2847,6 +2941,7 @@ class AssistantService:
                         response_string
                         or reasoning_string
                         or generated_files
+                        or consultations
                         or skill_runtime.snapshot().changed
                     ):
                         from eneo.sessions.session_service import (
@@ -2861,7 +2956,12 @@ class AssistantService:
                             else None
                         )
                         partial_tokens_answer = (
-                            safe_count_tokens(response_string, model_name)
+                            stream_usage.completion_tokens
+                            if stream_usage
+                            and stream_usage.completion_tokens is not None
+                            else stream_output_token_estimate
+                            if stream_output_token_estimate is not None
+                            else safe_count_tokens(response_string, model_name)
                             + reasoning_token_count
                         )
                         skill_provenance, skill_activation = (
@@ -2876,11 +2976,18 @@ class AssistantService:
                                 question_id=question_id,
                                 answer=response_string,
                                 num_tokens_answer=partial_tokens_answer,
+                                num_tokens_question=(
+                                    stream_usage.prompt_tokens
+                                    if stream_usage
+                                    and stream_usage.prompt_tokens is not None
+                                    else stream_input_token_estimate
+                                ),
                                 reasoning=reasoning_string or None,
                                 skill_provenance=skill_provenance,
                                 skill_activation=skill_activation,
                                 generated_files=list(generated_files),
                                 tool_calls=tool_calls or None,
+                                consultations=list(consultations.values()) or None,
                             )
                         )
                         logger.info(
@@ -3043,6 +3150,15 @@ class AssistantService:
                 logging_details=response.extended_logging
                 or LoggingDetails(model_kwargs={}),
                 tool_calls=non_streaming_tool_calls or None,
+                consultations=[
+                    ConsultationInfo.from_execution(item)
+                    for item in (
+                        response.completion.consultations or []
+                        if isinstance(response.completion, Completion)
+                        else []
+                    )
+                ]
+                or None,
                 mcp_tool_references=non_streaming_mcp_refs or None,
                 reasoning=final_reasoning,
                 skill_provenance=skill_provenance,
@@ -3443,28 +3559,19 @@ class AssistantService:
             is_personal_default=is_personal_default,
         )
 
-    async def _execute_turn(
+    async def _prepare_execution_resources(
         self,
         prepared: _PreparedAssistantTurn,
         session: "SessionInDB",
-        completion_file_inputs: AssistantCompletionFileInputs,
-        *,
-        stream: bool,
-        version: int,
-        require_tool_approval: bool,
-    ) -> tuple["CompletionModelResponse", "DatastoreResult"]:
-        """Run the existing assistant engine; the caller owns response persistence."""
+    ) -> _AssistantTurnResources:
+        """Resolve local tool scopes and provider settings before execution."""
         assistant_to_ask = prepared.assistant_to_ask
         space = prepared.space
         files = prepared.files
         cleaned_question = prepared.cleaned_question
         effective_completion_model = prepared.effective_completion_model
-        completion_model_override = prepared.completion_model_override
-        model_kwargs_override = prepared.model_kwargs_override
         mcp_servers_override = prepared.mcp_servers_override
         capability_mcp_servers = prepared.capability_mcp_servers
-        prompt_override = prepared.prompt_override
-        skill_runtime = prepared.skill_runtime
         is_personal_default = prepared.is_personal_default
 
         # Internal (loopback) MCP servers are scoped by one short-lived token
@@ -3610,31 +3717,262 @@ class AssistantService:
                 security_classification=space.security_classification,
             )
 
-        response, datastore_result = await assistant_to_ask.ask(
-            question=cleaned_question,
+        return _AssistantTurnResources(
+            knowledge=knowledge_mcp_server,
+            files=files_mcp_server,
+            document_template=document_template,
+            rerank=rerank,
+            mcp_servers=mcp_servers_override,
+            capabilities=capability_mcp_servers,
+        )
+
+    async def _execute_turn(
+        self,
+        prepared: _PreparedAssistantTurn,
+        session: "SessionInDB",
+        completion_file_inputs: AssistantCompletionFileInputs,
+        *,
+        stream: bool,
+        version: int,
+        require_tool_approval: bool,
+    ) -> tuple["CompletionModelResponse", "DatastoreResult"]:
+        """Execute with short preparation reads when no caller transaction exists."""
+        db_session = self.repo.session
+        async with nullcontext() if db_session.in_transaction() else db_session.begin():
+            resources = await self._prepare_execution_resources(prepared, session)
+        response, datastore_result = await prepared.assistant_to_ask.ask(
+            question=prepared.cleaned_question,
             completion_service=self.completion_service,
             references_service=self.references_service,
-            rerank=rerank,
+            rerank=resources.rerank,
             session=session,
             files=completion_file_inputs.completion_message_files,
             stream=stream,
             version=version,
-            capability_mcp_servers=capability_mcp_servers,
-            document_template=document_template,
+            capability_mcp_servers=resources.capabilities,
+            document_template=resources.document_template,
             require_tool_approval=require_tool_approval,
-            completion_model_override=completion_model_override,
-            model_kwargs_override=model_kwargs_override,
-            mcp_servers_override=mcp_servers_override,
-            prompt_override=prompt_override,
+            completion_model_override=prepared.completion_model_override,
+            model_kwargs_override=prepared.model_kwargs_override,
+            mcp_servers_override=resources.mcp_servers,
+            prompt_override=prepared.prompt_override,
             completion_prompt_files=completion_file_inputs.completion_prompt_files,
-            skill_runtime=skill_runtime,
-            knowledge_mcp_server=knowledge_mcp_server,
+            skill_runtime=prepared.skill_runtime,
+            knowledge_mcp_server=resources.knowledge,
             internal_mcp_servers=(
-                [files_mcp_server] if files_mcp_server is not None else []
+                [resources.files] if resources.files is not None else []
             ),
         )
 
         return response, datastore_result
+
+    async def _create_delegation(
+        self,
+        *,
+        plan: AssistantDelegationPlan,
+        prepared: _PreparedAssistantTurn,
+        session: "SessionInDB",
+        version: int,
+        require_tool_approval: bool,
+        disabled_mcp_server_ids: list[UUID] | None,
+        disabled_capabilities: list[CapabilityPurpose] | None,
+    ) -> AssistantDelegation:
+        if (
+            prepared.space.id != plan.space_id
+            or prepared.active_assistant.id != plan.orchestrator_id
+            or session.group_chat_id != plan.group_chat_id
+            or not prepared.effective_completion_model.supports_tool_calling
+        ):
+            raise BadRequestException("Invalid group-chat orchestrator configuration.")
+
+        expected: dict[UUID, _PreparedAssistantTurn] = {plan.orchestrator_id: prepared}
+        # Validate before names/descriptions are offered to the parent model.
+        for candidate in plan.candidates:
+            child = await self._prepare_turn(
+                question="",
+                assistant_id=candidate.id,
+                disabled_mcp_server_ids=disabled_mcp_server_ids,
+                disabled_capabilities=disabled_capabilities,
+            )
+            if child.space.id != plan.space_id:
+                raise UnauthorizedException("Specialist is outside this space.")
+            expected[candidate.id] = child
+
+        def provider_policy(turn: _PreparedAssistantTurn) -> tuple[object, ...]:
+            return (
+                turn.effective_completion_model.id,
+                turn.effective_completion_model.provider_id,
+                turn.model_route,
+                turn.assistant_to_ask.updated_at,
+                turn.prompt_override,
+                turn.skill_plan,
+                turn.model_kwargs_override,
+                tuple(
+                    (
+                        server.id,
+                        server.is_enabled,
+                        server.http_url,
+                        server.http_auth_type,
+                        server.security_classification,
+                        tuple(
+                            (
+                                tool.name,
+                                tool.is_enabled_by_default,
+                                tool.requires_approval,
+                                tool.removed_from_remote,
+                            )
+                            for tool in server.tools
+                        ),
+                    )
+                    for server in [
+                        *turn.mcp_servers_override,
+                        *turn.capability_mcp_servers,
+                    ]
+                ),
+            )
+
+        policies = {
+            assistant_id: provider_policy(turn)
+            for assistant_id, turn in expected.items()
+        }
+
+        async def authorize(assistant_id: UUID) -> None:
+            if assistant_id not in expected:
+                raise UnauthorizedException("Specialist is unavailable.")
+            # No model or tool request runs inside this transaction. A fresh
+            # transaction also prevents a long-lived ORM snapshot from acting
+            # as an authorization grant for the rest of the run.
+            async with self.repo.session.begin():
+                current_user = await UsersRepository(
+                    self.repo.session
+                ).get_user_by_id_and_tenant_id(self.user.id, self.user.tenant_id)
+                if (
+                    current_user is None
+                    or not current_user.is_active
+                    or current_user.state != UserState.ACTIVE
+                    or current_user.credential_version != self.user.credential_version
+                    or current_user.permissions != self.user.permissions
+                    or current_user.user_groups_ids != self.user.user_groups_ids
+                    or current_user.tenant.security_enabled
+                    != self.user.tenant.security_enabled
+                ):
+                    raise UnauthorizedException(
+                        "The user session is no longer eligible."
+                    )
+                current_space = await self.space_repo.get_space_by_group_chat(
+                    group_chat_id=plan.group_chat_id
+                )
+                actor = self.actor_manager.get_space_actor_from_space(current_space)
+                group = current_space.get_group_chat(plan.group_chat_id)
+                if (
+                    current_space.id != plan.space_id
+                    or not actor.can_read_group_chat(group)
+                    or group.orchestrator_assistant_id != plan.orchestrator_id
+                    or (
+                        assistant_id != plan.orchestrator_id
+                        and assistant_id not in group.assistant_ids
+                    )
+                ):
+                    raise UnauthorizedException("The group chat is no longer eligible.")
+                fresh = await self._prepare_turn(
+                    question="",
+                    assistant_id=assistant_id,
+                    disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    disabled_capabilities=disabled_capabilities,
+                )
+                rerank_model_id = fresh.assistant_to_ask.rerank_model_id
+                if rerank_model_id is not None and (
+                    self.rerank_service is None
+                    or not await self.rerank_service.selectable(
+                        rerank_model_id, fresh.space.security_classification
+                    )
+                ):
+                    raise UnauthorizedException(
+                        "The configured reranker is no longer eligible."
+                    )
+                if (
+                    fresh.space.id != plan.space_id
+                    or provider_policy(fresh) != policies[assistant_id]
+                ):
+                    raise UnauthorizedException(
+                        "Assistant configuration changed; start a new turn."
+                    )
+
+        async def execute(
+            request: ConsultationRequest,
+        ) -> AsyncGenerator[Completion, None]:
+            # The parent owns history and approvals. The specialist receives
+            # only its focused question and explicitly delegated attachments.
+            child_session = session.model_copy(update={"questions": []})
+            async with self.repo.session.begin():
+                child = await self._prepare_turn(
+                    question=request.question,
+                    assistant_id=request.assistant_id,
+                    file_ids=request.attachment_ids,
+                    disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    disabled_capabilities=disabled_capabilities,
+                )
+                inputs = await self._build_completion_file_inputs(
+                    files=child.files,
+                    session=child_session,
+                    assistant=child.assistant_to_ask,
+                    completion_model=child.effective_completion_model,
+                )
+            yield Completion(execution_model_id=child.effective_completion_model.id)
+            result, knowledge = await self._execute_turn(
+                child,
+                child_session,
+                inputs,
+                stream=True,
+                version=version,
+                require_tool_approval=require_tool_approval,
+            )
+            if knowledge.chunks:
+                yield Completion(
+                    response_type=ResponseType.TOOL_CALL,
+                    tool_calls_metadata=[
+                        ToolCallMetadata(
+                            server_name="knowledge",
+                            tool_name="retrieve",
+                            arguments={"query": request.question, "mode": "inject"},
+                            result_status="succeeded",
+                            is_internal=True,
+                            result="\n\n".join(
+                                chunk.text for chunk in knowledge.chunks
+                            ),
+                        )
+                    ],
+                    mcp_tool_references=[
+                        McpToolReference(
+                            id=blob.id,
+                            tool_call_id=None,
+                            mcp_tool_name=None,
+                            uri=f"eneo://info-blob/{blob.id}",
+                            mime_type="text/plain",
+                            content="\n\n".join(
+                                chunk.text
+                                for chunk in knowledge.chunks
+                                if chunk.info_blob_id == blob.id
+                            ),
+                            meta={"title": blob.title, "info_blob_id": str(blob.id)},
+                            order=index,
+                        )
+                        for index, blob in enumerate(knowledge.info_blobs)
+                    ],
+                )
+            child_stream = cast(AsyncGenerator[Completion, None], result.completion)
+            async with aclosing(child_stream):
+                async for chunk in child_stream:
+                    yield chunk
+
+        return AssistantDelegation(
+            parent_assistant_id=plan.orchestrator_id,
+            candidates=plan.candidates,
+            attachment_ids=frozenset(file.id for file in prepared.files),
+            budget=ExecutionBudget(),
+            execute=execute,
+            authorize=authorize,
+        )
 
     async def ask(
         self,
@@ -3650,7 +3988,12 @@ class AssistantService:
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: list["UUID"] | None = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
+        delegation_plan: AssistantDelegationPlan | None = None,
     ):
+        if delegation_plan is not None and self.user.active_api_key is not None:
+            raise BadRequestException(
+                "Orchestrated group chats currently require an interactive user session."
+            )
         prepared = await self._prepare_turn(
             question=question,
             assistant_id=assistant_id,
@@ -3750,6 +4093,96 @@ class AssistantService:
                 skill_activation=skill_activation,
             )
         assert question_id is not None
+
+        if delegation_plan is not None:
+            delegation = await self._create_delegation(
+                plan=delegation_plan,
+                prepared=prepared,
+                session=session,
+                version=version,
+                require_tool_approval=require_tool_approval,
+                disabled_mcp_server_ids=disabled_mcp_server_ids,
+                disabled_capabilities=disabled_capabilities,
+            )
+
+            async def orchestrated_answer() -> AsyncGenerator[Completion, None]:
+                with delegation.bind():
+                    try:
+                        async with asyncio.timeout(delegation.budget.remaining_seconds):
+                            response, datastore_result = await self._execute_turn(
+                                prepared,
+                                session,
+                                completion_file_inputs,
+                                stream=True,
+                                version=version,
+                                require_tool_approval=require_tool_approval,
+                            )
+                            handled = await self._handle_response(
+                                response=response,
+                                datastore_result=datastore_result,
+                                question=question,
+                                files=files,
+                                completion_model=effective_completion_model,
+                                session=session,
+                                stream=True,
+                                assistant_id=assistant_to_ask.id,
+                                question_id=question_id,
+                                skill_plan=skill_plan,
+                                skill_runtime=skill_runtime,
+                                selected_model_route=model_route,
+                                initial_skill_context_tokens=prepared.initial_skill_context_tokens,
+                                version=version,
+                            )
+                            if isinstance(handled, NonStreamingAnswer):
+                                raise TypeError(
+                                    "Expected a streaming orchestration answer"
+                                )
+                            async with aclosing(handled):
+                                async for chunk in handled:
+                                    yield chunk
+                    except (TimeoutError, ExecutionLimitReached) as exc:
+                        limit = (
+                            exc.limit
+                            if isinstance(exc, ExecutionLimitReached)
+                            else "duration"
+                        )
+                        yield Completion(
+                            response_type=ResponseType.ERROR,
+                            error="This turn reached its execution limit. Available results are incomplete.",
+                            error_code=422,
+                            error_reason=f"execution_limit_{limit}",
+                            stop=True,
+                        )
+                    except UnauthorizedException:
+                        yield Completion(
+                            response_type=ResponseType.ERROR,
+                            error="Access or assistant configuration changed. Start a new turn.",
+                            error_code=403,
+                            error_reason="assistant_access_changed",
+                            stop=True,
+                        )
+
+            # Execution starts when consumed, after the request's preparation
+            # transaction has committed. Non-streaming HTTP clients drain this
+            # same execution before serialization.
+            return AssistantResponse(
+                created_at=question_created_at,
+                question=question,
+                files=files,
+                session=session,
+                answer=orchestrated_answer(),
+                info_blobs=[],
+                completion_model=effective_completion_model,
+                tools=UseTools(
+                    assistants=[
+                        ToolAssistant(
+                            id=assistant_to_ask.id, handle=assistant_to_ask.name
+                        )
+                    ]
+                ),
+                description=assistant_to_ask.description,
+                question_id=question_id,
+            )
 
         try:
             response, datastore_result = await self._execute_turn(

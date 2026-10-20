@@ -71,6 +71,7 @@ class GroupChatAssembler:
             name=group_chat.name,
             id=group_chat.id,
             space_id=group_chat.space_id,
+            orchestrator_assistant_id=group_chat.orchestrator_assistant_id,
             allow_mentions=group_chat.allow_mentions,
             show_response_label=group_chat.show_response_label,
             published=group_chat.published,

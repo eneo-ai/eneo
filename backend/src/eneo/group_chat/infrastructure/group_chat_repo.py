@@ -35,6 +35,7 @@ class GroupChatRepository:
                 insight_enabled=chat.insight_enabled,
                 metadata_json=chat.metadata_json,
                 icon_id=chat.icon_id,
+                orchestrator_assistant_id=chat.orchestrator_assistant_id,
             )
         )
         if chat.assistants:
@@ -60,8 +61,9 @@ class GroupChatRepository:
         metadata_json: dict[str, object] | None | NotProvided = NOT_PROVIDED,
         icon_id: UUID | None | NotProvided = NOT_PROVIDED,
         members: dict[UUID, str | None] | None = None,
+        orchestrator_assistant_id: UUID | None | NotProvided = NOT_PROVIDED,
     ) -> None:
-        if members is not None:
+        if members is not None or is_provided(orchestrator_assistant_id):
             # Assistant moves lock source/destination Spaces first. Take that
             # same lock before checking seats so a moved member cannot be
             # reinserted into its former Space by a concurrent replacement.
@@ -97,6 +99,19 @@ class GroupChatRepository:
             values["metadata_json"] = metadata_json
         if is_provided(icon_id):
             values["icon_id"] = icon_id
+        if is_provided(orchestrator_assistant_id):
+            if orchestrator_assistant_id is not None:
+                valid = await self.session.scalar(
+                    sa.select(Assistants.id).where(
+                        Assistants.id == orchestrator_assistant_id,
+                        Assistants.space_id == space_id,
+                    )
+                )
+                if valid is None:
+                    raise BadRequestException(
+                        "The orchestrator must belong to the group chat space"
+                    )
+            values["orchestrator_assistant_id"] = orchestrator_assistant_id
         if values:
             await self.session.execute(
                 sa.update(GroupChatsTable)
