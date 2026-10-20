@@ -48,7 +48,7 @@ def credential_transport_violation(
         # An address the parser rejects is not proven to be https or loopback.
         return CredentialTransportViolation.NOT_HTTPS
     # A user name or password in the address is a credential whatever the auth
-    # type: httpx sends it as an Authorization: Basic header.
+    # type, because httpx sends it as an Authorization: Basic header.
     carries_userinfo = parts.username is not None or parts.password is not None
     if http_auth_type in _AUTH_TYPES_WITHOUT_ADMIN_CREDENTIAL and not carries_userinfo:
         return None

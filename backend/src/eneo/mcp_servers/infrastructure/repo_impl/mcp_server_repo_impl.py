@@ -128,7 +128,7 @@ class MCPServerRepoImpl(
 
         return self.mapper.to_entities(records)
 
-    async def query(  # type: ignore[override]
+    async def query(
         self, tags: list[str] | None = None, **filters: object
     ) -> list[MCPServer]:
         """Query MCP servers with optional tag filtering."""
@@ -137,7 +137,7 @@ class MCPServerRepoImpl(
         if tags:
             # Filter by tags using JSONB contains operator
             query = query.where(
-                sa.or_(*[self._db_model.tags.contains([tag]) for tag in tags])  # type: ignore[union-attr]
+                sa.or_(*[self._db_model.tags.contains([tag]) for tag in tags])
             )
 
         if filters:
