@@ -223,12 +223,13 @@ when their layout data reloads. New tenants follow the global default (on).
   seen marker alone, so the dot stays until the user opens the page. Accounts
   created after a dated release are marked announced without opening the
   dialog. Undated development releases announce to all existing accounts.
-- **Reminder.** "Remind me tomorrow" saves `remind_after` for the announced
-  version on the user's server-side state. It may announce again on an app load
-  after 24 hours, only while unread. Showing it consumes the reminder; "Not
+- **Reminder.** "Remind me tomorrow" saves a local-storage deadline scoped to the
+  user id and installed version. It may announce again in that browser on an app
+  load after 24 hours, only while unread. Showing it consumes the reminder; "Not
   interested" or Escape closes it until a newer version. Opening the news cancels
-  its reminder. A newer version announces immediately and replaces an older
-  reminder; older clients cannot change a newer version's reminder.
+  its reminder. A newer version announces immediately; older clients cannot
+  overwrite another version's local reminder. The developer reset clears the
+  current local reminder along with the server's seen/announced markers.
 - "Unseen" means `releases[0].version` is **newer** (semver) than the seen
   version, so a rollback or an older frontend pod during a rolling deploy
   does not re-light the dot. No coupling to the deployed version number:

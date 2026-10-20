@@ -18,7 +18,6 @@ test("what's new markers use the session-only routes", async () => {
   });
   await whatsNew.markSeen("2.2.0");
   await whatsNew.markAnnounced("2.2.0");
-  await whatsNew.snooze("2.2.0");
   await whatsNew.resetState();
 
   assert.deepEqual(calls, [
@@ -29,10 +28,6 @@ test("what's new markers use the session-only routes", async () => {
     },
     {
       endpoint: "/api/v1/whats-new/announced/",
-      request: { method: "put", requestBody: { "application/json": { version: "2.2.0" } } }
-    },
-    {
-      endpoint: "/api/v1/whats-new/snooze/",
       request: { method: "put", requestBody: { "application/json": { version: "2.2.0" } } }
     },
     { endpoint: "/api/v1/whats-new/state/", request: { method: "delete" } }
