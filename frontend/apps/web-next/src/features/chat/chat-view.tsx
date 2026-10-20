@@ -39,7 +39,11 @@ import { messageGeneratedFiles, messageToolCalls } from "./side-panel/message-to
 import { conversationUploads, type PanelContents } from "./side-panel/panel-contents";
 import type { PreviewQuote } from "./side-panel/side-panel-store";
 import { composeQuotedQuestion } from "./side-panel/question-quote";
-import { SidePanel, type ConversationCompanion } from "./side-panel/side-panel";
+import {
+  SidePanel,
+  type ConversationCompanion,
+  type NativeOccupant
+} from "./side-panel/side-panel";
 import { SidePanelProvider, useSidePanel } from "./side-panel/use-side-panel";
 import { isExportableDocument } from "./side-panel/file-panel";
 import { FlowPanel } from "@/features/flows/flow-panel";
@@ -975,29 +979,58 @@ function ConversationView({
     </ChatSystemMessage>
   ) : null;
 
+  // On a flow page: the flow, shown by the side panel as its native content.
+  const nativeOccupant: NativeOccupant | null = flowPanel
+    ? {
+        label: t("flow_panel_label"),
+        body: (frame) => <FlowPanel {...frame} />
+      }
+    : null;
+
   if (!started) {
+    const start = (
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <StartState
+          partner={partner}
+          onPickStarter={(prompt) => {
+            setInput(prompt);
+            startTextareaRef.current?.focus();
+          }}
+          composer={
+            <div ref={startComposerRef} className="flex w-full flex-col gap-3">
+              {errorNotice}
+              <Composer
+                {...composerProps}
+                variant="start"
+                partnerToken={partnerToken}
+                textareaRef={startTextareaRef}
+              />
+            </div>
+          }
+        />
+      </div>
+    );
     return (
       <>
-        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-          <StartState
-            partner={partner}
-            onPickStarter={(prompt) => {
-              setInput(prompt);
-              startTextareaRef.current?.focus();
-            }}
-            composer={
-              <div ref={startComposerRef} className="flex w-full flex-col gap-3">
-                {errorNotice}
-                <Composer
-                  {...composerProps}
-                  variant="start"
-                  partnerToken={partnerToken}
-                  textareaRef={startTextareaRef}
-                />
-              </div>
-            }
-          />
-        </div>
+        {companion ? (
+          // The page's own content (an empty flow) is there before the first
+          // question, with the start state in the conversation column.
+          <SidePanel
+            panel={panel}
+            messages={messages}
+            contents={panelContents}
+            versionsOf={versionsOf}
+            exportOf={exportOf}
+            native={nativeOccupant}
+            companion={companion}
+            latestActivity={null}
+            activity={null}
+          >
+            {start}
+          </SidePanel>
+        ) : (
+          start
+        )}
         {/* One file input for the view's lifetime (same position in both layouts). */}
         {fileInputElement}
       </>
@@ -1026,14 +1059,7 @@ function ConversationView({
         contents={panelContents}
         versionsOf={versionsOf}
         exportOf={exportOf}
-        native={
-          flowPanel
-            ? {
-                label: t("flow_panel_label"),
-                body: (frame) => <FlowPanel {...frame} />
-              }
-            : null
-        }
+        native={nativeOccupant}
         companion={companion}
         latestActivity={latestActivity}
         activity={

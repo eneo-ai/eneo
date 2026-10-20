@@ -343,6 +343,13 @@ export function FlowPanel({ switcher, maximise, primary, headingLevel }: Occupan
                     onOpenStep={openStep}
                     onInsertStep={(kind, index) => store.openNewStep(kind, index)}
                     onMoveStep={moveStep}
+                    onEdit={
+                      canEdit && !editing
+                        ? () => {
+                            if (!enter.isPending) enter.mutate(data.id);
+                          }
+                        : undefined
+                    }
                     onSaveInputs={(fields) =>
                       saveDefinition.mutateAsync({
                         definition: { ...data.definition, form_fields: fields },

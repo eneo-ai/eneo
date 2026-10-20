@@ -446,6 +446,7 @@ export function FlowDefinition({
   onInsertStep,
   onMoveStep,
   onSaveInputs,
+  onEdit,
   saving = false,
   problems = []
 }: {
@@ -464,6 +465,8 @@ export function FlowDefinition({
   onMoveStep?: (key: string, direction: -1 | 1) => void;
   /** Edit mode: saves the run inputs as the dialog hands them back; the dialog closes when it resolves. */
   onSaveInputs?: (fields: FormField[]) => Promise<unknown>;
+  /** View mode: enters edit mode (offered where there are no steps yet). */
+  onEdit?: () => void;
   /** An overview save (a move, the inputs) is on its way. */
   saving?: boolean;
   /** Problems the last overview save was refused for. */
@@ -556,6 +559,21 @@ export function FlowDefinition({
                 <StepKindPicker
                   label={t("flow_add_step_yourself")}
                   onPick={(kind) => onInsertStep(kind, 0)}
+                />
+              }
+            />
+          ) : canEdit && onEdit ? (
+            <EmptyState
+              isCompact
+              headingLevel={4}
+              title={t("flow_steps_none")}
+              description={t("flow_steps_empty_view_description")}
+              actions={
+                <Button
+                  label={t("flow_edit")}
+                  size="sm"
+                  icon={<Pencil className="size-4" />}
+                  onClick={onEdit}
                 />
               }
             />

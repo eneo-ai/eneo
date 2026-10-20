@@ -5,7 +5,6 @@ import { Button } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
-import { Token } from "@astryxdesign/core/Token";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Workflow } from "lucide-react";
 import Link from "next/link";
@@ -123,20 +122,32 @@ export function FlowsPage() {
     },
     {
       key: "steps",
-      header: t("flow_section_steps"),
-      width: proportional(2),
-      renderCell: (flow) => (
-        <span className="flex flex-wrap gap-1">
-          {flow.step_kinds.map((kind, index) => (
-            <Token key={`${kind}-${index}`} size="sm" label={stepKindLabel(kind, t)} />
-          ))}
-        </span>
-      )
+      header: t("flow_section_steps_short"),
+      width: pixel(180),
+      // A count and the kinds it is made of: a flow can have dozens of steps.
+      renderCell: (flow) => {
+        const counts = new Map<string, number>();
+        for (const kind of flow.step_kinds) counts.set(kind, (counts.get(kind) ?? 0) + 1);
+        return (
+          <span className="flex min-w-0 flex-col gap-0.5">
+            <span>{t("flow_steps_count", { count: flow.step_count })}</span>
+            {counts.size > 0 && (
+              <span className="text-ax-text-secondary text-xs">
+                {[...counts]
+                  .map(([kind, count]) => `${count} ${stepKindLabel(kind, t).toLocaleLowerCase()}`)
+                  .join(" · ")}
+              </span>
+            )}
+          </span>
+        );
+      }
     },
     {
       key: "status",
       header: t("status"),
-      width: proportional(1),
+      // Fixed: a proportional(1) share here would set the proportional group's
+      // minimum at 8 × 120 px and push the actions past the frame's edge.
+      width: pixel(140),
       renderCell: (flow) => (
         <Badge
           variant={flow.published_version != null ? "success" : "neutral"}

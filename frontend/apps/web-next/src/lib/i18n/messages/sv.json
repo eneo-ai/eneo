@@ -6759,6 +6759,7 @@
   "flow_add_step_last": "Lägg till steg sist",
   "flow_add_step_yourself": "Lägg till steg själv",
   "flow_steps_empty_edit_description": "Beskriv i chatten vad flödet ska göra, så föreslår assistenten stegen och du granskar dem här. Eller bygg stegen själv, ett i taget.",
+  "flow_steps_empty_view_description": "Beskriv i chatten vad flödet ska göra, så föreslår assistenten stegen. Eller tryck Redigera och bygg stegen själv.",
   "flow_inputs_note": "Ändrade indata",
   "flow_kind_llm_description": "En språkmodell läser indata eller tidigare steg och skriver text eller strukturerad data.",
   "flow_kind_compose_description": "Sätter ihop text ur indata och tidigare steg efter en mall, utan modell.",

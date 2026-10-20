@@ -6759,6 +6759,7 @@
   "flow_add_step_last": "Add a step at the end",
   "flow_add_step_yourself": "Add a step yourself",
   "flow_steps_empty_edit_description": "Describe in the chat what the flow should do; the assistant proposes the steps and you review them here. Or build the steps yourself, one at a time.",
+  "flow_steps_empty_view_description": "Describe in the chat what the flow should do and the assistant proposes the steps. Or press Edit and build the steps yourself.",
   "flow_inputs_note": "Changed the run inputs",
   "flow_kind_llm_description": "A language model reads inputs or earlier steps and writes text or structured data.",
   "flow_kind_compose_description": "Assembles text from inputs and earlier steps by a template, without a model.",
