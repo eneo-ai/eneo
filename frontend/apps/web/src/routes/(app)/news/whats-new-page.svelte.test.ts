@@ -16,6 +16,7 @@ const state = vi.hoisted(() => ({
   installedVersion: "2.3.0",
   markSeen: vi.fn().mockResolvedValue(undefined),
   markAnnounced: vi.fn().mockResolvedValue(undefined),
+  snooze: vi.fn().mockResolvedValue(undefined),
   start: vi.fn().mockResolvedValue("completed")
 }));
 
@@ -30,10 +31,10 @@ vi.mock("$lib/core/AppContext", () => ({
 }));
 vi.mock("$app/stores", async () => {
   const { readable } = await import("svelte/store");
-  return { page: readable({ url: new URL("https://eneo.test/whats-new") }) };
+  return { page: readable({ url: new URL("https://eneo.test/news") }) };
 });
 vi.mock("$app/state", () => ({
-  page: { state: {}, url: new URL("https://eneo.test/whats-new") }
+  page: { state: {}, url: new URL("https://eneo.test/news") }
 }));
 vi.mock("$app/navigation", () => ({
   goto: vi.fn(),
@@ -53,7 +54,8 @@ vi.mock("$lib/features/whats-new/whatsNewStore", async () => {
       enabled: writable(state.enabled),
       hasUnseen: writable(state.enabled),
       pendingAnnouncement: () => releasesForVersion(state.installedVersion)[0],
-      markLatestAnnounced: state.markAnnounced
+      markLatestAnnounced: state.markAnnounced,
+      snoozeLatest: state.snooze
     })
   };
 });
@@ -84,6 +86,31 @@ beforeEach(async () => {
 
 for (const locale of ["sv", "en"] satisfies Locale[]) {
   describe(locale, () => {
+    it("dismisses this version explicitly without scheduling a reminder", async () => {
+      overwriteGetLocale(() => locale);
+      render(WhatsNewAnnouncement);
+      const dialog = page.getByRole("dialog");
+      await expect.element(dialog).toBeVisible();
+      expect(dialog.element().querySelector('[data-slot="dialog-close"]')).toBeNull();
+      await page
+        .getByRole("button", { name: m.whats_new_announcement_dismiss(), exact: true })
+        .click();
+      await expect.element(dialog).not.toBeInTheDocument();
+      expect(state.snooze).not.toHaveBeenCalled();
+      expect(state.markSeen).not.toHaveBeenCalled();
+    });
+
+    it("keeps the dialog open when saving the reminder fails", async () => {
+      overwriteGetLocale(() => locale);
+      state.snooze.mockRejectedValueOnce(new Error("offline"));
+      render(WhatsNewAnnouncement);
+      await page
+        .getByRole("button", { name: m.whats_new_announcement_later(), exact: true })
+        .click();
+      await expect.element(page.getByRole("dialog")).toBeVisible();
+      expect(state.snooze).toHaveBeenCalledOnce();
+    });
+
     it("shares account navigation and marks news as the current page", async () => {
       overwriteGetLocale(() => locale);
       render(WhatsNewPage);
@@ -92,10 +119,10 @@ for (const locale of ["sv", "en"] satisfies Locale[]) {
         [m.my_account(), "/account"],
         [m.integrations(), "/account/integrations"],
         [m.api_keys(), "/account/api-keys"],
-        [m.whats_new(), "/whats-new"]
+        [m.whats_new(), "/news"]
       ]) {
         await expect
-          .element(navigation.getByRole("link", { name, exact: href !== "/whats-new" }))
+          .element(navigation.getByRole("link", { name, exact: href !== "/news" }))
           .toHaveAttribute("href", localizeHref(href));
       }
       await expect
@@ -146,6 +173,7 @@ for (const locale of ["sv", "en"] satisfies Locale[]) {
         .getByRole("button", { name: m.whats_new_announcement_later(), exact: true })
         .click();
       await expect.element(dialog).not.toBeInTheDocument();
+      expect(state.snooze).toHaveBeenCalledOnce();
     });
 
     for (const admin of [false, true]) {

@@ -1,4 +1,5 @@
 import re
+from datetime import datetime
 
 from pydantic import BaseModel, Field
 
@@ -23,6 +24,10 @@ class WhatsNewStatePublic(BaseModel):
     )
     announced_version: str | None = Field(
         description="Newest release the user has been shown the announcement for; null before the first one.",
+    )
+    remind_after: datetime | None = Field(
+        default=None,
+        description="Show the announced release again on a visit after this UTC time, unless already seen; null means no reminder.",
     )
 
 

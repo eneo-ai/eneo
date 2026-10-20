@@ -1,7 +1,7 @@
 # What's new — playbook
 
 `releases.json` is the single source for the **What's new** page in the app
-(`/whats-new`) and the release notes page on docs.eneo.ai. It is written for
+(`/news`) and the release notes page on docs.eneo.ai. It is written for
 the people who use Eneo — case workers, administrators — not for developers.
 Developer-facing notes belong in the GitHub release.
 
@@ -215,7 +215,7 @@ when their layout data reloads. New tenants follow the global default (on).
   for, and **announced** (`PUT …/announced/`), the newest release they have
   been shown the one-time announcement dialog for. The profile menu shows a
   dot while `releases[0].version` is newer than the seen marker, and the dot
-  clears when the user opens `/whats-new`.
+  clears when the user opens `/news`.
 - **Announcement.** On the first app load after a release reaches the user,
   a dialog shows the first four visible entries and the total entry count.
   Its primary action starts the walkthrough, or opens the page if there are
@@ -223,6 +223,12 @@ when their layout data reloads. New tenants follow the global default (on).
   seen marker alone, so the dot stays until the user opens the page. Accounts
   created after a dated release are marked announced without opening the
   dialog. Undated development releases announce to all existing accounts.
+- **Reminder.** "Remind me tomorrow" saves `remind_after` for the announced
+  version on the user's server-side state. It may announce again on an app load
+  after 24 hours, only while unread. Showing it consumes the reminder; "Not
+  interested" or Escape closes it until a newer version. Opening the news cancels
+  its reminder. A newer version announces immediately and replaces an older
+  reminder; older clients cannot change a newer version's reminder.
 - "Unseen" means `releases[0].version` is **newer** (semver) than the seen
   version, so a rollback or an older frontend pod during a rolling deploy
   does not re-light the dot. No coupling to the deployed version number:

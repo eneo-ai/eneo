@@ -86,6 +86,7 @@ export const load = async (event) => {
     whatsNewVersion: versions.frontend,
     whatsNewSeenVersion: whatsNewState ? whatsNewState.seen_version : undefined,
     whatsNewAnnouncedVersion: whatsNewState ? whatsNewState.announced_version : undefined,
+    whatsNewRemindAfter: whatsNewState?.remind_after,
     featureFlags,
     environment
   };
