@@ -120,6 +120,13 @@
   }
 
   const fmt = (n: number) => n.toLocaleString();
+  // Fixed k/M suffixes keep the summary short in every UI language. Details
+  // retain full, locale-formatted counts; calculations always use raw tokens.
+  const compactFormat = new Intl.NumberFormat("en", {
+    notation: "compact",
+    maximumSignificantDigits: 3
+  });
+  const fmtCompact = (n: number) => compactFormat.format(n).replace("K", "k");
 
   // Single source of truth lives in ChatService so the label and the context
   // window can't disagree about which model is active.
@@ -160,11 +167,11 @@
 {#if showBar}
   <Popover.Root>
     <Popover.Trigger
-      class="text-secondary hover:text-default flex w-full items-center gap-3 px-1 pt-1 text-[11px] leading-none transition-colors"
+      class="text-secondary hover:text-default flex w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-1 px-1 pt-1 text-[11px] leading-none transition-colors"
       aria-label={m.context_usage()}
     >
       <div
-        class="bg-tertiary border-dimmer relative h-2.5 flex-1 overflow-hidden rounded-full border"
+        class="bg-tertiary border-dimmer relative h-2.5 min-w-8 flex-1 overflow-hidden rounded-full border"
         role="progressbar"
         aria-valuenow={projectedTotal}
         aria-valuemin="0"
@@ -181,18 +188,23 @@
           {/if}
         {/each}
       </div>
-      <span class="flex items-center gap-1.5 whitespace-nowrap tabular-nums {summaryTone}">
+      <span
+        class="flex max-w-full flex-wrap items-center justify-end gap-1.5 tabular-nums {summaryTone}"
+      >
         {#if willExceed}
           <TriangleAlert class="h-3 w-3" aria-hidden="true" />
         {/if}
-        ≈ {fmt(projectedTotal)} / {fmt(chat.contextLimit)} ({projectedPercent.toFixed(
-          projectedPercent >= 10 ? 0 : 1
-        )}%)
+        <span class="whitespace-nowrap"
+          >≈ {fmtCompact(projectedTotal)} / {fmtCompact(chat.contextLimit)}</span
+        >
+        <span class="whitespace-nowrap"
+          >({projectedPercent.toFixed(projectedPercent >= 10 ? 0 : 1)}%)</span
+        >
         <Info class="text-tertiary h-3 w-3" aria-hidden="true" />
       </span>
     </Popover.Trigger>
 
-    <Popover.Content side="top" class="w-[340px] p-0" align="end">
+    <Popover.Content side="top" class="w-[340px] max-w-[calc(100vw-1rem)] p-0" align="end">
       <div class="border-default border-b px-4 py-3">
         <p class="text-default text-sm font-medium">{m.context_usage_estimate()}</p>
         <p class="text-secondary mt-0.5 text-xs tabular-nums">

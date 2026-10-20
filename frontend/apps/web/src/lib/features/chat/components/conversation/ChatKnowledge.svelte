@@ -43,13 +43,18 @@
 
 <Popover.Root>
   <Popover.Trigger
-    class={buttonVariants({ variant: "secondary", size: "sm" }) + " h-9 gap-1.5 rounded-lg"}
-    title={m.knowledge()}
+    class={buttonVariants({ variant: "secondary", size: "sm" }) +
+      " h-9 shrink-0 gap-1 rounded-lg px-2 @[40rem]/composer:gap-1.5 @[40rem]/composer:px-3"}
+    title={m.knowledge_attached_aria({ count: total })}
     aria-label={m.knowledge_attached_aria({ count: total })}
   >
     <BookOpen class="size-4" aria-hidden="true" />
-    <span class="hidden sm:inline">{m.knowledge()}</span>
-    <Badge variant="default" class="ml-0.5 px-1.5 tabular-nums" aria-hidden="true">{total}</Badge>
+    <span class="hidden @[40rem]/composer:inline">{m.knowledge()}</span>
+    <Badge
+      variant="default"
+      class="hidden px-1.5 tabular-nums @[24rem]/composer:inline-flex"
+      aria-hidden="true">{total}</Badge
+    >
   </Popover.Trigger>
 
   <Popover.Content side="top" align="start" class="w-80 gap-0 p-0">
