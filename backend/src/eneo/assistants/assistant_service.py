@@ -28,6 +28,7 @@ from eneo.assistants.assistant_repo import (
 )
 from eneo.assistants.assistant_update import AssistantUpdate
 from eneo.assistants.delegation import (
+    AssistantCandidate,
     AssistantDelegation,
     AssistantDelegationPlan,
     ConsultationRequest,
@@ -308,6 +309,15 @@ class _PreparedAssistantTurn:
     model_route: "str"
     initial_skill_context_tokens: "int"
     is_personal_default: "bool"
+
+
+@dataclass(frozen=True)
+class _ResolvedDelegation:
+    """The specialists bound for one question and their expected policies."""
+
+    plan: AssistantDelegationPlan
+    expected: dict[UUID, _PreparedAssistantTurn]
+    unavailable_candidates: int
 
 
 @dataclass(frozen=True)
@@ -3766,6 +3776,57 @@ class AssistantService:
 
         return response, datastore_result
 
+    async def _resolve_delegation_candidates(
+        self,
+        *,
+        plan: AssistantDelegationPlan,
+        prepared: _PreparedAssistantTurn,
+        disabled_mcp_server_ids: list[UUID] | None,
+        disabled_capabilities: list[CapabilityPurpose] | None,
+    ) -> _ResolvedDelegation:
+        """Bind the specialists this caller may consult, before any history write.
+
+        A member the caller cannot use (for example an unpublished assistant
+        for a viewer) is left out rather than failing the whole question: its
+        name is never offered to the model, and the orchestrator learns only
+        that some configured expertise is unavailable.
+        """
+        if (
+            prepared.space.id != plan.space_id
+            or prepared.active_assistant.id != plan.orchestrator_id
+            or not prepared.effective_completion_model.supports_tool_calling
+        ):
+            raise BadRequestException("Invalid group-chat orchestrator configuration.")
+
+        expected: dict[UUID, _PreparedAssistantTurn] = {plan.orchestrator_id: prepared}
+        candidates: list[AssistantCandidate] = []
+        unavailable = 0
+        for candidate in plan.candidates:
+            try:
+                child = await self._prepare_turn(
+                    question="",
+                    assistant_id=candidate.id,
+                    disabled_mcp_server_ids=disabled_mcp_server_ids,
+                    disabled_capabilities=disabled_capabilities,
+                )
+            except (UnauthorizedException, NotFoundException):
+                unavailable += 1
+                continue
+            if child.space.id != plan.space_id:
+                raise UnauthorizedException("Specialist is outside this space.")
+            expected[candidate.id] = child
+            candidates.append(candidate)
+        if not candidates:
+            raise BadRequestException(
+                "None of this group's specialists are available to you.",
+                code="no_available_specialists",
+            )
+        return _ResolvedDelegation(
+            plan=replace(plan, candidates=tuple(candidates)),
+            expected=expected,
+            unavailable_candidates=unavailable,
+        )
+
     async def _create_delegation(
         self,
         *,
@@ -3776,27 +3837,19 @@ class AssistantService:
         require_tool_approval: bool,
         disabled_mcp_server_ids: list[UUID] | None,
         disabled_capabilities: list[CapabilityPurpose] | None,
+        resolved: _ResolvedDelegation | None = None,
     ) -> AssistantDelegation:
-        if (
-            prepared.space.id != plan.space_id
-            or prepared.active_assistant.id != plan.orchestrator_id
-            or session.group_chat_id != plan.group_chat_id
-            or not prepared.effective_completion_model.supports_tool_calling
-        ):
-            raise BadRequestException("Invalid group-chat orchestrator configuration.")
-
-        expected: dict[UUID, _PreparedAssistantTurn] = {plan.orchestrator_id: prepared}
-        # Validate before names/descriptions are offered to the parent model.
-        for candidate in plan.candidates:
-            child = await self._prepare_turn(
-                question="",
-                assistant_id=candidate.id,
+        if resolved is None:
+            resolved = await self._resolve_delegation_candidates(
+                plan=plan,
+                prepared=prepared,
                 disabled_mcp_server_ids=disabled_mcp_server_ids,
                 disabled_capabilities=disabled_capabilities,
             )
-            if child.space.id != plan.space_id:
-                raise UnauthorizedException("Specialist is outside this space.")
-            expected[candidate.id] = child
+        plan = resolved.plan
+        expected = resolved.expected
+        if session.group_chat_id != plan.group_chat_id:
+            raise BadRequestException("Invalid group-chat orchestrator configuration.")
 
         def provider_policy(turn: _PreparedAssistantTurn) -> tuple[object, ...]:
             return (
@@ -3972,6 +4025,7 @@ class AssistantService:
             budget=ExecutionBudget(),
             execute=execute,
             authorize=authorize,
+            unavailable_candidates=resolved.unavailable_candidates,
         )
 
     async def ask(
@@ -4011,6 +4065,19 @@ class AssistantService:
         skill_composition = prepared.skill_composition
         skill_activation = prepared.skill_activation
         model_route = prepared.model_route
+
+        # Resolve the specialists before any conversation row exists, so an
+        # unusable configuration leaves no empty question behind.
+        resolved_delegation = (
+            await self._resolve_delegation_candidates(
+                plan=delegation_plan,
+                prepared=prepared,
+                disabled_mcp_server_ids=disabled_mcp_server_ids,
+                disabled_capabilities=disabled_capabilities,
+            )
+            if delegation_plan is not None
+            else None
+        )
 
         question_id: UUID | None = None
         question_created_at: datetime | None = None
@@ -4103,43 +4170,51 @@ class AssistantService:
                 require_tool_approval=require_tool_approval,
                 disabled_mcp_server_ids=disabled_mcp_server_ids,
                 disabled_capabilities=disabled_capabilities,
+                resolved=resolved_delegation,
             )
 
             async def orchestrated_answer() -> AsyncGenerator[Completion, None]:
                 with delegation.bind():
                     try:
-                        async with asyncio.timeout(delegation.budget.remaining_seconds):
-                            response, datastore_result = await self._execute_turn(
-                                prepared,
-                                session,
-                                completion_file_inputs,
-                                stream=True,
-                                version=version,
-                                require_tool_approval=require_tool_approval,
-                            )
-                            handled = await self._handle_response(
-                                response=response,
-                                datastore_result=datastore_result,
-                                question=question,
-                                files=files,
-                                completion_model=effective_completion_model,
-                                session=session,
-                                stream=True,
-                                assistant_id=assistant_to_ask.id,
-                                question_id=question_id,
-                                skill_plan=skill_plan,
-                                skill_runtime=skill_runtime,
-                                selected_model_route=model_route,
-                                initial_skill_context_tokens=prepared.initial_skill_context_tokens,
-                                version=version,
-                            )
-                            if isinstance(handled, NonStreamingAnswer):
-                                raise TypeError(
-                                    "Expected a streaming orchestration answer"
+                        # Registered so a pause for a user's tool approval
+                        # pushes the turn deadline back by the waited time.
+                        async with asyncio.timeout(
+                            delegation.budget.remaining_seconds
+                        ) as deadline:
+                            with delegation.budget.deadline(deadline):
+                                response, datastore_result = await self._execute_turn(
+                                    prepared,
+                                    session,
+                                    completion_file_inputs,
+                                    stream=True,
+                                    version=version,
+                                    require_tool_approval=require_tool_approval,
                                 )
-                            async with aclosing(handled):
-                                async for chunk in handled:
-                                    yield chunk
+                                handled = await self._handle_response(
+                                    response=response,
+                                    datastore_result=datastore_result,
+                                    question=question,
+                                    files=files,
+                                    completion_model=effective_completion_model,
+                                    session=session,
+                                    stream=True,
+                                    assistant_id=assistant_to_ask.id,
+                                    question_id=question_id,
+                                    skill_plan=skill_plan,
+                                    skill_runtime=skill_runtime,
+                                    selected_model_route=model_route,
+                                    initial_skill_context_tokens=(
+                                        prepared.initial_skill_context_tokens
+                                    ),
+                                    version=version,
+                                )
+                                if isinstance(handled, NonStreamingAnswer):
+                                    raise TypeError(
+                                        "Expected a streaming orchestration answer"
+                                    )
+                                async with aclosing(handled):
+                                    async for chunk in handled:
+                                        yield chunk
                     except (TimeoutError, ExecutionLimitReached) as exc:
                         limit = (
                             exc.limit

@@ -216,6 +216,7 @@ class ConsultationInfo(BaseModel):
     )
     usage: TokenUsage | None = None
     approval_id: str | None = None
+    awaiting_tool_call_ids: list[str] = Field(default_factory=list[str])
     completion_model_id: UUID | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
@@ -247,6 +248,7 @@ class ConsultationInfo(BaseModel):
             ],
             usage=consultation.usage,
             approval_id=consultation.approval_id,
+            awaiting_tool_call_ids=list(consultation.awaiting_tool_call_ids),
             completion_model_id=consultation.completion_model_id,
             input_tokens=consultation.input_tokens,
             output_tokens=consultation.output_tokens,

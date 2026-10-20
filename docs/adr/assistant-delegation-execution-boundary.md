@@ -101,7 +101,10 @@ existing Skill and MCP tool loop. Loopback knowledge/files and the MCP proxy
 remain the tool transport, including tools nested under a specialist.
 
 The plan binds the interactive caller, tenant, Space, group, orchestrator,
-candidate IDs and permitted attachment IDs on the server. Each later model,
+candidate IDs and permitted attachment IDs on the server. Candidates are
+resolved before any history row is written: a member the caller may not use is
+left out without exposing its name, the root learns only how many are
+unavailable, and a question with no usable specialist is refused up front. Each later model,
 query-embedding, reranking and MCP boundary rechecks current access/configuration in a short
 transaction. The parent is checked again before receiving specialist evidence.
 Changes to user eligibility, group membership, effective model, prompt, Skills
@@ -115,9 +118,17 @@ Non-streaming HTTP requests drain the same execution, so they cannot bypass the
 specialist's ordinary streaming tool loop.
 
 `ExecutionBudget` is one context shared across the root and its serial children.
-It bounds consultations, model requests/input, local tool dispatches, model
-output and total/child time. MCP transports still enforce their own per-call
-limits. Provider work inside an HTTP MCP request, including Eneo's loopback
+It bounds consultations, model requests, the size of a single request, local
+tool dispatches, model output and total/child time; the limits come from the
+`ORCHESTRATION_*` settings. Request size is an admission limit per request, not
+a sum over the turn: every round re-sends the conversation, so a cumulative
+input counter would cap a long conversation at a few rounds regardless of the
+model's window. Part of the model-request, output and time budget is reserved
+for the root's final synthesis; a child cannot start or continue on it, and a
+consultation refused for that reason is reported to the root as incomplete so
+the turn still ends in an answer that names its gaps. Waiting for a user's tool
+approval pauses the registered deadlines. MCP transports still enforce their
+own per-call limits. Provider work inside an HTTP MCP request, including Eneo's loopback
 leaf tools, is not separately charged to these in-process counters: the shared
 budget admits the tool dispatch, and its existing server-side limits apply.
 Distributed provider accounting is not implemented by passing Python context

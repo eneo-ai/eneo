@@ -6,7 +6,7 @@ import copy
 import json
 import re
 import uuid
-from contextlib import aclosing
+from contextlib import aclosing, nullcontext
 from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
@@ -2557,9 +2557,17 @@ class TenantModelAdapter(CompletionModelAdapter):
                             approval_id=approval_id,
                         )
 
-                        wait_result = await approval_manager.wait_for_approval(
-                            approval_id
-                        )
+                        # Waiting on the user is not execution time: an
+                        # orchestrated turn's deadlines pause meanwhile.
+                        approval_budget = current_execution_budget()
+                        async with (
+                            approval_budget.pause()
+                            if approval_budget is not None
+                            else nullcontext()
+                        ):
+                            wait_result = await approval_manager.wait_for_approval(
+                                approval_id
+                            )
                         if pending_approval_ids is not None:
                             pending_approval_ids.discard(approval_id)
                         timed_out = wait_result.timed_out

@@ -435,7 +435,9 @@ async def test_model_limit_prevents_another_outbound_request(
     monkeypatch.setattr(
         "eneo.model_providers.infrastructure.litellm_transport.acompletion", provider
     )
-    budget = ExecutionBudget(ExecutionLimits(model_requests=1))
+    budget = ExecutionBudget(
+        ExecutionLimits(model_requests=1, reserved_model_requests=0)
+    )
     with budget.bind():
         await dispatch_completion(
             model="test", messages=[{"role": "user", "content": "First"}]
@@ -971,7 +973,9 @@ async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
     if stop == "timeout":
         monkeypatch.setattr(
             "eneo.assistants.assistant_service.ExecutionBudget",
-            lambda: ExecutionBudget(ExecutionLimits(duration_seconds=0.1)),
+            lambda: ExecutionBudget(
+                ExecutionLimits(duration_seconds=0.1, reserved_seconds=0)
+            ),
         )
     async with turn.service.repo.session.begin():
         reply = await turn.service.ask(
@@ -1033,3 +1037,268 @@ async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
         turn.service.references_service.get_references.assert_not_awaited()
     else:
         turn.service.references_service.get_references.assert_awaited_once()
+
+
+def _consultation_arguments(child: UUID) -> str:
+    return json.dumps(
+        {"assistant_id": str(child), "question": "Check", "attachment_ids": []}
+    )
+
+
+async def test_specialists_cannot_spend_the_parent_reserve():
+    limits = ExecutionLimits(
+        model_requests=3,
+        reserved_model_requests=2,
+        output_characters=10,
+        reserved_output_characters=4,
+    )
+    budget = ExecutionBudget(limits)
+    with budget.child_scope():
+        budget.reserve_model_request(1)
+        with pytest.raises(ExecutionLimitReached) as model_refusal:
+            budget.reserve_model_request(1)
+        budget.record_output("abcdef")
+        with pytest.raises(ExecutionLimitReached) as output_refusal:
+            budget.record_output("g")
+    assert model_refusal.value.limit == "model_requests"
+    assert output_refusal.value.limit == "output_characters"
+    # The orchestrator still owns its reserved synthesis round and output.
+    budget.reserve_model_request(1)
+    budget.record_output("ghij")
+    assert (budget.model_requests, budget.output_characters) == (2, 10)
+
+
+async def test_consultation_is_refused_rather_than_started_on_the_reserve():
+    parent, child = uuid4(), uuid4()
+    started = False
+
+    async def execute(request):
+        nonlocal started
+        started = True
+        yield Completion(text="unreachable")
+
+    budget = ExecutionBudget(
+        ExecutionLimits(model_requests=3, reserved_model_requests=2)
+    )
+    budget.reserve_model_request(1)
+    runtime = AssistantDelegation(
+        parent_assistant_id=parent,
+        candidates=(AssistantCandidate(child, "IT", "IT"),),
+        attachment_ids=frozenset(),
+        budget=budget,
+        execute=execute,
+        authorize=AsyncMock(),
+    )
+    with runtime.bind():
+        events = [
+            event
+            async for event in runtime.call(
+                call_id="one", arguments=_consultation_arguments(child)
+            )
+        ]
+    assert events == []
+    assert not started
+    assert runtime.consultations == []
+    assert json.loads(runtime.result_for("one")) == {
+        "outcome": "incomplete",
+        "reason": "execution_limit_reached",
+    }
+    assert budget.consultations == 0
+    # The reserve is intact for the parent's final answer.
+    budget.reserve_model_request(1)
+    budget.reserve_model_request(1)
+
+
+async def test_request_size_is_an_admission_limit_not_a_cumulative_charge(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    provider = AsyncMock(return_value=response("Answer"))
+    monkeypatch.setattr(
+        "eneo.model_providers.infrastructure.litellm_transport.acompletion", provider
+    )
+    budget = ExecutionBudget(ExecutionLimits(request_bytes=200, model_requests=5))
+    with budget.bind():
+        for _ in range(4):
+            await dispatch_completion(
+                model="test", messages=[{"role": "user", "content": "x" * 100}]
+            )
+        with pytest.raises(ExecutionLimitReached) as refusal:
+            await dispatch_completion(
+                model="test", messages=[{"role": "user", "content": "x" * 400}]
+            )
+    assert refusal.value.limit == "request_bytes"
+    assert provider.await_count == 4
+    assert budget.largest_request_bytes < 200
+
+
+async def test_approval_wait_is_excluded_from_turn_and_consultation_deadlines():
+    budget = ExecutionBudget(
+        ExecutionLimits(
+            duration_seconds=0.4,
+            consultation_seconds=0.2,
+            reserved_seconds=0.05,
+        )
+    )
+    async with asyncio.timeout(budget.child_seconds) as deadline:
+        with budget.deadline(deadline):
+            before = deadline.when()
+            assert before is not None
+            async with budget.pause():
+                await asyncio.sleep(0.25)
+            after = deadline.when()
+            assert after is not None
+            assert after - before >= 0.25
+            assert not deadline.expired()
+            await asyncio.sleep(0.05)
+    assert budget.paused_seconds >= 0.25
+    assert budget.remaining_seconds > 0.25
+
+
+async def test_awaiting_approval_names_only_the_calls_the_approval_decides():
+    parent, child = uuid4(), uuid4()
+
+    def step(call_id: str, status: str, internal: bool) -> ToolCallMetadata:
+        return ToolCallMetadata(
+            server_name="knowledge" if internal else "inventory",
+            tool_name="search" if internal else "lookup",
+            tool_call_id=call_id,
+            result_status=status,
+            is_internal=internal,
+        )
+
+    async def execute(request):
+        yield Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[
+                step("internal", "pending", True),
+                step("external", "pending", False),
+            ],
+        )
+        yield Completion(
+            response_type=ResponseType.TOOL_APPROVAL_REQUIRED,
+            approval_id="approval-1",
+            tool_calls_metadata=[step("external", "awaiting_approval", False)],
+        )
+        yield Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[
+                step("internal", "succeeded", True),
+                step("external", "succeeded", False),
+            ],
+        )
+        yield Completion(response_type=ResponseType.TEXT, text="Done")
+
+    runtime = AssistantDelegation(
+        parent_assistant_id=parent,
+        candidates=(AssistantCandidate(child, "IT", "IT"),),
+        attachment_ids=frozenset(),
+        budget=ExecutionBudget(),
+        execute=execute,
+        authorize=AsyncMock(),
+    )
+    with runtime.bind():
+        events = [
+            event
+            async for event in runtime.call(
+                call_id="one", arguments=_consultation_arguments(child)
+            )
+        ]
+    snapshots = [event.consultations[0] for event in events if event.consultations]
+    awaiting = next(item for item in snapshots if item.status == "awaiting_approval")
+    assert awaiting.approval_id == "approval-1"
+    assert awaiting.awaiting_tool_call_ids == ["external"]
+    assert {step.tool_call_id for step in awaiting.tool_calls} == {
+        "internal",
+        "external",
+    }
+    assert snapshots[-1].status == "complete"
+    assert snapshots[-1].awaiting_tool_call_ids == []
+    assert snapshots[-1].approval_id is None
+    stored = ConsultationInfo.from_execution(awaiting)
+    assert stored.awaiting_tool_call_ids == ["external"]
+
+
+@pytest.mark.parametrize("readable", ["one", "none"])
+async def test_unreadable_specialists_are_excluded_before_history_writes(
+    turn: TurnFixture, monkeypatch: pytest.MonkeyPatch, readable: str
+):
+    from eneo.main.exceptions import BadRequestException
+
+    hidden = copy.deepcopy(turn.assistant)
+    hidden.id = uuid4()
+    hidden.name = "Hidden legal"
+    visible = copy.deepcopy(turn.assistant)
+    visible.id = uuid4()
+    visible.name = "IT"
+    plan = group_plan(turn, monkeypatch, visible)
+    turn.space.assistants.append(hidden)
+    turn.space.group_chats[0].assistants.append(GroupChatAssistant(hidden))
+    unreadable = {hidden.id} if readable == "one" else {hidden.id, visible.id}
+    plan = AssistantDelegationPlan(
+        plan.group_chat_id,
+        plan.space_id,
+        plan.orchestrator_id,
+        (
+            *plan.candidates,
+            AssistantCandidate(hidden.id, hidden.name, "Legal"),
+        ),
+    )
+    prepare = turn.service._prepare_turn
+
+    async def prepare_or_refuse(**kwargs):
+        if kwargs["assistant_id"] in unreadable:
+            raise UnauthorizedException(
+                "You do not have permission to use this assistant."
+            )
+        return await prepare(**kwargs)
+
+    monkeypatch.setattr(turn.service, "_prepare_turn", prepare_or_refuse)
+    created: list[AssistantDelegation] = []
+    create = turn.service._create_delegation
+
+    async def capture(**kwargs):
+        created.append(await create(**kwargs))
+        return created[-1]
+
+    monkeypatch.setattr(turn.service, "_create_delegation", capture)
+
+    async def answer_without_consulting(**kwargs: object):
+        return response("No specialist was needed.", stream=True)
+
+    turn.provider.side_effect = answer_without_consulting
+
+    if readable == "none":
+        with pytest.raises(BadRequestException) as refusal:
+            async with turn.service.repo.session.begin():
+                await turn.service.ask(
+                    question="Review",
+                    assistant_id=turn.assistant.id,
+                    group_chat_id=plan.group_chat_id,
+                    delegation_plan=plan,
+                    stream=True,
+                    version=2,
+                )
+        assert refusal.value.code == "no_available_specialists"
+        turn.history.create_session_with_question_placeholder.assert_not_awaited()
+        turn.history.create_question_placeholder.assert_not_awaited()
+        assert created == []
+        return
+
+    async with turn.service.repo.session.begin():
+        reply = await turn.service.ask(
+            question="Review",
+            assistant_id=turn.assistant.id,
+            group_chat_id=plan.group_chat_id,
+            delegation_plan=plan,
+            stream=True,
+            version=2,
+        )
+    events = [event async for event in reply.answer]
+    assert not [event for event in events if event.response_type == ResponseType.ERROR]
+    assert turn.history.create_session_with_question_placeholder.await_count == 1
+    (runtime,) = created
+    assert set(runtime.candidates) == {visible.id}
+    assert runtime.unavailable_candidates == 1
+    description = runtime.tool_definition.description
+    assert "Hidden legal" not in description
+    assert "1 configured specialist(s) are not available" in description

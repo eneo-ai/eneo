@@ -205,6 +205,9 @@ class AssistantConsultation:
     references: list[McpToolReference] = field(default_factory=list[McpToolReference])
     usage: TokenUsage | None = None
     approval_id: str | None = None
+    # Provider IDs of the steps a pending approval decides. Internal tools in
+    # the same round never need approval and are not listed.
+    awaiting_tool_call_ids: list[str] = field(default_factory=list[str])
     # Server-issued identities are separate from provider-local approval IDs.
     step_ids: list[UUID] = field(default_factory=list[UUID])
     completion_model_id: UUID | None = None

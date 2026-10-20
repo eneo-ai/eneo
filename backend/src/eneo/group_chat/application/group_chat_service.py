@@ -532,7 +532,8 @@ class GroupChatService:
             )
         if require_tool_approval and group_chat.orchestrator_assistant_id is None:
             raise BadRequestException(
-                "Tool approval requires an orchestrated group chat."
+                "Tool approval requires an orchestrated group chat.",
+                code="not_supported",
             )
 
         # Existing conversations contribute history to assistant selection. A
