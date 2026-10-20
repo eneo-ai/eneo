@@ -4520,7 +4520,7 @@
   "whats_new_tour_previous": "Föregående",
   "whats_new_tour_progress": "Steg {current} av {total}",
   "whats_new_tour_version": "v{version}",
-  "whats_new_announcement_later": "Påminn mig imorgon",
+  "whats_new_announcement_later": "Senare",
   "whats_new_announcement_dismiss": "Inte intresserad",
   "whats_new_announcement_dismiss_hint": "Nästa besked visas först vid nästa version.",
   "whats_new_reminder_failed": "Kunde inte spara påminnelsen. Försök igen.",

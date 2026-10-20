@@ -223,7 +223,7 @@ when their layout data reloads. New tenants follow the global default (on).
   seen marker alone, so the dot stays until the user opens the page. Accounts
   created after a dated release are marked announced without opening the
   dialog. Undated development releases announce to all existing accounts.
-- **Reminder.** "Remind me tomorrow" saves a local-storage deadline scoped to the
+- **Reminder.** "Later" saves a local-storage deadline scoped to the
   user id and installed version. It may announce again in that browser on an app
   load after 24 hours, only while unread. Showing it consumes the reminder; "Not
   interested" or Escape closes it until a newer version. Opening the news cancels
