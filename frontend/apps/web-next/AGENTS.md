@@ -188,8 +188,9 @@ the default name on a backend name collision (9017).
   recreate it with `bun patch @astryxdesign/core` (keep the diff free of bun's
   `.bun-tag-*` file), or drop a part Astryx has fixed.
   - Mermaid 11.16.1 inserts SVG styles without a CSP nonce. The
-    `mermaid@11.16.1` patch uses `NonceProvider`'s request nonce both while
-    measuring the diagram and in its sanitized SVG output. The production
+    `mermaid@11.16.1` patch uses `NonceProvider`'s request nonce while measuring,
+    parsing and displaying the SVG. Serialization hides a live node's nonce,
+    so it is restored on inert markup before sanitization and display. The production
     `tests/answer-presentation.spec.ts` covers this; retain the patch on upgrades
     until upstream supports nonces, then remove it once that test passes.
 - **Theme**: `src/theme/eneo-theme.ts` extends Astryx Neutral with the Eneo

@@ -11,20 +11,35 @@ diff --git a/dist/mermaid.core.mjs b/dist/mermaid.core.mjs
    style1.innerHTML = rules;
    svg.insertBefore(style1, firstChild);
    try {
-@@ -1348,6 +1351,16 @@
+@@ -1336,6 +1339,16 @@
+   const a11yDescr = diag.db.getAccDescription?.();
+   addA11yInfo(diagramType, svgNode, a11yTitle, a11yDescr);
+   root.select(`[id="${id39}"]`).selectAll("foreignobject > *").attr("xmlns", XMLNS_XHTML_STD);
++  // Eneo: live SVG serialization hides nonces. Restore only the renderer's
++  // own style on inert markup before DOMPurify parses it, and on its output.
++  const withStyleNonce = (markup) => {
++    if (!styleNonce) return markup;
++    const template = document.createElement("template");
++    template.innerHTML = markup;
++    const style = template.content.firstElementChild?.querySelector(":scope > style");
++    if (style) style.setAttribute("nonce", styleNonce);
++    return template.innerHTML;
++  };
+   let svgCode = root.select(enclosingDivID_selector).node().innerHTML;
+   log.debug("config.arrowMarkerAbsolute", config.arrowMarkerAbsolute);
+   svgCode = cleanUpSvgCode(svgCode, isSandboxed, evaluate(config.arrowMarkerAbsolute));
+@@ -1343,12 +1356,13 @@
+     const svgEl = root.select(enclosingDivID_selector + " svg").node();
+     svgCode = putIntoIFrame(svgCode, svgEl);
+   } else if (!isLooseSecurityLevel) {
+-    svgCode = DOMPurify.sanitize(svgCode, {
++    svgCode = DOMPurify.sanitize(withStyleNonce(svgCode), {
+       ADD_TAGS: DOMPURIFY_TAGS,
        ADD_ATTR: DOMPURIFY_ATTR,
        HTML_INTEGRATION_POINTS: { foreignobject: true }
      });
-+  }
-+  // Eneo: sanitization and nonce hiding can remove the serialized nonce.
-+  // Add it to the sanitized, inert SVG before Streamdown inserts that SVG.
-+  if (styleNonce && !isSandboxed) {
-+    const template = document.createElement("template");
-+    template.innerHTML = svgCode;
-+    const style = template.content.firstElementChild?.firstElementChild;
-+    // Only the renderer's own, prepended style receives the nonce.
-+    if (style?.localName === "style") style.setAttribute("nonce", styleNonce);
-+    svgCode = template.innerHTML;
    }
++  if (!isSandboxed) svgCode = withStyleNonce(svgCode);
    attachFunctions();
    if (parseEncounteredException) {
+     throw parseEncounteredException;

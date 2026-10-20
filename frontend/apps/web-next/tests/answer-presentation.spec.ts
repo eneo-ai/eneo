@@ -10,7 +10,8 @@ Inline: \(E = mc^2\). Priser: $5 och $10.
 \sum_{i=1}^{n} i = \frac{n(n+1)}{2}
 \]
 
-` + "```mermaid\nflowchart LR\nA[Start] --> B[Klart]\n```";
+` +
+  "```mermaid\nflowchart LR\naccTitle: Testflöde\naccDescr: Från start till klart\nA[Start] --> B[Klart]\n```";
 
 test("renders formulas and diagrams through the production CSP and follows theme changes", async ({
   page
@@ -47,6 +48,7 @@ test("renders formulas and diagrams through the production CSP and follows theme
   await expect(log.getByText("Priser: $5 och $10.", { exact: false })).toBeVisible();
   const diagram = log.locator('[data-streamdown="mermaid"] svg[id^="mermaid-"]');
   await expect(diagram).toBeVisible();
+  await expect(diagram).toHaveAccessibleName("Testflöde");
   const node = diagram.locator(".node rect").first();
   const lightFill = await node.evaluate((element) => getComputedStyle(element).fill);
   await expect(diagram.locator("style")).toHaveCount(1);
