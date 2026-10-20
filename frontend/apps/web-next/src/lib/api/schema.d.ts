@@ -11004,6 +11004,8 @@ export interface components {
       /** References */
       references: components["schemas"]["InfoBlobAskAssistantPublic"][];
       tools: components["schemas"]["UseTools"];
+      /** Consultations */
+      consultations?: components["schemas"]["ConsultationInfo"][];
       /**
        * Mcp Tool References
        * @default []
@@ -12739,6 +12741,113 @@ export interface components {
      * @enum {string}
      */
     ConstrainingSource: "admin_policy" | "operator_ceiling";
+    /**
+     * ConsultationInfo
+     * @description Version-one consultation history, owned by its parent question.
+     */
+    ConsultationInfo: {
+      /**
+       * Schema Version
+       * @default 1
+       * @constant
+       */
+      schema_version?: 1;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Ordinal */
+      ordinal: number;
+      /**
+       * Assistant Id
+       * Format: uuid
+       */
+      assistant_id: string;
+      /** Assistant Name */
+      assistant_name: string;
+      /** Question */
+      question: string;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        | "running"
+        | "awaiting_approval"
+        | "complete"
+        | "denied"
+        | "timeout"
+        | "cancelled"
+        | "incomplete"
+        | "failed";
+      /** Answer */
+      answer: string;
+      /** Tool Calls */
+      tool_calls?: components["schemas"]["ConsultationToolCall"][];
+      /** References */
+      references?: components["schemas"]["McpToolReferencePublic"][];
+      usage?: components["schemas"]["TokenUsage"] | null;
+      /** Approval Id */
+      approval_id?: string | null;
+      /** Completion Model Id */
+      completion_model_id?: string | null;
+      /** Input Tokens */
+      input_tokens?: number | null;
+      /** Output Tokens */
+      output_tokens?: number | null;
+    };
+    /**
+     * ConsultationToolCall
+     * @description A stored step has a server identity independent of provider approval IDs.
+     */
+    ConsultationToolCall: {
+      /** Server Name */
+      server_name: string;
+      /** Tool Name */
+      tool_name: string;
+      /** Title */
+      title?: string | null;
+      /** Arguments */
+      arguments?: {
+        [key: string]: unknown;
+      } | null;
+      /** Tool Call Id */
+      tool_call_id?: string | null;
+      /** Approved */
+      approved?: boolean | null;
+      /** Result Status */
+      result_status?: string | null;
+      /** Result */
+      result?: string | null;
+      /** Mcp Tool Name */
+      mcp_tool_name?: string | null;
+      /** Purpose */
+      purpose?: string | null;
+      /** Is Internal */
+      is_internal?: boolean | null;
+      /** Is Bundled */
+      is_bundled?: boolean | null;
+      /** Meta */
+      meta?: {
+        [key: string]: unknown;
+      } | null;
+      /** Generated File Ids */
+      generated_file_ids?: string[] | null;
+      /** Structured Content */
+      structured_content?: {
+        [key: string]: unknown;
+      } | null;
+      /** App View */
+      app_view?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+    };
     /**
      * ContentDisposition
      * @enum {string}
@@ -14942,6 +15051,8 @@ export interface components {
        * Format: uuid
        */
       space_id: string;
+      /** Orchestrator Assistant Id */
+      orchestrator_assistant_id?: string | null;
       /** Allow Mentions */
       allow_mentions: boolean;
       /** Show Response Label */
@@ -15021,6 +15132,8 @@ export interface components {
     };
     /** GroupChatUpdateSchema */
     GroupChatUpdateSchema: {
+      /** Orchestrator Assistant Id */
+      orchestrator_assistant_id?: string | null;
       /**
        * Name
        * @description The name of the group chat.
@@ -16845,6 +16958,8 @@ export interface components {
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /** Consultations */
+      consultations?: components["schemas"]["ConsultationInfo"][];
       /** Skill Provenance */
       skill_provenance?: components["schemas"]["SkillExecutionReference"][] | null;
       /** Reasoning */
@@ -16941,6 +17056,8 @@ export interface components {
        * @default []
        */
       tool_calls?: components["schemas"]["ToolCallInfo"][];
+      /** Consultations */
+      consultations?: components["schemas"]["ConsultationInfo"][];
       /** Skill Provenance */
       skill_provenance?: components["schemas"]["SkillExecutionReference"][] | null;
       /** Reasoning */
@@ -23330,6 +23447,26 @@ export interface components {
      * @enum {string}
      */
     TokenCountSource: "litellm" | "fallback_estimate";
+    /**
+     * TokenUsage
+     * @description Provider usage for one logical completion.
+     *
+     *     The base fields accumulate reported usage across every provider request made
+     *     by that completion. The context fields retain only the final provider request
+     *     and response, which is the snapshot relevant to model headroom.
+     */
+    TokenUsage: {
+      /** Prompt Tokens */
+      prompt_tokens?: number | null;
+      /** Completion Tokens */
+      completion_tokens?: number | null;
+      /** Reasoning Tokens */
+      reasoning_tokens?: number | null;
+      /** Context Prompt Tokens */
+      context_prompt_tokens?: number | null;
+      /** Context Completion Tokens */
+      context_completion_tokens?: number | null;
+    };
     /** TokenUsageSummary */
     TokenUsageSummary: {
       /**
@@ -25014,7 +25151,24 @@ export interface components {
       set_at: string;
     };
     /** @enum {string} */
-    EneoEventType: "tool_call" | "tool_approval_required" | "tool_approval_timeout" | "token_usage";
+    EneoEventType:
+      | "tool_call"
+      | "tool_approval_required"
+      | "tool_approval_timeout"
+      | "token_usage"
+      | "consultation";
+    /** SSEConsultation */
+    SSEConsultation: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** @default consultation */
+      eneo_event_type?: components["schemas"]["EneoEventType"];
+      /** Consultations */
+      consultations: components["schemas"]["ConsultationInfo"][];
+    };
     /** SSEText */
     SSEText: {
       /**
@@ -25207,6 +25361,8 @@ export interface components {
       /** References */
       references: components["schemas"]["InfoBlobAskAssistantPublic"][];
       tools: components["schemas"]["UseTools"];
+      /** Consultations */
+      consultations?: components["schemas"]["ConsultationInfo"][];
       /**
        * Mcp Tool References
        * @default []
@@ -29765,6 +29921,8 @@ export interface operations {
             /** References */
             references: components["schemas"]["InfoBlobAskAssistantPublic"][];
             tools: components["schemas"]["UseTools"];
+            /** Consultations */
+            consultations?: components["schemas"]["ConsultationInfo"][];
             /**
              * Mcp Tool References
              * @default []
@@ -29867,6 +30025,113 @@ export interface operations {
                 provider_name?: string | null;
                 /** Deprecation Date */
                 deprecation_date?: string | null;
+              };
+              /**
+               * ConsultationInfo
+               * @description Version-one consultation history, owned by its parent question.
+               */
+              ConsultationInfo: {
+                /**
+                 * Schema Version
+                 * @default 1
+                 * @constant
+                 */
+                schema_version?: 1;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Ordinal */
+                ordinal: number;
+                /**
+                 * Assistant Id
+                 * Format: uuid
+                 */
+                assistant_id: string;
+                /** Assistant Name */
+                assistant_name: string;
+                /** Question */
+                question: string;
+                /**
+                 * Status
+                 * @enum {string}
+                 */
+                status:
+                  | "running"
+                  | "awaiting_approval"
+                  | "complete"
+                  | "denied"
+                  | "timeout"
+                  | "cancelled"
+                  | "incomplete"
+                  | "failed";
+                /** Answer */
+                answer: string;
+                /** Tool Calls */
+                tool_calls?: components["schemas"]["ConsultationToolCall"][];
+                /** References */
+                references?: components["schemas"]["McpToolReferencePublic"][];
+                usage?: components["schemas"]["TokenUsage"] | null;
+                /** Approval Id */
+                approval_id?: string | null;
+                /** Completion Model Id */
+                completion_model_id?: string | null;
+                /** Input Tokens */
+                input_tokens?: number | null;
+                /** Output Tokens */
+                output_tokens?: number | null;
+              };
+              /**
+               * ConsultationToolCall
+               * @description A stored step has a server identity independent of provider approval IDs.
+               */
+              ConsultationToolCall: {
+                /** Server Name */
+                server_name: string;
+                /** Tool Name */
+                tool_name: string;
+                /** Title */
+                title?: string | null;
+                /** Arguments */
+                arguments?: {
+                  [key: string]: unknown;
+                } | null;
+                /** Tool Call Id */
+                tool_call_id?: string | null;
+                /** Approved */
+                approved?: boolean | null;
+                /** Result Status */
+                result_status?: string | null;
+                /** Result */
+                result?: string | null;
+                /** Mcp Tool Name */
+                mcp_tool_name?: string | null;
+                /** Purpose */
+                purpose?: string | null;
+                /** Is Internal */
+                is_internal?: boolean | null;
+                /** Is Bundled */
+                is_bundled?: boolean | null;
+                /** Meta */
+                meta?: {
+                  [key: string]: unknown;
+                } | null;
+                /** Generated File Ids */
+                generated_file_ids?: string[] | null;
+                /** Structured Content */
+                structured_content?: {
+                  [key: string]: unknown;
+                } | null;
+                /** App View */
+                app_view?: {
+                  [key: string]: unknown;
+                } | null;
+                /**
+                 * Step Id
+                 * Format: uuid
+                 */
+                step_id: string;
               };
               /** FilePublic */
               FilePublic: {
@@ -30047,6 +30312,26 @@ export interface operations {
                 presence_penalty?: components["schemas"]["ModelKwargCapability"];
                 frequency_penalty?: components["schemas"]["ModelKwargCapability"];
                 top_k?: components["schemas"]["ModelKwargCapability"];
+              };
+              /**
+               * TokenUsage
+               * @description Provider usage for one logical completion.
+               *
+               *     The base fields accumulate reported usage across every provider request made
+               *     by that completion. The context fields retain only the final provider request
+               *     and response, which is the snapshot relevant to model headroom.
+               */
+              TokenUsage: {
+                /** Prompt Tokens */
+                prompt_tokens?: number | null;
+                /** Completion Tokens */
+                completion_tokens?: number | null;
+                /** Reasoning Tokens */
+                reasoning_tokens?: number | null;
+                /** Context Prompt Tokens */
+                context_prompt_tokens?: number | null;
+                /** Context Completion Tokens */
+                context_completion_tokens?: number | null;
               };
               /** ToolAssistant */
               ToolAssistant: {
@@ -30213,6 +30498,8 @@ export interface operations {
             /** References */
             references: components["schemas"]["InfoBlobAskAssistantPublic"][];
             tools: components["schemas"]["UseTools"];
+            /** Consultations */
+            consultations?: components["schemas"]["ConsultationInfo"][];
             /**
              * Mcp Tool References
              * @default []
@@ -30315,6 +30602,113 @@ export interface operations {
                 provider_name?: string | null;
                 /** Deprecation Date */
                 deprecation_date?: string | null;
+              };
+              /**
+               * ConsultationInfo
+               * @description Version-one consultation history, owned by its parent question.
+               */
+              ConsultationInfo: {
+                /**
+                 * Schema Version
+                 * @default 1
+                 * @constant
+                 */
+                schema_version?: 1;
+                /**
+                 * Id
+                 * Format: uuid
+                 */
+                id: string;
+                /** Ordinal */
+                ordinal: number;
+                /**
+                 * Assistant Id
+                 * Format: uuid
+                 */
+                assistant_id: string;
+                /** Assistant Name */
+                assistant_name: string;
+                /** Question */
+                question: string;
+                /**
+                 * Status
+                 * @enum {string}
+                 */
+                status:
+                  | "running"
+                  | "awaiting_approval"
+                  | "complete"
+                  | "denied"
+                  | "timeout"
+                  | "cancelled"
+                  | "incomplete"
+                  | "failed";
+                /** Answer */
+                answer: string;
+                /** Tool Calls */
+                tool_calls?: components["schemas"]["ConsultationToolCall"][];
+                /** References */
+                references?: components["schemas"]["McpToolReferencePublic"][];
+                usage?: components["schemas"]["TokenUsage"] | null;
+                /** Approval Id */
+                approval_id?: string | null;
+                /** Completion Model Id */
+                completion_model_id?: string | null;
+                /** Input Tokens */
+                input_tokens?: number | null;
+                /** Output Tokens */
+                output_tokens?: number | null;
+              };
+              /**
+               * ConsultationToolCall
+               * @description A stored step has a server identity independent of provider approval IDs.
+               */
+              ConsultationToolCall: {
+                /** Server Name */
+                server_name: string;
+                /** Tool Name */
+                tool_name: string;
+                /** Title */
+                title?: string | null;
+                /** Arguments */
+                arguments?: {
+                  [key: string]: unknown;
+                } | null;
+                /** Tool Call Id */
+                tool_call_id?: string | null;
+                /** Approved */
+                approved?: boolean | null;
+                /** Result Status */
+                result_status?: string | null;
+                /** Result */
+                result?: string | null;
+                /** Mcp Tool Name */
+                mcp_tool_name?: string | null;
+                /** Purpose */
+                purpose?: string | null;
+                /** Is Internal */
+                is_internal?: boolean | null;
+                /** Is Bundled */
+                is_bundled?: boolean | null;
+                /** Meta */
+                meta?: {
+                  [key: string]: unknown;
+                } | null;
+                /** Generated File Ids */
+                generated_file_ids?: string[] | null;
+                /** Structured Content */
+                structured_content?: {
+                  [key: string]: unknown;
+                } | null;
+                /** App View */
+                app_view?: {
+                  [key: string]: unknown;
+                } | null;
+                /**
+                 * Step Id
+                 * Format: uuid
+                 */
+                step_id: string;
               };
               /** FilePublic */
               FilePublic: {
@@ -30495,6 +30889,26 @@ export interface operations {
                 presence_penalty?: components["schemas"]["ModelKwargCapability"];
                 frequency_penalty?: components["schemas"]["ModelKwargCapability"];
                 top_k?: components["schemas"]["ModelKwargCapability"];
+              };
+              /**
+               * TokenUsage
+               * @description Provider usage for one logical completion.
+               *
+               *     The base fields accumulate reported usage across every provider request made
+               *     by that completion. The context fields retain only the final provider request
+               *     and response, which is the snapshot relevant to model headroom.
+               */
+              TokenUsage: {
+                /** Prompt Tokens */
+                prompt_tokens?: number | null;
+                /** Completion Tokens */
+                completion_tokens?: number | null;
+                /** Reasoning Tokens */
+                reasoning_tokens?: number | null;
+                /** Context Prompt Tokens */
+                context_prompt_tokens?: number | null;
+                /** Context Completion Tokens */
+                context_completion_tokens?: number | null;
               };
               /** ToolAssistant */
               ToolAssistant: {
@@ -31378,7 +31792,8 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
-                    | "token_usage";
+                    | "token_usage"
+                    | "consultation";
                   /**
                    * McpToolReferencePublic
                    * @description One MCP resource block captured from a tool call.
@@ -31496,7 +31911,8 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
-                    | "token_usage";
+                    | "token_usage"
+                    | "consultation";
                   /**
                    * ToolCallInfo
                    * @description Info about a single tool being called.
@@ -31566,7 +31982,8 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
-                    | "token_usage";
+                    | "token_usage"
+                    | "consultation";
                   /**
                    * ToolCallInfo
                    * @description Info about a single tool being called.
@@ -31677,7 +32094,8 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
-                    | "token_usage";
+                    | "token_usage"
+                    | "consultation";
                   /** TokenUsageEvent */
                   TokenUsageEvent: {
                     /**
@@ -31737,6 +32155,8 @@ export interface operations {
                 /** References */
                 references: components["schemas"]["InfoBlobAskAssistantPublic"][];
                 tools: components["schemas"]["UseTools"];
+                /** Consultations */
+                consultations?: components["schemas"]["ConsultationInfo"][];
                 /**
                  * Mcp Tool References
                  * @default []
@@ -31839,6 +32259,113 @@ export interface operations {
                     provider_name?: string | null;
                     /** Deprecation Date */
                     deprecation_date?: string | null;
+                  };
+                  /**
+                   * ConsultationInfo
+                   * @description Version-one consultation history, owned by its parent question.
+                   */
+                  ConsultationInfo: {
+                    /**
+                     * Schema Version
+                     * @default 1
+                     * @constant
+                     */
+                    schema_version?: 1;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Ordinal */
+                    ordinal: number;
+                    /**
+                     * Assistant Id
+                     * Format: uuid
+                     */
+                    assistant_id: string;
+                    /** Assistant Name */
+                    assistant_name: string;
+                    /** Question */
+                    question: string;
+                    /**
+                     * Status
+                     * @enum {string}
+                     */
+                    status:
+                      | "running"
+                      | "awaiting_approval"
+                      | "complete"
+                      | "denied"
+                      | "timeout"
+                      | "cancelled"
+                      | "incomplete"
+                      | "failed";
+                    /** Answer */
+                    answer: string;
+                    /** Tool Calls */
+                    tool_calls?: components["schemas"]["ConsultationToolCall"][];
+                    /** References */
+                    references?: components["schemas"]["McpToolReferencePublic"][];
+                    usage?: components["schemas"]["TokenUsage"] | null;
+                    /** Approval Id */
+                    approval_id?: string | null;
+                    /** Completion Model Id */
+                    completion_model_id?: string | null;
+                    /** Input Tokens */
+                    input_tokens?: number | null;
+                    /** Output Tokens */
+                    output_tokens?: number | null;
+                  };
+                  /**
+                   * ConsultationToolCall
+                   * @description A stored step has a server identity independent of provider approval IDs.
+                   */
+                  ConsultationToolCall: {
+                    /** Server Name */
+                    server_name: string;
+                    /** Tool Name */
+                    tool_name: string;
+                    /** Title */
+                    title?: string | null;
+                    /** Arguments */
+                    arguments?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Approved */
+                    approved?: boolean | null;
+                    /** Result Status */
+                    result_status?: string | null;
+                    /** Result */
+                    result?: string | null;
+                    /** Mcp Tool Name */
+                    mcp_tool_name?: string | null;
+                    /** Purpose */
+                    purpose?: string | null;
+                    /** Is Internal */
+                    is_internal?: boolean | null;
+                    /** Is Bundled */
+                    is_bundled?: boolean | null;
+                    /** Meta */
+                    meta?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** Generated File Ids */
+                    generated_file_ids?: string[] | null;
+                    /** Structured Content */
+                    structured_content?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** App View */
+                    app_view?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /**
+                     * Step Id
+                     * Format: uuid
+                     */
+                    step_id: string;
                   };
                   /** FilePublic */
                   FilePublic: {
@@ -32020,6 +32547,26 @@ export interface operations {
                     frequency_penalty?: components["schemas"]["ModelKwargCapability"];
                     top_k?: components["schemas"]["ModelKwargCapability"];
                   };
+                  /**
+                   * TokenUsage
+                   * @description Provider usage for one logical completion.
+                   *
+                   *     The base fields accumulate reported usage across every provider request made
+                   *     by that completion. The context fields retain only the final provider request
+                   *     and response, which is the snapshot relevant to model headroom.
+                   */
+                  TokenUsage: {
+                    /** Prompt Tokens */
+                    prompt_tokens?: number | null;
+                    /** Completion Tokens */
+                    completion_tokens?: number | null;
+                    /** Reasoning Tokens */
+                    reasoning_tokens?: number | null;
+                    /** Context Prompt Tokens */
+                    context_prompt_tokens?: number | null;
+                    /** Context Completion Tokens */
+                    context_completion_tokens?: number | null;
+                  };
                   /** ToolAssistant */
                   ToolAssistant: {
                     /**
@@ -32049,6 +32596,193 @@ export interface operations {
                 error_code?: number | null;
                 /** Code */
                 code?: string | null;
+              }
+            | {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** @default consultation */
+                eneo_event_type?: components["schemas"]["EneoEventType"];
+                /** Consultations */
+                consultations: components["schemas"]["ConsultationInfo"][];
+                $defs: {
+                  /**
+                   * ConsultationInfo
+                   * @description Version-one consultation history, owned by its parent question.
+                   */
+                  ConsultationInfo: {
+                    /**
+                     * Schema Version
+                     * @default 1
+                     * @constant
+                     */
+                    schema_version?: 1;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Ordinal */
+                    ordinal: number;
+                    /**
+                     * Assistant Id
+                     * Format: uuid
+                     */
+                    assistant_id: string;
+                    /** Assistant Name */
+                    assistant_name: string;
+                    /** Question */
+                    question: string;
+                    /**
+                     * Status
+                     * @enum {string}
+                     */
+                    status:
+                      | "running"
+                      | "awaiting_approval"
+                      | "complete"
+                      | "denied"
+                      | "timeout"
+                      | "cancelled"
+                      | "incomplete"
+                      | "failed";
+                    /** Answer */
+                    answer: string;
+                    /** Tool Calls */
+                    tool_calls?: components["schemas"]["ConsultationToolCall"][];
+                    /** References */
+                    references?: components["schemas"]["McpToolReferencePublic"][];
+                    usage?: components["schemas"]["TokenUsage"] | null;
+                    /** Approval Id */
+                    approval_id?: string | null;
+                    /** Completion Model Id */
+                    completion_model_id?: string | null;
+                    /** Input Tokens */
+                    input_tokens?: number | null;
+                    /** Output Tokens */
+                    output_tokens?: number | null;
+                  };
+                  /**
+                   * ConsultationToolCall
+                   * @description A stored step has a server identity independent of provider approval IDs.
+                   */
+                  ConsultationToolCall: {
+                    /** Server Name */
+                    server_name: string;
+                    /** Tool Name */
+                    tool_name: string;
+                    /** Title */
+                    title?: string | null;
+                    /** Arguments */
+                    arguments?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Approved */
+                    approved?: boolean | null;
+                    /** Result Status */
+                    result_status?: string | null;
+                    /** Result */
+                    result?: string | null;
+                    /** Mcp Tool Name */
+                    mcp_tool_name?: string | null;
+                    /** Purpose */
+                    purpose?: string | null;
+                    /** Is Internal */
+                    is_internal?: boolean | null;
+                    /** Is Bundled */
+                    is_bundled?: boolean | null;
+                    /** Meta */
+                    meta?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** Generated File Ids */
+                    generated_file_ids?: string[] | null;
+                    /** Structured Content */
+                    structured_content?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** App View */
+                    app_view?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /**
+                     * Step Id
+                     * Format: uuid
+                     */
+                    step_id: string;
+                  };
+                  /**
+                   * EneoEventType
+                   * @enum {string}
+                   */
+                  EneoEventType:
+                    | "tool_call"
+                    | "tool_approval_required"
+                    | "tool_approval_timeout"
+                    | "token_usage"
+                    | "consultation";
+                  /**
+                   * McpToolReferencePublic
+                   * @description One MCP resource block captured from a tool call.
+                   *
+                   *     Generic across MCP servers: only `uri`, `mime_type`, `content`, and the
+                   *     raw `meta` dict are exposed. Frontend may read generic keys from `meta`
+                   *     (e.g. `sourceType`, `title`) to drive richer affordances but must degrade
+                   *     gracefully when meta is empty.
+                   */
+                  McpToolReferencePublic: {
+                    /** Created At */
+                    created_at?: string | null;
+                    /** Updated At */
+                    updated_at?: string | null;
+                    /**
+                     * Id
+                     * Format: uuid
+                     */
+                    id: string;
+                    /** Uri */
+                    uri: string;
+                    /** Mime Type */
+                    mime_type?: string | null;
+                    /** Content */
+                    content?: string | null;
+                    /**
+                     * Meta
+                     * @default {}
+                     */
+                    meta?: {
+                      [key: string]: unknown;
+                    };
+                    /** Tool Call Id */
+                    tool_call_id?: string | null;
+                    /** Mcp Tool Name */
+                    mcp_tool_name?: string | null;
+                  };
+                  /**
+                   * TokenUsage
+                   * @description Provider usage for one logical completion.
+                   *
+                   *     The base fields accumulate reported usage across every provider request made
+                   *     by that completion. The context fields retain only the final provider request
+                   *     and response, which is the snapshot relevant to model headroom.
+                   */
+                  TokenUsage: {
+                    /** Prompt Tokens */
+                    prompt_tokens?: number | null;
+                    /** Completion Tokens */
+                    completion_tokens?: number | null;
+                    /** Reasoning Tokens */
+                    reasoning_tokens?: number | null;
+                    /** Context Prompt Tokens */
+                    context_prompt_tokens?: number | null;
+                    /** Context Completion Tokens */
+                    context_completion_tokens?: number | null;
+                  };
+                };
               };
         };
       };
