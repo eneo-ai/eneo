@@ -22,19 +22,20 @@ export const actions: Actions = {
     const redirectUrl = resolveSafeLoginDestination(next);
 
     if (username && password) {
-      const { success, correlationId, attemptsRemaining, retryAfterSeconds } = await loginWithEneo(
-        username,
-        password
-      );
+      const { success, correlationId, attemptsRemaining, retryAfterSeconds, reason } =
+        await loginWithEneo(username, password);
 
       if (success) {
         clearOidcLoginAttempt(event.cookies);
         redirect(302, redirectUrl);
       }
 
-      // Return correlation ID for error tracking
-      return fail(400, {
+      // The page tells a backend that could not answer apart from rejected
+      // credentials; the correlation ID lets support find the server log.
+      const failureReason = reason ?? "credentials";
+      return fail(failureReason === "unavailable" ? 503 : 400, {
         failed: true,
+        reason: failureReason,
         correlationId,
         attemptsRemaining: attemptsRemaining ?? null,
         retryAfterSeconds: retryAfterSeconds ?? null

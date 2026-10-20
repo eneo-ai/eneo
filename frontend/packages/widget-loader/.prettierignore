@@ -1,4 +1,4 @@
 node_modules
 dist
-# Archived pinned releases keep their exact bytes.
+# Pinned release assets are served byte for byte (SRI); never reformat them.
 releases

@@ -5,7 +5,10 @@ import { documentConfigSchema } from "../../src/tools/documents/config";
 import { executeRender } from "../../src/tools/documents/execute";
 import { documentTools, fileRenderer } from "../../src/tools/documents/tool";
 import { imageDimensions } from "../../src/tools/documents/engine/images";
-import { pageContentSize } from "../../src/tools/documents/engine/template";
+import { pdfAvailable } from "../../src/tools/documents/engine/pdf";
+
+const PDF = await pdfAvailable();
+import { pageContentSize } from "../../src/tools/documents/engine/word/inspect";
 import { RichResult } from "../../src/tools/types";
 import { chartTools } from "../../src/tools/charts/tool";
 import { executeChart } from "../../src/tools/charts/execute";
@@ -84,7 +87,7 @@ describe("document chart images", () => {
     }
   });
 
-  test("tall figures shrink to fit and move together with their caption", async () => {
+  test.skipIf(!PDF)("tall figures shrink to fit and move together with their caption", async () => {
     const tall = Buffer.from(
       new Resvg(
         '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="2000"><rect width="100" height="2000" fill="steelblue"/></svg>',
@@ -108,7 +111,8 @@ describe("document chart images", () => {
     const dimensions = /<wp:extent cx="(\d+)" cy="(\d+)"/.exec(xml)!;
     const width = Number(dimensions[1]) / 12700;
     const height = Number(dimensions[2]) / 12700;
-    expect(height).toBeLessThanOrEqual(531);
+    // Eneo's built-in template is A4 with 2.54 cm margins: 698 pt of height, 120 pt kept free.
+    expect(height).toBeLessThanOrEqual(578);
     expect(height / width).toBeCloseTo(20, 2);
   });
 
@@ -130,14 +134,17 @@ describe("document chart images", () => {
     expect(Number(dimensions[1]) / 12700).toBeLessThanOrEqual(452);
   });
 
-  test("PDF contains the chart and captions, with enough room on the page", async () => {
-    const output = (await tool().execute({ ...input, format: "pdf" }, context)) as RichResult;
-    const bytes = bytesOf(output);
-    expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
-    expect(bytes.toString("latin1")).toContain("/Subtype /Image");
-    expect(output.structured.pages).toBe(1);
-    await Bun.write("/tmp/eneo-report-with-chart.pdf", bytes);
-  });
+  test.skipIf(!PDF)(
+    "PDF contains the chart and captions, with enough room on the page",
+    async () => {
+      const output = (await tool().execute({ ...input, format: "pdf" }, context)) as RichResult;
+      const bytes = bytesOf(output);
+      expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
+      expect(bytes.toString("latin1")).toContain("/Subtype /Image");
+      expect(output.structured.pages).toBe(1);
+      await Bun.write("/tmp/eneo-report-with-chart.pdf", bytes);
+    },
+  );
 
   test("templates and revisions keep embedded media with collision-free relationships", async () => {
     const first = bytesOf((await tool().execute(input, context)) as RichResult);
@@ -296,5 +303,11 @@ describe("document chart images", () => {
     )[0]!;
     const output = (await create.execute(input, context)) as RichResult;
     expect(output.files[0]!.mimeType).toContain("wordprocessingml");
+    if (PDF) {
+      // The PDF sidecar runs inside the child's confinement too: it must still read the
+      // document's own image files from the render directory.
+      const pdf = (await create.execute({ ...input, format: "pdf" }, context)) as RichResult;
+      expect(bytesOf(pdf).toString("latin1")).toContain("/Subtype /Image");
+    }
   });
 });

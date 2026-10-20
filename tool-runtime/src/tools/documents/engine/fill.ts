@@ -1,11 +1,7 @@
-// Runs inside sandbox children only. Fills the {{placeholders}} of a template the user supplied
-// with plain-text values. A Word template keeps everything else (styles, headers, footers, the
-// formatting of the run a placeholder sits in); a text template is the same text with the
-// placeholders replaced. Other ways to mark a field (Word content controls, mail-merge fields)
-// are not read: a filler for one belongs beside these two.
-import { PatchType, TextRun, patchDetector, patchDocument } from "docx";
+// Runs inside sandbox children only. Fills the {{placeholders}} of a text template (plain
+// text or Markdown) with plain-text values: the same text with the placeholders replaced.
+// Word templates are filled in word/apply.ts, which also reads content controls.
 import { ToolError } from "../../../errors";
-import { openWordTemplate } from "./template";
 
 /** Placeholder name to the text that replaces it. */
 export type Values = Record<string, string>;
@@ -36,41 +32,23 @@ function resolve(
   };
 }
 
-/** Fills a Word template: body, headers and footers, also where Word split a placeholder. */
-export async function fillDocx(template: Buffer, values: Values): Promise<Filled> {
-  await openWordTemplate(template);
-  const { names, valueOf } = resolve(await patchDetector({ data: template }), values);
-  if (!names.length) return { buffer: template, placeholders: names };
-  const patches = Object.fromEntries(
-    [...valueOf].map(([placeholder, value]) => [
-      placeholder,
-      {
-        type: PatchType.PARAGRAPH,
-        children: value
-          .split(/\r?\n/)
-          .map((line, index) => new TextRun({ text: line, break: index > 0 ? 1 : undefined })),
-      },
-    ]),
-  );
-  const buffer = await patchDocument({
-    outputType: "nodebuffer",
-    data: template,
-    patches,
-    keepOriginalStyles: true,
-  });
-  return { buffer: Buffer.from(buffer), placeholders: names };
+/** The placeholder names of a text template, each once, in order of appearance. */
+export function textPlaceholders(template: Buffer): string[] {
+  return [...new Set([...decode(template).matchAll(PLACEHOLDER)].map((m) => m[1]!.trim()))];
+}
+
+function decode(template: Buffer): string {
+  if (template.includes(0)) throw new ToolError("INVALID_FILE", "The template is not a text file.");
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(template);
+  } catch {
+    throw new ToolError("INVALID_FILE", "Text templates must use UTF-8 encoding.");
+  }
 }
 
 /** Fills a text template (plain text or Markdown). */
 export function fillText(template: Buffer, values: Values): Filled {
-  if (template.includes(0))
-    throw new ToolError("INVALID_FILE", "The template is not a text file.");
-  let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(template);
-  } catch {
-    throw new ToolError("INVALID_FILE", "Text templates must use UTF-8 encoding.");
-  }
+  const text = decode(template);
   const { names, valueOf } = resolve(
     [...text.matchAll(PLACEHOLDER)].map((match) => match[1]!),
     values,

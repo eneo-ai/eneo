@@ -16,6 +16,7 @@ export default ts.config(
     }
   },
   {
+    // Pinned release assets are served byte for byte (SRI); never lint or rewrite them.
     ignores: ["dist/", "releases/"]
   }
 );

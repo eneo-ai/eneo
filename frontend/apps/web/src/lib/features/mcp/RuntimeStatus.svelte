@@ -7,12 +7,9 @@
 </script>
 
 {#if status}
-  <!-- Same right gutter and column as the tab content below, so the box lines up with the cards. -->
+  <!-- Same right gutter as the tab content below, so the box lines up with the cards and the table. -->
   <div class="pt-6 pr-6">
-    <section
-      class="border-default mx-auto w-full max-w-5xl rounded-xl border p-5"
-      aria-labelledby="runtime-status-title"
-    >
+    <section class="border-default rounded-xl border p-5" aria-labelledby="runtime-status-title">
       <h2 id="runtime-status-title" class="text-default font-semibold">
         {m.tools_runtime_title()}
       </h2>

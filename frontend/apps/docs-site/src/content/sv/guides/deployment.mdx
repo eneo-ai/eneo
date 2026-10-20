@@ -1,6 +1,6 @@
 ---
 title: Driftsätt Eneo
-translationSource: guides/deployment.mdx@13ddf87a52c3
+translationSource: guides/deployment.mdx@fab85120a0b8
 ---
 
 import { Callout } from "nextra/components";
@@ -14,8 +14,8 @@ bakgrundsjobb och crawlning samt en isolerad körmiljö för inbyggda verktyg.
 
 <Callout type="warning">
   Exempelfilerna måste anpassas. Ersätt alla förekomster av `your-domain.com`,
-  `changeme` och `CHANGEME`. Använd installationsfiler från den källrevision
-  som releasens `release.json` anger, så att mallarna matchar avbildningarna.
+  `changeme` och `CHANGEME`. Använd installationsfiler från den källrevision som
+  releasens `release.json` anger, så att mallarna matchar avbildningarna.
 </Callout>
 
 ## Förberedelser
@@ -115,6 +115,12 @@ I `env_frontend.env`:
 | `PUBLIC_ENEO_BACKEND_URL`    | `https://eneo.example.se`      |
 
 Lägg inte till `/api` i `PUBLIC_ENEO_BACKEND_URL`: klienten lägger till API-sökvägen.
+SSR-anrop till `ENEO_BACKEND_URL` skrivs om till `ENEO_BACKEND_SERVER_URL` och
+går därmed förbi proxyn; lämna variabeln tom för att i stället gå via proxyn.
+När `ENEO_BACKEND_URL` är appens egen adress, som ovan, är dessa anrop rena
+server-till-server-anrop utan webbläsarens `Origin`-huvud och beror inte på
+CORS-tillåtelselistan. En backend på en annan adress måste tillåta appens
+adress, precis som för webbläsaren.
 Byt alla fyra förekomster av `your-domain.com` i Compose-filen och ersätt
 `your-email@domain.com` med adressen för Let's Encrypt.
 

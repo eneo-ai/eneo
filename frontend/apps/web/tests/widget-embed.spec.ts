@@ -305,15 +305,27 @@ test.describe("embeddable widget", () => {
     });
     await expect(composer).toBeFocused();
 
-    const helpful = frame.getByRole("button", { name: "Bra svar" });
+    // Feedback rates the conversation. After a vote the thumbs fold into an
+    // acknowledgement, a change control and, because the widget stores
+    // comments, the comment link.
+    // Exact: the thumbs-down is "Inte hjälpsam konversation".
+    const helpful = frame.getByRole("button", { name: "Hjälpsam konversation", exact: true });
     await helpful.click();
+    const status = frame.getByRole("status");
+    await expect(status).toHaveText(/Tack för din återkoppling på konversationen/);
+    await expect(helpful).toBeHidden();
+    const changeVote = frame.getByRole("button", { name: "Ändra omdöme" });
+    await expect(changeVote).toBeFocused();
     await frame.getByRole("button", { name: "Vill du berätta mer?" }).click();
     const comment = frame.getByRole("dialog");
     await comment.getByRole("textbox").fill("Tydligt och snabbt svar.");
     await comment.getByRole("button", { name: "Skicka" }).click();
-    await expect(frame.getByRole("status")).toHaveText(/Tack, vi har tagit emot din återkoppling/);
+    await expect(status).toHaveText(/Din återkoppling på konversationen är sparad/);
     await expect(comment).toBeHidden();
-    await expect(helpful).toBeFocused();
+    // Focus lands on the stable change-vote control, since the opener's
+    // label changed to offer editing the saved comment.
+    await expect(changeVote).toBeFocused();
+    await expect(frame.getByRole("button", { name: "Redigera kommentar" })).toBeVisible();
 
     // The chat's landmarks, title, conversation and composer, as the
     // accessibility tree exposes them inside the frame.
