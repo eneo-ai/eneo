@@ -306,7 +306,9 @@ class SharepointWebhookService:
         """At most one Graph call per subscription and event in a window.
 
         Graph repeats ``reauthorizationRequired`` as expiry nears, and asks
-        apps not to renew a subscription twice within ten minutes.
+        apps not to renew a subscription twice within ten minutes. Without
+        Redis nothing is claimed: the renewal cron still renews the
+        subscription, and a burst of events cannot each call Graph.
         """
         try:
             return bool(
@@ -323,7 +325,7 @@ class SharepointWebhookService:
                 subscription_db_id,
                 type(exc).__name__,
             )
-            return True
+            return False
 
     async def queue_syncs_for_subscription(
         self, subscription: SharePointSubscription

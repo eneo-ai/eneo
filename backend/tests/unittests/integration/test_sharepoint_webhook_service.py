@@ -12,6 +12,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import RedisError
 
 from eneo.integration.domain.entities.sharepoint_subscription import (
     SharePointSubscription,
@@ -1236,6 +1237,17 @@ async def test_lifecycle_events_needing_graph_are_returned_once_per_window(
     ]
     assert second == []
     setup.service._fetch_knowledge_by_subscription.assert_not_called()
+
+
+async def test_lifecycle_events_call_graph_for_none_while_redis_is_down(setup: Setup):
+    setup.redis.set.side_effect = RedisError("down")
+    setup.service._fetch_knowledge_by_subscription = AsyncMock(return_value=[])
+
+    maintenance = await setup.service.handle_notifications(
+        [_lifecycle("reauthorizationRequired"), _lifecycle("subscriptionRemoved")]
+    )
+
+    assert maintenance == []
 
 
 async def test_lifecycle_events_for_unknown_subscriptions_are_ignored(setup: Setup):
