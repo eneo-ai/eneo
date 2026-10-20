@@ -5,6 +5,7 @@
   import { getMessageContext, setMessageContext } from "../../MessageContext.svelte";
   import { getChatService } from "../../ChatService.svelte";
   import { toolStepStatus } from "../../toolStepStatus";
+  import { isAwaitingApproval } from "../../consultationApproval";
   import { isSkillActivation, serverDisplayName, toolDisplayName } from "../../internalToolLabels";
   import MessageEneoInfoBlob from "./MessageEneoInfoBlob.svelte";
   import ReasoningToolStep from "./ReasoningToolStep.svelte";
@@ -38,12 +39,22 @@
     incomplete: m.group_consultation_incomplete,
     failed: m.chat_tool_status_failed
   };
+  // A consultation persisted as still running (a turn that died before its
+  // steps were normalised) or carrying a status this client does not know is
+  // shown as incomplete rather than as live work or a crash.
+  const label = $derived.by(() => {
+    const status = consultation.status;
+    if (!streaming && (status === "running" || status === "awaiting_approval")) {
+      return m.group_consultation_incomplete();
+    }
+    return (labels[status] ?? m.group_consultation_incomplete)();
+  });
 </script>
 
 <details class="border-dimmer bg-primary rounded-lg border">
   <summary class="cursor-pointer px-3 py-2 text-sm focus-visible:ring-2">
     <span class="font-medium">{consultation.ordinal}. {consultation.assistant_name}</span>
-    <span class="text-muted ml-2">{labels[consultation.status]()}</span>
+    <span class="text-muted ml-2">{label}</span>
   </summary>
   <div class="border-dimmer flex flex-col gap-3 border-t px-3 py-3">
     <div>
@@ -51,7 +62,11 @@
       <p class="whitespace-pre-wrap text-sm">{consultation.question}</p>
     </div>
     {#each consultation.tool_calls as step (step.step_id)}
-      {@const status = toolStepStatus(step.result_status, step.approved === false, streaming)}
+      {@const status = toolStepStatus(
+        isAwaitingApproval(consultation, step) ? "awaiting_approval" : step.result_status,
+        step.approved === false,
+        streaming
+      )}
       {#if isSkillActivation(step)}
         <SkillActivationStep
           name={step.title ?? step.tool_name}

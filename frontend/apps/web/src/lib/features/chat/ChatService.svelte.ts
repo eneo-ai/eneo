@@ -28,6 +28,7 @@ import type { CapabilityPurpose } from "$lib/features/mcp/capabilities";
 import { documentDraft, type DocumentDraft } from "./documentDraft";
 import { conversationDocuments } from "./documentVersions";
 import { readPartialArguments, readPartialStringArguments } from "./partialToolArguments";
+import { awaitingToolCalls } from "./consultationApproval";
 
 export type PendingToolApproval = {
   approvalId: string;
@@ -973,22 +974,11 @@ export class ChatService {
                 for (const consultation of event.consultations) {
                   const previous = stored.get(consultation.id);
                   stored.set(consultation.id, consultation);
-                  if (consultation.status === "awaiting_approval" && consultation.approval_id) {
+                  const awaiting = awaitingToolCalls(consultation);
+                  if (awaiting.length > 0 && consultation.approval_id) {
                     this.pendingToolApproval = {
                       approvalId: consultation.approval_id,
-                      tools: (consultation.tool_calls ?? [])
-                        .filter(
-                          (step) =>
-                            step.approved == null &&
-                            step.result_status !== "succeeded" &&
-                            step.result_status !== "completed"
-                        )
-                        .map((step) => ({
-                          server_name: step.server_name,
-                          tool_name: step.tool_name,
-                          arguments: step.arguments ?? undefined,
-                          tool_call_id: step.tool_call_id ?? undefined
-                        }))
+                      tools: awaiting
                     };
                   } else if (previous?.approval_id === this.pendingToolApproval?.approvalId) {
                     this.pendingToolApproval = null;
@@ -1203,8 +1193,15 @@ export class ChatService {
             }
           }
 
-          this.currentConversation.messages[this.currentConversation.messages?.length - 1].answer =
-            message;
+          // An orchestrated turn that stopped on a limit or an access change
+          // has already shown its synthesis and specialist steps; the notice
+          // joins that answer instead of replacing it.
+          const failed =
+            this.currentConversation.messages[this.currentConversation.messages?.length - 1];
+          failed.answer =
+            (failed.consultations?.length ?? 0) > 0 && failed.answer
+              ? `${failed.answer}\n\n${message}`
+              : message;
           console.error(error);
         }
       } finally {

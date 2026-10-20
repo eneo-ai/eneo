@@ -12790,6 +12790,8 @@ export interface components {
       usage?: components["schemas"]["TokenUsage"] | null;
       /** Approval Id */
       approval_id?: string | null;
+      /** Awaiting Tool Call Ids */
+      awaiting_tool_call_ids?: string[];
       /** Completion Model Id */
       completion_model_id?: string | null;
       /** Input Tokens */
@@ -30075,6 +30077,8 @@ export interface operations {
                 usage?: components["schemas"]["TokenUsage"] | null;
                 /** Approval Id */
                 approval_id?: string | null;
+                /** Awaiting Tool Call Ids */
+                awaiting_tool_call_ids?: string[];
                 /** Completion Model Id */
                 completion_model_id?: string | null;
                 /** Input Tokens */
@@ -30652,6 +30656,8 @@ export interface operations {
                 usage?: components["schemas"]["TokenUsage"] | null;
                 /** Approval Id */
                 approval_id?: string | null;
+                /** Awaiting Tool Call Ids */
+                awaiting_tool_call_ids?: string[];
                 /** Completion Model Id */
                 completion_model_id?: string | null;
                 /** Input Tokens */
@@ -32309,6 +32315,8 @@ export interface operations {
                     usage?: components["schemas"]["TokenUsage"] | null;
                     /** Approval Id */
                     approval_id?: string | null;
+                    /** Awaiting Tool Call Ids */
+                    awaiting_tool_call_ids?: string[];
                     /** Completion Model Id */
                     completion_model_id?: string | null;
                     /** Input Tokens */
@@ -32657,6 +32665,8 @@ export interface operations {
                     usage?: components["schemas"]["TokenUsage"] | null;
                     /** Approval Id */
                     approval_id?: string | null;
+                    /** Awaiting Tool Call Ids */
+                    awaiting_tool_call_ids?: string[];
                     /** Completion Model Id */
                     completion_model_id?: string | null;
                     /** Input Tokens */

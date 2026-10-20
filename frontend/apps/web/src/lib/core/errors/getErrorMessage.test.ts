@@ -21,6 +21,8 @@ vi.mock("$lib/paraglide/messages", () => ({
     eneo_error_9064: () => "Crawler cleanup pending.",
     eneo_error_9069: () => "Deactivate it in the governance first.",
     chat_answer_failed_internal: () => "An error in Eneo interrupted the answer.",
+    chat_answer_failed_execution_limit: () => "This question reached its execution limit.",
+    chat_answer_failed_access_changed: () => "Your access changed during this question.",
     provider_failure_unavailable: () => "The provider is having problems.",
     provider_failure_timeout: () => "The model did not respond in time.",
     provider_failure_unreachable: () => "Could not connect to the provider.",
@@ -38,7 +40,7 @@ vi.mock("$lib/paraglide/messages", () => ({
   }
 }));
 
-import { getErrorMessage } from "./getErrorMessage";
+import { getAnswerFailureMessage, getErrorMessage } from "./getErrorMessage";
 
 /** Reason codes for the Skill lifecycle conflicts, and the code that used to
     answer for all of them: a taken name. */
@@ -248,5 +250,23 @@ describe("getErrorMessage", () => {
       "Active website sync.",
       "Crawler cleanup pending."
     ]);
+  });
+
+  it("names the limit family of an orchestrated turn and an access change", () => {
+    const streamError = (code: string) =>
+      new EneoError("Backend fallback", "SERVER", 200, 0, { code, message: "Backend fallback" });
+    for (const code of [
+      "execution_limit_duration",
+      "execution_limit_model_requests",
+      "execution_limit_request_bytes"
+    ]) {
+      expect(getAnswerFailureMessage(streamError(code))).toBe(
+        "This question reached its execution limit."
+      );
+    }
+    expect(getAnswerFailureMessage(streamError("assistant_access_changed"))).toBe(
+      "Your access changed during this question."
+    );
+    expect(getAnswerFailureMessage(streamError("execution_limit"))).toBeUndefined();
   });
 });

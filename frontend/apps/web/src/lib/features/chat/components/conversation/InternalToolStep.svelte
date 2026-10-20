@@ -30,7 +30,7 @@
   import ToolCallDetailsPanel from "./ToolCallDetailsPanel.svelte";
   import ToolStepIcon from "./ToolStepIcon.svelte";
 
-  type Status = "preparing" | "running" | "complete" | "failed" | "denied";
+  import type { ToolStepStatus as Status } from "../../toolStepStatus";
 
   let {
     runningLabel,
@@ -82,7 +82,9 @@
   const attachmentUrls = getAttachmentUrlService();
 
   let open = $state(false);
-  const isActive = $derived(status === "preparing" || status === "running");
+  const isActive = $derived(
+    status === "preparing" || status === "awaiting" || status === "running"
+  );
   const isPreviousAttempt = $derived(status === "failed" && previousAttempt);
   const isNegative = $derived((status === "failed" && !isPreviousAttempt) || status === "denied");
   const hasArgs = $derived(args != null && Object.keys(args).length > 0);

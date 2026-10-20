@@ -687,7 +687,7 @@
           servers={generalMcpServers}
           {capabilityServers}
           internalServers={internalMcpServers}
-          modelSupportsTools={supportsToolCalling || hasDelegatedTools}
+          modelSupportsTools={supportsToolCalling}
           delegatedTools={hasDelegatedTools}
           disabledServerIds={disabledMcpServerIds}
           onSelectionChange={persistMcpServerSelection}

@@ -1,4 +1,5 @@
-export type ToolStepStatus = "preparing" | "running" | "complete" | "failed" | "denied";
+export type ToolStepStatus =
+  "preparing" | "awaiting" | "running" | "complete" | "failed" | "denied";
 
 /** New calls require a terminal result; legacy history may lack a status. */
 export function toolStepStatus(
@@ -9,8 +10,14 @@ export function toolStepStatus(
 ): ToolStepStatus {
   if (denied || status === "denied" || status === "timeout_denied") return "denied";
   if (status === "failed") return "failed";
-  if (status === "pending" || status === "approved" || status === "deferred") {
+  if (
+    status === "pending" ||
+    status === "approved" ||
+    status === "deferred" ||
+    status === "awaiting_approval"
+  ) {
     if (!streaming) return "failed";
+    if (status === "awaiting_approval") return "awaiting";
     return status === "approved" ? "running" : "preparing";
   }
   if (status === "succeeded" || status === "completed") return "complete";

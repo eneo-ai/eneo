@@ -159,7 +159,7 @@ POST /api/v1/conversations/
 
 Exactly one of `session_id`, `assistant_id`, or `group_chat_id` must be present; anything else fails validation with `422`. The optional query parameter `version` (`1`, `2` or `3`, default `1`) selects the knowledge-retrieval behaviour; the web app sends `version=2`. `version=3` retrieves and generates exactly like `2` but, with `stream: true`, frames the stream as the [AI SDK UI Message Stream](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) (data-only events with a `type` field, ended by `data: [DONE]`) instead of the named events below; without `stream` it behaves like `2`.
 
-Sending `require_tool_approval: true` without `stream: true` returns `400` with `code: "invalid_request"`; groups without a configured orchestrator retain their existing restriction on approval requests.
+Sending `require_tool_approval: true` without `stream: true` returns `400` with `code: "invalid_request"`; sending it for a group without a configured orchestrator returns `400` with `code: "not_supported"`.
 
 ### Orchestrated groups
 
@@ -181,9 +181,19 @@ A `consultation` SSE event carries `session_id`, `eneo_event_type: "consultation
 and the changed `consultations`. Merge them by ID and order by ordinal. Version 3
 emits the equivalent `data-consultation` part; clients need a renderer for it.
 While a consultation has `status: "awaiting_approval"`, its `approval_id` and
-pending steps use the existing approval endpoint. Keep that decision visible
-even when the trace is collapsed. See [Group Chats](../guides/group-chats) for
-limits, access checks and cancellation behaviour.
+`awaiting_tool_call_ids` name the decision and the steps it covers; submit it
+with the existing approval endpoint. Other steps of the same round (the
+specialist's internal knowledge and file tools) run without approval and are
+not listed. Keep that decision visible even when the trace is collapsed.
+
+A turn that stops on a limit ends with an `error` event whose `code` is
+`execution_limit_<limit>` (for example `execution_limit_duration`); one that
+stops because the caller's access or an assistant's configuration changed uses
+`assistant_access_changed` with `error_code` 403. The persisted answer and
+consultations are kept in both cases. A question whose specialists are all
+unavailable to the caller returns `400` with `code: "no_available_specialists"`
+before anything is saved. See [Group Chats](../guides/group-chats) for limits,
+access checks and cancellation behaviour.
 
 ### Non-streaming response
 

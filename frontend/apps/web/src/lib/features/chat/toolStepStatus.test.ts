@@ -11,6 +11,11 @@ it("tracks admission and execution separately", () => {
   expect(toolStepStatus("pending", false, true)).toBe("preparing");
   expect(toolStepStatus("approved", false, true)).toBe("running");
 });
+it("shows a call blocked on the user's approval as awaiting, never as done", () => {
+  expect(toolStepStatus("awaiting_approval", false, true)).toBe("awaiting");
+  expect(toolStepStatus("awaiting_approval", false, false)).toBe("failed");
+  expect(toolStepStatus("awaiting_approval", true, true)).toBe("denied");
+});
 it("keeps explicit outcomes and legacy history", () => {
   expect(toolStepStatus("succeeded", false, true, true)).toBe("complete");
   expect(toolStepStatus("failed", false, false)).toBe("failed");

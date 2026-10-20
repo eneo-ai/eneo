@@ -62,14 +62,38 @@ not grant extra permissions: Eneo checks the caller's access, available models,
 Space classification and effective tool settings before execution and later
 handoffs. A specialist's answer does not lower the information's classification.
 
+A specialist the asking user may not use, for example an unpublished assistant
+for a viewer, is left out of that user's question. The orchestrator is told that
+some configured expertise is unavailable, without the assistant's name, and must
+say so when that expertise is needed. A question whose specialists are all
+unavailable is refused before anything is saved.
+
 One question shares a bounded execution budget across the orchestrator and its
-specialists: six consultations, 24 model requests (including locally initiated
-query embeddings and reranking), 48 local tool dispatches, 1 MiB of model request input and
-100,000 characters of model output. Total execution is limited to 180 seconds;
-a consultation is limited to 60 seconds. Approval waiting counts toward these
-deadlines. The limits cover work Eneo dispatches, including the loopback request;
-they do not separately count provider work inside MCP servers, including Eneo's
-HTTP loopback tools. Those tools retain their own request limits.
+specialists. The limits cover work Eneo dispatches, including the loopback
+request; they do not separately count provider work inside MCP servers,
+including Eneo's HTTP loopback tools. Those tools retain their own request
+limits, so the effective bound on their model work is the tool-dispatch limit.
+Part of the budget is reserved for the orchestrator's final answer: a specialist
+cannot start or continue on that reserve, and a consultation refused for that
+reason is reported to the orchestrator, which then answers with the evidence it
+has and names the unresolved questions. Time spent waiting for a user's tool
+approval does not count toward the deadlines.
+
+| Setting                                        | Default   | Meaning                                                                 |
+| ---------------------------------------------- | --------- | ----------------------------------------------------------------------- |
+| `ORCHESTRATION_MAX_CONSULTATIONS`              | 6         | Specialist consultations per question, follow-ups included.             |
+| `ORCHESTRATION_MAX_MODEL_REQUESTS`             | 24        | Model requests per question, including query embeddings and reranking.  |
+| `ORCHESTRATION_MAX_TOOL_CALLS`                 | 48        | Local tool dispatches per question (consultations, Skills, MCP calls).  |
+| `ORCHESTRATION_MAX_REQUEST_BYTES`              | 4 MiB     | Largest single model request. Requests are not summed over the question. |
+| `ORCHESTRATION_MAX_OUTPUT_CHARACTERS`          | 100 000   | Generated characters per question, specialists included.                |
+| `ORCHESTRATION_TIMEOUT_SECONDS`                | 180       | Execution time per question, excluding approval waits.                  |
+| `ORCHESTRATION_CONSULTATION_TIMEOUT_SECONDS`   | 60        | Execution time per consultation, excluding approval waits.              |
+| `ORCHESTRATION_RESERVED_MODEL_REQUESTS`        | 2         | Model requests kept for the orchestrator's final answer.                |
+| `ORCHESTRATION_RESERVED_OUTPUT_CHARACTERS`     | 8 000     | Output kept for the orchestrator's final answer.                        |
+| `ORCHESTRATION_RESERVED_SECONDS`               | 20        | Time kept for the orchestrator's final answer.                          |
+
+Each reserve must be smaller than its limit; the backend refuses to start
+otherwise.
 
 Stopping the question stops local specialist work and closes its pending streams
 and approvals. Completed actions in an external system remain completed. A
