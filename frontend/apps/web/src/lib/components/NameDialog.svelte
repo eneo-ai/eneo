@@ -19,6 +19,8 @@
      */
     initial?: string;
     placeholder?: string;
+    /** The longest name the server takes, in characters. */
+    maxlength?: number;
     submitLabel: string;
     /** Shown on the submit button while `onSubmit` runs. */
     pendingLabel?: string;
@@ -43,6 +45,7 @@
     label,
     initial = "",
     placeholder,
+    maxlength,
     submitLabel,
     pendingLabel,
     width = "small",
@@ -114,7 +117,7 @@
               {label}
               <span class="text-muted font-normal" aria-hidden="true">({m.required()})</span>
             </Field.Label>
-            <Input id="{id}-name" bind:value={draft} {placeholder} required />
+            <Input id="{id}-name" bind:value={draft} {placeholder} {maxlength} required />
           </Field.Field>
         </div>
       </div>

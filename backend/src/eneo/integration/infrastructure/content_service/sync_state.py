@@ -94,14 +94,17 @@ class SyncStateRecorder:
         metadata: "SyncMetadata",
         summary_counts: dict[str, Any] | None = None,
         clear_delta_token: bool = False,
+        delta_token: str | None = None,
     ) -> None:
         """Persist the failure before the caller re-raises; never raises itself.
 
         Each write is attempted on its own so a broken status row still leaves
         a sync log, and neither can replace the exception being recorded.
         ``clear_delta_token`` drops the token when a full sync could not finish
-        every item: a delta from it would never re-emit those items, so the
-        next sync must be a full one.
+        every item and nothing retries them: a delta from it would never
+        re-emit those items, so the next sync must be a full one.
+        ``delta_token`` is persisted instead when the next delta pass retries
+        them.
         """
         if knowledge_id is None:
             return
@@ -120,6 +123,9 @@ class SyncStateRecorder:
             if clear_delta_token:
                 knowledge.delta_token = None
                 fields["delta_token"] = None
+            elif delta_token is not None:
+                knowledge.delta_token = delta_token
+                fields["delta_token"] = delta_token
             await self._knowledge_repo.update_sync_state(knowledge_id, **fields)
         except Exception:
             logger.error(

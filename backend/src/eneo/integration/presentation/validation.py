@@ -30,6 +30,10 @@ RESOURCE_TYPES = ("site", "onedrive")
 SELECTED_ITEM_TYPE_PATTERN = r"^[a-z_]*$"
 SELECTED_ITEM_TYPE_MAX_LENGTH = 32
 
+# A batch item's name is checked per item, so one long SharePoint name fails
+# only its item; past this the request body itself is malformed.
+BATCH_ITEM_NAME_MAX_LENGTH = FOLDER_PATH_MAX_LENGTH
+
 
 def validate_folder_path(value: Optional[str]) -> Optional[str]:
     """Reject paths with ``..`` segments; the pattern already rejects the rest."""
@@ -49,6 +53,13 @@ def is_https_url(value: str) -> bool:
     except ValueError:
         return False
     return parts.scheme == "https" and bool(parts.hostname) and "@" not in parts.netloc
+
+
+def validate_https_url(value: str) -> str:
+    """An item's link as rendered by the UIs; "" when the source gave none."""
+    if value and not is_https_url(value):
+        raise ValueError("url must be an absolute https URL")
+    return value
 
 
 def https_url_or_none(value: Optional[str]) -> Optional[str]:

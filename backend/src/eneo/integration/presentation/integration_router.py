@@ -12,7 +12,9 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
+from eneo.integration.domain.value_objects import TenantIntegrationFilter
 from eneo.integration.presentation.models import (
+    MAX_PAGE_OFFSET,
     Integration,
     IntegrationList,
     IntegrationPreviewDataList,
@@ -21,7 +23,6 @@ from eneo.integration.presentation.models import (
     SharePointTreeResponse,
     SyncLog,
     TenantIntegration,
-    TenantIntegrationFilter,
     TenantIntegrationList,
     UserIntegrationList,
 )
@@ -33,6 +34,7 @@ from eneo.integration.presentation.validation import (
     validate_folder_path,
 )
 from eneo.main.container.container import Container
+from eneo.observability.error_text import user_visible_error
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
@@ -312,7 +314,10 @@ async def disconnect_user_integration(
 async def get_sync_logs(
     integration_knowledge_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    skip: Annotated[int, Query(ge=0, description="Number of items to skip")] = 0,
+    skip: Annotated[
+        int,
+        Query(ge=0, le=MAX_PAGE_OFFSET, description="Number of items to skip"),
+    ] = 0,
     limit: Annotated[
         int, Query(ge=1, le=100, description="Number of items per page")
     ] = 10,
@@ -337,20 +342,7 @@ async def get_sync_logs(
     )
 
     # Convert domain entities to presentation models
-    sync_log_models = [
-        SyncLog(
-            id=log.id,
-            integration_knowledge_id=log.integration_knowledge_id,
-            sync_type=log.sync_type,
-            status=log.status,
-            metadata=log.metadata,
-            error_message=log.error_message,
-            started_at=log.started_at,
-            completed_at=log.completed_at,
-            created_at=log.created_at or log.started_at,
-        )
-        for log in sync_logs
-    ]
+    sync_log_models = [SyncLog.from_domain(log) for log in sync_logs]
 
     return PaginatedSyncLogList(
         items=sync_log_models, total_count=total_count, page_size=limit, offset=skip
@@ -559,7 +551,9 @@ async def get_sharepoint_folder_tree(
             },
             exc_info=True,
         )
-        raise BadRequestException(f"Failed to fetch SharePoint folder tree: {str(e)}")
+        raise BadRequestException(
+            f"Failed to fetch SharePoint folder tree: {user_visible_error(e)}"
+        )
 
 
 @router.get(

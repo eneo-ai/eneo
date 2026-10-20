@@ -142,3 +142,40 @@ test("listing an item's skipped documents reads the skipped endpoint", async () 
     }
   ]);
 });
+
+test("reading a space's sync progress reads the space-wide progress endpoint", async () => {
+  const calls = [];
+  const progress = {
+    items: [
+      {
+        integration_knowledge_id: "ik-1",
+        sync_type: "full",
+        phase: "processing",
+        started_at: "2026-10-14T09:00:00Z",
+        updated_at: "2026-10-14T09:02:00Z",
+        total: 120,
+        done: 45,
+        indexed: 30,
+        unchanged: 12,
+        skipped: 3,
+        deleted: 1
+      }
+    ]
+  };
+  const integrations = initIntegrations({
+    fetch: async (endpoint, request) => {
+      calls.push({ endpoint, request });
+      return progress;
+    }
+  });
+
+  const result = await integrations.knowledge.getSyncProgress({ space: { id: "space-1" } });
+
+  assert.deepEqual(result, progress);
+  assert.deepEqual(calls, [
+    {
+      endpoint: "/api/v1/spaces/{id}/knowledge/integrations/sync-progress/",
+      request: { method: "get", params: { path: { id: "space-1" } } }
+    }
+  ]);
+});

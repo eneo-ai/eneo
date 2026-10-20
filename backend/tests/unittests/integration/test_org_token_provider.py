@@ -20,6 +20,8 @@ from eneo.integration.infrastructure.auth_service.org_token_provider import (
     CREDENTIALS_INVALID_MESSAGE,
     OrgTokenProvider,
     SharePointCredentialsInvalidError,
+    loggable_token_reason,
+    summarize_token_endpoint_error,
 )
 
 _MODULE = "eneo.integration.infrastructure.auth_service.org_token_provider"
@@ -457,3 +459,82 @@ async def test_access_token_provider_forces_a_fresh_token(auth_method):
         )
     else:
         app_auth.get_access_token.assert_awaited_once_with(app, force_refresh=True)
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "AADSTS70008: The code has expired.\r\nTrace ID: 1f\r\nCorrelation ID: 2e",
+        "AADSTS70008: The code has expired.\nTrace ID: 1f\nCorrelation ID: 2e",
+        "AADSTS70008: The code has expired. Trace ID: 1f Correlation ID: 2e "
+        "Timestamp: 2026-10-19 12:00:00Z",
+        "AADSTS70008: The code has expired. Timestamp: 2026-10-19 12:00:00Z",
+    ],
+    ids=["crlf", "lf", "one-line", "timestamp-only"],
+)
+def test_the_summary_drops_microsofts_trace_lines_however_they_are_separated(
+    description,
+):
+    error = _token_error(
+        400, {"error": "invalid_grant", "error_description": description}
+    )
+
+    assert summarize_token_endpoint_error(error) == (
+        "AADSTS70008: The code has expired."
+    )
+
+
+@pytest.mark.parametrize(
+    "reason, logged",
+    [
+        (
+            _token_error(
+                401,
+                {
+                    "error": "invalid_client",
+                    "error_description": "AADSTS7000215: Invalid client secret "
+                    "provided for app '11111111-2222-3333-4444-555555555555'.",
+                },
+            ),
+            "invalid_client AADSTS7000215",
+        ),
+        (
+            "AADSTS50034: The user account anna.svensson@sundsvall.se does not "
+            "exist in the 1a2b3c4d-0000-1111-2222-333344445555 directory.",
+            "AADSTS50034",
+        ),
+        ("invalid_grant", "invalid_grant"),
+        ("HTTP 401", "HTTP 401"),
+        ("The account anna.svensson@sundsvall.se is disabled", "unrecognized reason"),
+    ],
+    ids=["refusal", "stored-detail", "error-only", "status-only", "free-text"],
+)
+def test_a_refusal_is_logged_by_its_codes_only(reason, logged):
+    """Descriptions can name accounts and directories."""
+    assert loggable_token_reason(reason) == logged
+
+
+async def test_a_recorded_refusal_logs_no_description():
+    app_auth = AsyncMock()
+    app_auth.get_access_token.side_effect = _token_error(
+        401,
+        {
+            "error": "invalid_client",
+            "error_description": "AADSTS7000215: Invalid client secret provided "
+            "for app '11111111-2222-3333-4444-555555555555'.",
+        },
+    )
+    provider, _ = _provider(app_auth=app_auth)
+
+    with (
+        patch(f"{_MODULE}.sessionmanager", _FakeSessionManager()),
+        patch(f"{_MODULE}.logger") as log,
+    ):
+        with pytest.raises(SharePointCredentialsInvalidError):
+            await provider.get_access_token(_app())
+
+    logged = " ".join(
+        str(call.args[0]) % call.args[1:] for call in log.warning.call_args_list
+    )
+    assert "AADSTS7000215" in logged
+    assert "11111111-2222-3333-4444-555555555555" not in logged

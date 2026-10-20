@@ -1,4 +1,4 @@
-import axe, { type AxeResults, type RunOptions } from "axe-core";
+import axe, { type AxeResults, type ElementContext, type RunOptions } from "axe-core";
 import { expect } from "vitest";
 
 // Component tests render fragments, not pages: landmark and heading rules
@@ -14,11 +14,30 @@ function describeViolations(violations: AxeResults["violations"]): string {
     .join("\n");
 }
 
+// Contrast is measured on the colours drawn now, so an intro transition that fades
+// in (such as the page title's) fails it midway. Only running, finite animations are
+// awaited: endless ones (spinners) never end, and finished ones that keep their end
+// state (`fill: forwards`) or paused ones would never settle.
+async function finishTransitions(): Promise<void> {
+  // A transition can start a frame after the render that caused it.
+  for (let round = 0; round < 10; round++) {
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    const ending = document.getAnimations().filter((animation) => {
+      if (animation.playState !== "running") return false;
+      const end = animation.effect?.getComputedTiming().endTime;
+      return typeof end === "number" && Number.isFinite(end);
+    });
+    if (ending.length === 0) return;
+    await Promise.all(ending.map((animation) => animation.finished.catch(() => undefined)));
+  }
+}
+
 /** Fails the test when axe finds a WCAG violation inside `context`. */
 export async function expectNoAxeViolations(
-  context: Element | Document = document,
+  context: ElementContext = document,
   options: RunOptions = {}
 ): Promise<void> {
+  await finishTransitions();
   const rules = Object.fromEntries(PAGE_LEVEL_RULES.map((rule) => [rule, { enabled: false }]));
   const results = await axe.run(context, {
     ...options,

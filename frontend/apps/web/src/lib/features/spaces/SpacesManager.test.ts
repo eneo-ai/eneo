@@ -229,6 +229,18 @@ describe("SpacesManager.refreshCurrentSpace", () => {
     expect(get(manager.state.currentSpace).name).toBe("A");
   });
 
+  it("does not let a full read that began before a rename undo it", async () => {
+    const { manager, eneo } = setup();
+    const old = deferred<Space>();
+    vi.spyOn(eneo.spaces, "get").mockReturnValue(old.promise);
+    vi.spyOn(eneo.spaces, "update").mockResolvedValue({ ...initial, name: "Renamed" });
+    const earlier = manager.refreshCurrentSpace();
+    await manager.updateSpace({ name: "Renamed" });
+    old.resolve({ ...initial, name: "A" });
+    expect(await earlier).toBe(false);
+    expect(get(manager.state.currentSpace).name).toBe("Renamed");
+  });
+
   it("merges a partial response into the current space, preserving intervening edits", async () => {
     const { manager, eneo } = setup();
     const response = deferred<Space["knowledge"]>();

@@ -127,6 +127,10 @@ class IntegrationKnowledge(BasePublic):
     last_sync_summary: Mapped[Optional[Dict[str, Any]]] = mapped_column(
         JSONB, nullable=True
     )
+    # Items syncs could not finish and retry by id; sharepoint_sync_ledger.
+    sync_failed_items: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
     # Outcome of the most recent sync attempt: 'never' | 'success' | 'error'.
     # last_synced_at is the last *successful* completion; last_sync_attempted_at
     # moves on every attempt so a failing integration is distinguishable from

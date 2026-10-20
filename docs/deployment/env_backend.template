@@ -504,6 +504,18 @@ SHAREPOINT_WEBHOOK_CLIENT_STATE=
 # {PUBLIC_ORIGIN}/api/v1/integrations/sharepoint/webhook/
 # SHAREPOINT_WEBHOOK_NOTIFICATION_URL=
 
+# [OPTIONAL] Where Graph sends subscription lifecycle events (reauthorization,
+# removal, missed notifications). Defaults to the webhook callback URL itself,
+# which serves both kinds; the lifecycle/ path under it works as well. Graph
+# must reach this URL whenever it creates a subscription.
+# SHAREPOINT_WEBHOOK_LIFECYCLE_NOTIFICATION_URL=
+
+# [OPTIONAL] Hours without any sync after which a SharePoint source gets a
+# delta sync anyway, in case Graph dropped its notifications (0 = off), and the
+# most such syncs queued per run (every 15 minutes).
+# SHAREPOINT_CATCH_UP_AFTER_HOURS=6
+# SHAREPOINT_CATCH_UP_MAX_SYNCS_PER_RUN=25
+
 # ----------------------------------------------------------------------------
 # Default Tenant & User (First-time Bootstrap)
 # ----------------------------------------------------------------------------

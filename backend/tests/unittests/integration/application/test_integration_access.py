@@ -317,5 +317,7 @@ async def test_sharepoint_preview_refusal_becomes_a_credential_message(
         confluence_preview_service=AsyncMock(),
         sharepoint_preview_service=sharepoint,
     )
-    with pytest.raises(BadRequestException, match=CREDENTIALS_INVALID_MESSAGE):
+    with pytest.raises(BadRequestException, match=CREDENTIALS_INVALID_MESSAGE) as error:
         await service.get_preview_data(case.integration.id)
+    # The same code an import or a sync answers with.
+    assert getattr(error.value, "code", None) == "sharepoint_credentials_invalid"

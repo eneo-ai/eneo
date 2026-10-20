@@ -3,25 +3,27 @@
 from __future__ import annotations
 
 import unicodedata
-from typing import TYPE_CHECKING, Literal
+from typing import Literal, Protocol
 from urllib.parse import unquote, urlsplit
 
-from eneo.integration.presentation.models import (
-    IntegrationDocumentItem,
-    IntegrationSkippedDocument,
-    IntegrationSkippedDocuments,
-)
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
-
-    from eneo.info_blobs.info_blob import InfoBlobInDBNoText
-    from eneo.integration.domain.entities.integration_knowledge import (
-        IntegrationKnowledge,
-    )
-    from eneo.integration.domain.entities.sync_log import SyncLog
-
 SortOrder = Literal["asc", "desc"]
+
+
+class DocumentSource(Protocol):
+    """What the Documents page reads of an item: an entity or its location."""
+
+    @property
+    def integration_type(self) -> str: ...
+
+    @property
+    def url(self) -> str | None: ...
+
+    @property
+    def folder_path(self) -> str | None: ...
+
+    @property
+    def resource_type(self) -> str | None: ...
+
 
 ONEDRIVE_RESOURCE_TYPE = "onedrive"
 SHAREPOINT_INTEGRATION_TYPE = "sharepoint"
@@ -39,6 +41,24 @@ def _segments(path: str | None) -> list[str]:
 
 def _url_segments(url: str | None) -> list[str]:
     return _segments(urlsplit(url).path) if url else []
+
+
+def _folder_path_forms(folder_path: str | None) -> list[list[str]]:
+    """The stored folder path's segments: as stored, and decoded once.
+
+    The sync stores the path decoded, so a name like "Budget 50%AB" must not
+    be decoded again; a path stored percent-encoded before that still reads
+    until the sync refreshes it.
+    """
+    if not folder_path:
+        return []
+    stored = [
+        unicodedata.normalize("NFC", segment)
+        for segment in folder_path.split("/")
+        if segment
+    ]
+    decoded = _segments(folder_path)
+    return [stored] if decoded == stored else [stored, decoded]
 
 
 def _fold(segments: list[str]) -> list[str]:
@@ -76,27 +96,28 @@ def relative_document_path(
     if not segments:
         return ""
     folders = segments[:-1]
-    folder_segments = _segments(folder_path)
+    folder_forms = _folder_path_forms(folder_path)
 
     anchor = _url_segments(item_url)
     if anchor and _fold(segments[: len(anchor)]) == _fold(anchor):
         rest = folders[len(anchor) :]
-        if not folder_segments and resource_type != ONEDRIVE_RESOURCE_TYPE:
+        if not folder_forms and resource_type != ONEDRIVE_RESOURCE_TYPE:
             rest = rest[1:]
         return "/".join(rest)
 
-    start = _find(folders, folder_segments)
-    if start is not None:
-        return "/".join(folders[start + len(folder_segments) :])
+    for folder_segments in folder_forms:
+        start = _find(folders, folder_segments)
+        if start is not None:
+            return "/".join(folders[start + len(folder_segments) :])
     return "/".join(folders)
 
 
-def document_url_anchor(item: IntegrationKnowledge) -> str | None:
+def document_url_anchor(item: DocumentSource) -> str | None:
     """The item's URL as its document URLs start, for searching below it."""
     return item.url.rstrip("/") or None if item.url else None
 
 
-def _relative_path_for(item: IntegrationKnowledge, document_url: str | None) -> str:
+def item_relative_path(item: DocumentSource, document_url: str | None) -> str:
     # Confluence pages are not files under an imported folder; their URL path
     # (wiki/spaces/KEY/pages/123) says nothing a user would call a folder.
     if item.integration_type != SHAREPOINT_INTEGRATION_TYPE:
@@ -106,58 +127,4 @@ def _relative_path_for(item: IntegrationKnowledge, document_url: str | None) -> 
         item_url=item.url,
         folder_path=item.folder_path,
         resource_type=item.resource_type,
-    )
-
-
-def ordered_by_relative_path(
-    items: list[IntegrationDocumentItem], *, descending: bool = False
-) -> list[IntegrationDocumentItem]:
-    """The page sorted on the decoded path, folders first within each.
-
-    The query orders on the percent-encoded URL so pages stay stable, which
-    puts an encoded folder such as Årsmöte (%C3%85...) before plain letters.
-    Only the page in hand is reordered; a document can still land on the
-    page the encoded order assigns it.
-    """
-    return sorted(
-        items,
-        key=lambda item: (item.relative_path.casefold(), item.title.casefold()),
-        reverse=descending,
-    )
-
-
-def document_items(
-    documents: Iterable[InfoBlobInDBNoText], item: IntegrationKnowledge
-) -> list[IntegrationDocumentItem]:
-    return [
-        IntegrationDocumentItem(
-            id=document.id,
-            title=document.title or document.url or "",
-            relative_path=_relative_path_for(item, document.url),
-            url=document.url or None,
-            size=document.size,
-            updated_at=document.updated_at or document.created_at,
-            source_metadata=document.source_metadata or [],
-        )
-        for document in documents
-    ]
-
-
-def skipped_documents(sync_log: SyncLog | None) -> IntegrationSkippedDocuments:
-    if sync_log is None:
-        return IntegrationSkippedDocuments(items=[], total=0, truncated=False)
-    metadata = sync_log.metadata
-    details = metadata.get("skipped_details", [])
-    return IntegrationSkippedDocuments(
-        items=[
-            IntegrationSkippedDocument(
-                file=str(detail.get("file", "")), reason=str(detail.get("reason", ""))
-            )
-            for detail in details
-        ],
-        total=int(
-            metadata.get("skipped_total", metadata.get("skipped_items", len(details)))
-        ),
-        truncated=bool(metadata.get("skipped_truncated", False)),
-        synced_at=sync_log.completed_at or sync_log.started_at,
     )

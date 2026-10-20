@@ -19,6 +19,7 @@ vi.mock("$lib/core/errors", () => ({
   getErrorMessage: (error: unknown) => String(error)
 }));
 
+import { SharePointSubscriptionList } from "$lib/features/integrations/sharepoint/SharePointSubscriptionList.svelte";
 import SharePointSubscriptions from "./SharePointSubscriptions.svelte";
 
 const api = {
@@ -72,7 +73,10 @@ beforeEach(() => {
 });
 
 async function openRecreateAllDialog() {
-  render(SharePointSubscriptions, { eneo: api as never });
+  render(SharePointSubscriptions, {
+    eneo: api as never,
+    subscriptionList: new SharePointSubscriptionList(api as never)
+  });
   await expect
     .element(page.getByText(m.sharepoint_subscription_owner_organization()))
     .toBeVisible();

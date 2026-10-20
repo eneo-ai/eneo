@@ -2,13 +2,13 @@ import logging
 from typing import TYPE_CHECKING, Optional
 
 from eneo.integration.domain.entities.oauth_token import SharePointToken
+from eneo.integration.domain.value_objects import IntegrationType
 from eneo.integration.infrastructure.auth_service.org_token_provider import (
     AccessTokenProvider,
     OrgTokenProvider,
     SharePointCredentialsInvalidError,
 )
 from eneo.integration.infrastructure.oauth_token_service import OauthTokenService
-from eneo.integration.presentation.models import IntegrationType
 
 if TYPE_CHECKING:
     from eneo.integration.application.user_integration_service import (

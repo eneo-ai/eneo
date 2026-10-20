@@ -1,5 +1,6 @@
 """HTTP contract of the public Graph webhook endpoint."""
 
+import asyncio
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -18,12 +19,14 @@ from eneo.integration.infrastructure.sharepoint_webhook_service import (
     SharepointWebhookService,
 )
 from eneo.integration.presentation.sharepoint_webhook_router import (
+    MAX_VALIDATION_TOKEN_LENGTH,
     MAX_WEBHOOK_BODY_BYTES,
     router,
 )
 
 CLIENT_STATE = "webhook-secret"
 WEBHOOK = "/integrations/sharepoint/webhook/"
+LIFECYCLE = "/integrations/sharepoint/webhook/lifecycle/"
 
 
 @dataclass
@@ -162,15 +165,41 @@ def _knowledge_rows(count: int):
     return rows
 
 
+@pytest.mark.parametrize("path", [WEBHOOK, LIFECYCLE])
 @pytest.mark.parametrize("method", ["GET", "POST"])
-async def test_handshake_echoes_the_validation_token_as_plain_text(api, method):
+async def test_handshake_echoes_the_validation_token_as_plain_text(api, method, path):
     response = await api.client.request(
-        method, WEBHOOK, params={"validationToken": "abc 123"}
+        method, path, params={"validationToken": "abc 123"}
     )
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
+    assert response.headers["x-content-type-options"] == "nosniff"
     assert response.text == "abc 123"
+
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+async def test_an_overlong_validation_token_is_not_echoed(api, method):
+    token = "<" + "x" * MAX_VALIDATION_TOKEN_LENGTH
+
+    response = await api.client.request(
+        method, WEBHOOK, params={"validationToken": token}
+    )
+
+    assert response.status_code == 400
+    assert token not in response.text
+
+
+@pytest.mark.parametrize("method", ["GET", "POST"])
+async def test_a_validation_token_at_the_limit_is_echoed(api, method):
+    token = "t" * MAX_VALIDATION_TOKEN_LENGTH
+
+    response = await api.client.request(
+        method, WEBHOOK, params={"validationToken": token}
+    )
+
+    assert response.status_code == 200
+    assert response.text == token
 
 
 @pytest.mark.parametrize(
@@ -194,6 +223,11 @@ async def test_handshake_echoes_the_validation_token_as_plain_text(api, method):
             b"{}",
             {"content-type": "application/json", "content-length": str(10**9)},
             id="oversized-declared",
+        ),
+        pytest.param(
+            b"[" * 100_000 + b"]" * 100_000,
+            {"content-type": "application/json"},
+            id="deeply-nested",
         ),
     ],
 )
@@ -273,3 +307,137 @@ async def test_valid_notification_queues_exactly_the_referencing_knowledge(api):
         knowledge.id for knowledge, _ in result.all.return_value
     }
     assert api.subscription.last_webhook_received_at is not None
+
+
+def _lifecycle(event: str, client_state: str = CLIENT_STATE) -> dict[str, object]:
+    return {
+        "subscriptionId": "sub-known",
+        "clientState": client_state,
+        "lifecycleEvent": event,
+    }
+
+
+async def test_a_reauthorization_request_is_renewed_after_the_acknowledgement(
+    api, monkeypatch
+):
+    maintain = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.integration.presentation.sharepoint_webhook_router.maintain_subscriptions",
+        maintain,
+    )
+
+    response = await api.client.post(
+        LIFECYCLE, json={"value": [_lifecycle("reauthorizationRequired")]}
+    )
+    for _ in range(3):
+        await asyncio.sleep(0)
+
+    assert response.status_code == 202
+    [requests] = maintain.await_args.args
+    assert [(r.subscription_id, r.event) for r in requests] == [
+        (api.subscription.id, "reauthorizationRequired")
+    ]
+
+
+async def test_a_forged_lifecycle_event_does_nothing(api, monkeypatch):
+    maintain = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.integration.presentation.sharepoint_webhook_router.maintain_subscriptions",
+        maintain,
+    )
+
+    response = await api.client.post(
+        LIFECYCLE,
+        json={"value": [_lifecycle("subscriptionRemoved", client_state="guess")]},
+    )
+
+    assert response.status_code == 202
+    maintain.assert_not_called()
+    api.session.begin.assert_not_called()
+
+
+async def test_the_lifecycle_path_has_the_same_body_limits(api):
+    response = await api.client.post(
+        LIFECYCLE,
+        content=b"{" + b" " * MAX_WEBHOOK_BODY_BYTES + b"}",
+        headers={"content-type": "application/json"},
+    )
+
+    assert response.status_code == 400
+    api.subscription_repo.get_by_subscription_id.assert_not_called()
+
+
+def test_the_lifecycle_path_stays_out_of_the_published_api():
+    app = FastAPI()
+    app.include_router(router, prefix="/integrations")
+
+    assert LIFECYCLE not in app.openapi()["paths"]
+    assert WEBHOOK in app.openapi()["paths"]
+
+
+async def test_the_webhook_path_hands_lifecycle_events_to_lifecycle_handling(
+    api, monkeypatch
+):
+    """Graph posts lifecycle events to the webhook URL by default; a change in
+    the same batch still queues its sync."""
+    maintain = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.integration.presentation.sharepoint_webhook_router.maintain_subscriptions",
+        maintain,
+    )
+    result = MagicMock()
+    result.all.return_value = _knowledge_rows(1)
+    api.session.execute.return_value = result
+    api.service.oauth_token_repo.one_or_none.return_value = MagicMock(id=uuid4())
+    api.service.user_repo.get_user_by_id.return_value = MagicMock(id=uuid4())
+
+    response = await api.client.post(
+        WEBHOOK,
+        json={"value": [_lifecycle("reauthorizationRequired"), _notification()]},
+    )
+    for _ in range(3):
+        await asyncio.sleep(0)
+
+    assert response.status_code == 202
+    [requests] = maintain.await_args.args
+    assert [(r.subscription_id, r.event) for r in requests] == [
+        (api.subscription.id, "reauthorizationRequired")
+    ]
+    [queued] = api.job_service.queue_job.await_args_list
+    assert queued.kwargs["task_params"].integration_knowledge_id == (
+        result.all.return_value[0][0].id
+    )
+
+
+async def test_a_change_notification_alone_starts_no_lifecycle_handling(
+    api, monkeypatch
+):
+    maintain = AsyncMock()
+    monkeypatch.setattr(
+        "eneo.integration.presentation.sharepoint_webhook_router.maintain_subscriptions",
+        maintain,
+    )
+    result = MagicMock()
+    result.all.return_value = _knowledge_rows(1)
+    api.session.execute.return_value = result
+    api.service.oauth_token_repo.one_or_none.return_value = MagicMock(id=uuid4())
+    api.service.user_repo.get_user_by_id.return_value = MagicMock(id=uuid4())
+
+    response = await api.client.post(WEBHOOK, json={"value": [_notification()]})
+
+    assert response.status_code == 202
+    api.job_service.queue_job.assert_awaited_once()
+    maintain.assert_not_called()
+
+
+async def test_missed_notifications_on_the_webhook_path_queue_syncs(api):
+    result = MagicMock()
+    result.all.return_value = _knowledge_rows(2)
+    api.session.execute.return_value = result
+    api.service.oauth_token_repo.one_or_none.return_value = MagicMock(id=uuid4())
+    api.service.user_repo.get_user_by_id.return_value = MagicMock(id=uuid4())
+
+    response = await api.client.post(WEBHOOK, json={"value": [_lifecycle("missed")]})
+
+    assert response.status_code == 202
+    assert api.job_service.queue_job.await_count == 2

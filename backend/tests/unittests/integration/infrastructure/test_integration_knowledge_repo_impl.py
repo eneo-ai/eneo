@@ -109,6 +109,8 @@ class TestDocumentCountProjection:
         session.execute.assert_not_called()
         repo.mapper.to_entity.assert_called_once()
         repo.mapper.to_entities.assert_called_once()
+        # Knowledge keeps its embedding model after the model is deprecated.
+        repo.embedding_model_repo.all.assert_awaited_with(with_deprecated=True)
 
     async def test_attach_document_counts_counts_all_items_in_one_query(
         self, repo, session

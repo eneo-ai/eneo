@@ -1,10 +1,17 @@
 import gzip
+import traceback
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
+from aiohttp import web
+from aiohttp.client_reqrep import RequestInfo
+from aiohttp.test_utils import TestServer
+from multidict import CIMultiDict, CIMultiDictProxy
+from yarl import URL
 
 from eneo.integration.infrastructure.clients.sharepoint_content_client import (
+    IncompleteDownloadError,
     SharePointContentClient,
 )
 from eneo.integration.infrastructure.content_service.utils import (
@@ -200,22 +207,48 @@ class TestFileDownloadExtraction:
     async def test_truncated_download_is_a_failure_not_an_empty_file(
         self, client: SharePointContentClient, encoding: str | None
     ):
+        """Still cut off after its retries, it fails the item, which keeps its
+        copy and is tried again later, instead of being parsed or skipped."""
         payload = docx_bytes("Downloaded body")
         headers = {"Content-Length": str(len(payload))}
         if encoding:
             headers["Content-Encoding"] = encoding
         _serve(client, [payload[: len(payload) // 2]], **headers)
 
-        result = await client.get_file_extraction_by_id("drive", "item")
+        with patch("asyncio.sleep", new=AsyncMock()):
+            with pytest.raises(
+                IncompleteDownloadError,
+                match=(
+                    f"Incomplete download of 'report.docx' "
+                    rf"\({len(payload) // 2} of {len(payload)} bytes\)"
+                ),
+            ):
+                await client.get_file_extraction_by_id("drive", "item")
 
-        assert result == ExtractionResult(
-            skip_reason=(
-                f"Error: Incomplete download of 'report.docx' "
-                f"({len(payload) // 2} of {len(payload)} bytes)"
-            ),
-            failed=True,
-            content_type=OCTET,
+        assert client.client.client.get.call_count == 5
+
+    async def test_a_cut_off_download_is_fetched_again(
+        self, client: SharePointContentClient
+    ):
+        payload = docx_bytes("Whole body")
+        length = {"Content-Type": OCTET, "Content-Length": str(len(payload))}
+        client.client.client.get = MagicMock(
+            side_effect=[
+                _FakeResponse([payload[:10]], length),
+                _FailedRequest(
+                    aiohttp.ClientPayloadError("Response payload is not completed")
+                ),
+                _FakeResponse([payload], length),
+            ]
         )
+
+        with patch("asyncio.sleep", new=AsyncMock()):
+            result = await client.get_file_extraction_by_id("drive", "item")
+
+        assert result.text is not None and "Whole body" in result.text
+        assert client.client.client.get.call_count == 3
+        for call in client.client.client.get.call_args_list:
+            assert "headers" not in call.kwargs
 
     @pytest.mark.parametrize("encoding", ["gzip", "br", "deflate", "GZIP"])
     async def test_decompressed_body_is_not_measured_against_the_wire_length(
@@ -287,6 +320,260 @@ class TestFileDownloadExtraction:
 
         with pytest.raises(ValueError, match="exceeds max download size"):
             await client.get_file_extraction_by_id("drive", "item")
+
+
+_SIGNED_DOWNLOAD_URL = (
+    "https://contoso.sharepoint.com/sites/KS/_layouts/15/download.aspx"
+    "?UniqueId=abc&Translate=false&tempauth=v1.eyJzaWduZWQiOiJ0b2tlbiJ9.c2lnbmF0dXJl"
+    "&ApiVersion=2.0"
+)
+
+
+def _signed_request_info() -> RequestInfo:
+    url = URL(_SIGNED_DOWNLOAD_URL)
+    return RequestInfo(
+        url,
+        "GET",
+        CIMultiDictProxy(CIMultiDict({"Authorization": "Bearer mock-token"})),
+        url,
+    )
+
+
+class _FailedRequest(_FakeResponse):
+    """A download aiohttp gives up on before it hands back a response."""
+
+    def __init__(self, error: Exception):
+        super().__init__([], {})
+        self._error = error
+
+    async def __aenter__(self):
+        raise self._error
+
+
+class _RefusedResponse(_FakeResponse):
+    """A download answered with an error status, as aiohttp reports it."""
+
+    def __init__(self, status: int, reason: str, headers: dict[str, str]):
+        super().__init__([], headers)
+        self.status = status
+        self.reason = reason
+
+    def raise_for_status(self) -> None:
+        url = URL(_SIGNED_DOWNLOAD_URL)
+        raise aiohttp.ClientResponseError(
+            RequestInfo(
+                url,
+                "GET",
+                CIMultiDictProxy(CIMultiDict({"Authorization": "Bearer mock-token"})),
+                url,
+            ),
+            (),
+            status=self.status,
+            message=self.reason,
+            headers=CIMultiDictProxy(CIMultiDict(self.headers)),
+        )
+
+
+class TestRefusedDownloads:
+    """A download URL carries a bearer token in its query; errors must not."""
+
+    @pytest.fixture
+    def signed_client(self, client: SharePointContentClient):
+        client.get_file_metadata = AsyncMock(
+            return_value={
+                "name": "report.docx",
+                "@microsoft.graph.downloadUrl": _SIGNED_DOWNLOAD_URL,
+            }
+        )
+        return client
+
+    async def test_the_error_names_the_status_without_the_url_query_or_token(
+        self, signed_client: SharePointContentClient
+    ):
+        signed_client.client.client.get = MagicMock(
+            return_value=_RefusedResponse(403, "Forbidden", {})
+        )
+
+        with pytest.raises(aiohttp.ClientResponseError) as caught:
+            await signed_client.get_file_extraction_by_id("drive", "item")
+
+        error = caught.value
+        assert error.status == 403
+        logged = "".join(traceback.format_exception(error))
+        for text in (str(error), repr(error), logged):
+            assert "tempauth" not in text
+            assert "eyJ" not in text
+            assert "mock-token" not in text
+        assert str(error.request_info.real_url) == _SIGNED_DOWNLOAD_URL.split("?")[0]
+
+    @pytest.mark.parametrize(
+        "error",
+        [
+            pytest.param(
+                aiohttp.TooManyRedirects(
+                    _signed_request_info(),
+                    # aiohttp keeps every redirect, each with the signed URL.
+                    (MagicMock(__repr__=lambda _: _SIGNED_DOWNLOAD_URL),),
+                    status=302,
+                    message="Found",
+                ),
+                id="too-many-redirects",
+            ),
+            pytest.param(
+                aiohttp.InvalidUrlRedirectClientError(
+                    _SIGNED_DOWNLOAD_URL, "Invalid redirect URL"
+                ),
+                id="invalid-redirect",
+            ),
+        ],
+    )
+    async def test_a_request_that_fails_before_a_response_drops_the_token_too(
+        self, signed_client: SharePointContentClient, error: aiohttp.ClientError
+    ):
+        signed_client.client.client.get = MagicMock(return_value=_FailedRequest(error))
+
+        with pytest.raises(aiohttp.ClientError) as caught:
+            await signed_client.get_file_extraction_by_id("drive", "item")
+
+        logged = "".join(traceback.format_exception(caught.value))
+        for text in (str(caught.value), repr(caught.value), logged):
+            assert "tempauth" not in text
+            assert "eyJ" not in text
+            assert "mock-token" not in text
+
+    async def test_throttled_downloads_are_still_retried(
+        self, signed_client: SharePointContentClient
+    ):
+        payload = docx_bytes("Second attempt")
+        signed_client.client.client.get = MagicMock(
+            side_effect=[
+                _RefusedResponse(429, "Too Many Requests", {"Retry-After": "0"}),
+                _FakeResponse(
+                    [payload],
+                    {"Content-Type": OCTET, "Content-Length": str(len(payload))},
+                ),
+            ]
+        )
+
+        result = await signed_client.get_file_extraction_by_id("drive", "item")
+
+        assert result.text is not None and "Second attempt" in result.text
+        assert signed_client.client.client.get.call_count == 2
+
+    @pytest.mark.parametrize(
+        "failure",
+        [
+            pytest.param(lambda: _RefusedResponse(502, "Bad Gateway", {}), id="502"),
+            pytest.param(
+                lambda: _RefusedResponse(504, "Gateway Timeout", {}), id="504"
+            ),
+            pytest.param(
+                lambda: _FailedRequest(
+                    aiohttp.ClientOSError(104, "Connection reset by peer")
+                ),
+                id="connection-reset",
+            ),
+            pytest.param(
+                lambda: _FailedRequest(aiohttp.ServerDisconnectedError()),
+                id="disconnected",
+            ),
+            pytest.param(lambda: _FailedRequest(TimeoutError()), id="timeout"),
+        ],
+    )
+    async def test_transient_download_failures_are_retried(
+        self, signed_client: SharePointContentClient, failure
+    ):
+        payload = docx_bytes("After a transient failure")
+        signed_client.client.client.get = MagicMock(
+            side_effect=[
+                failure(),
+                _FakeResponse(
+                    [payload],
+                    {"Content-Type": OCTET, "Content-Length": str(len(payload))},
+                ),
+            ]
+        )
+
+        with patch("asyncio.sleep", new=AsyncMock()):
+            result = await signed_client.get_file_extraction_by_id("drive", "item")
+
+        assert result.text is not None and "After a transient failure" in result.text
+        assert signed_client.client.client.get.call_count == 2
+
+    async def test_a_refused_download_is_not_retried(
+        self, signed_client: SharePointContentClient
+    ):
+        signed_client.client.client.get = MagicMock(
+            return_value=_RefusedResponse(403, "Forbidden", {})
+        )
+
+        with pytest.raises(aiohttp.ClientResponseError):
+            await signed_client.get_file_extraction_by_id("drive", "item")
+        assert signed_client.client.client.get.call_count == 1
+
+    async def test_an_expired_token_is_still_refreshed(
+        self, signed_client: SharePointContentClient
+    ):
+        payload = docx_bytes("After refresh")
+        signed_client.access_token_provider = AsyncMock(return_value="fresh")
+        signed_client.client.client.get = MagicMock(
+            side_effect=[
+                _RefusedResponse(401, "Unauthorized", {}),
+                _FakeResponse(
+                    [payload],
+                    {"Content-Type": OCTET, "Content-Length": str(len(payload))},
+                ),
+            ]
+        )
+
+        result = await signed_client.get_file_extraction_by_id("drive", "item")
+
+        assert result.text is not None and "After refresh" in result.text
+        assert signed_client.headers["Authorization"] == "Bearer fresh"
+
+
+class TestDownloadUrlGetsNoGraphToken:
+    """The download URL authorizes itself; the Graph token stays with Graph."""
+
+    async def test_no_authorization_header_reaches_the_download_host(
+        self, client: SharePointContentClient
+    ):
+        payload = docx_bytes("Served without a token")
+        seen: list[tuple[str, dict[str, str]]] = []
+
+        async def record(request: web.Request) -> web.StreamResponse:
+            seen.append((request.path, dict(request.headers)))
+            if len(seen) == 1:
+                return web.Response(status=503)
+            if request.path == "/download.aspx":
+                raise web.HTTPFound(f"/file?{request.query_string}")
+            return web.Response(body=payload, content_type=OCTET)
+
+        app = web.Application()
+        app.router.add_get("/{tail:.*}", record)
+        async with TestServer(app) as server:
+            client.get_file_metadata = AsyncMock(
+                return_value={
+                    "name": "report.docx",
+                    "@microsoft.graph.downloadUrl": str(
+                        server.make_url("/download.aspx?tempauth=signed")
+                    ),
+                }
+            )
+            with patch("asyncio.sleep", new=AsyncMock()):
+                result = await client.get_file_extraction_by_id("drive", "item")
+
+        assert result.text is not None and "Served without a token" in result.text
+        # The first answer is retried, the second is a same-host redirect.
+        assert [path for path, _ in seen] == [
+            "/download.aspx",
+            "/download.aspx",
+            "/file",
+        ]
+        for _, headers in seen:
+            assert "Authorization" not in headers
+            assert "mock-token" not in str(headers)
+        assert client.headers["Authorization"] == "Bearer mock-token"
 
 
 @pytest.mark.parametrize("status", [200, 403, 404, 410, 429, 503])

@@ -439,7 +439,7 @@
           class="text-muted-foreground flex items-center justify-center gap-2 py-10"
           role="status"
         >
-          <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+          <LoaderCircle class="size-4 motion-safe:animate-spin" aria-hidden="true" />
           {m.loading_configuration()}
         </div>
       {:else if configLoadFailed}
@@ -503,7 +503,7 @@
                 onclick={testStoredConnection}
               >
                 {#if testStoredConnection.isLoading}
-                  <LoaderCircle class="animate-spin" aria-hidden="true" />
+                  <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
                 {/if}
                 {testStoredConnection.isLoading ? m.testing() : m.test_connection()}
               </Button>
@@ -663,7 +663,7 @@
           onclick={updateSecret}
         >
           {#if updateSecret.isLoading}
-            <LoaderCircle class="animate-spin" aria-hidden="true" />
+            <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
           {/if}
           {updateSecret.isLoading ? m.saving() : m.save()}
         </Button>
@@ -676,7 +676,7 @@
             onclick={reauthServiceAccount}
           >
             {#if reauthServiceAccount.isLoading}
-              <LoaderCircle class="animate-spin" aria-hidden="true" />
+              <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
             {/if}
             {reauthServiceAccount.isLoading
               ? m.redirecting()
@@ -699,21 +699,29 @@
         <Button
           variant="outline"
           class="w-full sm:w-auto"
-          disabled={testCredentials.isLoading || !credentialsComplete}
-          onclick={testCredentials}
+          disabled={!credentialsComplete}
+          aria-disabled={testCredentials.isLoading}
+          aria-busy={testCredentials.isLoading}
+          onclick={() => {
+            if (!testCredentials.isLoading) void testCredentials();
+          }}
         >
           {#if testCredentials.isLoading}
-            <LoaderCircle class="animate-spin" aria-hidden="true" />
+            <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
           {/if}
           {testCredentials.isLoading ? m.testing() : m.test_connection()}
         </Button>
         <Button
           class="w-full sm:w-auto"
-          disabled={saveConfig.isLoading || !credentialsComplete}
-          onclick={saveConfig}
+          disabled={!credentialsComplete}
+          aria-disabled={saveConfig.isLoading}
+          aria-busy={saveConfig.isLoading}
+          onclick={() => {
+            if (!saveConfig.isLoading) void saveConfig();
+          }}
         >
           {#if saveConfig.isLoading}
-            <LoaderCircle class="animate-spin" aria-hidden="true" />
+            <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
           {:else if isFixtureSession}
             <FlaskConical aria-hidden="true" />
           {/if}
@@ -728,11 +736,15 @@
       {:else}
         <Button
           class="w-full sm:w-auto"
-          disabled={startServiceAccountOAuth.isLoading || !credentialsComplete}
-          onclick={startServiceAccountOAuth}
+          disabled={!credentialsComplete}
+          aria-disabled={startServiceAccountOAuth.isLoading}
+          aria-busy={startServiceAccountOAuth.isLoading}
+          onclick={() => {
+            if (!startServiceAccountOAuth.isLoading) void startServiceAccountOAuth();
+          }}
         >
           {#if startServiceAccountOAuth.isLoading}
-            <LoaderCircle class="animate-spin" aria-hidden="true" />
+            <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
           {:else if isFixtureSession}
             <FlaskConical aria-hidden="true" />
           {/if}

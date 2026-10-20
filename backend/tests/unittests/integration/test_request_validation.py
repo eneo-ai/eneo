@@ -8,6 +8,9 @@ from eneo.integration.presentation.validation import https_url_or_none
 from eneo.spaces.api.space_models import (
     CreateSpaceIntegrationKnowledge,
     CreateSpaceIntegrationKnowledgeBatchItem,
+    CreateSpaceIntegrationKnowledgeBatchRequest,
+    UpdateIntegrationKnowledgeRequest,
+    UpdateIntegrationKnowledgeWrapperRequest,
 )
 
 _BASE = {"name": "Policies", "url": "https://contoso.sharepoint.com/sites/x"}
@@ -84,6 +87,62 @@ def test_batch_items_share_the_same_constraints():
 
 
 @pytest.mark.parametrize(
+    "url",
+    [
+        "https://contoso.sharepoint.com/sites/x/Shared%20Documents/Policies",
+        "https://contoso-my.sharepoint.com/personal/anna_contoso_se/Documents",
+        "https://contoso.atlassian.net/wiki/spaces/DOCS",
+        # The import dialog sends "" for an item Graph gave no web URL.
+        "",
+    ],
+)
+def test_https_links_are_accepted(url):
+    created = CreateSpaceIntegrationKnowledge(
+        name="Policies",
+        url=url,
+        embedding_model={"id": "00000000-0000-0000-0000-000000000001"},
+    )
+    assert created.url == url
+    assert CreateSpaceIntegrationKnowledgeBatchItem(name="Policies", url=url).url == url
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("javascript:alert(document.cookie)", id="javascript"),
+        pytest.param("data:text/html,<script>alert(1)</script>", id="data"),
+        pytest.param("http://contoso.sharepoint.com/sites/x", id="http"),
+        pytest.param("//evil.example/sites/x", id="scheme-relative"),
+        pytest.param("/sites/x", id="relative"),
+        pytest.param("https:///sites/x", id="no-host"),
+        pytest.param("https://user:pass@evil.example/x", id="user-info"),
+        pytest.param(" https://contoso.sharepoint.com/sites/x", id="leading-space"),
+        pytest.param("https://contoso.sharepoint.com/a\nb", id="control-character"),
+    ],
+)
+def test_links_that_are_not_https_are_rejected(url):
+    with pytest.raises(ValidationError):
+        CreateSpaceIntegrationKnowledge(
+            name="Policies",
+            url=url,
+            embedding_model={"id": "00000000-0000-0000-0000-000000000001"},
+        )
+    with pytest.raises(ValidationError):
+        CreateSpaceIntegrationKnowledgeBatchItem(name="Policies", url=url)
+
+
+def test_the_link_stays_a_plain_string_in_the_api_schema():
+    for model in (
+        CreateSpaceIntegrationKnowledge,
+        CreateSpaceIntegrationKnowledgeBatchItem,
+    ):
+        assert model.model_json_schema()["properties"]["url"] == {
+            "title": "Url",
+            "type": "string",
+        }
+
+
+@pytest.mark.parametrize(
     ("value", "expected"),
     [
         pytest.param(
@@ -144,3 +203,49 @@ def test_knowledge_items_only_link_to_https(url, expected):
     )
 
     assert knowledge.url == expected
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 256])
+@pytest.mark.parametrize(
+    "model",
+    [
+        CreateSpaceIntegrationKnowledge,
+        UpdateIntegrationKnowledgeRequest,
+        UpdateIntegrationKnowledgeWrapperRequest,
+    ],
+)
+def test_a_knowledge_name_is_neither_blank_nor_overlong(model, name):
+    fields = {
+        "embedding_model": {"id": "00000000-0000-0000-0000-000000000001"},
+        "url": "https://contoso.sharepoint.com/sites/x",
+        "name": name,
+    }
+    with pytest.raises(ValidationError) as error:
+        model(**fields)
+    assert [problem["loc"] for problem in error.value.errors()] == [("name",)]
+
+
+def test_a_knowledge_name_is_stored_without_surrounding_whitespace():
+    assert UpdateIntegrationKnowledgeRequest(name="  Protokoll  ").name == "Protokoll"
+    assert UpdateIntegrationKnowledgeRequest(name="x" * 255).name == "x" * 255
+
+
+def test_a_batch_wrapper_name_may_be_blank_but_not_overlong():
+    request = {
+        "embedding_model": {"id": "00000000-0000-0000-0000-000000000001"},
+        "items": [_BASE],
+    }
+    assert CreateSpaceIntegrationKnowledgeBatchRequest(**request, wrapper_name="")
+    with pytest.raises(ValidationError):
+        CreateSpaceIntegrationKnowledgeBatchRequest(**request, wrapper_name="x" * 256)
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 256])
+def test_a_batch_item_name_is_checked_per_item_not_per_request(name):
+    """A SharePoint name may exceed 255 characters; it fails its item only."""
+    assert CreateSpaceIntegrationKnowledgeBatchItem(**{**_BASE, "name": name})
+
+
+def test_a_batch_item_name_beyond_any_sharepoint_name_is_a_malformed_body():
+    with pytest.raises(ValidationError):
+        CreateSpaceIntegrationKnowledgeBatchItem(**{**_BASE, "name": "x" * 2049})

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
@@ -119,3 +120,24 @@ async def test_failed_sync_is_marked_failed_before_reraise(service, knowledge, t
         "last_sync_status": "error",
         "last_sync_error": "Confluence unreachable",
     }
+
+
+async def test_a_failed_sync_records_no_sql_or_url(service, knowledge, token):
+    failure = sa.exc.OperationalError(
+        "UPDATE integration_knowledge SET size = %(size)s",
+        {"size": 1},
+        Exception('connection to server at "db.internal" failed'),
+    )
+    get_content = AsyncMock(side_effect=failure)
+    written = service.integration_knowledge_repo.update_sync_state
+
+    with patch(_CLIENT, return_value=_client(get_content)):
+        with pytest.raises(sa.exc.OperationalError):
+            await service.pull_content(
+                token_id=token.id,
+                space_key="DOCS",
+                integration_knowledge_id=knowledge.id,
+            )
+
+    assert knowledge.last_sync_error == "Database error"
+    assert written.await_args.kwargs["last_sync_error"] == "Database error"

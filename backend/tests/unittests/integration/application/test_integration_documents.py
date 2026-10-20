@@ -8,17 +8,20 @@ import pytest
 
 from eneo.info_blobs.info_blob import InfoBlobInDBNoText, SourceMetadataEntry
 from eneo.integration.application.integration_documents import (
-    document_items,
     document_url_anchor,
-    ordered_by_relative_path,
     relative_document_path,
-    skipped_documents,
 )
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.integration.domain.entities.sync_log import SyncLog
+from eneo.integration.domain.skip_reasons import classify_skip_reason
 from eneo.integration.presentation import models as presentation
+from eneo.integration.presentation.assemblers.integration_documents_assembler import (
+    document_items,
+    ordered_by_relative_path,
+    skipped_documents,
+)
 
 SITE = "https://contoso.sharepoint.com/sites/KS"
 FOLDER = f"{SITE}/Shared%20Documents/Protokoll"
@@ -101,6 +104,26 @@ DRIVE = "https://contoso-my.sharepoint.com/personal/max_contoso_com/Documents"
             f"{SITE}/Shared%20Documents/protokoll/Bilagor/KS-1.pdf",
             dict(item_url=None, folder_path="/Protokoll/", resource_type="site"),
             "Bilagor",
+        ),
+        (
+            "folder_path stored decoded keeps a literal percent in a name",
+            "https://contoso.sharepoint.com/sites/KS-ny/Delade%20dokument/Ekonomi/Budget%2050%25AB/Q1/KS-1.pdf",
+            dict(
+                item_url=FOLDER,
+                folder_path="/Ekonomi/Budget 50%AB",
+                resource_type="site",
+            ),
+            "Q1",
+        ),
+        (
+            "folder_path stored encoded, before the sync refreshed it",
+            "https://contoso.sharepoint.com/sites/KS-ny/Delade%20dokument/Ekonomi/Budget%2050%25AB/Q1/KS-1.pdf",
+            dict(
+                item_url=FOLDER,
+                folder_path="/Ekonomi/Budget%2050%25AB",
+                resource_type="site",
+            ),
+            "Q1",
         ),
         (
             "URL sharing neither anchor keeps its own folders",
@@ -265,6 +288,18 @@ def test_skipped_documents_without_a_sync_log_is_empty():
     }
 
 
+def _served(file: str, reason: str) -> dict:
+    """A skipped document as the API serves it: classified from its text."""
+    code, params, retry = classify_skip_reason(reason)
+    return {
+        "file": file,
+        "reason": reason,
+        "code": code,
+        "params": params,
+        "retry": retry,
+    }
+
+
 @pytest.mark.parametrize(
     "metadata, completed_at, expected",
     [
@@ -280,8 +315,8 @@ def test_skipped_documents_without_a_sync_log_is_empty():
             datetime(2026, 10, 13, 8, tzinfo=timezone.utc),
             {
                 "items": [
-                    {"file": "scan.pdf", "reason": "No text layer"},
-                    {"file": "old.xyz", "reason": "Unsupported format"},
+                    _served("scan.pdf", "No text layer"),
+                    _served("old.xyz", "Unsupported format"),
                 ],
                 "total": 17,
                 "truncated": True,
@@ -294,7 +329,7 @@ def test_skipped_documents_without_a_sync_log_is_empty():
             {"skipped_items": 1, "skipped_details": [{"file": "a.pdf", "reason": "r"}]},
             None,
             {
-                "items": [{"file": "a.pdf", "reason": "r"}],
+                "items": [_served("a.pdf", "r")],
                 "total": 1,
                 "truncated": False,
                 "synced_at": datetime(2026, 10, 13, 7, tzinfo=timezone.utc),
@@ -326,6 +361,31 @@ def test_skipped_documents_reads_the_sync_log(metadata, completed_at, expected):
     assert skipped_documents(log).model_dump() == expected
 
 
+@pytest.mark.parametrize(
+    "metadata, total, truncated",
+    [
+        ({"skipped_details": None, "skipped_total": None}, 0, False),
+        ({"skipped_details": "a.pdf", "skipped_total": "abc"}, 0, False),
+        ({"skipped_details": [], "skipped_total": [], "skipped_items": 4}, 4, False),
+        ({"skipped_truncated": "maybe", "skipped_total": 3}, 3, False),
+    ],
+    ids=["nulls", "text", "list-for-count", "text-for-flag"],
+)
+def test_skipped_documents_of_a_row_another_release_wrote(metadata, total, truncated):
+    """The Skipped view read the stored JSON as it came and failed with a 500."""
+    log = SyncLog(
+        integration_knowledge_id=uuid4(),
+        sync_type="full",
+        status="success",
+        started_at=datetime(2026, 10, 13, 7, tzinfo=timezone.utc),
+        metadata=metadata,
+    )
+
+    served = skipped_documents(log)
+
+    assert (served.items, served.total, served.truncated) == ([], total, truncated)
+
+
 def test_served_sync_log_tolerates_a_skipped_item_without_a_name():
     """Older syncs stored an unnamed item as a null file."""
     log = presentation.SyncLog(
@@ -348,7 +408,17 @@ def test_served_sync_log_tolerates_a_skipped_item_without_a_name():
 
     assert log.metadata == {
         "skipped_details": [
-            {"file": "", "reason": "Missing item id"},
-            {"file": "a.pdf", "reason": f"Download failed: {FOLDER}/a.pdf"},
+            {
+                "file": "",
+                "reason": "Missing item id",
+                "code": "missing_item_id",
+                "params": {},
+            },
+            {
+                "file": "a.pdf",
+                "reason": f"Download failed: {FOLDER}/a.pdf",
+                "code": "error",
+                "params": {"detail": f"Download failed: {FOLDER}/a.pdf"},
+            },
         ]
     }

@@ -48,6 +48,7 @@ function SpacesManager(data: SpacesManagerParams) {
   // Function definitions --------------------------------------------------------
   let navigationVersion = 0;
   let refreshSequence = 0;
+  let spaceUpdates = 0;
   const refreshVersions = { applications: 0, knowledge: 0 };
 
   /** Will update the current space if a new space is passed in via page data */
@@ -74,6 +75,7 @@ function SpacesManager(data: SpacesManagerParams) {
     const requestedSpace = get(currentSpace);
     const navigation = navigationVersion;
     const request = ++refreshSequence;
+    const updates = spaceUpdates;
     if (type) refreshVersions[type] = request;
     else {
       refreshVersions.applications = request;
@@ -84,7 +86,8 @@ function SpacesManager(data: SpacesManagerParams) {
       requestedSpace.id === get(currentSpace).id &&
       (type
         ? refreshVersions[type] === request
-        : Object.values(refreshVersions).every((version) => version === request));
+        : updates === spaceUpdates &&
+          Object.values(refreshVersions).every((version) => version === request));
     try {
       if (type) {
         switch (type) {
@@ -132,6 +135,8 @@ function SpacesManager(data: SpacesManagerParams) {
       // The mutation still updates the list, but a late response cannot replace
       // the space reached since it began, including navigation back to this id.
       if (space === undefined && navigation === navigationVersion && id === get(currentSpace).id) {
+        // A full re-read still in flight began before this and must not put the old space back.
+        spaceUpdates++;
         currentSpace.set(updatedSpace);
       }
       return updatedSpace;

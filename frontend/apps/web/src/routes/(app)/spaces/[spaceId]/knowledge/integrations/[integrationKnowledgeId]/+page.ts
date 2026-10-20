@@ -1,16 +1,19 @@
-import { error } from "@sveltejs/kit";
-import { getErrorMessage } from "$lib/core/errors";
-import {
-  DEFAULT_INTEGRATION_DOCUMENTS_QUERY,
-  emptyDocumentsPage,
-  type IntegrationDocumentsTab
-} from "$lib/features/integrations/integrationDocuments";
+import { error, redirect } from "@sveltejs/kit";
 import { findIntegrationItems } from "$lib/features/integrations/integrationItems";
+import { sourceHref, type SourceTab } from "$lib/features/integrations/sources";
+
+/** The wrapper page's tab for a tab of the item page; an old `skipped` link opens Problems. */
+function wrapperTab(tab: string | null): SourceTab | undefined {
+  if (tab === "skipped" || tab === "problems") return "problems";
+  if (tab === "activity" || tab === "content") return tab;
+  return undefined;
+}
 
 export const load = async (event) => {
   const { eneo, currentSpace } = await event.parent();
   const integrationKnowledgeId = event.params.integrationKnowledgeId;
 
+  // The layout's space predates an import made since; such an item is only on the server.
   const [knowledge] = await findIntegrationItems(
     eneo,
     currentSpace,
@@ -20,29 +23,24 @@ export const load = async (event) => {
     throw error(404);
   }
 
-  // A failed list keeps the page: the view shows the error in place, with a retry.
-  let documentsError: string | null = null;
-  const [documents, skipped] = await Promise.all([
-    eneo.integrations.knowledge
-      .listDocuments({
-        knowledge,
-        space: currentSpace,
-        ...DEFAULT_INTEGRATION_DOCUMENTS_QUERY
-      })
-      .catch((err: unknown) => {
-        documentsError = getErrorMessage(err);
-        return emptyDocumentsPage();
-      }),
-    eneo.integrations.knowledge
-      .listSkippedDocuments({ knowledge, space: currentSpace })
-      .catch((err: unknown) => {
-        console.error("Could not load the skipped files of an integration item", err);
-        return null;
-      })
-  ]);
+  const requestedTab = event.url.searchParams.get("tab");
 
-  const initialTab: IntegrationDocumentsTab =
-    event.url.searchParams.get("tab") === "skipped" ? "skipped" : "documents";
+  // An item imported with others lives on its wrapper's page, with its folder selected.
+  if (knowledge.wrapper_id && knowledge.integration_type === "sharepoint") {
+    throw redirect(
+      307,
+      sourceHref(
+        event.params.spaceId,
+        { kind: "wrapper", id: knowledge.wrapper_id },
+        { folder: knowledge.id, tab: wrapperTab(requestedTab) }
+      )
+    );
+  }
 
-  return { knowledge, documents, documentsError, skipped, initialTab };
+  // Links from before the problems tab still name the skipped-files tab.
+  if (requestedTab === "skipped") {
+    throw redirect(307, `${event.url.pathname}?tab=problems`);
+  }
+
+  return { knowledge };
 };

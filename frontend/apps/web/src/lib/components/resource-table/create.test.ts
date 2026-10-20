@@ -114,6 +114,21 @@ describe("resource table view model", () => {
     stop();
   });
 
+  test("keys rows by getRowId, so a row keeps its id when the rows before it go", () => {
+    const data = writable(items);
+    const table = createWithStore(data, 999999, { getRowId: (item) => item.id });
+    const view = table.createViewModel([table.column({ accessor: "name", header: "Name" })]);
+    const stop = watch(view.pageRows);
+
+    expect(get(view.pageRows).map((row) => row.id)).toEqual(["1", "2", "3"]);
+    data.set(items.slice(1));
+    expect(get(view.pageRows).map((row) => [row.id, row.original.name])).toEqual([
+      ["2", "alpha"],
+      ["3", "Gamma"]
+    ]);
+    stop();
+  });
+
   test("shows the value as text when a column has no cell function", () => {
     const table = createWithResource(items);
     const view = table.createViewModel([table.column({ accessor: "size", header: "Size" })]);

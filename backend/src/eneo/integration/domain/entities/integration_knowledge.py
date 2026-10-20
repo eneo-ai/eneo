@@ -15,6 +15,13 @@ if TYPE_CHECKING:
 _DEFAULT_SIZE = 0
 _MAX_SYNC_ERROR_LENGTH = 1000
 
+# A display name a person types or a SharePoint item name, as long as the
+# names of assistant templates and uploaded files.
+KNOWLEDGE_NAME_MAX_LENGTH = 255
+KNOWLEDGE_NAME_LENGTH_REASON = (
+    f"The name must be 1 to {KNOWLEDGE_NAME_MAX_LENGTH} characters long"
+)
+
 SYNC_STATUS_NEVER = "never"
 SYNC_STATUS_SUCCESS = "success"
 SYNC_STATUS_ERROR = "error"

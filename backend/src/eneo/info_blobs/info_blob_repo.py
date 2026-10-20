@@ -117,7 +117,32 @@ def _starts_with(column: _Column, prefix: str) -> ColumnElement[bool]:
     return column.ilike(f"{_like_literal(prefix)}%", escape=_LIKE_ESCAPE)
 
 
-def _document_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
+# Every property value except booleans'. In lax mode ``value[*]`` yields a
+# plain value as well as each entry of a multi-value list. An entry without a
+# kind is kept: ``@.kind == "boolean"`` is false when the key is missing.
+_SEARCHABLE_PROPERTY_VALUES_PATH = '$[*] ? (!(@.kind == "boolean")).value[*]'
+
+
+def _property_value_matches(q: str) -> ColumnElement[bool]:
+    """``q`` in a value of the document's ``source_metadata``.
+
+    Only values are searched: every document of a library shares the same
+    property names and labels, so matching those would match them all.
+    Booleans are left out as well: they are stored as "true" and "false" but
+    shown as yes and no, so "true" would match every document of a library
+    with a yes/no column. A date-only value is shown as the date part of its
+    stored ISO form, so it matches as shown.
+    """
+    values = sa.func.jsonb_array_elements_text(
+        sa.func.jsonb_path_query_array(
+            InfoBlobs.source_metadata,
+            sa.literal_column(f"'{_SEARCHABLE_PROPERTY_VALUES_PATH}'"),
+        )
+    ).column_valued("value", joins_implicitly=True)
+    return sa.exists().where(_contains(values, q))
+
+
+def _title_or_path_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
     """``q`` in the title, or in the URL below the item's own URL.
 
     Document URLs are percent-encoded, so the encoded form of ``q`` is tried
@@ -144,6 +169,10 @@ def _document_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
     return sa.or_(
         _contains(InfoBlobs.title, q), *(_contains(path, needle) for needle in needles)
     )
+
+
+def _document_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
+    return sa.or_(_title_or_path_matches(q, url_anchor), _property_value_matches(q))
 
 
 def _document_sort_keys(sort: IntegrationDocumentSort) -> list[_Column]:
@@ -252,6 +281,26 @@ class InfoBlobRepository:
         *,
         original_sha256: bytes | None = None,
     ) -> None:
+        """Serialize publishers of one identity until the transaction ends.
+
+        Without it two transactions that both find no active version insert
+        two. A sync publishes a whole library in one transaction, and an
+        advisory lock per document would stay held until it commits and fill
+        the shared lock table; an integration knowledge's publications lock its
+        row instead, whose lock lives in the tuple and which the sync already
+        holds from recording its start.
+        """
+        if (
+            info_blob.group_id is None
+            and info_blob.website_id is None
+            and info_blob.integration_knowledge_id is not None
+        ):
+            await self.session.execute(
+                sa.select(IntegrationKnowledge.id)
+                .where(IntegrationKnowledge.id == info_blob.integration_knowledge_id)
+                .with_for_update(key_share=True)
+            )
+            return
         identities = {
             identity
             for identity in (
@@ -859,6 +908,36 @@ class InfoBlobRepository:
         )
         return InfoBlobInDB.model_validate(record) if record is not None else None
 
+    async def refresh_sharepoint_citation(
+        self,
+        *,
+        sharepoint_item_id: str,
+        integration_knowledge_id: UUID,
+        title: str,
+        url: str,
+    ) -> bool:
+        """Point the active version at the item's current name and address.
+
+        Neither is embedded for a document without source properties, and a
+        document with them re-embeds on a rename anyway (its title is in the
+        header), so nothing else needs to change. True when a row changed.
+        """
+        updated = await self.session.execute(
+            sa.update(InfoBlobs)
+            .where(
+                InfoBlobs.sharepoint_item_id == sharepoint_item_id,
+                InfoBlobs.integration_knowledge_id == integration_knowledge_id,
+                active_info_blob_version(),
+                sa.or_(
+                    InfoBlobs.title.is_distinct_from(title),
+                    InfoBlobs.url.is_distinct_from(url),
+                ),
+            )
+            .values(title=title, url=url)
+            .execution_options(synchronize_session=False)
+        )
+        return affected_row_count(updated) > 0
+
     async def get_by_sharepoint_item_and_integration_knowledge(
         self,
         sharepoint_item_id: str,
@@ -1051,7 +1130,8 @@ class InfoBlobRepository:
         limit: int,
         offset: int = 0,
     ) -> IntegrationDocumentsPage:
-        """Active documents of one item, filtered on title or path, as one page.
+        """Active documents of one item, filtered on title, path or a property
+        value, as one page.
 
         ``url_anchor`` is the item's own URL without a trailing slash; the
         search covers the URL part after it.

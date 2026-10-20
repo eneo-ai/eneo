@@ -1,8 +1,15 @@
 from enum import Enum
-from typing import Any, Literal, Optional, Union
+from typing import Annotated, Any, Literal, Optional, Union
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    computed_field,
+    field_validator,
+)
 
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModelPublic,
@@ -21,8 +28,12 @@ from eneo.embedding_models.presentation.embedding_model_models import (
 )
 from eneo.group_chat.presentation.models import GroupChatSparse
 from eneo.groups_legacy.api.group_models import GroupMetadata, GroupPublicWithMetadata
+from eneo.integration.domain.entities.integration_knowledge import (
+    KNOWLEDGE_NAME_MAX_LENGTH,
+)
 from eneo.integration.presentation.models import IntegrationKnowledgePublic
 from eneo.integration.presentation.validation import (
+    BATCH_ITEM_NAME_MAX_LENGTH,
     FOLDER_PATH_MAX_LENGTH,
     FOLDER_PATH_PATTERN,
     GRAPH_ID_MAX_LENGTH,
@@ -31,6 +42,7 @@ from eneo.integration.presentation.validation import (
     SELECTED_ITEM_TYPE_MAX_LENGTH,
     SELECTED_ITEM_TYPE_PATTERN,
     validate_folder_path,
+    validate_https_url,
 )
 from eneo.jobs.job_models import JobPublic
 from eneo.main.models import (
@@ -358,6 +370,15 @@ class UpdateSpaceGroupMemberRequest(BaseModel):
     role: SpaceRoleValue
 
 
+# Surrounding whitespace is dropped before the length is checked.
+IntegrationKnowledgeName = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True, min_length=1, max_length=KNOWLEDGE_NAME_MAX_LENGTH
+    ),
+]
+
+
 class _IntegrationKnowledgeSelection(BaseModel):
     """Where in SharePoint/OneDrive (or Confluence) a knowledge item points."""
 
@@ -385,19 +406,35 @@ class _IntegrationKnowledgeSelection(BaseModel):
 
 
 class CreateSpaceIntegrationKnowledge(_IntegrationKnowledgeSelection):
-    name: str
+    name: IntegrationKnowledgeName
     embedding_model: ModelId
     url: str
 
+    @field_validator("url")
+    @classmethod
+    def _https_url(cls, value: str) -> str:
+        return validate_https_url(value)
+
 
 class CreateSpaceIntegrationKnowledgeBatchItem(_IntegrationKnowledgeSelection):
-    name: str
+    name: str = Field(
+        max_length=BATCH_ITEM_NAME_MAX_LENGTH,
+        description=f"Stored without surrounding whitespace; an item whose name "
+        f"is then empty or longer than {KNOWLEDGE_NAME_MAX_LENGTH} characters "
+        "fails on its own",
+    )
     url: str
+
+    @field_validator("url")
+    @classmethod
+    def _https_url(cls, value: str) -> str:
+        return validate_https_url(value)
 
 
 class CreateSpaceIntegrationKnowledgeBatchRequest(BaseModel):
     embedding_model: ModelId
-    wrapper_name: Optional[str] = None
+    # Blank means no wrapper name.
+    wrapper_name: Optional[str] = Field(None, max_length=KNOWLEDGE_NAME_MAX_LENGTH)
     items: list[CreateSpaceIntegrationKnowledgeBatchItem] = Field(
         min_length=1, max_length=50
     )
@@ -419,8 +456,8 @@ class CreateSpaceIntegrationKnowledgeBatchResponse(BaseModel):
 
 
 class UpdateIntegrationKnowledgeRequest(BaseModel):
-    name: str
+    name: IntegrationKnowledgeName
 
 
 class UpdateIntegrationKnowledgeWrapperRequest(BaseModel):
-    name: str
+    name: IntegrationKnowledgeName
