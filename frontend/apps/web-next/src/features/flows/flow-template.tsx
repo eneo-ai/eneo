@@ -7,7 +7,9 @@ import { formFieldsOf, stepsOf, type FlowDefinition } from "./types";
 /** One `{{…}}` placeholder of a template, as the definition explains it. */
 export type TemplateReference =
   | { kind: "previous" }
-  | { kind: "form"; key: string; label: string | null }
+  /** A run input; `file` for `{{files.<key>}}`, the link to the field's file. */
+  | { kind: "form"; key: string; label: string | null; file: boolean }
+  /** An earlier step; `path` is what is read inside its JSON output, or "file" for its file. */
   | { kind: "step"; key: string; index: number | null; name: string | null; path: string | null }
   | { kind: "unknown"; raw: string };
 
@@ -19,9 +21,9 @@ const PLACEHOLDER = /\{\{\s*([^{}]+?)\s*\}\}/g;
 export function describeReference(raw: string, definition: FlowDefinition): TemplateReference {
   if (raw === "previous") return { kind: "previous" };
   const [source, key, ...rest] = raw.split(".");
-  if (source === "form" && key) {
+  if ((source === "form" || source === "files") && key) {
     const field = formFieldsOf(definition).find((candidate) => candidate.key === key);
-    return { kind: "form", key, label: field?.label ?? null };
+    return { kind: "form", key, label: field?.label ?? null, file: source === "files" };
   }
   if (source === "steps" && key) {
     const steps = stepsOf(definition);
@@ -60,7 +62,7 @@ export function referenceLabel(ref: TemplateReference, t: Translate): string {
     case "previous":
       return t("flow_ref_previous");
     case "form":
-      return `${t("flow_ref_input")} · ${ref.label ?? ref.key}`;
+      return `${t(ref.file ? "flow_ref_file" : "flow_ref_input")} · ${ref.label ?? ref.key}`;
     case "step": {
       const step =
         ref.index !== null

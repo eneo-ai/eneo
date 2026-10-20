@@ -5,6 +5,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
+import { Token } from "@astryxdesign/core/Token";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Workflow } from "lucide-react";
 import Link from "next/link";
@@ -26,7 +27,6 @@ import { useRemovalMutation } from "@/features/spaces/removal";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
 import { createFlow } from "./flow-create";
-import { Chip } from "./flow-fields";
 import { runStatusLabel, runStatusTone, stepKindLabel } from "./flow-labels";
 import { FlowRunDialog } from "./flow-run-dialog";
 import { NewFlowDialog } from "./new-flow-dialog";
@@ -128,7 +128,7 @@ export function FlowsPage() {
       renderCell: (flow) => (
         <span className="flex flex-wrap gap-1">
           {flow.step_kinds.map((kind, index) => (
-            <Chip key={`${kind}-${index}`}>{stepKindLabel(kind, t)}</Chip>
+            <Token key={`${kind}-${index}`} size="sm" label={stepKindLabel(kind, t)} />
           ))}
         </span>
       )

@@ -371,14 +371,35 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
         f"/api/v1/conversations/{_STUB_ID}/documents/{_STUB_ID}/versions/",
         {"content": "# x\n"},
     ),
+    # Entering edit mode on a flow inserts a (flow_id, user_id) row.
+    ("POST", f"/api/v1/flows/{_STUB_ID}/edit-mode/", None),
 ]
+
+
+@pytest.fixture
+async def flows_enabled(db_container, admin_user):
+    """The flows routes answer only for tenants with the feature on; without
+    it the router answers 404 before any endpoint gate runs."""
+    async with db_container() as container:
+        service = container.feature_flag_service()
+        if await service.feature_flag_repo.one_or_none(name="flows_core") is None:
+            await service.create_feature_flag("flows_core")
+        flag = await service.feature_flag_repo.one(name="flows_core")
+        assert flag.feature_id is not None
+        await service.enable_tenant(flag.feature_id, admin_user.tenant_id)
 
 
 @pytest.mark.parametrize("method,path_template,body", _CREATION_ENDPOINTS)
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_service_key_creation_endpoints_return_403_with_gate_code(
-    client, tenant_admin_service_secret, test_space_id, method, path_template, body
+    client,
+    tenant_admin_service_secret,
+    test_space_id,
+    flows_enabled,
+    method,
+    path_template,
+    body,
 ):
     """Every gated create endpoint returns 403 with the creation-gate code
     when called by a service key, regardless of body validity."""

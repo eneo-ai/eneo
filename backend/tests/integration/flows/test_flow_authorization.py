@@ -1,5 +1,6 @@
 """Who may do what with flows over HTTP: a user bearer, a service key in the
-flow's space, a service key of another space, and a service key on a draft."""
+flow's space, a service key of another space, a service key on a draft, and
+the edit mode a person enters before the panel may save."""
 
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -206,3 +207,123 @@ async def test_a_service_key_of_another_space_sees_nothing(
             f"/api/v1/flows/?space_id={published['space_id']}", headers=key
         )
     ).status_code in (403, 404)
+
+
+# --- Edit mode ---
+
+
+def _gate_code(payload: dict) -> str | None:
+    detail = payload.get("detail")
+    if isinstance(detail, dict):
+        return detail.get("code")
+    return payload.get("code")
+
+
+@pytest.fixture
+async def second_editor(db_container, admin_user, published, patch_auth_service_jwt):
+    """Another member of the flow's space who may edit flows, as a bearer.
+
+    The tenant roles come from the admin user (flows need the tenant-level
+    flows permission); the space role is editor."""
+    from eneo.database.tables.spaces_table import SpacesUsers
+    from eneo.main.models import ModelId
+    from eneo.users.user import UserAdd, UserState
+
+    async with db_container() as container:
+        user = await container.user_repo().add(
+            UserAdd(
+                email=f"editor-{uuid4().hex[:6]}@example.com",
+                username=f"editor-{uuid4().hex[:6]}",
+                tenant_id=admin_user.tenant_id,
+                state=UserState.ACTIVE,
+                roles=[ModelId(id=role.id) for role in admin_user.roles],
+            )
+        )
+        container.session().add(
+            SpacesUsers(space_id=published["space_id"], user_id=user.id, role="editor")
+        )
+        await container.session().flush()
+        token = container.auth_service().create_access_token_for_user(user)
+    return {"user": user, "bearer": {"Authorization": f"Bearer {token}"}}
+
+
+async def test_edit_mode_is_entered_and_left_per_user_and_gates_the_panel_save(
+    client, published, flows_enabled, bearer
+):
+    url = f"/api/v1/flows/{published['draft'].id}/"
+
+    # A flow opens in view mode, where the panel cannot save.
+    viewed = await client.get(url, headers=bearer)
+    assert viewed.json()["editing"] is False
+    assert viewed.json()["editors"] == []
+    refused = await client.patch(url, json={"name": "Renamed"}, headers=bearer)
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["code"] == "flow_not_in_edit_mode"
+    assert refused.json()["message"].startswith("The flow is shown in view mode.")
+
+    entered = await client.post(f"{url}edit-mode/", headers=bearer)
+    assert entered.status_code == 200, entered.text
+    assert entered.json()["editing"] is True
+    assert (await client.get(url, headers=bearer)).json()["editing"] is True
+    # Entering again changes nothing.
+    assert (await client.post(f"{url}edit-mode/", headers=bearer)).status_code == 200
+    saved = await client.patch(url, json={"name": "Renamed"}, headers=bearer)
+    assert saved.status_code == 200, saved.text
+
+    left = await client.delete(f"{url}edit-mode/", headers=bearer)
+    assert left.status_code == 200, left.text
+    assert left.json()["editing"] is False
+    assert left.json()["name"] == "Renamed"
+    assert (await client.get(url, headers=bearer)).json()["editing"] is False
+    # Leaving twice is fine; the save is refused again.
+    assert (await client.delete(f"{url}edit-mode/", headers=bearer)).status_code == 200
+    assert (
+        await client.patch(url, json={"name": "Again"}, headers=bearer)
+    ).status_code == 409
+
+
+async def test_two_users_may_edit_the_same_flow_and_see_each_other(
+    client, published, flows_enabled, bearer, second_editor, admin_user
+):
+    url = f"/api/v1/flows/{published['draft'].id}/"
+    other = second_editor["bearer"]
+
+    assert (await client.post(f"{url}edit-mode/", headers=bearer)).status_code == 200
+    joined = await client.post(f"{url}edit-mode/", headers=other)
+    assert joined.status_code == 200, joined.text
+
+    assert joined.json()["editing"] is True
+    assert [e["user_id"] for e in joined.json()["editors"]] == [str(admin_user.id)]
+    mine = (await client.get(url, headers=bearer)).json()
+    assert mine["editing"] is True
+    assert [(e["user_id"], e["username"]) for e in mine["editors"]] == [
+        (str(second_editor["user"].id), second_editor["user"].username)
+    ]
+    assert mine["editors"][0]["started_at"]
+
+    # Both save; each sees the other's save as a revision.
+    assert (
+        await client.patch(url, json={"name": "By admin"}, headers=bearer)
+    ).status_code == 200
+    theirs = await client.patch(url, json={"name": "By editor"}, headers=other)
+    assert theirs.status_code == 200, theirs.text
+    assert theirs.json()["revision"] == 3
+
+    # One leaving does not end the other's edit mode.
+    assert (await client.delete(f"{url}edit-mode/", headers=other)).status_code == 200
+    mine = (await client.get(url, headers=bearer)).json()
+    assert mine["editing"] is True and mine["editors"] == []
+
+
+async def test_a_service_key_cannot_enter_edit_mode(
+    client, published, flows_enabled, bearer
+):
+    secret = await _service_key(client, bearer, space_id=published["space_id"])
+    key = {API_KEY_HEADER: secret}
+    url = f"/api/v1/flows/{published['flow'].id}/"
+
+    refused = await client.post(f"{url}edit-mode/", headers=key)
+
+    assert refused.status_code == 403, refused.text
+    assert _gate_code(refused.json()) == "service_key_cannot_create_resources"
+    assert (await client.patch(url, json={"name": "x"}, headers=key)).status_code == 403

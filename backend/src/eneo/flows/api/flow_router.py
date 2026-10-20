@@ -1,7 +1,8 @@
 """REST surface for flows.
 
-Authoring happens through the loopback ``flows`` MCP tools, so this router
-only reads flows, exposes the hidden authoring assistant and carries the
+Authoring happens through the loopback ``flows`` MCP tools and, for the
+panel's own editor, the PATCH and edit-mode endpoints here. Otherwise this
+router reads flows, exposes the hidden authoring assistant and carries the
 run side of the API (published view, run contract, runtime uploads, runs,
 status, steps, cancel, review checkpoints, signed file links) that external
 consumers integrate against. The run-side paths are the ones
@@ -50,6 +51,7 @@ from eneo.flows.flow_models import (
     FlowTranscriptCorrectionsEditRequest,
     FlowTranscriptCorrectionsPublic,
     FlowTranscriptPublic,
+    FlowUpdateRequest,
 )
 from eneo.flows.flow_runtime_paths import (
     DELETE_RUNTIME_FILE_PATH,
@@ -128,6 +130,7 @@ async def list_flows(
 
 @router.post(
     "/",
+    description="Start a flow as an empty draft in a space; its chat fills it in afterwards.",
     response_model=FlowPublic,
     status_code=201,
     responses=responses.get_responses([400, 403, 404]),
@@ -178,8 +181,80 @@ async def get_flow(id: UUID, container: _Container) -> FlowPublic:
     return await container.flow_service().get_flow(id)
 
 
+@router.patch(
+    "/{id}/",
+    description="Change the draft from the panel (needs edit mode); only the fields given change.",
+    response_model=FlowPublic,
+    responses=responses.get_responses([400, 403, 404, 409, 422]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=(
+        "FlowService enforces flow edit permission in the space and that the "
+        "caller is in edit mode on the flow."
+    ),
+)
+async def update_flow(
+    id: UUID, request: FlowUpdateRequest, container: _Container
+) -> FlowPublic:
+    """Change the draft from the panel; only the fields given change.
+
+    Needs edit mode (409 otherwise). Every change is kept as a revision.
+    A definition with problems is refused with 422 and the problems listed
+    in ``details.problems``.
+    """
+    service = container.flow_service()
+    await service.require_editing(id)
+    return await service.update_flow(
+        id,
+        name=request.name,
+        description=request.description,
+        definition=request.definition,
+        channel="api",
+        note=request.note,
+    )
+
+
+@router.post(
+    "/{id}/edit-mode/",
+    description="Enter edit mode on the flow for the caller (idempotent); others may be editing too.",
+    response_model=FlowPublic,
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="FlowService enforces flow edit permission in the space.",
+)
+async def enter_edit_mode(
+    id: UUID,
+    container: _Container,
+    _user_for_creation: None = Depends(require_user_for_creation),
+) -> FlowPublic:
+    """Enter edit mode on the flow (idempotent); others may be editing too."""
+    return await container.flow_service().enter_edit_mode(id)
+
+
+@router.delete(
+    "/{id}/edit-mode/",
+    description="Leave edit mode (idempotent); nothing is saved, every change already is a revision.",
+    response_model=FlowPublic,
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_READ_REASON,
+)
+async def leave_edit_mode(id: UUID, container: _Container) -> FlowPublic:
+    """Leave edit mode (idempotent); nothing is saved, every change already is."""
+    return await container.flow_service().leave_edit_mode(id)
+
+
 @router.delete(
     "/{id}/",
+    description="Delete the flow; runs already made stay in the history.",
     status_code=204,
     responses=responses.get_responses([403, 404]),
 )
@@ -195,6 +270,7 @@ async def delete_flow(id: UUID, container: _Container) -> Response:
 
 @router.post(
     "/{id}/conversation/",
+    description="Bind the flow to the chat that authors it (409 when bound elsewhere).",
     response_model=FlowPublic,
     responses=responses.get_responses([400, 403, 404, 409]),
 )
@@ -249,6 +325,7 @@ async def get_run_contract(id: UUID, container: _Container) -> FlowRunContractPu
 
 @router.post(
     UPLOAD_RUNTIME_FILE_PATH,
+    description="Upload a file to give a run; bind its id to a file form field when starting the run.",
     response_model=FilePublic,
     status_code=201,
     openapi_extra=_UPLOAD_OPENAPI_EXTRA,
@@ -272,6 +349,7 @@ async def upload_runtime_file(
 
 @router.delete(
     DELETE_RUNTIME_FILE_PATH,
+    description="Remove an upload no run has used yet (409 once a run took it).",
     status_code=204,
     responses=responses.get_responses([403, 404, 409]),
 )
@@ -332,8 +410,9 @@ async def get_revision(
 
 @router.post(
     "/{id}/revisions/{revision}/restore/",
+    description="Make an earlier revision the draft again; the restore is a new revision.",
     response_model=FlowPublic,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 422]),
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -371,9 +450,10 @@ async def list_artifacts(
 
 @router.post(
     "/{id}/runs/",
+    description="Start a run of the published version, or a test run of the draft.",
     response_model=FlowRunPublic,
     status_code=201,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 422]),
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -473,6 +553,7 @@ async def get_run_steps(
 
 @router.post(
     "/{id}/runs/{run_id}/cancel/",
+    description="Cancel a run that is queued, running or waiting for a review.",
     response_model=FlowRunPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -506,6 +587,7 @@ async def get_active_checkpoint(
 
 @router.patch(
     "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
+    description="Replace the payload under review (checked against the checkpoint revision).",
     response_model=FlowRunReviewCheckpointPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -532,6 +614,7 @@ async def edit_checkpoint(
 
 @router.post(
     "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
+    description="Approve the review checkpoint without resuming the run.",
     response_model=FlowRunReviewCheckpointResumeResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -558,6 +641,7 @@ async def approve_checkpoint(
 
 @router.post(
     "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
+    description="Reject the review checkpoint; the run stops and the reason is kept.",
     response_model=FlowRunReviewCheckpointPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -584,6 +668,7 @@ async def reject_checkpoint(
 
 @router.post(
     "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
+    description="Resume the run after an approved checkpoint.",
     response_model=FlowRunReviewCheckpointResumeResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -609,6 +694,7 @@ async def resume_checkpoint(
 
 @router.post(
     "/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve-and-continue/",
+    description="Approve the review checkpoint and resume the run.",
     response_model=FlowRunReviewCheckpointResumeResponse,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -658,6 +744,7 @@ async def list_transcript_corrections(
 
 @router.patch(
     "/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/",
+    description="Replace one transcribe step's corrections (full lists, checked against the revision).",
     response_model=FlowTranscriptCorrectionsPublic,
     responses=responses.get_responses([400, 403, 404]),
 )
@@ -735,6 +822,7 @@ def _signed_download(
 
 @router.post(
     FLOW_RUN_ARTIFACT_SIGNED_URL_PATH,
+    description="A time-limited link to a file the run produced.",
     response_model=SignedURLResponse,
     responses=responses.get_responses([403, 404]),
 )
@@ -765,6 +853,7 @@ async def generate_run_artifact_signed_url(
 
 @router.post(
     FLOW_RUN_INPUT_FILE_SIGNED_URL_PATH,
+    description="A time-limited link to a file the run was given.",
     response_model=SignedURLResponse,
     responses=responses.get_responses([403, 404]),
 )

@@ -99,6 +99,10 @@ class ErrorCodes(int, Enum):
     FLOW_CONVERSATION_CONFLICT = 9070
     # A flow runtime upload a run already uses cannot be deleted.
     FLOW_RUNTIME_FILE_IN_USE = 9071
+    # A flow definition the validator refused; the problems are listed.
+    FLOW_DEFINITION_PROBLEMS = 9072
+    # A flow change asked for while the caller is in view mode.
+    FLOW_NOT_IN_EDIT_MODE = 9073
 
 
 class NotFoundException(Exception):
@@ -407,6 +411,36 @@ class FlowRuntimeFileInUseException(Exception):
     """A runtime upload a run already took as input stays with that run."""
 
 
+class FlowDefinitionProblemsException(BadRequestException):
+    """A flow definition that cannot be saved or run as it is.
+
+    The message lists every problem on its own line, for a reader or a model
+    that repairs the definition from the text; ``details`` carries the same
+    list as ``problems`` for a client that shows them next to the fields.
+    """
+
+    code = "flow_definition_problems"
+
+    def __init__(
+        self, problems: list[str], *, lead: str = "The flow definition has problems:"
+    ) -> None:
+        super().__init__(lead + "\n- " + "\n- ".join(problems))
+        self.problems = problems
+        self.details: dict[str, object] = {"problems": list(problems)}
+
+
+class FlowNotEditingException(Exception):
+    """The caller asked to change a flow they are viewing, not editing."""
+
+    code = "flow_not_in_edit_mode"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The flow is shown in view mode. Ask the user to press Redigera in "
+            "the flow panel to enter edit mode."
+        )
+
+
 class SkillRevisionConflictException(Exception):
     pass
 
@@ -568,6 +602,14 @@ EXCEPTION_MAP = {
         None,
         ErrorCodes.FLOW_RUNTIME_FILE_IN_USE,
     ),
+    # Starlette resolves handlers via MRO, so this subclass entry wins over
+    # the BadRequestException one and the problems reach the client as 422.
+    FlowDefinitionProblemsException: (
+        422,
+        None,
+        ErrorCodes.FLOW_DEFINITION_PROBLEMS,
+    ),
+    FlowNotEditingException: (409, None, ErrorCodes.FLOW_NOT_IN_EDIT_MODE),
     ProvisioningNotAllowed: (403, None, ErrorCodes.PROVISIONING_NOT_ENABLED),
     UserInactiveException: (403, None, ErrorCodes.USER_INACTIVE),
     NoModelSelectedException: (400, None, ErrorCodes.NO_MODEL_SELECTED),

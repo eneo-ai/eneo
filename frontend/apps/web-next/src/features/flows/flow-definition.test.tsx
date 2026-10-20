@@ -1,121 +1,38 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { FlowDefinition } from "./flow-definition";
-import { FlowStepCard } from "./flow-step-card";
-import type { FlowPublic } from "./types";
-
-/** One flow with every step kind, every parameter set. */
-const flow: FlowPublic = {
-  id: "flow-1",
-  space_id: "space-1",
-  name: "Mötesprotokoll",
-  description:
-    "Transkriberar en mötesinspelning, pausar för granskning och fyller protokollmallen.",
-  published_version: 3,
-  has_unpublished_changes: true,
-  conversation_id: "session-1",
-  created_at: "2026-10-20T08:00:00Z",
-  updated_at: "2026-10-20T09:00:00Z",
-  definition: {
-    schema_version: 1,
-    form_fields: [
-      { key: "recording", label: "Inspelning", type: "audio", required: true },
-      { key: "meeting_date", label: "Mötesdatum", type: "text", required: true },
-      {
-        key: "participants",
-        label: "Deltagare",
-        type: "text",
-        required: false,
-        description: "Namn, kommaseparerade"
-      },
-      { key: "kind", label: "Mötestyp", type: "select", required: true, options: ["Nämnd", "AU"] }
-    ],
-    steps: [
-      {
-        kind: "transcribe",
-        key: "transcript",
-        id: "s1",
-        name: "Transkribera mötet",
-        source: "recording",
-        transcription_model_id: "tm-1",
-        language: "sv",
-        speaker_labels: true,
-        max_speakers: 6,
-        speaker_mapping: { participants_field: "participants", infer_names: true }
-      },
-      {
-        kind: "review",
-        key: "check",
-        id: "s2",
-        name: "Granska transkriptet",
-        mode: "edit",
-        of: "transcript",
-        expires_after_seconds: 7 * 86_400
-      },
-      {
-        kind: "llm",
-        key: "summary",
-        id: "s3",
-        name: "Sammanfatta beslut",
-        prompt: "Lista varje beslut med kort motivering.",
-        input: "{{steps.check}}\n\nMötestyp: {{form.kind}}",
-        model_id: "model-1",
-        model_kwargs: { temperature: 0 },
-        files_from: ["recording"],
-        knowledge: { collection_ids: ["collection-1"], website_ids: ["website-1"] },
-        output: {
-          type: "json",
-          schema: {
-            type: "object",
-            properties: { decisions: { type: "array" }, actions: { type: "array" } }
-          }
-        }
-      },
-      {
-        kind: "compose",
-        key: "intro",
-        id: "s4",
-        name: "Inledning",
-        template: "Protokoll fört {{form.meeting_date}}. Beslut: {{steps.summary.json.decisions}}"
-      },
-      {
-        kind: "document",
-        key: "minutes",
-        id: "s5",
-        name: "Skapa protokoll",
-        format: "pdf",
-        template_file_id: "file-1",
-        title: "Protokoll {{form.meeting_date}}",
-        filename: "protokoll-{{form.meeting_date}}",
-        values: { meeting_date: "{{form.meeting_date}}", decisions: "{{previous}}" }
-      }
-    ]
-  }
-};
-
-const names = {
-  modelName: (id: string) => (id === "model-1" ? "GPT-5.2" : null),
-  transcriptionModelName: (id: string) => (id === "tm-1" ? "KB-Whisper large" : null),
-  collectionName: (id: string) => (id === "collection-1" ? "Delegationsordning" : null),
-  websiteName: (id: string) => (id === "website-1" ? "kommunen.se" : null),
-  fileName: (id: string) => (id === "file-1" ? "Protokollmall.docx" : null)
-};
-
-const steps = flow.definition.steps!;
+import { flowFixture as flow, namesFixture as names } from "./flow-fixtures";
 
 afterEach(cleanup);
 
-describe("FlowDefinition", () => {
-  it("shows the status, every input and one row per step, and opens a step in a dialog", async () => {
-    const { container } = renderInApp(<FlowDefinition flow={flow} names={names} />);
+/** The card of a step: the Astryx clickable card's button names it, the list item holds its content. */
+const cardOf = (name: string) => screen.getByRole("button", { name }).closest("li")!;
 
-    // Status and inputs.
+describe("FlowDefinition", () => {
+  it("shows the status, the oversight strip, every input and one card per step", async () => {
+    const onOpenStep = vi.fn();
+    const { container } = renderInApp(
+      <FlowDefinition flow={flow} names={names} onOpenStep={onOpenStep} canEdit />
+    );
+
     expect(screen.getByText("Publicerad v3")).toBeTruthy();
     expect(screen.getByText("Opublicerade ändringar")).toBeTruthy();
-    expect(screen.getByText("5 steg")).toBeTruthy();
+    expect(screen.getByText("6 steg")).toBeTruthy();
+
+    // Oversight: counts by kind and the gate sentence.
+    const oversight = screen.getByRole("group", { name: "Steg per typ" });
+    expect(within(oversight).getByText("1 modellsteg")).toBeTruthy();
+    expect(within(oversight).getByText("1 granskning av en person")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Ingen körning blir klar utan att en person har godkänt resultatet av steg 1. Steg 3–6 bygger på det godkända resultatet."
+      )
+    ).toBeTruthy();
+
+    // Inputs with their type lines.
     const inputs = screen.getByRole("region", { name: "Indata vid körning" });
     expect(within(inputs).getByText("Inspelning")).toBeTruthy();
     expect(within(inputs).getByText("ljudfil · obligatorisk")).toBeTruthy();
@@ -123,33 +40,93 @@ describe("FlowDefinition", () => {
     expect(within(inputs).getByText("Namn, kommaseparerade")).toBeTruthy();
     expect(within(inputs).getByText("val · obligatorisk · Nämnd, AU")).toBeTruthy();
 
-    // One collapsed row per step: number, name, a one-line summary and the kind.
-    const rows = screen.getAllByRole("button", { name: /^Visa inställningar för steg/ });
-    expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
-      "Visa inställningar för steg 1: Transkribera mötet",
-      "Visa inställningar för steg 2: Granska transkriptet",
-      "Visa inställningar för steg 3: Sammanfatta beslut",
-      "Visa inställningar för steg 4: Inledning",
-      "Visa inställningar för steg 5: Skapa protokoll"
+    // One card per step, each opening the step by its key.
+    const cards = screen.getAllByRole("button", { name: /^Öppna steg/ });
+    expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual([
+      "Öppna steg 1: Transkribera mötet",
+      "Öppna steg 2: Granska transkriptet",
+      "Öppna steg 3: Sammanfatta beslut",
+      "Öppna steg 4: Inledning",
+      "Öppna steg 5: Skapa protokoll",
+      "Öppna steg 6: Rita beslutsdiagram"
     ]);
-    expect(within(rows[0]!).getByText("KB-Whisper large")).toBeTruthy();
-    expect(within(rows[1]!).getByText("Redigering och godkännande")).toBeTruthy();
-    expect(within(rows[2]!).getByText("GPT-5.2 · JSON-utdata")).toBeTruthy();
-    expect(within(rows[4]!).getByText("PDF · Protokollmall.docx")).toBeTruthy();
+    fireEvent.click(cards[2]!);
+    expect(onOpenStep).toHaveBeenCalledWith("summary");
 
-    // Nothing is editable: the rows are the only buttons, there are no fields.
+    // The view-mode note names Redigera; nothing here is editable.
+    expect(screen.getByText(/Flödet visas i läsläge\. Välj Redigera/)).toBeTruthy();
     expect(container.querySelectorAll("input, textarea, select, [contenteditable]")).toHaveLength(
       0
     );
     await expectNoAxeViolations(container);
+  });
 
-    // A row opens the step with every parameter in a dialog.
-    fireEvent.click(rows[2]!);
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByText("Sammanfatta beslut")).toBeTruthy();
-    expect(within(dialog).getByText("Steg 3 av 5 · Modell")).toBeTruthy();
-    expect(within(dialog).getByText("Lista varje beslut med kort motivering.")).toBeTruthy();
-    expect(within(dialog).getByText("GPT-5.2")).toBeTruthy();
+  it("says what a model step reads and gives, coloured by source", () => {
+    renderInApp(<FlowDefinition flow={flow} names={names} onOpenStep={() => {}} />);
+    const card = cardOf("Öppna steg 3: Sammanfatta beslut");
+    expect(within(card).getByText("Steg 2 · Granska transkriptet")).toBeTruthy();
+    expect(within(card).getByText("Mötestyp")).toBeTruthy();
+    expect(within(card).getByText("Inspelning")).toBeTruthy();
+    expect(within(card).getByText("Delegationsordning")).toBeTruthy();
+    expect(within(card).getByText("kommunen.se")).toBeTruthy();
+    expect(within(card).getByText("Strukturerad data", { exact: false })).toBeTruthy();
+    expect(within(card).getByText("decisions, actions, kind")).toBeTruthy();
+
+    const document = cardOf("Öppna steg 5: Skapa protokoll");
+    expect(within(document).getByText("Steg 4 · Inledning")).toBeTruthy();
+    expect(within(document).getByText("Ifylld mall", { exact: false })).toBeTruthy();
+    expect(within(document).getByText("Indata · Mötesdatum")).toBeTruthy();
+  });
+
+  it("shows a review step as a person's checkpoint with its time limit", () => {
+    renderInApp(<FlowDefinition flow={flow} names={names} onOpenStep={() => {}} />);
+    const card = cardOf("Öppna steg 2: Granska transkriptet");
+    expect(within(card).getByText("Granskning")).toBeTruthy();
+    expect(
+      within(card).getByText(
+        "Flödet pausar. En person redigerar och godkänner resultatet från steg 1 innan något mer körs."
+      )
+    ).toBeTruthy();
+    expect(within(card).getByText("Tidsgräns 7 dagar")).toBeTruthy();
+    expect(within(card).getByText("Avvisas: körningen stoppas")).toBeTruthy();
+  });
+
+  it("renders plain cards without an opener, as the history does", () => {
+    renderInApp(<FlowDefinition flow={flow} names={names} />);
+    expect(screen.queryAllByRole("button", { name: /^Öppna steg/ })).toHaveLength(0);
+    expect(screen.getByRole("group", { name: "Steg 3: Sammanfatta beslut" })).toBeTruthy();
+    expect(screen.queryByText(/Flödet visas i läsläge/)).toBeNull();
+  });
+
+  it("offers insertion points, moves and the inputs editor only in edit mode", async () => {
+    const onInsertStep = vi.fn();
+    const onMoveStep = vi.fn();
+    const { rerender } = renderInApp(
+      <FlowDefinition flow={flow} names={names} onOpenStep={() => {}} canEdit />
+    );
+    expect(screen.queryByRole("button", { name: /Infoga steg/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Åtgärder för/ })).toBeNull();
+
+    rerender(
+      <FlowDefinition
+        flow={flow}
+        names={names}
+        onOpenStep={() => {}}
+        canEdit
+        mode="edit"
+        onInsertStep={onInsertStep}
+        onMoveStep={onMoveStep}
+        onSaveInputs={() => Promise.resolve()}
+      />
+    );
+    expect(screen.getAllByRole("button", { name: /^Infoga steg efter/ })).toHaveLength(5);
+    expect(screen.getByRole("button", { name: "Lägg till steg sist" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Åtgärder för Inledning" }));
+    // Every card's menu is in the document; the fourth card's is Inledning's.
+    fireEvent.click(screen.getAllByRole("menuitem", { name: /Flytta upp/ })[3]!);
+    expect(onMoveStep).toHaveBeenCalledWith("intro", -1);
+    fireEvent.click(screen.getByRole("button", { name: "Redigera" }));
+    expect(await screen.findByRole("dialog", { name: /Indata vid körning/ })).toBeTruthy();
   });
 
   it("says what is missing on an unpublished flow without inputs or steps", () => {
@@ -166,72 +143,6 @@ describe("FlowDefinition", () => {
     expect(screen.getByText("Utkast")).toBeTruthy();
     expect(screen.getByText("Flödet tar inga indata vid körning.")).toBeTruthy();
     expect(screen.getByText("Flödet har inga steg ännu.")).toBeTruthy();
-  });
-});
-
-describe("FlowStepCard", () => {
-  const card = (index: number) => {
-    const { container } = renderInApp(
-      <FlowStepCard step={steps[index]!} index={index} definition={flow.definition} names={names} />
-    );
-    return { container, article: screen.getByRole("article") };
-  };
-
-  it("shows a transcribe step's source, model, language and speakers", () => {
-    const { article } = card(0);
-    expect(within(article).getByText("Transkribering")).toBeTruthy();
-    expect(within(article).getByText("Indata · Inspelning")).toBeTruthy();
-    expect(within(article).getByText("KB-Whisper large")).toBeTruthy();
-    expect(within(article).getByText("sv")).toBeTruthy();
-    expect(
-      within(article).getByText("Identifiera talare, högst 6 · namnge från Deltagare")
-    ).toBeTruthy();
-  });
-
-  it("shows a review step's mode, target and time limit", () => {
-    const { article } = card(1);
-    expect(within(article).getByText("Granskning")).toBeTruthy();
-    expect(
-      within(article).getByText("Redigera: granskaren kan ändra texten innan den godkänns")
-    ).toBeTruthy();
-    expect(within(article).getByText("Steg 1 · Transkribera mötet")).toBeTruthy();
-    expect(within(article).getByText("Högst 7 dagar, sedan avbryts körningen")).toBeTruthy();
-  });
-
-  it("shows an llm step's prompt, input references, model, knowledge, files and JSON output", () => {
-    const { article } = card(2);
-    expect(within(article).getByText("Lista varje beslut med kort motivering.")).toBeTruthy();
-    expect(within(article).getByText("Steg 2 · Granska transkriptet")).toBeTruthy();
-    expect(within(article).getByText("Indata · Mötestyp")).toBeTruthy();
-    expect(within(article).getByText("GPT-5.2")).toBeTruthy();
-    expect(within(article).getByText("· temperature: 0")).toBeTruthy();
-    expect(within(article).getByText("Delegationsordning")).toBeTruthy();
-    expect(within(article).getByText("kommunen.se")).toBeTruthy();
-    expect(within(article).getByText("Indata · Inspelning")).toBeTruthy();
-    expect(within(article).getByText("JSON enligt schema", { exact: false })).toBeTruthy();
-    expect(within(article).getByText("decisions, actions")).toBeTruthy();
-    expect(within(article).getByText(/"type": "object"/)).toBeTruthy();
-  });
-
-  it("shows a compose step's template with its references", () => {
-    const { article } = card(3);
-    expect(within(article).getByText("Protokoll fört", { exact: false })).toBeTruthy();
-    expect(within(article).getByText("Indata · Mötesdatum")).toBeTruthy();
-    expect(within(article).getByText("Steg 3 · Sammanfatta beslut · decisions")).toBeTruthy();
-  });
-
-  it("shows a document step's template file, bindings, format, title and file name, read-only", async () => {
-    const { article, container } = card(4);
-    expect(within(article).getByText("Protokollmall.docx")).toBeTruthy();
-    expect(within(article).getByText("meeting_date")).toBeTruthy();
-    expect(within(article).getByText("decisions")).toBeTruthy();
-    expect(within(article).getByText("Föregående steg")).toBeTruthy();
-    expect(within(article).getByText("PDF")).toBeTruthy();
-    expect(within(article).getByText("protokoll-", { exact: false })).toBeTruthy();
-    expect(within(article).getAllByText("Indata · Mötesdatum").length).toBeGreaterThanOrEqual(3);
-    expect(
-      container.querySelectorAll("input, textarea, select, button, [contenteditable]")
-    ).toHaveLength(0);
-    await expectNoAxeViolations(container);
+    expect(screen.queryByRole("group", { name: "Steg per typ" })).toBeNull();
   });
 });

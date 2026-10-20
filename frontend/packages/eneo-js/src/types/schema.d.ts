@@ -156,7 +156,7 @@ export interface paths {
     put?: never;
     /**
      * Create Flow
-     * @description Start a flow as an empty draft; its chat fills it in afterwards.
+     * @description Start a flow as an empty draft in a space; its chat fills it in afterwards.
      */
     post: operations["create_flow_api_v1_flows__post"];
     delete?: never;
@@ -193,8 +193,39 @@ export interface paths {
     get: operations["get_flow_api_v1_flows__id___get"];
     put?: never;
     post?: never;
-    /** Delete Flow */
+    /**
+     * Delete Flow
+     * @description Delete the flow; runs already made stay in the history.
+     */
     delete: operations["delete_flow_api_v1_flows__id___delete"];
+    options?: never;
+    head?: never;
+    /**
+     * Update Flow
+     * @description Change the draft from the panel (needs edit mode); only the fields given change.
+     */
+    patch: operations["update_flow_api_v1_flows__id___patch"];
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/edit-mode/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Enter Edit Mode
+     * @description Enter edit mode on the flow for the caller (idempotent); others may be editing too.
+     */
+    post: operations["enter_edit_mode_api_v1_flows__id__edit_mode__post"];
+    /**
+     * Leave Edit Mode
+     * @description Leave edit mode (idempotent); nothing is saved, every change already is a revision.
+     */
+    delete: operations["leave_edit_mode_api_v1_flows__id__edit_mode__delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -268,10 +299,7 @@ export interface paths {
     put?: never;
     /**
      * Upload Runtime File
-     * @description Upload a file to give a run; bind its id to a file form field in the run.
-     *
-     *     Open to service keys: the file is stored as the flow author's, so the
-     *     creation guard for user-owned rows does not apply.
+     * @description Upload a file to give a run; bind its id to a file form field when starting the run.
      */
     post: operations["upload_runtime_file_api_v1_flows__id__runtime_files__post"];
     delete?: never;
@@ -348,7 +376,7 @@ export interface paths {
     put?: never;
     /**
      * Restore Revision
-     * @description Make the revision the draft again; the restore is a new revision.
+     * @description Make an earlier revision the draft again; the restore is a new revision.
      */
     post: operations["restore_revision_api_v1_flows__id__revisions__revision__restore__post"];
     delete?: never;
@@ -387,7 +415,10 @@ export interface paths {
     /** List Runs */
     get: operations["list_runs_api_v1_flows__id__runs__get"];
     put?: never;
-    /** Create Run */
+    /**
+     * Create Run
+     * @description Start a run of the published version, or a test run of the draft.
+     */
     post: operations["create_run_api_v1_flows__id__runs__post"];
     delete?: never;
     options?: never;
@@ -455,7 +486,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Cancel Run */
+    /**
+     * Cancel Run
+     * @description Cancel a run that is queued, running or waiting for a review.
+     */
     post: operations["cancel_run_api_v1_flows__id__runs__run_id__cancel__post"];
     delete?: never;
     options?: never;
@@ -493,7 +527,10 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Edit Checkpoint */
+    /**
+     * Edit Checkpoint
+     * @description Replace the payload under review (checked against the checkpoint revision).
+     */
     patch: operations["edit_checkpoint_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id___patch"];
     trace?: never;
   };
@@ -506,7 +543,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Approve Checkpoint */
+    /**
+     * Approve Checkpoint
+     * @description Approve the review checkpoint without resuming the run.
+     */
     post: operations["approve_checkpoint_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id__approve__post"];
     delete?: never;
     options?: never;
@@ -523,7 +563,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Reject Checkpoint */
+    /**
+     * Reject Checkpoint
+     * @description Reject the review checkpoint; the run stops and the reason is kept.
+     */
     post: operations["reject_checkpoint_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id__reject__post"];
     delete?: never;
     options?: never;
@@ -540,7 +583,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Resume Checkpoint */
+    /**
+     * Resume Checkpoint
+     * @description Resume the run after an approved checkpoint.
+     */
     post: operations["resume_checkpoint_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id__resume__post"];
     delete?: never;
     options?: never;
@@ -557,7 +603,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Approve And Continue */
+    /**
+     * Approve And Continue
+     * @description Approve the review checkpoint and resume the run.
+     */
     post: operations["approve_and_continue_api_v1_flows__id__runs__run_id__review_checkpoints__checkpoint_id__approve_and_continue__post"];
     delete?: never;
     options?: never;
@@ -601,9 +650,7 @@ export interface paths {
     head?: never;
     /**
      * Edit Transcript Corrections
-     * @description Replace one transcribe step's corrections: send the full lists, the
-     *     ``segments_hash`` of the transcript they anchor to and
-     *     ``expected_revision`` (null to create).
+     * @description Replace one transcribe step's corrections (full lists, checked against the revision).
      */
     patch: operations["edit_transcript_corrections_api_v1_flows__id__runs__run_id__steps__step_id__transcript_corrections__patch"];
     trace?: never;
@@ -15002,7 +15049,9 @@ export interface components {
       | 9064
       | 9069
       | 9070
-      | 9071;
+      | 9071
+      | 9072
+      | 9073;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -15412,6 +15461,24 @@ export interface components {
         | components["schemas"]["TranscribeStep"]
       )[];
     };
+    /**
+     * FlowEditorPublic
+     * @description Another user currently editing the flow.
+     */
+    FlowEditorPublic: {
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string;
+      /** Username */
+      username?: string | null;
+      /**
+       * Started At
+       * Format: date-time
+       */
+      started_at: string;
+    };
     /** FlowFinalOutputContractPublic */
     FlowFinalOutputContractPublic: {
       kind: components["schemas"]["StepKind"];
@@ -15462,6 +15529,15 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+      /**
+       * Editing
+       * @default false
+       */
+      editing?: boolean;
+      /** Editors */
+      editors?: components["schemas"]["FlowEditorPublic"][];
+      /** Step Origins */
+      step_origins?: components["schemas"]["StepOriginPublic"][];
     };
     /** FlowReviewCheckpointRuntimePathsPublic */
     FlowReviewCheckpointRuntimePathsPublic: {
@@ -16150,6 +16226,19 @@ export interface components {
       text: string;
       /** Corrections Revision */
       corrections_revision?: number | null;
+    };
+    /**
+     * FlowUpdateRequest
+     * @description Change the draft from the panel; only the fields given change.
+     */
+    FlowUpdateRequest: {
+      /** Name */
+      name?: string | null;
+      /** Description */
+      description?: string | null;
+      definition?: components["schemas"]["FlowDefinition"] | null;
+      /** Note */
+      note?: string | null;
     };
     /**
      * FormField
@@ -23319,6 +23408,27 @@ export interface components {
       website_ids?: string[];
     };
     /**
+     * StepOriginPublic
+     * @description Where a step of the draft comes from: the save that made it what it is.
+     */
+    StepOriginPublic: {
+      /** Key */
+      key: string;
+      /** Revision */
+      revision: number;
+      /** Channel */
+      channel: string;
+      /**
+       * Changed At
+       * Format: date-time
+       */
+      changed_at: string;
+      /** Changed By User Id */
+      changed_by_user_id?: string | null;
+      /** Assistant Revision */
+      assistant_revision?: number | null;
+    };
+    /**
      * StepResultStatus
      * @enum {string}
      */
@@ -27300,6 +27410,175 @@ export interface operations {
       };
     };
   };
+  update_flow_api_v1_flows__id___patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  enter_edit_mode_api_v1_flows__id__edit_mode__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  leave_edit_mode_api_v1_flows__id__edit_mode__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   bind_conversation_api_v1_flows__id__conversation__post: {
     parameters: {
       query?: never;
@@ -27765,13 +28044,13 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Validation Error */
+      /** @description Unprocessable Entity */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -27832,6 +28111,8 @@ export interface operations {
       query?: {
         limit?: number;
         offset?: number;
+        /** @description Only runs in these statuses (repeat the parameter). */
+        status?: components["schemas"]["FlowRunStatus"][] | null;
       };
       header?: never;
       path: {
@@ -27932,13 +28213,13 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Validation Error */
+      /** @description Unprocessable Entity */
       422: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

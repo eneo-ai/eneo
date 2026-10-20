@@ -1,8 +1,8 @@
 import { infiniteQueryOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
-import { unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { flowsApi } from "./flows-api";
 import type {
-  FlowArtifactPublic,
+  FlowDefinition,
   FlowPublic,
   FlowRunCreateRequest,
   FlowRunPublic,
@@ -188,6 +188,52 @@ export function cancelFlowRun(flowId: string, runId: string): Promise<FlowRunPub
       params: { path: { id: flowId, run_id: runId } }
     })
   );
+}
+
+/** What the panel's editor sends: only the fields given change; the note goes to the history. */
+export type FlowUpdate = {
+  name?: string;
+  description?: string;
+  definition?: FlowDefinition;
+  note?: string | null;
+};
+
+/** Saves a change from the panel as a new draft revision (channel "api"); needs edit mode. */
+export function updateFlow(flowId: string, body: FlowUpdate): Promise<FlowPublic> {
+  return unwrap(flowsApi.PATCH("/api/v1/flows/{id}/", { params: { path: { id: flowId } }, body }));
+}
+
+/** The user presses "Redigera": the flow (and its chat) may change until "Klar". */
+export function enterEditMode(flowId: string): Promise<FlowPublic> {
+  return unwrap(
+    flowsApi.POST("/api/v1/flows/{id}/edit-mode/", { params: { path: { id: flowId } } })
+  );
+}
+
+export function leaveEditMode(flowId: string): Promise<FlowPublic> {
+  return unwrap(
+    flowsApi.DELETE("/api/v1/flows/{id}/edit-mode/", { params: { path: { id: flowId } } })
+  );
+}
+
+/**
+ * The problems a save was refused for (a 422 from the validator), each one
+ * line, or null for any other failure. The editor shows them at the fields
+ * they name instead of as a toast.
+ */
+export function definitionProblems(error: unknown): string[] | null {
+  if (!(error instanceof EneoApiError) || error.status !== 422) return null;
+  const details = error.details;
+  if (!details || typeof details !== "object") return null;
+  const problems = (details as { problems?: unknown }).problems;
+  return Array.isArray(problems) && problems.every((item) => typeof item === "string")
+    ? (problems as string[])
+    : null;
+}
+
+/** Whether a request was refused because the flow is in view mode (409). */
+export function isViewModeError(error: unknown): boolean {
+  return error instanceof EneoApiError && error.reason === "flow_not_in_edit_mode";
 }
 
 export function deleteFlow(flowId: string): Promise<unknown> {

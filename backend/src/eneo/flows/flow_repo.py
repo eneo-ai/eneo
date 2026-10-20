@@ -14,6 +14,7 @@ from typing import Any, Optional, cast
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -22,6 +23,7 @@ from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FLOW_REVIEW_CHECKPOINT_ACTIVE_STATES,
+    FlowEditSessions,
     FlowFiles,
     FlowRevisions,
     FlowRunFiles,
@@ -34,6 +36,7 @@ from eneo.database.tables.flow_tables import (
     FlowVersions,
 )
 from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.users_table import Users
 from eneo.flows.flow_models import (
     FlowRunStatus,
     ReviewCheckpointState,
@@ -69,6 +72,15 @@ class SessionBinding:
 class FlowListRow:
     flow: Flows
     last_run: Optional[FlowRuns]
+
+
+@dataclass(frozen=True)
+class EditSessionRow:
+    """A user editing a flow, with the name the panel shows."""
+
+    user_id: UUID
+    username: Optional[str]
+    started_at: datetime
 
 
 @dataclass(frozen=True)
@@ -364,6 +376,65 @@ class FlowRepository:
         )
         rows = list((await self.session.execute(stmt)).scalars().all())
         return rows, int(total)
+
+    async def recent_revisions(
+        self, flow_id: UUID, *, limit: int
+    ) -> list[FlowRevisions]:
+        """The newest ``limit`` revisions, newest first."""
+        stmt = (
+            sa.select(FlowRevisions)
+            .where(FlowRevisions.flow_id == flow_id)
+            .order_by(FlowRevisions.revision.desc())
+            .limit(limit)
+        )
+        return list((await self.session.execute(stmt)).scalars().all())
+
+    # --- Edit sessions ---
+
+    async def start_edit_session(self, flow_id: UUID, user_id: UUID) -> None:
+        """Enter edit mode; entering again keeps the row and its start time."""
+        stmt = (
+            pg_insert(FlowEditSessions)
+            .values(flow_id=flow_id, user_id=user_id)
+            .on_conflict_do_nothing(
+                index_elements=[FlowEditSessions.flow_id, FlowEditSessions.user_id]
+            )
+        )
+        await self.session.execute(stmt)
+
+    async def end_edit_session(self, flow_id: UUID, user_id: UUID) -> bool:
+        """Leave edit mode; True when there was a session to leave."""
+        result = await self.session.execute(
+            sa.delete(FlowEditSessions).where(
+                FlowEditSessions.flow_id == flow_id,
+                FlowEditSessions.user_id == user_id,
+            )
+        )
+        return _rowcount(result) > 0
+
+    async def is_editing(self, flow_id: UUID, user_id: UUID) -> bool:
+        stmt = sa.select(sa.literal(True)).where(
+            FlowEditSessions.flow_id == flow_id, FlowEditSessions.user_id == user_id
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none() is not None
+
+    async def edit_sessions(self, flow_id: UUID) -> list[EditSessionRow]:
+        """Everyone editing the flow, oldest session first."""
+        stmt = (
+            sa.select(
+                FlowEditSessions.user_id,
+                Users.username,
+                FlowEditSessions.started_at,
+            )
+            .join(Users, Users.id == FlowEditSessions.user_id)
+            .where(FlowEditSessions.flow_id == flow_id)
+            .order_by(FlowEditSessions.started_at, FlowEditSessions.user_id)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            EditSessionRow(user_id=user_id, username=username, started_at=started_at)
+            for user_id, username, started_at in rows
+        ]
 
     # --- Runs ---
 

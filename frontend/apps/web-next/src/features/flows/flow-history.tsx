@@ -2,6 +2,7 @@
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
+import { Token } from "@astryxdesign/core/Token";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -13,8 +14,7 @@ import { ListError, QueryStateBoundary } from "@/components/composites/query-sta
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { FlowDefinition } from "./flow-definition";
-import { Chip } from "./flow-fields";
-import type { FlowNames } from "./flow-step-card";
+import type { FlowNames } from "./flow-step-summary";
 import {
   flowRevisionQueryOptions,
   flowRevisionsQueryOptions,
@@ -126,7 +126,7 @@ function RevisionList({
                           {t("flow_history_revision", { revision: revision.revision })}
                         </span>
                         {revision.revision === current && (
-                          <Chip tone="accent">{t("flow_history_current")}</Chip>
+                          <Token size="sm" color="blue" label={t("flow_history_current")} />
                         )}
                         {revision.published_version != null && (
                           <Badge
@@ -226,7 +226,7 @@ function RevisionDetail({
                 </span>
               </div>
               {isCurrent ? (
-                <Chip tone="accent">{t("flow_history_current")}</Chip>
+                <Token size="sm" color="blue" label={t("flow_history_current")} />
               ) : (
                 <Button
                   label={t("flow_history_restore")}

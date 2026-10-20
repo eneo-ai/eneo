@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { Token } from "@astryxdesign/core/Token";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Ban,
@@ -24,7 +25,6 @@ import { StatusLabel } from "@/components/composites/status-label";
 import { formatSeconds } from "@/features/chat/format";
 import { toastApiError } from "@/lib/api/toast";
 import { cn } from "@/lib/utils";
-import { Chip } from "./flow-fields";
 import {
   runDisplayName,
   runStatusLabel,
@@ -291,9 +291,11 @@ function RunInputs({
         {values.length > 0 && (
           <div className="flex flex-wrap gap-1">
             {values.map(([key, value]) => (
-              <Chip key={key}>
-                {labelOf(key)}: {typeof value === "string" ? value : JSON.stringify(value)}
-              </Chip>
+              <Token
+                key={key}
+                size="sm"
+                label={`${labelOf(key)}: ${typeof value === "string" ? value : JSON.stringify(value)}`}
+              />
             ))}
           </div>
         )}

@@ -31,6 +31,8 @@ export type PrincipalType = Schema<"PrincipalType">;
 
 export type FlowSparsePublic = Schema<"FlowSparsePublic">;
 export type FlowPublic = Schema<"FlowPublic">;
+export type FlowEditorPublic = Schema<"FlowEditorPublic">;
+export type StepOriginPublic = Schema<"StepOriginPublic">;
 export type FlowAuthoringAssistantPublic = Schema<"FlowAuthoringAssistantPublic">;
 export type FlowRunContractPublic = Schema<"FlowRunContractPublic">;
 export type FlowRunCreateRequest = Schema<"FlowRunCreateRequest">;

@@ -20,9 +20,10 @@ content for the flow panel in the clients: top-level ``flow_id`` and
 ``run_id`` (nullable) plus the flow or the run state when the call produced
 one. Problems the model can repair (validation errors, a missing flow, a
 bad attachment link) come back as text that starts with "Could not", never
-as a protocol error, so the model fixes the call and tries again. The
-transaction of a failed call rolls back; the services record the audit
-entries of the successful ones.
+as a protocol error, so the model fixes the call and tries again. The write
+tools also refuse that way while the user views the flow without having
+entered edit mode in the panel. The transaction of a failed call rolls
+back; the services record the audit entries of the successful ones.
 
 See :mod:`eneo.internal_mcp.foundation` for the hosting and authentication
 model shared by all internal servers.
@@ -64,6 +65,7 @@ from eneo.internal_mcp.foundation import (
 )
 from eneo.main.exceptions import (
     BadRequestException,
+    FlowNotEditingException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -146,6 +148,11 @@ Every save (update_flow) is kept as a numbered revision the user can read in
 the flow's history and restore; nothing is lost by changing a flow. Give update_flow a one-line note on what changed and why. list_revisions
 shows the history and restore_revision brings an earlier revision back as the
 draft (itself a new revision).
+
+Changing a flow (update_flow, restore_revision, publish_flow, delete_flow)
+needs the user to have pressed Redigera in the flow panel; when one of these
+tools refuses because the flow is shown in view mode, ask the user to press
+Redigera and then try again. Reading and running are always available.
 """
 
 mcp = FastMCP(
@@ -170,6 +177,7 @@ class _ToolRefused(Exception):
 # an outage and propagates as a protocol error like in every other server.
 _REPAIRABLE = (
     BadRequestException,
+    FlowNotEditingException,
     NotFoundException,
     UnauthorizedException,
     FileReferenceRejected,
@@ -662,6 +670,7 @@ async def update_flow(
             space_id = await _authoring_space_id(tool_ctx)
             current = await _resolve_flow(tool_ctx, flow_id, space_id)
             flow_id = current.id
+            await tool_ctx.container.flow_service().require_editing(current.id)
             if (
                 name is None
                 and description is None
@@ -744,7 +753,9 @@ async def restore_revision(
             space_id = await _authoring_space_id(tool_ctx)
             current = await _resolve_flow(tool_ctx, flow_id, space_id)
             flow_id = current.id
-            flow = await tool_ctx.container.flow_service().restore_revision(
+            flow_service = tool_ctx.container.flow_service()
+            await flow_service.require_editing(current.id)
+            flow = await flow_service.restore_revision(
                 current.id, revision, channel=CHANNEL
             )
     except _REPAIRABLE as exc:
@@ -776,6 +787,7 @@ async def publish_flow(ctx: Context, flow_id: UUID | None = None) -> CallToolRes
             current = await _resolve_flow(tool_ctx, flow_id, space_id)
             flow_id = current.id
             flow_service = tool_ctx.container.flow_service()
+            await flow_service.require_editing(current.id)
             flow = await flow_service.publish_flow(current.id, channel=CHANNEL)
             contract = await flow_service.get_run_contract(current.id)
     except _REPAIRABLE as exc:
@@ -806,9 +818,9 @@ async def delete_flow(ctx: Context, flow_id: UUID | None = None) -> CallToolResu
             space_id = await _authoring_space_id(tool_ctx)
             flow = await _resolve_flow(tool_ctx, flow_id, space_id)
             flow_id = flow.id
-            await tool_ctx.container.flow_service().delete_flow(
-                flow.id, channel=CHANNEL
-            )
+            flow_service = tool_ctx.container.flow_service()
+            await flow_service.require_editing(flow.id)
+            await flow_service.delete_flow(flow.id, channel=CHANNEL)
     except _REPAIRABLE as exc:
         return _failure("delete flow", exc, flow_id=flow_id)
     logger.info("[FLOWS] deleted flow %s", flow_id)

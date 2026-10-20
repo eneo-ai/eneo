@@ -38,8 +38,10 @@ from eneo.flows.flow_assembler import (
     flow_revision_public,
     flow_revision_summary_public,
     flow_sparse_public,
+    step_origins,
 )
 from eneo.flows.flow_models import (
+    FlowEditorPublic,
     FlowFinalOutputContractPublic,
     FlowPublic,
     FlowRevisionPublic,
@@ -55,6 +57,8 @@ from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     FlowConversationConflictException,
+    FlowDefinitionProblemsException,
+    FlowNotEditingException,
     FlowRuntimeFileInUseException,
     NotFoundException,
     UnauthorizedException,
@@ -89,6 +93,8 @@ RUNTIME_UPLOAD_ROLE = "runtime_upload"
 MAX_REVISION_PAGE = 100
 NOTE_MAX_LENGTH = 500
 DEFAULT_FLOW_NAME = "Nytt flöde"
+# How far back a step's origin is looked for in the flow's history.
+STEP_ORIGIN_WINDOW = 50
 
 
 class FlowService:
@@ -252,9 +258,7 @@ class FlowService:
             problems.extend(exc.errors)
         problems.extend(self._space_problems(definition, space))
         if problems:
-            raise BadRequestException(
-                "The flow definition has problems:\n- " + "\n- ".join(problems)
-            )
+            raise FlowDefinitionProblemsException(problems)
 
     @staticmethod
     def _unavailable_kinds(definition: FlowDefinition) -> list[str]:
@@ -414,11 +418,58 @@ class FlowService:
         return version is None or version.definition != flow.definition
 
     async def _to_public(self, flow: Flows) -> FlowPublic:
+        revisions = await self.repo.recent_revisions(flow.id, limit=STEP_ORIGIN_WINDOW)
+        sessions = await self.repo.edit_sessions(flow.id)
         return flow_public(
             flow,
             has_unpublished_changes=await self._has_unpublished_changes(flow),
-            revision=await self.repo.latest_revision_number(flow.id),
+            revision=revisions[0].revision if revisions else 0,
+            editing=any(row.user_id == self.user.id for row in sessions),
+            editors=[
+                FlowEditorPublic(
+                    user_id=row.user_id,
+                    username=row.username,
+                    started_at=row.started_at,
+                )
+                for row in sessions
+                if row.user_id != self.user.id
+            ],
+            step_origins=step_origins(flow.definition, revisions),
         )
+
+    # --- Edit mode ---
+
+    async def enter_edit_mode(self, flow_id: UUID) -> FlowPublic:
+        """Start (or keep) the caller's edit mode on the flow.
+
+        Anyone who may edit flows in the space may enter, also while others
+        are editing: the revisions make concurrent changes visible and
+        restorable, so there is no lock.
+        """
+        flow = await self._require_flow(flow_id)
+        await self.authorize_space(flow.space_id, "edit")
+        await self.repo.start_edit_session(flow.id, self.user.id)
+        return await self._to_public(flow)
+
+    async def leave_edit_mode(self, flow_id: UUID) -> FlowPublic:
+        """End the caller's edit mode; nothing is saved (every change already
+        is a revision) and leaving twice is fine."""
+        flow = await self._require_flow(flow_id)
+        await self.authorize_space(flow.space_id)
+        await self.repo.end_edit_session(flow.id, self.user.id)
+        return await self._to_public(flow)
+
+    async def require_editing(self, flow: UUID | Flows) -> Flows:
+        """The flow, provided the caller may edit it and is in edit mode on it.
+
+        Every change from the panel and from the chat's write tools goes
+        through here, so a flow a person is only viewing stays as it is.
+        """
+        row = flow if not isinstance(flow, UUID) else await self._require_flow(flow)
+        await self.authorize_space(row.space_id, "edit")
+        if not await self.repo.is_editing(row.id, self.user.id):
+            raise FlowNotEditingException()
+        return row
 
     # --- Revisions ---
 
@@ -518,9 +569,7 @@ class FlowService:
         self._validate(definition, space)
         problems = await self._template_problems(None, definition)
         if problems:
-            raise BadRequestException(
-                "The flow definition has problems:\n- " + "\n- ".join(problems)
-            )
+            raise FlowDefinitionProblemsException(problems)
         definition = assign_step_ids(definition)
         flow = await self.repo.add_flow(
             name=name,
@@ -618,9 +667,7 @@ class FlowService:
             self._validate(definition, space)
             problems = await self._template_problems(flow.id, definition)
             if problems:
-                raise BadRequestException(
-                    "The flow definition has problems:\n- " + "\n- ".join(problems)
-                )
+                raise FlowDefinitionProblemsException(problems)
             previous = definition_from_json(flow.definition)
             definition = assign_step_ids(
                 definition, previous, keep_unknown_ids=restored_from is not None
@@ -726,8 +773,8 @@ class FlowService:
         problems = await self._template_problems(flow.id, definition)
         problems.extend(self._document_capability_problems(definition, space))
         if problems:
-            raise BadRequestException(
-                f"The flow cannot be {action}:\n- " + "\n- ".join(problems)
+            raise FlowDefinitionProblemsException(
+                problems, lead=f"The flow cannot be {action}:"
             )
 
     async def get_runnable_draft(self, flow_id: UUID) -> FlowDefinition:

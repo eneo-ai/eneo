@@ -1,4 +1,5 @@
 import { hasFlowRef, mergeFlowRefs, type FlowRef } from "./flow-tool-calls";
+import type { StepKind } from "./types";
 
 export type FlowPanelTab = "definition" | "runs" | "history";
 
@@ -11,6 +12,15 @@ export function isFlowPanelTab(value: unknown): value is FlowPanelTab {
 
 /** The id the side panel knows the flow panel by (its `native` occupant). */
 export const FLOW_PANEL_ID = "flow";
+
+/** Whether the flow is read as it is, or being changed (after "Redigera"). */
+export type FlowPanelMode = "view" | "edit";
+
+/**
+ * The part of the side panel the step view steers: whether the panel covers
+ * the conversation. The side panel store has this shape.
+ */
+export type PanelLayout = { maximised: boolean; setMaximised: (maximised: boolean) => void };
 
 /** What the store knows about one flows tool call. */
 type KnownCall = {
@@ -47,6 +57,19 @@ export class FlowPanelStore {
   /** The run on show in the runs tab. */
   runId: string | null;
   tab: FlowPanelTab;
+  /** The step open in the step view (over the definition tab), by its key. */
+  stepKey: string | null = null;
+  /** The step view is the editor, not the read view. */
+  stepEditing = false;
+  /**
+   * A step being added (edit mode): its kind and the position it takes in
+   * the list. It has no key until it is saved.
+   */
+  newStep: { kind: StepKind; index: number } | null = null;
+  /** View until the user presses "Redigera"; the flow's own `editing` drives it. */
+  mode: FlowPanelMode = "view";
+  // How the panel was laid out before a step maximised it; put back on close.
+  #maximisedBefore: boolean | null = null;
   /**
    * Counts the times the panel asked to be shown: a flow bound, a run
    * started, a line under an answer pressed. The chat view opens the side
@@ -136,11 +159,73 @@ export class FlowPanelStore {
     this.#emit();
   }
 
-  /** Shows a run (null: the list) on the runs tab (and asks for the panel). */
+  /** Shows a run (null: the list) on the runs tab (and asks for the panel); a step on show closes. */
   showRun(runId: string | null) {
     this.runId = runId;
     this.tab = "runs";
+    this.#leaveSteps();
     this.openRequests++;
+    this.#emit();
+  }
+
+  #leaveSteps() {
+    this.stepKey = null;
+    this.stepEditing = false;
+    this.newStep = null;
+    this.#maximisedBefore = null;
+  }
+
+  #maximise(layout: PanelLayout | null) {
+    if (this.stepKey === null && this.newStep === null && layout) {
+      this.#maximisedBefore = layout.maximised;
+      layout.setMaximised(true);
+    }
+  }
+
+  /**
+   * Opens a step in the step view. The panel maximises over the conversation
+   * (through `layout`, when the layout can) and remembers how it was, so
+   * closing the step puts it back.
+   */
+  openStep(key: string, layout: PanelLayout | null = null, { edit = false } = {}) {
+    this.#maximise(layout);
+    this.stepKey = key;
+    this.stepEditing = edit;
+    this.newStep = null;
+    this.tab = "definition";
+    this.#emit();
+  }
+
+  /** Opens the editor for a step that is not in the flow yet, to be inserted at `index`. */
+  openNewStep(kind: StepKind, index: number, layout: PanelLayout | null = null) {
+    this.#maximise(layout);
+    this.stepKey = null;
+    this.stepEditing = true;
+    this.newStep = { kind, index };
+    this.tab = "definition";
+    this.#emit();
+  }
+
+  /** From the editor back to reading the step (a new step goes back to the overview). */
+  closeEditor(layout: PanelLayout | null = null) {
+    if (!this.stepEditing) return;
+    if (this.newStep !== null) return this.closeStep(layout);
+    this.stepEditing = false;
+    this.#emit();
+  }
+
+  /** Back from the step view to the overview, the panel laid out as before the step. */
+  closeStep(layout: PanelLayout | null = null) {
+    if (this.stepKey === null && this.newStep === null) return;
+    const before = this.#maximisedBefore;
+    this.#leaveSteps();
+    if (layout && before !== null) layout.setMaximised(before);
+    this.#emit();
+  }
+
+  setMode(mode: FlowPanelMode) {
+    if (this.mode === mode) return;
+    this.mode = mode;
     this.#emit();
   }
 

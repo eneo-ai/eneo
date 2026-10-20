@@ -9,13 +9,13 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import TIMESTAMP, ForeignKey, Index, UniqueConstraint
+from sqlalchemy import TIMESTAMP, ForeignKey, Index, UniqueConstraint, func
 from sqlalchemy import text as sa_text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
-from eneo.database.tables.base_class import BasePublic
+from eneo.database.tables.base_class import BasePublic, BaseWithTableName
 from eneo.database.tables.files_table import Files, file_usage
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.sessions_table import Sessions
@@ -125,6 +125,22 @@ class FlowRevisions(BasePublic):
 
     __table_args__ = (
         UniqueConstraint("flow_id", "revision", name="uq_flow_revisions_flow_revision"),
+    )
+
+
+class FlowEditSessions(BaseWithTableName):
+    """A user's edit mode on a flow: one row per flow and user, from the
+    moment they enter until they leave. Rows never expire; a deleted flow
+    takes them along."""
+
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Users.id, ondelete="CASCADE"), primary_key=True
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=func.now(), nullable=False
     )
 
 

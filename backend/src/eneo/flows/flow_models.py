@@ -91,6 +91,28 @@ class FlowSparsePublic(BaseModel):
     updated_at: datetime
 
 
+class FlowEditorPublic(BaseModel):
+    """Another user currently editing the flow."""
+
+    user_id: UUID
+    username: Optional[str] = None
+    started_at: datetime
+
+
+class StepOriginPublic(BaseModel):
+    """Where a step of the draft comes from: the save that made it what it is."""
+
+    key: str
+    # The revision that last changed the step (or added it).
+    revision: int
+    # "mcp" (the flows chat) | "api" (the panel or the REST API)
+    channel: str
+    changed_at: datetime
+    changed_by_user_id: Optional[UUID] = None
+    # The newest chat revision that held the step differently, for a restore.
+    assistant_revision: Optional[int] = None
+
+
 class FlowPublic(BaseModel):
     """A flow with its draft definition; what the panel renders."""
 
@@ -107,6 +129,24 @@ class FlowPublic(BaseModel):
     conversation_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
+    # The caller is in edit mode on this flow.
+    editing: bool = False
+    # Other users in edit mode on this flow (never the caller).
+    editors: list[FlowEditorPublic] = Field(default_factory=list[FlowEditorPublic])
+    # One entry per step of the draft, in step order.
+    step_origins: list[StepOriginPublic] = Field(default_factory=list[StepOriginPublic])
+
+
+class FlowUpdateRequest(BaseModel):
+    """Change the draft from the panel; only the fields given change."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: Optional[str] = Field(default=None, max_length=200)
+    description: Optional[str] = None
+    definition: Optional[FlowDefinition] = None
+    # One line on what changed and why, shown in the flow's history.
+    note: Optional[str] = Field(default=None, max_length=500)
 
 
 class FlowRevisionChangesPublic(BaseModel):

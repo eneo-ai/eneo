@@ -70,7 +70,11 @@ from eneo.internal_mcp.flows import (
 )
 from eneo.internal_mcp.foundation import ToolContext
 from eneo.internal_mcp.registry import internal_mcp_mounts
-from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.exceptions import (
+    BadRequestException,
+    FlowNotEditingException,
+    NotFoundException,
+)
 
 NOW = datetime(2026, 10, 20, 12, 0, tzinfo=timezone.utc)
 CTX = SimpleNamespace()
@@ -183,16 +187,20 @@ def _summary(run: FlowRunStatePublic) -> FlowRunSummaryPublic:
 
 
 class FakeFlowService:
-    """Records every call; raises ``error`` on the next mutating call.
+    """Records every call; raises ``error`` on the next mutating call and
+    ``editing_error`` when a write tool checks the caller's edit mode.
 
     Every create and every changing update keeps a revision, as the real
     service does; ``revisions`` holds them per flow, oldest first.
     """
 
-    def __init__(self, flows: list[FlowPublic] = (), *, error=None):
+    def __init__(self, flows: list[FlowPublic] = (), *, error=None, editing_error=None):
         self.flows = {flow.id: flow for flow in flows}
         self.calls: list[tuple] = []
         self.error = error
+        self.editing_error = editing_error
+        # Flow ids the write tools checked edit mode on, in order.
+        self.edit_checks: list[UUID] = []
         self.revisions: dict[UUID, list[FlowRevisionPublic]] = {
             flow.id: [self._revision(flow, channel="api")] for flow in flows
         }
@@ -244,6 +252,12 @@ class FakeFlowService:
             (f for f in self.flows.values() if f.conversation_id == conversation_id),
             None,
         )
+
+    async def require_editing(self, flow_id):
+        self.edit_checks.append(flow_id)
+        if self.editing_error is not None:
+            raise self.editing_error
+        return self.flows[flow_id]
 
     async def update_flow(
         self,
@@ -689,6 +703,77 @@ class TestChatFlow:
             f"Could not update flow: {NOT_AUTHORING_ASSISTANT_MESSAGE}"
         )
         assert service.calls == []
+
+
+VIEW_MODE_MESSAGE = (
+    "The flow is shown in view mode. Ask the user to press Redigera in the flow "
+    "panel to enter edit mode."
+)
+
+
+class TestEditModeGate:
+    """The write tools refuse while the user views the flow; the rest do not."""
+
+    def _rig(self, monkeypatch):
+        session_id = uuid4()
+        space_id = uuid4()
+        mine = _flow(space_id=space_id, conversation_id=session_id)
+        service = FakeFlowService([mine], editing_error=FlowNotEditingException())
+        _patch_context(
+            monkeypatch,
+            flow_service=service,
+            run_service=FakeFlowRunService([_run_state(mine)]),
+            space_id=space_id,
+            session_id=session_id,
+        )
+        return mine, service
+
+    async def test_update_flow_in_view_mode_tells_the_model_to_ask_for_edit_mode(
+        self, monkeypatch
+    ):
+        mine, service = self._rig(monkeypatch)
+
+        result = await update_flow(name="Daily brief", note="Renamed", ctx=CTX)
+
+        assert _text(result) == f"Could not update flow: {VIEW_MODE_MESSAGE}"
+        assert result.isError is False
+        assert result.structuredContent["flow_id"] == str(mine.id)
+        assert result.structuredContent["flow"] is None
+        assert result.structuredContent["error"] == VIEW_MODE_MESSAGE
+        assert service.edit_checks == [mine.id]
+        assert service.calls == []
+        assert service.flows[mine.id].name == mine.name
+
+    async def test_every_write_tool_is_gated_before_it_changes_anything(
+        self, monkeypatch
+    ):
+        mine, service = self._rig(monkeypatch)
+
+        results = [
+            ("restore revision", await restore_revision(revision=1, ctx=CTX)),
+            ("publish flow", await publish_flow(ctx=CTX)),
+            ("delete flow", await delete_flow(ctx=CTX)),
+        ]
+
+        for action, result in results:
+            assert _text(result) == f"Could not {action}: {VIEW_MODE_MESSAGE}"
+            assert result.structuredContent["flow_id"] == str(mine.id)
+        assert service.edit_checks == [mine.id] * 3
+        assert service.calls == []
+        assert mine.id in service.flows
+        assert service.flows[mine.id].published_version is None
+
+    async def test_running_and_reading_do_not_need_edit_mode(self, monkeypatch):
+        mine, service = self._rig(monkeypatch)
+
+        run = await run_flow(inputs={"topic": "x"}, draft=True, ctx=CTX)
+        read = await get_flow(ctx=CTX)
+        history = await list_revisions(ctx=CTX)
+
+        assert not _text(run).startswith("Could not")
+        assert read.structuredContent["flow"]["id"] == str(mine.id)
+        assert history.structuredContent["revisions"]
+        assert service.edit_checks == []
 
 
 class TestFlowScoping:

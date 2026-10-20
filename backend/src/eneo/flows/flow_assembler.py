@@ -15,6 +15,7 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.flows.definition import FlowDefinition, Step, StepKind
 from eneo.flows.flow_models import (
+    FlowEditorPublic,
     FlowPublic,
     FlowRevisionChangesPublic,
     FlowRevisionPublic,
@@ -31,6 +32,7 @@ from eneo.flows.flow_models import (
     FlowSparsePublic,
     PrincipalType,
     ReviewCheckpointState,
+    StepOriginPublic,
     StepResultStatus,
 )
 from eneo.flows.flow_repo import FlowRepository, RunFileRow
@@ -61,7 +63,13 @@ async def run_definition(repo: FlowRepository, run: FlowRuns) -> FlowDefinition:
 
 
 def flow_public(
-    flow: Flows, *, has_unpublished_changes: bool, revision: int = 1
+    flow: Flows,
+    *,
+    has_unpublished_changes: bool,
+    revision: int = 1,
+    editing: bool = False,
+    editors: Optional[list[FlowEditorPublic]] = None,
+    step_origins: Optional[list[StepOriginPublic]] = None,
 ) -> FlowPublic:
     return FlowPublic(
         id=flow.id,
@@ -75,6 +83,9 @@ def flow_public(
         conversation_id=flow.conversation_id,
         created_at=flow.created_at,
         updated_at=flow.updated_at,
+        editing=editing,
+        editors=editors or [],
+        step_origins=step_origins or [],
     )
 
 
@@ -137,6 +148,55 @@ def revision_changes(
             and _step_body(step) != _step_body(previous_by_key[key])
         ],
     )
+
+
+def step_origins(
+    definition: dict[str, Any], revisions: list[FlowRevisions]
+) -> list[StepOriginPublic]:
+    """Where each step of ``definition`` comes from (pure).
+
+    ``revisions`` is the flow's history newest first. A step's origin is the
+    oldest revision in the unbroken run of newest revisions that hold the
+    step as it is now (matched by key, compared without the server-assigned
+    id): the save that made it what it is. ``assistant_revision`` is the
+    newest chat revision that held the step differently, when the window
+    has one, so a reader can bring that version back. A step no revision in
+    the window holds as it is now has no origin.
+    """
+    bodies_per_revision = [
+        {str(step.get("key")): _step_body(step) for step in _steps_of(row.definition)}
+        for row in revisions
+    ]
+    origins: list[StepOriginPublic] = []
+    for step in _steps_of(definition):
+        key = str(step.get("key"))
+        body = _step_body(step)
+        origin: Optional[FlowRevisions] = None
+        for row, bodies in zip(revisions, bodies_per_revision):
+            if bodies.get(key) != body:
+                break
+            origin = row
+        if origin is None:
+            continue
+        assistant_revision = next(
+            (
+                row.revision
+                for row, bodies in zip(revisions, bodies_per_revision)
+                if row.channel == "mcp" and key in bodies and bodies[key] != body
+            ),
+            None,
+        )
+        origins.append(
+            StepOriginPublic(
+                key=key,
+                revision=origin.revision,
+                channel=origin.channel,
+                changed_at=origin.created_at,
+                changed_by_user_id=origin.principal_user_id,
+                assistant_revision=assistant_revision,
+            )
+        )
+    return origins
 
 
 def _revision_fields(

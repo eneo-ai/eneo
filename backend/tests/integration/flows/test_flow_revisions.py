@@ -205,6 +205,13 @@ async def test_a_flow_starts_empty_and_its_chat_fills_it_in(
 
         monkeypatch.setattr(flows_mcp, "internal_tool_context", tool_context)
 
+        # The chat's write tools wait for the person to enter edit mode.
+        refused = await flows_mcp.update_flow(ctx=object(), name="Brief")
+        assert refused.content[0].text.startswith(
+            "Could not update flow: The flow is shown in view mode."
+        )
+        assert (await flow_service.enter_edit_mode(draft.id)).editing is True
+
         result = await flows_mcp.update_flow(
             ctx=object(),
             name="Brief",
@@ -236,3 +243,132 @@ async def test_a_flow_starts_empty_and_its_chat_fills_it_in(
 
         await flow_service.delete_flow(draft.id)
         assert await flow_service.flow_for_conversation(chat.id) is None
+
+
+@pytest.fixture
+async def chat_authored(db_container, member_space, completion_model_factory, provider):
+    """A flow the chat saved (revision 1, channel mcp) in a space the admin
+    user edits; returned as the ids the HTTP cases need."""
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "flow-patch-model")
+        space = await member_space(session, "Patch Space", [model.id])
+        flow = await container.flow_service().create_flow(
+            space_id=space.id,
+            name="Brief",
+            description=None,
+            definition=_two_steps(model.id),
+            channel="mcp",
+        )
+        # Read inside the session: the row detaches when it closes.
+        model_id = model.id
+    return {"flow": flow, "model_id": model_id}
+
+
+async def test_the_panel_saves_through_patch_as_api_revisions_keeping_step_ids(
+    client, chat_authored, flows_enabled, bearer
+):
+    flow = chat_authored["flow"]
+    url = f"/api/v1/flows/{flow.id}/"
+    assert (await client.post(f"{url}edit-mode/", headers=bearer)).status_code == 200
+
+    definition = (await client.get(url, headers=bearer)).json()["definition"]
+    definition["steps"][0]["prompt"] = "draft carefully"
+    saved = await client.patch(
+        url,
+        json={"definition": definition, "note": "Sharper draft prompt"},
+        headers=bearer,
+    )
+
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["revision"] == 2
+    assert body["editing"] is True
+    assert body["definition"]["steps"][0]["prompt"] == "draft carefully"
+    assert [step["id"] for step in body["definition"]["steps"]] == [
+        str(step.id) for step in flow.definition.steps
+    ]
+    history = (await client.get(f"{url}revisions/", headers=bearer)).json()["items"]
+    assert [(r["revision"], r["channel"]) for r in history] == [(2, "api"), (1, "mcp")]
+    assert history[0]["note"] == "Sharper draft prompt"
+    assert history[0]["changes"]["steps_changed"] == ["Draft"]
+
+    # Name and description alone are a revision too; a no-op save is not.
+    renamed = await client.patch(url, json={"name": "Weekly brief"}, headers=bearer)
+    assert renamed.status_code == 200 and renamed.json()["revision"] == 3
+    same = await client.patch(url, json={"name": "Weekly brief"}, headers=bearer)
+    assert same.status_code == 200 and same.json()["revision"] == 3
+    unknown = await client.patch(url, json={"colour": "blue"}, headers=bearer)
+    assert unknown.status_code == 422
+
+
+async def test_a_definition_with_problems_is_refused_with_the_problems_listed(
+    client, chat_authored, flows_enabled, bearer
+):
+    flow = chat_authored["flow"]
+    url = f"/api/v1/flows/{flow.id}/"
+    await client.post(f"{url}edit-mode/", headers=bearer)
+    definition = (await client.get(url, headers=bearer)).json()["definition"]
+    definition["steps"][1]["template"] = "Done: {{steps.nope}}"
+
+    refused = await client.patch(url, json={"definition": definition}, headers=bearer)
+
+    assert refused.status_code == 422, refused.text
+    body = refused.json()
+    assert body["code"] == "flow_definition_problems"
+    assert body["message"].startswith("The flow definition has problems:\n- ")
+    assert body["details"]["problems"] == [
+        "step 'wrap' template: {{steps.nope}} must name an earlier step"
+    ]
+    # Nothing was kept.
+    assert (await client.get(url, headers=bearer)).json()["revision"] == 1
+
+
+async def test_step_origins_tell_which_steps_the_panel_changed_since_the_chat(
+    client, db_container, chat_authored, flows_enabled, bearer
+):
+    flow = chat_authored["flow"]
+    url = f"/api/v1/flows/{flow.id}/"
+
+    # The chat saves again (revision 2), then the panel changes one step.
+    async with db_container() as container:
+        await container.flow_service().update_flow(
+            flow.id,
+            definition=FlowDefinition(
+                form_fields=flow.definition.form_fields,
+                steps=[
+                    LlmStep(
+                        key="draft",
+                        name="Draft",
+                        prompt="draft, chat style",
+                        input="{{form.topic}}",
+                        model_id=chat_authored["model_id"],
+                    ),
+                    flow.definition.steps[1],
+                ],
+            ),
+            channel="mcp",
+            note="Chat style",
+        )
+    await client.post(f"{url}edit-mode/", headers=bearer)
+    definition = (await client.get(url, headers=bearer)).json()["definition"]
+    definition["steps"][0]["prompt"] = "draft, panel style"
+    saved = await client.patch(url, json={"definition": definition}, headers=bearer)
+    assert saved.status_code == 200, saved.text
+
+    origins = {o["key"]: o for o in saved.json()["step_origins"]}
+    assert set(origins) == {"draft", "wrap"}
+    assert (origins["draft"]["revision"], origins["draft"]["channel"]) == (3, "api")
+    assert origins["draft"]["assistant_revision"] == 2
+    assert origins["draft"]["changed_by_user_id"] is not None
+    assert origins["draft"]["changed_at"] is not None
+    assert (origins["wrap"]["revision"], origins["wrap"]["channel"]) == (1, "mcp")
+    assert origins["wrap"]["assistant_revision"] is None
+
+    # Restoring the chat's version is an api save (the origin); the chat's
+    # older, different version is what remains to go back to.
+    restored = await client.post(f"{url}revisions/2/restore/", headers=bearer)
+    assert restored.status_code == 200, restored.text
+    origins = {o["key"]: o for o in restored.json()["step_origins"]}
+    assert (origins["draft"]["revision"], origins["draft"]["channel"]) == (4, "api")
+    assert origins["draft"]["assistant_revision"] == 1
