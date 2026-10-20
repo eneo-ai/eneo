@@ -4,8 +4,10 @@
   import { getEneo } from "$lib/core/Eneo";
   import { PAGINATION } from "$lib/core/constants";
   import { toastError } from "$lib/core/errors";
-  import CrawlRunsTable from "./CrawlRunsTable.svelte";
-  import { onMount } from "svelte";
+  import CrawlRunActivity from "./CrawlRunActivity.svelte";
+  import { onMount, tick } from "svelte";
+  import { page } from "$app/state";
+  import { replaceState } from "$app/navigation";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import WebsiteContent from "$lib/features/knowledge/WebsiteContent.svelte";
   import CrawlRunDetailsContent from "$lib/features/knowledge/CrawlRunDetailsContent.svelte";
@@ -22,9 +24,7 @@
     isActiveCrawlRun
   } from "$lib/features/knowledge/crawlRunState";
   import { Info, LoaderCircle, TriangleAlert } from "@lucide/svelte";
-  import type { CrawlResourceFailure, CrawlRun } from "@eneo/eneo-js";
-  import CrawlRunDetails from "$lib/features/knowledge/CrawlRunDetails.svelte";
-  import CrawlFailureActions from "$lib/features/knowledge/CrawlFailureActions.svelte";
+  import type { CrawlRun } from "@eneo/eneo-js";
   import { mergeLatestCrawlRun, pollWebsiteDetail } from "./websiteDetailPolling";
 
   export let data;
@@ -32,10 +32,12 @@
   const eneo = getEneo();
   const tabs = writable<string>();
   let startDialogOpen = false;
-  let selectedRun: CrawlRun | null = null;
-  let initialKind: CrawlResourceFailure["kind"] | null = null;
-  let detailsOpen = false;
-  $: latestCompletedRun = crawlRuns.find((run) => !isActiveCrawlRun(run));
+  let selectedProblemRunId: string | null = null;
+  let problemHeading: HTMLHeadingElement | undefined;
+  $: completedRuns = crawlRuns.filter((run) => !isActiveCrawlRun(run));
+  $: latestCompletedRun = completedRuns[0];
+  $: problemRun =
+    completedRuns.find((run) => run.id === selectedProblemRunId) ?? latestCompletedRun;
   $: onrerun =
     !data.readonly && !activeRun
       ? () => {
@@ -43,10 +45,15 @@
         }
       : undefined;
 
-  function showContentFailures(kind: CrawlResourceFailure["kind"] | null) {
-    selectedRun = latestCompletedRun ?? null;
-    initialKind = kind;
-    detailsOpen = true;
+  async function showProblems(run: CrawlRun) {
+    selectedProblemRunId = run.id === latestCompletedRun?.id ? null : run.id;
+    tabs.set("problems");
+    const url = new URL(page.url);
+    url.searchParams.set("tab", "problems");
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- same page, changing only its tab
+    replaceState(url, { ...page.state, tab: "problems" });
+    await tick();
+    problemHeading?.focus();
   }
 
   let serverCrawlRuns = data.crawlRuns;
@@ -235,15 +242,51 @@
     </div>
     <Page.Tab id="problems">
       {#if $tabs === "problems"}
-        <div class="max-w-5xl py-5 pr-4">
-          {#if latestCompletedRun}
-            <h2 class="mb-1 text-base font-semibold">{m.website_source_latest_completed()}</h2>
+        <div class="w-full py-5 pr-4">
+          {#if problemRun}
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <h2 bind:this={problemHeading} tabindex="-1" class="text-base font-semibold">
+                {problemRun.id === latestCompletedRun?.id
+                  ? m.website_source_latest_completed()
+                  : m.website_source_previous_crawl()}
+              </h2>
+              {#if completedRuns.length > 1}
+                <div class="flex flex-wrap items-center gap-2 text-sm">
+                  <label for="problem-crawl">{m.website_source_choose_crawl()}</label>
+                  <select
+                    id="problem-crawl"
+                    class="border-default bg-primary rounded-md border px-2 py-1.5"
+                    value={problemRun.id}
+                    onchange={(event) => {
+                      selectedProblemRunId =
+                        event.currentTarget.value === latestCompletedRun?.id
+                          ? null
+                          : event.currentTarget.value;
+                    }}
+                  >
+                    {#each completedRuns as run (run.id)}
+                      <option value={run.id}>{formatDateTime(run.created_at)}</option>
+                    {/each}
+                  </select>
+                </div>
+              {/if}
+            </div>
             <p class="text-secondary mb-5 text-sm">
               {m.website_source_problems_description({
-                date: formatDateTime(latestCompletedRun.created_at)
+                date: formatDateTime(problemRun.created_at)
               })}
             </p>
-            <CrawlRunDetailsContent run={latestCompletedRun} open grouped />
+            {#key problemRun.id}
+              <CrawlRunDetailsContent run={problemRun} open grouped />
+            {/key}
+            {#if onrerun}
+              <div class="border-default mt-4 border-t pt-3">
+                <p class="text-secondary mb-2 text-xs">{m.crawl_retry_whole_website_help()}</p>
+                <Button variant="outline" onclick={onrerun}>
+                  {m.crawl_retry_whole_website()}
+                </Button>
+              </div>
+            {/if}
           {:else}
             <p class="text-secondary py-6 text-sm">{m.website_source_no_completed()}</p>
           {/if}
@@ -254,7 +297,7 @@
       {#if data.environment.integrationRequestFormUrl}
         <CrawlLimitations></CrawlLimitations>
       {/if}
-      <CrawlRunsTable runs={crawlRuns} {onrerun} />
+      <CrawlRunActivity runs={crawlRuns} onshowProblems={showProblems} />
       {#if nextCrawlRunCursor !== null}
         <div class="mt-4 flex justify-center">
           <Button
@@ -306,7 +349,9 @@
               </p>
             </div>
           </div>
-          <CrawlFailureActions run={latestCompletedRun} onselect={showContentFailures} />
+          <Button variant="outline" size="sm" onclick={() => showProblems(latestCompletedRun)}>
+            {m.website_source_see_problems()}
+          </Button>
         </div>
       {/if}
       {#if $tabs === "blobs"}
@@ -315,7 +360,3 @@
     </Page.Tab>
   </Page.Main>
 </Page.Root>
-
-{#if selectedRun}
-  <CrawlRunDetails run={selectedRun} bind:open={detailsOpen} {initialKind} {onrerun} />
-{/if}

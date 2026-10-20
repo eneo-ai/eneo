@@ -1612,5 +1612,10 @@
   "integration_activity_reconcile_warning": "<label>Avstämningsvarning:</label> {warning}",
   "integration_progress_step_done_named": "<hidden>Klart:</hidden> {step}",
   "integration_source_collapse_folder": "Fäll ihop {name}",
-  "integration_source_expand_folder": "Fäll ut {name}"
+  "integration_source_expand_folder": "Fäll ut {name}",
+  "duration": "Varaktighet",
+  "pages_succeeded": "{count} sidor lyckades",
+  "files_succeeded": "{count} filer lyckades",
+  "pages_and_files_succeeded": "{pages} sidor och {files} filer lyckades",
+  "pages_unchanged_count": "{count} sidor oförändrade"
 }
