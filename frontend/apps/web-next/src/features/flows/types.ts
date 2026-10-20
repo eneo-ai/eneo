@@ -39,6 +39,9 @@ export type FlowRunStepPublic = Schema<"FlowRunStepPublic">;
 export type FlowRunReviewCheckpointPublic = Schema<"FlowRunReviewCheckpointPublic">;
 export type FlowRunPublic = Schema<"FlowRunPublic">;
 export type FlowRunReviewCheckpointResumeResponse = Schema<"FlowRunReviewCheckpointResumeResponse">;
+export type FlowRevisionChangesPublic = Schema<"FlowRevisionChangesPublic">;
+export type FlowRevisionSummaryPublic = Schema<"FlowRevisionSummaryPublic">;
+export type FlowRevisionPublic = Schema<"FlowRevisionPublic">;
 
 const NO_FIELDS: FormField[] = [];
 const NO_STEPS: FlowStep[] = [];

@@ -286,10 +286,87 @@ function TranscribeFields({
 }
 
 /**
- * One step of a flow, always expanded, every parameter visible and none
- * editable: the chat is where a flow changes. Templates show their
- * `{{…}}` references as badges naming the step or input they read.
+ * A step's parameters, every one visible and none editable: the chat is
+ * where a flow changes. Templates show their `{{…}}` references as badges
+ * naming the step or input they read.
  */
+export function FlowStepDetails({
+  step,
+  definition,
+  names = NO_NAMES
+}: {
+  step: FlowStep;
+  definition: FlowDefinition;
+  names?: FlowNames;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="flex flex-col gap-3">
+      {step.description && (
+        <p className="text-ax-text-secondary m-0 text-[13px]">{step.description}</p>
+      )}
+      <dl className="m-0 flex flex-col gap-2.5">
+        {step.kind === "llm" && <LlmFields step={step} definition={definition} names={names} />}
+        {step.kind === "compose" && (
+          <Field label={t("flow_param_template")}>
+            <MonoBlock>
+              <TemplateText template={step.template} definition={definition} />
+            </MonoBlock>
+          </Field>
+        )}
+        {step.kind === "document" && (
+          <DocumentFields step={step} definition={definition} names={names} />
+        )}
+        {step.kind === "review" && <ReviewFields step={step} definition={definition} />}
+        {step.kind === "transcribe" && (
+          <TranscribeFields step={step} definition={definition} names={names} />
+        )}
+      </dl>
+    </div>
+  );
+}
+
+/**
+ * One line that says what a step does with, for the collapsed step list:
+ * the model and output kind, the review mode, the document format and
+ * template, or the transcription model.
+ */
+export function stepSummary(
+  step: FlowStep,
+  names: FlowNames,
+  t: ReturnType<typeof useTranslations>
+): string {
+  switch (step.kind) {
+    case "llm": {
+      const model = step.model_id
+        ? (names.modelName?.(step.model_id) ?? shortId(step.model_id))
+        : t("flow_param_model_default");
+      const output =
+        step.output?.type === "json" ? t("flow_step_summary_json") : t("flow_step_summary_text");
+      return `${model} · ${output}`;
+    }
+    case "compose":
+      return t("flow_param_template");
+    case "document": {
+      const format = (step.format ?? "docx").toUpperCase();
+      const template = step.template_file_id
+        ? (names.fileName?.(step.template_file_id) ?? shortId(step.template_file_id))
+        : null;
+      return template ? `${format} · ${template}` : format;
+    }
+    case "review":
+      return step.mode === "view"
+        ? t("flow_step_summary_review_view")
+        : t("flow_step_summary_review_edit");
+    case "transcribe":
+      return step.transcription_model_id
+        ? (names.transcriptionModelName?.(step.transcription_model_id) ??
+            shortId(step.transcription_model_id))
+        : t("flow_param_model_default");
+  }
+}
+
+/** A step with its header, every parameter expanded (the dialog's body uses the details alone). */
 export function FlowStepCard({
   step,
   index,
@@ -318,26 +395,7 @@ export function FlowStepCard({
         <h4 className="min-w-0 flex-1 truncate text-sm font-semibold">{step.name}</h4>
         <Badge variant="neutral" label={kind} />
       </header>
-      {step.description && (
-        <p className="text-ax-text-secondary m-0 text-[13px]">{step.description}</p>
-      )}
-      <dl className="m-0 flex flex-col gap-2.5">
-        {step.kind === "llm" && <LlmFields step={step} definition={definition} names={names} />}
-        {step.kind === "compose" && (
-          <Field label={t("flow_param_template")}>
-            <MonoBlock>
-              <TemplateText template={step.template} definition={definition} />
-            </MonoBlock>
-          </Field>
-        )}
-        {step.kind === "document" && (
-          <DocumentFields step={step} definition={definition} names={names} />
-        )}
-        {step.kind === "review" && <ReviewFields step={step} definition={definition} />}
-        {step.kind === "transcribe" && (
-          <TranscribeFields step={step} definition={definition} names={names} />
-        )}
-      </dl>
+      <FlowStepDetails step={step} definition={definition} names={names} />
     </article>
   );
 }

@@ -18,9 +18,11 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FLOW_REVIEW_CHECKPOINT_ACTIVE_STATES,
+    FlowRevisions,
     FlowRunFiles,
     FlowRunReviewCheckpoints,
     FlowRuns,
@@ -29,6 +31,7 @@ from eneo.database.tables.flow_tables import (
     FlowStepResults,
     FlowVersions,
 )
+from eneo.database.tables.sessions_table import Sessions
 from eneo.flows.flow_models import (
     FlowRunStatus,
     ReviewCheckpointState,
@@ -49,6 +52,15 @@ def _rowcount(result: object) -> int:
 
 def _clip(text: Optional[str]) -> Optional[str]:
     return text[:ERROR_MESSAGE_MAX] if text else None
+
+
+@dataclass(frozen=True)
+class SessionBinding:
+    """Who owns a chat session and which assistant it talks to."""
+
+    user_id: Optional[UUID]
+    api_key_id: Optional[UUID]
+    assistant_id: Optional[UUID]
 
 
 @dataclass(frozen=True)
@@ -117,6 +129,22 @@ class FlowRepository:
             stmt = stmt.where(Flows.deleted_at.is_(None))
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def get_flow_by_conversation(
+        self, conversation_id: UUID, tenant_id: UUID
+    ) -> Optional[Flows]:
+        """The flow a chat builds, if it has one (a chat builds at most one)."""
+        stmt = (
+            sa.select(Flows)
+            .where(
+                Flows.conversation_id == conversation_id,
+                Flows.tenant_id == tenant_id,
+                Flows.deleted_at.is_(None),
+            )
+            .order_by(Flows.created_at)
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
     async def list_flows(self, space_id: UUID, tenant_id: UUID) -> list[FlowListRow]:
         last_run_id = (
             sa.select(FlowRuns.id)
@@ -178,6 +206,36 @@ class FlowRepository:
             .values(conversation_id=conversation_id)
         )
 
+    async def bind_conversation(self, flow_id: UUID, conversation_id: UUID) -> bool:
+        """Set the chat of a flow that has none yet; False when one is set."""
+        result = await self.session.execute(
+            sa.update(Flows)
+            .where(Flows.id == flow_id, Flows.conversation_id.is_(None))
+            .values(conversation_id=conversation_id)
+        )
+        return _rowcount(result) == 1
+
+    async def get_session_binding(self, session_id: UUID) -> Optional[SessionBinding]:
+        stmt = sa.select(
+            Sessions.user_id, Sessions.api_key_id, Sessions.assistant_id
+        ).where(Sessions.id == session_id)
+        row = (await self.session.execute(stmt)).one_or_none()
+        if row is None:
+            return None
+        user_id, api_key_id, assistant_id = row
+        return SessionBinding(
+            user_id=user_id, api_key_id=api_key_id, assistant_id=assistant_id
+        )
+
+    async def is_authoring_assistant(self, assistant_id: UUID, space_id: UUID) -> bool:
+        """Whether the assistant is the flows authoring assistant of the space."""
+        stmt = sa.select(Assistants.id).where(
+            Assistants.id == assistant_id,
+            Assistants.space_id == space_id,
+            Assistants.purpose == "flows",
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none() is not None
+
     # --- Versions ---
 
     async def add_version(
@@ -187,6 +245,7 @@ class FlowRepository:
         version: int,
         definition: dict[str, Any],
         published_by_user_id: Optional[UUID],
+        revision: Optional[int] = None,
     ) -> FlowVersions:
         row = (
             await self.session.execute(
@@ -196,6 +255,7 @@ class FlowRepository:
                     version=version,
                     definition=definition,
                     published_by_user_id=published_by_user_id,
+                    revision=revision,
                 )
                 .returning(FlowVersions)
             )
@@ -212,6 +272,86 @@ class FlowRepository:
             FlowVersions.flow_id == flow_id, FlowVersions.version == version
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def versions_by_revision(self, flow_id: UUID) -> dict[int, int]:
+        """revision -> the (latest) version published from it."""
+        stmt = (
+            sa.select(FlowVersions.revision, FlowVersions.version)
+            .where(FlowVersions.flow_id == flow_id, FlowVersions.revision.is_not(None))
+            .order_by(FlowVersions.version)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {int(revision): int(version) for revision, version in rows}
+
+    # --- Revisions ---
+
+    async def add_revision(
+        self,
+        *,
+        flow_id: UUID,
+        revision: int,
+        name: str,
+        description: Optional[str],
+        definition: dict[str, Any],
+        principal_type: str,
+        principal_user_id: Optional[UUID],
+        principal_service_id: Optional[UUID] = None,
+        channel: str,
+        note: Optional[str] = None,
+    ) -> FlowRevisions:
+        stmt = (
+            sa.insert(FlowRevisions)
+            .values(
+                flow_id=flow_id,
+                revision=revision,
+                name=name,
+                description=description,
+                definition=definition,
+                principal_type=principal_type,
+                principal_user_id=principal_user_id,
+                principal_service_id=principal_service_id,
+                channel=channel,
+                note=note,
+            )
+            .returning(FlowRevisions)
+        )
+        return (await self.session.execute(stmt)).scalar_one()
+
+    async def latest_revision_number(self, flow_id: UUID) -> int:
+        """The current revision; 0 for a flow with no history rows."""
+        stmt = sa.select(sa.func.max(FlowRevisions.revision)).where(
+            FlowRevisions.flow_id == flow_id
+        )
+        latest = (await self.session.execute(stmt)).scalar_one_or_none()
+        return int(latest) if latest is not None else 0
+
+    async def get_revision(
+        self, flow_id: UUID, revision: int
+    ) -> Optional[FlowRevisions]:
+        stmt = sa.select(FlowRevisions).where(
+            FlowRevisions.flow_id == flow_id, FlowRevisions.revision == revision
+        )
+        return (await self.session.execute(stmt)).scalar_one_or_none()
+
+    async def list_revisions(
+        self, flow_id: UUID, *, limit: int, offset: int
+    ) -> tuple[list[FlowRevisions], int]:
+        """Newest first."""
+        where = FlowRevisions.flow_id == flow_id
+        total = (
+            await self.session.execute(
+                sa.select(sa.func.count()).select_from(FlowRevisions).where(where)
+            )
+        ).scalar_one()
+        stmt = (
+            sa.select(FlowRevisions)
+            .where(where)
+            .order_by(FlowRevisions.revision.desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        rows = list((await self.session.execute(stmt)).scalars().all())
+        return rows, int(total)
 
     # --- Runs ---
 

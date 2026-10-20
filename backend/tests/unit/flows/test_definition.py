@@ -132,8 +132,8 @@ def test_select_field_needs_options():
     assert errors == ["select field 'mode' needs options"]
 
 
-def test_empty_flow_and_duplicate_keys():
-    assert _errors(FlowDefinition()) == ["a flow needs at least one step"]
+def test_empty_draft_is_valid_and_duplicate_keys_are_not():
+    validate_definition(FlowDefinition())
     errors = _errors(FlowDefinition(steps=[_llm("a"), _llm("a")]))
     assert "step key 'a' is used more than once" in errors
 

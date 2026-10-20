@@ -1,6 +1,13 @@
 import { hasFlowRef, mergeFlowRefs, type FlowRef } from "./flow-tool-calls";
 
-export type FlowPanelTab = "definition" | "runs";
+export type FlowPanelTab = "definition" | "runs" | "history";
+
+const TABS: readonly FlowPanelTab[] = ["definition", "runs", "history"];
+
+/** Whether a value (from a tab list or the address) names a panel tab. */
+export function isFlowPanelTab(value: unknown): value is FlowPanelTab {
+  return typeof value === "string" && (TABS as readonly string[]).includes(value);
+}
 
 /** The id the side panel knows the flow panel by (its `native` occupant). */
 export const FLOW_PANEL_ID = "flow";

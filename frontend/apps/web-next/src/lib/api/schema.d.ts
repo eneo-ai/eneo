@@ -154,7 +154,11 @@ export interface paths {
     /** List Flows */
     get: operations["list_flows_api_v1_flows__get"];
     put?: never;
-    post?: never;
+    /**
+     * Create Flow
+     * @description Start a flow as an empty draft; its chat fills it in afterwards.
+     */
+    post: operations["create_flow_api_v1_flows__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -196,6 +200,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/{id}/conversation/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Bind Conversation
+     * @description Bind the flow to the chat that authors it (409 when bound elsewhere).
+     */
+    post: operations["bind_conversation_api_v1_flows__id__conversation__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/run-contract/": {
     parameters: {
       query?: never;
@@ -207,6 +231,63 @@ export interface paths {
     get: operations["get_run_contract_api_v1_flows__id__run_contract__get"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/revisions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Revisions
+     * @description The flow's history, newest first: every save, with what it changed.
+     */
+    get: operations["list_revisions_api_v1_flows__id__revisions__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/revisions/{revision}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Revision */
+    get: operations["get_revision_api_v1_flows__id__revisions__revision___get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/revisions/{revision}/restore/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restore Revision
+     * @description Make the revision the draft again; the restore is a new revision.
+     */
+    post: operations["restore_revision_api_v1_flows__id__revisions__revision__restore__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -14716,7 +14797,8 @@ export interface components {
       | 9062
       | 9063
       | 9064
-      | 9069;
+      | 9069
+      | 9070;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -15062,6 +15144,30 @@ export interface components {
       space_id: string;
     };
     /**
+     * FlowConversationBindRequest
+     * @description Bind the flow to the chat (a flows chat of its space) that authors it.
+     */
+    FlowConversationBindRequest: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+    };
+    /**
+     * FlowCreateRequest
+     * @description Start a flow: an empty draft in a space, authored in its chat afterwards.
+     */
+    FlowCreateRequest: {
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Name */
+      name?: string | null;
+    };
+    /**
      * FlowDefinition
      * @description The whole definition. ``schema_version`` lets later shapes migrate.
      */
@@ -15115,6 +15221,11 @@ export interface components {
        * @default false
        */
       has_unpublished_changes?: boolean;
+      /**
+       * Revision
+       * @default 1
+       */
+      revision?: number;
       /** Conversation Id */
       conversation_id?: string | null;
       /**
@@ -15127,6 +15238,98 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /**
+     * FlowRevisionChangesPublic
+     * @description What a revision changed against the one before it.
+     */
+    FlowRevisionChangesPublic: {
+      /**
+       * Is Initial
+       * @default false
+       */
+      is_initial?: boolean;
+      /**
+       * Name Changed
+       * @default false
+       */
+      name_changed?: boolean;
+      /**
+       * Description Changed
+       * @default false
+       */
+      description_changed?: boolean;
+      /**
+       * Form Fields Changed
+       * @default false
+       */
+      form_fields_changed?: boolean;
+      /** Steps Added */
+      steps_added?: string[];
+      /** Steps Removed */
+      steps_removed?: string[];
+      /** Steps Changed */
+      steps_changed?: string[];
+    };
+    /** FlowRevisionPublic */
+    FlowRevisionPublic: {
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /** Revision */
+      revision: number;
+      /** Name */
+      name: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      principal_type: components["schemas"]["PrincipalType"];
+      /** Created By User Id */
+      created_by_user_id?: string | null;
+      /** Channel */
+      channel: string;
+      /** Note */
+      note?: string | null;
+      /** Published Version */
+      published_version?: number | null;
+      changes: components["schemas"]["FlowRevisionChangesPublic"];
+      /** Description */
+      description?: string | null;
+      definition: components["schemas"]["FlowDefinition"];
+    };
+    /**
+     * FlowRevisionSummaryPublic
+     * @description A row in a flow's history: every save, newest first.
+     */
+    FlowRevisionSummaryPublic: {
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /** Revision */
+      revision: number;
+      /** Name */
+      name: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      principal_type: components["schemas"]["PrincipalType"];
+      /** Created By User Id */
+      created_by_user_id?: string | null;
+      /** Channel */
+      channel: string;
+      /** Note */
+      note?: string | null;
+      /** Published Version */
+      published_version?: number | null;
+      changes: components["schemas"]["FlowRevisionChangesPublic"];
     };
     /** FlowRunContractPublic */
     FlowRunContractPublic: {
@@ -18901,6 +19104,19 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[FlowRevisionSummaryPublic] */
+    PaginatedResponse_FlowRevisionSummaryPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["FlowRevisionSummaryPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[FlowRunSummaryPublic] */
     PaginatedResponse_FlowRunSummaryPublic_: {
       /**
@@ -20544,6 +20760,8 @@ export interface components {
       assistants?: components["schemas"]["ResourcePermissionLevel"];
       /** @default none */
       apps?: components["schemas"]["ResourcePermissionLevel"];
+      /** @default none */
+      flows?: components["schemas"]["ResourcePermissionLevel"];
       /** @default none */
       spaces?: components["schemas"]["ResourcePermissionLevel"];
       /** @default none */
@@ -26309,6 +26527,66 @@ export interface operations {
       };
     };
   };
+  create_flow_api_v1_flows__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowCreateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_authoring_assistant_api_v1_flows_authoring_assistant__get: {
     parameters: {
       query: {
@@ -26463,6 +26741,77 @@ export interface operations {
       };
     };
   };
+  bind_conversation_api_v1_flows__id__conversation__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowConversationBindRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_run_contract_api_v1_flows__id__run_contract__get: {
     parameters: {
       query?: never;
@@ -26481,6 +26830,167 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FlowRunContractPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_revisions_api_v1_flows__id__revisions__get: {
+    parameters: {
+      query?: {
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_FlowRevisionSummaryPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_revision_api_v1_flows__id__revisions__revision___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        revision: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRevisionPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  restore_revision_api_v1_flows__id__revisions__revision__restore__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        revision: number;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
         };
       };
       /** @description Bad Request */

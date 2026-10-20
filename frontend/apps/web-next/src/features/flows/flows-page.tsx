@@ -5,7 +5,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Trash2, Workflow } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -25,9 +25,11 @@ import { toast } from "@/lib/toast";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
+import { createFlow } from "./flow-create";
 import { Chip } from "./flow-fields";
 import { runStatusLabel, runStatusTone, stepKindLabel } from "./flow-labels";
 import { FlowRunDialog } from "./flow-run-dialog";
+import { NewFlowDialog } from "./new-flow-dialog";
 import { deleteFlow, flowQueryOptions, flowsListQueryOptions } from "./flows";
 import type { FlowSparsePublic } from "./types";
 
@@ -81,6 +83,7 @@ export function FlowsPage() {
   const t = useTranslations();
   const { space, routeId, can } = useSpace();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [deleteTarget, setDeleteTarget] = useState<FlowSparsePublic | null>(null);
   const [runTarget, setRunTarget] = useState<string | null>(null);
@@ -198,12 +201,23 @@ export function FlowsPage() {
     }
   ];
 
+  // "Nytt flöde" creates the draft first and opens its chat: the assistant
+  // then only edits this flow, it never creates one.
+  const [newFlowOpen, setNewFlowOpen] = useState(false);
+  const create = useMutation({
+    mutationFn: (name: string) => createFlow(space.id, name),
+    onSuccess: (flow) => {
+      void queryClient.invalidateQueries({ queryKey: flowsListQueryOptions(space.id).queryKey });
+      router.push(`${base}/${flow.id}`);
+    },
+    onError: (error) => toast.error(getErrorMessage(error, t))
+  });
   const createButton = can("create", "flow") ? (
     <Button
       label={t("flow_new")}
       variant="primary"
-      href={`${base}/new`}
       icon={<Plus aria-hidden="true" />}
+      onClick={() => setNewFlowOpen(true)}
     />
   ) : undefined;
 
@@ -229,17 +243,17 @@ export function FlowsPage() {
             />
           ) : (
             <SpaceTableFrame>
-              <Table
-                data={page.items}
-                columns={columns}
-                idKey="id"
-                verticalAlign="top"
-                aria-label={t("flows")}
-              />
+              <Table data={page.items} columns={columns} idKey="id" aria-label={t("flows")} />
             </SpaceTableFrame>
           )
         }
       </QueryStateBoundary>
+      <NewFlowDialog
+        open={newFlowOpen}
+        pending={create.isPending}
+        onCancel={() => setNewFlowOpen(false)}
+        onCreate={(name) => create.mutate(name)}
+      />
       <ConfirmDialogControlled
         open={deleteTarget !== null}
         onOpenChange={(open) => {

@@ -306,7 +306,8 @@ def validate_definition(definition: FlowDefinition) -> None:
 
     Space-dependent checks (does the model exist, may the space use this
     collection) live in the service; this is the shape-only pass the MCP
-    tools and the REST layer share.
+    tools and the REST layer share. A definition without steps is a valid
+    draft (a flow starts empty); publishing is what needs steps.
     """
     errors: list[str] = []
     form_keys: list[str] = [field.key for field in definition.form_fields]
@@ -318,8 +319,6 @@ def validate_definition(definition: FlowDefinition) -> None:
         if field.type == FormFieldType.SELECT and not field.options:
             errors.append(f"select field '{field.key}' needs options")
 
-    if not definition.steps:
-        errors.append("a flow needs at least one step")
     step_keys = [step.key for step in definition.steps]
     for key in sorted({key for key in step_keys if step_keys.count(key) > 1}):
         errors.append(f"step key '{key}' is used more than once")
@@ -385,19 +384,26 @@ def validate_definition(definition: FlowDefinition) -> None:
 
 
 def assign_step_ids(
-    definition: FlowDefinition, previous: FlowDefinition | None = None
+    definition: FlowDefinition,
+    previous: FlowDefinition | None = None,
+    *,
+    keep_unknown_ids: bool = False,
 ) -> FlowDefinition:
     """Give every step a stable id.
 
     A step keeps the id it had in ``previous`` when its key matches, so a
     run's step results and review checkpoints keep pointing at the same step
     across edits. New keys get fresh ids; ids the model sent for unknown keys
-    are replaced, since only Eneo assigns them.
+    are replaced, since only Eneo assigns them. ``keep_unknown_ids`` trusts
+    the ids in ``definition`` for keys ``previous`` lacks: a restored
+    revision's ids were assigned by Eneo once already.
     """
     previous_ids = {step.key: step.id for step in (previous.steps if previous else [])}
     steps: list[Any] = []
     for step in definition.steps:
         kept = previous_ids.get(step.key)
+        if kept is None and keep_unknown_ids:
+            kept = step.id
         steps.append(step.model_copy(update={"id": kept or uuid4()}))
     return definition.model_copy(update={"steps": steps})
 

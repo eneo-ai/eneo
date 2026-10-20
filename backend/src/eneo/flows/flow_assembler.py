@@ -7,6 +7,7 @@ from typing import Any, Optional, cast
 from uuid import UUID
 
 from eneo.database.tables.flow_tables import (
+    FlowRevisions,
     FlowRunReviewCheckpoints,
     FlowRuns,
     Flows,
@@ -15,6 +16,9 @@ from eneo.database.tables.flow_tables import (
 from eneo.flows.definition import FlowDefinition, Step, StepKind
 from eneo.flows.flow_models import (
     FlowPublic,
+    FlowRevisionChangesPublic,
+    FlowRevisionPublic,
+    FlowRevisionSummaryPublic,
     FlowRunErrorPublic,
     FlowRunFilePublic,
     FlowRunPublic,
@@ -42,7 +46,9 @@ def definition_from_json(data: dict[str, Any]) -> FlowDefinition:
     return FlowDefinition.model_validate(data)
 
 
-def flow_public(flow: Flows, *, has_unpublished_changes: bool) -> FlowPublic:
+def flow_public(
+    flow: Flows, *, has_unpublished_changes: bool, revision: int = 1
+) -> FlowPublic:
     return FlowPublic(
         id=flow.id,
         space_id=flow.space_id,
@@ -51,9 +57,119 @@ def flow_public(flow: Flows, *, has_unpublished_changes: bool) -> FlowPublic:
         definition=definition_from_json(flow.definition),
         published_version=flow.published_version,
         has_unpublished_changes=has_unpublished_changes,
+        revision=revision,
         conversation_id=flow.conversation_id,
         created_at=flow.created_at,
         updated_at=flow.updated_at,
+    )
+
+
+# --- Revisions ---
+
+
+def _steps_of(definition: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = definition.get("steps")
+    return cast(list[dict[str, Any]], raw) if isinstance(raw, list) else []
+
+
+def _step_body(step: dict[str, Any]) -> dict[str, Any]:
+    """A step without its server-assigned id, which never counts as a change."""
+    return {key: value for key, value in step.items() if key != "id"}
+
+
+def _step_name(step: dict[str, Any]) -> str:
+    name = step.get("name")
+    return str(name) if name else str(step.get("key") or "")
+
+
+def revision_changes(
+    name: str,
+    description: Optional[str],
+    definition: dict[str, Any],
+    previous: Optional[tuple[str, Optional[str], dict[str, Any]]],
+) -> FlowRevisionChangesPublic:
+    """What a revision changed against the one before it (pure).
+
+    Steps match by key: a key only in this revision was added, a key only in
+    the previous one removed, a key in both with any other field different
+    changed. Names are the step names of the revision they appear in.
+    """
+    if previous is None:
+        return FlowRevisionChangesPublic(is_initial=True)
+    previous_name, previous_description, previous_definition = previous
+    steps = _steps_of(definition)
+    previous_steps = _steps_of(previous_definition)
+    current_by_key = {str(step.get("key")): step for step in steps}
+    previous_by_key = {str(step.get("key")): step for step in previous_steps}
+    return FlowRevisionChangesPublic(
+        name_changed=name != previous_name,
+        description_changed=(description or None) != (previous_description or None),
+        form_fields_changed=(definition.get("form_fields") or [])
+        != (previous_definition.get("form_fields") or []),
+        steps_added=[
+            _step_name(step)
+            for key, step in current_by_key.items()
+            if key not in previous_by_key
+        ],
+        steps_removed=[
+            _step_name(step)
+            for key, step in previous_by_key.items()
+            if key not in current_by_key
+        ],
+        steps_changed=[
+            _step_name(step)
+            for key, step in current_by_key.items()
+            if key in previous_by_key
+            and _step_body(step) != _step_body(previous_by_key[key])
+        ],
+    )
+
+
+def _revision_fields(
+    row: FlowRevisions,
+    previous: Optional[FlowRevisions],
+    published_version: Optional[int],
+) -> dict[str, Any]:
+    return {
+        "flow_id": row.flow_id,
+        "revision": row.revision,
+        "name": row.name,
+        "created_at": row.created_at,
+        "principal_type": PrincipalType(row.principal_type),
+        "created_by_user_id": row.principal_user_id,
+        "channel": row.channel,
+        "note": row.note,
+        "published_version": published_version,
+        "changes": revision_changes(
+            row.name,
+            row.description,
+            row.definition,
+            (previous.name, previous.description, previous.definition)
+            if previous is not None
+            else None,
+        ),
+    }
+
+
+def flow_revision_summary_public(
+    row: FlowRevisions,
+    previous: Optional[FlowRevisions],
+    published_version: Optional[int],
+) -> FlowRevisionSummaryPublic:
+    return FlowRevisionSummaryPublic(
+        **_revision_fields(row, previous, published_version)
+    )
+
+
+def flow_revision_public(
+    row: FlowRevisions,
+    previous: Optional[FlowRevisions],
+    published_version: Optional[int],
+) -> FlowRevisionPublic:
+    return FlowRevisionPublic(
+        **_revision_fields(row, previous, published_version),
+        description=row.description,
+        definition=definition_from_json(row.definition),
     )
 
 

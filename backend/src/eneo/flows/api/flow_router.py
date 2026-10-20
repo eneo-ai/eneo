@@ -13,6 +13,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query, Response
 
+from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -21,7 +22,11 @@ from eneo.authentication.endpoint_access import (
 from eneo.flows.api.dependencies import require_flows_enabled
 from eneo.flows.flow_models import (
     FlowAuthoringAssistantPublic,
+    FlowConversationBindRequest,
+    FlowCreateRequest,
     FlowPublic,
+    FlowRevisionPublic,
+    FlowRevisionSummaryPublic,
     FlowRunContractPublic,
     FlowRunCreateRequest,
     FlowRunPublic,
@@ -52,6 +57,7 @@ _REVIEW_REASON = (
     "FlowRunService enforces flow read permission and checkpoint revision CAS."
 )
 MAX_RUN_PAGE = 100
+MAX_REVISION_PAGE = 100
 
 
 # --- Flows ---
@@ -72,6 +78,28 @@ async def list_flows(
 ) -> PaginatedResponse[FlowSparsePublic]:
     flows = await container.flow_service().list_flows(space_id)
     return PaginatedResponse(items=flows)
+
+
+@router.post(
+    "/",
+    response_model=FlowPublic,
+    status_code=201,
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="FlowService enforces flow create permission in the space.",
+)
+async def create_flow(
+    request: FlowCreateRequest,
+    container: _Container,
+    _user_for_creation: None = Depends(require_user_for_creation),
+) -> FlowPublic:
+    """Start a flow as an empty draft; its chat fills it in afterwards."""
+    return await container.flow_service().create_draft(
+        space_id=request.space_id, name=request.name
+    )
 
 
 @router.get(
@@ -119,6 +147,26 @@ async def delete_flow(id: UUID, container: _Container) -> Response:
     return Response(status_code=204)
 
 
+@router.post(
+    "/{id}/conversation/",
+    response_model=FlowPublic,
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=(
+        "FlowService enforces flow edit permission and that the session is the "
+        "caller's own flows chat."
+    ),
+)
+async def bind_conversation(
+    id: UUID, request: FlowConversationBindRequest, container: _Container
+) -> FlowPublic:
+    """Bind the flow to the chat that authors it (409 when bound elsewhere)."""
+    return await container.flow_service().bind_conversation(id, request.session_id)
+
+
 @router.get(
     "/{id}/run-contract/",
     response_model=FlowRunContractPublic,
@@ -131,6 +179,65 @@ async def delete_flow(id: UUID, container: _Container) -> Response:
 )
 async def get_run_contract(id: UUID, container: _Container) -> FlowRunContractPublic:
     return await container.flow_service().get_run_contract(id)
+
+
+# --- Revisions ---
+
+
+@router.get(
+    "/{id}/revisions/",
+    response_model=PaginatedResponse[FlowRevisionSummaryPublic],
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_READ_REASON,
+)
+async def list_revisions(
+    id: UUID,
+    container: _Container,
+    limit: Annotated[int, Query(ge=1, le=MAX_REVISION_PAGE)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> PaginatedResponse[FlowRevisionSummaryPublic]:
+    """The flow's history, newest first: every save, with what it changed."""
+    revisions, _total = await container.flow_service().list_revisions(
+        id, limit=limit, offset=offset
+    )
+    return PaginatedResponse(items=revisions)
+
+
+@router.get(
+    "/{id}/revisions/{revision}/",
+    response_model=FlowRevisionPublic,
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_READ_REASON,
+)
+async def get_revision(
+    id: UUID, revision: int, container: _Container
+) -> FlowRevisionPublic:
+    return await container.flow_service().get_revision(id, revision)
+
+
+@router.post(
+    "/{id}/revisions/{revision}/restore/",
+    response_model=FlowPublic,
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="FlowService enforces flow edit permission in the space.",
+)
+async def restore_revision(
+    id: UUID, revision: int, container: _Container
+) -> FlowPublic:
+    """Make the revision the draft again; the restore is a new revision."""
+    return await container.flow_service().restore_revision(id, revision)
 
 
 # --- Runs ---

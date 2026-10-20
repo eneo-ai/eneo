@@ -55,6 +55,7 @@ FLOW_REVIEW_CHECKPOINT_STATES = (
 FLOW_REVIEW_CHECKPOINT_ACTIVE_STATES = ("awaiting_review", "edited", "approved")
 FLOW_PRINCIPAL_TYPES = ("user", "service")
 FLOW_FILE_ROLES = ("template", "runtime_upload")
+FLOW_REVISION_CHANNELS = ("mcp", "api")
 FLOW_RUN_FILE_ROLES = ("input", "output")
 
 
@@ -84,6 +85,9 @@ class FlowVersions(BasePublic):
     version: Mapped[int] = mapped_column()
     # Immutable snapshot a run executes; the draft is never read by a run.
     definition: Mapped[dict[str, object]] = mapped_column(JSONB)
+    # The flow_revisions.revision this version froze; NULL for versions
+    # published before revisions were kept.
+    revision: Mapped[Optional[int]] = mapped_column()
 
     flow_id: Mapped[UUID] = mapped_column(ForeignKey(Flows.id, ondelete="CASCADE"))
     published_by_user_id: Mapped[Optional[UUID]] = mapped_column(
@@ -92,6 +96,35 @@ class FlowVersions(BasePublic):
 
     __table_args__ = (
         UniqueConstraint("flow_id", "version", name="uq_flow_versions_flow_version"),
+    )
+
+
+class FlowRevisions(BasePublic):
+    """One saved state of a flow's name, description and definition.
+
+    Written on create and on every change; never updated or deleted on its
+    own (a flow's history goes with the flow). Restoring one writes a new
+    revision rather than rewinding the numbering.
+    """
+
+    revision: Mapped[int] = mapped_column()
+    name: Mapped[str] = mapped_column()
+    description: Mapped[Optional[str]] = mapped_column()
+    definition: Mapped[dict[str, object]] = mapped_column(JSONB)
+    principal_type: Mapped[str] = mapped_column(server_default=sa_text("'user'"))
+    principal_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL")
+    )
+    principal_service_id: Mapped[Optional[UUID]] = mapped_column()
+    # 'mcp' (the flows chat) | 'api' (REST, including a restore from the panel)
+    channel: Mapped[str] = mapped_column(server_default=sa_text("'api'"))
+    # One line the author gave on what changed and why.
+    note: Mapped[Optional[str]] = mapped_column()
+
+    flow_id: Mapped[UUID] = mapped_column(ForeignKey(Flows.id, ondelete="CASCADE"))
+
+    __table_args__ = (
+        UniqueConstraint("flow_id", "revision", name="uq_flow_revisions_flow_revision"),
     )
 
 

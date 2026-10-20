@@ -81,7 +81,8 @@ export function ChatPage({
   modelSelector,
   switcherItems,
   editHref,
-  singleConversation = false
+  singleConversation = false,
+  onSessionCreated
 }: {
   partner: ChatPartner;
   /**
@@ -104,6 +105,8 @@ export function ChatPage({
    * from here.
    */
   singleConversation?: boolean;
+  /** The conversation this page started, once the first answer has named it. */
+  onSessionCreated?: (sessionId: string) => void;
 }) {
   const t = useTranslations();
   const router = useRouter();
@@ -345,6 +348,7 @@ export function ChatPage({
                 onSessionCreated={(id) => {
                   setActive((current) => (current ? { ...current, sessionId: id } : current));
                   updateUrl(id);
+                  onSessionCreated?.(id);
                 }}
                 activity={activity}
                 onActivityChange={onActivityChange}

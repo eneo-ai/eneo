@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { FlowDefinition } from "./flow-definition";
+import { FlowStepCard } from "./flow-step-card";
 import type { FlowPublic } from "./types";
 
 /** One flow with every step kind, every parameter set. */
@@ -103,10 +104,12 @@ const names = {
   fileName: (id: string) => (id === "file-1" ? "Protokollmall.docx" : null)
 };
 
+const steps = flow.definition.steps!;
+
 afterEach(cleanup);
 
 describe("FlowDefinition", () => {
-  it("shows every input and every parameter of every step kind, read-only", async () => {
+  it("shows the status, every input and one row per step, and opens a step in a dialog", async () => {
     const { container } = renderInApp(<FlowDefinition flow={flow} names={names} />);
 
     // Status and inputs.
@@ -120,60 +123,33 @@ describe("FlowDefinition", () => {
     expect(within(inputs).getByText("Namn, kommaseparerade")).toBeTruthy();
     expect(within(inputs).getByText("val · obligatorisk · Nämnd, AU")).toBeTruthy();
 
-    // Transcribe: source, model, language, speakers.
-    const transcribe = screen.getByRole("article", { name: "Steg 1: Transkribera mötet" });
-    expect(within(transcribe).getByText("Transkribering")).toBeTruthy();
-    expect(within(transcribe).getByText("Indata · Inspelning")).toBeTruthy();
-    expect(within(transcribe).getByText("KB-Whisper large")).toBeTruthy();
-    expect(within(transcribe).getByText("sv")).toBeTruthy();
-    expect(
-      within(transcribe).getByText("Identifiera talare, högst 6 · namnge från Deltagare")
-    ).toBeTruthy();
+    // One collapsed row per step: number, name, a one-line summary and the kind.
+    const rows = screen.getAllByRole("button", { name: /^Visa inställningar för steg/ });
+    expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Visa inställningar för steg 1: Transkribera mötet",
+      "Visa inställningar för steg 2: Granska transkriptet",
+      "Visa inställningar för steg 3: Sammanfatta beslut",
+      "Visa inställningar för steg 4: Inledning",
+      "Visa inställningar för steg 5: Skapa protokoll"
+    ]);
+    expect(within(rows[0]!).getByText("KB-Whisper large")).toBeTruthy();
+    expect(within(rows[1]!).getByText("Redigering och godkännande")).toBeTruthy();
+    expect(within(rows[2]!).getByText("GPT-5.2 · JSON-utdata")).toBeTruthy();
+    expect(within(rows[4]!).getByText("PDF · Protokollmall.docx")).toBeTruthy();
 
-    // Review: mode, target, time limit.
-    const review = screen.getByRole("article", { name: "Steg 2: Granska transkriptet" });
-    expect(within(review).getByText("Granskning")).toBeTruthy();
-    expect(
-      within(review).getByText("Redigera: granskaren kan ändra texten innan den godkänns")
-    ).toBeTruthy();
-    expect(within(review).getByText("Steg 1 · Transkribera mötet")).toBeTruthy();
-    expect(within(review).getByText("Högst 7 dagar, sedan avbryts körningen")).toBeTruthy();
-
-    // Llm: prompt, input template with reference badges, model and settings, knowledge, files, JSON output.
-    const llm = screen.getByRole("article", { name: "Steg 3: Sammanfatta beslut" });
-    expect(within(llm).getByText("Lista varje beslut med kort motivering.")).toBeTruthy();
-    expect(within(llm).getByText("Steg 2 · Granska transkriptet")).toBeTruthy();
-    expect(within(llm).getByText("Indata · Mötestyp")).toBeTruthy();
-    expect(within(llm).getByText("GPT-5.2")).toBeTruthy();
-    expect(within(llm).getByText("· temperature: 0")).toBeTruthy();
-    expect(within(llm).getByText("Delegationsordning")).toBeTruthy();
-    expect(within(llm).getByText("kommunen.se")).toBeTruthy();
-    expect(within(llm).getByText("Indata · Inspelning")).toBeTruthy();
-    expect(within(llm).getByText("JSON enligt schema", { exact: false })).toBeTruthy();
-    expect(within(llm).getByText("decisions, actions")).toBeTruthy();
-    expect(within(llm).getByText(/"type": "object"/)).toBeTruthy();
-
-    // Compose: the template with its references.
-    const compose = screen.getByRole("article", { name: "Steg 4: Inledning" });
-    expect(within(compose).getByText("Protokoll fört", { exact: false })).toBeTruthy();
-    expect(within(compose).getByText("Indata · Mötesdatum")).toBeTruthy();
-    expect(within(compose).getByText("Steg 3 · Sammanfatta beslut · decisions")).toBeTruthy();
-
-    // Document: template file, field bindings, format, title and file name.
-    const document = screen.getByRole("article", { name: "Steg 5: Skapa protokoll" });
-    expect(within(document).getByText("Protokollmall.docx")).toBeTruthy();
-    expect(within(document).getByText("meeting_date")).toBeTruthy();
-    expect(within(document).getByText("decisions")).toBeTruthy();
-    expect(within(document).getByText("Föregående steg")).toBeTruthy();
-    expect(within(document).getByText("PDF")).toBeTruthy();
-    expect(within(document).getByText("protokoll-", { exact: false })).toBeTruthy();
-    expect(within(document).getAllByText("Indata · Mötesdatum").length).toBeGreaterThanOrEqual(3);
-
-    // Nothing is editable: no fields, no buttons.
-    expect(
-      container.querySelectorAll("input, textarea, select, button, [contenteditable]")
-    ).toHaveLength(0);
+    // Nothing is editable: the rows are the only buttons, there are no fields.
+    expect(container.querySelectorAll("input, textarea, select, [contenteditable]")).toHaveLength(
+      0
+    );
     await expectNoAxeViolations(container);
+
+    // A row opens the step with every parameter in a dialog.
+    fireEvent.click(rows[2]!);
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Sammanfatta beslut")).toBeTruthy();
+    expect(within(dialog).getByText("Steg 3 av 5 · Modell")).toBeTruthy();
+    expect(within(dialog).getByText("Lista varje beslut med kort motivering.")).toBeTruthy();
+    expect(within(dialog).getByText("GPT-5.2")).toBeTruthy();
   });
 
   it("says what is missing on an unpublished flow without inputs or steps", () => {
@@ -190,5 +166,72 @@ describe("FlowDefinition", () => {
     expect(screen.getByText("Utkast")).toBeTruthy();
     expect(screen.getByText("Flödet tar inga indata vid körning.")).toBeTruthy();
     expect(screen.getByText("Flödet har inga steg ännu.")).toBeTruthy();
+  });
+});
+
+describe("FlowStepCard", () => {
+  const card = (index: number) => {
+    const { container } = renderInApp(
+      <FlowStepCard step={steps[index]!} index={index} definition={flow.definition} names={names} />
+    );
+    return { container, article: screen.getByRole("article") };
+  };
+
+  it("shows a transcribe step's source, model, language and speakers", () => {
+    const { article } = card(0);
+    expect(within(article).getByText("Transkribering")).toBeTruthy();
+    expect(within(article).getByText("Indata · Inspelning")).toBeTruthy();
+    expect(within(article).getByText("KB-Whisper large")).toBeTruthy();
+    expect(within(article).getByText("sv")).toBeTruthy();
+    expect(
+      within(article).getByText("Identifiera talare, högst 6 · namnge från Deltagare")
+    ).toBeTruthy();
+  });
+
+  it("shows a review step's mode, target and time limit", () => {
+    const { article } = card(1);
+    expect(within(article).getByText("Granskning")).toBeTruthy();
+    expect(
+      within(article).getByText("Redigera: granskaren kan ändra texten innan den godkänns")
+    ).toBeTruthy();
+    expect(within(article).getByText("Steg 1 · Transkribera mötet")).toBeTruthy();
+    expect(within(article).getByText("Högst 7 dagar, sedan avbryts körningen")).toBeTruthy();
+  });
+
+  it("shows an llm step's prompt, input references, model, knowledge, files and JSON output", () => {
+    const { article } = card(2);
+    expect(within(article).getByText("Lista varje beslut med kort motivering.")).toBeTruthy();
+    expect(within(article).getByText("Steg 2 · Granska transkriptet")).toBeTruthy();
+    expect(within(article).getByText("Indata · Mötestyp")).toBeTruthy();
+    expect(within(article).getByText("GPT-5.2")).toBeTruthy();
+    expect(within(article).getByText("· temperature: 0")).toBeTruthy();
+    expect(within(article).getByText("Delegationsordning")).toBeTruthy();
+    expect(within(article).getByText("kommunen.se")).toBeTruthy();
+    expect(within(article).getByText("Indata · Inspelning")).toBeTruthy();
+    expect(within(article).getByText("JSON enligt schema", { exact: false })).toBeTruthy();
+    expect(within(article).getByText("decisions, actions")).toBeTruthy();
+    expect(within(article).getByText(/"type": "object"/)).toBeTruthy();
+  });
+
+  it("shows a compose step's template with its references", () => {
+    const { article } = card(3);
+    expect(within(article).getByText("Protokoll fört", { exact: false })).toBeTruthy();
+    expect(within(article).getByText("Indata · Mötesdatum")).toBeTruthy();
+    expect(within(article).getByText("Steg 3 · Sammanfatta beslut · decisions")).toBeTruthy();
+  });
+
+  it("shows a document step's template file, bindings, format, title and file name, read-only", async () => {
+    const { article, container } = card(4);
+    expect(within(article).getByText("Protokollmall.docx")).toBeTruthy();
+    expect(within(article).getByText("meeting_date")).toBeTruthy();
+    expect(within(article).getByText("decisions")).toBeTruthy();
+    expect(within(article).getByText("Föregående steg")).toBeTruthy();
+    expect(within(article).getByText("PDF")).toBeTruthy();
+    expect(within(article).getByText("protokoll-", { exact: false })).toBeTruthy();
+    expect(within(article).getAllByText("Indata · Mötesdatum").length).toBeGreaterThanOrEqual(3);
+    expect(
+      container.querySelectorAll("input, textarea, select, button, [contenteditable]")
+    ).toHaveLength(0);
+    await expectNoAxeViolations(container);
   });
 });

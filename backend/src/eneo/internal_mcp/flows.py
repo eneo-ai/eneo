@@ -5,11 +5,14 @@
 
 A flow is a deterministic, ordered list of typed steps that a space runs
 unattended (:mod:`eneo.flows.definition`). The model never executes a flow;
-it writes the definition through these tools from the flows chat of a space,
-publishes it, and starts runs that the worker executes. The bearer token's
-``assistant_id`` claim names the hidden flows assistant of exactly one space,
-so every tool is scoped to that space without taking it as an argument, and
-a flow or run of another space reads as not found.
+it writes the definition through these tools from the flow's chat,
+publishes it, and starts runs that the worker executes. A flow is created
+from the flows page (REST ``POST /flows/``) as an empty draft and bound to
+the chat that authors it, so there is no tool to create one: ``flow_id``
+is optional everywhere and defaults to the chat's own flow. The bearer
+token's ``assistant_id`` claim names the hidden flows assistant of exactly
+one space, so every tool is scoped to that space without taking it as an
+argument, and a flow or run of another space reads as not found.
 
 Each tool answers with a short text for the model (what was saved, the
 validation problems verbatim, where a run stands) and with structured
@@ -43,6 +46,7 @@ from eneo.flows.definition import (
 )
 from eneo.flows.flow_models import (
     FlowPublic,
+    FlowRevisionSummaryPublic,
     FlowRunContractPublic,
     FlowRunStatePublic,
     FlowSparsePublic,
@@ -71,16 +75,18 @@ __all__ = [
     "FLOWS_SERVER_NAME",
     "FLOW_NOT_FOUND_MESSAGE",
     "NOT_AUTHORING_ASSISTANT_MESSAGE",
+    "NOT_BOUND_MESSAGE",
     "RUN_NOT_FOUND_MESSAGE",
     "build_flows_mcp_server",
     "cancel_run",
-    "create_flow",
     "delete_flow",
     "get_flow",
     "get_run",
     "list_flows",
+    "list_revisions",
     "mcp",
     "publish_flow",
+    "restore_revision",
     "review_run",
     "run_flow",
     "update_flow",
@@ -100,6 +106,8 @@ NO_REVIEW_WAITING_MESSAGE = "This run has no review waiting."
 NOTHING_TO_CHANGE_MESSAGE = (
     "Nothing to change: pass a new name, description, form_fields or steps."
 )
+NOT_BOUND_MESSAGE = "This chat is not bound to a flow yet."
+REVISIONS_SHOWN = 10
 
 INSTRUCTIONS = """\
 Tools for authoring and running the flows of this space. A flow is a
@@ -107,6 +115,11 @@ deterministic, ordered list of typed steps that runs unattended once a person
 starts it with the run inputs (form fields). The step kind decides what runs;
 nothing is decided at run time, and you never execute a flow yourself: you
 write its definition, publish it, start runs and report on them.
+
+This chat belongs to one flow, created empty from the flows page before the
+chat started. Omit flow_id to work on it (the usual case); get_flow shows
+where it stands. There is no tool to create a flow: the user starts another
+one from the flows page.
 
 Step kinds: llm (one completion with a fixed prompt; output is text or JSON
 checked against a schema), compose (text assembled from a template, no model),
@@ -122,6 +135,11 @@ A saved flow is a draft until publish_flow; run_flow runs the published
 version. run_flow only queues the run and returns at once; get_run is how to
 follow its progress. Validation problems come back as text starting with
 "Could not": fix the definition and call again.
+
+Every save (update_flow) is kept as a numbered revision the user can read in
+the flow's history and restore; nothing is lost by changing a flow. Give update_flow a one-line note on what changed and why. list_revisions
+shows the history and restore_revision brings an earlier revision back as the
+draft (itself a new revision).
 """
 
 mcp = FastMCP(
@@ -243,6 +261,24 @@ async def _flow_in_space(container: Any, flow_id: UUID, space_id: UUID) -> FlowP
     return flow
 
 
+async def _resolve_flow(
+    tool_ctx: ToolContext, flow_id: UUID | None, space_id: UUID
+) -> FlowPublic:
+    """The flow a tool acts on: the given one, else the chat's own flow."""
+    if flow_id is not None:
+        return await _flow_in_space(tool_ctx.container, flow_id, space_id)
+    bound = (
+        await tool_ctx.container.flow_service().flow_for_conversation(
+            tool_ctx.session_id
+        )
+        if tool_ctx.session_id is not None
+        else None
+    )
+    if bound is None or bound.space_id != space_id:
+        raise _ToolRefused(NOT_BOUND_MESSAGE)
+    return bound
+
+
 async def _run_in_space(
     container: Any, run_id: UUID, space_id: UUID
 ) -> FlowRunStatePublic:
@@ -294,7 +330,7 @@ def _flow_text(flow: FlowPublic, lead: str) -> str:
         state = f"published version {flow.published_version}"
     lines = [
         lead,
-        f"Flow '{flow.name}' (flow_id {flow.id}; {state}).",
+        f"Flow '{flow.name}' (flow_id {flow.id}; revision {flow.revision}; {state}).",
         _form_fields_text(flow.definition.form_fields),
         "Steps:",
         definition_summary(flow.definition) or "(none)",
@@ -304,7 +340,7 @@ def _flow_text(flow: FlowPublic, lead: str) -> str:
 
 def _flows_list_text(flows: list[FlowSparsePublic]) -> str:
     if not flows:
-        return "No flows in this space yet. Create one with create_flow."
+        return "No flows in this space yet. Flows are created from the flows page."
     lines = [f"{len(flows)} flow(s) in this space:"]
     for flow in flows:
         published = (
@@ -317,6 +353,52 @@ def _flows_list_text(flows: list[FlowSparsePublic]) -> str:
             f"- '{flow.name}' (flow_id {flow.id}; {published}; "
             f"{flow.step_count} step(s): {kinds or 'none'})"
         )
+    return "\n".join(lines)
+
+
+def _changes_text(revision: FlowRevisionSummaryPublic) -> str:
+    changes = revision.changes
+    if changes.is_initial:
+        return "first revision"
+    parts: list[str] = []
+    if changes.name_changed:
+        parts.append("name changed")
+    if changes.description_changed:
+        parts.append("description changed")
+    if changes.form_fields_changed:
+        parts.append("run inputs changed")
+    if changes.steps_added:
+        parts.append("steps added: " + ", ".join(changes.steps_added))
+    if changes.steps_removed:
+        parts.append("steps removed: " + ", ".join(changes.steps_removed))
+    if changes.steps_changed:
+        parts.append("steps changed: " + ", ".join(changes.steps_changed))
+    return "; ".join(parts) or "no visible change"
+
+
+def _revisions_text(
+    flow: FlowPublic, revisions: list[FlowRevisionSummaryPublic], total: int
+) -> str:
+    lines = [
+        f"History of '{flow.name}' (flow_id {flow.id}): {total} revision(s), "
+        f"current is {flow.revision}. Newest first"
+        + (f", last {len(revisions)} shown" if total > len(revisions) else "")
+        + ":"
+    ]
+    for revision in revisions:
+        line = (
+            f"- revision {revision.revision} ({revision.created_at:%Y-%m-%d %H:%M}, "
+            f"via {'chat' if revision.channel == 'mcp' else 'API'}): "
+            + _changes_text(revision)
+        )
+        if revision.note:
+            line += f'. Note: "{revision.note}"'
+        if revision.published_version is not None:
+            line += f" [published as version {revision.published_version}]"
+        lines.append(line)
+    lines.append(
+        "restore_revision brings any of them back as the draft (as a new revision)."
+    )
     return "\n".join(lines)
 
 
@@ -369,10 +451,10 @@ def _run_text(state: FlowRunStatePublic, lead: str | None = None) -> str:
 
 @mcp.tool(title="List flows")
 async def list_flows(ctx: Context) -> CallToolResult:
-    """List the flows of this space, published or draft.
+    """List the flows of this space, published or draft, for reference.
 
-    Use it to find a flow's id before get_flow, update_flow, publish_flow,
-    run_flow or delete_flow when the user names a flow rather than its id.
+    The chat's own flow needs no id (omit flow_id in the other tools); use
+    this to find another flow's id when the user names one.
     """
     try:
         async with internal_tool_context(ctx) as tool_ctx:
@@ -387,30 +469,40 @@ async def list_flows(ctx: Context) -> CallToolResult:
 
 
 @mcp.tool(title="Get flow")
-async def get_flow(flow_id: UUID, ctx: Context) -> CallToolResult:
-    """Read a flow's current draft definition and publication state.
+async def get_flow(ctx: Context, flow_id: UUID | None = None) -> CallToolResult:
+    """Read a flow's current draft definition, revision and publication state.
 
-    Read a flow before changing it: update_flow replaces the given lists
-    whole, so send every form field or step you want to keep.
+    Omit flow_id to work on this chat's flow (the usual case). Read a flow
+    before changing it: update_flow replaces the given lists whole, so send
+    every form field or step you want to keep. A new flow is empty (no
+    inputs, no steps) until update_flow gives it some.
     """
     try:
         async with internal_tool_context(ctx) as tool_ctx:
             space_id = await _authoring_space_id(tool_ctx)
-            flow = await _flow_in_space(tool_ctx.container, flow_id, space_id)
+            flow = await _resolve_flow(tool_ctx, flow_id, space_id)
     except _REPAIRABLE as exc:
         return _failure("get flow", exc, flow_id=flow_id)
     return _result(_flow_text(flow, "Current definition."), flow=flow)
 
 
-@mcp.tool(title="Create flow")
-async def create_flow(
-    name: str,
-    description: str,
-    steps: list[Step],
+@mcp.tool(title="Update flow")
+async def update_flow(
     ctx: Context,
+    flow_id: UUID | None = None,
+    name: str | None = None,
+    description: str | None = None,
     form_fields: list[FormField] | None = None,
+    steps: list[Step] | None = None,
+    note: str | None = None,
 ) -> CallToolResult:
-    """Create a flow in this space from its run inputs and ordered steps.
+    """Change a flow's name, description, run inputs or steps.
+
+    Omit flow_id to work on this chat's flow (the usual case). Only the
+    arguments given change. A given form_fields or steps list replaces the
+    whole list, so include every item to keep; a step keeps its identity
+    (and its run history) when its key stays the same. Changes land in the
+    draft: publish_flow again for runs to use them.
 
     A flow is deterministic: every step runs in order, each time, with the
     inputs and the earlier outputs it names. form_fields are the run inputs a
@@ -433,56 +525,20 @@ async def create_flow(
     Keys are short lower-case identifiers (letters, digits, underscore) that
     stay stable across edits; templates read {{form.<key>}}, {{steps.<key>}},
     {{steps.<key>.json.<path>}} and {{previous}}, and a step only reads what
-    comes before it. Do not send step ids; Eneo assigns them.
+    comes before it. Do not send step ids; Eneo assigns them. Validation
+    problems come back as text starting with "Could not update flow": fix
+    them and call again.
 
-    The flow is saved as a draft bound to this conversation. Publish it with
-    publish_flow before running it. Validation problems come back as text
-    starting with "Could not create flow": fix them and call again.
+    Every save is kept as a revision the user can read and restore later,
+    so changing a flow never loses anything. note is one line on what
+    changed and why ("Shortened the summary prompt at the user's request");
+    it is shown in the flow's history, so give one with every change.
     """
     try:
         async with internal_tool_context(ctx) as tool_ctx:
             space_id = await _authoring_space_id(tool_ctx)
-            definition = FlowDefinition(form_fields=form_fields or [], steps=steps)
-            flow = await tool_ctx.container.flow_service().create_flow(
-                space_id=space_id,
-                name=name,
-                description=description,
-                definition=definition,
-                conversation_id=tool_ctx.session_id,
-                channel=CHANNEL,
-            )
-    except _REPAIRABLE as exc:
-        return _failure("create flow", exc)
-    logger.info("[FLOWS] created flow %s in space %s", flow.id, flow.space_id)
-    return _result(
-        _flow_text(
-            flow, "Flow created as a draft. Publish it with publish_flow to run it."
-        ),
-        flow=flow,
-    )
-
-
-@mcp.tool(title="Update flow")
-async def update_flow(
-    flow_id: UUID,
-    ctx: Context,
-    name: str | None = None,
-    description: str | None = None,
-    form_fields: list[FormField] | None = None,
-    steps: list[Step] | None = None,
-) -> CallToolResult:
-    """Change a flow's name, description, run inputs or steps.
-
-    Only the arguments given change. A given form_fields or steps list
-    replaces the whole list, so include every item to keep; a step keeps
-    its identity (and its run history) when its key stays the same. The
-    kinds, template references and rules are those of create_flow. Changes
-    land in the draft: publish_flow again for runs to use them.
-    """
-    try:
-        async with internal_tool_context(ctx) as tool_ctx:
-            space_id = await _authoring_space_id(tool_ctx)
-            current = await _flow_in_space(tool_ctx.container, flow_id, space_id)
+            current = await _resolve_flow(tool_ctx, flow_id, space_id)
+            flow_id = current.id
             if (
                 name is None
                 and description is None
@@ -501,27 +557,92 @@ async def update_flow(
                     steps=current.definition.steps if steps is None else steps,
                 )
             flow = await tool_ctx.container.flow_service().update_flow(
-                flow_id,
+                current.id,
                 name=name,
                 description=description,
                 definition=definition,
                 conversation_id=tool_ctx.session_id,
                 channel=CHANNEL,
+                note=note,
             )
     except _REPAIRABLE as exc:
         return _failure("update flow", exc, flow_id=flow_id)
     logger.info("[FLOWS] updated flow %s", flow.id)
+    lead = (
+        f"Draft updated as revision {flow.revision}. Publish it with publish_flow "
+        "to run it."
+        if flow.revision != current.revision
+        else "Nothing changed: the draft already looked like this."
+    )
+    return _result(_flow_text(flow, lead), flow=flow)
+
+
+@mcp.tool(title="List revisions")
+async def list_revisions(ctx: Context, flow_id: UUID | None = None) -> CallToolResult:
+    """Read a flow's history: every save as a numbered revision, newest first.
+
+    Omit flow_id to work on this chat's flow (the usual case). Each revision says when it was made, from the chat or the API, the note
+    given with it, what it changed (name, description, run inputs, steps
+    added, removed or changed) and whether a published version froze it.
+    Use it when the user asks what changed, wants to go back, or compares
+    with how the flow was; restore_revision brings one back.
+    """
+    try:
+        async with internal_tool_context(ctx) as tool_ctx:
+            space_id = await _authoring_space_id(tool_ctx)
+            flow = await _resolve_flow(tool_ctx, flow_id, space_id)
+            flow_id = flow.id
+            revisions, total = await tool_ctx.container.flow_service().list_revisions(
+                flow.id, limit=REVISIONS_SHOWN
+            )
+    except _REPAIRABLE as exc:
+        return _failure("list revisions", exc, flow_id=flow_id)
     return _result(
-        _flow_text(flow, "Draft updated. Publish it with publish_flow to run it."),
+        _revisions_text(flow, revisions, total),
+        flow_id=flow.id,
+        revisions=[revision.model_dump(mode="json") for revision in revisions],
+    )
+
+
+@mcp.tool(title="Restore revision")
+async def restore_revision(
+    revision: int, ctx: Context, flow_id: UUID | None = None
+) -> CallToolResult:
+    """Make an earlier revision the flow's draft again.
+
+    Omit flow_id to work on this chat's flow (the usual case). The restore is itself a new revision (noted "Restored revision N"), so
+    nothing is lost and it can be undone the same way. Steps keep their
+    identity. Use it on the user's request, after list_revisions showed
+    which revision they mean. Changes land in the draft: publish_flow again
+    for runs to use them.
+    """
+    try:
+        async with internal_tool_context(ctx) as tool_ctx:
+            space_id = await _authoring_space_id(tool_ctx)
+            current = await _resolve_flow(tool_ctx, flow_id, space_id)
+            flow_id = current.id
+            flow = await tool_ctx.container.flow_service().restore_revision(
+                current.id, revision, channel=CHANNEL
+            )
+    except _REPAIRABLE as exc:
+        return _failure("restore revision", exc, flow_id=flow_id)
+    logger.info("[FLOWS] restored flow %s to revision %s", flow.id, revision)
+    return _result(
+        _flow_text(
+            flow,
+            f"Restored revision {revision} as the draft (now revision "
+            f"{flow.revision}). Publish it with publish_flow to run it.",
+        ),
         flow=flow,
+        restored_from=revision,
     )
 
 
 @mcp.tool(title="Publish flow")
-async def publish_flow(flow_id: UUID, ctx: Context) -> CallToolResult:
+async def publish_flow(ctx: Context, flow_id: UUID | None = None) -> CallToolResult:
     """Publish the flow's draft as its next version.
 
-    Runs always use the published version; a draft, or a draft edited since
+    Omit flow_id to work on this chat's flow (the usual case). Runs always use the published version; a draft, or a draft edited since
     the last publish, cannot run until it is published. The result tells
     what a run needs: the run inputs, where a review pauses it and what the
     final output is.
@@ -529,10 +650,11 @@ async def publish_flow(flow_id: UUID, ctx: Context) -> CallToolResult:
     try:
         async with internal_tool_context(ctx) as tool_ctx:
             space_id = await _authoring_space_id(tool_ctx)
-            await _flow_in_space(tool_ctx.container, flow_id, space_id)
+            current = await _resolve_flow(tool_ctx, flow_id, space_id)
+            flow_id = current.id
             flow_service = tool_ctx.container.flow_service()
-            flow = await flow_service.publish_flow(flow_id, channel=CHANNEL)
-            contract = await flow_service.get_run_contract(flow_id)
+            flow = await flow_service.publish_flow(current.id, channel=CHANNEL)
+            contract = await flow_service.get_run_contract(current.id)
     except _REPAIRABLE as exc:
         return _failure("publish flow", exc, flow_id=flow_id)
     logger.info("[FLOWS] published flow %s v%s", flow.id, flow.published_version)
@@ -549,18 +671,20 @@ async def publish_flow(flow_id: UUID, ctx: Context) -> CallToolResult:
 
 
 @mcp.tool(title="Delete flow")
-async def delete_flow(flow_id: UUID, ctx: Context) -> CallToolResult:
+async def delete_flow(ctx: Context, flow_id: UUID | None = None) -> CallToolResult:
     """Delete a flow of this space.
 
-    Only on the user's explicit request. The flow leaves the space's list;
+    Omit flow_id to work on this chat's flow (the usual case). Only on the
+    user's explicit request. The flow leaves the space's list;
     its run history stays readable to API consumers that reference it.
     """
     try:
         async with internal_tool_context(ctx) as tool_ctx:
             space_id = await _authoring_space_id(tool_ctx)
-            flow = await _flow_in_space(tool_ctx.container, flow_id, space_id)
+            flow = await _resolve_flow(tool_ctx, flow_id, space_id)
+            flow_id = flow.id
             await tool_ctx.container.flow_service().delete_flow(
-                flow_id, channel=CHANNEL
+                flow.id, channel=CHANNEL
             )
     except _REPAIRABLE as exc:
         return _failure("delete flow", exc, flow_id=flow_id)
@@ -570,15 +694,15 @@ async def delete_flow(flow_id: UUID, ctx: Context) -> CallToolResult:
 
 @mcp.tool(title="Run flow")
 async def run_flow(
-    flow_id: UUID,
     inputs: dict[str, InputValue],
     ctx: Context,
+    flow_id: UUID | None = None,
     files: dict[str, list[str]] | None = None,
     run_label: str | None = None,
 ) -> CallToolResult:
     """Start a run of the flow's published version with the given inputs.
 
-    inputs maps text, number and select form field keys to their values;
+    Omit flow_id to work on this chat's flow (the usual case). inputs maps text, number and select form field keys to their values;
     files maps file and audio form field keys to the attachment reference
     URLs from this conversation (the exact "url" values of the file
     reference entries, never constructed). Every required field needs a
@@ -595,7 +719,8 @@ async def run_flow(
     try:
         async with internal_tool_context(ctx) as tool_ctx:
             space_id = await _authoring_space_id(tool_ctx)
-            flow = await _flow_in_space(tool_ctx.container, flow_id, space_id)
+            flow = await _resolve_flow(tool_ctx, flow_id, space_id)
+            flow_id = flow.id
             file_ids: dict[str, list[UUID]] = {}
             for key, urls in (files or {}).items():
                 file_ids[key] = [
@@ -603,7 +728,7 @@ async def run_flow(
                 ]
             run_service = tool_ctx.container.flow_run_service()
             run = await run_service.create_run(
-                flow_id,
+                flow.id,
                 values=dict(inputs),
                 files=file_ids,
                 run_label=run_label,

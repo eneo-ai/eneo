@@ -102,9 +102,64 @@ class FlowPublic(BaseModel):
     published_version: Optional[int] = None
     # True when the draft differs from the published version (or is unpublished).
     has_unpublished_changes: bool = False
+    # The current revision of the draft (see FlowRevisionSummaryPublic).
+    revision: int = 1
     conversation_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
+
+
+class FlowRevisionChangesPublic(BaseModel):
+    """What a revision changed against the one before it."""
+
+    # The first revision: nothing to compare with.
+    is_initial: bool = False
+    name_changed: bool = False
+    description_changed: bool = False
+    form_fields_changed: bool = False
+    # Step names, in the order of the revision they appear in.
+    steps_added: list[str] = Field(default_factory=list[str])
+    steps_removed: list[str] = Field(default_factory=list[str])
+    steps_changed: list[str] = Field(default_factory=list[str])
+
+
+class FlowRevisionSummaryPublic(BaseModel):
+    """A row in a flow's history: every save, newest first."""
+
+    flow_id: UUID
+    revision: int
+    name: str
+    created_at: datetime
+    principal_type: PrincipalType
+    created_by_user_id: Optional[UUID] = None
+    # "mcp" (the flows chat) | "api"
+    channel: str
+    note: Optional[str] = None
+    # The version a publish froze from this revision, when one did.
+    published_version: Optional[int] = None
+    changes: FlowRevisionChangesPublic
+
+
+class FlowRevisionPublic(FlowRevisionSummaryPublic):
+    description: Optional[str] = None
+    definition: FlowDefinition
+
+
+class FlowCreateRequest(BaseModel):
+    """Start a flow: an empty draft in a space, authored in its chat afterwards."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    space_id: UUID
+    name: Optional[str] = Field(default=None, max_length=200)
+
+
+class FlowConversationBindRequest(BaseModel):
+    """Bind the flow to the chat (a flows chat of its space) that authors it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: UUID
 
 
 class FlowAuthoringAssistantPublic(BaseModel):

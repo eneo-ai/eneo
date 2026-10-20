@@ -2,6 +2,7 @@ import { infiniteQueryOptions, queryOptions, type QueryClient } from "@tanstack/
 import { unwrap } from "@/lib/api/errors";
 import { flowsApi } from "./flows-api";
 import type {
+  FlowPublic,
   FlowRunCreateRequest,
   FlowRunPublic,
   FlowRunReviewCheckpointPublic,
@@ -31,6 +32,8 @@ export function isOpenCheckpoint(checkpoint: FlowRunReviewCheckpointPublic | nul
 }
 
 export const RUNS_PAGE_SIZE = 20;
+/** Revisions the history tab lists at a time (newest first). */
+export const REVISIONS_PAGE_SIZE = 20;
 /** How often an active run is refetched while the tab is visible. */
 export const RUN_POLL_INTERVAL_MS = 3000;
 
@@ -40,7 +43,9 @@ export const flowKeys = {
   authoringAssistant: (spaceId: string) => ["flows", "authoring-assistant", spaceId] as const,
   flow: (flowId: string) => ["flows", flowId] as const,
   runs: (flowId: string) => ["flows", flowId, "runs"] as const,
-  run: (flowId: string, runId: string) => ["flows", flowId, "runs", runId] as const
+  run: (flowId: string, runId: string) => ["flows", flowId, "runs", runId] as const,
+  revisions: (flowId: string) => ["flows", flowId, "revisions"] as const,
+  revision: (flowId: string, revision: number) => ["flows", flowId, "revisions", revision] as const
 };
 
 export function flowsListQueryOptions(spaceId: string) {
@@ -114,6 +119,50 @@ export function flowRunQueryOptions(flowId: string, runId: string) {
   });
 }
 
+/** The flow's history, newest first, a page at a time. */
+export function flowRevisionsQueryOptions(flowId: string) {
+  return infiniteQueryOptions({
+    queryKey: flowKeys.revisions(flowId),
+    initialPageParam: 0,
+    queryFn: ({ pageParam, signal }) =>
+      unwrap(
+        flowsApi.GET("/api/v1/flows/{id}/revisions/", {
+          params: {
+            path: { id: flowId },
+            query: { limit: REVISIONS_PAGE_SIZE, offset: pageParam }
+          },
+          signal
+        })
+      ),
+    getNextPageParam: (last, pages) =>
+      last.items.length < REVISIONS_PAGE_SIZE ? undefined : pages.length * REVISIONS_PAGE_SIZE
+  });
+}
+
+/** One revision with its definition. A revision never changes once written. */
+export function flowRevisionQueryOptions(flowId: string, revision: number) {
+  return queryOptions({
+    queryKey: flowKeys.revision(flowId, revision),
+    queryFn: ({ signal }) =>
+      unwrap(
+        flowsApi.GET("/api/v1/flows/{id}/revisions/{revision}/", {
+          params: { path: { id: flowId, revision } },
+          signal
+        })
+      ),
+    staleTime: Infinity
+  });
+}
+
+/** Makes the revision the draft again; the restore is a new revision. */
+export function restoreFlowRevision(flowId: string, revision: number): Promise<FlowPublic> {
+  return unwrap(
+    flowsApi.POST("/api/v1/flows/{id}/revisions/{revision}/restore/", {
+      params: { path: { id: flowId, revision } }
+    })
+  );
+}
+
 export function createFlowRun(flowId: string, body: FlowRunCreateRequest): Promise<FlowRunPublic> {
   return unwrap(
     flowsApi.POST("/api/v1/flows/{id}/runs/", { params: { path: { id: flowId } }, body })
@@ -171,7 +220,10 @@ export function rejectCheckpoint(ref: CheckpointRef, reason: string | null) {
   );
 }
 
-/** Refetches everything shown about a flow after a tool call changed it. */
+/**
+ * Refetches everything shown about a flow after a tool call changed it: the
+ * flow itself and, by key prefix, its runs and its revision history.
+ */
 export function invalidateFlow(queryClient: QueryClient, flowId: string) {
   return queryClient.invalidateQueries({ queryKey: flowKeys.flow(flowId) });
 }

@@ -59,7 +59,11 @@ function PanelTitle({
   };
 
   return (
-    <h2 className="flex min-w-0">
+    // The popover wraps its trigger in an inline-flex anchor that sizes to
+    // the button's content and clips the negative margins; letting the anchor
+    // fill the title column (and the button fill the anchor) keeps the whole
+    // title readable and gives the trigger the full column as its target.
+    <h2 className="flex min-w-0 [&>div]:flex [&>div]:min-w-0 [&>div]:flex-1">
       <Popover
         isOpen={open}
         onOpenChange={setOpen}
@@ -85,7 +89,7 @@ function PanelTitle({
           type="button"
           aria-label={`${title}. ${t("panel_switcher_hint")}`}
           title={title}
-          className="hover:bg-ax-hover focus-visible:outline-ring rounded-ax-inner aria-expanded:bg-ax-hover -mx-2 -my-1 flex max-w-full min-w-0 flex-col items-start px-2 py-1 text-start focus-visible:outline-2 focus-visible:outline-offset-2"
+          className="hover:bg-ax-hover focus-visible:outline-ring rounded-ax-inner aria-expanded:bg-ax-hover -mx-2 -my-1 flex w-full min-w-0 flex-col items-start px-2 py-1 text-start focus-visible:outline-2 focus-visible:outline-offset-2"
         >
           <span className="flex max-w-full min-w-0 items-center gap-1">
             <span className="truncate text-sm font-semibold">{title}</span>

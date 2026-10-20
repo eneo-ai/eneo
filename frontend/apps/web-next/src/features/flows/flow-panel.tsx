@@ -13,6 +13,8 @@ import { PanelFrame } from "@/features/chat/side-panel/panel-frame";
 import { useSidePanel } from "@/features/chat/side-panel/use-side-panel";
 import { useSpace } from "@/features/spaces/use-space";
 import { FlowDefinition } from "./flow-definition";
+import { FlowHistory } from "./flow-history";
+import { isFlowPanelTab } from "./flow-panel-store";
 import { FlowRunDetail } from "./flow-run-detail";
 import { FlowRunDialog } from "./flow-run-dialog";
 import { FlowRunList } from "./flow-run-list";
@@ -76,6 +78,7 @@ export function FlowPanel({
     : undefined;
   const definitionPanel = `${panelId}-definition`;
   const runsPanel = `${panelId}-runs`;
+  const historyPanel = `${panelId}-history`;
 
   return (
     <PanelFrame
@@ -112,16 +115,17 @@ export function FlowPanel({
         </div>
       ) : (
         <>
-          <div className="border-ax-border shrink-0 border-b px-2">
+          <div className="border-ax-border shrink-0 border-b px-4 py-1.5">
             <TabList
               role="tablist"
               value={store.tab}
-              onChange={(value) => store.setTab(value === "runs" ? "runs" : "definition")}
+              onChange={(value) => store.setTab(isFlowPanelTab(value) ? value : "definition")}
               size="sm"
               aria-label={t("flow_panel_tabs_label")}
             >
               <Tab value="definition" label={t("flow_tab_definition")} panelId={definitionPanel} />
               <Tab value="runs" label={t("flow_tab_runs")} panelId={runsPanel} />
+              <Tab value="history" label={t("flow_tab_history")} panelId={historyPanel} />
             </TabList>
           </div>
           {store.tab === "definition" ? (
@@ -134,6 +138,24 @@ export function FlowPanel({
             >
               <QueryStateBoundary query={flow} rows={4}>
                 {(data) => <FlowDefinition flow={data} names={names} />}
+              </QueryStateBoundary>
+            </div>
+          ) : store.tab === "history" ? (
+            <div
+              id={historyPanel}
+              role="tabpanel"
+              tabIndex={0}
+              aria-label={t("flow_tab_history")}
+              className="focus-visible:outline-ring min-h-0 flex-1 overflow-y-auto focus-visible:outline-2 focus-visible:-outline-offset-2"
+            >
+              <QueryStateBoundary query={flow} rows={4}>
+                {(data) => (
+                  <FlowHistory
+                    flow={data}
+                    names={names}
+                    onRestored={() => store.setTab("definition")}
+                  />
+                )}
               </QueryStateBoundary>
             </div>
           ) : (

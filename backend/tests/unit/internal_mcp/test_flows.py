@@ -3,9 +3,11 @@
 Covers the tool surface the model sees (names, the step union as the
 ``steps`` schema), the text + structured shape every tool answers with, the
 space scoping (another space's flow reads as not found, a token for an
-ordinary assistant is refused), repairable problems returned as text, the
-file-reference mapping of ``run_flow`` and the review decision sequence.
-The flow services are faked; their contract is the one the tools call.
+ordinary assistant is refused), the chat's own flow as the default
+``flow_id``, repairable problems returned as text, the file-reference
+mapping of ``run_flow``, the review decision sequence and the revision
+history. The flow services are faked; their contract is the one the tools
+call.
 """
 
 from __future__ import annotations
@@ -28,6 +30,9 @@ from eneo.flows.definition import (
 from eneo.flows.flow_models import (
     FlowFinalOutputContractPublic,
     FlowPublic,
+    FlowRevisionChangesPublic,
+    FlowRevisionPublic,
+    FlowRevisionSummaryPublic,
     FlowRunContractPublic,
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
@@ -47,16 +52,18 @@ from eneo.internal_mcp.flows import (
     FLOWS_SERVER_NAME,
     NO_REVIEW_WAITING_MESSAGE,
     NOT_AUTHORING_ASSISTANT_MESSAGE,
+    NOT_BOUND_MESSAGE,
     RUN_NOT_FOUND_MESSAGE,
     build_flows_mcp_server,
     cancel_run,
-    create_flow,
     delete_flow,
     get_flow,
     get_run,
     list_flows,
+    list_revisions,
     mcp,
     publish_flow,
+    restore_revision,
     review_run,
     run_flow,
     update_flow,
@@ -71,8 +78,9 @@ CTX = SimpleNamespace()
 EXPECTED_TOOLS = [
     "list_flows",
     "get_flow",
-    "create_flow",
     "update_flow",
+    "list_revisions",
+    "restore_revision",
     "publish_flow",
     "delete_flow",
     "run_flow",
@@ -174,30 +182,55 @@ def _summary(run: FlowRunStatePublic) -> FlowRunSummaryPublic:
 
 
 class FakeFlowService:
-    """Records every call; raises ``error`` on the next mutating call."""
+    """Records every call; raises ``error`` on the next mutating call.
+
+    Every create and every changing update keeps a revision, as the real
+    service does; ``revisions`` holds them per flow, oldest first.
+    """
 
     def __init__(self, flows: list[FlowPublic] = (), *, error=None):
         self.flows = {flow.id: flow for flow in flows}
         self.calls: list[tuple] = []
         self.error = error
+        self.revisions: dict[UUID, list[FlowRevisionPublic]] = {
+            flow.id: [self._revision(flow, channel="api")] for flow in flows
+        }
+
+    @staticmethod
+    def _revision(
+        flow: FlowPublic,
+        *,
+        channel: str,
+        note: str | None = None,
+        changes: FlowRevisionChangesPublic | None = None,
+    ) -> FlowRevisionPublic:
+        return FlowRevisionPublic(
+            flow_id=flow.id,
+            revision=flow.revision,
+            name=flow.name,
+            description=flow.description,
+            definition=flow.definition,
+            created_at=NOW,
+            principal_type=PrincipalType.USER,
+            channel=channel,
+            note=note,
+            changes=changes or FlowRevisionChangesPublic(is_initial=True),
+        )
+
+    def _keep(self, flow: FlowPublic, *, channel: str, note: str | None, **changes):
+        self.flows[flow.id] = flow
+        self.revisions.setdefault(flow.id, []).append(
+            self._revision(
+                flow,
+                channel=channel,
+                note=note,
+                changes=FlowRevisionChangesPublic(**changes),
+            )
+        )
 
     def _raise(self):
         if self.error is not None:
             raise self.error
-
-    async def create_flow(
-        self, *, space_id, name, description, definition, conversation_id, channel
-    ):
-        self.calls.append(("create_flow", channel, conversation_id))
-        self._raise()
-        flow = _flow(
-            space_id=space_id,
-            definition=definition,
-            name=name,
-            conversation_id=conversation_id,
-        )
-        self.flows[flow.id] = flow
-        return flow
 
     async def get_flow(self, flow_id):
         try:
@@ -205,10 +238,24 @@ class FakeFlowService:
         except KeyError:
             raise NotFoundException() from None
 
+    async def flow_for_conversation(self, conversation_id):
+        return next(
+            (f for f in self.flows.values() if f.conversation_id == conversation_id),
+            None,
+        )
+
     async def update_flow(
-        self, flow_id, *, name, description, definition, channel, conversation_id=None
+        self,
+        flow_id,
+        *,
+        name,
+        description,
+        definition,
+        channel,
+        conversation_id=None,
+        note=None,
     ):
-        self.calls.append(("update_flow", channel, name, description, definition))
+        self.calls.append(("update_flow", channel, name, description, definition, note))
         self._raise()
         current = self.flows[flow_id]
         updated = current.model_copy(
@@ -219,10 +266,43 @@ class FakeFlowService:
                     if definition is not None
                     else current.definition
                 ),
+                "revision": current.revision + 1,
             }
         )
-        self.flows[flow_id] = updated
+        self._keep(
+            updated,
+            channel=channel,
+            note=note,
+            name_changed=name is not None,
+            steps_changed=[step.name for step in updated.definition.steps]
+            if definition is not None
+            else [],
+        )
         return updated
+
+    async def list_revisions(self, flow_id, *, limit=20, offset=0):
+        rows = list(reversed(self.revisions.get(flow_id, [])))
+        summaries = [FlowRevisionSummaryPublic(**row.model_dump()) for row in rows]
+        return summaries[offset : offset + limit], len(summaries)
+
+    async def restore_revision(self, flow_id, revision, *, channel):
+        self.calls.append(("restore_revision", flow_id, revision, channel))
+        self._raise()
+        rows = self.revisions.get(flow_id, [])
+        row = next((r for r in rows if r.revision == revision), None)
+        if row is None:
+            raise NotFoundException("Flow revision not found")
+        current = self.flows[flow_id]
+        restored = current.model_copy(
+            update={
+                "name": row.name,
+                "description": row.description,
+                "definition": row.definition,
+                "revision": current.revision + 1,
+            }
+        )
+        self._keep(restored, channel=channel, note=f"Restored revision {revision}")
+        return restored
 
     async def list_flows(self, space_id):
         return [
@@ -386,28 +466,29 @@ class TestToolSurface:
 
     async def test_steps_schema_is_the_step_union(self):
         tools = {tool.name: tool for tool in await mcp.list_tools()}
-        for name in ("create_flow", "update_flow"):
-            schema = tools[name].inputSchema
-            steps = schema["properties"]["steps"]
-            items = (
-                steps["items"] if name == "create_flow" else steps["anyOf"][0]["items"]
+        schema = tools["update_flow"].inputSchema
+        items = schema["properties"]["steps"]["anyOf"][0]["items"]
+        assert items["discriminator"]["propertyName"] == "kind"
+        assert set(items["discriminator"]["mapping"]) == {
+            "llm",
+            "compose",
+            "document",
+            "review",
+            "transcribe",
+        }
+        assert "FormField" in schema["$defs"]
+        # The chat's own flow is the default: no tool requires a flow id.
+        for name in EXPECTED_TOOLS:
+            assert "flow_id" not in (tools[name].inputSchema.get("required") or []), (
+                name
             )
-            assert items["discriminator"]["propertyName"] == "kind"
-            assert set(items["discriminator"]["mapping"]) == {
-                "llm",
-                "compose",
-                "document",
-                "review",
-                "transcribe",
-            }
-            assert "FormField" in schema["$defs"]
         # The tools return CallToolResult themselves: no output schema, so the
         # text is never a JSON copy of the structured payload.
         assert all(tool.outputSchema is None for tool in tools.values())
 
     async def test_docstrings_teach_the_authoring_model(self):
         tools = {tool.name: tool for tool in await mcp.list_tools()}
-        create = tools["create_flow"].description
+        update = tools["update_flow"].description
         for needle in (
             "{{form.<key>}}",
             "{{steps.<key>}}",
@@ -415,10 +496,33 @@ class TestToolSurface:
             "{{previous}}",
             "deterministic",
             "publish_flow",
+            "cannot be published yet",
+            "revision",
+            "note",
         ):
-            assert needle in create
+            assert needle in update
         assert "get_run" in tools["run_flow"].description
-        assert "cannot be published yet" in create
+        flow_tools = [
+            name
+            for name in EXPECTED_TOOLS
+            if "flow_id" in tools[name].inputSchema["properties"]
+        ]
+        assert set(flow_tools) == {
+            "get_flow",
+            "update_flow",
+            "publish_flow",
+            "delete_flow",
+            "run_flow",
+            "list_revisions",
+            "restore_revision",
+        }
+        for name in flow_tools:
+            assert "Omit flow_id to work on this chat's flow" in (
+                tools[name].description or ""
+            ), name
+        assert "create" not in [tool.name for tool in await mcp.list_tools()]
+        assert "restore_revision" in tools["list_revisions"].description
+        assert "new revision" in tools["restore_revision"].description
 
     async def test_ephemeral_server_mirrors_the_live_tools_and_is_mounted(self):
         server = await build_flows_mcp_server(token="tok", tenant_id=uuid4())
@@ -429,21 +533,31 @@ class TestToolSurface:
         assert f"/internal-mcp/{FLOWS_SERVER_NAME}" in dict(internal_mcp_mounts())
 
 
-class TestCreateFlow:
-    async def test_returns_summary_text_and_structured_flow(self, monkeypatch):
+class TestChatFlow:
+    """Tools act on the chat's own flow unless a flow_id is given."""
+
+    def _rig(self, monkeypatch, **context):
         session_id = uuid4()
-        service = FakeFlowService()
-        space_id = _patch_context(
-            monkeypatch, flow_service=service, session_id=session_id
+        space_id = uuid4()
+        mine = _flow(space_id=space_id, conversation_id=session_id)
+        service = FakeFlowService([mine, _flow(space_id=space_id, name="Other")])
+        _patch_context(
+            monkeypatch,
+            flow_service=service,
+            space_id=space_id,
+            session_id=session_id,
+            **context,
         )
+        return mine, service
+
+    async def test_update_without_flow_id_changes_the_chats_flow(self, monkeypatch):
+        mine, service = self._rig(monkeypatch)
 
         # Through FastMCP, with the JSON the model sends, so argument
         # validation and the CallToolResult passthrough are exercised.
         result = await mcp.call_tool(
-            "create_flow",
+            "update_flow",
             {
-                "name": "Weekly brief",
-                "description": "Writes the weekly brief",
                 "form_fields": [{"key": "topic", "label": "Topic", "type": "text"}],
                 "steps": [
                     {
@@ -459,77 +573,117 @@ class TestCreateFlow:
                         "template": "Result: {{previous}}",
                     },
                 ],
+                "note": "First steps",
             },
         )
 
         assert isinstance(result, CallToolResult)
-        flow = next(iter(service.flows.values()))
-        assert flow.space_id == space_id
-        assert service.calls == [("create_flow", "mcp", session_id)]
+        _, channel, name, _description, definition, note = service.calls[0]
+        assert channel == "mcp"
+        assert name is None
+        assert note == "First steps"
+        assert [step.key for step in definition.steps] == ["draft", "wrap"]
         text = _text(result)
         assert "1. [llm] Draft (key: draft)" in text
         assert "2. [compose] Wrap (key: wrap)" in text
         assert "publish_flow" in text
-        assert "{" not in text.split("Steps:")[0]
         structured = result.structuredContent
-        assert structured["flow_id"] == str(flow.id)
+        assert structured["flow_id"] == str(mine.id)
         assert structured["run_id"] is None
         assert structured["run"] is None
-        assert structured["flow"]["name"] == "Weekly brief"
+        assert structured["flow"]["id"] == str(mine.id)
         assert structured["flow"]["definition"]["steps"][0]["kind"] == "llm"
 
-    async def test_validation_problems_come_back_as_repairable_text(self, monkeypatch):
-        service = FakeFlowService(
-            error=BadRequestException(
-                "step 'draft' prompt: {{form.title}} names no form field"
-            )
-        )
-        _patch_context(monkeypatch, flow_service=service)
+    async def test_get_flow_without_flow_id_reads_the_chats_flow(self, monkeypatch):
+        mine, _service = self._rig(monkeypatch)
 
-        result = await create_flow(
-            name="Brief",
-            description="",
+        result = await get_flow(ctx=CTX)
+
+        assert f"Flow '{mine.name}' (flow_id {mine.id}; revision 1;" in _text(result)
+        assert result.structuredContent["flow_id"] == str(mine.id)
+
+    async def test_a_given_flow_id_wins_over_the_chats_flow(self, monkeypatch):
+        mine, service = self._rig(monkeypatch)
+        other = next(flow for flow in service.flows.values() if flow.id != mine.id)
+
+        result = await get_flow(flow_id=other.id, ctx=CTX)
+
+        assert result.structuredContent["flow_id"] == str(other.id)
+
+    async def test_a_chat_without_a_flow_is_told_so(self, monkeypatch):
+        space_id = uuid4()
+        service = FakeFlowService([_flow(space_id=space_id)])
+        _patch_context(
+            monkeypatch, flow_service=service, space_id=space_id, session_id=uuid4()
+        )
+
+        for tool, kwargs in (
+            (get_flow, {}),
+            (update_flow, {"name": "x"}),
+            (publish_flow, {}),
+            (list_revisions, {}),
+            (restore_revision, {"revision": 1}),
+            (run_flow, {"inputs": {}}),
+            (delete_flow, {}),
+        ):
+            result = await tool(ctx=CTX, **kwargs)
+            assert _text(result).endswith(NOT_BOUND_MESSAGE), tool.__name__
+            assert result.structuredContent["flow_id"] is None
+        assert service.calls == []
+
+    async def test_a_token_without_a_session_is_not_bound(self, monkeypatch):
+        space_id = uuid4()
+        _patch_context(
+            monkeypatch,
+            flow_service=FakeFlowService([_flow(space_id=space_id)]),
+            space_id=space_id,
+            session_id=None,
+        )
+
+        result = await get_flow(ctx=CTX)
+
+        assert _text(result) == f"Could not get flow: {NOT_BOUND_MESSAGE}"
+
+    async def test_validation_problems_come_back_as_repairable_text(self, monkeypatch):
+        mine, service = self._rig(
+            monkeypatch,
+        )
+        service.error = BadRequestException(
+            "step 'draft' prompt: {{form.title}} names no form field"
+        )
+
+        result = await update_flow(
             steps=[LlmStep(key="draft", name="Draft", prompt="{{form.title}}")],
             ctx=CTX,
         )
 
         assert _text(result).startswith(
-            "Could not create flow: step 'draft' prompt: {{form.title}} names no "
+            "Could not update flow: step 'draft' prompt: {{form.title}} names no "
             "form field"
         )
         assert result.isError is False
         assert result.structuredContent["flow"] is None
+        assert result.structuredContent["flow_id"] == str(mine.id)
         assert result.structuredContent["error"].startswith("step 'draft'")
 
     async def test_oversized_definition_is_reported_not_raised(self, monkeypatch):
-        _patch_context(monkeypatch, flow_service=FakeFlowService())
+        self._rig(monkeypatch)
         too_many = [
             FormField(key=f"f{i}", label=str(i), type="text") for i in range(40)
         ]
 
-        result = await create_flow(
-            name="Brief",
-            description="",
-            steps=[ComposeStep(key="a", name="A", template="x")],
-            form_fields=too_many,
-            ctx=CTX,
-        )
+        result = await update_flow(form_fields=too_many, ctx=CTX)
 
-        assert _text(result).startswith("Could not create flow: form_fields:")
+        assert _text(result).startswith("Could not update flow: form_fields:")
 
     async def test_an_ordinary_assistant_is_refused(self, monkeypatch):
         service = FakeFlowService()
         _patch_context(monkeypatch, flow_service=service, purpose=None)
 
-        result = await create_flow(
-            name="Brief",
-            description="",
-            steps=[ComposeStep(key="a", name="A", template="x")],
-            ctx=CTX,
-        )
+        result = await update_flow(name="Brief", ctx=CTX)
 
         assert _text(result) == (
-            f"Could not create flow: {NOT_AUTHORING_ASSISTANT_MESSAGE}"
+            f"Could not update flow: {NOT_AUTHORING_ASSISTANT_MESSAGE}"
         )
         assert service.calls == []
 
@@ -587,9 +741,10 @@ class TestUpdatePublishDelete:
             ctx=CTX,
         )
 
-        _, channel, name, _description, definition = service.calls[0]
+        _, channel, name, _description, definition, note = service.calls[0]
         assert channel == "mcp"
         assert name is None
+        assert note is None
         assert definition.form_fields == flow.definition.form_fields
         assert [step.key for step in definition.steps] == ["wrap"]
         assert "1. [compose] Only wrap (key: wrap)" in _text(result)
@@ -635,6 +790,111 @@ class TestUpdatePublishDelete:
         assert result.structuredContent["flow_id"] == str(flow.id)
         assert result.structuredContent["deleted"] is True
         assert flow.id not in service.flows
+
+
+class TestRevisions:
+    async def test_update_passes_the_note_and_reports_the_revision(self, monkeypatch):
+        space_id = uuid4()
+        flow = _flow(space_id=space_id)
+        service = FakeFlowService([flow])
+        _patch_context(monkeypatch, flow_service=service, space_id=space_id)
+
+        result = await update_flow(
+            flow_id=flow.id,
+            name="Daily brief",
+            note="Renamed at the user's request",
+            ctx=CTX,
+        )
+
+        assert service.calls[0][-1] == "Renamed at the user's request"
+        text = _text(result)
+        assert text.startswith("Draft updated as revision 2.")
+        assert "revision 2;" in text
+        assert result.structuredContent["flow"]["revision"] == 2
+
+    async def test_get_flow_names_the_revision(self, monkeypatch):
+        space_id = uuid4()
+        flow = _flow(space_id=space_id).model_copy(update={"revision": 4})
+        _patch_context(
+            monkeypatch, flow_service=FakeFlowService([flow]), space_id=space_id
+        )
+
+        result = await get_flow(flow_id=flow.id, ctx=CTX)
+
+        assert f"(flow_id {flow.id}; revision 4; not published yet)" in _text(result)
+
+    async def test_list_revisions_tells_the_history_newest_first(self, monkeypatch):
+        space_id = uuid4()
+        flow = _flow(space_id=space_id)
+        service = FakeFlowService([flow])
+        _patch_context(monkeypatch, flow_service=service, space_id=space_id)
+        await update_flow(flow_id=flow.id, name="Daily brief", note="Renamed", ctx=CTX)
+        service.revisions[flow.id][0] = service.revisions[flow.id][0].model_copy(
+            update={"published_version": 1}
+        )
+
+        result = await list_revisions(flow_id=flow.id, ctx=CTX)
+
+        text = _text(result)
+        assert text.startswith(
+            f"History of 'Daily brief' (flow_id {flow.id}): 2 revision(s), current is 2."
+        )
+        lines = text.splitlines()
+        assert lines[1].startswith(
+            "- revision 2 (2026-10-20 12:00, via chat): name changed"
+        )
+        assert 'Note: "Renamed"' in lines[1]
+        assert lines[2].startswith(
+            "- revision 1 (2026-10-20 12:00, via API): first revision"
+        )
+        assert lines[2].endswith("[published as version 1]")
+        assert "restore_revision" in lines[-1]
+        structured = result.structuredContent
+        assert structured["flow_id"] == str(flow.id)
+        assert structured["run_id"] is None
+        assert structured["flow"] is None
+        assert structured["run"] is None
+        assert [row["revision"] for row in structured["revisions"]] == [2, 1]
+        assert structured["revisions"][1]["changes"]["is_initial"] is True
+
+    async def test_list_revisions_of_another_spaces_flow_reads_as_not_found(
+        self, monkeypatch
+    ):
+        other = _flow(space_id=uuid4())
+        _patch_context(monkeypatch, flow_service=FakeFlowService([other]))
+
+        result = await list_revisions(flow_id=other.id, ctx=CTX)
+
+        assert _text(result) == f"Could not list revisions: {FLOW_NOT_FOUND_MESSAGE}"
+        assert "revisions" not in result.structuredContent
+
+    async def test_restore_revision_returns_the_restored_flow(self, monkeypatch):
+        space_id = uuid4()
+        flow = _flow(space_id=space_id)
+        service = FakeFlowService([flow])
+        _patch_context(monkeypatch, flow_service=service, space_id=space_id)
+        await update_flow(flow_id=flow.id, name="Daily brief", ctx=CTX)
+
+        result = await restore_revision(flow_id=flow.id, revision=1, ctx=CTX)
+
+        assert service.calls[-1] == ("restore_revision", flow.id, 1, "mcp")
+        text = _text(result)
+        assert text.startswith("Restored revision 1 as the draft (now revision 3).")
+        assert f"Flow '{flow.name}' (flow_id {flow.id}; revision 3;" in text
+        assert result.structuredContent["flow"]["revision"] == 3
+        assert result.structuredContent["restored_from"] == 1
+
+    async def test_restore_of_an_unknown_revision_is_repairable(self, monkeypatch):
+        space_id = uuid4()
+        flow = _flow(space_id=space_id)
+        _patch_context(
+            monkeypatch, flow_service=FakeFlowService([flow]), space_id=space_id
+        )
+
+        result = await restore_revision(flow_id=flow.id, revision=9, ctx=CTX)
+
+        assert _text(result) == "Could not restore revision: Flow revision not found"
+        assert result.structuredContent["flow"] is None
 
 
 class TestRuns:

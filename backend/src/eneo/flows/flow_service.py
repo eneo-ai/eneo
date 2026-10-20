@@ -28,17 +28,23 @@ from eneo.flows.flow_assembler import (
     definition_from_json,
     definition_to_json,
     flow_public,
+    flow_revision_public,
+    flow_revision_summary_public,
     flow_sparse_public,
 )
 from eneo.flows.flow_models import (
     FlowFinalOutputContractPublic,
     FlowPublic,
+    FlowRevisionPublic,
+    FlowRevisionSummaryPublic,
     FlowRunContractPublic,
     FlowRunContractStepPublic,
     FlowSparsePublic,
+    PrincipalType,
 )
 from eneo.main.exceptions import (
     BadRequestException,
+    FlowConversationConflictException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -49,7 +55,7 @@ if TYPE_CHECKING:
     from eneo.completion_models.application.completion_model_crud_service import (
         CompletionModelCRUDService,
     )
-    from eneo.database.tables.flow_tables import Flows
+    from eneo.database.tables.flow_tables import FlowRevisions, Flows
     from eneo.flows.flow_repo import FlowRepository
     from eneo.spaces.space import Space
     from eneo.spaces.space_repo import SpaceRepository
@@ -58,6 +64,9 @@ if TYPE_CHECKING:
 # Step kinds whose runners are not shipped yet; publishing refuses them so a
 # run can never reach a step that cannot execute.
 UNAVAILABLE_STEP_KINDS = (StepKind.DOCUMENT, StepKind.TRANSCRIBE)
+MAX_REVISION_PAGE = 100
+NOTE_MAX_LENGTH = 500
+DEFAULT_FLOW_NAME = "Nytt flöde"
 
 
 class FlowService:
@@ -217,7 +226,93 @@ class FlowService:
 
     async def _to_public(self, flow: Flows) -> FlowPublic:
         return flow_public(
-            flow, has_unpublished_changes=await self._has_unpublished_changes(flow)
+            flow,
+            has_unpublished_changes=await self._has_unpublished_changes(flow),
+            revision=await self.repo.latest_revision_number(flow.id),
+        )
+
+    # --- Revisions ---
+
+    async def _add_revision(
+        self, flow: Flows, *, channel: str, note: str | None
+    ) -> FlowRevisions:
+        """Keep the flow as it is now as its next revision."""
+        number = await self.repo.latest_revision_number(flow.id) + 1
+        return await self.repo.add_revision(
+            flow_id=flow.id,
+            revision=number,
+            name=flow.name,
+            description=flow.description,
+            definition=flow.definition,
+            principal_type=PrincipalType.USER.value,
+            principal_user_id=self.user.id,
+            channel=channel,
+            note=(note or "").strip()[:NOTE_MAX_LENGTH] or None,
+        )
+
+    async def _require_revision(self, flow_id: UUID, revision: int) -> FlowRevisions:
+        row = await self.repo.get_revision(flow_id, revision)
+        if row is None:
+            raise NotFoundException("Flow revision not found")
+        return row
+
+    async def list_revisions(
+        self, flow_id: UUID, *, limit: int = 20, offset: int = 0
+    ) -> tuple[list[FlowRevisionSummaryPublic], int]:
+        """The flow's history, newest first, each row with what it changed."""
+        flow = await self._require_flow(flow_id)
+        await self.authorize_space(flow.space_id)
+        limit = max(1, min(limit, MAX_REVISION_PAGE))
+        rows, total = await self.repo.list_revisions(
+            flow.id, limit=limit, offset=max(0, offset)
+        )
+        published = await self.repo.versions_by_revision(flow.id)
+        # The oldest row on the page compares against the revision before it.
+        older = (
+            await self.repo.get_revision(flow.id, rows[-1].revision - 1)
+            if rows and rows[-1].revision > 1
+            else None
+        )
+        previous_of: list[Optional[FlowRevisions]] = [*rows[1:], older]
+        return [
+            flow_revision_summary_public(row, previous, published.get(row.revision))
+            for row, previous in zip(rows, previous_of)
+        ], total
+
+    async def get_revision(self, flow_id: UUID, revision: int) -> FlowRevisionPublic:
+        flow = await self._require_flow(flow_id)
+        await self.authorize_space(flow.space_id)
+        row = await self._require_revision(flow.id, revision)
+        previous = (
+            await self.repo.get_revision(flow.id, revision - 1)
+            if revision > 1
+            else None
+        )
+        published = await self.repo.versions_by_revision(flow.id)
+        return flow_revision_public(row, previous, published.get(row.revision))
+
+    async def restore_revision(
+        self, flow_id: UUID, revision: int, *, channel: str = "api"
+    ) -> FlowPublic:
+        """Make an older revision the draft again, as a new revision.
+
+        The restored steps keep the ids they had, so run history and review
+        checkpoints of a step that was removed in between find it again.
+        """
+        flow = await self._require_flow(flow_id)
+        await self.authorize_space(flow.space_id, "edit")
+        row = await self._require_revision(flow.id, revision)
+        description = row.description
+        if description is None and flow.description is not None:
+            description = ""
+        return await self.update_flow(
+            flow.id,
+            name=row.name,
+            description=description,
+            definition=definition_from_json(row.definition),
+            channel=channel,
+            note=f"Restored revision {revision}",
+            restored_from=revision,
         )
 
     async def create_flow(
@@ -242,14 +337,61 @@ class FlowService:
             user_id=self.user.id,
             conversation_id=conversation_id,
         )
+        await self._add_revision(flow, channel=channel, note=None)
         await self._audit(
             ActionType.FLOW_CREATED,
             flow,
             "Created flow",
             channel=channel,
-            extra={"step_count": len(definition.steps)},
+            extra={"step_count": len(definition.steps), "revision": 1},
         )
         return await self._to_public(flow)
+
+    async def create_draft(
+        self, *, space_id: UUID, name: str | None, channel: str = "api"
+    ) -> FlowPublic:
+        """An empty flow (no inputs, no steps) the space's flows chat then fills."""
+        return await self.create_flow(
+            space_id=space_id,
+            name=(name or "").strip() or DEFAULT_FLOW_NAME,
+            description=None,
+            definition=FlowDefinition(),
+            channel=channel,
+        )
+
+    async def bind_conversation(self, flow_id: UUID, session_id: UUID) -> FlowPublic:
+        """Bind the flow to the chat that authors it.
+
+        A flow has one chat: binding the same chat again is a no-op, another
+        chat a conflict. The session must be the caller's own and talk to the
+        space's flows authoring assistant.
+        """
+        flow = await self._require_flow(flow_id)
+        await self.authorize_space(flow.space_id, "edit")
+        if flow.conversation_id == session_id:
+            return await self._to_public(flow)
+        if flow.conversation_id is not None:
+            raise FlowConversationConflictException(
+                "The flow is already bound to another chat."
+            )
+        binding = await self.repo.get_session_binding(session_id)
+        if binding is None:
+            raise NotFoundException("Session not found")
+        api_key_id = self.user.active_api_key.id if self.user.active_api_key else None
+        owns = (binding.user_id is not None and binding.user_id == self.user.id) or (
+            api_key_id is not None and binding.api_key_id == api_key_id
+        )
+        if not owns:
+            raise UnauthorizedException("The session is not yours.")
+        if binding.assistant_id is None or not await self.repo.is_authoring_assistant(
+            binding.assistant_id, flow.space_id
+        ):
+            raise BadRequestException("The session is not a flows chat of this space.")
+        if not await self.repo.bind_conversation(flow.id, session_id):
+            raise FlowConversationConflictException(
+                "The flow is already bound to another chat."
+            )
+        return await self._to_public(await self._require_flow(flow.id))
 
     async def update_flow(
         self,
@@ -260,11 +402,17 @@ class FlowService:
         definition: FlowDefinition | None = None,
         conversation_id: UUID | None = None,
         channel: str = "api",
+        note: str | None = None,
+        restored_from: int | None = None,
     ) -> FlowPublic:
         """Replace name, description and/or definition.
 
+        Every change is kept as a new revision with ``note`` (one line on what
+        changed and why); a call that changes nothing keeps no revision.
         ``conversation_id`` binds the flow to the chat it is edited from, but
         only when it has none yet: a flow keeps its first authoring chat.
+        ``restored_from`` names the revision a restore copied; its steps keep
+        the ids they had.
         """
         flow = await self._require_flow(flow_id)
         space = await self.authorize_space(flow.space_id, "edit")
@@ -274,32 +422,50 @@ class FlowService:
         if definition is not None:
             self._validate(definition, space)
             previous = definition_from_json(flow.definition)
-            definition = assign_step_ids(definition, previous)
+            definition = assign_step_ids(
+                definition, previous, keep_unknown_ids=restored_from is not None
+            )
             definition_json = definition_to_json(definition)
+        changed = [
+            field
+            for field, value, current in (
+                ("name", name, flow.name),
+                ("description", description, flow.description),
+                ("definition", definition_json, flow.definition),
+            )
+            if value is not None and value != current
+        ]
+        if not changed:
+            return await self._to_public(flow)
         await self.repo.update_flow(
             flow.id, name=name, description=description, definition=definition_json
         )
         refreshed = await self._require_flow(flow.id)
-        changed = [
-            field
-            for field, value in (
-                ("name", name),
-                ("description", description),
-                ("definition", definition_json),
-            )
-            if value is not None
-        ]
+        kept = await self._add_revision(refreshed, channel=channel, note=note)
+        extra: dict[str, Any] = {"changed": changed, "revision": kept.revision}
+        if restored_from is not None:
+            extra["restored_from"] = restored_from
         await self._audit(
             ActionType.FLOW_UPDATED,
             refreshed,
             "Updated flow",
             channel=channel,
-            extra={"changed": changed},
+            extra=extra,
         )
         return await self._to_public(refreshed)
 
     async def get_flow(self, flow_id: UUID) -> FlowPublic:
         flow = await self._require_flow(flow_id)
+        await self.authorize_space(flow.space_id)
+        return await self._to_public(flow)
+
+    async def flow_for_conversation(self, conversation_id: UUID) -> FlowPublic | None:
+        """The flow a chat builds; a chat builds exactly one, or none yet."""
+        flow = await self.repo.get_flow_by_conversation(
+            conversation_id, self.user.tenant_id
+        )
+        if flow is None:
+            return None
         await self.authorize_space(flow.space_id)
         return await self._to_public(flow)
 
@@ -313,6 +479,8 @@ class FlowService:
         flow = await self._require_flow(flow_id)
         space = await self.authorize_space(flow.space_id, "publish")
         definition = definition_from_json(flow.definition)
+        if not definition.steps:
+            raise BadRequestException("a flow needs at least one step to be published")
         self._validate(definition, space)
         unavailable = self._unavailable_kinds(definition)
         if unavailable:
@@ -332,6 +500,7 @@ class FlowService:
             version=version,
             definition=flow.definition,
             published_by_user_id=self.user.id,
+            revision=await self.repo.latest_revision_number(flow.id) or None,
         )
         refreshed = await self._require_flow(flow.id)
         await self._audit(
