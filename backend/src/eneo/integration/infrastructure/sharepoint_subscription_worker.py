@@ -208,7 +208,7 @@ async def _maintain_subscription(
                 done = await service.recreate_expired_subscription(
                     subscription=subscription,
                     token=token,
-                    is_onedrive=subscription.site_id == subscription.drive_id,
+                    is_onedrive=subscription.is_onedrive,
                 )
             else:
                 # A renewal reauthorizes the subscription as well.

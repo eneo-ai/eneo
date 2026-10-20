@@ -436,7 +436,7 @@ class SharePointSubscriptionService:
             return await self.recreate_expired_subscription(
                 subscription=subscription,
                 token=token,
-                is_onedrive=self._is_onedrive(subscription),
+                is_onedrive=subscription.is_onedrive,
             )
         if self.lifecycle_url_missing(subscription):
             logger.info(
@@ -446,7 +446,7 @@ class SharePointSubscriptionService:
             if await self.recreate_expired_subscription(
                 subscription=subscription,
                 token=token,
-                is_onedrive=self._is_onedrive(subscription),
+                is_onedrive=subscription.is_onedrive,
             ):
                 return True
             # Renewed in place it keeps working, only without lifecycle events.
@@ -504,7 +504,7 @@ class SharePointSubscriptionService:
                         return await self.recreate_expired_subscription(
                             subscription=subscription,
                             token=token,
-                            is_onedrive=self._is_onedrive(subscription),
+                            is_onedrive=subscription.is_onedrive,
                         )
                     else:
                         error_text = await response.text()
@@ -520,15 +520,6 @@ class SharePointSubscriptionService:
                 exc_info=True,
             )
             return False
-
-    @staticmethod
-    def _is_onedrive(subscription: SharePointSubscription) -> bool:
-        # OneDrive subscriptions store the drive id in both columns.
-        return (
-            bool(subscription.site_id)
-            and bool(subscription.drive_id)
-            and subscription.site_id == subscription.drive_id
-        )
 
     async def delete_subscription_if_unused(
         self,

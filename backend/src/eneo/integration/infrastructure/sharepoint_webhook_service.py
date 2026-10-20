@@ -336,7 +336,7 @@ class SharepointWebhookService:
         the drive, so every row is in scope. A row being synced gets a marker
         instead of a job, as for any notification.
         """
-        if subscription.site_id == subscription.drive_id:
+        if subscription.is_onedrive:
             fallback = ("drive", subscription.drive_id)
         else:
             fallback = ("site", subscription.site_id)
@@ -381,8 +381,7 @@ class SharepointWebhookService:
         processing duplicates. Filters integrations by scope to avoid
         unnecessary syncs for file/folder-level integrations.
         """
-        # OneDrive subscriptions store the drive id in both columns.
-        if subscription.site_id == subscription.drive_id:
+        if subscription.is_onedrive:
             resource_type, resource_id = "drive", subscription.drive_id
         else:
             resource_type, resource_id = "site", subscription.site_id
