@@ -11,6 +11,13 @@ Every request to a language model records two values:
 
 These counts are aggregated and displayed in the Insights and Admin dashboards.
 
+## Reading the Chat Counter
+
+The chat's context counter uses compact numbers: `250k` means 250,000 tokens and
+`1M` means 1,000,000 tokens. Open the counter to see the full counts and their
+breakdown. The `≈` marker indicates an estimate; rounding the displayed numbers
+does not change context-limit warnings or the underlying token counts.
+
 ## Accurate Counting With Major Providers
 
 When using hosted providers such as OpenAI, Anthropic, or Azure, Eneo receives the actual token counts directly from the provider's API response. This is the most accurate method because:
