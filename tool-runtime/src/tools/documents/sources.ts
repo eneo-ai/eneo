@@ -34,9 +34,14 @@ async function resolveSheet(sheet: SheetRequest): Promise<SheetSpec> {
   return { name: sheet.name, columns, rows };
 }
 
-/** Reads a downloaded CSV or XLSX source (one sheet) as typed columns and rows. */
+/**
+ * Reads a downloaded CSV or XLSX source (one sheet) as typed columns and rows. With `asText`,
+ * every cell keeps the text the file holds (empty cells are null): for a caller that must
+ * validate dates and numbers itself rather than accept the reader's guess at their format.
+ */
 export async function readSource(
   source: SheetSource,
+  options: { asText?: boolean } = {},
 ): Promise<{ columns: string[]; rows: Cell[][] }> {
   const { path, isXlsx } = source;
   if (!path) throw new ToolError("RENDER_FAILED", "A source file was not downloaded.");
@@ -66,10 +71,13 @@ export async function readSource(
       throw new ToolError("INVALID_FILE", "CSV sources must use UTF-8 encoding.");
     }
   }
-  return readTypedCsv(csvPath);
+  return readTypedCsv(csvPath, options.asText === true);
 }
 
-async function readTypedCsv(csvPath: string): Promise<{ columns: string[]; rows: Cell[][] }> {
+async function readTypedCsv(
+  csvPath: string,
+  asText: boolean,
+): Promise<{ columns: string[]; rows: Cell[][] }> {
   // Server-built SQL over a file this child was given; no model SQL runs here.
   const instance = await DuckDBInstance.create(":memory:", {
     memory_limit: "256MB",
@@ -84,7 +92,7 @@ async function readTypedCsv(csvPath: string): Promise<{ columns: string[]; rows:
     try {
       const literal = "'" + csvPath.replaceAll("'", "''") + "'";
       const reader = await conn.runAndReadAll(
-        `SELECT * FROM read_csv_auto(${literal}) LIMIT ${SOURCE_ROW_LIMIT + 1}`,
+        `SELECT * FROM read_csv_auto(${literal}${asText ? ", all_varchar = true" : ""}) LIMIT ${SOURCE_ROW_LIMIT + 1}`,
       );
       const rows = reader.getRowsJS();
       if (rows.length > SOURCE_ROW_LIMIT)
@@ -112,6 +120,12 @@ function toCell(value: unknown): Cell {
       : value.toString();
   if (typeof value === "number" || typeof value === "boolean" || typeof value === "string")
     return value;
-  // Dates, timestamps and decimals keep DuckDB's own text form.
+  // DuckDB hands dates and timestamps over as UTC instants. A date is written as one, the
+  // way XLSX conversion writes a date-only cell, never in the host's locale or time zone.
+  if (value instanceof Date) {
+    const iso = value.toISOString();
+    return iso.endsWith("T00:00:00.000Z") ? iso.slice(0, 10) : iso;
+  }
+  // Decimals and other values keep DuckDB's own text form.
   return String(value);
 }
