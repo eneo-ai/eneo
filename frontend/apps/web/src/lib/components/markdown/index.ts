@@ -4,7 +4,7 @@ import { hideMathDelimiters, mathExtensions, promoteDisplayMath, startsMathFence
 
 export { default as Markdown } from "./Markdown.svelte";
 export { sanitizeImageSrc, sanitizeLinkHref, sanitizeWebHref } from "./sanitizeUrl.js";
-export { fileHandleId, setFileImageUrls } from "./FileImageContext.js";
+export { fileHandleId } from "./FileImageContext.js";
 export {
   type CustomRenderers as MarkdownCustomRenderingOptions,
   type EneoFileCustomComponentProps,
@@ -56,10 +56,8 @@ function inlineText(tokenizer: Tokenizer) {
 }
 
 export function eneoMarkdownLexer({
-  breaks = true,
   fileNames = []
 }: {
-  breaks?: boolean;
   /** Names of the conversation's files; each mention of one becomes a file token. */
   fileNames?: string[];
 } = {}) {
@@ -159,9 +157,8 @@ export function eneoMarkdownLexer({
       ...mathExtensions,
       ...(names.length ? [eneoFile] : [])
     ],
-    // Chat text keeps the line breaks as typed; a document's single line
-    // breaks are soft, as in the Markdown file it is.
-    breaks,
+    // Chat text keeps the line breaks as typed.
+    breaks: true,
     gfm: true,
     tokenizer: {
       // marked tries a setext heading before each paragraph and reads it on

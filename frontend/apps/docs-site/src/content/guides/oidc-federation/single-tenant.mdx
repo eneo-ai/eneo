@@ -286,7 +286,7 @@ For deployments without SCIM, JIT can create a user on first sign-in only when a
 
 - Tenant `provisioning` is explicitly `true`.
 - A non-empty domain list admits the user's email domain: `OIDC_ALLOWED_DOMAINS` for environment-variable configuration, or `allowed_domains` for API configuration.
-- The validated ID token carries the boolean claim `email_verified: true` for its `email` address. Missing, false, numeric or string values do not satisfy this check.
+- The validated ID token carries the claim `email_verified: true` for its `email` address. For identity providers that can only send claims as text, the strings `"true"` and `"1"` (and the number `1`) are also accepted. A missing claim or any other value does not satisfy this check.
 
 Existing active accounts do not require `email_verified` to sign in. Inactive or removed accounts cannot be reactivated or recreated through JIT; SCIM or an administrator must restore them. If the IdP does not supply verified-email claims, provision accounts through SCIM or administration.
 

@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { GroupSparse, IntegrationKnowledge, WebsiteSparse } from "@eneo/eneo-js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { isOrgItem, isPersonalItem } from "./knowledgeOrigin";
+  import { m } from "$lib/paraglide/messages";
+  import { partitionByOrigin, type KnowledgeOrigin } from "./knowledgeOrigin";
   import { getSelectedIntegrationDisplay, type IntegrationEntry } from "./knowledgeIntegration";
   import SelectedKnowledgeItem from "./SelectedKnowledgeItem.svelte";
   import SelectedIntegrationItem from "./SelectedIntegrationItem.svelte";
@@ -14,19 +15,18 @@
     selectedCollections?: GroupSparse[];
     /** Bind to enable selecting integration knowledge. */
     selectedIntegrationKnowledge?: IntegrationKnowledge[];
-    aria?: Record<string, string>;
     /** Portal the dropdown to the body and lift its z-index when rendered inside a dialog. */
     inDialog?: boolean;
-    originMode?: "personal" | "organization" | "both";
+    /** The template wizard supplies its own heading; the assistant editor shows origin headings. */
+    showHeadings?: boolean;
   };
 
   let {
     selectedWebsites = $bindable(),
     selectedCollections = $bindable(),
     selectedIntegrationKnowledge = $bindable(),
-    aria = { "aria-label": "Select knowledge" },
     inDialog = false,
-    originMode = "both"
+    showHeadings = false
   }: Props = $props();
 
   const {
@@ -39,32 +39,22 @@
   const allIntegration = $derived($currentSpace?.knowledge?.integrationKnowledge ?? []);
   const integrationList = $derived(selectedIntegrationKnowledge ?? []);
 
-  const showPersonal = $derived(originMode !== "organization");
-  const showOrg = $derived(originMode !== "personal");
-
-  const personalCollections = $derived(
-    (selectedCollections ?? []).filter((c) => isPersonalItem(c, currentSpaceId))
+  const allOrigins: KnowledgeOrigin[] = ["space", "organization"];
+  const originLabels = $derived({
+    space: m.knowledge(),
+    organization: m.organization_knowledge()
+  });
+  const collectionsByOrigin = $derived(
+    partitionByOrigin(selectedCollections ?? [], currentSpaceId, orgSpaceId)
   );
-  const orgCollections = $derived(
-    (selectedCollections ?? []).filter((c) => isOrgItem(c, currentSpaceId, orgSpaceId))
+  const websitesByOrigin = $derived(
+    partitionByOrigin(selectedWebsites ?? [], currentSpaceId, orgSpaceId)
   );
-  const personalWebsites = $derived(
-    (selectedWebsites ?? []).filter((w) => isPersonalItem(w, currentSpaceId))
+  const integrationByOrigin = $derived(
+    partitionByOrigin(integrationList, currentSpaceId, orgSpaceId)
   );
-  const orgWebsites = $derived(
-    (selectedWebsites ?? []).filter((w) => isOrgItem(w, currentSpaceId, orgSpaceId))
-  );
-  const personalIntegration = $derived(
-    getSelectedIntegrationDisplay(
-      integrationList.filter((k) => isPersonalItem(k, currentSpaceId)),
-      allIntegration.filter((k) => isPersonalItem(k, currentSpaceId))
-    )
-  );
-  const orgIntegration = $derived(
-    getSelectedIntegrationDisplay(
-      integrationList.filter((k) => isOrgItem(k, currentSpaceId, orgSpaceId)),
-      allIntegration.filter((k) => isOrgItem(k, currentSpaceId, orgSpaceId))
-    )
+  const availableIntegrationByOrigin = $derived(
+    partitionByOrigin(allIntegration, currentSpaceId, orgSpaceId)
   );
 
   function addCollection(collection: GroupSparse) {
@@ -124,17 +114,17 @@
   </section>
 {/snippet}
 
-{#snippet comboboxSection(origin: "personal" | "organization")}
+{#snippet comboboxSection(origin: KnowledgeOrigin)}
   <section class="mt-4">
     <KnowledgeCombobox
       {origin}
       space={$currentSpace}
       {currentSpaceId}
+      organizationSpaceId={orgSpaceId}
       {selectedCollections}
       {selectedWebsites}
       selectedIntegrationKnowledge={integrationList}
       {inDialog}
-      {aria}
       onAddCollection={addCollection}
       onAddWebsite={addWebsite}
       onAddIntegration={addIntegration}
@@ -142,16 +132,20 @@
   </section>
 {/snippet}
 
-{#if showPersonal && personalCollections.length + personalWebsites.length + personalIntegration.length > 0}
-  {@render selectedSection(personalCollections, personalWebsites, personalIntegration)}
-{/if}
-{#if showOrg && orgCollections.length + orgWebsites.length + orgIntegration.length > 0}
-  {@render selectedSection(orgCollections, orgWebsites, orgIntegration)}
-{/if}
-
-{#if showPersonal}
-  {@render comboboxSection("personal")}
-{/if}
-{#if showOrg}
-  {@render comboboxSection("organization")}
-{/if}
+{#each allOrigins as sectionOrigin (sectionOrigin)}
+  {@const collections = collectionsByOrigin[sectionOrigin]}
+  {@const websites = websitesByOrigin[sectionOrigin]}
+  {@const integration = getSelectedIntegrationDisplay(
+    integrationByOrigin[sectionOrigin],
+    availableIntegrationByOrigin[sectionOrigin]
+  )}
+  <section aria-label={originLabels[sectionOrigin]} class="space-y-2">
+    {#if showHeadings}
+      <h4 class="font-medium">{originLabels[sectionOrigin]}</h4>
+    {/if}
+    {#if collections.length + websites.length + integration.length > 0}
+      {@render selectedSection(collections, websites, integration)}
+    {/if}
+    {@render comboboxSection(sectionOrigin)}
+  </section>
+{/each}

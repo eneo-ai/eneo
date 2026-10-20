@@ -40,6 +40,16 @@ it("leaves focus alone when it is still on something", () => {
   expect(document.activeElement).toBe(other);
 });
 
+it("does not restore focus after the target has been unmounted", () => {
+  const focus = vi.spyOn(panel, "focus");
+  rescueFocus(panel);
+  panel.remove();
+
+  vi.advanceTimersByTime(500);
+
+  expect(focus).not.toHaveBeenCalled();
+});
+
 it("leaves focus in a menu the user opened in the meantime", () => {
   const row = document.createElement("button");
   document.body.append(row);
@@ -112,4 +122,18 @@ describe("isFocusLost", () => {
       delete (HTMLElement.prototype as Partial<HTMLElement>).showPopover;
     }
   });
+});
+
+it("asks a target given as a function at the check, for one the re-render brings", () => {
+  const row = document.createElement("button");
+  document.body.append(row);
+  row.focus();
+  row.remove();
+
+  let later: HTMLElement | null = null;
+  rescueFocus(() => later);
+  later = panel;
+  vi.advanceTimersByTime(500);
+
+  expect(document.activeElement).toBe(panel);
 });

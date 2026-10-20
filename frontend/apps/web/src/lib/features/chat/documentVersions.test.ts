@@ -71,6 +71,61 @@ describe("conversation documents", () => {
     expect(versionsOf(ID.chart)).toEqual([]);
   });
 
+  it("continues a document with the version a reader saved of it", () => {
+    const saved = {
+      ...file("66666666-6666-6666-6666-666666666666", "Plan.md"),
+      revises_file_id: ID.plan3
+    };
+    const { documents, latestOf } = conversationDocuments(
+      [
+        ...messages.slice(0, 2),
+        { ...messages[2], generated_files: [file(ID.plan3, "Plan.md"), saved] }
+      ],
+      recorded
+    );
+
+    expect(documents).toHaveLength(1);
+    expect(documents[0].versions.map((version) => version.id)).toEqual([
+      ID.plan1,
+      ID.plan2,
+      ID.plan3,
+      saved.id
+    ]);
+    expect(latestOf(ID.plan1)?.id).toBe(saved.id);
+  });
+
+  it("holds two saves from the same version as its versions, the later save latest", () => {
+    const first = {
+      ...file("66666666-6666-6666-6666-666666666666", "Plan.md"),
+      revises_file_id: ID.plan3,
+      created_at: "2026-10-16T10:00:00Z"
+    };
+    const second = {
+      ...file("77777777-7777-7777-7777-777777777777", "Plan.md"),
+      revises_file_id: ID.plan3,
+      created_at: "2026-10-16T10:05:00Z"
+    };
+    // The conversation may list the later save first.
+    const { documents, latestOf, versionsOf } = conversationDocuments(
+      [
+        ...messages.slice(0, 2),
+        { ...messages[2], generated_files: [file(ID.plan3, "Plan.md"), second, first] }
+      ],
+      recorded
+    );
+
+    expect(documents).toHaveLength(1);
+    expect(versionsOf(ID.plan3).map((version) => version.id)).toEqual([
+      ID.plan1,
+      ID.plan2,
+      ID.plan3,
+      first.id,
+      second.id
+    ]);
+    expect(latestOf(ID.plan1)?.id).toBe(second.id);
+    expect(latestOf(first.id)?.id).toBe(second.id);
+  });
+
   it("keeps the same content in another format as a document of its own", () => {
     const { documents } = conversationDocuments(
       [

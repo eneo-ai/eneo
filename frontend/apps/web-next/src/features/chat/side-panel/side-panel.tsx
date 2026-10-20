@@ -11,6 +11,7 @@ import type { EneoUIMessage } from "@/lib/chat/types";
 import { useResizableSplit } from "@/lib/hooks/use-resizable-split";
 import { cn } from "@/lib/utils";
 import type { DocumentExport } from "./document-export";
+import type { DocumentSaver } from "./document-saver";
 import { FilePanel } from "./file-panel";
 import type { PanelContents } from "./panel-contents";
 import { panelContentsCount } from "./panel-contents";
@@ -36,6 +37,8 @@ export type SidePanelProps = {
   contents: PanelContents;
   versionsOf: (file: PreviewFile) => PreviewFile[];
   exportOf: (file: PreviewFile) => DocumentExport | null;
+  /** How a reader's edit of a file is saved, for a document that can be edited; null for any other file. */
+  saverOf: (file: PreviewFile) => DocumentSaver | null;
   activity: ActivityOccupant | null;
   /** The latest answer's activity, for the switcher; null when there is none to show. */
   latestActivity: { detail: string; open: () => void } | null;
@@ -56,6 +59,7 @@ export function SidePanel({
   contents,
   versionsOf,
   exportOf,
+  saverOf,
   activity,
   latestActivity,
   children
@@ -172,6 +176,7 @@ export function SidePanel({
             panel={panel}
             versionsOf={versionsOf}
             exportOf={exportOf}
+            saverOf={saverOf}
             switcher={switcher}
             maximise={maximise}
             narrow={narrow}

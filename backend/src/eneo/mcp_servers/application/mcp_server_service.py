@@ -20,6 +20,10 @@ from eneo.mcp_apps.application.view_snapshots import snapshot_app_views
 from eneo.mcp_apps.domain.csp import declared_domains
 from eneo.mcp_apps.domain.mcp_app_view import get_ui_resource_uri
 from eneo.mcp_servers.application.bundled_tools import forget_catalogs
+from eneo.mcp_servers.domain.credential_transport import (
+    CREDENTIAL_TRANSPORT_REQUIREMENT,
+    credential_transport_violation,
+)
 from eneo.mcp_servers.domain.entities.mcp_server import (
     AUDIENCE_EVERYONE,
     AUDIENCE_GROUPS,
@@ -56,6 +60,22 @@ from eneo.roles.permissions import Permission, validate_permissions
 
 _NAME_CONSTRAINT = "uq_mcp_servers_tenant_name_purpose"
 _ACTIVE_CAPABILITY_INDEX = "uq_mcp_servers_tenant_active_capability"
+
+
+class MCPServerCredentialTransportError(BadRequestException):
+    """The saved server would send its credential to a plain-http address."""
+
+    code = "mcp_credential_requires_https"
+
+    def __init__(self) -> None:
+        super().__init__(CREDENTIAL_TRANSPORT_REQUIREMENT)
+
+
+def _require_credential_transport(http_auth_type: str, http_url: str) -> None:
+    """Refuse a server state that would expose its credential, before any
+    connection test sends it."""
+    if credential_transport_violation(http_auth_type, http_url) is not None:
+        raise MCPServerCredentialTransportError()
 
 
 def _violated_constraint(error: IntegrityError) -> str:
@@ -336,10 +356,10 @@ class MCPServerService:
     ) -> None:
         """Validate a plaintext auth config before it is tested or stored.
 
-        Enforces that credentials ride in headers (never URLs), that an
-        api_key_header name is legal HTTP token syntax and not a reserved
-        transport/session header, and that no secret can smuggle CR/LF into
-        the request stream.
+        Enforces that an api_key_header name is legal HTTP token syntax and
+        not a reserved transport/session header, and that no secret can
+        smuggle CR/LF into the request stream. Which addresses may receive a
+        credential is decided by ``credential_transport_violation``.
         """
         if http_auth_type == "none":
             return
@@ -582,6 +602,7 @@ class MCPServerService:
                 )
             forward_identity = spec.forward_identity
         http_url = str(http_url)
+        _require_credential_transport(http_auth_type, http_url)
         user_groups = await self._resolve_audience(
             purpose, audience, list(user_group_ids or [])
         )
@@ -870,6 +891,12 @@ class MCPServerService:
                 )
             mcp_server.image_model_id = None
             mcp_server.image_model = None
+        # The state being saved: requested values over stored ones. Checked
+        # before anything below writes or the connection test runs.
+        _require_credential_transport(
+            effective_auth_type,
+            str(http_url) if http_url is not None else mcp_server.http_url,
+        )
 
         # Apply changes to domain object
         if name is not None:

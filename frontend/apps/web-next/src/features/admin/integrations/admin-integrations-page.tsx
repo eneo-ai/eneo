@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ import {
 } from "@/features/admin/integrations/integrations";
 import { SharePointAppConfigDialog } from "./sharepoint-app-config-dialog";
 import { SharePointAppDeleteDialog } from "./sharepoint-app-delete-dialog";
-import { SharePointSubscriptions } from "./sharepoint-subscriptions";
+import { SharePointConnectionHealth } from "./sharepoint-connection-health";
 
 function IntegrationCard({ integration }: { integration: TenantIntegration }) {
   const t = useTranslations();
@@ -84,45 +84,44 @@ function IntegrationCard({ integration }: { integration: TenantIntegration }) {
   );
 }
 
-/** SharePoint Azure-AD app config + webhook-subscription management. */
+/**
+ * SharePoint Azure-AD app config and, once configured, the connection's
+ * health checklist (sign-in, change notifications, connection test).
+ */
 function SharePointAdminSection() {
   const t = useTranslations();
+  const headingId = useId();
   const { data: config, isPending } = useQuery(sharepointAppQueryOptions(browserApi));
   const [showConfig, setShowConfig] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
-  const [showWebhooks, setShowWebhooks] = useState(false);
-  const configured = Boolean(config);
 
   return (
-    <Card className="flex flex-col gap-4 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
+    <section aria-labelledby={headingId} className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <h2 id={headingId} className="font-semibold">
+          {t("sharepoint_health_row_title")}
+        </h2>
+        <p className="text-ax-text-secondary text-sm">{t("sharepoint_health_row_description")}</p>
+      </div>
+      <Card className="flex flex-wrap items-center justify-between gap-2 p-4">
         <div className="flex flex-col">
           <span className="font-medium">SharePoint</span>
           <span className="text-muted-foreground text-xs">
             {isPending
               ? t("loading_configuration")
-              : configured
+              : config
                 ? t("organization_access_enabled")
                 : t("configure_azure_ad_app")}
           </span>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => setShowConfig(true)}>
-            {configured ? t("update_configuration") : t("configure_sharepoint_app")}
-          </Button>
-          {configured && (
-            <Button variant="outline" size="sm" onClick={() => setShowWebhooks((value) => !value)}>
-              {showWebhooks ? t("hide_webhooks") : t("manage_webhooks")}
-            </Button>
-          )}
-        </div>
-      </div>
+        <Button variant="outline" size="sm" onClick={() => setShowConfig(true)}>
+          {config ? t("update_configuration") : t("configure_sharepoint_app")}
+        </Button>
+      </Card>
 
-      {configured && showWebhooks && (
-        <div className="border-t pt-4">
-          <SharePointSubscriptions />
-        </div>
-      )}
+      {config ? (
+        <SharePointConnectionHealth config={config} onEdit={() => setShowConfig(true)} />
+      ) : null}
 
       <SharePointAppConfigDialog
         open={showConfig}
@@ -133,13 +132,13 @@ function SharePointAdminSection() {
         }}
       />
       <SharePointAppDeleteDialog open={showDelete} onOpenChange={setShowDelete} />
-    </Card>
+    </section>
   );
 }
 
 /**
  * Tenant knowledge-provider administration: link/unlink providers at the org
- * level, plus SharePoint Azure-AD app config + webhook subscription health.
+ * level and the SharePoint app config with its connection health.
  */
 export function AdminIntegrationsPage() {
   const t = useTranslations();
@@ -149,7 +148,7 @@ export function AdminIntegrationsPage() {
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
       <PageHeader title={t("integrations")} />
       <p className="text-muted-foreground text-sm">{t("admin_integrations_grid_hint")}</p>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" data-tour="admin-integrations">
         {integrations.map((integration) => (
           <IntegrationCard key={integration.integration_id} integration={integration} />
         ))}

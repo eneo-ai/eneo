@@ -2,7 +2,7 @@ from fastapi import HTTPException, status
 
 from eneo.main.config import get_settings
 from eneo.users.user import UserInDB
-from eneo.whats_new.whats_new_models import WhatsNewStatePublic
+from eneo.whats_new.whats_new_models import WhatsNewStatePublic, can_record_release
 from eneo.whats_new.whats_new_repo import WhatsNewRepository
 
 
@@ -16,9 +16,13 @@ class WhatsNewService:
         return await self.repo.get_state(self.user.id)
 
     async def mark_seen(self, version: str) -> WhatsNewStatePublic:
+        if not can_record_release(version, get_settings().app_version):
+            return await self.get_state()
         return await self.repo.mark_seen(self.user.id, version)
 
     async def mark_announced(self, version: str) -> WhatsNewStatePublic:
+        if not can_record_release(version, get_settings().app_version):
+            return await self.get_state()
         return await self.repo.mark_announced(self.user.id, version)
 
     async def reset_state(self) -> WhatsNewStatePublic:

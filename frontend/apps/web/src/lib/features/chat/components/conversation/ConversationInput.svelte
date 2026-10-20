@@ -36,11 +36,12 @@
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { modelSupportsToolCalling } from "$lib/features/mcp/readiness";
+  import { getPartnerKnowledgeSources, hasKnowledgeSources } from "../../knowledgeSources";
   import { chatCapabilities } from "../../chatCapabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
   import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
   import { getMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
-  import { composeQuotedQuestion } from "../../questionQuote";
+  import { composeQuotedQuestion, tableQuoteSummary } from "../../questionQuote";
 
   type McpServerSummary = {
     id: string;
@@ -469,28 +470,8 @@
 
   // Knowledge sources attached to the partner (read-only indicator; knowledge
   // cannot be toggled per conversation the way MCP servers can).
-  type NamedSource = { id: string; name: string };
-  const knowledgeSources = $derived.by(() => {
-    const partner = chat.partner as Record<string, unknown> | null;
-    const named = (value: unknown, fallbackKey?: string): NamedSource[] =>
-      Array.isArray(value)
-        ? value.map((source) => ({
-            id: String(source.id),
-            name: String(source.name ?? (fallbackKey ? (source[fallbackKey] ?? "") : ""))
-          }))
-        : [];
-    return {
-      collections: named(partner?.groups),
-      websites: named(partner?.websites, "url"),
-      integrations: named(partner?.integration_knowledge_list)
-    };
-  });
-  const hasKnowledge = $derived(
-    knowledgeSources.collections.length +
-      knowledgeSources.websites.length +
-      knowledgeSources.integrations.length >
-      0
-  );
+  const knowledgeSources = $derived(getPartnerKnowledgeSources(chat.partner));
+  const hasKnowledge = $derived(hasKnowledgeSources(knowledgeSources));
   const partnerKnowledgeMode = $derived.by(() => {
     const partner = chat.partner as Record<string, unknown> | null;
     return typeof partner?.knowledge_mode === "string" ? partner.knowledge_mode : undefined;
@@ -560,7 +541,7 @@
   status={chat.askQuestion.isLoading || sendPending ? "streaming" : "ready"}
   onSubmit={ask}
   onStop={() => abortController?.abort("User cancelled")}
-  class="max-w-[74ch] md:w-full"
+  class="min-w-0"
 >
   {#if quote && filePreview}
     {@const location = tableLocationLabel(quote.locator, (row) => m.table_reference_row({ row }))}
@@ -584,9 +565,20 @@
           >{m.file_quote_from({ name: quote.fileName })}</span
         >
         {#if location}<span class="text-secondary block text-xs">{location}</span>{/if}
-        <span class="text-default line-clamp-2 text-sm break-words whitespace-pre-line"
-          >{quote.text}</span
-        >
+        {#if tableQuoteSummary(quote.text)}
+          {@const table = tableQuoteSummary(quote.text)!}
+          <!-- No room for the table itself here: its columns and size stand in. -->
+          <span class="text-default block truncate text-sm">{table.columns.join(" · ")}</span>
+          <span class="text-secondary block text-xs">
+            {table.rows === 1
+              ? m.file_quote_table_row()
+              : m.file_quote_table_rows({ count: table.rows })}
+          </span>
+        {:else}
+          <span class="text-default line-clamp-2 text-sm break-words whitespace-pre-line"
+            >{quote.text}</span
+          >
+        {/if}
         {#if quote.fileId && !quotedFile}<span class="text-secondary block text-xs"
             >{m.table_reference_unavailable()}</span
           >{/if}
@@ -666,9 +658,12 @@
     </div>
   {/if}
 
-  <PromptInput.Footer>
+  <PromptInput.Footer class="flex-wrap gap-1 px-1.5 @[36rem]/composer:gap-2 @[36rem]/composer:px-2">
     <PromptInput.Tools
-      class={chat.askQuestion.isLoading ? "pointer-events-none opacity-40" : undefined}
+      class={[
+        "shrink-0 gap-0.5 @[36rem]/composer:gap-1",
+        chat.askQuestion.isLoading && "pointer-events-none opacity-40"
+      ]}
     >
       <AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
       {#if shouldShowMentionButton}
@@ -698,13 +693,15 @@
     </PromptInput.Tools>
 
     <!-- Right cluster: model + send/stop -->
-    <div class="flex items-center gap-2">
+    <div
+      class="flex min-w-[7rem] flex-1 items-center justify-end gap-0.5 @[26rem]/composer:min-w-0 @[36rem]/composer:gap-2"
+    >
       {#if showModelSelect}
         <ChatModelSelect />
         <ChatReasoningSelect />
       {/if}
 
-      <PromptInput.Submit disabled={isAskingDisabled} name="ask" />
+      <PromptInput.Submit class="shrink-0" disabled={isAskingDisabled} name="ask" />
     </div>
   </PromptInput.Footer>
 </PromptInput.Root>

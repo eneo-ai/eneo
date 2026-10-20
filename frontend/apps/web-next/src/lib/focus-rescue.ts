@@ -37,11 +37,14 @@ export function isFocusLost(): boolean {
 /**
  * Moves focus to `target` (a list heading or panel with tabIndex -1) once the
  * list re-rendered, and again after a closing dialog has handed focus back;
- * it only acts when focus was actually lost.
+ * it only acts when focus was actually lost. A function is asked at each check,
+ * for a target the re-render brings.
  */
-export function rescueFocus(target: HTMLElement | null) {
+export function rescueFocus(target: HTMLElement | null | (() => HTMLElement | null)) {
   const check = () => {
-    if (isFocusLost()) target?.focus();
+    const element = typeof target === "function" ? target() : target;
+    // Navigation or unmount may remove the target before either callback runs.
+    if (element?.isConnected && isFocusLost()) element.focus();
   };
   requestAnimationFrame(check);
   window.setTimeout(check, 500);

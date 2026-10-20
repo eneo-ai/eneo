@@ -52,3 +52,36 @@ condition = "AND"
 paths = ['''^backend/tests/integration/test_model_provider_outbound_headers\.py$''']
 regexTarget = "secret"
 regexes = ['''^sk-test-12345678$''']
+
+[[rules.allowlists]]
+description = "Keyword-argument pair in SharePoint sync tests that the generic rule reads as a token"
+condition = "AND"
+paths = [
+  '''^backend/tests/unittests/integration/test_sharepoint_content_service\.py$''',
+  '''^backend/tests/unittests/integration/infrastructure/content_service/test_sharepoint_(?:content_service|index|reconciliation)\.py$''',
+  '''^backend/tests/unittests/integration/test_sharepoint_sync_ledger\.py$''',
+  '''^backend/tests/unittests/integration/test_sharepoint_failed_items\.py$''',
+]
+regexTarget = "secret"
+regexes = ['''^integration_knowledge_id=(?:ik\.id|knowledge_id)$''']
+
+[[rules.allowlists]]
+description = "Fake pre-authenticated download token the error-text tests must redact"
+condition = "AND"
+paths = ['''^backend/tests/unittests/observability/test_error_text\.py$''']
+regexTarget = "secret"
+regexes = ['''^v1\.eyJhdWQiOiJ4In0\.c2lnbmF0dXJl$''']
+
+[[rules.allowlists]]
+description = "The same fake download token in the SharePoint sync, job and route tests that assert it never reaches users"
+condition = "AND"
+paths = [
+  '''^backend/tests/unittests/integration/application/test_sync_log_access\.py$''',
+  '''^backend/tests/unittests/integration/test_integration_public_models\.py$''',
+  '''^backend/tests/unittests/integration/test_integration_task\.py$''',
+  '''^backend/tests/unittests/integration/test_sharepoint_content_client\.py$''',
+  '''^backend/tests/unittests/jobs/test_job_failure_codes\.py$''',
+  '''^backend/tests/unittests/spaces/api/test_integration_documents_routes\.py$''',
+]
+regexTarget = "secret"
+regexes = ['''^v1\.eyJ(?:hdWQiOiJ4In0|zaWduZWQiOiJ0b2tlbiJ9)\.c2ln(?:bmF0dXJl)?$''']

@@ -30,6 +30,8 @@
     trigger?: Snippet<[{ props: Record<string, unknown> }]>;
     /** Extra content between the description and the buttons. */
     children?: Snippet;
+    /** Where focus goes on close; `preventDefault()` keeps it from returning to the opener. */
+    onCloseAutoFocus?: (event: Event) => void;
   };
 
   let {
@@ -46,7 +48,8 @@
     confirmDisabled = false,
     onConfirm,
     trigger,
-    children
+    children,
+    onCloseAutoFocus
   }: Props = $props();
 
   let pending = $state(false);
@@ -92,7 +95,7 @@
     </AlertDialog.Trigger>
   {/if}
 
-  <AlertDialog.Content class={dialogLayout.content(width)}>
+  <AlertDialog.Content class={dialogLayout.content(width)} {onCloseAutoFocus}>
     <AlertDialog.Header class={dialogLayout.header}>
       <AlertDialog.Title>{title}</AlertDialog.Title>
       {#if typeof description === "string"}

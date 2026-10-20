@@ -12,9 +12,18 @@ const FILE_PATH = /^\/api\/v1\/files\/([0-9a-f-]{36})\/original\/download\/?$/;
 // Eneo's signed link to a document template of the organisation's library.
 const TEMPLATE_PATH = /^\/api\/v1\/document-templates\/[0-9a-f-]{36}\/original\/download\/?$/;
 
-/** A file the model names by its signed Eneo URL and filename, both passed unchanged. */
-function referenceTo(extensions: readonly string[]) {
-  const list = extensions.map((extension) => `.${extension}`).join(" and ");
+const extensionList = (extensions: readonly string[]) =>
+  extensions.map((extension) => `.${extension}`).join(" and ");
+
+/**
+ * A file the model names by its signed Eneo URL and filename, both passed unchanged. The
+ * schema holds the filename to the given extensions, unless `checkedInTool`: then any
+ * filename passes and the tool refuses another kind itself, with advice on where to read it,
+ * instead of an invalid-arguments error that asks for the same call again.
+ */
+function referenceTo(extensions: readonly string[], checkedInTool = false) {
+  const list = extensionList(extensions);
+  const accepted = checkedInTool ? "[A-Za-z0-9]+" : extensions.join("|");
   return z
     .object({
       url: z
@@ -26,15 +35,35 @@ function referenceTo(extensions: readonly string[]) {
         .string()
         .max(200)
         .regex(
-          new RegExp(`^[^\\x00-\\x1f/\\\\]+\\.(${extensions.join("|")})$`, "i"),
+          new RegExp(`^[^\\x00-\\x1f/\\\\]+\\.(${accepted})$`, "i"),
           `Only ${list} files are supported`,
         )
         .describe(`The file's name, ending in ${list}.`),
     })
     .strict();
 }
+export const TABULAR_EXTENSIONS = ["csv", "tsv", "xlsx"] as const;
 /** A table source: CSV or XLSX. */
-export const fileReference = referenceTo(["csv", "tsv", "xlsx"]);
+export const fileReference = referenceTo(TABULAR_EXTENSIONS);
+/**
+ * A table source as the table tools take it: the tools are the first the model reaches for
+ * to read an attached file, so a file of another kind is refused with the way to read it.
+ */
+export const tabularReference = referenceTo(TABULAR_EXTENSIONS, true);
+
+/** Refuses a file whose name does not end in one of `extensions`, naming the tools that would read it. */
+export function requireExtension(
+  ref: FileReference,
+  extensions: readonly string[],
+  tools: string,
+): void {
+  const extension = ref.filename.split(".").pop()!.toLowerCase();
+  if (extensions.includes(extension)) return;
+  throw new ToolError(
+    "UNSUPPORTED_FILE",
+    `${tools} read ${extensionList(extensions)} files only, not a .${extension} file. Do not call them again with this file: read it with the file reading tool, or pass a CSV or Excel file.`,
+  );
+}
 /** Raster images embedded in documents; bytes are validated in the sandbox. */
 export const imageReference = referenceTo(["png", "jpg", "jpeg"]);
 /** A Word document used as a template. */

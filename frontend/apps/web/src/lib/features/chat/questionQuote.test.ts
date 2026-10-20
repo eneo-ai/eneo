@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { composeQuotedQuestion, parseQuotedQuestion, quotedFileMatches } from "./questionQuote";
+import {
+  composeQuotedQuestion,
+  parseQuotedQuestion,
+  quotedFileMatches,
+  tableQuoteSummary
+} from "./questionQuote";
 
 describe("question quotes", () => {
   const quote = {
@@ -103,4 +108,12 @@ it("preserves a selected-row filter without pasting preview values", () => {
     quote,
     text: "Compare these"
   });
+});
+
+it("sums up a table quote as its columns and row count", () => {
+  expect(tableQuoteSummary("| Fas | Innehåll |\n| --- | --- |\n| A | b |\n| C | d |")).toEqual({
+    columns: ["Fas", "Innehåll"],
+    rows: 2
+  });
+  expect(tableQuoteSummary("Bara text")).toBeNull();
 });

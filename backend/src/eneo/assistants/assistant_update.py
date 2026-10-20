@@ -25,6 +25,7 @@ class AssistantUpdate:
     data_retention_days: int | None | NotProvided = NOT_PROVIDED
     metadata_json: dict[str, object] | None | NotProvided = NOT_PROVIDED
     icon_id: UUID | None | NotProvided = NOT_PROVIDED
+    rerank_model_id: UUID | None | NotProvided = NOT_PROVIDED
     prompt: Prompt | None = None
     document_template: DocumentTemplateChoice | None = None
     collection_ids: list[UUID] | None = None
@@ -50,6 +51,7 @@ class AssistantUpdate:
                 "data_retention_days": self.data_retention_days,
                 "metadata_json": self.metadata_json,
                 "icon_id": self.icon_id,
+                "rerank_model_id": self.rerank_model_id,
             }.items()
             if is_provided(value)
         }

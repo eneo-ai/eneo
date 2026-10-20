@@ -12,11 +12,12 @@
     CompletionModel,
     EmbeddingModel,
     ImageModel,
+    RerankModel,
     TranscriptionModel
   } from "@eneo/eneo-js";
   import { m } from "$lib/paraglide/messages";
 
-  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
 
   export let model: AnyModel;
 
