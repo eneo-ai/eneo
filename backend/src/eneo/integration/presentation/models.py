@@ -1,6 +1,5 @@
 from collections.abc import Mapping
 from datetime import datetime
-from enum import Enum
 from typing import (
     Any,
     Dict,
@@ -30,11 +29,8 @@ from eneo.ai_models.embedding_models.embedding_model import (
 )
 from eneo.info_blobs.info_blob import SourceMetadataEntry
 from eneo.integration.domain.entities.sync_log import SyncLog as SyncLogEntity
-from eneo.integration.domain.skip_reasons import (
-    SkipReasonCode,
-    visible_skip_params,
-    with_code,
-)
+from eneo.integration.domain.skip_reasons import SkipReasonCode, visible_skip
+from eneo.integration.domain.sync_progress import IntegrationSyncProgress
 
 # Re-exported: jobs queued before the task parameters moved to the domain are
 # pickled under this module's name.
@@ -51,7 +47,6 @@ from eneo.integration.domain.value_objects import (
 )
 from eneo.integration.presentation.validation import https_url_or_none
 from eneo.jobs.job_models import Task
-from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.models import ResourcePermission
 from eneo.observability.error_text import user_visible_error
 
@@ -71,35 +66,6 @@ def _empty_resource_permissions() -> list[ResourcePermission]:
 # SQL, host names or files from outside the imported item.
 def _visible_error(value: Optional[str]) -> Optional[str]:
     return None if value is None else user_visible_error(value)
-
-
-# Skips of delta items never placed in the item's scope: older syncs named
-# their file, which may lie anywhere in the drive. "Could not remove:" is what
-# releases before 2.2 wrote for deleted items, which were never placed either.
-_UNPLACED_SKIP_REASONS = (
-    "Folder scope path unavailable",
-    "Missing item id",
-    "Could not remove out-of-scope",
-    "Could not remove removed:",
-    "Could not remove:",
-)
-
-
-def _visible_skip(detail: Mapping[str, Any]) -> SkippedDetail:
-    """The detail as served: coded, its text cleaned, unplaced items unnamed."""
-    stored = detail.get("reason")
-    cleaned = user_visible_error(stored) if isinstance(stored, str) else ""
-    coded = with_code({**detail, "reason": cleaned})
-    reason = coded["reason"]
-    visible: SkippedDetail = {
-        "file": "" if reason.startswith(_UNPLACED_SKIP_REASONS) else coded["file"],
-        "reason": reason,
-        "code": coded.get("code", "error"),
-        "params": visible_skip_params(coded.get("params", {})),
-    }
-    if coded.get("retry"):
-        visible["retry"] = True
-    return visible
 
 
 def _visible_summary(summary: Dict[str, Any]) -> Dict[str, Any]:
@@ -122,7 +88,7 @@ def _visible_detail(detail: object) -> object:
     entry = cast(Dict[str, object], detail)
     # A sync names an item Graph returned without a name as a null file; a
     # detail without a readable reason keeps its shape and loses the reason.
-    return {**entry, **_visible_skip(entry)}
+    return {**entry, **visible_skip(entry)}
 
 
 _SYNC_METADATA_HINTS = get_type_hints(SyncMetadata)
@@ -205,11 +171,6 @@ class TenantIntegrationList(BaseListModel[TenantIntegration]):
     pass
 
 
-class TenantIntegrationFilter(Enum):
-    DEFAULT = "all"
-    TENANT_ONLY = "tenant_only"
-
-
 class UserIntegration(Integration):
     id: UUID = Field(default_factory=uuid4)
     tenant_integration_id: UUID
@@ -239,10 +200,6 @@ class AuthCallbackParams(BaseModel):
     tenant_integration_id: UUID
     # The issued state is token_urlsafe(32), 43 characters.
     state: str = Field(max_length=256)
-
-
-class ConfluenceContentProcessParam(ResourceTaskParams):
-    results: list[dict[str, Any]]
 
 
 class IntegrationPreviewData(BaseModel):
@@ -553,7 +510,7 @@ class IntegrationSkippedDocument(BaseModel):
         if not isinstance(value, Mapping):
             return value
         entry = cast(Mapping[str, Any], value)
-        return {**entry, **_visible_skip(entry)}
+        return {**entry, **visible_skip(entry)}
 
 
 class IntegrationSkippedDocuments(BaseModel):
@@ -565,79 +522,6 @@ class IntegrationSkippedDocuments(BaseModel):
     synced_at: Optional[datetime] = Field(
         default=None,
         description="When the sync the list comes from finished or started",
-    )
-
-
-class IntegrationSyncProgressFile(BaseModel):
-    """A file or page a running sync has finished with."""
-
-    name: str
-    outcome: Literal["indexed", "unchanged", "skipped"]
-    reason: Optional[str] = Field(
-        default=None, description="Why a skipped file was skipped, when known"
-    )
-    code: Optional[SkipReasonCode] = Field(
-        default=None, description="The skip reason's code, when known"
-    )
-    params: dict[str, str | int] = Field(default_factory=dict)
-    retry: bool = Field(default=False, description="The next sync tries the file again")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _user_visible(cls, value: object) -> object:
-        if not isinstance(value, Mapping):
-            return value
-        entry = cast(Mapping[str, Any], value)
-        if not isinstance(entry.get("reason"), str):
-            return entry
-        visible = _visible_skip({**entry, "file": str(entry.get("name", ""))})
-        return {
-            **entry,
-            "reason": visible["reason"],
-            "code": visible.get("code"),
-            "params": visible.get("params", {}),
-            "retry": bool(visible.get("retry")),
-        }
-
-
-def _no_finished_files() -> list[IntegrationSyncProgressFile]:
-    return []
-
-
-class IntegrationSyncProgress(BaseModel):
-    """Live progress of a SharePoint sync that is running now.
-
-    `total` counts the files and site pages the sync has listed so far. A full
-    sync lists each folder when it reaches it, so `total` is null until the
-    first listing returns and then grows as subfolders are found; it never
-    drops below `done`. A delta sync cannot cheaply tell which of its changes
-    are files in scope, so its `total` stays null.
-    """
-
-    integration_knowledge_id: UUID
-    sync_type: Literal["full", "delta"]
-    phase: Literal["discovering", "processing", "finishing"] = Field(
-        description="discovering: resolving scope and listing changes before "
-        "files are handled; processing: handling files; finishing: orphan "
-        "cleanup, delta token and summary"
-    )
-    started_at: datetime
-    updated_at: datetime = Field(description="When this progress was last written")
-    total: Optional[int] = Field(
-        description="Files and pages listed so far; null while unknown"
-    )
-    done: int = Field(description="Files finished: indexed + unchanged + skipped")
-    indexed: int = Field(description="Files and pages embedded in this sync")
-    unchanged: int
-    skipped: int
-    deleted: int = Field(description="Local documents removed in this sync")
-    current: Optional[str] = Field(
-        default=None,
-        description="Name of the file or page being handled now; never a folder",
-    )
-    recent: list[IntegrationSyncProgressFile] = Field(
-        default_factory=_no_finished_files,
-        description="Files and pages finished most recently, newest first, at most 8",
     )
 
 

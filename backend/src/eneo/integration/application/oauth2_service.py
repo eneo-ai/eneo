@@ -5,6 +5,7 @@ import httpx
 
 from eneo.integration.domain.entities.oauth_token import OauthToken
 from eneo.integration.domain.entities.user_integration import UserIntegration
+from eneo.integration.domain.value_objects import IntegrationType
 from eneo.integration.infrastructure.auth_service.base_auth_service import (
     TokenResponse,
     token_exchange_rejection,
@@ -13,7 +14,6 @@ from eneo.integration.infrastructure.auth_service.org_token_provider import (
     loggable_token_reason,
 )
 from eneo.integration.infrastructure.oauth_state_store import OauthStateStore
-from eneo.integration.presentation.models import IntegrationType
 from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger

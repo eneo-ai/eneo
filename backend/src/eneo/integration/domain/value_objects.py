@@ -27,6 +27,11 @@ class IntegrationType(str, Enum):
         return self == IntegrationType.Sharepoint
 
 
+class TenantIntegrationFilter(Enum):
+    DEFAULT = "all"
+    TENANT_ONLY = "tenant_only"
+
+
 class OAuthResource(TypedDict, total=False):
     id: str
     url: str
