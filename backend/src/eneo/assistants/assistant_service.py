@@ -267,24 +267,24 @@ class _PreparedAssistantTurn:
     persisted authorization grant nor safe to reuse in a later request.
     """
 
-    active_assistant: "Assistant"
-    assistant_to_ask: "Assistant"
+    active_assistant: Assistant
+    assistant_to_ask: Assistant
     space: "Space"
-    files: "list[File]"
-    cleaned_question: "str"
+    files: list["File"]
+    cleaned_question: str
     effective_completion_model: "CompletionModel"
     completion_model_override: "CompletionModel | None"
-    model_kwargs_override: "ModelKwargs | None"
-    mcp_servers_override: "list[MCPServer]"
-    capability_mcp_servers: "list[MCPServer]"
-    prompt_override: "str | None"
-    skill_plan: "SkillTurnPlan"
+    model_kwargs_override: ModelKwargs | None
+    mcp_servers_override: list["MCPServer"]
+    capability_mcp_servers: list["MCPServer"]
+    prompt_override: str | None
+    skill_plan: SkillTurnPlan
     skill_runtime: "SkillActivationRuntime"
-    skill_composition: "SkillComposition"
-    skill_activation: "SkillActivationEvidenceV1"
-    model_route: "str"
-    initial_skill_context_tokens: "int"
-    is_personal_default: "bool"
+    skill_composition: SkillComposition
+    skill_activation: SkillActivationEvidenceV1
+    model_route: str
+    initial_skill_context_tokens: int
+    is_personal_default: bool
 
 
 @dataclass(frozen=True)
@@ -3454,18 +3454,8 @@ class AssistantService:
         require_tool_approval: bool,
     ) -> tuple["CompletionModelResponse", "DatastoreResult"]:
         """Run the existing assistant engine; the caller owns response persistence."""
-        assistant_to_ask = prepared.assistant_to_ask
-        space = prepared.space
-        files = prepared.files
-        cleaned_question = prepared.cleaned_question
-        effective_completion_model = prepared.effective_completion_model
-        completion_model_override = prepared.completion_model_override
-        model_kwargs_override = prepared.model_kwargs_override
         mcp_servers_override = prepared.mcp_servers_override
         capability_mcp_servers = prepared.capability_mcp_servers
-        prompt_override = prepared.prompt_override
-        skill_runtime = prepared.skill_runtime
-        is_personal_default = prepared.is_personal_default
 
         # Internal (loopback) MCP servers are scoped by one short-lived token
         # per completion, minted only when some server actually attaches.
@@ -3482,7 +3472,7 @@ class AssistantService:
             if scoped_token is None:
                 scoped_token = self.auth_service.create_scoped_mcp_token(
                     self.user,
-                    assistant_id=assistant_to_ask.id,
+                    assistant_id=prepared.assistant_to_ask.id,
                     table_tools=table_tools_attached,
                 )
             return scoped_token
@@ -3494,18 +3484,18 @@ class AssistantService:
         ]
         # Persistent attachments marked "open with tool" are URL-only, so the
         # files server must attach for them exactly as for URL-only uploads.
-        url_only_attachment_ids = assistant_to_ask.url_only_attachment_ids(
-            effective_completion_model
+        url_only_attachment_ids = prepared.assistant_to_ask.url_only_attachment_ids(
+            prepared.effective_completion_model
         )
         url_only_attachments = [
             file
-            for file in assistant_to_ask.attachments
+            for file in prepared.assistant_to_ask.attachments
             if file.id in url_only_attachment_ids
         ]
-        referenceable_files = [*files, *history_files, *url_only_attachments]
+        referenceable_files = [*prepared.files, *history_files, *url_only_attachments]
         internal_mcp = resolve_internal_mcp_availability(
-            assistant=assistant_to_ask,
-            completion_model=effective_completion_model,
+            assistant=prepared.assistant_to_ask,
+            completion_model=prepared.effective_completion_model,
             conversation_files=referenceable_files,
         )
 
@@ -3518,7 +3508,7 @@ class AssistantService:
             knowledge_mcp_server = await build_knowledge_mcp_server(
                 token=mint_scoped_token(),
                 tenant_id=self.user.tenant_id,
-                source_labels=assistant_to_ask.knowledge_source_labels(),
+                source_labels=prepared.assistant_to_ask.knowledge_source_labels(),
             )
 
         # Referenced attachments: whenever signed reference URLs render in the
@@ -3546,7 +3536,7 @@ class AssistantService:
             logger.info(
                 "[FILES] assistant=%s files tool attached "
                 "(%d referenced attachments, %d url-only)",
-                assistant_to_ask.id,
+                prepared.assistant_to_ask.id,
                 len(internal_mcp.referenced_file_ids),
                 len(internal_mcp.url_only_file_ids),
             )
@@ -3554,17 +3544,17 @@ class AssistantService:
             "[RAG] assistant=%s knowledge_mode=%s "
             "collections=%d websites=%d integrations=%d "
             "model_supports_tools=%s -> %s",
-            assistant_to_ask.id,
-            assistant_to_ask.knowledge_mode.value,
-            len(assistant_to_ask.collections),
-            len(assistant_to_ask.websites),
-            len(assistant_to_ask.integration_knowledge_list),
-            effective_completion_model.supports_tool_calling,
+            prepared.assistant_to_ask.id,
+            prepared.assistant_to_ask.knowledge_mode.value,
+            len(prepared.assistant_to_ask.collections),
+            len(prepared.assistant_to_ask.websites),
+            len(prepared.assistant_to_ask.integration_knowledge_list),
+            prepared.effective_completion_model.supports_tool_calling,
             "knowledge tool attached"
             if knowledge_mcp_server is not None
             else (
                 "legacy inject retrieval"
-                if assistant_to_ask.has_knowledge()
+                if prepared.assistant_to_ask.has_knowledge()
                 else "no knowledge"
             ),
         )
@@ -3596,22 +3586,22 @@ class AssistantService:
             document_template = await resolve_document_template(
                 db_session,
                 tenant_id=self.user.tenant_id,
-                assistant_id=assistant_to_ask.id,
-                choice=assistant_to_ask.document_template,
+                assistant_id=prepared.assistant_to_ask.id,
+                choice=prepared.assistant_to_ask.document_template,
             )
 
         # The assistant's reranker, checked against the space at ask time. The
         # personal assistant is governed and has no choice yet (#1035, B4).
         rerank = None
-        if self.rerank_service is not None and not is_personal_default:
+        if self.rerank_service is not None and not prepared.is_personal_default:
             rerank = await self.rerank_service.spec_for_model(
-                assistant_to_ask.rerank_model_id,
-                query=cleaned_question,
-                security_classification=space.security_classification,
+                prepared.assistant_to_ask.rerank_model_id,
+                query=prepared.cleaned_question,
+                security_classification=prepared.space.security_classification,
             )
 
-        response, datastore_result = await assistant_to_ask.ask(
-            question=cleaned_question,
+        response, datastore_result = await prepared.assistant_to_ask.ask(
+            question=prepared.cleaned_question,
             completion_service=self.completion_service,
             references_service=self.references_service,
             rerank=rerank,
@@ -3622,12 +3612,12 @@ class AssistantService:
             capability_mcp_servers=capability_mcp_servers,
             document_template=document_template,
             require_tool_approval=require_tool_approval,
-            completion_model_override=completion_model_override,
-            model_kwargs_override=model_kwargs_override,
+            completion_model_override=prepared.completion_model_override,
+            model_kwargs_override=prepared.model_kwargs_override,
             mcp_servers_override=mcp_servers_override,
-            prompt_override=prompt_override,
+            prompt_override=prepared.prompt_override,
             completion_prompt_files=completion_file_inputs.completion_prompt_files,
-            skill_runtime=skill_runtime,
+            skill_runtime=prepared.skill_runtime,
             knowledge_mcp_server=knowledge_mcp_server,
             internal_mcp_servers=(
                 [files_mcp_server] if files_mcp_server is not None else []
@@ -3751,6 +3741,8 @@ class AssistantService:
             )
         assert question_id is not None
 
+        # Tool/loopback setup inside _execute_turn fails here too; before the
+        # model call the Skill snapshot is unchanged, so only the re-raise applies.
         try:
             response, datastore_result = await self._execute_turn(
                 prepared,

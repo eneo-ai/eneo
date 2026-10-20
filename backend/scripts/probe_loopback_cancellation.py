@@ -68,6 +68,13 @@ async def main() -> None:
                             "params": {"requestId": 1, "reason": "parent stopped"},
                         },
                     )
+                    # A delivered cancellation reaches the tool only at its next
+                    # checkpoint, so give it a bounded chance before releasing.
+                    try:
+                        async with asyncio.timeout(0.5):
+                            await stopped.wait()
+                    except TimeoutError:
+                        pass
                     still_running = not stopped.is_set()
                     release.set()
                     answer = await call

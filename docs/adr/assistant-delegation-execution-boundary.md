@@ -71,8 +71,9 @@ The SDK's [stateless request handler at v1.30.0](https://github.com/modelcontext
 creates a new server/transport for every request, including notifications.
 `backend/scripts/probe_loopback_cancellation.py` reproduces the consequence with
 two concurrent in-memory HTTP requests: start a tool, send
-`notifications/cancelled` for its request ID, then observe whether the active
-tool stopped. It releases and joins all work before exiting. The probe measures
+`notifications/cancelled` for its request ID, wait up to 0.5 s for the tool to
+stop, then observe whether it did. It releases and joins all work before
+exiting. The probe measures
 protocol notification behavior, not TCP disconnect behavior or production
 load-balancer cancellation.
 
@@ -84,12 +85,11 @@ an isolated 1.30.0 environment without modifying that shared environment.
 Neither result establishes a safe cancellation contract for nested assistant
 runs over the existing stateless endpoint.
 
-Run with the MCP version pinned in `backend/uv.lock`:
+Run from `backend` in the project environment, which uses the MCP version
+pinned in `backend/uv.lock`:
 
 ```sh
-python3 /Users/maxeriksson/.codex/scripts/run-guarded.py --seconds 120 -- \
-  uv run --isolated --no-project --with mcp==1.30.0 \
-  backend/scripts/probe_loopback_cancellation.py
+uv run --no-sync python scripts/probe_loopback_cancellation.py
 ```
 
 ## Security and lifecycle requirements for the next slice
@@ -128,7 +128,9 @@ The first code change stays in `AssistantService`:
    classification and tool opt-outs before creating conversation records.
 2. `_execute_turn` attaches the existing tools and calls `Assistant.ask`.
 3. `ask` retains ordinary session creation, placeholders, response persistence,
-   streaming and failure-state ownership.
+   streaming and failure-state ownership. Its failure handler now also sees
+   tool/loopback setup errors raised inside `_execute_turn`; before the model
+   call the Skill snapshot is unchanged, so that handler only re-raises them.
 
 The typed request-local prepared value connects those phases. Code is moved
 within its canonical owner; policy/configuration resolution is not copied.
@@ -151,8 +153,7 @@ or the full #1151 delegation proof.
 From `backend`, with an existing synchronized environment:
 
 ```sh
-python3 /Users/maxeriksson/.codex/scripts/run-guarded.py --seconds 120 -- \
-  uv run --no-sync pytest -q \
+uv run --no-sync pytest -q \
   tests/unit/assistants/test_assistant_turn_preparation.py \
   tests/unit/assistants/test_assistant_service_attachment_references.py \
   tests/unit/assistants/test_assistant_service_builtin_providers.py \
