@@ -42,13 +42,13 @@ from psycopg2.extras import (
     execute_values,  # pyright: ignore[reportUnknownVariableType]  # psycopg2 stubs incomplete
 )
 
+from eneo.integration.domain.sync_progress import (
+    IntegrationSyncProgress,
+    IntegrationSyncProgressFile,
+)
 from eneo.integration.infrastructure.sharepoint_sync_progress import (
     SYNC_PROGRESS_TTL_SECONDS,
     sync_progress_key,
-)
-from eneo.integration.presentation.models import (
-    IntegrationSyncProgress,
-    IntegrationSyncProgressFile,
 )
 from eneo.main.config import Settings, get_settings
 from eneo.redis.connection import build_redis_auth_kwargs, build_redis_url
