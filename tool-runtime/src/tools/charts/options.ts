@@ -540,10 +540,11 @@ export function imageOptions(
     });
   }
 
-  // Long category names are tilted rather than dropped.
+  // Long category names are tilted rather than dropped. Dates stay upright: among many days,
+  // the ones that would collide give way and the rest still read as a time axis.
   const slot = (width - 2 * edge - 60 * scale) / Math.max(1, groups);
   const widest = Math.max(0, ...spec.labels.map((name) => textWidth(clean(name), text)));
-  const tilted = spec.type !== "scatter" && groups > 1 && widest > slot - 6 * scale;
+  const tilted = !spec.dates && spec.type !== "scatter" && groups > 1 && widest > slot - 6 * scale;
   const { xAxis, yAxis } = axes(spec, style, format);
   return {
     ...common(style),

@@ -17,6 +17,20 @@ export type ForecastSeries = {
 
 const DAY_MS = 86_400_000;
 
+/** The days before the forecast a reader sees first: eight weeks, or twice a longer horizon. */
+export function openingDays(horizon: number): number {
+  return Math.max(56, 2 * horizon);
+}
+
+/** The forecast with only the history the view opens on, as a picture of it shows. */
+export function focused<T extends ForecastSeries>(data: T): T {
+  const values = data.recent.values;
+  const drop = values.length - openingDays(data.forecast.days);
+  if (drop <= 0) return data;
+  const from = new Date(Date.parse(`${data.recent.from}T00:00:00Z`) + drop * DAY_MS).toISOString().slice(0, 10);
+  return { ...data, recent: { from, values: values.slice(drop) } };
+}
+
 /**
  * The recent history, then the median and its interval. Both start at the last observed day,
  * so the forecast continues the line; after a day without a value they start on their own.

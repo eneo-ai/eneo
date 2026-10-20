@@ -71,6 +71,16 @@ describe("intervals around a line", () => {
     expect(option.aria.label?.description).toBe("Linjediagram: historik och prognos.");
   });
 
+  test("keep an image's many dates upright, letting the ones that collide give way", () => {
+    const labels = Array.from({ length: 120 }, (_, i) => new Date(Date.UTC(2026, 5, 1 + i)).toISOString().slice(0, 10));
+    const values = labels.map((_, i) => 1000 + i);
+    const long: PlotSpec = { ...plot, labels, series: [{ name: "Historik", values }], bands: [], markers: [] };
+    const svg = renderSvg(long, { width: 1200, height: 675, locale: "sv-SE" });
+    // Tilted labels are drawn turned by 35 degrees.
+    expect(svg).not.toMatch(/transform="matrix\(0\.819,-0\.574/);
+    expect(svg).toContain("1 juni");
+  });
+
   test("name the interval in an image's legend and draw it", () => {
     const svg = renderSvg(plot, { width: 1200, height: 675, locale: "sv-SE" });
     expect(svg).toContain("Spann (P10–P90)");

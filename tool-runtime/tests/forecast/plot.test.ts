@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { PLOT_TEXTS, forecastPlot } from "../../src/tools/forecast/plot";
+import { PLOT_TEXTS, focused, forecastPlot } from "../../src/tools/forecast/plot";
 
 const data = {
   recent: { from: "2026-10-17", values: [1800, null, 1850] },
@@ -21,6 +21,18 @@ describe("a forecast's chart", () => {
       bands: [{ name: "Spann (P10–P90)", series: 1, lower: [null, null, 1850, 1600, 1550], upper: [null, null, 1850, 2100, 2080] }],
       markers: [{ at: 3, label: "Prognos" }],
     });
+  });
+
+  test("shows the days ahead with the weeks before them, as the view opens", () => {
+    const long = {
+      recent: { from: "2026-04-01", values: Array.from({ length: 180 }, (_, i) => 1000 + i) },
+      forecast: { ...data.forecast, from: "2026-09-28" },
+    };
+    // 56 days before a short forecast, twice the horizon before a long one.
+    expect(focused(long).recent).toEqual({ from: "2026-08-03", values: long.recent.values.slice(-56) });
+    const far = { ...long, forecast: { ...long.forecast, days: 40 } };
+    expect(focused(far).recent.values).toHaveLength(80);
+    expect(focused(data)).toEqual(data);
   });
 
   test("leaves a gap rather than joining the forecast to a day without a value", () => {

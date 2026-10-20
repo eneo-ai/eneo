@@ -9,7 +9,7 @@ import type {
   ForecastResult,
   Interval,
 } from "./ports";
-import { PLOT_TEXTS, forecastPlot } from "./plot";
+import { PLOT_TEXTS, focused, forecastPlot } from "./plot";
 import { DAY_MS, dailySeries, isoDay } from "./series";
 
 export async function executeForecast(
@@ -88,10 +88,10 @@ export async function executeForecast(
     parameters: prediction.parameters,
   };
   if (!job.image) return result;
-  // The same chart as the view, from the unrounded figures; the renderer loads only here.
+  // The chart the view opens on, from the unrounded figures; the renderer loads only here.
   const { renderChart } = await import("../charts/engine/render");
   const { image } = job;
-  const drawn = renderChart(forecastPlot(result, PLOT_TEXTS[image.language], image.title), image.chart);
+  const drawn = renderChart(forecastPlot(focused(result), PLOT_TEXTS[image.language], image.title), image.chart);
   return { ...result, image: { png_base64: drawn.png_base64, width: drawn.width, height: drawn.height } };
 }
 
