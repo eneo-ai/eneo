@@ -5,6 +5,7 @@
     CompletionModel,
     EmbeddingModel,
     ImageModel,
+    RerankModel,
     TranscriptionModel
   } from "@eneo/eneo-js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -16,8 +17,9 @@
   import { TriangleAlert, Clock } from "@lucide/svelte";
   import { getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
 
-  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
+  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
+  type ModelTypeKey =
+    "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
 
   export let model: AnyModel;
   export let type: ModelTypeKey;
