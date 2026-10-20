@@ -1,10 +1,11 @@
 <script lang="ts">
   import type { CrawlRun, CrawlResourceFailure, Eneo } from "@eneo/eneo-js";
   import { untrack } from "svelte";
-  import { RefreshCw, TriangleAlert } from "@lucide/svelte";
-  import SourceProblemGroup from "./components/SourceProblemGroup.svelte";
+  import { RefreshCw } from "@lucide/svelte";
   import { cn } from "$lib/utils";
+  import CrawlFailureList from "./CrawlFailureList.svelte";
   import CrawlLoadError from "./CrawlLoadError.svelte";
+  import CrawlProblemGroups from "./CrawlProblemGroups.svelte";
   import CrawlRunCounts from "./CrawlRunCounts.svelte";
   import CrawlRunStatus from "./CrawlRunStatus.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -57,12 +58,7 @@
   ]);
   const displayedRun = $derived(loadedRun ?? run);
   const summary = $derived(Object.entries(displayedRun.failure_summary ?? {}));
-  const reasons = $derived([
-    ...new Set([
-      ...(kind ? [] : summary.map(([reason]) => reason)),
-      ...failures.map((failure) => failure.reason)
-    ])
-  ]);
+  const hasProblemGroups = $derived(failures.length > 0 || (!kind && summary.length > 0));
 
   async function loadFailures(cursor: string | null = null) {
     const request = ++generation;
@@ -103,6 +99,14 @@
         // onrunupdate passes this exact proxy back through run. Keep its identity:
         // cloning it would turn snapshot adoption into another fetch/adopt cycle.
         if (currentRun === loadedRun) return;
+        // Polling hands over fresh copies of the run every few seconds. A finished
+        // crawl's failures do not change, so a copy of the run already shown, or
+        // still being fetched, needs no fetch of its own.
+        const sameFinishedRun =
+          viewedRunId === currentRun.id &&
+          viewedInitialKind === currentInitialKind &&
+          !isActiveCrawlRun(currentRun);
+        if (sameFinishedRun && (loading || (loadedRun && !isActiveCrawlRun(loadedRun)))) return;
         loadedRun = null;
         if (viewedRunId !== currentRun.id || viewedInitialKind !== currentInitialKind) {
           kind = currentInitialKind;
@@ -132,15 +136,6 @@
     nextCursor = null;
     loadFailed = false;
     void loadFailures();
-  }
-
-  function resourceLink(url: string): string | undefined {
-    try {
-      const parsed = new URL(url);
-      return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : undefined;
-    } catch {
-      return undefined;
-    }
   }
 
   async function refresh() {
@@ -223,82 +218,16 @@
         </ul>
       </details>
     {/if}
-    {#if grouped && reasons.length > 0}
-      <div class="border-default overflow-hidden rounded-lg border">
-        {#each reasons as reason (reason)}
-          {@const matching = failures.filter((failure) => failure.reason === reason)}
-          {@const count = kind
-            ? matching.length
-            : (displayedRun.failure_summary?.[reason] ?? matching.length)}
-          <SourceProblemGroup
-            title={crawlFailureReasonLabel(reason)}
-            advice={crawlFailureReasonHelp(reason)}
-            countLabel={!kind && displayedRun.failure_summary?.[reason] !== undefined
-              ? m.website_source_problem_count({ shown: matching.length, total: count })
-              : m.website_source_problem_shown({ shown: matching.length })}
-            icon={TriangleAlert}
-            open
-          >
-            <ul class="divide-border divide-y px-4 pb-3 pl-15 text-sm">
-              {#each matching as failure (failure.id)}
-                {@const href = resourceLink(failure.url)}
-                <li class="flex flex-wrap items-baseline gap-3 py-2">
-                  <span class="text-secondary text-xs"
-                    >{failure.kind === "page" ? m.page() : m.crawl_failure_file()}</span
-                  >
-                  {#if href}
-                    <!-- eslint-disable svelte/no-navigation-without-resolve -- validated external HTTP(S) address -->
-                    <a
-                      {href}
-                      target="_blank"
-                      rel="noreferrer"
-                      class="text-accent-stronger break-all underline underline-offset-2"
-                      >{failure.url}</a
-                    >
-                    <!-- eslint-enable svelte/no-navigation-without-resolve -->
-                  {:else}<span class="break-all">{failure.url}</span>{/if}
-                </li>
-              {:else}
-                <li class="text-secondary py-2">
-                  {loading
-                    ? m.loading()
-                    : !detailsAvailable
-                      ? m.crawl_failures_unavailable()
-                      : m.website_source_problem_not_loaded()}
-                </li>
-              {/each}
-            </ul>
-          </SourceProblemGroup>
-        {/each}
-      </div>
-    {:else if failures.length > 0}
-      <ul aria-label={m.crawl_failed_addresses()} class="divide-border divide-y text-sm">
-        {#each failures as failure (failure.id)}
-          {@const href = resourceLink(failure.url)}
-          <li class="space-y-1.5 py-3">
-            <p class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-              <span class="text-secondary text-xs">
-                {failure.kind === "page" ? m.page() : m.crawl_failure_file()}
-              </span>
-              <span class="text-negative-stronger break-words">
-                {crawlFailureReasonLabel(failure.reason)}
-              </span>
-            </p>
-            {#if href}
-              <!-- eslint-disable svelte/no-navigation-without-resolve -- validated external HTTP(S) address -->
-              <a
-                {href}
-                target="_blank"
-                rel="noreferrer"
-                class="text-accent-stronger break-all underline underline-offset-2">{failure.url}</a
-              >
-              <!-- eslint-enable svelte/no-navigation-without-resolve -->
-            {:else}
-              <span class="break-all">{failure.url}</span>
-            {/if}
-          </li>
-        {/each}
-      </ul>
+    {#if grouped && hasProblemGroups}
+      <CrawlProblemGroups
+        {failures}
+        summary={displayedRun.failure_summary}
+        {kind}
+        {loading}
+        {detailsAvailable}
+      />
+    {:else if !grouped && failures.length > 0}
+      <CrawlFailureList {failures} />
     {:else if !loading && !loadFailed}
       <p class="text-secondary py-4 text-sm">
         {detailsAvailable

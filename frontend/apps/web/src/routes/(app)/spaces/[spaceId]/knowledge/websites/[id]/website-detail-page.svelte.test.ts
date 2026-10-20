@@ -732,3 +732,37 @@ test("activity retains a legacy crawl whose start date is unknown", async () => 
     .element(activity.getByText(m.crawl_status_succeeded(), { exact: true }))
     .toBeVisible();
 });
+
+test("a poll with a fresh copy of the same finished crawl does not reload its problems", async () => {
+  const completed: CrawlRun = {
+    ...terminal,
+    id: "completed",
+    outcome: "partial",
+    pages_failed: 1,
+    failure_summary: { http_404: 1 }
+  };
+  listFailures.mockResolvedValue({
+    ...emptyPage,
+    run: completed,
+    details_available: true,
+    items: [
+      { id: "failure-one", url: "https://example.test/missing", kind: "page", reason: "http_404" }
+    ],
+    total_count: 1
+  });
+  latestRun.mockImplementation(async () => ({ ...completed }));
+  render(WebsiteDetailPage, { data: { ...data, crawlRuns: [completed] } as never });
+  await page.getByRole("tab", { name: m.source_tab_problems() }).click();
+  const panel = page.getByRole("tabpanel", { name: m.source_tab_problems() });
+  await expect
+    .element(panel.getByRole("link", { name: "https://example.test/missing" }))
+    .toBeVisible();
+  await vi.advanceTimersByTimeAsync(10_000);
+  await vi.advanceTimersByTimeAsync(10_000);
+  expect(latestRun).toHaveBeenCalledTimes(2);
+  expect(listFailures).toHaveBeenCalledOnce();
+  await expect.element(panel.getByRole("status")).not.toBeInTheDocument();
+  await expect
+    .element(panel.getByRole("link", { name: "https://example.test/missing" }))
+    .toBeVisible();
+});
