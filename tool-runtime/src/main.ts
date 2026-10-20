@@ -25,6 +25,8 @@ import { chartConfigSchema } from "./tools/charts/config";
 import type { ChartResult } from "./tools/charts/ports";
 import { chartTools } from "./tools/charts/tool";
 import { chartView } from "./tools/charts/view";
+import type { ForecastResult } from "./tools/forecast/ports";
+import { forecastTools } from "./tools/forecast/tool";
 
 const config = loadConfig(process.env);
 const isolate = (job: SandboxJob, timeoutMs: number) =>
@@ -160,6 +162,27 @@ endpoints.push(
     ),
   },
 );
+
+// Forecasts run a Python sidecar with torch each, so they queue on their own, one at a time by
+// default. The whole-job deadline covers the sidecar's start-up (torch import, model load).
+const forecastScheduler = new Scheduler(
+  config.forecastConcurrency,
+  config.maxConcurrency,
+  config.maxConcurrency,
+);
+const forecastJobTimeoutMs = 30_000;
+endpoints.push({
+  slug: "forecast",
+  toolTimeoutMs: forecastJobTimeoutMs + 5_000,
+  tools: forecastTools(
+    config.forecast,
+    (job) =>
+      forecastScheduler.run(
+        async () => (await isolate({ job }, forecastJobTimeoutMs)) as ForecastResult,
+      ),
+    fileAccess,
+  ),
+});
 
 const fetch = createHandler({
   token: config.token,

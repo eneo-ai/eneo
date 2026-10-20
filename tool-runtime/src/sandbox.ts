@@ -20,13 +20,19 @@ const LANDRUN = [join(RUNTIME_ROOT, "bin", "landrun"), "/usr/local/bin/landrun"]
 // out of the venv, so the real binary is allowed as well.
 const PDF_PYTHON = process.env.PDF_PYTHON ?? "/opt/pdf/bin/python3";
 const PDF_PYTHON_ROOT = dirname(dirname(PDF_PYTHON));
-const PDF_PYTHON_BINARY = (() => {
+const PDF_PYTHON_BINARY = realBinary(PDF_PYTHON);
+// The Python that forecasts (tools/forecast/engine/timestral.ts), the same way.
+const FORECAST_PYTHON = process.env.FORECAST_PYTHON ?? "/opt/forecast/bin/python3";
+const FORECAST_PYTHON_ROOT = dirname(dirname(FORECAST_PYTHON));
+const FORECAST_PYTHON_BINARY = realBinary(FORECAST_PYTHON);
+
+function realBinary(path: string): string {
   try {
-    return realpathSync(PDF_PYTHON);
+    return realpathSync(path);
   } catch {
-    return PDF_PYTHON;
+    return path;
   }
-})();
+}
 
 // What a Bun child needs whatever its job: its own binary and the dynamic loader, shared
 // libraries, this runtime's code, fonts, time zones, the container's memory and CPU limits,
@@ -47,6 +53,9 @@ const BASE_RULES = [
   // The PDF sidecar: its Python, fontconfig's configuration and prebuilt cache.
   ["--rox", PDF_PYTHON_ROOT],
   ["--rox", PDF_PYTHON_BINARY],
+  // The forecast sidecar: its Python, with torch's native libraries inside the venv.
+  ["--rox", FORECAST_PYTHON_ROOT],
+  ["--rox", FORECAST_PYTHON_BINARY],
   ["--ro", "/etc/fonts"],
   ["--ro", "/var/cache/fontconfig"],
   ["--ro", "/etc/mime.types"],
@@ -92,6 +101,12 @@ export function jobPaths(job: SandboxJob["job"]): JobPaths {
     case "render_chart":
       // An XLSX source is converted to CSV next to itself.
       return { write: job.source?.path ? [dirname(job.source.path)] : [] };
+    case "forecast":
+      // The model the operator mounted, and the source (converted to CSV next to itself).
+      return {
+        read: [job.config.model_path],
+        write: job.source.path ? [dirname(job.source.path)] : [],
+      };
   }
 }
 
@@ -116,7 +131,7 @@ export function confinement(job: SandboxJob, directory: string): string[] {
     // image lacks (a font directory, /lib64) are skipped.
     "--best-effort",
     "--ignore-missing",
-    ...["--env", "PATH", "--env", "TMPDIR", "--env", "PDF_PYTHON"],
+    ...["--env", "PATH", "--env", "TMPDIR", "--env", "PDF_PYTHON", "--env", "FORECAST_PYTHON"],
     ...BASE_RULES,
     ...["--rw", directory],
     ...(paths.read ?? []).flatMap((path) => ["--ro", path]),
@@ -146,6 +161,7 @@ export async function runIsolated(
   const env: Record<string, string> = { TMPDIR: directory };
   if (process.env.PATH) env.PATH = process.env.PATH;
   if (process.env.PDF_PYTHON) env.PDF_PYTHON = process.env.PDF_PYTHON;
+  if (process.env.FORECAST_PYTHON) env.FORECAST_PYTHON = process.env.FORECAST_PYTHON;
   const seconds = Math.ceil(timeoutMs / 1000);
   try {
     const launcher = confinement(job, directory);

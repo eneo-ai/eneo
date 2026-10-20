@@ -11,11 +11,13 @@ import { confinement, jobPaths, runIsolated } from "../src/sandbox";
 const config = computeConfigSchema.parse({});
 
 describe("sandbox child", () => {
-  test("inherits no environment beyond PATH and its private TMPDIR", async () => {
+  test("inherits no environment beyond PATH, its private TMPDIR and the sidecar locations", async () => {
     process.env.TOOL_RUNTIME_TOKEN = "must-not-leak-into-the-child-process";
     try {
       const result = await runIsolated({ job: { kind: "env" } }, 10_000);
-      const names = (result.names as string[]).filter((n) => !["PATH", "TMPDIR"].includes(n));
+      // Where the PDF and forecast Pythons live is passed on on purpose, never anything else.
+      const passed = ["PATH", "TMPDIR", "PDF_PYTHON", "FORECAST_PYTHON"];
+      const names = (result.names as string[]).filter((n) => !passed.includes(n));
       // Bun may add its own runtime markers; none of the parent's variables may appear.
       expect(names.filter((n) => n in process.env)).toEqual([]);
       expect(result.names).not.toContain("TOOL_RUNTIME_TOKEN");
