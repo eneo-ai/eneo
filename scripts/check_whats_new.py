@@ -8,7 +8,7 @@ the CI backstop (stdlib only, no jsonschema dependency) and also enforces what
 a schema cannot express:
 
   * releases are ordered newest first with unique versions
-  * entry ids are unique within a release
+  * entry ids and aliases are unique within a release
   * texts are user-facing: no PR/issue numbers, GitHub URLs, code-like tokens
   * every showMe href resolves to a page under the web app's (app) routes
   * every showMe anchor exists as data-tour="..." in the web app
@@ -124,6 +124,13 @@ def _check_entry(
     if not isinstance(entry_id, str) or not vocab.id_re.match(entry_id):
         errors.append(f"{where}.id: must be kebab-case")
         entry_id = None
+
+    if "aliases" in entry:
+        aliases = entry["aliases"]
+        if not isinstance(aliases, list) or not aliases:
+            errors.append(f"{where}.aliases: must be a non-empty array")
+        elif any(not isinstance(alias, str) or not vocab.id_re.fullmatch(alias) for alias in aliases):
+            errors.append(f"{where}.aliases: every alias must be kebab-case")
 
     if entry.get("type") not in vocab.types:
         errors.append(f"{where}.type: must be one of {sorted(vocab.types)}")
@@ -262,6 +269,16 @@ def validate(
             if entry_id in ids:
                 errors.append(f"{entry_where}.id: {entry_id!r} is not unique in the release")
             ids.add(entry_id)
+            aliases = entry.get("aliases", [])
+            if isinstance(aliases, list):
+                for alias in aliases:
+                    if not isinstance(alias, str):
+                        continue
+                    if alias in ids:
+                        errors.append(
+                            f"{entry_where}.aliases: {alias!r} is not unique in the release"
+                        )
+                    ids.add(alias)
             show_me = entry.get("showMe") if isinstance(entry, dict) else None
             if isinstance(show_me, dict):
                 href = show_me.get("href")
@@ -290,6 +307,14 @@ def check_release_tag(data: dict, tag: str) -> list[str]:
     if not VERSION_RE_LOOSE.match(version):
         return [f"release tag {tag!r} is not vMAJOR.MINOR.PATCH[-prerelease]"]
     releases = data.get("releases") or []
+    if re.fullmatch(r"\d+\.\d+\.\d+-rc\.\d+", version) and not any(
+        release.get("version") in {version, _core_version(version)}
+        for release in releases
+    ):
+        return [
+            f"RC tag {tag} needs notes for {_core_version(version)}; "
+            "the app cannot identify a new candidate from another version's notes"
+        ]
     if not releases:
         return []
     newest = releases[0]

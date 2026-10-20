@@ -81,6 +81,7 @@ class ActionType(str, Enum):
     FILE_ORIGINAL_DOWNLOADED = "file_original_downloaded"
     FILE_SIGNED_URL_MINTED = "file_signed_url_minted"
     DOCUMENT_EXPORTED = "document_exported"
+    DOCUMENT_VERSION_SAVED = "document_version_saved"
     INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED = (
         "info_blob_original_download_link_created"
     )
@@ -117,6 +118,9 @@ class ActionType(str, Enum):
     IMAGE_MODEL_CREATED = "image_model_created"
     IMAGE_MODEL_UPDATED = "image_model_updated"
     IMAGE_MODEL_DELETED = "image_model_deleted"
+    RERANK_MODEL_CREATED = "rerank_model_created"
+    RERANK_MODEL_UPDATED = "rerank_model_updated"
+    RERANK_MODEL_DELETED = "rerank_model_deleted"
     TEMPLATE_CREATED = "template_created"
     TEMPLATE_UPDATED = "template_updated"
     TEMPLATE_DELETED = "template_deleted"

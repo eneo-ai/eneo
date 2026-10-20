@@ -135,7 +135,10 @@ async def test_demo_search_returns_knowledge_without_a_user_row(
 ):
     collection = SimpleNamespace(id=uuid4(), embedding_model=SimpleNamespace())
     assistant = SimpleNamespace(
-        collections=[collection], websites=[], integration_knowledge_list=[]
+        collections=[collection],
+        websites=[],
+        integration_knowledge_list=[],
+        rerank_model_id=None,
     )
     tool_container.assistant_service.override(
         providers.Object(

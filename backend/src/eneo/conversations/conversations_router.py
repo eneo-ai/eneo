@@ -27,6 +27,7 @@ from eneo.audit.infrastructure.rate_limiting import (
 )
 from eneo.authentication.auth_dependencies import (
     require_resource_permission_for_method,
+    require_user_for_creation,
 )
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -39,6 +40,7 @@ from eneo.conversations.conversation_models import (
     ConversationRequest,
     PreflightRequest,
     PreflightResponse,
+    RecentConversation,
 )
 from eneo.conversations.document_export import (
     EXPORT_MIME_TYPES,
@@ -48,8 +50,12 @@ from eneo.conversations.document_export import (
     document_export_availability,
     export_document,
 )
+from eneo.conversations.document_versions import save_document_version
+from eneo.conversations.ui_message_stream import to_ui_message_stream_response
 from eneo.database.database import AsyncSession
 from eneo.document_templates.service import document_template_resolver
+from eneo.files.file_models import FilePublic
+from eneo.files.generated_documents import GeneratedDocumentRejected
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
@@ -58,7 +64,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
-from eneo.main.models import CursorPaginatedResponse
+from eneo.main.models import CursorPaginatedResponse, PaginatedResponse
 from eneo.mcp_apps.application.view_tool_calls import (
     ViewCallNotReady,
     call_tool_from_view,
@@ -70,25 +76,29 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     get_approval_manager,
 )
+from eneo.questions.question import MessageFeedback
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.server.protocol.downloads import content_disposition_header
 from eneo.sessions.session import (
     DocumentExportRequest,
+    DocumentVersionCreate,
     SessionFeedback,
     SessionInDB,
     SessionMetadataPublic,
     SessionPublic,
     SessionUpdate,
-    SSEEneoEvent,
     SSEError,
     SSEFiles,
     SSEFirstChunk,
+    SSEReasoning,
     SSEText,
+    SSETokenUsage,
     SSEToolApprovalRequired,
     SSEToolApprovalTimeout,
     SSEToolCall,
+    SSEToolCallDelta,
     ToolApprovalResponse,
     ToolCallResultPublic,
     ViewToolCallRequest,
@@ -108,6 +118,9 @@ _CHAT_ACCESS_REASON = "Chat access is checked against the selected assistant, gr
 logger = get_logger(__name__)
 
 router = APIRouter()
+
+RECENT_CONVERSATIONS_DEFAULT_LIMIT = 20
+RECENT_CONVERSATIONS_MAX_LIMIT = 50
 
 
 def _raise_conversation_scope_denied(http_request: Request, message: str) -> NoReturn:
@@ -294,13 +307,25 @@ async def _authorize_session_access(container: Container, session: SessionInDB) 
     UnauthorizedException when access is no longer allowed, and get_assistant is
     default-assistant-aware so the personal chat is gated by personal_chat.
     """
-    if session.group_chat_id:
+    await _authorize_partner_access(
+        container,
+        assistant_id=session.assistant.id if session.assistant else None,
+        group_chat_id=session.group_chat_id,
+    )
+
+
+async def _authorize_partner_access(
+    container: Container, *, assistant_id: UUID | None, group_chat_id: UUID | None
+) -> None:
+    """The partner half of ``_authorize_session_access``, for callers that hold
+    only the partner ids of an owned conversation."""
+    if group_chat_id:
         group_chat_service = container.group_chat_service()
-        await group_chat_service.get_group_chat(group_chat_id=session.group_chat_id)
+        await group_chat_service.get_group_chat(group_chat_id=group_chat_id)
     else:
-        assert session.assistant is not None
+        assert assistant_id is not None
         assistant_service = container.assistant_service()
-        await assistant_service.get_assistant(session.assistant.id)
+        await assistant_service.get_assistant(assistant_id)
 
 
 @router.post(
@@ -310,11 +335,13 @@ async def _authorize_session_access(container: Container, session: SessionInDB) 
         response_codes=[400, 403, 404],
         models=[
             SSEText,
-            SSEEneoEvent,
+            SSEReasoning,
             SSEToolCall,
+            SSEToolCallDelta,
             SSEToolApprovalRequired,
             SSEToolApprovalTimeout,
             SSEFiles,
+            SSETokenUsage,
             SSEFirstChunk,
             SSEError,
         ],
@@ -328,7 +355,7 @@ async def _authorize_session_access(container: Container, session: SessionInDB) 
 async def chat(
     request: ConversationRequest,
     http_request: Request,
-    version: Annotated[int, Query(ge=1, le=2)] = 1,
+    version: Annotated[int, Query(ge=1, le=3)] = 1,
     container: Container = Depends(
         get_container(with_user=True, with_transaction=False)  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
     ),
@@ -354,7 +381,6 @@ async def chat(
     Streams the response as Server-Sent Events if stream == true.
     The following SSE response models are supported in the stream:
     - SSEText: Text completion chunks
-    - SSEEneoEvent: Internal events like generating an image
     - SSEFiles: Generated files/images responses
     - SSEFirstChunk: Initial response with metadata
     - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
@@ -393,7 +419,9 @@ async def chat(
         if request.tools is not None and request.tools.assistants:
             tool_assistant_id = request.tools.assistants[0].id
 
-        # Use the dedicated ConversationService to handle routing logic
+        # Use the dedicated ConversationService to handle routing logic.
+        # version=3 only changes the stream framing; retrieval and generation
+        # behave exactly like version=2.
         conversation_service = container.conversation_service()
         response = await conversation_service.ask_conversation(
             question=request.question,
@@ -407,6 +435,11 @@ async def chat(
             require_tool_approval=request.require_tool_approval,
             disabled_mcp_server_ids=request.disabled_mcp_server_ids,
             disabled_capabilities=request.disabled_capabilities,
+        )
+
+    if version == 3 and request.stream:
+        return to_ui_message_stream_response(
+            response=response, base_url=str(http_request.base_url)
         )
 
     return await to_conversation_response(
@@ -641,6 +674,42 @@ async def list_conversations(
         previous=previous,
         total_count=total_count,
     )
+
+
+# Declared before "/{session_id}/": the path would otherwise match "recent" as a
+# session id and fail its UUID validation.
+@router.get(
+    "/recent/",
+    response_model=PaginatedResponse[RecentConversation],
+    description=(
+        "List the caller's own latest conversations across the personal "
+        "assistant, space assistants and group chats they can still open, "
+        "latest activity first."
+    ),
+    responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason="The list serves the signed-in user's own navigation; an API key has no personal history to list.",
+)
+async def list_recent_conversations(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    limit: Annotated[
+        int,
+        Query(
+            ge=1,
+            le=RECENT_CONVERSATIONS_MAX_LIMIT,
+            description="How many conversations to return.",
+        ),
+    ] = RECENT_CONVERSATIONS_DEFAULT_LIMIT,
+) -> PaginatedResponse[RecentConversation]:
+    """Each item names its assistant or group chat and that one's space, so a
+    client can label and link it without further requests. Session-only: the
+    list serves the signed-in user's own navigation.
+    """
+    service = container.recent_conversations_service()
+    return PaginatedResponse(items=await service.list_recent(limit=limit))
 
 
 @router.get(
@@ -1061,6 +1130,103 @@ async def export_conversation_document(
     )
 
 
+@router.post(
+    "/{session_id}/documents/{file_id}/versions/",
+    response_model=FilePublic,
+    status_code=201,
+    description="Save the reader's edited Markdown of a conversation document as its next version.",
+    responses=responses.get_responses([400, 403, 404, 413]),
+    dependencies=[
+        Depends(require_user_for_creation),
+        Depends(require_resource_permission_for_method("conversations")),
+    ],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
+)
+async def save_conversation_document_version(
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    file_id: Annotated[
+        UUID,
+        Path(description="The version of a Markdown document the edit was made from"),
+    ],
+    request: DocumentVersionCreate,
+    http_request: Request,
+    response: Response,
+    container: Annotated[
+        Container,
+        # Committed before the response: the next turn and an export must see it.
+        Depends(get_container(with_user=True, transaction_scope="function")),
+    ],
+) -> FilePublic:
+    """Save a reader's edit of a Markdown document as a new version.
+
+    The version joins the turn that made the document it was edited from.
+    Saving unchanged text makes nothing and answers 200 with that version.
+    """
+    current_user = container.user()
+    await _validate_conversation_scope(
+        http_request=http_request,
+        container=container,
+        assistant_id=None,
+        group_chat_id=None,
+        session_id=session_id,
+    )
+    session = await container.session_service().get_session_by_uuid(session_id)
+    await _authorize_session_access(container, session)
+    response.headers["Cache-Control"] = "no-store"
+
+    try:
+        saved = await save_document_version(
+            conversation=session,
+            file_id=file_id,
+            content=request.content,
+            user_id=current_user.id,
+            file_service=container.file_service(),
+            question_repo=container.question_repo(),
+        )
+    except GeneratedDocumentRejected as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "document_version_rejected",
+                "message": str(exc) or "The document text could not be saved.",
+            },
+        )
+
+    if not saved.created:
+        response.status_code = 200
+        return FilePublic(**saved.file.model_dump())
+
+    response.status_code = 201
+    await container.audit_service().log_async(
+        tenant_id=current_user.tenant_id,
+        user=current_user,
+        action=ActionType.DOCUMENT_VERSION_SAVED,
+        entity_type=EntityType.FILE,
+        entity_id=saved.file.id,
+        description="Saved a reader-edited version of a document",
+        metadata=AuditMetadata.standard(
+            actor=current_user,
+            target=session,
+            extra={
+                "session_id": str(session_id),
+                "file_id": str(saved.file.id),
+                "revises_file_id": str(saved.file.revises_file_id),
+                "edited_from_file_id": str(file_id),
+                "question_id": str(saved.question_id),
+                "bytes": len(request.content.encode("utf-8")),
+            },
+        ),
+        outcome=Outcome.SUCCESS,
+    )
+    return FilePublic(**saved.file.model_dump())
+
+
 @router.delete(
     "/{session_id}/",
     status_code=204,
@@ -1138,6 +1304,91 @@ async def leave_feedback(
         )
 
     return to_session_public(updated_session)
+
+
+@router.put(
+    "/{session_id}/messages/{message_id}/feedback/",
+    response_model=MessageFeedback,
+    description=(
+        "Rate one answer in a conversation, with an optional comment. Replaces "
+        "the answer's earlier rating."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
+)
+async def set_message_feedback(
+    feedback: MessageFeedback,
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    message_id: Annotated[
+        UUID, Path(description="The UUID of the message (a question and its answer)")
+    ],
+    container: Annotated[
+        Container,
+        # Committed before the response: a reload right after shows the rating.
+        Depends(get_container(with_user=True, transaction_scope="function")),
+    ],
+) -> MessageFeedback:
+    """Only the conversation's owner can rate its answers. Separate from the
+    conversation-level feedback, which this does not change."""
+    session_service = container.session_service()
+    partner = await session_service.get_message_partner(
+        session_id=session_id, message_id=message_id
+    )
+    await _authorize_partner_access(
+        container,
+        assistant_id=partner.assistant_id,
+        group_chat_id=partner.group_chat_id,
+    )
+    return await session_service.set_message_feedback(
+        session_id=session_id, message_id=message_id, feedback=feedback
+    )
+
+
+@router.delete(
+    "/{session_id}/messages/{message_id}/feedback/",
+    status_code=204,
+    description="Remove the rating of one answer in a conversation.",
+    responses=responses.get_responses([400, 403, 404]),
+    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_CONVERSATION_SERVICE_ACCESS_REASON,
+)
+async def delete_message_feedback(
+    session_id: Annotated[
+        UUID, Path(description="The UUID of the conversation/session")
+    ],
+    message_id: Annotated[
+        UUID, Path(description="The UUID of the message (a question and its answer)")
+    ],
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, transaction_scope="function")),
+    ],
+) -> None:
+    """Only the conversation's owner can remove a rating; removing a rating that
+    is not there succeeds."""
+    session_service = container.session_service()
+    partner = await session_service.get_message_partner(
+        session_id=session_id, message_id=message_id
+    )
+    await _authorize_partner_access(
+        container,
+        assistant_id=partner.assistant_id,
+        group_chat_id=partner.group_chat_id,
+    )
+    await session_service.clear_message_feedback(
+        session_id=session_id, message_id=message_id
+    )
 
 
 @router.post(

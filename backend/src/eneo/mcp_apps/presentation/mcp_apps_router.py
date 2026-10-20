@@ -175,12 +175,15 @@ async def serve_app_view_content(
         raise NotFoundException("MCP app view not found")
 
     ui_csp = (view.ui_meta or {}).get("csp")
+    # The addresses Eneo is opened on: each may frame the view and is the only
+    # party the sandbox proxy talks to.
+    host_origins = get_settings().mcp_app_view_host_origins()
     csp = build_app_csp(
         cast(dict[str, object], ui_csp) if isinstance(ui_csp, dict) else None,
-        frame_ancestors=get_settings().public_origin or None,
+        frame_ancestors=" ".join(host_origins) or None,
     )
     return HTMLResponse(
-        content=sandbox_document(get_settings().public_origin or ""),
+        content=sandbox_document(host_origins),
         headers={
             "Content-Security-Policy": csp,
             "X-Content-Type-Options": "nosniff",

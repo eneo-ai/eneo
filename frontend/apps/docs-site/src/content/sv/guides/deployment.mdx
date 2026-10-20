@@ -1,6 +1,6 @@
 ---
 title: Driftsätt Eneo
-translationSource: guides/deployment.mdx@fab85120a0b8
+translationSource: guides/deployment.mdx@d946e76fc385
 ---
 
 import { Callout } from "nextra/components";
@@ -220,3 +220,86 @@ För fler konfigurationstabeller, proxyexempel och driftsrutiner, byt till
 **English** på den här sidan. Andra fördjupningar finns i guiderna om
 [SCIM](/guides/scim-provisioning), [SharePoint](/guides/sharepoint-integration)
 och [modulinloggning](/docs/module-authentication).
+
+## Kör Next-betan bredvid den befintliga appen
+
+Den ordinarie Svelte-appen använder `ghcr.io/eneo-ai/eneo-frontend`. Den valfria
+Next-appen använder `ghcr.io/eneo-ai/eneo-web-next`, låst av `ENEO_WEB_NEXT_IMAGE`
+i samma releasepaket. Kör båda mot **en gemensam backend** från det paketet.
+Konton, behörigheter, konversationer, assistenter, filer, workers och databas
+delas. Ändringar i betan påverkar alltså samma data som i den ordinarie appen.
+
+Använd ett separat HTTPS-värdnamn, exempelvis `beta.example.com`, inte ett
+sökvägsprefix. Behåll den ordinarie appens och backendens `PUBLIC_ORIGIN`.
+Betan vidarebefordrar API-anrop och strömmande svar på serversidan. Ingen
+ytterligare databas, Redis, worker eller backend behövs.
+
+1. Ta backup av databas och lagring och prova uppgraderingen i en testmiljö.
+   Kör backendens migreringar en gång för releasen. Betans migreringar för
+   återkoppling och leverantörsstatus ingår i samma kedja; kontrollera att
+   `alembic heads` visar ett enda huvud.
+2. Kopiera `docs/deployment/env_web_next.template` till `env_web_next.env`.
+   Generera en separat `SESSION_SECRET` med `openssl rand -base64 48` och sätt
+   `LEGACY_APP_URL=https://app.example.com` för profilmenyns länk tillbaka.
+   Skydda filen på samma sätt som övriga hemligheter.
+3. Sätt `WEB_NEXT_HOST=beta.example.com` i installationens `.env`. Avbildningen
+   kommer från releasepaketets `ENEO_WEB_NEXT_IMAGE`. Starta med overlay-filen:
+
+   ```bash
+   docker compose --env-file .env --env-file release.env \
+     -f docker-compose.yml -f docker-compose.web-next.yml --profile web-next up -d
+   ```
+
+4. Använd backendhanterad federation vid utrullningen. Lägg till
+   `https://beta.example.com/login/callback` i federationens
+   `additional_redirect_uris` och registrera samma URI hos identitetsleverantören.
+   Behåll den befintliga callback-adressen. Frontendhanterad OIDC är fortfarande
+   experimentell: samtidiga anrop kan återanvända en roterande engångstoken och
+   göra sessionen ogiltig. Förnyelsen samordnas inte mellan anrop eller repliker.
+   Innan det läget släpps krävs gemensam samordning och verifiering av leverantörens
+   tokenrotation. Utvecklingskonfigurationen använder betans `OIDC_*`-variabler
+   och `https://beta.example.com/auth/callback`.
+5. För SharePoint och Confluence behåller du `OAUTH_CALLBACK_URL` för den
+   ordinarie appen och lägger till följande i backendens miljö:
+
+   ```dotenv
+   OAUTH_CALLBACK_URLS=["https://beta.example.com/integrations/callback/token/"]
+   ```
+
+   Registrera båda fullständiga callback-adresserna hos leverantören, inklusive
+   avslutande snedstreck. Backend accepterar bara exakt registrerade adresser
+   och binder valet till den inloggade användarens OAuth-engångstillstånd.
+   Klienter som inte skickar en adress använder standardadressen. Starta om
+   backend efter miljöändringen och slutför eller starta om pågående
+   integrationsinloggningar vid uppgraderingen.
+6. Kontrollera lösenordsinloggning, federerad inloggning, utloggning, strömmande
+   chatt, filer, organisationsbehörigheter och båda integrationsleverantörerna i
+   respektive app innan användare bjuds in. Varje app har en egen sessionskaka
+   för sitt värdnamn. SSO kan återanvända leverantörens session, men lokal
+   utloggning ur en app loggar inte nödvändigtvis ut ur den andra.
+
+### Visa inbjudan till betan
+
+Sätt följande körmiljövariabler för **Svelte-appen** och starta om den:
+
+```dotenv
+SHOW_NEW_APP_BANNER=true
+NEW_APP_URL=https://beta.example.com
+```
+
+Flaggan är `false` som standard. Både en aktiverad flagga och en giltig
+HTTP(S)-adress krävs. Inbjudan visas för inloggade användare och öppnar en ny
+flik. `false` döljer inbjudan, men betan är fortfarande nåbar via sin adress:
+bannern styr upptäckbarhet, inte åtkomst.
+
+För att dra tillbaka betan döljer du inbjudan och stoppar `web-next` eller tar
+bort dess ingress. Låt gemensam backend och databas fortsätta köras. Nedgradera
+inte databasen för att stänga betan; återställning av backend kräver en separat,
+testad migrerings- eller återställningsplan som bevarar användarnas data.
+
+Inför release krävs ordinarie CI/E2E-kontroller, granskning av källkod,
+beroenden och hemligheter samt installationens säkerhetskontroller av
+avbildningar. Läs den tillfälliga beroendeåtgärden i
+`frontend/patches/SECURITY.md`. Automatiska kontroller ersätter inte provning av
+autentisering, organisationsisolering och tillgänglighet i testmiljön med de
+konfigurerade leverantörerna.

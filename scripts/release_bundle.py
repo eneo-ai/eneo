@@ -9,7 +9,9 @@ import re
 import subprocess
 from pathlib import Path
 
-COMPONENTS = ("backend", "frontend", "tool-runtime")
+# web-next is the optional Next beta: published and pinned with every bundle so
+# a deployment that enables it runs the image verified with this release.
+COMPONENTS = ("backend", "frontend", "web-next", "tool-runtime")
 REGISTRY = "ghcr.io/eneo-ai/eneo-"
 SHA = re.compile(r"[0-9a-f]{40}")
 SEMVER = re.compile(

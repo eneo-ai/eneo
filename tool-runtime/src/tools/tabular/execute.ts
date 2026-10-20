@@ -14,6 +14,7 @@ import type {
   SheetMetadata,
 } from "./ports";
 import { assertZipWithinBounds } from "./zip-guard";
+import { toCsv } from "../files/csv";
 
 const XLSX_TYPES = [
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -222,16 +223,4 @@ export function modelFacingDiagnostic(error: unknown): string {
   return `${text}\nFix the SQL and call again, using column names from inspect_table.`;
 }
 
-/** RFC 4180 CSV; values are written exactly as the query returned them. */
-export function toCsv(columns: string[], rows: unknown[][]): string {
-  const field = (value: unknown): string => {
-    if (value === null || value === undefined) return "";
-    const text =
-      typeof value === "object" ? JSON.stringify(value) : String(value);
-    return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-  };
-  return (
-    [columns, ...rows].map((row) => row.map(field).join(",")).join("\r\n") +
-    "\r\n"
-  );
-}
+export { toCsv };

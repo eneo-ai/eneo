@@ -1,8 +1,19 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from eneo.model_providers.domain.connection_check import (
+    ConnectionCheckError,
+    ConnectionCheckStatus,
+)
+
+_KEY_EXPIRES_ON_DESCRIPTION = (
+    "Date the API key stops working, entered by an admin so the key can be "
+    "renewed in time. Few providers report key expiry through their API, so "
+    "Eneo stores this date as given and does not verify it."
+)
 
 HeaderEncoding = Literal["percent", "none"]
 HeaderOnMissing = Literal["omit", "fallback", "fail"]
@@ -131,6 +142,9 @@ class ModelProviderCreate(BaseModel):
         default_factory=dict, description="Additional configuration"
     )
     is_active: bool = Field(default=True, description="Whether the provider is active")
+    key_expires_on: date | None = Field(
+        default=None, description=_KEY_EXPIRES_ON_DESCRIPTION
+    )
     outbound_headers: list[OutboundHeaderInput] = Field(
         default_factory=lambda: list[OutboundHeaderInput](),
         description="Outbound HTTP headers to configure",
@@ -152,6 +166,13 @@ class ModelProviderUpdate(BaseModel):
     is_active: Optional[bool] = Field(
         None, description="Whether the provider is active"
     )
+    key_expires_on: date | None = Field(
+        default=None,
+        description=(
+            f"{_KEY_EXPIRES_ON_DESCRIPTION} Send null to remove the date; "
+            "leave the field out to keep it."
+        ),
+    )
     outbound_headers: Optional[list[OutboundHeaderInput]] = Field(
         None,
         description="Replaces the configured outbound headers; omit to leave them unchanged",
@@ -164,7 +185,7 @@ class ValidateModelRequest(BaseModel):
     model_name: str = Field(..., description="Model name to validate")
     model_type: str = Field(
         default="completion",
-        description="Model type: completion, embedding, transcription, or image",
+        description="Model type: completion, embedding, transcription, image, or rerank",
     )
 
 
@@ -173,6 +194,20 @@ class FavoriteProvidersUpdate(BaseModel):
 
     providers: list[str] = Field(
         ..., description="Ordered list of provider type strings to pin as favorites"
+    )
+
+
+class ConnectionCheckPublic(BaseModel):
+    """The latest connection check: an authenticated call to the provider."""
+
+    status: ConnectionCheckStatus
+    checked_at: datetime
+    error: ConnectionCheckError | None = Field(
+        default=None,
+        description=(
+            "Why the check failed; set only when status is failed. A fixed "
+            "category, never text from the provider's response."
+        ),
     )
 
 
@@ -186,6 +221,24 @@ class ModelProviderPublic(BaseModel):
     config: dict[str, Any]
     is_active: bool
     masked_api_key: str | None = None
+    key_expires_on: date | None = Field(
+        default=None, description=_KEY_EXPIRES_ON_DESCRIPTION
+    )
+    connection_check: ConnectionCheckPublic | None = Field(
+        default=None,
+        description=(
+            "Result of the latest connection check; null until one runs and "
+            "again after the credentials or endpoint change."
+        ),
+    )
+    connection_check_supported: bool = Field(
+        default=False,
+        description=(
+            "Whether POST /{provider_id}/connection-check/ can check this "
+            "provider: Eneo knows a cheap authenticated call for its type, or "
+            "it has an OpenAI-compatible endpoint."
+        ),
+    )
     outbound_headers: list[OutboundHeaderPublic] = []
     created_at: datetime
     updated_at: datetime

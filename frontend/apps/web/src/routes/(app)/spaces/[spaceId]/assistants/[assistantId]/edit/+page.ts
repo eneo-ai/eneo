@@ -19,7 +19,8 @@ export const load = async (event) => {
     skills,
     skillConfiguration,
     documentTemplates,
-    widgetStatus
+    widgetStatus,
+    models
   ] = await Promise.all([
     eneo.assistants.get({ id: event.params.assistantId }),
     eneo.assistants.listMCPServers({ id: event.params.assistantId }),
@@ -46,7 +47,10 @@ export const load = async (event) => {
     // The organisation's document templates, for the file-creation capability's choice.
     eneo.documentTemplates.listAvailable().catch(() => ({ items: [] })),
     // Anyone who can read the assistant may ask, widget permission or not.
-    eneo.assistants.getWidgetStatus({ id: event.params.assistantId }).catch(() => null)
+    eneo.assistants.getWidgetStatus({ id: event.params.assistantId }).catch(() => null),
+    // Rerank models carry their security status for this space, so the
+    // material settings can offer only the ones the space allows.
+    eneo.models.list({ space: currentSpace })
   ]);
 
   // Help assistants are edited in the admin UI, not in a space. If someone
@@ -65,6 +69,7 @@ export const load = async (event) => {
     supportsDirectSkills,
     documentTemplates: documentTemplates.items,
     // Visitors get the assistant as configured, tools included.
-    servesActiveWidget: widgetStatus?.serves_active_widget ?? false
+    servesActiveWidget: widgetStatus?.serves_active_widget ?? false,
+    rerankModels: models.rerankModels ?? []
   };
 };

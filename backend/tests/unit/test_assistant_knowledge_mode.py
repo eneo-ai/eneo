@@ -94,6 +94,7 @@ class TestKnowledgeModeGating:
             context_window_tokens=100_000,
             version=1,
             num_chunks_override=None,
+            rerank=None,
         )
         kwargs = completion_service.get_response.await_args.kwargs
         assert kwargs["info_blob_chunks"] == [chunk]

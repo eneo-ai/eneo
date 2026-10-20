@@ -18,11 +18,17 @@ from eneo.main.exceptions import (
     NameCollisionException,
     NotFoundException,
 )
+from eneo.mcp_servers.application import mcp_server_service as service_module
 from eneo.mcp_servers.application.mcp_server_service import (
     ConnectionResult,
     MCPServerService,
 )
-from eneo.mcp_servers.domain.entities.mcp_server import BUNDLED_AUTH_TYPE, MCPServer
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    BUNDLED_AUTH_TYPE,
+    BUNDLED_TOOLS,
+    BundledToolSpec,
+    MCPServer,
+)
 from eneo.mcp_servers.infrastructure.client import mcp_client as client_module
 
 RUNTIME_URL = "http://tool-runtime:3010"
@@ -54,18 +60,38 @@ def _make_service(monkeypatch):
     return service, repo, user
 
 
-def _bundled_server(tenant_id, tool="compute"):
-    return MCPServer(
+def _bundled_server(tenant_id, tool="compute", purpose=None):
+    server = MCPServer(
         id=uuid4(),
         tenant_id=tenant_id,
         name="Compute",
         http_url=f"{RUNTIME_URL}/mcp/{tool}",
         http_auth_type=BUNDLED_AUTH_TYPE,
     )
+    if purpose is not None:
+        server.purpose = purpose
+    return server
+
+
+@pytest.fixture
+def general_tool(monkeypatch):
+    """A runtime endpoint registered as a general server, as compute once was.
+
+    Every bundled tool is a function today; the general path stays for tools
+    that are plain per-space servers.
+    """
+    monkeypatch.setitem(
+        BUNDLED_TOOLS,
+        "echo",
+        BundledToolSpec(purpose="general", forward_identity=False),
+    )
+    monkeypatch.setitem(service_module.BUNDLED_TOOL_NAMES, "echo", "Echo")
+    monkeypatch.setitem(service_module.BUNDLED_TOOL_DESCRIPTIONS, "echo", "Echoes.")
+    return "echo"
 
 
 class TestCreateBundled:
-    async def test_creates_a_general_server_without_credentials(
+    async def test_creates_an_inactive_provider_without_credentials(
         self, monkeypatch, runtime_configured
     ):
         service, _, _ = _make_service(monkeypatch)
@@ -76,9 +102,21 @@ class TestCreateBundled:
         assert server.http_url == f"{RUNTIME_URL}/mcp/compute"
         assert server.http_auth_type == BUNDLED_AUTH_TYPE
         assert server.http_auth_config_schema is None
+        assert server.purpose == "compute"
+        assert server.is_enabled is False
+        assert server.forward_identity is False
+
+    async def test_creates_a_general_server_enabled(
+        self, monkeypatch, runtime_configured, general_tool
+    ):
+        service, _, _ = _make_service(monkeypatch)
+
+        result = await service.create_bundled_mcp_server(general_tool)
+
+        server = result.server
+        assert server.http_url == f"{RUNTIME_URL}/mcp/{general_tool}"
         assert server.purpose == "general"
         assert server.is_enabled is True
-        assert server.forward_identity is False
 
     async def test_requires_a_configured_runtime(self, monkeypatch):
         settings = get_settings().model_copy(
@@ -101,7 +139,7 @@ class TestCreateBundled:
         self, monkeypatch, runtime_configured
     ):
         service, repo, user = _make_service(monkeypatch)
-        repo.query.return_value = [_bundled_server(user.tenant_id)]
+        repo.query.return_value = [_bundled_server(user.tenant_id, purpose="compute")]
 
         with pytest.raises(NameCollisionException):
             await service.create_bundled_mcp_server("compute")
@@ -168,12 +206,12 @@ class TestListBundled:
         self, monkeypatch, runtime_configured
     ):
         service, repo, user = _make_service(monkeypatch)
-        added = _bundled_server(user.tenant_id)
+        added = _bundled_server(user.tenant_id, purpose="compute")
         repo.query.return_value = [added]
 
         tools = {tool.tool: tool for tool in await service.list_bundled_tools()}
 
-        assert tools["compute"].purpose == "general"
+        assert tools["compute"].purpose == "compute"
         assert tools["compute"].available is True
         assert tools["compute"].mcp_server_id == added.id
         assert tools["file-analysis"].purpose == "file_analysis"
@@ -256,15 +294,18 @@ class TestUpdateBundled:
             await service.update_mcp_server(server.id, http_auth_type=BUNDLED_AUTH_TYPE)
 
 
-class TestChartFunction:
+@pytest.mark.parametrize("tool", ["charts", "compute"])
+class TestFunctionProviders:
+    """Runtime tools that were general servers before they became functions."""
+
     async def test_creates_inactive_provider_without_changing_legacy_server(
-        self, monkeypatch, runtime_configured
+        self, monkeypatch, runtime_configured, tool
     ):
         service, repo, user = _make_service(monkeypatch)
-        legacy = _bundled_server(user.tenant_id, "charts")
+        legacy = _bundled_server(user.tenant_id, tool)
         repo.query.return_value = [legacy]
-        result = await service.create_bundled_mcp_server("charts")
-        assert result.server.purpose == "charts"
+        result = await service.create_bundled_mcp_server(tool)
+        assert result.server.purpose == BUNDLED_TOOLS[tool].purpose
         assert result.server.is_enabled is False
         assert result.server.forward_identity is False
         assert legacy.purpose == "general"
@@ -272,27 +313,25 @@ class TestChartFunction:
         repo.update.assert_not_called()
 
     async def test_existing_function_prevents_duplicate(
-        self, monkeypatch, runtime_configured
+        self, monkeypatch, runtime_configured, tool
     ):
         service, repo, user = _make_service(monkeypatch)
-        provider = _bundled_server(user.tenant_id, "charts")
-        provider.purpose = "charts"
+        provider = _bundled_server(user.tenant_id, tool, BUNDLED_TOOLS[tool].purpose)
         repo.query.return_value = [provider]
         with pytest.raises(NameCollisionException):
-            await service.create_bundled_mcp_server("charts")
+            await service.create_bundled_mcp_server(tool)
         repo.add.assert_not_called()
 
     async def test_catalog_does_not_confuse_legacy_server_with_function(
-        self, monkeypatch, runtime_configured
+        self, monkeypatch, runtime_configured, tool
     ):
         service, repo, user = _make_service(monkeypatch)
-        legacy = _bundled_server(user.tenant_id, "charts")
+        legacy = _bundled_server(user.tenant_id, tool)
         repo.query.return_value = [legacy]
-        tools = {tool.tool: tool for tool in await service.list_bundled_tools()}
-        assert tools["charts"].purpose == "charts"
-        assert tools["charts"].mcp_server_id is None
-        provider = _bundled_server(user.tenant_id, "charts")
-        provider.purpose = "charts"
+        tools = {t.tool: t for t in await service.list_bundled_tools()}
+        assert tools[tool].purpose == BUNDLED_TOOLS[tool].purpose
+        assert tools[tool].mcp_server_id is None
+        provider = _bundled_server(user.tenant_id, tool, BUNDLED_TOOLS[tool].purpose)
         repo.query.return_value = [provider, legacy]
-        tools = {tool.tool: tool for tool in await service.list_bundled_tools()}
-        assert tools["charts"].mcp_server_id == provider.id
+        tools = {t.tool: t for t in await service.list_bundled_tools()}
+        assert tools[tool].mcp_server_id == provider.id

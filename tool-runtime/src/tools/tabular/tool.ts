@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { ToolError } from "../../errors";
+import { exportFilename, MAX_EXPORT_BYTES } from "../files/csv";
 import {
   RichResult,
   type CallContext,
@@ -13,7 +14,9 @@ import {
 import { SheetCache } from "./cache";
 import {
   fetchReference,
-  fileReference,
+  requireExtension,
+  TABULAR_EXTENSIONS,
+  tabularReference,
   type FileReference,
 } from "../files/reference";
 import type { TabularConfig } from "./config";
@@ -55,24 +58,9 @@ const ROWS_SHOWN =
 const NO_ROWS_MATCHED =
   "No rows matched. Compare the filter values with the value lists and examples from inspect_table: string comparison is exact and case-sensitive, so use the listed spelling or ILIKE. Say which filter found nothing instead of reporting that the data is missing.";
 
-// An exported result travels as a file; Eneo admits generated files up to 20 MiB by default.
-const MAX_EXPORT_BYTES = 20 * 1024 * 1024;
+export { exportFilename };
 
-/** A download name for an exported result; never a path, always .csv. */
-export function exportFilename(input: string | undefined): string {
-  const base = (input ?? "")
-    .normalize("NFC")
-    .replace(/\.csv$/i, "")
-    .replace(/[\u0000-\u001f\u007f-\u009f"\\/:;*?<>|]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^\.+/, "")
-    .slice(0, 100)
-    .trim();
-  return `${base || "resultat"}.csv`;
-}
-
-const fileRef = fileReference;
+const fileRef = tabularReference;
 const sheetName = z
   .string()
   .max(200)
@@ -118,6 +106,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     ref: FileReference & { sheet?: string; source_rows?: number[] },
     ctx: CallContext,
   ) {
+    requireExtension(ref, TABULAR_EXTENSIONS, "inspect_table and query_table");
     const { bytes, contentType, isXlsx } = await fetchReference(ref, ctx, {
       allowedFileOrigins: deps.allowedFileOrigins,
       maxBytes: deps.config.max_upload_bytes,
@@ -187,6 +176,13 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     extras: z.infer<typeof extraFiles>,
     ctx: CallContext,
   ) {
+    // Every file is checked before any is downloaded, so one call reports the wrong one.
+    for (const ref of [main, ...(extras ?? [])])
+      requireExtension(
+        ref,
+        TABULAR_EXTENSIONS,
+        "inspect_table and query_table",
+      );
     const aliases = new Set<string>();
     for (const extra of extras ?? []) {
       if (aliases.has(extra.alias))
@@ -276,7 +272,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
         .boolean()
         .default(false)
         .describe(
-          `Leave false for showing, browsing, filtering or sorting rows in the conversation, even for large results. Set true when the user asks for a downloadable file or when the result must become a source file for create_spreadsheet or create_chart. Attaches the complete result (up to ${deps.config.export_row_limit} rows) as CSV; pass its reference url to the next tool instead of copying rows.`,
+          `Leave false for showing, browsing, filtering or sorting rows in the conversation, even for large results, and for a small aggregate (up to about 50 rows, such as totals per month or per category) that a chart will draw: pass those rows to create_chart as labels and series instead, since an export is shown to the user as a downloadable file. Set true when the user asks for a downloadable file, when create_spreadsheet needs the result as a file, or when a chart needs more rows than that. Attaches the complete result (up to ${deps.config.export_row_limit} rows) as CSV; pass its reference url to the next tool instead of copying rows.`,
         ),
       export_filename: z
         .string()
@@ -321,11 +317,17 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
       name: "inspect_table",
       title: "Inspect table",
       description:
-        "Start here when the user wants to view, browse, filter, sort or analyse an attached CSV, TSV or Excel (.xlsx) file. For a native row selection, pass source_rows and sheet unchanged to inspect_table and query_table; the source is filtered before SQL. Pass each file's signed url and filename from the attachment reference, unchanged. Returns sheet names, column names and types, column value profiles, parsed and rejected row counts and up to five sample rows per sheet. These samples describe the file, not the requested result: follow with query_table to show the requested rows or calculate an answer over the full dataset. Do not ask the user to name tools or choose an interactive display. Report rejected rows and missing saved formula results as coverage limitations. Formulas are not recalculated; saved results may be outdated.",
+        "Start here for any question about an attached CSV, TSV or Excel (.xlsx) file, including what it contains, and when the user wants to view, browse, filter, sort or analyse it. For a native row selection, pass source_rows and sheet unchanged to inspect_table and query_table; the source is filtered before SQL. Pass each file's signed url and filename from the attachment reference, unchanged. Returns sheet names, column names and types, column value profiles, parsed and rejected row counts and up to five sample rows per sheet. These samples describe the file, not the requested result: follow with query_table to show the requested rows or calculate an answer over the full dataset. Do not ask the user to name tools or choose an interactive display. Report rejected rows and missing saved formula results as coverage limitations. Formulas are not recalculated; saved results may be outdated.",
       inputSchema: inspectInput.shape,
       readOnly: true,
       async execute(raw, ctx) {
         const args = inspectInput.parse(raw);
+        for (const ref of args.files)
+          requireExtension(
+            ref,
+            TABULAR_EXTENSIONS,
+            "inspect_table and query_table",
+          );
         const files = [];
         for (const ref of args.files) {
           const loaded = await load(ref, ctx);
@@ -362,7 +364,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
       title: "Query table",
       ...(deps.resultView ? { view: deps.resultView } : {}),
       description:
-        'Use for ordinary requests such as "show me this file", "show the rows for this region", "sort by amount" or "summarise sales by region", as well as totals, counts, averages, rankings and comparisons over the full CSV/Excel dataset. Call inspect_table first for the actual sheet and column names. Choose display=none for intermediate queries used to calculate an answer or prepare a chart or another tool; do not show a table merely because you queried data. Choose display=table when the table itself is part of the requested answer, and give it a title that tells it apart from the other tables in the conversation. For viewing or browsing, leave export=false: hosts supporting tool views show multi-row results as an interactive table when display=table. The user does not need to ask for a table, name a tool or choose a display mode. Do not add LIMIT merely to keep the answer short; the host pages the result. Export only for a requested downloadable file or a source file needed by create_spreadsheet or create_chart. For a native row selection, pass its source_rows filter unchanged in file; t contains only those source records before your SQL runs. Runs one read-only DuckDB SELECT over table t; pass sheet for multi-sheet workbooks. To combine attachments, list them under files with an alias and JOIN them. Pass signed urls and filenames unchanged. Results report truncation, parsed/rejected coverage and formula limitations for all source files. Disclose missing saved formula results and qualify conclusions based on them; formulas are not recalculated. When the result includes shown, follow that presentation guidance and do not repeat the rows in your answer. Otherwise answer from the returned data, acknowledge truncation and do not claim an interactive table is visible.',
+        'Use for ordinary requests such as "show me this file", "show the rows for this region", "sort by amount" or "summarise sales by region", as well as totals, counts, averages, rankings and comparisons over the full CSV/Excel dataset. Call inspect_table first for the actual sheet and column names. Choose display=none for intermediate queries used to calculate an answer or prepare a chart or another tool; do not show a table merely because you queried data. Choose display=table when the table itself is part of the requested answer, and give it a title that tells it apart from the other tables in the conversation. For viewing or browsing, leave export=false: hosts supporting tool views show multi-row results as an interactive table when display=table. The user does not need to ask for a table, name a tool or choose a display mode. Do not add LIMIT merely to keep the answer short; the host pages the result. Export only for a requested downloadable file, a source file for create_spreadsheet, or a chart over more than about 50 rows; a smaller aggregate goes to create_chart as labels and series without export, since an export is shown to the user as a downloadable file. For a native row selection, pass its source_rows filter unchanged in file; t contains only those source records before your SQL runs. Runs one read-only DuckDB SELECT over table t; pass sheet for multi-sheet workbooks. To combine attachments, list them under files with an alias and JOIN them. Pass signed urls and filenames unchanged. Results report truncation, parsed/rejected coverage and formula limitations for all source files. Disclose missing saved formula results and qualify conclusions based on them; formulas are not recalculated. When the result includes shown, follow that presentation guidance and do not repeat the rows in your answer. Otherwise answer from the returned data, acknowledge truncation and do not claim an interactive table is visible.',
       inputSchema: queryInput.shape,
       readOnly: true,
       async execute(raw, ctx) {

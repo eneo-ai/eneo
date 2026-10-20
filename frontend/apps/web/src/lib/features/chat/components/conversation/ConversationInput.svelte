@@ -6,7 +6,11 @@
   import AttachmentUploadIconButton from "$lib/features/attachments/components/AttachmentUploadIconButton.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as PromptInput from "$lib/components/ai-elements/prompt-input/index.js";
-  import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
+  import {
+    getAttachmentManager,
+    UploadsNotReadyError
+  } from "$lib/features/attachments/AttachmentManager";
+  import { derived } from "svelte/store";
   import MentionInput from "../mentions/MentionInput.svelte";
   import { initMentionInput } from "../mentions/MentionInput";
   import MentionButton from "../mentions/MentionButton.svelte";
@@ -36,7 +40,7 @@
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
   import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
   import { getMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
-  import { composeQuotedQuestion } from "../../questionQuote";
+  import { composeQuotedQuestion, tableQuoteSummary } from "../../questionQuote";
 
   type McpServerSummary = {
     id: string;
@@ -54,10 +58,11 @@
   const { tenant, user } = getAppContext();
 
   const {
-    state: { attachments, isUploading, uploadError },
+    state: { attachments, uploadError },
     queueValidUploads,
-    clearUploads,
-    clearUploadError
+    clearUploadError,
+    removeUploads,
+    awaitUploads
   } = getAttachmentManager();
 
   const {
@@ -176,6 +181,9 @@
 
   function queueUploadsFromClipboard(event: ClipboardEvent) {
     if (!event.clipboardData?.files || event.clipboardData.files.length === 0) return;
+    // A message in flight owns the attachment list; files pasted now would be
+    // dropped with the sent batch.
+    if (chat.askQuestion.isLoading || sendPending) return;
     // Validation errors surface inline via the manager's uploadError store.
     queueValidUploads([...event.clipboardData.files]);
   }
@@ -202,8 +210,26 @@
     if (isAskingDisabled) return;
     sendPending = true;
     inputError = null;
-    const files = $attachments.map((file) => file?.fileRef).filter((file) => file !== undefined);
-    abortController = new AbortController();
+    // The controller is kept locally too: by the time the catch below runs a
+    // later send may have replaced the shared one.
+    const controller = new AbortController();
+    abortController = controller;
+    // Attachments still uploading do not hold the message back. It leaves the
+    // composer at once and waits in the conversation, mirroring their
+    // progress, until all of them are on the server.
+    const sentIds = $attachments.map((attachment) => attachment.id);
+    const allUploaded = $attachments.every(
+      (attachment) => attachment.status === "completed" && attachment.fileRef
+    );
+    const files = allUploaded
+      ? $attachments.map((attachment) => attachment.fileRef).filter((file) => file !== undefined)
+      : {
+          ids: sentIds,
+          subscribe: derived(attachments, (list) =>
+            list.filter((attachment) => sentIds.includes(attachment.id))
+          ).subscribe,
+          ready: () => awaitUploads(sentIds, controller.signal)
+        };
     const tools =
       $mentions.length > 0
         ? {
@@ -236,15 +262,18 @@
         files,
         tools,
         toolApprovalEnabled,
-        abortController,
+        controller,
         disabledMcpServerIds.size > 0 ? Array.from(disabledMcpServerIds) : undefined
       );
-      clearUploads();
+      removeUploads(sentIds);
     } catch (error: unknown) {
       // Put the draft back unless the user has already started a new one
       // while the request was pending; that newer input wins.
       if (isMentionInputEmpty()) restoreMentionInput(draft);
       if (filePreview && !filePreview.quote) filePreview.quote = sentQuote;
+      // A cancelled send is not an error, and a failed upload has already
+      // been reported by the attachment manager next to its list.
+      if (controller.signal.aborted || error instanceof UploadsNotReadyError) return;
       const contextError = getContextErrorInfo(error);
       if (contextError) {
         if (contextError.used !== undefined && contextError.limit !== undefined) {
@@ -520,7 +549,6 @@
     isConversationSubmitDisabled({
       isLoading: chat.askQuestion.isLoading,
       sendPending,
-      isUploading: $isUploading,
       hasContent: $question !== "" || $attachments.length > 0,
       hasCompletionModel: chat.hasCompletionModel,
       estimatedExceedsContext: chat.willExceedContext
@@ -532,7 +560,7 @@
   status={chat.askQuestion.isLoading || sendPending ? "streaming" : "ready"}
   onSubmit={ask}
   onStop={() => abortController?.abort("User cancelled")}
-  class="max-w-[74ch] md:w-full"
+  class="min-w-0"
 >
   {#if quote && filePreview}
     {@const location = tableLocationLabel(quote.locator, (row) => m.table_reference_row({ row }))}
@@ -556,9 +584,20 @@
           >{m.file_quote_from({ name: quote.fileName })}</span
         >
         {#if location}<span class="text-secondary block text-xs">{location}</span>{/if}
-        <span class="text-default line-clamp-2 text-sm break-words whitespace-pre-line"
-          >{quote.text}</span
-        >
+        {#if tableQuoteSummary(quote.text)}
+          {@const table = tableQuoteSummary(quote.text)!}
+          <!-- No room for the table itself here: its columns and size stand in. -->
+          <span class="text-default block truncate text-sm">{table.columns.join(" · ")}</span>
+          <span class="text-secondary block text-xs">
+            {table.rows === 1
+              ? m.file_quote_table_row()
+              : m.file_quote_table_rows({ count: table.rows })}
+          </span>
+        {:else}
+          <span class="text-default line-clamp-2 text-sm break-words whitespace-pre-line"
+            >{quote.text}</span
+          >
+        {/if}
         {#if quote.fileId && !quotedFile}<span class="text-secondary block text-xs"
             >{m.table_reference_unavailable()}</span
           >{/if}
@@ -638,9 +677,12 @@
     </div>
   {/if}
 
-  <PromptInput.Footer>
+  <PromptInput.Footer class="flex-wrap gap-1 px-1.5 @[36rem]/composer:gap-2 @[36rem]/composer:px-2">
     <PromptInput.Tools
-      class={chat.askQuestion.isLoading ? "pointer-events-none opacity-40" : undefined}
+      class={[
+        "shrink-0 gap-0.5 @[36rem]/composer:gap-1",
+        chat.askQuestion.isLoading && "pointer-events-none opacity-40"
+      ]}
     >
       <AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
       {#if shouldShowMentionButton}
@@ -670,13 +712,15 @@
     </PromptInput.Tools>
 
     <!-- Right cluster: model + send/stop -->
-    <div class="flex items-center gap-2">
+    <div
+      class="flex min-w-[7rem] flex-1 items-center justify-end gap-0.5 @[26rem]/composer:min-w-0 @[36rem]/composer:gap-2"
+    >
       {#if showModelSelect}
         <ChatModelSelect />
         <ChatReasoningSelect />
       {/if}
 
-      <PromptInput.Submit disabled={isAskingDisabled} name="ask" />
+      <PromptInput.Submit class="shrink-0" disabled={isAskingDisabled} name="ask" />
     </div>
   </PromptInput.Footer>
 </PromptInput.Root>

@@ -24,6 +24,7 @@ from eneo.assistants.assistant_repo import (
     AssistantRepository,
     PersonalDefaultValidationInput,
 )
+from eneo.assistants.assistant_update import AssistantUpdate
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.authentication.auth_service import AuthService
@@ -253,6 +254,7 @@ if TYPE_CHECKING:
         IntegrationKnowledgeRepository,
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.rerank_models.application.rerank_service import RerankService
     from eneo.sessions.session import SessionInDB
     from eneo.sessions.session_service import SessionService
     from eneo.skills.application.skill_service import SkillService
@@ -267,6 +269,14 @@ logger = get_logger(__name__)
 class AssistantCompletionFileInputs:
     completion_message_files: list[File]
     completion_prompt_files: list[File]
+
+
+@dataclass(frozen=True)
+class NonStreamingAnswer:
+    """A complete answer, with the files its tools made, for a non-streaming ask."""
+
+    text: str
+    generated_files: tuple[File, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -375,6 +385,7 @@ class AssistantService:
         skill_service: "SkillService",
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
         effective_config_service: "EffectiveConfigService | None" = None,
+        rerank_service: "RerankService | None" = None,
     ):
         super().__init__()
         self.repo = repo
@@ -402,6 +413,7 @@ class AssistantService:
         self.skill_service = skill_service
         self.api_key_scope_revoker = api_key_scope_revoker
         self.effective_config_service = effective_config_service
+        self.rerank_service = rerank_service
 
     async def _with_builtin_provider_token(
         self, server: "MCPServer", *, assistant_id: UUID
@@ -794,8 +806,8 @@ class AssistantService:
             )
 
             assistant.enabled_capabilities = sorted(set(enabled_capabilities or []))
-            space.add_assistant(assistant)
-            refreshed_space = await self.space_repo.update(space)
+            await self._add_assistant_to_space(space, assistant)
+            refreshed_space = await self.space_service.get_space(space.id)
             assistant = refreshed_space.get_assistant(assistant.id)
 
         else:
@@ -813,6 +825,19 @@ class AssistantService:
         )
 
         return assistant, permissions  # type: ignore[return-value]
+
+    async def _add_assistant_to_space(
+        self, space: "Space", assistant: Assistant
+    ) -> None:
+        assert space.id is not None
+        model = assistant.completion_model
+        enable_model = model is not None and not space.is_completion_model_in_space(
+            model.id
+        )
+        space.add_assistant(assistant)
+        if enable_model and model is not None:
+            await self.space_repo.enable_completion_model(space.id, model.id)
+        await self.repo.add(assistant)
 
     async def _create_from_template(
         self,
@@ -878,8 +903,8 @@ class AssistantService:
         # without leaving an invalid row behind.
         await self._validate_attachments_fit(assistant, space=space)
 
-        space.add_assistant(assistant)
-        refreshed_space = await self.space_repo.update(space)
+        await self._add_assistant_to_space(space, assistant)
+        refreshed_space = await self.space_service.get_space(space.id)
         assistant = refreshed_space.get_assistant(assistant.id)
 
         return assistant
@@ -1525,7 +1550,7 @@ class AssistantService:
 
         if cm and not space.is_completion_model_in_space(cm.id):
             space.add_completion_model(cm)
-            await self.space_repo.update(space)
+            await self.space_repo.enable_completion_model(space.id, cm.id)
 
         return self.factory.create_assistant(
             name=name,
@@ -1559,10 +1584,22 @@ class AssistantService:
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
         skill_binding_intents: list[SkillBindingIntent] | None = None,
         document_template: "DocumentTemplateChoice | None" = None,
+        rerank_model_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
 
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        # Partial writes must validate against the latest committed model,
+        # prompt and attachments. Take the fit token before the parent row lock,
+        # matching governance lock order, and hold both until the request commits.
+        await acquire_personal_default_fit_lock(
+            session=self.repo.session,
+            tenant_id=self.user.tenant_id,
+            shared=True,
+        )
+        assert space.id is not None
+        await self.repo.lock(assistant_id, space.id)
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
@@ -1643,6 +1680,7 @@ class AssistantService:
                 data_retention_days,
                 metadata_json,
                 icon_id,
+                rerank_model_id,
             )
         )
         if (
@@ -1718,6 +1756,14 @@ class AssistantService:
                     "The completion model is not enabled in the space."
                 )
             completion_model = space.get_completion_model(completion_model_id)
+
+        if is_provided(rerank_model_id) and rerank_model_id is not None:
+            if self.rerank_service is None or not await self.rerank_service.selectable(
+                rerank_model_id, space.security_classification
+            ):
+                raise BadRequestException(
+                    "The rerank model is not available in the space."
+                )
 
         if completion_model_kwargs is not None:
             kwargs_model = completion_model
@@ -1900,10 +1946,6 @@ class AssistantService:
                 )
             )
 
-        # Store MCP server IDs and tool settings for repository to handle.
-        setattr(assistant, "_mcp_server_ids", mcp_server_ids)
-        setattr(assistant, "_mcp_tool_settings", mcp_tools)
-
         if enabled_capabilities is not None:
             from eneo.mcp_servers.application.capability_resolver import (
                 validate_capability_additions,
@@ -1957,6 +1999,7 @@ class AssistantService:
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
             icon_id=icon_id,
+            rerank_model_id=rerank_model_id,
         )
 
         knowledge_changing = (
@@ -2014,7 +2057,46 @@ class AssistantService:
                 mcp_servers_override=mcp_servers_for_validation,
             )
 
-        refreshed_space = await self.space_repo.update(space)
+        await self.repo.apply_update(
+            assistant_id,
+            assistant.space_id,
+            AssistantUpdate(
+                name=name if name is not None else NOT_PROVIDED,
+                completion_model_id=completion_model_id
+                if completion_model_id is not None
+                else NOT_PROVIDED,
+                completion_model_kwargs=completion_model_kwargs
+                if completion_model_kwargs is not None
+                else NOT_PROVIDED,
+                logging_enabled=logging_enabled
+                if logging_enabled is not None
+                else NOT_PROVIDED,
+                collection_ids=groups,
+                website_ids=websites,
+                integration_knowledge_ids=integration_knowledge_ids,
+                mcp_server_ids=mcp_server_ids,
+                mcp_tools=mcp_tools,
+                enabled_capabilities=enabled_capabilities,
+                attachments=attachments,
+                description=description,
+                insight_enabled=insight_enabled
+                if insight_enabled is not None
+                else NOT_PROVIDED,
+                inline_file_text=inline_file_text
+                if inline_file_text is not None
+                else NOT_PROVIDED,
+                knowledge_mode=knowledge_mode
+                if knowledge_mode is not None
+                else NOT_PROVIDED,
+                data_retention_days=data_retention_days,
+                metadata_json=metadata_json,
+                icon_id=icon_id,
+                rerank_model_id=rerank_model_id,
+                prompt=prompt_obj,
+                document_template=document_template,
+            ),
+        )
+        refreshed_space = await self.space_service.get_space(assistant.space_id)
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
 
         # TODO: Review how we get the permissions to the presentation layer
@@ -2319,6 +2401,9 @@ class AssistantService:
         assistant = space.get_assistant(assistant_id=assistant_id)
         icon_id = assistant.icon_id
 
+        if assistant.is_default:
+            raise BadRequestException("The default assistant cannot be deleted")
+
         if self.api_key_scope_revoker is not None:
             try:
                 await self.api_key_scope_revoker.revoke_scope(
@@ -2333,8 +2418,7 @@ class AssistantService:
                     extra={"assistant_id": str(assistant_id)},
                 )
 
-        space.remove_assistant(assistant)
-        await self.space_repo.update(space)
+        await self.repo.delete(assistant_id, space.id)
 
         # After the delete: a widget created meanwhile holds the assistant row
         # until it commits, so it is archived here too.
@@ -2383,7 +2467,7 @@ class AssistantService:
         initial_skill_context_tokens: int,
         version: int = 1,
         assistant_selector_tokens: int = 0,
-    ) -> str | AsyncGenerator[Completion, None]:
+    ) -> NonStreamingAnswer | AsyncGenerator[Completion, None]:
         # Capture tenant_id outside the generator so the abort-path background save
         # doesn't depend on self.user being safely accessible during teardown.
         tenant_id = self.user.tenant_id
@@ -2480,9 +2564,6 @@ class AssistantService:
                                     chunk.image.tool_call_id, []
                                 ).append(image_file.id)
                             chunk.generated_file = image_file
-                            yield chunk
-
-                        if chunk.response_type == ResponseType.ENEO_EVENT:
                             yield chunk
 
                         if chunk.response_type == ResponseType.TOOL_CALL_DELTA:
@@ -2643,6 +2724,12 @@ class AssistantService:
                                                 is_bundled=tc.is_bundled,
                                             )
                                         )
+                            yield chunk
+
+                        if chunk.response_type == ResponseType.ERROR:
+                            # The adapter ends a failed answer with this event
+                            # instead of raising; the client needs it to tell
+                            # a cut-off answer from a finished one.
                             yield chunk
 
                     # Get the references for the whole response
@@ -2974,7 +3061,9 @@ class AssistantService:
                 skill_activation=skill_activation,
             )
 
-            return final_answer
+            return NonStreamingAnswer(
+                text=final_answer, generated_files=tuple(generated_files)
+            )
 
     async def _build_completion_file_inputs(
         self,
@@ -3440,11 +3529,19 @@ class AssistantService:
         # per completion, minted only when some server actually attaches.
         scoped_token: str | None = None
 
+        # The files server points spreadsheets at the table tools when the
+        # file-analysis provider is attached to this turn.
+        table_tools_attached = any(
+            server.purpose == "file_analysis" for server in capability_mcp_servers
+        )
+
         def mint_scoped_token() -> str:
             nonlocal scoped_token
             if scoped_token is None:
                 scoped_token = self.auth_service.create_scoped_mcp_token(
-                    self.user, assistant_id=assistant_to_ask.id
+                    self.user,
+                    assistant_id=assistant_to_ask.id,
+                    table_tools=table_tools_attached,
                 )
             return scoped_token
 
@@ -3505,6 +3602,7 @@ class AssistantService:
                 token=mint_scoped_token(),
                 tenant_id=self.user.tenant_id,
                 attachment_labels=attachment_labels,
+                table_tools=table_tools_attached,
             )
             logger.info(
                 "[FILES] assistant=%s files tool attached "
@@ -3563,11 +3661,22 @@ class AssistantService:
                 choice=assistant_to_ask.document_template,
             )
 
+        # The assistant's reranker, checked against the space at ask time. The
+        # personal assistant is governed and has no choice yet (#1035, B4).
+        rerank = None
+        if self.rerank_service is not None and not is_personal_default:
+            rerank = await self.rerank_service.spec_for_model(
+                assistant_to_ask.rerank_model_id,
+                query=cleaned_question,
+                security_classification=space.security_classification,
+            )
+
         try:
             response, datastore_result = await assistant_to_ask.ask(
                 question=cleaned_question,
                 completion_service=self.completion_service,
                 references_service=self.references_service,
+                rerank=rerank,
                 session=session,
                 files=completion_file_inputs.completion_message_files,
                 stream=stream,
@@ -3615,7 +3724,7 @@ class AssistantService:
 
         # TODO: Separate the response based on stream true or false
 
-        answer = await self._handle_response(
+        handled = await self._handle_response(
             response=response,
             datastore_result=datastore_result,
             question=question,
@@ -3634,8 +3743,11 @@ class AssistantService:
         )
 
         mcp_tool_references: list[McpToolReference] = []
-        if not stream:
-            assert isinstance(answer, str)
+        generated_files: list[File] = []
+        answer: str | AsyncGenerator[Completion, None]
+        if isinstance(handled, NonStreamingAnswer):
+            answer = handled.text
+            generated_files = list(handled.generated_files)
             info_blob_references = datastore_result.info_blobs
             if isinstance(response.completion, Completion):
                 mcp_tool_references = filter_mcp_tool_references(
@@ -3644,12 +3756,14 @@ class AssistantService:
                     version=version,
                 )
         else:
+            answer = handled
             info_blob_references = datastore_result.info_blobs
 
         final_response = AssistantResponse(
             created_at=question_created_at,
             question=question,
             files=files,
+            generated_files=generated_files,
             session=session,
             answer=answer,
             info_blobs=info_blob_references,
@@ -3690,7 +3804,9 @@ class AssistantService:
 
         assistant.update(published=publish)
 
-        await self.space_repo.update(space)
+        await self.repo.apply_update(
+            assistant_id, space.id, AssistantUpdate(published=publish)
+        )
 
         # TODO: Review how we get the permissions to the presentation layer
         permissions: list[ResourcePermission] = actor.get_assistant_permissions(
@@ -3724,6 +3840,16 @@ class AssistantService:
         mcp_server_id: UUID,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         """Add an MCP server to an assistant."""
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assert space.id is not None
+        # Incremental additions share the update path's fit/row lock order.
+        # Reload after waiting so combined tool schemas are validated together.
+        await acquire_personal_default_fit_lock(
+            session=self.repo.session,
+            tenant_id=self.user.tenant_id,
+            shared=True,
+        )
+        await self.repo.lock(assistant_id, space.id)
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         assert space.id is not None
         assistant = space.get_assistant(assistant_id=assistant_id)
@@ -3822,22 +3948,7 @@ class AssistantService:
             mcp_servers_override=projected_mcp_servers,
         )
 
-        # Persist only after the complete post-add provider payload is accepted.
-        existing_server_ids.append(mcp_server_id)
-        # Update via repository
-        from eneo.database.tables.assistant_table import Assistants
-
-        stmt = sa.select(Assistants).where(Assistants.id == assistant_id)
-        assistant_in_db = await self.repo.session.scalar(stmt)
-        assert assistant_in_db is not None
-
-        await self.repo.set_mcp_servers(assistant_in_db, existing_server_ids)
-        # Keep the fit snapshot's parent-row version coupled to this association write.
-        await self.repo.session.execute(
-            sa.update(Assistants)
-            .where(Assistants.id == assistant_id)
-            .values(updated_at=sa.func.now())
-        )
+        await self.repo.add_mcp_server(assistant_id, space.id, mcp_server_id)
 
         # Refresh and return
         refreshed_space = await self.space_repo.get_space_by_assistant(
@@ -3872,32 +3983,7 @@ class AssistantService:
                 },
             )
 
-        # Get existing associations from the database
-        import sqlalchemy as sa
-
-        from eneo.database.tables.assistant_table import (
-            AssistantMCPServers,
-            Assistants,
-        )
-
-        stmt = sa.select(AssistantMCPServers).where(
-            AssistantMCPServers.assistant_id == assistant_id
-        )
-        result = await self.repo.session.execute(stmt)
-        existing_server_ids: list[UUID] = [
-            row.mcp_server_id for row in result.scalars()
-        ]
-
-        # Remove the association
-        existing_server_ids = [
-            server_id for server_id in existing_server_ids if server_id != mcp_server_id
-        ]
-        # Update via repository
-        stmt = sa.select(Assistants).where(Assistants.id == assistant_id)
-        assistant_in_db = await self.repo.session.scalar(stmt)
-        assert assistant_in_db is not None
-
-        await self.repo.set_mcp_servers(assistant_in_db, existing_server_ids)
+        await self.repo.remove_mcp_server(assistant_id, space.id, mcp_server_id)
 
         # Refresh and return
         refreshed_space = await self.space_repo.get_space_by_assistant(
@@ -3940,7 +4026,6 @@ class AssistantService:
 
         from eneo.database.tables.assistant_table import (
             AssistantMCPServers,
-            Assistants,
         )
 
         stmt = sa.select(AssistantMCPServers).where(
@@ -3955,14 +4040,8 @@ class AssistantService:
         if mcp_server_id not in existing_server_ids:
             raise BadRequestException("MCP server not associated with assistant")
 
-        # Note: enabled/config/priority fields are not currently stored in the database schema
-        # The association table only stores assistant_id and mcp_server_id
-        # Update via repository
-        stmt = sa.select(Assistants).where(Assistants.id == assistant_id)
-        assistant_in_db = await self.repo.session.scalar(stmt)
-        assert assistant_in_db is not None
-
-        await self.repo.set_mcp_servers(assistant_in_db, existing_server_ids)
+        # This legacy endpoint has no persisted config fields. A read must not
+        # rewrite the server selection or its timestamps.
 
         # Refresh and return
         refreshed_space = await self.space_repo.get_space_by_assistant(

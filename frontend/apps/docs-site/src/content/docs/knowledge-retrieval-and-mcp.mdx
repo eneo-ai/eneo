@@ -11,6 +11,8 @@ import { Callout } from "nextra/components";
 
 <Callout type="info">
   This page is the engineering reference for how the pieces fit together. For
+  the map of the three places a tool can run and why the design is split that
+  way, see [Tools and MCP Architecture](/docs/tool-architecture). For
   administrator-facing setup and tool-catalog approval, see [MCP
   Servers](/guides/mcp-servers). For knowledge ingestion, see [Document
   Processing](/guides/document-processing).
@@ -59,10 +61,18 @@ file attachments and existing knowledge selectors together. **Bilagor**
 shows whether it is loaded before every answer or opened on demand; changing
 its reading mode does not move it out of Attachments.
 
-**Kunskap** (Knowledge) and **Organisationskunskap** (Organization knowledge)
-are separate sections below the attachments and uploader. The knowledge summary
-states whether searches run on demand or before every answer. Personal and
-organization knowledge retain their existing selectors and origins.
+Below the attachments and uploader, **Organisationskunskap** (Organization
+knowledge) contains sources owned by the organization space and **Kunskap**
+(Knowledge) contains every other source the space can use. Organization identity
+comes from the current space's API response, independently of whether the user
+can open the organization space. When organization identity is unavailable, all
+sources appear in Knowledge.
+
+The available options and selected sources use the same ownership classification.
+Every selected source remains visible and removable, including when its embedding
+model is disabled. The knowledge summary states whether searches run on demand or
+before every answer. These sections describe ownership; they do not grant access
+or change sharing permissions.
 
 Use **Ändra** (Change) on a file to choose between **Öppna vid behov** (Open
 when needed) and **Läs in inför varje svar** (Load before every answer). The
@@ -455,19 +465,22 @@ governance, per-message, and enabled-state filters.
 
 This comparison covers the ephemeral knowledge/file servers and independently
 operated servers. The registered internal image provider has a different
-lifecycle but the same per-call approval rule; the bundled runtime is a separate service whose
-catalog follows Eneo's code. See [Built-in Tool Servers](/docs/builtin-tool-servers)
-for those two provider patterns.
+lifecycle but the same per-call approval rule; the bundled runtime is a separate
+service whose catalog follows Eneo's code and whose calls follow the
+conversation's approval setting. [Tools and MCP
+Architecture](/docs/tool-architecture#one-protocol-one-proxy-three-places-to-run)
+compares all three tiers; [Built-in Tool Servers](/docs/builtin-tool-servers)
+describes the two loopback attachment patterns.
 
 | Property | Internal loopback MCP | External MCP |
 | --- | --- | --- |
 | Endpoint owner | Eneo backend | Another configured service |
 | Catalog record | Ephemeral, never persisted | Persistent, tenant-scoped |
 | Tool definitions | Derived from trusted built-in code | Synced, stored, and admin-approved |
-| Credentials | Short-lived user and assistant-scoped bearer token | Configured public or encrypted bearer authentication |
+| Credentials | Short-lived user and assistant-scoped bearer token | Configured public, encrypted bearer or API-key header authentication; a credential only over https (plain http only to a loopback host) |
 | User identity | Encoded in Eneo's scoped token | Optional `X-Eneo-*` forwarding, off by default |
 | Availability | Derived automatically from the current assistant, model, and files | Selected through admin, space, assistant/governance, and conversation controls |
-| Per-call user approval | Always auto-approved because tools are read-only core capabilities | Controlled by the conversation's tool-approval setting |
+| Per-call user approval | Skipped: the scope is fixed by Eneo's code and the completion token | Controlled by the conversation's tool-approval setting |
 | MCP protocol state | Stateless | Stateless (fresh connection per completion) |
 | Circuit-breaker persistence | Throwaway server IDs mean failures remain request-local | Failures accumulate against the persistent server ID until cooldown |
 
@@ -536,9 +549,12 @@ input.
 
 Per-call approval happens after the model chooses an external tool. When the
 conversation requires approval, Eneo pauses execution and asks the user to
-approve or deny the proposed external calls. Built-in `knowledge` and `files`
-calls bypass this prompt: they are read-only Eneo capabilities whose scope is
-already fixed by the authenticated completion.
+approve or deny the proposed external calls. Built-in calls (`knowledge`,
+`files` and the built-in image provider) bypass this prompt: their scope is
+fixed by Eneo's own code and the completion token, and the role, space and
+classification checks that attached them already decided that this user may
+use them. Bundled runtime calls are not built-in in this sense and follow the
+conversation setting.
 
 An external tool can still be read-only, but Eneo does not infer safety from
 its name or description. It remains subject to the external approval policy.
@@ -564,8 +580,10 @@ they are not the file identifiers exposed to the model.
 
 The built-in files server remains the authorized raw-text fallback. If another
 tool fails while its arguments contain an Eneo reference URL, the proxy appends
-a hint telling the model to retry the same file reference with `files__read_file` instead
-of repeatedly calling the failed service.
+a hint: when the files server is attached, to retry the same file reference
+with `files__read_file` instead of repeatedly calling the failed service;
+otherwise, that the reference is valid, so the model reports that the tool
+cannot reach the file rather than asking the user to upload it again.
 
 <Callout type="warning">
   Passing a reference URL to an external MCP server is data egress. The URL is

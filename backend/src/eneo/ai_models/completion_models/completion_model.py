@@ -46,7 +46,6 @@ class TokenUsage(BaseModel):
 class ResponseType(str, Enum):
     TEXT = "text"
     REASONING = "reasoning"
-    ENEO_EVENT = "eneo_event"
     TOOL_CALL = "tool_call"
     TOOL_CALL_DELTA = "tool_call_delta"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
@@ -201,6 +200,8 @@ class Completion:
     stop: bool = False
     error: Optional[str] = None
     error_code: Optional[int] = None
+    # Public reason for an ERROR event, e.g. ``provider_unreachable``.
+    error_reason: Optional[str] = None
     usage: Optional[TokenUsage] = None
     # Cumulative request-payload count when at least one provider round omitted
     # prompt usage. Provider-reported usage remains separate and authoritative.

@@ -1,0 +1,46 @@
+/* A single returned value, large enough to be the point of the view. */
+.eneo-value {
+  padding: var(--spacing-4) var(--spacing-3);
+  font-size: var(--font-size-heading-2, 1.75rem);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* The code behind the result: tabs over one panel, under the footer's row. */
+.eneo-details {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--color-border);
+}
+/* Astryx draws the strip as a nav with its divider under its own bottom padding; it gets the
+   toolbar's inset and room above the tabs, and keeps that padding so the tabs stay above the line. */
+.eneo-details > .astryx-tab-list {
+  padding-top: var(--spacing-2);
+  padding-inline: var(--spacing-3);
+}
+.eneo-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  padding: var(--spacing-3);
+  background: var(--color-background-muted);
+}
+/* The fields of an editable input, two to a row where there is room. */
+.eneo-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+  gap: var(--spacing-2) var(--spacing-3);
+  align-items: end;
+}
+.eneo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing-2);
+}
+:root[data-mode="fullscreen"] [data-view="compute-result"] .eneo-rows {
+  flex: 1 0 20rem;
+  min-height: 20rem;
+  max-height: none;
+}

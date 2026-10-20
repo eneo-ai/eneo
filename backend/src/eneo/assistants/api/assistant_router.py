@@ -38,7 +38,6 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.database.database import AsyncSession
 from eneo.document_templates.domain import DocumentTemplateChoice
-from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
 from eneo.main.models import (
@@ -65,7 +64,7 @@ from eneo.skills.presentation.skill_assembler import (
     assistant_skill_binding_intents_from_input,
     skill_binding_audit_entries,
 )
-from eneo.spaces.api.space_models import TransferApplicationRequest
+from eneo.spaces.api.space_models import TransferRequest
 
 if TYPE_CHECKING:
     from eneo.assistants.assistant import Assistant
@@ -782,6 +781,10 @@ async def update_assistant(
     if "icon_id" in request_dict:
         icon_id = assistant.icon_id
 
+    rerank_model_id = NOT_PROVIDED
+    if "rerank_model_id" in request_dict:
+        rerank_model_id = assistant.rerank_model_id
+
     updated_assistant, _ = await service.update_assistant(
         assistant_id=id,
         name=assistant.name,
@@ -803,6 +806,7 @@ async def update_assistant(
         data_retention_days=data_retention_days,
         metadata_json=metadata_json,
         icon_id=icon_id,
+        rerank_model_id=rerank_model_id,
         skill_binding_intents=skill_binding_intents,
         document_template=document_template,
     )
@@ -1257,7 +1261,7 @@ async def leave_feedback(
 )
 async def transfer_assistant_to_space(
     id: UUID,
-    transfer_req: TransferApplicationRequest,
+    transfer_req: TransferRequest,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
     # Get assistant info BEFORE transfer to capture source space
@@ -1279,7 +1283,6 @@ async def transfer_assistant_to_space(
     await service.move_assistant_to_space(
         assistant_id=id,
         space_id=transfer_req.target_space_id,
-        move_resources=transfer_req.move_resources,
     )
 
     # Get target space info
@@ -1299,7 +1302,6 @@ async def transfer_assistant_to_space(
             "source_space_name": source_space.name if source_space else None,
             "target_space_id": str(transfer_req.target_space_id),
             "target_space_name": target_space.name if target_space else None,
-            "move_resources": transfer_req.move_resources,
         },
     }
 
@@ -1325,7 +1327,6 @@ async def transfer_assistant_to_space(
     response_model=PaginatedResponse[PromptSparse],
     description="List the prompt history for an assistant.",
     responses=responses.get_responses([404]),
-    include_in_schema=get_settings().dev,
 )
 @endpoint_access(
     authentication=Authentication.USER,

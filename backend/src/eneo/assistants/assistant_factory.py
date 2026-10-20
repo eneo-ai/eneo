@@ -187,6 +187,7 @@ class AssistantFactory:
             inline_file_text=assistant_in_db.inline_file_text,
             knowledge_mode=KnowledgeMode(assistant_in_db.knowledge_mode),
             icon_id=assistant_in_db.icon_id,
+            rerank_model_id=assistant_in_db.rerank_model_id,
         )
 
     def create_space_assistant_from_db(
@@ -245,6 +246,10 @@ class AssistantFactory:
         else:
             # Fallback: Map MCP servers from database to domain entities (without filtering)
             mcp_servers = MCPServerMapper.to_entities(assistant_in_db.mcp_servers)
+        mcp_tools = [
+            (tool.mcp_server_tool_id, tool.is_enabled)
+            for tool in assistant_in_db.assistant_mcp_server_tools
+        ]
 
         # `is None` (not truthiness) so corrupt non-None JSONB still raises
         # ValidationError downstream rather than being silently dropped.
@@ -300,6 +305,7 @@ class AssistantFactory:
             collections=collections,
             integration_knowledge_list=integration_knowledge_list,
             mcp_servers=[s for s in mcp_servers if s.purpose == "general"],
+            mcp_tools=mcp_tools,
             created_at=assistant_in_db.created_at,
             updated_at=assistant_in_db.updated_at,
             published=assistant_in_db.published,
@@ -312,4 +318,5 @@ class AssistantFactory:
             data_retention_days=assistant_in_db.data_retention_days,
             metadata_json=assistant_in_db.metadata_json,
             icon_id=assistant_in_db.icon_id,
+            rerank_model_id=assistant_in_db.rerank_model_id,
         )

@@ -756,6 +756,9 @@ class SpaceAssembler:
             skill_permissions=self._get_skill_permissions(space),
             personal=space.is_personal(),
             organization=space.is_organization(),
+            organization_space_id=(
+                space.id if space.is_organization() else space.tenant_space_id
+            ),
             permissions=self._cap_space_permissions(self._get_space_permissions(space)),
             available_roles=available_roles,
             security_classification=security_classification,
@@ -866,10 +869,26 @@ class SpaceAssembler:
 
         return UpdateSpaceDryRunResponse(
             capabilities=result.affected_capabilities,
-            assistants=applications.assistants.items,
-            group_chats=applications.group_chats.items,
-            apps=applications.apps.items,
-            services=applications.services.items,
+            assistants=[
+                item
+                for item in applications.assistants.items
+                if item.id in result.affected_assistant_ids
+            ],
+            group_chats=[
+                item
+                for item in applications.group_chats.items
+                if item.id in result.affected_group_chat_ids
+            ],
+            apps=[
+                item
+                for item in applications.apps.items
+                if item.id in result.affected_app_ids
+            ],
+            services=[
+                item
+                for item in applications.services.items
+                if item.id in result.affected_service_ids
+            ],
             completion_models=[
                 self.completion_model_assembler.from_completion_model_to_model(
                     cm, show_pricing=self.user.can_view_model_pricing

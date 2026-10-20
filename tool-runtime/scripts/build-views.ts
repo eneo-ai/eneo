@@ -11,6 +11,7 @@ const ROOT = join(import.meta.dir, "..");
 const VIEWS = {
   "query-result": "src/tools/tabular/view",
   chart: "src/tools/charts/view",
+  "compute-result": "src/tools/compute/view",
 };
 // Eneo reads a view only up to this size (mcp_app_resource_max_bytes in its backend).
 const MAX_VIEW_BYTES = 2 * 1024 * 1024;

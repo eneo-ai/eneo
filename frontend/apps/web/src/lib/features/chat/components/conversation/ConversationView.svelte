@@ -1,8 +1,11 @@
 <script lang="ts">
-  import { conversationUploads } from "../../conversationUploads";
+  import { conversationUploadGroups } from "../../conversationUploads";
   import { opensFilePanel } from "../../toolFileInputs";
   import { getEneo } from "$lib/core/Eneo";
-  import { initAttachmentManager } from "$lib/features/attachments/AttachmentManager";
+  import {
+    initAttachmentManager,
+    matchesUpload
+  } from "$lib/features/attachments/AttachmentManager";
   import { getAttachmentRulesStore } from "$lib/features/attachments/getAttachmentRules";
   import { toStore } from "svelte/store";
   import AttachmentDropArea from "$lib/features/attachments/components/AttachmentDropArea.svelte";
@@ -10,7 +13,8 @@
   import {
     getFilePreview,
     initFilePreview,
-    type DocumentExport
+    type DocumentExport,
+    type DocumentSaver
   } from "$lib/features/file-preview/FilePreview.svelte";
   import { previewKindOf, type PreviewFile } from "$lib/features/file-preview/previewKind";
   import FilePreviewLayout from "$lib/features/file-preview/components/FilePreviewLayout.svelte";
@@ -35,6 +39,7 @@
   import type { PanelContents } from "$lib/features/file-preview/panelContents";
   import { getAppContext } from "$lib/core/AppContext";
   import { onDestroy, untrack, type Snippet } from "svelte";
+  import { beforeNavigate } from "$app/navigation";
   import { followConversationScroll } from "../../followConversationScroll";
   import { m } from "$lib/paraglide/messages";
 
@@ -46,7 +51,8 @@
   let { children, onNewConversation }: Props = $props();
 
   const chat = getChatService();
-  const uploads = $derived(conversationUploads(chat.currentConversation.messages ?? []));
+  const uploadGroups = $derived(conversationUploadGroups(chat.currentConversation.messages ?? []));
+  const uploads = $derived(uploadGroups.flatMap((group) => group.files));
   const { user } = getAppContext();
 
   // Validate uploads client-side against the backend's per-format size limits
@@ -71,7 +77,13 @@
   );
   initAttachmentManager({
     eneo: getEneo(),
-    options: { rules: attachmentRules, inlineErrors: true }
+    options: {
+      rules: attachmentRules,
+      inlineErrors: true,
+      // A file sent earlier in this conversation is attached again as it is,
+      // without another upload.
+      findExisting: (file) => uploads.find((uploaded) => matchesUpload(file, uploaded))
+    }
   });
 
   // Every file in the conversation opens in one preview panel beside the
@@ -123,6 +135,33 @@
         eneo.conversations.exportDocument({ sessionId, fileId: file.id, format })
     };
   }
+  // A reader's edit of such a document is saved as its next version, which
+  // joins the conversation like a version the assistant made.
+  function documentSaver(file: PreviewFile): DocumentSaver | null {
+    const sessionId = chat.currentConversation.id;
+    if (!sessionId || previewKindOf(file) !== "markdown") return null;
+    if (chat.documents.versionsOf(file.id).length === 0) return null;
+    return {
+      save: async (content) => {
+        const version = await eneo.conversations.saveDocumentVersion({
+          sessionId,
+          fileId: file.id,
+          content
+        });
+        // The request can finish after another conversation has opened.
+        if (chat.currentConversation.id === sessionId) chat.addGeneratedFile(version);
+        return version;
+      }
+    };
+  }
+  // Leaving the conversation would lose unsaved edits to a document. On a
+  // reload or a closed tab the browser asks with its own dialog.
+  beforeNavigate((navigation) => {
+    if (!filePreview.unsaved) return;
+    if (navigation.type === "leave" || !confirm(m.unsaved_changes_warning())) {
+      navigation.cancel();
+    }
+  });
 
   // A tool call of the answer being written.
   type LiveToolCall = Parameters<typeof chat.generatedFileIdsOf>[0] & {
@@ -235,7 +274,7 @@
         open: () => appPane.open(call.tool_call_id)
       })),
     documents: chat.documents.documents,
-    uploads
+    uploads: uploadGroups
   });
 
   let isDragging = $state(false);
@@ -249,6 +288,7 @@
   preview={filePreview}
   versionsOf={(file) => chat.documents.versionsOf(file.id)}
   exportOf={documentExport}
+  saverOf={documentSaver}
   contents={panelContents}
   occupant={{
     shown: appPane.shown,
@@ -265,6 +305,9 @@
       bind:this={scrollContainer}
       ondragenter={(event) => {
         event.preventDefault();
+        // Files dropped while a message is in flight would be lost with the
+        // sent batch, so the drop area stays closed until the reply is in.
+        if (chat.askQuestion.isLoading) return;
         isDragging = true;
       }}
     >

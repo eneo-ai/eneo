@@ -1,19 +1,20 @@
 /**
  * Capability purposes: MCP servers that act as the tenant's provider for one
- * capability (web search, image generation, file analysis, file creation, charts). The backend resolves an attached
+ * capability (web search, image generation, file analysis, file creation, charts,
+ * compute). The backend resolves an attached
  * capability marker to the active provider at ask time, so every surface here
  * treats them as on/off capabilities rather than as servers.
  *
  * Adding a capability means adding one entry here (plus its messages); every
  * admin, space, assistant and chat surface renders from this list.
  */
-import { ChartColumn, FilePlus, FileSearch, Globe, Image } from "@lucide/svelte";
+import { Calculator, ChartColumn, FilePlus, FileSearch, Globe, Image } from "@lucide/svelte";
 import { m } from "$lib/paraglide/messages";
 
 export const GENERAL_PURPOSE = "general";
 
 export type CapabilityPurpose =
-  "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts";
+  "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute";
 
 export type CapabilityDescriptor = {
   purpose: CapabilityPurpose;
@@ -119,6 +120,21 @@ export const CAPABILITIES: readonly CapabilityDescriptor[] = [
     classificationHint: m.charts_classification_hint,
     bundledDescription: m.tools_builtin_charts_description,
     bundledSummary: m.tools_builtin_charts_summary
+  },
+  {
+    purpose: "compute",
+    icon: Calculator,
+    label: m.compute,
+    providerNamePlaceholder: m.compute_provider_name_placeholder,
+    providerManagedNote: m.compute_provider_managed_note,
+    forwardIdentityHint: m.compute_forward_identity_hint,
+    capabilityHint: m.compute_capability_hint,
+    spaceHint: m.compute_space_group_hint,
+    noActiveProviderHint: m.compute_no_active_provider_hint,
+    notAvailableHereHint: m.compute_not_available_here_hint,
+    classificationHint: m.compute_classification_hint,
+    bundledDescription: m.tools_builtin_compute_description,
+    bundledSummary: m.tools_builtin_compute_summary
   }
 ];
 

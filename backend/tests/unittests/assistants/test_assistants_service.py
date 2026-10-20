@@ -51,6 +51,16 @@ class Setup:
     group_service: AsyncMock
 
 
+async def test_default_assistant_cannot_be_deleted(setup: Setup):
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+    assistant.is_default = True
+    with pytest.raises(
+        BadRequestException, match="default assistant cannot be deleted"
+    ):
+        await setup.service.delete_assistant(TEST_UUID)
+    setup.service.repo.delete.assert_not_awaited()
+
+
 @pytest.fixture(name="setup")
 def setup_fixture():
     repo = AsyncMock()
@@ -70,6 +80,7 @@ def setup_fixture():
 
     space_repo = AsyncMock()
     mock_assistant = MagicMock()
+    mock_assistant.is_default = False
     mock_assistant.mcp_servers = []
     mock_assistant.collections = []
     mock_assistant.websites = []
@@ -219,7 +230,7 @@ async def test_retention_admin_can_set_or_clear_assistant_override(
     space.default_assistant = None
     space.data_retention_days = 30
     space.get_assistant.return_value = assistant
-    setup.service.space_repo.update.return_value = space
+    setup.service.space_service.get_space.return_value = space
     setup.service.actor_manager.get_space_actor_from_space.return_value = (
         retention_actor
     )
@@ -241,7 +252,7 @@ async def test_editor_can_edit_assistant_when_retention_is_omitted(
     space = setup.service.space_repo.get_space_by_assistant.return_value
     space.is_personal.return_value = False
     space.get_assistant.return_value = assistant
-    setup.service.space_repo.update.return_value = space
+    setup.service.space_service.get_space.return_value = space
     setup.service.actor_manager.get_space_actor_from_space.return_value = (
         retention_actor
     )
@@ -428,7 +439,7 @@ async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
     assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
     assistant.space_id = TEST_UUID
     space = setup.service.space_repo.get_space_by_assistant.return_value
-    setup.service.space_repo.update.return_value = space
+    setup.service.space_service.get_space.return_value = space
     intents = [
         SkillBindingIntent(
             reference=SkillBindingReference(skill_id=uuid4(), skill_revision_id=uuid4())
@@ -459,7 +470,7 @@ async def test_update_replaces_assistant_skills_before_fit_and_parent_persist(
         replace_bindings
     )
     setup.service._validate_attachments_fit.side_effect = validate_fit
-    setup.service.space_repo.update.side_effect = persist_parent
+    setup.service.repo.apply_update.side_effect = persist_parent
 
     await setup.service.update_assistant(
         assistant_id=TEST_UUID,
@@ -500,7 +511,7 @@ async def test_update_assistant_binding_fit_failure_skips_parent_persist(
         assistant_id=TEST_UUID,
         intents=[],
     )
-    setup.service.space_repo.update.assert_not_awaited()
+    setup.service.repo.apply_update.assert_not_awaited()
 
 
 def configure_personal_default_assistant(
@@ -508,6 +519,7 @@ def configure_personal_default_assistant(
 ):
     assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
     assistant.id = TEST_UUID
+    assistant.is_default = True
     assistant.collections = []
     assistant.websites = []
     assistant.integration_knowledge_list = []
@@ -518,7 +530,7 @@ def configure_personal_default_assistant(
     space.get_assistant.return_value = assistant
     space.is_completion_model_available.return_value = True
     space.is_completion_model_in_space.return_value = True
-    setup.service.space_repo.update.return_value = space
+    setup.service.space_service.get_space.return_value = space
 
     actor = MagicMock()
     actor.can_edit_default_assistant.return_value = True
@@ -882,6 +894,8 @@ async def test_personal_chat_cannot_store_unsupported_reasoning_effort(
         {"metadata_json": {}},
         {"icon_id": uuid4()},
         {"skill_binding_intents": []},
+        {"rerank_model_id": uuid4()},
+        {"rerank_model_id": None},
     ],
 )
 async def test_personal_chat_cannot_change_extended_default_assistant_fields(
@@ -946,7 +960,7 @@ async def test_create_from_template_prefers_template_model_when_available(
     setup.service.assistant_template_service.get_consumable_assistant_template.return_value = template
     setup.service.file_service.get_file_infos.return_value = []
     setup.service.factory.create_assistant.return_value = created_assistant
-    setup.service.space_repo.update.return_value = refreshed_space
+    setup.service.space_service.get_space.return_value = refreshed_space
 
     await setup.service._create_from_template(
         space=space,
@@ -985,7 +999,7 @@ async def test_create_from_template_keeps_fallback_when_template_has_no_model(
     setup.service.assistant_template_service.get_consumable_assistant_template.return_value = template
     setup.service.file_service.get_file_infos.return_value = []
     setup.service.factory.create_assistant.return_value = created_assistant
-    setup.service.space_repo.update.return_value = refreshed_space
+    setup.service.space_service.get_space.return_value = refreshed_space
 
     await setup.service._create_from_template(
         space=MagicMock(id=uuid4()),
@@ -1219,3 +1233,54 @@ async def test_history_derivatives_do_not_duplicate_present_images(setup: Setup)
     await setup.service._attach_history_derivatives(session=session)
 
     assert question.files == [pdf, derived]
+
+
+async def test_update_rejects_a_rerank_model_the_space_may_not_use(setup: Setup):
+    space = MagicMock()
+    space.security_classification = MagicMock(name="classification")
+    setup.service.space_repo.get_space_by_assistant.return_value = space
+    setup.service.rerank_service = AsyncMock()
+    setup.service.rerank_service.selectable.return_value = False
+    chosen = uuid4()
+
+    with pytest.raises(
+        BadRequestException, match="rerank model is not available in the space"
+    ):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID, rerank_model_id=chosen
+        )
+
+    setup.service.rerank_service.selectable.assert_awaited_once_with(
+        chosen, space.security_classification
+    )
+
+
+async def test_update_persists_an_allowed_rerank_model(setup: Setup):
+    setup.service.rerank_service = AsyncMock()
+    setup.service.rerank_service.selectable.return_value = True
+    chosen = uuid4()
+
+    await setup.service.update_assistant(assistant_id=TEST_UUID, rerank_model_id=chosen)
+
+    update = setup.service.repo.apply_update.await_args.args[2]
+    assert update.rerank_model_id == chosen
+
+
+async def test_update_clears_the_rerank_model_without_asking_the_service(setup: Setup):
+    setup.service.rerank_service = AsyncMock()
+
+    await setup.service.update_assistant(assistant_id=TEST_UUID, rerank_model_id=None)
+
+    setup.service.rerank_service.selectable.assert_not_awaited()
+    update = setup.service.repo.apply_update.await_args.args[2]
+    assert update.rerank_model_id is None
+
+
+async def test_partial_update_leaves_the_rerank_model_alone(setup: Setup):
+    setup.service.rerank_service = AsyncMock()
+
+    await setup.service.update_assistant(assistant_id=TEST_UUID, name="renamed")
+
+    setup.service.rerank_service.selectable.assert_not_awaited()
+    update = setup.service.repo.apply_update.await_args.args[2]
+    assert "rerank_model_id" not in update.scalar_values()

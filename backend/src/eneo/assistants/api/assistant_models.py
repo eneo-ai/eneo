@@ -145,6 +145,10 @@ def _empty_mcp_tool_reference_list() -> list[McpToolReference]:
     return []
 
 
+def _empty_file_list() -> list[File]:
+    return []
+
+
 class EffectiveConfigPublic(BaseModel):
     available_capabilities: list[CapabilityAvailability] = Field(
         default_factory=list[CapabilityAvailability]
@@ -319,6 +323,14 @@ class AssistantUpdatePublic(AssistantCreatePublic):
         default=NOT_PROVIDED,
         description="Icon ID referencing an uploaded icon. Set to null to remove.",
     )
+    rerank_model_id: Union[UUID, None, NotProvided] = Field(
+        default=NOT_PROVIDED,
+        description=(
+            "Rerank model that re-scores retrieved knowledge before it reaches "
+            "the model. Must be enabled and meet the space's security "
+            "classification. Set to null to search in vector order only."
+        ),
+    )
     skill_bindings: Optional[list[AssistantSkillBindingInput]] = None
 
 
@@ -368,6 +380,9 @@ class AssistantResponse(BaseModel):
     question: str
     question_id: Optional[UUID] = None
     files: list[File]
+    # The files the answer's tools made; only known up front for a complete
+    # (non-streaming) answer, since a stream delivers each file as it comes.
+    generated_files: list[File] = Field(default_factory=_empty_file_list)
     answer: str | AsyncIterable[Completion]
     info_blobs: list[InfoBlobInDBWithScore]
     completion_model: CompletionModel | CompletionModelPublic
@@ -452,6 +467,10 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     icon_id: Optional[UUID] = Field(
         default=None,
         description="Icon ID referencing an uploaded icon",
+    )
+    rerank_model_id: Optional[UUID] = Field(
+        default=None,
+        description="ID of the rerank model, or None for vector order only",
     )
     insight_enabled: bool = Field(
         description=(

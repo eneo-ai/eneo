@@ -7,6 +7,7 @@ Quick deployment reference for Eneo using Docker Compose.
 ## Files in This Directory
 
 - `docker-compose.yml` - Complete production stack (Traefik, frontend, backend, worker, tools runtime, PostgreSQL, Redis)
+- `docker-compose.web-next.yml` / `env_web_next.template` - Optional Next beta sharing the existing backend; see [parallel frontend deployment](https://docs.eneo.ai/dev/guides/deployment#run-the-next-beta-alongside-the-existing-app)
 - `docker-compose.object-content.yml` - Optional bundled SeaweedFS profile
 - `docker-compose.without-tools.yml` - Optional overlay that omits the tools runtime (see [TOOL_RUNTIME.md](TOOL_RUNTIME.md))
 - `setup.py` - Generates the missing tools runtime token in `.env`, preserving existing settings
@@ -17,7 +18,7 @@ Quick deployment reference for Eneo using Docker Compose.
 - `env_db.template` - Database credentials
 - `env_modules.template` / `env_module_ttt.template` - Module configuration (only needed when enabling modules)
 - `OBJECT_CONTENT.md` - Offline object-content operations reference
-- `TOOL_RUNTIME.md` - Bundled tools runtime: isolation, release bundle, upgrade, diagnostics and omitting it
+- `TOOL_RUNTIME.md` - Bundled tools runtime operator guide: release bundle, configuration, isolation checklist, upgrade, diagnostics and omitting it (architecture and security model on [docs.eneo.ai](https://docs.eneo.ai/dev/docs/tool-architecture))
 - `MCP_APPS.md` - Optional interactive tool views (MCP Apps): the extra hostname, settings and what administrators approve
 
 ## Quick Start

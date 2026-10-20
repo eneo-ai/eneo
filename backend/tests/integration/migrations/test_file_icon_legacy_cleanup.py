@@ -617,7 +617,10 @@ async def test_same_build_metadata_fallback_worker_and_failure_after_cleanup(
     )
     from eneo.object_content.file_icon_preflight import run_file_icon_preflight
 
-    url, _config, ids = contract_database
+    url, config, ids = contract_database
+    # The repositories read this build's schema; the contract revision only
+    # fixes what the cleanup and preflight expect of the legacy columns.
+    command.upgrade(config, "head")
     database = DatabaseSessionManager()
     database.init(
         make_url(url)

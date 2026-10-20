@@ -102,10 +102,8 @@ export async function readConversationStream(client, endpoint, args, callbacks, 
                 200,
                 0,
                 {
-                  detail: {
-                    code: typeof data.error_code === "string" ? data.error_code : "stream_error",
-                    message: data.error
-                  }
+                  code: typeof data.code === "string" && data.code ? data.code : "stream_error",
+                  message: data.error
                 }
               );
           }

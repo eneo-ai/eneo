@@ -402,6 +402,12 @@ export class EneoError extends Error {
    * @param {{endpoint: string;}} requestInfo
    */
   static throw(error, requestInfo) {
+    // A stream callback reports a failed answer as an EneoError already;
+    // wrapping it again would drop its reason code.
+    if (error instanceof EneoError) {
+      if (!error.request.endpoint) error.request = { endpoint: requestInfo.endpoint };
+      throw error;
+    }
     if (error instanceof PartialError) {
       throw new EneoError(
         error.message,

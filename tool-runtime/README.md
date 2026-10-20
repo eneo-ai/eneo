@@ -1,10 +1,24 @@
 # Eneo tool runtime
 
 Eneo's bundled, isolated MCP provider. It is a small Bun service. Operator
-documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
+documentation lives in `docs/deployment/TOOL_RUNTIME.md`. Why it is a
+separate service, and the security model its code implements, are described
+on the docs site: `frontend/apps/docs-site/src/content/docs/tool-architecture.mdx`
+and `frontend/apps/docs-site/src/content/docs/tool-runtime-security.mdx`
+(published under https://docs.eneo.ai/dev/docs/). Keep the security page in
+step when changing `src/server.ts`, `src/sandbox.ts`, `src/child.ts`, the
+download policy or an engine's limits.
 
 - `POST /mcp/compute` is a stateless Streamable HTTP MCP endpoint (JSON
   responses) exposing `run_javascript`.
+- `POST /mcp/compute` (`run_javascript`) provides the **Compute** function: exact
+  calculations over JSON in a QuickJS sandbox. With `export: true` a tabular
+  value is attached as a CSV file (`src/tools/files/csv.ts`) that charts,
+  spreadsheets and documents take as a source. The tool brings a result view
+  (`src/tools/compute/view/`): a table, a value, a key/value list or JSON, with
+  the code, input and logs behind a disclosure and fields to run the same code
+  again over edited input. `display: "auto"` shows a table of several rows,
+  `"result"` shows any value, `"none"` hides the view.
 - `POST /mcp/file-analysis` exposes `inspect_table`, `query_table` and
   `assert_table` over signed Eneo attachment URLs. It fetches only from the
   origin Eneo sends in `X-Eneo-File-Origin`. `query_table` brings a table view
@@ -65,7 +79,7 @@ documentation lives in `docs/deployment/TOOL_RUNTIME.md`.
 | `src/server.ts`              | Bearer check, Origin refusal, body/result bounds, MCP    |
 | `src/sandbox.ts`             | One child process per job (only `PATH` and `TMPDIR` in its env, watchdog, tmpdir) |
 | `src/child.ts`               | Child entrypoint                                         |
-| `src/tools/compute/`         | QuickJS engine, limits and the tool definition           |
+| `src/tools/compute/`         | QuickJS engine, limits, the tool definition, the result view and the prelude (`Decimal`, `fmt`) a script finds installed |
 | `src/tools/tabular/`         | Download policy, parsed-sheet cache, DuckDB/XLSX engines |
 | `src/tools/documents/`       | Markdown parser, DOCX/PDF/XLSX renderers, Word templates |
 | `scripts/render_pdf.py`      | The WeasyPrint sidecar the PDF renderer spawns            |
@@ -110,12 +124,18 @@ as shipped, and they share one kit in `src/views/kit/`:
   context, and the tool's input and result as they arrive.
 - `TableRows` and `columnWidth` give an Astryx `Table` scrolling rows under
   headings that stay in place.
+- The frame also gives Astryx its own words in the host's language (its
+  bundled Swedish catalogue; English is built in), so a `CodeBlock`'s copy
+  button or a menu reads right without the view translating anything.
 
 A view lives next to its tool (`src/tools/<tool>/view/`: `index.html`,
 `main.tsx`, and `index.ts`, which loads the built page). To add one, write
 those files and add the view to `VIEWS` in `scripts/build-views.ts`.
 
-`bun run build:views` builds every view with Vite into one self-contained page
+`bun run build:prelude` bundles `src/tools/compute/prelude/` (decimal.js and the
+Swedish `fmt` helpers) into `dist/prelude/compute.js`, evaluated in every fresh
+QuickJS context before the script; the libraries are build-time dependencies
+only. `bun run build:views` builds every view with Vite into one self-contained page
 under `dist/views/` (ignored by git). `bun run dev` and `bun run test` build
 them first, and the image builds them in its own stage, so React, Astryx and
 Vite are development dependencies only. A page larger than the 2 MB a host

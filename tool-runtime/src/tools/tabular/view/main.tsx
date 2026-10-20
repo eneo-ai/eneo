@@ -21,11 +21,17 @@ import {
   TableRows,
   ViewFrame,
   columnWidth,
+  copyText,
+  filterRows,
+  isNumeric,
+  numberFormatter,
   pick,
+  sortRows,
+  toTsv,
   useHost,
   type ToolResult,
 } from "../../../views/kit";
-import { filterRows, pageSql, showsTable, sortRows, toTsv } from "./paging";
+import { pageSql, showsTable } from "./paging";
 import "./view.css";
 
 /** Rows drawn at once; a longer result is read on from with the button. */
@@ -113,9 +119,6 @@ function queryResult(result: ToolResult): QueryResult | undefined {
   return candidate as QueryResult;
 }
 
-/** A whole number too large for a JSON number arrives as its digits. */
-const isNumeric = (value: unknown) =>
-  typeof value === "number" || (typeof value === "string" && /^-?\d+$/.test(value));
 
 function QueryResultView() {
   const args = useRef<QueryArguments | undefined>(undefined);
@@ -214,14 +217,7 @@ function QueryResultView() {
     },
   });
 
-  const format = useMemo(
-    () =>
-      new Intl.NumberFormat(context.locale ?? "sv", {
-        useGrouping: false,
-        maximumFractionDigits: 6,
-      }),
-    [context.locale],
-  );
+  const format = useMemo(() => numberFormatter(context.locale), [context.locale]);
   const filtering = filter.trim() !== "";
   const visible = useMemo(() => filterRows(rows, filter).slice(0, MAX_DRAWN_ROWS), [rows, filter]);
   // A row is keyed by where its column stands, so two columns of one name stay apart.
@@ -231,8 +227,8 @@ function QueryResultView() {
   );
   const tableColumns = useMemo(() => {
     const shown = (value: unknown) =>
-      typeof value === "number"
-        ? format.format(value)
+      typeof value === "number" || typeof value === "string"
+        ? format(value)
         : typeof value === "object"
           ? JSON.stringify(value)
           : String(value);
@@ -258,17 +254,7 @@ function QueryResultView() {
   }, [columns, visible, format]);
 
   const copy = async () => {
-    const tsv = toTsv(columns, visible);
-    try {
-      await navigator.clipboard.writeText(tsv);
-    } catch {
-      // A frame without clipboard permission still has the old way.
-      const area = Object.assign(document.createElement("textarea"), { value: tsv });
-      document.body.append(area);
-      area.select();
-      document.execCommand("copy");
-      area.remove();
-    }
+    await copyText(toTsv(columns, visible));
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };

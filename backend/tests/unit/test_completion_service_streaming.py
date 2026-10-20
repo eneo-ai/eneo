@@ -214,6 +214,66 @@ async def test_generated_image_chunks_pass_through_tool_call_handling():
     assert chunks[0].image is image
 
 
+async def test_adapter_events_without_text_reach_the_caller():
+    """Typed adapter events pass through whether or not they carry text; an
+    approval timeout must reach the chat so the pending approval resolves."""
+    completion_model = _make_completion_model()
+    tools = [
+        ToolCallMetadata(server_name="files", tool_name="read", tool_call_id="call-1")
+    ]
+
+    class _ApprovalAdapter(_DummyAdapter):
+        async def iterate_stream(self, **kwargs):
+            yield Completion(
+                response_type=ResponseType.TOOL_APPROVAL_REQUIRED,
+                approval_id="approval-1",
+                tool_calls_metadata=tools,
+            )
+            yield Completion(
+                response_type=ResponseType.TOOL_APPROVAL_TIMEOUT,
+                approval_id="approval-1",
+                tool_calls_metadata=tools,
+            )
+            yield Completion(
+                response_type=ResponseType.TOOL_CALL, tool_calls_metadata=tools
+            )
+            yield Completion(text="Okej.")
+            yield Completion()
+            yield Completion(text="", stop=True)
+
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+        redis_client=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(
+        return_value=_ApprovalAdapter(model=completion_model)
+    )
+
+    response = await service.get_response(
+        model=completion_model,
+        text_input="read a.txt",
+        session=SimpleNamespace(
+            id=uuid4(),
+            user_id=uuid4(),
+            assistant=SimpleNamespace(id=uuid4()),
+            questions=[],
+        ),
+        stream=True,
+    )
+    chunks = [chunk async for chunk in response.completion]
+
+    # The empty untyped chunk carries nothing and is the only one dropped.
+    assert [(chunk.response_type, chunk.stop) for chunk in chunks] == [
+        (ResponseType.TOOL_APPROVAL_REQUIRED, False),
+        (ResponseType.TOOL_APPROVAL_TIMEOUT, False),
+        (ResponseType.TOOL_CALL, False),
+        (ResponseType.TEXT, False),
+        (None, True),
+    ]
+
+
 class _ViewProxy:
     """Proxy whose ``weather__get_weather`` tool has an approved view."""
 

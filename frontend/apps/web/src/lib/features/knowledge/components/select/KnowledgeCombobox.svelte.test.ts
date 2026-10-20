@@ -36,9 +36,10 @@ describe("KnowledgeCombobox", () => {
     const onAddWebsite = vi.fn();
 
     render(KnowledgeCombobox, {
-      origin: "personal",
+      origin: "space",
       space,
       currentSpaceId: "personal-space",
+      organizationSpaceId: "organization-space",
       selectedCollections: [],
       selectedWebsites: [],
       selectedIntegrationKnowledge: [],
@@ -47,7 +48,7 @@ describe("KnowledgeCombobox", () => {
       onAddIntegration: vi.fn()
     });
 
-    await page.getByRole("button", { name: m.add_knowledge_personal() }).click();
+    await page.getByRole("button", { name: m.add_knowledge_space() }).click();
 
     await expect.element(page.getByText(m.pages_failed({ count: 3 }))).toBeVisible();
     await page.getByText("Documentation").click();

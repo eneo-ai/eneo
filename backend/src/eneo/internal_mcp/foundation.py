@@ -38,7 +38,7 @@ from eneo.authentication.auth_models import (
     JWTPayload,
     ScopedMcpClaims,
 )
-from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE
+from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
 from eneo.database.database import sessionmanager
 from eneo.main.config import get_settings
 from eneo.main.exceptions import AuthenticationException
@@ -101,6 +101,18 @@ def mcp_server_id_from_token(token: str) -> UUID:
     if server_id is None:
         raise ValueError("Access token is not scoped to a built-in provider.")
     return server_id
+
+
+def table_tools_from_token(token: str) -> bool:
+    """Whether the completion this token was minted for attached the table tools."""
+    settings = get_settings()
+    _, claims = AuthService().get_jwt_payload_with_claims(
+        token,
+        key=str(settings.jwt_secret),
+        aud=INTERNAL_MCP_AUDIENCE,
+        algs=[settings.jwt_algorithm],
+    )
+    return claims.get("table_tools") is True
 
 
 @asynccontextmanager

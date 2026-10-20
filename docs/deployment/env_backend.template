@@ -465,6 +465,8 @@ EXPORT_MAX_AGE_HOURS=24
 # address users open Eneo on.
 # MCP_APPS_ENABLED=true
 # MCP_APP_CONTENT_BASE_URL=https://views.your-domain.com
+# A second frontend served beside PUBLIC_ORIGIN that may frame views (JSON list).
+# MCP_APP_HOST_ORIGINS=["https://next.your-domain.com"]
 
 # ============================================================================
 # FEATURE FLAGS
@@ -555,3 +557,8 @@ OTEL_DEPLOYMENT_ENVIRONMENT=production
 # DEPRECATED: MobilityGuard and Zitadel variables are no longer used.
 # Use OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET above.
 # ----------------------------------------------------------------------------
+
+# Extra, exact integration callback URLs for parallel frontends (JSON array).
+# Keep OAUTH_CALLBACK_URL pointing at the existing app. Register each URL with
+# SharePoint/Confluence too. The selected URL is bound to the one-use OAuth state.
+OAUTH_CALLBACK_URLS=[]

@@ -2,8 +2,8 @@ import { Marked, type TokenizerAndRendererExtension } from "marked";
 import type { EneoFileToken, EneoInrefToken, EneoMentionToken } from "./CustomComponents";
 
 export { default as Markdown } from "./Markdown.svelte";
-export { sanitizeImageSrc, sanitizeLinkHref } from "./sanitizeUrl.js";
-export { fileHandleId, setFileImageUrls } from "./FileImageContext.js";
+export { sanitizeImageSrc, sanitizeLinkHref, sanitizeWebHref } from "./sanitizeUrl.js";
+export { fileHandleId } from "./FileImageContext.js";
 export {
   type CustomRenderers as MarkdownCustomRenderingOptions,
   type EneoFileCustomComponentProps,
@@ -12,10 +12,8 @@ export {
 } from "./CustomComponents";
 
 export function eneoMarkdownLexer({
-  breaks = true,
   fileNames = []
 }: {
-  breaks?: boolean;
   /** Names of the conversation's files; each mention of one becomes a file token. */
   fileNames?: string[];
 } = {}) {
@@ -118,9 +116,8 @@ export function eneoMarkdownLexer({
   // deduplicate), so lexing got slower with every message rendered.
   const instance = new Marked({
     extensions: [eneoInref, eneoInrefBlock, eneoMention, ...(names.length ? [eneoFile] : [])],
-    // Chat text keeps the line breaks as typed; a document's single line
-    // breaks are soft, as in the Markdown file it is.
-    breaks,
+    // Chat text keeps the line breaks as typed.
+    breaks: true,
     gfm: true
   });
 

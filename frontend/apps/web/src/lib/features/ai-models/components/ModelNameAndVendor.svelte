@@ -34,6 +34,7 @@
     CompletionModel,
     EmbeddingModel,
     ImageModel,
+    RerankModel,
     TranscriptionModel
   } from "@eneo/eneo-js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -45,6 +46,7 @@
     | EmbeddingModel
     | TranscriptionModel
     | ImageModel
+    | RerankModel
     | { org: string; nickname: string; name: string; description: string };
   export let size: "card" | "table" = "table";
   /** Controls the description info-button next to the model name.
