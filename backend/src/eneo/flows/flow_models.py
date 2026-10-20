@@ -202,6 +202,31 @@ class FlowConversationBindRequest(BaseModel):
     session_id: UUID
 
 
+class FlowFunctionToolPublic(BaseModel):
+    """One tool of a function's provider, as a function step names it."""
+
+    name: str
+    description: Optional[str] = None
+    input_schema: dict[str, Any] = Field(default_factory=dict)
+
+
+class FlowFunctionPublic(BaseModel):
+    """A function a function step can call in a space, and whether it can now.
+
+    ``enabled_in_space`` is the space's setting; ``available`` whether the
+    space's flows assistant reaches a provider for it today (the one a run
+    uses), with that provider's tools.
+    """
+
+    purpose: str
+    enabled_in_space: bool
+    available: bool
+    provider: Optional[str] = None
+    tools: list[FlowFunctionToolPublic] = Field(
+        default_factory=list[FlowFunctionToolPublic]
+    )
+
+
 class FlowAuthoringAssistantPublic(BaseModel):
     """The hidden assistant the flows chat talks to, for one space."""
 

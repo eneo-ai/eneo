@@ -251,3 +251,52 @@ async def test_arguments_the_tool_rejects_fail_before_the_call(
         assert finished.error.code == STEP_FUNCTION_FAILED
         assert "query" in finished.error.message
         assert providers.proxy is None
+
+
+async def test_the_panel_lists_the_functions_a_step_can_call(
+    client,
+    bearer,
+    flows_enabled,
+    db_container,
+    member_space,
+    completion_model_factory,
+    providers,
+):
+    """GET /flows/functions/ says per purpose whether the space enables it and
+    which tools its provider offers, as list_functions tells the chat."""
+    async with db_container() as container:
+        space = await _space(
+            container,
+            member_space,
+            completion_model_factory,
+            "Functions Space",
+            "image_generation",
+            "charts",
+        )
+        space_id = space.id
+
+    response = await client.get(
+        "/api/v1/flows/functions/", params={"space_id": str(space_id)}, headers=bearer
+    )
+    assert response.status_code == 200, response.text
+    by_purpose = {item["purpose"]: item for item in response.json()}
+    assert set(by_purpose) == {
+        "web_search",
+        "image_generation",
+        "file_analysis",
+        "file_creation",
+        "charts",
+        "compute",
+    }
+    image = by_purpose["image_generation"]
+    assert image["enabled_in_space"] and image["available"]
+    assert image["provider"] == "image_generation provider"
+    assert [tool["name"] for tool in image["tools"]] == ["generate_image"]
+    assert image["tools"][0]["input_schema"]["required"] == ["prompt"]
+    # Enabled in the space but no provider serves it.
+    charts = by_purpose["charts"]
+    assert charts["enabled_in_space"] and not charts["available"]
+    assert charts["tools"] == []
+    # Not enabled: the provider is never asked.
+    assert not by_purpose["web_search"]["enabled_in_space"]
+    assert "web_search" not in providers.purposes

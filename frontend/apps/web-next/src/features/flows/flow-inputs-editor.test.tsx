@@ -24,7 +24,7 @@ describe("stepsReadingInput", () => {
 
 describe("FlowInputsEditor", () => {
   it("adds an input with a key from its label, blocks removing one a step reads, and saves the list", async () => {
-    const onSave = vi.fn((_fields: FormField[]) => Promise.resolve());
+    const onSave = vi.fn<(fields: FormField[]) => Promise<void>>(() => Promise.resolve());
     const onOpenChange = vi.fn();
     renderInApp(
       <FlowInputsEditor

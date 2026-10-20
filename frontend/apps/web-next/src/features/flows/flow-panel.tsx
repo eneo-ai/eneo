@@ -15,6 +15,7 @@ import { useSidePanel } from "@/features/chat/side-panel/use-side-panel";
 import { useSpace } from "@/features/spaces/use-space";
 import { toastApiError } from "@/lib/api/toast";
 import { FlowDefinition } from "./flow-definition";
+import { flowFunctionsQueryOptions } from "./flow-functions";
 import { FlowHistory } from "./flow-history";
 import { isFlowPanelTab } from "./flow-panel-store";
 import { FlowRunDetail } from "./flow-run-detail";
@@ -84,8 +85,10 @@ export function FlowPanel({
   const panel = useSidePanel()!;
   const store = useFlowPanel()!;
   const names = useFlowNames();
-  const { can } = useSpace();
+  const { space, can } = useSpace();
   const queryClient = useQueryClient();
+  // What a function step can call here; shown in the overview, the step view and the editor.
+  const functions = useQuery(flowFunctionsQueryOptions(space.id)).data;
   const panelId = useId();
   const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [overviewProblems, setOverviewProblems] = useState<string[]>([]);
@@ -260,6 +263,7 @@ export function FlowPanel({
           flow={flow.data}
           target={store.newStep ?? { step: steps.find((step) => step.key === stepKey)! }}
           names={names}
+          functions={functions}
           wide={wide}
           onSaved={(key) => store.openStep(key, panel)}
           onCancel={() => store.closeEditor(panel)}
@@ -272,6 +276,7 @@ export function FlowPanel({
           stepKey={stepKey}
           origins={flow.data?.step_origins ?? []}
           names={names}
+          functions={functions}
           wide={wide}
           onClose={() => store.closeStep(panel)}
           onSelectStep={openStep}
@@ -320,6 +325,7 @@ export function FlowPanel({
                     flow={data}
                     names={names}
                     canEdit={canEdit}
+                    functions={functions}
                     mode={editing ? "edit" : "view"}
                     onOpenStep={openStep}
                     onInsertStep={(kind, index) => store.openNewStep(kind, index, panel)}

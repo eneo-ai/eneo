@@ -27,11 +27,13 @@ from eneo.authentication.endpoint_access import (
 from eneo.authentication.signed_urls import generate_file_original_download_token
 from eneo.files.file_models import FilePublic, SignedURLRequest, SignedURLResponse
 from eneo.flows.api.dependencies import require_flows_enabled
+from eneo.flows.flow_functions import list_flow_functions
 from eneo.flows.flow_models import (
     FlowArtifactPublic,
     FlowAuthoringAssistantPublic,
     FlowConversationBindRequest,
     FlowCreateRequest,
+    FlowFunctionPublic,
     FlowPublic,
     FlowRevisionPublic,
     FlowRevisionSummaryPublic,
@@ -148,6 +150,30 @@ async def create_flow(
     """Start a flow as an empty draft; its chat fills it in afterwards."""
     return await container.flow_service().create_draft(
         space_id=request.space_id, name=request.name
+    )
+
+
+@router.get(
+    "/functions/",
+    response_model=list[FlowFunctionPublic],
+    description=(
+        "The functions a function step can call in a space: each purpose, "
+        "whether the space enables it, and the tools of the provider a run "
+        "reaches for it."
+    ),
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_READ_REASON,
+)
+async def list_functions(
+    container: _Container, space_id: UUID
+) -> list[FlowFunctionPublic]:
+    space = await container.flow_service().authorize_space(space_id)
+    return await list_flow_functions(
+        space, container.assistant_service().capability_server
     )
 
 

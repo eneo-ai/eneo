@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { FlowDefinition } from "./flow-definition";
-import { flowFixture as flow, namesFixture as names } from "./flow-fixtures";
+import { flowFixture as flow, functionsFixture, namesFixture as names } from "./flow-fixtures";
 
 afterEach(cleanup);
 
@@ -89,6 +89,25 @@ describe("FlowDefinition", () => {
     ).toBeTruthy();
     expect(within(card).getByText("Tidsgräns 7 dagar")).toBeTruthy();
     expect(within(card).getByText("Avvisas: körningen stoppas")).toBeTruthy();
+  });
+
+  it("marks a function step the space cannot run", () => {
+    const steps = flow.definition.steps!.map((step) =>
+      step.key === "chart" ? { ...step, tool: "draw" } : step
+    );
+    renderInApp(
+      <FlowDefinition
+        flow={{ ...flow, definition: { ...flow.definition, steps } }}
+        names={names}
+        functions={functionsFixture}
+        onOpenStep={() => {}}
+      />
+    );
+    const card = cardOf("Öppna steg 6: Rita beslutsdiagram");
+    expect(within(card).getByText("Kan inte köras")).toBeTruthy();
+    expect(
+      within(cardOf("Öppna steg 3: Sammanfatta beslut")).queryByText("Kan inte köras")
+    ).toBeNull();
   });
 
   it("renders plain cards without an opener, as the history does", () => {

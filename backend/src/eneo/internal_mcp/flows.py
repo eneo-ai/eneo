@@ -45,6 +45,7 @@ from eneo.flows.definition import (
     Step,
     definition_summary,
 )
+from eneo.flows.flow_functions import list_flow_functions
 from eneo.flows.flow_models import (
     FlowPublic,
     FlowRevisionSummaryPublic,
@@ -492,38 +493,13 @@ async def list_functions(ctx: Context) -> CallToolResult:
 async def _available_functions(
     tool_ctx: ToolContext, space_id: UUID
 ) -> list[dict[str, Any]]:
-    """Each purpose with its provider's tools as the flows assistant reaches them."""
-    from eneo.flows.definition import FUNCTION_PURPOSES
-
+    """Each purpose with its provider's tools, as the panel's editor lists them too."""
     container = tool_ctx.container
     space = await container.space_repo().one(space_id)
-    functions: list[dict[str, Any]] = []
-    for purpose in FUNCTION_PURPOSES:
-        enabled = space.is_personal() or purpose in space.enabled_capabilities
-        server = (
-            await container.assistant_service().capability_server(
-                assistant_id=tool_ctx.assistant_id, purpose=purpose
-            )
-            if enabled
-            else None
-        )
-        functions.append(
-            {
-                "purpose": purpose,
-                "enabled_in_space": enabled,
-                "available": server is not None,
-                "provider": server.name if server is not None else None,
-                "tools": [
-                    {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "input_schema": tool.input_schema,
-                    }
-                    for tool in (server.tools if server is not None else [])
-                ],
-            }
-        )
-    return functions
+    functions = await list_flow_functions(
+        space, container.assistant_service().capability_server
+    )
+    return [function.model_dump(mode="json") for function in functions]
 
 
 def _functions_text(functions: list[dict[str, Any]]) -> str:

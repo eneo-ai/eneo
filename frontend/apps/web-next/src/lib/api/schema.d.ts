@@ -165,6 +165,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/functions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Functions
+     * @description The functions a function step can call in a space: each purpose, whether the space enables it, and the tools of the provider a run reaches for it.
+     */
+    get: operations["list_functions_api_v1_flows_functions__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/authoring-assistant/": {
     parameters: {
       query?: never;
@@ -15486,6 +15506,40 @@ export interface components {
       output_type: string;
     };
     /**
+     * FlowFunctionPublic
+     * @description A function a function step can call in a space, and whether it can now.
+     *
+     *     ``enabled_in_space`` is the space's setting; ``available`` whether the
+     *     space's flows assistant reaches a provider for it today (the one a run
+     *     uses), with that provider's tools.
+     */
+    FlowFunctionPublic: {
+      /** Purpose */
+      purpose: string;
+      /** Enabled In Space */
+      enabled_in_space: boolean;
+      /** Available */
+      available: boolean;
+      /** Provider */
+      provider?: string | null;
+      /** Tools */
+      tools?: components["schemas"]["FlowFunctionToolPublic"][];
+    };
+    /**
+     * FlowFunctionToolPublic
+     * @description One tool of a function's provider, as a function step names it.
+     */
+    FlowFunctionToolPublic: {
+      /** Name */
+      name: string;
+      /** Description */
+      description?: string | null;
+      /** Input Schema */
+      input_schema?: {
+        [key: string]: unknown;
+      };
+    };
+    /**
      * FlowPublic
      * @description A flow with its draft definition; what the panel renders.
      */
@@ -27225,6 +27279,55 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_functions_api_v1_flows_functions__get: {
+    parameters: {
+      query: {
+        space_id: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowFunctionPublic"][];
         };
       };
       /** @description Forbidden */

@@ -24,6 +24,7 @@ import { Fragment, useState, type ReactNode } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { FlowInputsEditor } from "./flow-inputs-editor";
 import { StepKindPicker } from "./step-kind-picker";
+import { functionAvailability } from "./flow-functions";
 import { formatDuration, stepKindLabel } from "./flow-labels";
 import {
   flowOversight,
@@ -39,6 +40,7 @@ import {
   formFieldsOf,
   stepsOf,
   type FlowDefinition as Definition,
+  type FlowFunctionPublic,
   type FlowPublic,
   type FlowStep,
   type FormField,
@@ -255,14 +257,18 @@ function ReviewCardBody({ step, definition }: { step: FlowStep; definition: Defi
 function StepCardBody({
   step,
   definition,
-  names
+  names,
+  functions
 }: {
   step: FlowStep;
   definition: Definition;
   names: FlowNames;
+  functions?: FlowFunctionPublic[];
 }) {
   const t = useTranslations();
   const reads = stepReads(step, definition);
+  const cannotRun =
+    step.kind === "function" && !["ok", "unknown"].includes(functionAvailability(functions, step));
   return (
     <span className="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-2.5 gap-y-1 text-[12.5px]">
       <Text type="supporting" size="2xs" weight="semibold" className="tracking-wide uppercase">
@@ -286,9 +292,12 @@ function StepCardBody({
       <Text type="supporting" size="2xs" weight="semibold" className="tracking-wide uppercase">
         {t("flow_gives")}
       </Text>
-      <Text type="body" size="sm" className="min-w-0 leading-snug break-words">
-        <ProducesLine produces={stepProduces(step)} definition={definition} />
-      </Text>
+      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <Text type="body" size="sm" className="min-w-0 leading-snug break-words">
+          <ProducesLine produces={stepProduces(step)} definition={definition} />
+        </Text>
+        {cannotRun && <Token size="sm" color="orange" label={t("flow_function_cannot_run")} />}
+      </span>
     </span>
   );
 }
@@ -304,6 +313,7 @@ export function FlowStepCard({
   count,
   definition,
   names = NO_NAMES,
+  functions,
   onOpen,
   onMove
 }: {
@@ -313,6 +323,7 @@ export function FlowStepCard({
   count?: number;
   definition: Definition;
   names?: FlowNames;
+  functions?: FlowFunctionPublic[];
   onOpen?: (key: string) => void;
   /** Edit mode: the card's menu moves the step up or down. */
   onMove?: (key: string, direction: -1 | 1) => void;
@@ -365,7 +376,7 @@ export function FlowStepCard({
       {review ? (
         <ReviewCardBody step={step} definition={definition} />
       ) : (
-        <StepCardBody step={step} definition={definition} names={names} />
+        <StepCardBody step={step} definition={definition} names={names} functions={functions} />
       )}
     </div>
   );
@@ -455,6 +466,7 @@ export function FlowDefinition({
   names = NO_NAMES,
   onOpenStep,
   canEdit = false,
+  functions,
   mode = "view",
   onInsertStep,
   onMoveStep,
@@ -468,6 +480,8 @@ export function FlowDefinition({
   onOpenStep?: (key: string) => void;
   /** Whether the reader may press "Redigera" (the note at the end says so). */
   canEdit?: boolean;
+  /** What the space can call; a function step that cannot run is marked. */
+  functions?: FlowFunctionPublic[];
   mode?: FlowOverviewMode;
   /** Edit mode: a kind picked on the rail opens the editor for a new step at the index. */
   onInsertStep?: (kind: StepKind, index: number) => void;
@@ -589,6 +603,7 @@ export function FlowDefinition({
                   count={steps.length}
                   definition={definition}
                   names={names}
+                  functions={functions}
                   onOpen={onOpenStep}
                   onMove={editing && onMoveStep ? onMoveStep : undefined}
                 />

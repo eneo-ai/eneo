@@ -3,20 +3,21 @@ import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
-import { flowFixture as flow, namesFixture as names } from "./flow-fixtures";
+import { flowFixture as flow, functionsFixture, namesFixture as names } from "./flow-fixtures";
 import { FlowStepView } from "./flow-step-view";
 
 afterEach(cleanup);
 
-function view(stepKey: string, wide = true) {
+function view(stepKey: string, wide = true, definition = flow.definition) {
   const onSelectStep = vi.fn();
   const onClose = vi.fn();
   const onEdit = vi.fn();
   const utils = renderInApp(
     <FlowStepView
-      definition={flow.definition}
+      definition={definition}
       stepKey={stepKey}
       names={names}
+      functions={functionsFixture}
       wide={wide}
       onClose={onClose}
       onSelectStep={onSelectStep}
@@ -136,13 +137,28 @@ describe("FlowStepView", () => {
     expect(within(usedBy).getByText("Granskar resultatet")).toBeTruthy();
   });
 
-  it("shows a function step's tool and arguments as templates", () => {
+  it("shows a function step's tool, provider and arguments as templates", () => {
     view("chart");
     const section = screen.getByRole("region", { name: "Funktion" });
     expect(within(section).getByText("render_chart")).toBeTruthy();
+    expect(within(section).getByText("Diagramtjänsten")).toBeTruthy();
+    expect(within(section).queryByText(/Steget kan inte köras/)).toBeNull();
     expect(within(section).getByText("Steg 3 · Sammanfatta beslut · decisions")).toBeTruthy();
     expect(within(section).getByText("bar")).toBeTruthy();
     expect(screen.getByText("Inget senare steg läser detta resultat direkt.")).toBeTruthy();
+  });
+
+  it("warns when a function step's purpose is not enabled in the space", () => {
+    const steps = flow.definition.steps!.map((step) =>
+      step.key === "chart" ? { ...step, purpose: "web_search" as const, tool: "search" } : step
+    );
+    view("chart", true, { ...flow.definition, steps });
+    expect(screen.getByText("Steget kan inte köras som det är")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Funktionen är inte aktiverad i rummet. Aktivera den i rummets inställningar, eller välj en annan funktion."
+      )
+    ).toBeTruthy();
   });
 
   it("is one column under a pager when the panel is narrow", () => {

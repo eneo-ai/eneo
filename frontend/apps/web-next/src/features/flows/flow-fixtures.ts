@@ -1,6 +1,6 @@
 /** Test-only: one flow with every step kind, every parameter set. */
 import type { FlowNames } from "./flow-step-summary";
-import type { FlowPublic } from "./types";
+import type { FlowFunctionPublic, FlowPublic } from "./types";
 
 export const flowFixture: FlowPublic = {
   id: "flow-1",
@@ -113,3 +113,48 @@ export const namesFixture: FlowNames = {
   websiteName: (id) => (id === "website-1" ? "kommunen.se" : null),
   fileName: (id) => (id === "file-1" ? "Protokollmall.docx" : null)
 };
+
+/** What the space can call: charts served, compute enabled but unserved, the rest off. */
+export const functionsFixture: FlowFunctionPublic[] = [
+  { purpose: "web_search", enabled_in_space: false, available: false, provider: null, tools: [] },
+  {
+    purpose: "image_generation",
+    enabled_in_space: false,
+    available: false,
+    provider: null,
+    tools: []
+  },
+  {
+    purpose: "file_analysis",
+    enabled_in_space: false,
+    available: false,
+    provider: null,
+    tools: []
+  },
+  {
+    purpose: "file_creation",
+    enabled_in_space: false,
+    available: false,
+    provider: null,
+    tools: []
+  },
+  {
+    purpose: "charts",
+    enabled_in_space: true,
+    available: true,
+    provider: "Diagramtjänsten",
+    tools: [
+      {
+        name: "render_chart",
+        description: "Ritar ett diagram av data.\nAndra raden.",
+        input_schema: {
+          type: "object",
+          required: ["data"],
+          properties: { data: { type: "string" }, kind: { type: "string" } }
+        }
+      },
+      { name: "render_table", description: "Ritar en tabell.", input_schema: {} }
+    ]
+  },
+  { purpose: "compute", enabled_in_space: true, available: false, provider: null, tools: [] }
+];

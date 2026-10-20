@@ -1,6 +1,7 @@
 "use client";
 
 import { Badge } from "@astryxdesign/core/Badge";
+import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
@@ -27,6 +28,7 @@ import { ClientTime } from "@/components/composites/client-time";
 import { cn } from "@/lib/utils";
 import { readColor, readLabel, SectionHeading, StepGlyph } from "./flow-definition";
 import { MonoBlock } from "./flow-fields";
+import { functionAvailability, functionOf } from "./flow-functions";
 import { formatDuration, functionPurposeLabel, stepKindLabel } from "./flow-labels";
 import {
   schemaFieldRows,
@@ -44,6 +46,7 @@ import {
   stepsOf,
   type DocumentStep,
   type FlowDefinition,
+  type FlowFunctionPublic,
   type FlowStep,
   type FunctionStep,
   type LlmStep,
@@ -439,11 +442,56 @@ function DocumentSection({
   );
 }
 
-function FunctionSection({ step, definition }: { step: FunctionStep; definition: FlowDefinition }) {
+/** Why a function step cannot run as it is, for the warning above its settings. */
+export function functionWarning(
+  availability: ReturnType<typeof functionAvailability>,
+  step: FunctionStep,
+  provider: string | null,
+  t: Translate
+): string | null {
+  switch (availability) {
+    case "disabled":
+      return t("flow_function_warning_disabled");
+    case "unavailable":
+      return t("flow_function_warning_unavailable");
+    case "unknown_tool":
+      return t("flow_function_warning_unknown_tool", {
+        tool: step.tool,
+        provider: provider ?? t("flow_function_provider_unknown")
+      });
+    default:
+      return null;
+  }
+}
+
+function FunctionSection({
+  step,
+  definition,
+  functions
+}: {
+  step: FunctionStep;
+  definition: FlowDefinition;
+  functions?: FlowFunctionPublic[];
+}) {
   const t = useTranslations();
   const entries = Object.entries(step.arguments ?? {});
+  const entry = functionOf(functions, step.purpose);
+  const warning = functionWarning(
+    functionAvailability(functions, step),
+    step,
+    entry?.provider ?? null,
+    t
+  );
   return (
     <Section id="flow-step-function" title={t("flow_section_function")}>
+      {warning && (
+        <Banner
+          status="warning"
+          title={t("flow_function_warning_title")}
+          description={warning}
+          collapsible={false}
+        />
+      )}
       <MetadataList>
         <MetadataListItem label={t("flow_param_function")}>
           {functionPurposeLabel(step.purpose, t)}
@@ -452,6 +500,9 @@ function FunctionSection({ step, definition }: { step: FunctionStep; definition:
             {step.tool}
           </Text>
         </MetadataListItem>
+        {entry?.provider && (
+          <MetadataListItem label={t("flow_function_provider")}>{entry.provider}</MetadataListItem>
+        )}
         {entries.length === 0 ? (
           <MetadataListItem label={t("flow_param_arguments")}>
             {t("flow_param_none")}
@@ -653,12 +704,14 @@ function StepSections({
   step,
   definition,
   names,
+  functions,
   onSelectStep,
   wide
 }: {
   step: FlowStep;
   definition: FlowDefinition;
   names: FlowNames;
+  functions?: FlowFunctionPublic[];
   onSelectStep: (key: string) => void;
   wide: boolean;
 }) {
@@ -724,7 +777,7 @@ function StepSections({
       return (
         <>
           {reads}
-          <FunctionSection step={step} definition={definition} />
+          <FunctionSection step={step} definition={definition} functions={functions} />
           <div className={row}>
             {produces}
             {usedBy}
@@ -756,6 +809,7 @@ export function FlowStepView({
   stepKey,
   origins = [],
   names = NO_NAMES,
+  functions,
   wide,
   onClose,
   onSelectStep,
@@ -766,6 +820,8 @@ export function FlowStepView({
   /** Where each step comes from (the flow's `step_origins`). */
   origins?: StepOriginPublic[];
   names?: FlowNames;
+  /** What the space can call, so a function step says whether it can run. */
+  functions?: FlowFunctionPublic[];
   /** The panel covers the conversation: navigator and two-column rows. */
   wide: boolean;
   onClose: () => void;
@@ -864,6 +920,7 @@ export function FlowStepView({
         step={step}
         definition={definition}
         names={names}
+        functions={functions}
         onSelectStep={onSelectStep}
         wide={wide}
       />

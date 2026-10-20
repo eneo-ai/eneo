@@ -2,6 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { Popover } from "@astryxdesign/core/Popover";
+import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
 import { Switch } from "@/components/astryx/switch";
 import { Lock, Plug, ShieldCheck } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -249,7 +250,7 @@ export function ChatTools({
             )}
           </div>
 
-          <div className="flex max-h-72 flex-col overflow-y-auto">
+          <ScrollableArea axis="block" label={t("chat_tools_list")} className="max-h-72">
             {alwaysOn.length > 0 && (
               <ToolGroup title={t("mcp_built_in")}>
                 {alwaysOn.map((tool) => (
@@ -351,7 +352,7 @@ export function ChatTools({
                 })}
               </ToolGroup>
             )}
-          </div>
+          </ScrollableArea>
 
           {modelSupportsTools && (
             <div className="border-ax-border flex items-start gap-2.5 border-t pt-2">

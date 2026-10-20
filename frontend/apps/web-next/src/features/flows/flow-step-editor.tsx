@@ -48,6 +48,7 @@ import {
 import {
   stepsOf,
   type FlowDefinition,
+  type FlowFunctionPublic,
   type FlowPublic,
   type FlowStep,
   type StepKind
@@ -131,12 +132,14 @@ function StepForm({
   definition,
   index,
   names,
+  functions,
   problems
 }: {
   draft: StepDraftState;
   definition: FlowDefinition;
   index: number;
   names: FlowNames;
+  functions?: FlowFunctionPublic[];
   problems: FieldProblems;
 }) {
   switch (draft.draft.step.kind) {
@@ -149,7 +152,14 @@ function StepForm({
         <DocumentForm draft={draft} definition={definition} names={names} problems={problems} />
       );
     case "function":
-      return <FunctionForm draft={draft} definition={definition} problems={problems} />;
+      return (
+        <FunctionForm
+          draft={draft}
+          definition={definition}
+          functions={functions}
+          problems={problems}
+        />
+      );
     case "review":
       return <ReviewForm draft={draft} definition={definition} index={index} problems={problems} />;
     case "transcribe":
@@ -348,6 +358,7 @@ export function FlowStepEditor({
   flow,
   target,
   names = NO_NAMES,
+  functions,
   wide,
   onSaved,
   onCancel,
@@ -358,6 +369,8 @@ export function FlowStepEditor({
   /** The step to edit, or a new one of a kind to insert at an index. */
   target: { step: FlowStep } | { kind: StepKind; index: number };
   names?: FlowNames;
+  /** What the space can call, for a function step's form. */
+  functions?: FlowFunctionPublic[];
   wide: boolean;
   /** The step was saved (its key, which a new step gets on save). */
   onSaved: (key: string) => void;
@@ -552,6 +565,7 @@ export function FlowStepEditor({
               definition={definition}
               index={index}
               names={names}
+              functions={functions}
               problems={problems}
             />
             <TextInput
