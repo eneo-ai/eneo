@@ -464,13 +464,13 @@ The deterministic catalog is owned by `backend/src/eneo/integration/sharepoint_f
 
 ### Imported knowledge at scale
 
-The fixture catalog covers the import dialog only. To see imported knowledge as it looks at scale, `backend/scripts/seed_sharepoint_showcase.py` creates the shared spaces _SharePoint – storskaligt_ and _SharePoint – HR och nämnd_ with six sources: a site imported as a 35-folder tree with every sync state and skip reason, a source with thousands of documents and long names, a whole-site import under a second embedding model, a OneDrive folder, a source whose sign-in was refused and one that never synced. A seventh, failing source goes into the user's personal space, so the admin overview has one to count. Subscriptions are active, expired, failing or about to expire, and every folder has weeks of sync history that names the files each sync changed. It runs only while fixture mode is active and recreates the space on every run. From `backend/` in the devcontainer:
+The fixture catalog covers the import dialog only. To see imported knowledge as it looks at scale, `backend/scripts/seed_sharepoint_showcase.py` creates four shared spaces, _SharePoint – storskaligt_, _SharePoint – HR och nämnd_, _SharePoint – Utbildningsförvaltningen_ and _SharePoint – Kommunledningskontoret_, with a site imported as a 35-folder tree with every sync state and skip reason, a source with thousands of documents and long names, a whole-site import under a second embedding model, a OneDrive folder, sources whose sign-in was refused and sources that never synced. One source goes into the organization space and a failing one into the user's personal space. Subscriptions are active, expired, failing or about to expire, and every folder has weeks of sync history that names the files each sync changed. It runs only while fixture mode is active and recreates the space on every run. From `backend/` in the devcontainer:
 
 ```bash
 uv run python scripts/seed_sharepoint_showcase.py
 ```
 
-`--simulate-sync` then writes live progress for four of the items for about 90 seconds, so the progress bars can be watched without a SharePoint tenant, and `--remove` deletes the spaces and the personal source.
+`--simulate-sync` then writes live progress for four of the items for about 90 seconds, so the progress bars can be watched without a SharePoint tenant, and `--remove` deletes the spaces and the sources the seed placed in the organization and personal spaces.
 
 ### Admin setup demo
 

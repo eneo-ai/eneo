@@ -1,12 +1,11 @@
 """Seed SharePoint knowledge at scale so the integration UI can be tried locally.
 
-Creates the shared spaces "SharePoint – storskaligt" and "SharePoint – HR och
-nämnd" (recreated on every run) holding the combinations the knowledge UI must
-handle: a site imported as a 35-folder tree with every sync state and every
+Creates four shared spaces (recreated on every run) holding the combinations
+the knowledge UI must handle: a site imported as a 35-folder tree with every sync state and every
 skip reason, a clean source with thousands of documents and long names, a
 whole-site import under a second embedding model, and single items that
-failed, never synced or sit in a OneDrive. One failing source goes into the
-user's personal space, so admin views have one to count. Change-notification
+failed, never synced or sit in a OneDrive. One source goes into the
+organization space and a failing one into the user's personal space. Change-notification
 subscriptions are active, expired, failing or about to expire, and every
 folder has weeks of sync history naming the files each sync changed.
 
@@ -58,7 +57,7 @@ from eneo.settings.encryption_service import EncryptionService
 SPACE_ID = uuid.UUID("5a0e5a0e-0000-4000-8000-000000000001")
 SECOND_SPACE_ID = uuid.UUID("5a0e5a0e-0000-4000-8000-000000000002")
 SECOND_SPACE_NAME = "SharePoint – HR och nämnd"
-# Shared spaces the seed creates, so the admin overview has several to list.
+# Shared spaces the seed creates.
 SHARED_SPACES = {
     "main": (SPACE_ID, "SharePoint – storskaligt"),
     "second": (SECOND_SPACE_ID, SECOND_SPACE_NAME),
@@ -71,7 +70,6 @@ SHARED_SPACES = {
         "SharePoint – Kommunledningskontoret",
     ),
 }
-# One source goes into the user's personal space, so admin views have one to count.
 SPACE_NAME = "SharePoint – storskaligt"
 # Every id the script creates is derived from this namespace, so a rerun
 # replaces the same rows instead of piling up new ones.

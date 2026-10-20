@@ -70,6 +70,11 @@ export class SourceAnnouncer {
     this.#announcer = new SyncAnnouncer(options);
   }
 
+  /** When an ended sync stops waiting for its outcome; call `next` again then. */
+  get awaitingUntil(): number | null {
+    return this.#announcer.awaitingUntil;
+  }
+
   next(name: string, summary: AnnouncedSummary, now: number): string | null {
     const transition = this.#announcer.next(sourceSnapshot(summary), now);
     return transition ? describe(name, transition) : null;

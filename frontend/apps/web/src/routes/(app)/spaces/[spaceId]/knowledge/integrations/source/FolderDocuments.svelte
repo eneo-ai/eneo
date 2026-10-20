@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onDestroy, onMount, untrack } from "svelte";
+  import { onDestroy, onMount, tick, untrack } from "svelte";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
   import { IconLinkExternal } from "@eneo/icons/link-external";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
@@ -108,8 +108,9 @@
   ) {
     const generation = ++loadGeneration;
     requestedQuery = next;
+    // A quiet reload that supersedes a load someone asked for keeps its loading line.
+    quietLoad = how === "quiet" && !(loading && !quietLoad);
     loading = true;
-    quietLoad = how === "quiet";
     error = null;
     try {
       const page = await eneo.integrations.knowledge.listDocuments({
@@ -126,12 +127,16 @@
       }
       documents = page;
       if (how === "user") {
-        rangeAnnouncement =
+        const text =
           page.items.length > 0
             ? m.integration_documents_showing_range(documentsPageRange(page))
             : next.q !== ""
               ? m.no_results_found()
               : "";
+        // Cleared first, so a result that reads the same as the last one is spoken again.
+        rangeAnnouncement = "";
+        await tick();
+        if (generation === loadGeneration) rangeAnnouncement = text;
       }
     } catch (err) {
       if (generation !== loadGeneration) return;

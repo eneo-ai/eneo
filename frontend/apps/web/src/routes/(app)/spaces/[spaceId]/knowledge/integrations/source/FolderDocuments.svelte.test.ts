@@ -199,6 +199,29 @@ describe("FolderDocuments", () => {
       .toBeInTheDocument();
   });
 
+  it("speaks a sort's result again when it reads the same as the last one", async () => {
+    api.listDocuments.mockResolvedValue(pageOf([doc(1)]));
+    show();
+    const sortBySize = page.getByRole("button", { name: m.size() });
+    await expect.element(sortBySize).toBeVisible();
+    const status = () =>
+      [...document.querySelectorAll('[role="status"]')].map((node) => node.textContent?.trim());
+    const range = m.integration_documents_showing_range({ from: 1, to: 1, total: 1 });
+
+    await sortBySize.click();
+    await expect.poll(status).toContain(range);
+    const region = [...document.querySelectorAll('[role="status"]')].find(
+      (node) => node.textContent?.trim() === range
+    )!;
+    const changes: string[] = [];
+    const observer = new MutationObserver(() => changes.push(region.textContent?.trim() ?? ""));
+    observer.observe(region, { childList: true, characterData: true, subtree: true });
+    await sortBySize.click();
+    await expect.poll(() => changes.at(-1)).toBe(range);
+    observer.disconnect();
+    expect(changes).toContain("");
+  });
+
   it("pages forward and falls back to the last page when documents disappeared meanwhile", async () => {
     api.listDocuments
       .mockResolvedValueOnce(
