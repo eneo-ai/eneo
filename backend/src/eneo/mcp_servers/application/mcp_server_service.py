@@ -193,6 +193,7 @@ class BundledTool:
 BUNDLED_TOOL_NAMES: dict[str, str] = {
     "compute": "Compute",
     "charts": "Charts",
+    "forecast": "Forecast",
     "file-analysis": "Ask a file",
     "file-creation": "Create a file",
 }
@@ -215,6 +216,12 @@ BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
         "Runs JavaScript over JSON in an isolated sandbox for exact "
         "calculations, and can export a tabular result as a CSV file for "
         "charts, spreadsheets and documents. No network or state between calls."
+    ),
+    "forecast": (
+        "Forecasts the coming days of a daily series in a CSV/XLSX file in the "
+        "conversation, with a P10-P90 interval and a check against the last "
+        "days, using a model installed with the runtime. Runs in an isolated "
+        "sandbox; the data never leaves the deployment."
     ),
 }
 

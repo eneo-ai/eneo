@@ -28,6 +28,7 @@ MCPServerPurpose = Literal[
     "file_creation",
     "charts",
     "compute",
+    "forecast",
 ]
 MCPServerAudience = Literal["everyone", "groups"]
 

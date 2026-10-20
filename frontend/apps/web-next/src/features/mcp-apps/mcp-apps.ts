@@ -28,6 +28,7 @@ export function appViewTitle(call: McpAppCall | null | undefined, t: Translate):
   if (call?.isBundled && call.toolName === "query_table") return t("mcp_app_table_title");
   if (call?.isBundled && call.toolName === "create_chart") return t("mcp_app_chart_title");
   if (call?.isBundled && call.toolName === "run_javascript") return t("mcp_app_compute_title");
+  if (call?.isBundled && call.toolName === "create_forecast") return t("mcp_app_forecast_title");
   return call?.title || call?.toolName || t("mcp_app_view_title");
 }
 
@@ -84,11 +85,14 @@ export function hasResult(call: Pick<ToolCallRecord, "resultStatus" | "state">, 
   return status == null || status === "succeeded" || status === "completed";
 }
 
+/** Eneo's tools that draw a chart: as a view, or as an image when asked to. */
+const CHART_TOOLS = new Set(["create_chart", "create_forecast"]);
+
 /** A bundled chart exported only as an input to another tool, such as a report. */
 export function isChartDocumentAsset(
   call: Pick<ToolCallRecord, "isBundled" | "toolName" | "input">
 ) {
-  return call.isBundled && call.toolName === "create_chart" && call.input?.display === "none";
+  return call.isBundled && CHART_TOOLS.has(call.toolName) && call.input?.display === "none";
 }
 
 /** The calls of a message whose tool has a view to show, in call order. */
@@ -99,7 +103,7 @@ export function appViewCalls(calls: readonly ToolCallRecord[]): McpAppCall[] {
     // Explicit image exports render through the existing image block.
     if (
       call.isBundled &&
-      call.toolName === "create_chart" &&
+      CHART_TOOLS.has(call.toolName) &&
       (call.input?.format === "png" || call.input?.include_svg === true)
     )
       continue;

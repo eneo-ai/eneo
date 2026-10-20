@@ -34,7 +34,8 @@ const MEMBERS: Record<Exclude<PermissionGroupId, "other">, readonly string[]> = 
     "file_analysis",
     "file_creation",
     "charts",
-    "compute"
+    "compute",
+    "forecast"
   ],
   build: ["assistants", "apps", "services", "skills", "skills_management", "AI"],
   knowledge: ["collections", "websites", "integrations"],

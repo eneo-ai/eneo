@@ -41,6 +41,7 @@ CAPABILITY_PURPOSES: tuple[CapabilityPurpose, ...] = (
     "file_creation",
     "charts",
     "compute",
+    "forecast",
 )
 
 # Purposes whose providers deliver files. A binary embedded resource of one
@@ -73,6 +74,9 @@ GENERATED_FILE_TYPES_BY_PURPOSE: dict[str, frozenset[str]] = {
     # A tabular calculation result, exported so charts, spreadsheets and
     # documents can take it as a source file.
     "compute": frozenset({CSV_MIME_TYPE}),
+    # A forecast with the recent history before it, for a download, a chart or a
+    # spreadsheet.
+    "forecast": frozenset({CSV_MIME_TYPE}),
 }
 _GENERATED_FILE_EXTENSIONS: dict[str, str] = {
     DOCX_MIME_TYPE: "docx",
@@ -144,6 +148,7 @@ class BundledToolSpec:
 BUNDLED_TOOLS: dict[str, BundledToolSpec] = {
     "compute": BundledToolSpec(purpose="compute", forward_identity=False),
     "charts": BundledToolSpec(purpose="charts", forward_identity=False),
+    "forecast": BundledToolSpec(purpose="forecast", forward_identity=False),
     "file-analysis": BundledToolSpec(purpose="file_analysis", forward_identity=True),
     "file-creation": BundledToolSpec(purpose="file_creation", forward_identity=False),
 }

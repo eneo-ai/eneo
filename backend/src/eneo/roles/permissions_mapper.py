@@ -26,4 +26,5 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.FILE_CREATION: "Create Word, PDF and Excel files in chats where an assistant offers it. Without this permission file creation tools are never attached for the user.",
     Permission.CHARTS: "Create charts in chats where an assistant offers it. Without this permission chart tools are never attached for the user.",
     Permission.COMPUTE: "Run exact calculations in chats where an assistant offers it. Without this permission compute tools are never attached for the user.",
+    Permission.FORECAST: "Forecast the coming days of a daily series in chats where an assistant offers it. Without this permission forecast tools are never attached for the user.",
 }

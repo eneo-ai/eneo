@@ -31,7 +31,8 @@ describe("capability descriptors", () => {
       "file_analysis",
       "file_creation",
       "charts",
-      "compute"
+      "compute",
+      "forecast"
     ]);
   });
 
