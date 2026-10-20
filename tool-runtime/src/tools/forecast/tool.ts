@@ -21,27 +21,29 @@ export function forecastTools(
   run: ForecastRunner,
   access: ReferenceAccess,
 ): ToolDefinition[] {
+  // The columns sit beside the horizon rather than in the source: that is where models write
+  // them, and a source that also repeats them is still the same file.
   const input = z.object({
-    source: fileReference
-      .extend({
+    source: z
+      .object({
+        ...fileReference.shape,
         sheet: z
           .string()
           .max(200)
           .optional()
           .describe("Exact sheet name for an XLSX source. Omit for CSV or the default sheet."),
-        date_column: z
-          .string()
-          .max(200)
-          .describe("Column with one ISO date (YYYY-MM-DD) per row, one row per day, oldest first."),
-        value_column: z
-          .string()
-          .max(200)
-          .describe("Numeric column to forecast. Empty cells are days without a value."),
       })
-      .strict()
       .describe(
         "The CSV or XLSX file with the daily series: the attached file itself, or the export of query_table, by its signed url and filename.",
       ),
+    date_column: z
+      .string()
+      .max(200)
+      .describe("Column in the source with one ISO date (YYYY-MM-DD) per row, one row per day, oldest first."),
+    value_column: z
+      .string()
+      .max(200)
+      .describe("Numeric column in the source to forecast. Empty cells are days without a value."),
     horizon: z
       .number()
       .int()
@@ -94,8 +96,8 @@ export function forecastTools(
               path,
               isXlsx: file.isXlsx,
               ...(args.source.sheet ? { sheet: args.source.sheet } : {}),
-              dateColumn: args.source.date_column,
-              valueColumn: args.source.value_column,
+              dateColumn: args.date_column,
+              valueColumn: args.value_column,
             },
           });
         } finally {
