@@ -6,6 +6,7 @@
   import { Badge } from "$lib/components/ui/badge";
   import { Button } from "$lib/components/ui/button";
   import { getAppContext } from "$lib/core/AppContext";
+  import AccountLayout from "$lib/features/account/AccountLayout.svelte";
   import { getWhatsNewStore } from "$lib/features/whats-new/whatsNewStore";
   import { getWhatsNewTour, tourSteps } from "$lib/features/whats-new/tour";
   import { m } from "$lib/paraglide/messages";
@@ -136,15 +137,13 @@
   <title>{m.app_name()} – {m.whats_new()}</title>
 </svelte:head>
 
-<!-- The (app) shell positions <main> relatively; pages without a sidebar layout
-     stretch themselves like account/admin do. -->
-<div class="absolute inset-0 flex">
+<AccountLayout>
   <Page.Root>
     <Page.Header>
       <Page.Title title={m.whats_new()}></Page.Title>
     </Page.Header>
     <Page.Main>
-      <div class="flex max-w-3xl flex-col gap-10 py-6 pr-6">
+      <div class="flex w-full flex-col gap-10 py-6 pr-6">
         <p class="text-secondary">{m.whats_new_intro()}</p>
 
         {#if releases.length === 0}
@@ -342,4 +341,4 @@
       </div>
     </Page.Main>
   </Page.Root>
-</div>
+</AccountLayout>
