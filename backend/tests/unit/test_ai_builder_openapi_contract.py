@@ -628,3 +628,21 @@ def test_openapi_revise_plan_docs_do_not_advertise_regenerate(
     description = operation.get("description", "")
     assert "keep_current_description" in description
     assert "regenerate_description" not in description
+
+
+def test_openapi_run_failure_400_names_wire_codes_not_enum_members(
+    openapi_spec: dict,
+) -> None:
+    """Kills: the description lists Python member names (REVIEW_STALE) instead of the codes clients receive."""
+    operation = openapi_spec["paths"][
+        "/api/v1/flows/ai-builder/flows/{flow_id}/run-failures/{run_id}/steps/{step_order}"
+    ]["get"]
+    description = operation["responses"]["400"]["description"]
+
+    for code in (
+        AIBuilderErrorCode.REVIEW_STALE,
+        AIBuilderErrorCode.FLOW_NOT_PUBLISHED,
+        AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN,
+    ):
+        assert code.value in description
+        assert code.name not in description

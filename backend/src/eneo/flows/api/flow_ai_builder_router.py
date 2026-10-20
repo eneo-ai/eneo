@@ -1164,7 +1164,9 @@ async def get_flow_review_packet(
     responses={
         **_ai_builder_error_response(
             description=(
-                "REVIEW_STALE, FLOW_NOT_PUBLISHED, or REVIEW_FINDING_UNKNOWN. "
+                f"{AIBuilderErrorCode.REVIEW_STALE.value}, "
+                f"{AIBuilderErrorCode.FLOW_NOT_PUBLISHED.value}, or "
+                f"{AIBuilderErrorCode.REVIEW_FINDING_UNKNOWN.value}. "
                 "Unavailable reasons: " + ", ".join(RUN_FAILURE_UNAVAILABLE_REASONS)
             ),
             message="The failed step is unavailable for instruction repair.",

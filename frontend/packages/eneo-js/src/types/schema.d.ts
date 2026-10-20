@@ -59611,7 +59611,7 @@ export interface operations {
           "application/json": components["schemas"]["AIBuilderRunFailureLaunchResponse"];
         };
       };
-      /** @description REVIEW_STALE, FLOW_NOT_PUBLISHED, or REVIEW_FINDING_UNKNOWN. Unavailable reasons: step_unknown, no_failed_attempt, output_not_retained, output_masked */
+      /** @description review_stale, flow_not_published, or review_finding_unknown. Unavailable reasons: step_unknown, no_failed_attempt, output_not_retained, output_masked */
       400: {
         headers: {
           [name: string]: unknown;
