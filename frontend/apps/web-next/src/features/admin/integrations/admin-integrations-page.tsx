@@ -138,8 +138,7 @@ function SharePointAdminSection() {
 
 /**
  * Tenant knowledge-provider administration: link/unlink providers at the org
- * level, the SharePoint app config with its connection health, and every
- * source imported into shared and organisation spaces.
+ * level and the SharePoint app config with its connection health.
  */
 export function AdminIntegrationsPage() {
   const t = useTranslations();

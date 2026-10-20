@@ -501,12 +501,8 @@ for (const colorScheme of ["light", "dark"] as const) {
         await expect(
           page.getByRole("heading", { level: 1, name: /^(Integrationer|Integrations)$/ })
         ).toBeVisible();
-        // The sources overview has loaded: its summary or the empty text.
-        await expect(
-          page.getByRole("heading", {
-            name: /^(Källor i organisationen|Sources across the organisation)$/
-          })
-        ).toBeVisible();
+        // The providers have loaded.
+        await expect(page.locator('[data-tour="admin-integrations"]')).toBeVisible();
       });
     });
 
