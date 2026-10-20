@@ -148,6 +148,7 @@ function Harness({
       contents={{ views: [], documents: [], uploads: [] }}
       versionsOf={() => []}
       exportOf={() => null}
+      saverOf={() => null}
       latestActivity={null}
       activity={{
         detail: "",

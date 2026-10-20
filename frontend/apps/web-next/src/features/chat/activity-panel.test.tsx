@@ -88,6 +88,7 @@ function Harness({
       contents={EMPTY_CONTENTS}
       versionsOf={() => []}
       exportOf={() => null}
+      saverOf={() => null}
       latestActivity={null}
       activity={
         open
