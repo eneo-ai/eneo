@@ -318,14 +318,3 @@ export function syncProgressQueryOptions(
     refetchIntervalInBackground: false
   });
 }
-
-export type KnowledgeOverview = Schema<"AdminIntegrationKnowledgeOverview">;
-
-/** Every source in shared and organisation spaces; personal spaces are only counted. */
-export function knowledgeOverviewQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: ["integrations", "admin-overview"],
-    queryFn: (): Promise<KnowledgeOverview> =>
-      unwrap(api.GET("/api/v1/admin/integrations/knowledge/"))
-  });
-}

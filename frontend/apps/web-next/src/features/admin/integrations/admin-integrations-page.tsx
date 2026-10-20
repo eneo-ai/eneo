@@ -19,7 +19,6 @@ import {
 import { SharePointAppConfigDialog } from "./sharepoint-app-config-dialog";
 import { SharePointAppDeleteDialog } from "./sharepoint-app-delete-dialog";
 import { SharePointConnectionHealth } from "./sharepoint-connection-health";
-import { SourcesOverview } from "./sources-overview";
 
 function IntegrationCard({ integration }: { integration: TenantIntegration }) {
   const t = useTranslations();
@@ -156,7 +155,6 @@ export function AdminIntegrationsPage() {
         ))}
       </div>
       <SharePointAdminSection />
-      <SourcesOverview />
     </div>
   );
 }
