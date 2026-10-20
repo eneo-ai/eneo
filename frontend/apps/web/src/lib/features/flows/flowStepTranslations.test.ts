@@ -11,7 +11,6 @@ describe("flow step translation copy", () => {
   it("uses Underlag language in Swedish for the editor-facing flow step keys", () => {
     const messages = readMessages("sv");
 
-    expect(messages.flow_step_summary_source_input_template).not.toContain("Standardindatan");
     expect(messages.flow_step_instructions_tooltip).toBe(
       "Styr uppdraget: vad AI:n ska göra och hur den ska svara. Exempel: ”Sammanfatta i tre punkter på svenska”. Det du infogar från flödet blir en del av instruktionen, inte av texten AI:n bearbetar."
     );

@@ -29,9 +29,6 @@ export type FlowDownstreamKind = "text" | "text_and_structured";
 
 export type FlowEdgePayloadKind = "flow_input" | "text" | "structured" | "none";
 
-export type FlowRuntimeFileOriginKind =
-  "flow_input_runtime" | "no_runtime_upload" | "static_step_context";
-
 const DISPLAY_PRIORITY_BY_SOURCE: Partial<Record<FlowSourceHintKind, InputType[]>> = {
   previous_step_json: ["json", "text", "any"]
 };
@@ -159,16 +156,6 @@ export function getEdgePayloadKind(params: {
   return "text";
 }
 
-export function getRuntimeFileOriginKind(params: {
-  needsFileUpload: boolean;
-  hasFlowInputStep: boolean;
-}): FlowRuntimeFileOriginKind {
-  const { needsFileUpload, hasFlowInputStep } = params;
-  if (needsFileUpload) return "flow_input_runtime";
-  if (!hasFlowInputStep) return "no_runtime_upload";
-  return "static_step_context";
-}
-
 export type FlowGraphTopologyStepLike = Pick<
   FlowStep,
   | "id"
@@ -200,7 +187,7 @@ export type FlowGraphTopologyEdge = {
 };
 
 /** The node of the tool a tool step calls; each tool step has its own. */
-export function flowGraphToolNodeId(stepId: string): string {
+function flowGraphToolNodeId(stepId: string): string {
   return `tool-${stepId}`;
 }
 

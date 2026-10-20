@@ -6,7 +6,6 @@ import {
   getDownstreamKindForOutput,
   getEdgePayloadKind,
   getRecommendedDisplayedInputType,
-  getRuntimeFileOriginKind,
   getSourceHintKind,
   sortSelectableInputTypeOptionsForDisplay,
   flowGraphLayoutKey
@@ -148,20 +147,6 @@ describe("getEdgePayloadKind", () => {
         targetStep: null
       })
     ).toBe("none");
-  });
-});
-
-describe("getRuntimeFileOriginKind", () => {
-  it("keeps runtime uploads attached to flow input only", () => {
-    expect(getRuntimeFileOriginKind({ needsFileUpload: true, hasFlowInputStep: true })).toBe(
-      "flow_input_runtime"
-    );
-  });
-
-  it("flags http-only flows as having no runtime upload entry point", () => {
-    expect(getRuntimeFileOriginKind({ needsFileUpload: false, hasFlowInputStep: false })).toBe(
-      "no_runtime_upload"
-    );
   });
 });
 

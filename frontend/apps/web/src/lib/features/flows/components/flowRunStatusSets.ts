@@ -35,10 +35,6 @@ export function shouldPollFlowRunStatus(status: string): boolean {
   return getFlowRunStatusCapability(status)?.should_poll ?? false;
 }
 
-export function isFlowRunTerminal(status: string): boolean {
-  return getFlowRunStatusCapability(status)?.is_terminal ?? false;
-}
-
 export function isFlowRunCancellable(status: string): boolean {
   return getFlowRunStatusCapability(status)?.is_cancellable ?? false;
 }

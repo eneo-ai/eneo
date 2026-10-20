@@ -1,5 +1,4 @@
 import type { HttpAuthoredConfig, HttpDirection, HttpMethod } from "./httpConfigTypes";
-import { isSecretSentinel } from "./httpConfigTypes";
 
 export function createDefaultHttpConfig(
   direction: HttpDirection,
@@ -13,12 +12,6 @@ export function createDefaultHttpConfig(
     custom_headers: [],
     response_format: direction === "input" ? "text" : null
   };
-}
-
-export interface HttpValidationError {
-  field: string;
-  code: string;
-  message: string;
 }
 
 export type HttpUrlValidationCode = "HTTP_MISSING_URL" | "HTTP_INVALID_URL";
@@ -59,59 +52,4 @@ export function getAuthoredHttpUrlError(url: string): HttpUrlValidationCode | nu
   } catch {
     return "HTTP_INVALID_URL";
   }
-}
-
-export function validateHttpConfig(
-  config: HttpAuthoredConfig,
-  direction: HttpDirection,
-  method: HttpMethod
-): HttpValidationError[] {
-  const errors: HttpValidationError[] = [];
-
-  const urlError = getAuthoredHttpUrlError(config.url);
-  if (urlError) {
-    errors.push({ field: "url", code: urlError, message: "" });
-  }
-
-  if (config.auth.mode === "bearer_token") {
-    const token = config.auth.token;
-    if (!token && !isSecretSentinel(token)) {
-      errors.push({ field: "auth", code: "HTTP_MISSING_AUTH", message: "" });
-    }
-  } else if (config.auth.mode === "api_key") {
-    const key = config.auth.key;
-    if (!key && !isSecretSentinel(key)) {
-      errors.push({ field: "auth", code: "HTTP_MISSING_AUTH", message: "" });
-    }
-  } else if (config.auth.mode === "basic_auth") {
-    if (!config.auth.username && !config.auth.password && !isSecretSentinel(config.auth.password)) {
-      errors.push({ field: "auth", code: "HTTP_MISSING_AUTH", message: "" });
-    }
-  }
-
-  if (method === "GET" && config.body.mode !== "none" && config.body.mode !== "auto") {
-    errors.push({ field: "body", code: "HTTP_BODY_NOT_ALLOWED_FOR_GET", message: "" });
-  }
-
-  if (config.body.mode === "json_template" && config.body.template) {
-    try {
-      JSON.parse(config.body.template);
-    } catch {
-      if (!config.body.template.includes("{{")) {
-        errors.push({ field: "body", code: "HTTP_INVALID_BODY_JSON", message: "" });
-      }
-    }
-  }
-
-  if (config.timeout_seconds < 1 || config.timeout_seconds > 120) {
-    errors.push({ field: "timeout", code: "HTTP_TIMEOUT_OUT_OF_RANGE", message: "" });
-  }
-
-  return errors;
-}
-
-// Check if an authored config has meaningful content beyond defaults
-export function isHttpConfigured(config: HttpAuthoredConfig | null | undefined): boolean {
-  if (!config) return false;
-  return config.url.trim().length > 0;
 }

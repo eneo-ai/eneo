@@ -33,7 +33,7 @@ function formatSteps(stepOrders: number[]): string {
 }
 
 /** One entry of the generated request contract: an edit scope, kind + steps. */
-export type SuggestionFocus = AIBuilderSuggestionContext["suggestions"][number];
+type SuggestionFocus = AIBuilderSuggestionContext["suggestions"][number];
 
 /** The selected suggestions as the edit scopes the server canonicalises them
  *  to: one focus per distinct kind and step set, ordered by kind then steps,
@@ -74,7 +74,7 @@ function messageKindLabel(kind: AIBuilderFlowReviewSuggestion["kind"]): string {
 /** The typed reference one suggestion travels as: kind and steps, canonical
  *  the same way the server canonicalises them, so a retry of the same
  *  investigation is the same request. */
-export function suggestionFocus(suggestion: AIBuilderFlowReviewSuggestion): SuggestionFocus {
+function suggestionFocus(suggestion: AIBuilderFlowReviewSuggestion): SuggestionFocus {
   return {
     suggestion_kind: suggestion.kind,
     step_orders: [...new Set(suggestion.step_orders)].sort((a, b) => a - b)

@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  shouldShowTemplateAccessibilityHint,
-  shouldShowTemplateBodyTextHint
-} from "./templateFillAuthoringHints";
+import { shouldShowTemplateBodyTextHint } from "./templateFillAuthoringHints";
 
 describe("templateFillAuthoringHints", () => {
   const baseStep = {
@@ -66,10 +63,5 @@ describe("templateFillAuthoringHints", () => {
         isTranscribeOnly: true
       })
     ).toBe(false);
-  });
-
-  it("shows docx accessibility guidance for template-fill authoring", () => {
-    expect(shouldShowTemplateAccessibilityHint({ isTemplateFill: true })).toBe(true);
-    expect(shouldShowTemplateAccessibilityHint({ isTemplateFill: false })).toBe(false);
   });
 });

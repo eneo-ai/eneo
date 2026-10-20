@@ -17,9 +17,3 @@ export function shouldShowTemplateBodyTextHint(params: {
     (step) => step.output_mode === "template_fill" && step.step_order > activeStep.step_order
   );
 }
-
-export function shouldShowTemplateAccessibilityHint(params: { isTemplateFill: boolean }): boolean {
-  // Accessible templates are a legal requirement for public-sector output,
-  // so the warning shows in both modes.
-  return params.isTemplateFill;
-}

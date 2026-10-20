@@ -1,11 +1,7 @@
 import { m } from "$lib/paraglide/messages";
 import { describe, expect, test } from "vitest";
-import type { FlowStep, SecurityClassification } from "@eneo/eneo-js";
+import type { SecurityClassification } from "@eneo/eneo-js";
 import {
-  hasAdvancedSettingsActive,
-  getTemplateAssetStatusClass,
-  getTemplateRowStatusClass,
-  getTemplateReadinessPillClass,
   parseMimeOverrideDraft,
   getMimePresetsForFormat,
   MIME_PRESETS_DOCUMENT,
@@ -13,88 +9,10 @@ import {
   getTemplateAssetStatusLabel,
   getSecurityClassificationLabel,
   getSecurityInheritanceLabel,
-  getSelectableSecurityClassifications,
-  getSummarySourceText
+  getSelectableSecurityClassifications
 } from "./flowStepEditHelpers";
 
-function makeStep(overrides: Partial<FlowStep> = {}): FlowStep {
-  return {
-    id: "step-1",
-    step_order: 1,
-    user_description: "Test step",
-    input_source: "flow_input",
-    input_type: "text",
-    output_type: "text",
-    output_mode: "pass_through",
-    input_contract: null,
-    output_contract: null,
-    input_config: null,
-    output_config: null,
-    input_bindings: null,
-    output_classification_override: null,
-    assistant_id: null,
-    ...overrides
-  } as FlowStep;
-}
-
-// ---------------------------------------------------------------------------
-// hasAdvancedSettingsActive
-// ---------------------------------------------------------------------------
-
-describe("hasAdvancedSettingsActive", () => {
-  test("returns false for a vanilla step with no overrides", () => {
-    expect(hasAdvancedSettingsActive(makeStep(), false)).toBe(false);
-  });
-
-  test("returns true when output_mode is template_fill", () => {
-    expect(hasAdvancedSettingsActive(makeStep({ output_mode: "template_fill" }), false)).toBe(true);
-  });
-
-  test("returns true when input_type is any", () => {
-    expect(hasAdvancedSettingsActive(makeStep({ input_type: "any" }), false)).toBe(true);
-  });
-
-  test("returns true when input_type is file", () => {
-    expect(hasAdvancedSettingsActive(makeStep({ input_type: "file" }), false)).toBe(true);
-  });
-
-  test("returns true when input_contract is set", () => {
-    expect(hasAdvancedSettingsActive(makeStep({ input_contract: { type: "object" } }), false)).toBe(
-      true
-    );
-  });
-
-  test("returns true when output_contract is set", () => {
-    expect(
-      hasAdvancedSettingsActive(makeStep({ output_contract: { type: "object" } }), false)
-    ).toBe(true);
-  });
-
-  test("returns false when output_config only contains citation mode", () => {
-    expect(
-      hasAdvancedSettingsActive(
-        makeStep({ output_config: { citation_mode: "inline_inref_sidecar" } }),
-        false
-      )
-    ).toBe(false);
-  });
-
-  test("returns true when hasInputTemplateOverride is true", () => {
-    expect(hasAdvancedSettingsActive(makeStep(), true)).toBe(true);
-  });
-});
-
 describe("step editor summaries", () => {
-  test("describes transcribe-only flow input instead of calling it a material template", () => {
-    expect(
-      getSummarySourceText(
-        makeStep({ output_mode: "transcribe_only", input_source: "flow_input" }),
-        { usesInputTemplate: true },
-        null
-      )
-    ).toBe("Det som skickas in");
-  });
-
   test("shows the inherited space classification when it is available", () => {
     expect(getSecurityInheritanceLabel({ security_level: 2, name: "Intern" })).toBe(
       "Ärvs automatiskt — Intern"
@@ -182,65 +100,5 @@ describe("getTemplateAssetStatusLabel", () => {
   test("defaults to Unavailable for unknown", () => {
     expect(getTemplateAssetStatusLabel(null)).toBe(m.flow_template_fill_asset_unavailable());
     expect(getTemplateAssetStatusLabel(undefined)).toBe(m.flow_template_fill_asset_unavailable());
-  });
-});
-
-// ---------------------------------------------------------------------------
-// CSS class helpers
-// ---------------------------------------------------------------------------
-
-describe("getTemplateAssetStatusClass", () => {
-  test("returns positive class for ready", () => {
-    expect(getTemplateAssetStatusClass("ready")).toContain("positive");
-  });
-
-  test("returns accent class for read_only", () => {
-    expect(getTemplateAssetStatusClass("read_only")).toContain("accent");
-  });
-
-  test("returns warning class for needs_action", () => {
-    expect(getTemplateAssetStatusClass("needs_action")).toContain("warning");
-  });
-
-  test("returns negative class for unknown", () => {
-    expect(getTemplateAssetStatusClass(null)).toContain("negative");
-  });
-});
-
-describe("getTemplateRowStatusClass", () => {
-  test("returns positive for matched", () => {
-    expect(getTemplateRowStatusClass("matched")).toContain("positive");
-  });
-
-  test("returns warning for missing", () => {
-    expect(getTemplateRowStatusClass("missing")).toContain("warning");
-  });
-
-  test("returns negative for invalid", () => {
-    expect(getTemplateRowStatusClass("invalid")).toContain("negative");
-  });
-
-  test("returns negative for orphaned", () => {
-    expect(getTemplateRowStatusClass("orphaned")).toContain("negative");
-  });
-});
-
-describe("getTemplateReadinessPillClass", () => {
-  test("returns dimmer class when total is 0", () => {
-    expect(getTemplateReadinessPillClass({ total: 0, matched: 0, incomplete: false })).toContain(
-      "hover-dimmer"
-    );
-  });
-
-  test("returns warning class when incomplete", () => {
-    expect(getTemplateReadinessPillClass({ total: 3, matched: 1, incomplete: true })).toContain(
-      "warning"
-    );
-  });
-
-  test("returns positive class when complete", () => {
-    expect(getTemplateReadinessPillClass({ total: 3, matched: 3, incomplete: false })).toContain(
-      "positive"
-    );
   });
 });

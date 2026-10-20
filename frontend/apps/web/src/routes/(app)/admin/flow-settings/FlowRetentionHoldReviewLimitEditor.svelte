@@ -6,6 +6,7 @@
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
   import { getEneo } from "$lib/core/Eneo";
+  import { FLOW_RETENTION_MAX_DAYS } from "$lib/features/flows/flowRunRetentionPolicy";
   import { m } from "$lib/paraglide/messages";
   import { untrack } from "svelte";
 
@@ -18,7 +19,6 @@
 
   let { limit, onChange }: Props = $props();
   const eneo = getEneo();
-  const MAX_DAYS = 2555;
   const DEFAULT_DAYS = 365;
 
   let input = $state<number | null>(untrack(() => limit?.days ?? null));
@@ -37,7 +37,10 @@
   let refusal = $state<string | null>(null);
 
   const valid = $derived(
-    typeof input === "number" && Number.isInteger(input) && input >= 1 && input <= MAX_DAYS
+    typeof input === "number" &&
+      Number.isInteger(input) &&
+      input >= 1 &&
+      input <= FLOW_RETENTION_MAX_DAYS
   );
   const unchanged = $derived(limit !== null && input === limit.days);
 
@@ -113,19 +116,23 @@
           type="number"
           inputmode="numeric"
           min={1}
-          max={MAX_DAYS}
+          max={FLOW_RETENTION_MAX_DAYS}
           class="w-32"
           bind:value={input}
           aria-invalid={!valid}
         />
         {#if !valid}
-          <Field.Error>{m.flow_retention_hold_max_review_invalid({ max: MAX_DAYS })}</Field.Error>
+          <Field.Error
+            >{m.flow_retention_hold_max_review_invalid({
+              max: FLOW_RETENTION_MAX_DAYS
+            })}</Field.Error
+          >
         {:else}
           <Field.Description>
             {limit.is_default === true
               ? m.flow_retention_hold_max_review_default_note({ days: DEFAULT_DAYS })
               : m.flow_retention_hold_max_review_description({
-                  max: MAX_DAYS,
+                  max: FLOW_RETENTION_MAX_DAYS,
                   default: DEFAULT_DAYS
                 })}
           </Field.Description>

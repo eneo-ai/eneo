@@ -1,4 +1,4 @@
-import type { FlowRunContractTemplateReadiness, FlowRunStepInputs } from "@eneo/eneo-js";
+import type { FlowRunStepInputs } from "@eneo/eneo-js";
 import {
   flowFormFieldIsMultiValue,
   getFlowFormFieldRuntimeKey,
@@ -35,14 +35,6 @@ export type ReusedFlowRunInput = {
   formValues: Record<string, unknown>;
   freeformText: string;
 };
-
-export function getBlockingTemplateReadinessItems(
-  readinessItems: FlowRunContractTemplateReadiness[]
-): FlowRunContractTemplateReadiness[] {
-  return readinessItems.filter(
-    (item) => item.status === "needs_action" || item.status === "unavailable"
-  );
-}
 
 // `liveTranscriptIdsByStepId` names the step's stored live transcript, used
 // instead of transcribing its one audio file again. `singleRecordingStepIds`

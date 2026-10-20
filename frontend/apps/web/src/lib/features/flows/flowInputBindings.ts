@@ -150,10 +150,6 @@ export function setInputBindingQuestion(
   return updatedInputBindings(stringValue(question), state.sourceRefs);
 }
 
-export function hasInputBindingSourceRefs(inputBindings: unknown): boolean {
-  return getInputBindingSourceRefs(inputBindings).length > 0;
-}
-
 export function hasDeletedInputBindingSourceRefs(inputBindings: unknown): boolean {
   const bindings = rawInputBindingRecord(inputBindings);
   const rawRefs = bindings?.[SOURCE_REFS_BINDING_KEY];

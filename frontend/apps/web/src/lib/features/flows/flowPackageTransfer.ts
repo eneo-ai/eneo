@@ -148,9 +148,7 @@ const FLOW_PACKAGE_ERROR_MESSAGES = {
   flow_package_export_too_large: m.flow_package_error_flow_package_export_too_large
 } satisfies Record<FlowPackageErrorCode, () => string>;
 
-export function getFlowPackageSlotKey(
-  slotRef: Pick<FlowPackageResourceSlotRef, "kind" | "slot">
-): string {
+function getFlowPackageSlotKey(slotRef: Pick<FlowPackageResourceSlotRef, "kind" | "slot">): string {
   return `${slotRef.kind}.${slotRef.slot}`;
 }
 
@@ -323,7 +321,7 @@ export function getFlowPackageImportReadiness(
   };
 }
 
-export const FLOW_PACKAGE_EXTENSION = ".eneopkg";
+const FLOW_PACKAGE_EXTENSION = ".eneopkg";
 
 /** A flow package is told apart by its extension: browsers report zip-based
  *  files under several media types, none of them specific to Eneo. */

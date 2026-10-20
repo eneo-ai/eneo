@@ -6,7 +6,6 @@ import {
   buildFlowRunInputPayload,
   buildStepInputsPayload,
   computeReusedFlowRunInput,
-  getBlockingTemplateReadinessItems,
   getFlowRunReviewFieldValue,
   getMissingFlowRunRequiredFields,
   readFlowRunFieldMultiValue,
@@ -92,19 +91,6 @@ describe("flowRunContract helpers", () => {
     expectTypeOf<{ fields: ContractFormFields }>().not.toMatchTypeOf<ContractFormFields>();
     expectTypeOf<ContractTemplateReadiness>().toEqualTypeOf<FlowRunContractTemplateReadiness[]>();
     expectTypeOf<FlowRunContractTemplateReadiness>().not.toMatchTypeOf<ContractTemplateReadiness>();
-  });
-
-  it("marks unavailable and needs_action template states as blocking", () => {
-    expect(
-      getBlockingTemplateReadinessItems([
-        { step_id: "step-1", status: "ready" },
-        { step_id: "step-2", status: "unavailable" },
-        { step_id: "step-3", status: "needs_action" }
-      ])
-    ).toEqual([
-      { step_id: "step-2", status: "unavailable" },
-      { step_id: "step-3", status: "needs_action" }
-    ]);
   });
 
   it("reads scalar and multiselect form field values", () => {

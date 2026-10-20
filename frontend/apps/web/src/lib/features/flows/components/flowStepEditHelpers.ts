@@ -5,7 +5,6 @@ import type {
   FlowSourceHintKind,
   FlowOutputHintKind
 } from "$lib/features/flows/flowStepPresentation";
-import { hasAdvancedOutputConfig } from "$lib/features/flows/flowCitationMode";
 
 // ---------------------------------------------------------------------------
 // Label arrays & lookup maps
@@ -184,26 +183,6 @@ export function getOutputHintText(
 }
 
 // ---------------------------------------------------------------------------
-// Step analysis
-// ---------------------------------------------------------------------------
-
-export function hasAdvancedSettingsActive(
-  step: FlowStep,
-  hasInputTemplateOverride: boolean
-): boolean {
-  return Boolean(
-    step.output_mode === "template_fill" ||
-    step.input_type === "any" ||
-    step.input_type === "file" ||
-    step.input_contract ||
-    step.output_contract ||
-    step.input_config ||
-    hasAdvancedOutputConfig(step) ||
-    hasInputTemplateOverride
-  );
-}
-
-// ---------------------------------------------------------------------------
 // MIME presets (for runtime input config UI)
 // ---------------------------------------------------------------------------
 
@@ -277,19 +256,6 @@ export function getTemplateAssetStatusLabel(status: string | null | undefined): 
   }
 }
 
-export function getTemplateAssetStatusClass(status: string | null | undefined): string {
-  switch (status) {
-    case "ready":
-      return "border-positive-default/30 bg-positive-default/10 text-positive-stronger";
-    case "read_only":
-      return "border-accent-default/30 bg-accent-dimmer text-accent-stronger";
-    case "needs_action":
-      return "border-warning-default/30 bg-warning-dimmer text-warning-stronger";
-    default:
-      return "border-negative-default/30 bg-negative-dimmer text-negative-stronger";
-  }
-}
-
 export function getTemplateRowStatusText(
   status: "matched" | "missing" | "invalid" | "orphaned"
 ): string {
@@ -303,71 +269,6 @@ export function getTemplateRowStatusText(
     case "missing":
     default:
       return m.flow_template_fill_status_missing();
-  }
-}
-
-export function getTemplateRowStatusClass(
-  status: "matched" | "missing" | "invalid" | "orphaned"
-): string {
-  switch (status) {
-    case "matched":
-      return "bg-positive-dimmer text-positive-stronger";
-    case "invalid":
-    case "orphaned":
-      return "bg-negative-dimmer text-negative-stronger";
-    case "missing":
-    default:
-      return "bg-warning-dimmer text-warning-stronger";
-  }
-}
-
-export function getTemplateReadinessPillClass(readiness: {
-  total: number;
-  matched: number;
-  incomplete: boolean;
-}): string {
-  if (!readiness.total) {
-    return "bg-hover-dimmer text-secondary";
-  }
-  return readiness.incomplete
-    ? "bg-warning-dimmer text-warning-stronger"
-    : "bg-positive-dimmer text-positive-stronger";
-}
-
-// ---------------------------------------------------------------------------
-// Summary display
-// ---------------------------------------------------------------------------
-
-export function getSummarySourceText(
-  activeStep: FlowStep | null,
-  summaryModel: { usesInputTemplate?: boolean } | null,
-  previousStep: FlowStep | undefined | null
-): string {
-  if (!activeStep) return "";
-  if (activeStep.output_mode === "transcribe_only" && activeStep.input_source === "flow_input") {
-    return m.flow_step_summary_source_flow_input();
-  }
-  if (summaryModel?.usesInputTemplate) return m.flow_step_summary_source_input_template();
-  switch (activeStep.input_source) {
-    case "flow_input":
-      return m.flow_step_summary_source_flow_input();
-    case "previous_step":
-      return previousStep
-        ? m.flow_step_summary_source_previous_step_named({
-            order: String(previousStep.step_order),
-            name:
-              previousStep.user_description ||
-              m.flow_step_fallback_label({ order: String(previousStep.step_order) })
-          })
-        : m.flow_step_summary_source_previous_step_unknown();
-    case "all_previous_steps":
-      return m.flow_step_summary_source_all_previous_steps();
-    case "http_get":
-      return m.flow_step_summary_source_http_get();
-    case "tool":
-      return m.flow_step_summary_source_tool();
-    default:
-      return activeStep.input_source;
   }
 }
 
