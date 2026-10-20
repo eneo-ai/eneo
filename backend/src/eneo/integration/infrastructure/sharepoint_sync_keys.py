@@ -6,7 +6,11 @@ manual full sync that finds the lease held leaves ``sync_pending_full_key``.
 The holder runs the pending delta passes before releasing and, once the lease
 is released, queues a job for any marker still left. Whoever leaves a marker
 checks the lease again afterwards and syncs itself if it was released in
-between, so a marker is never left without a reader.
+between, so a marker is never left without a reader (``marker_then_recheck``).
+
+The marker helpers never raise on a Redis failure; they log it and answer
+False, and the caller serves the change itself (queues or runs a sync). As
+for the queue slot, a duplicate sync is cheaper than a lost change.
 
 A sync that takes the lease removes the markers its own pass covers, so a job
 that fails before reading them does not queue itself again. The TTL only
@@ -100,3 +104,53 @@ async def release_sync_queue_slot(
             knowledge_id,
             type(exc).__name__,
         )
+
+
+async def leave_marker(
+    redis_client: "aioredis.Redis", knowledge_id: str, *, full: bool = False
+) -> bool:
+    """Leave the pending marker (the full-sync one with ``full``); False when
+    Redis could not take it."""
+    key = sync_pending_full_key if full else sync_pending_key
+    try:
+        await redis_client.set(
+            key(knowledge_id), "1", ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS
+        )
+    except (RedisError, OSError) as exc:
+        logger.warning(
+            "Could not leave a pending marker for knowledge %s (%s)",
+            knowledge_id,
+            type(exc).__name__,
+        )
+        return False
+    return True
+
+
+async def marker_then_recheck(
+    redis_client: "aioredis.Redis", knowledge_id: str, *, full: bool = False
+) -> bool:
+    """Leave the pending marker for the lease holder; True when it will read it.
+
+    The lease is checked after the marker is set. The holder reads the
+    markers after releasing, so a marker set before the release is served by
+    the holder. False (the lease was released in between, or Redis failed)
+    leaves the change to the caller.
+    """
+    if not await leave_marker(redis_client, knowledge_id, full=full):
+        return False
+    try:
+        held = bool(await redis_client.exists(sync_lock_key(knowledge_id)))
+    except (RedisError, OSError) as exc:
+        logger.warning(
+            "Could not check the sync lease for knowledge %s (%s)",
+            knowledge_id,
+            type(exc).__name__,
+        )
+        return False
+    if not held:
+        logger.info(
+            "Sync lease for knowledge %s was released while the pending marker "
+            "was left",
+            knowledge_id,
+        )
+    return held

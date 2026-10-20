@@ -40,8 +40,9 @@ from eneo.integration.infrastructure.office_change_key_service import (
     OfficeChangeKeyService,
 )
 from eneo.integration.infrastructure.sharepoint_sync_keys import (
-    SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
     claim_sync_queue_slot,
+    leave_marker,
+    marker_then_recheck,
     release_sync_queue_slot,
     sync_catch_up_key,
     sync_catch_up_marker_key,
@@ -690,7 +691,7 @@ class SharepointWebhookService:
             # removing the marker as it starts. The marker stays if that job
             # never runs (lost delivery, worker gone), and the catch-up serves
             # it once the queued-sync marker has expired.
-            await self._leave_marker(knowledge_id_str, full=full)
+            await leave_marker(self.redis_client, knowledge_id_str, full=full)
             logger.info(
                 "Knowledge %s already has a sync queued; left a marker instead of "
                 "queuing another",
@@ -898,19 +899,6 @@ class SharepointWebhookService:
                 )
         return states
 
-    async def _leave_marker(self, knowledge_id: str, *, full: bool) -> None:
-        key = sync_pending_full_key if full else sync_pending_key
-        try:
-            await self.redis_client.set(
-                key(knowledge_id), "1", ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS
-            )
-        except (RedisError, OSError) as exc:
-            logger.warning(
-                "Could not leave a pending marker for knowledge %s (%s)",
-                knowledge_id,
-                type(exc).__name__,
-            )
-
     def _release_queue_slot_on_rollback(self, knowledge_id: str) -> None:
         """A job rolled back with the transaction must not block the next one."""
         session = cast(object, self.session)
@@ -936,25 +924,11 @@ class SharepointWebhookService:
         pass before releasing, which is what the skipped job would have asked
         for. Without Redis the job is queued as before.
 
-        The lease is checked again after the marker is set. The holder looks
-        for markers after it has released, so a marker set before the release
-        is queued by the holder, and one set after it finds the lease free
-        here and is served by the job queued now.
+        A marker that the holder may not read (``marker_then_recheck``) is
+        served by the job queued now.
         """
         try:
             if not await self.redis_client.exists(sync_lock_key(knowledge_id)):
-                return False
-            await self.redis_client.set(
-                sync_pending_key(knowledge_id),
-                "1",
-                ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
-            )
-            if not await self.redis_client.exists(sync_lock_key(knowledge_id)):
-                logger.info(
-                    "Sync lease for knowledge %s was released while the pending "
-                    "marker was left; queuing a job to drain it",
-                    knowledge_id,
-                )
                 return False
         except (RedisError, OSError) as exc:
             logger.warning(
@@ -962,6 +936,8 @@ class SharepointWebhookService:
                 knowledge_id,
                 type(exc).__name__,
             )
+            return False
+        if not await marker_then_recheck(self.redis_client, knowledge_id):
             return False
         logger.info(
             "Knowledge %s is being synced; left a pending marker for the lease "

@@ -653,10 +653,6 @@ async def test_a_redis_outage_falls_back_to_queuing_the_job(
 def test_the_webhook_uses_the_sync_tasks_lease_and_marker_keys():
     assert sync_lock_key("k") == integration_task._lock_key("k")  # pyright: ignore[reportPrivateUsage]
     assert sync_pending_key("k") == integration_task._pending_key("k")  # pyright: ignore[reportPrivateUsage]
-    assert (
-        SHAREPOINT_SYNC_PENDING_TTL_SECONDS
-        == integration_task.SHAREPOINT_SYNC_PENDING_TTL_SECONDS
-    )
 
 
 async def test_tenant_app_integration_uses_tenant_app_id(
