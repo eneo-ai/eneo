@@ -73,7 +73,9 @@ export function useRemovalMutation<TData = unknown, TVariables = void>({
       await refresh();
       onRemoved?.(data, variables);
       const next = neighbour.current;
-      rescueFocus(() => next() ?? target?.current ?? document.getElementById("main-content"));
+      // Keep the fallback on this page if it unmounts before the delayed checks.
+      const page = document.getElementById("main-content");
+      rescueFocus(() => next() ?? target?.current ?? page);
     },
     onError: onError ?? ((error) => toastApiError(error, t))
   });
