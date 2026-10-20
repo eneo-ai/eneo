@@ -37,10 +37,27 @@ async def test_content_filters_apply_to_both_count_and_page_without_loading_text
         assert "version_state = 'active'" in statement
         assert r"LIKE 'https://example.test/A\%20B\_/%'" in statement
         assert r"ILIKE '%50\%\_pdf%'" in statement
+        # The search runs below the selected directory, never over the host.
+        assert "substr(" in statement
         assert "info_blobs.text" not in statement
     assert str(cursor) not in sql[0]
     assert str(cursor) in sql[1]
     assert "LIMIT 21" in sql[1]
+
+
+async def test_search_without_a_directory_skips_the_scheme_and_host():
+    session = AsyncMock()
+    session.scalar.return_value = 0
+    session.scalars.return_value = []
+    await InfoBlobRepository(session).get_by_website_page(uuid4(), q="kommun", limit=20)
+    sql = str(
+        session.scalars.await_args.args[0].compile(
+            dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}
+        )
+    ).replace("%%", "%")
+    assert "regexp_replace(" in sql
+    assert "^https?://[^/]+" in sql
+    assert "ILIKE '%kommun%'" in sql
 
 
 async def test_directory_query_limits_output_and_filters_before_grouping():

@@ -8,6 +8,7 @@ from eneo.database.tables.ai_models_table import EmbeddingModels
 from eneo.database.tables.info_blobs_table import InfoBlobs, InfoBlobVersionState
 from eneo.database.tables.spaces_table import SpacesUsers
 from eneo.database.tables.websites_table import Websites
+from eneo.users.user import UserAdd, UserState
 from eneo.websites.domain.crawl_run import CrawlType
 
 pytestmark = pytest.mark.integration
@@ -188,6 +189,94 @@ async def test_website_info_blob_endpoints_preserve_list_and_cursor_contracts(
     assert second_page["next_cursor"] is None
 
 
+async def test_content_folder_endpoint_contract(
+    client,
+    db_container,
+    admin_user,
+    admin_token: str,
+    space_factory,
+) -> None:
+    origin = "https://municipality.example/"
+    async with db_container(user=admin_user) as container:
+        session = container.session()
+        embedding_model_id = await session.scalar(
+            sa.select(EmbeddingModels.id).limit(1)
+        )
+        assert embedding_model_id is not None
+        space = await space_factory(session, f"Website folders {uuid4()}")
+        session.add(SpacesUsers(space_id=space.id, user_id=admin_user.id, role="admin"))
+        website = Websites(
+            name="Municipal website",
+            url=origin,
+            download_files=False,
+            crawl_type=CrawlType.CRAWL,
+            update_interval="never",
+            size=0,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=embedding_model_id,
+            space_id=space.id,
+        )
+        session.add(website)
+        await session.flush()
+        for position in range(2):
+            session.add(
+                InfoBlobs(
+                    id=UUID(int=201 + position),
+                    title=f"Document {position}",
+                    url=f"{origin}docs/{position}",
+                    text="text",
+                    size=4,
+                    source_id=uuid4(),
+                    version_state=InfoBlobVersionState.ACTIVE.value,
+                    user_id=admin_user.id,
+                    tenant_id=admin_user.tenant_id,
+                    website_id=website.id,
+                    embedding_model_id=embedding_model_id,
+                )
+            )
+        website_id = website.id
+        # Same tenant, not a member of the space.
+        outsider = await container.user_repo().add(
+            UserAdd(
+                email=f"outsider-{uuid4()}@example.com",
+                username=f"outsider-{uuid4().hex[:8]}",
+                tenant_id=admin_user.tenant_id,
+                state=UserState.ACTIVE,
+            )
+        )
+        outsider_token = container.auth_service().create_access_token_for_user(outsider)
+
+    endpoint = f"/api/v1/websites/{website_id}/content-folders/"
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    roots = await client.get(endpoint, headers=headers)
+    assert roots.status_code == 200, roots.text
+    assert roots.json() == {
+        "items": [{"path": origin, "count": 2, "has_children": True}],
+        "next_cursor": None,
+    }
+
+    level = await client.get(endpoint, params={"prefix": origin}, headers=headers)
+    assert level.status_code == 200, level.text
+    assert level.json()["items"] == [
+        {"path": f"{origin}docs/", "count": 2, "has_children": False}
+    ]
+
+    invalid = await client.get(endpoint, params={"prefix": "docs/"}, headers=headers)
+    assert invalid.status_code == 422, invalid.text
+
+    missing = await client.get(
+        f"/api/v1/websites/{uuid4()}/content-folders/", headers=headers
+    )
+    assert missing.status_code == 404, missing.text
+
+    forbidden = await client.get(
+        endpoint, headers={"Authorization": f"Bearer {outsider_token}"}
+    )
+    assert forbidden.status_code == 403, forbidden.text
+
+
 async def test_website_directories_and_search_cover_the_active_index(db_container):
     origin = "https://municipality.example/"
     async with db_container() as container:
@@ -279,6 +368,22 @@ async def test_website_directories_and_search_cover_the_active_index(db_containe
             website_id, prefix=origin + "A/", q="guide", limit=100
         )
         assert [item.title for item in combined.items] == ["Resource 1"]
+        # The scheme and host are never searched, so the website's own name
+        # matches nothing; below a directory only the remainder is searched.
+        for host_query in ("municipality", "https"):
+            host = await repo.get_by_website_page(website_id, q=host_query, limit=100)
+            assert host.items == []
+        scoped = await repo.get_by_website_page(
+            website_id, prefix=origin + "A/", q="A/", limit=100
+        )
+        assert scoped.items == []
+        below = await repo.get_by_website_page(
+            website_id, prefix=origin + "A/", q="nested", limit=100
+        )
+        assert sorted(item.title for item in below.items) == [
+            "Resource 1",
+            "Resource 2",
+        ]
         other = await repo.get_website_folders(uuid4(), prefix=origin)
         assert other.items == []
 

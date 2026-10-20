@@ -178,6 +178,13 @@ def _title_or_path_matches(q: str, url_anchor: str | None) -> ColumnElement[bool
             ),
             else_=InfoBlobs.url,
         )
+    return _title_or_url_matches(q, path)
+
+
+def _title_or_url_matches(
+    q: str, path: _Column | ColumnElement[str]
+) -> ColumnElement[bool]:
+    """``q`` in the title, or in ``path``: the searchable part of the URL."""
     needles = [q]
     if (encoded := quote(q, safe="/")) != q:
         needles.append(encoded)
@@ -1011,7 +1018,9 @@ class InfoBlobRepository:
             active_info_blob_version(),
         ]
         if q.strip():
-            conditions.append(_title_or_path_matches(q.strip(), url_anchor=None))
+            conditions.append(
+                _title_or_url_matches(q.strip(), self._website_search_path(prefix))
+            )
         if prefix:
             # URL paths are case sensitive. Escape LIKE metacharacters in real URLs.
             conditions.append(
@@ -1059,6 +1068,18 @@ class InfoBlobRepository:
         )
         return sa.case((path.op("~")(r"^https?://[^/]+$"), path + "/"), else_=path)
 
+    @staticmethod
+    def _website_search_path(prefix: str) -> ColumnElement[str]:
+        """The URL below the selected directory, or below the origin.
+
+        The scheme and host are never searched, so the website's own name does
+        not match every resource. Mirrors ``url_anchor`` for integrations.
+        """
+        url = InfoBlobRepository._website_url_path()
+        if prefix:
+            return sa.func.substr(url, len(prefix) + 1)
+        return sa.func.regexp_replace(url, r"^https?://[^/]+", "")
+
     async def get_website_folders(
         self,
         website_id: UUID,
@@ -1067,7 +1088,13 @@ class InfoBlobRepository:
         cursor: str | None = None,
         limit: int = 100,
     ) -> WebsiteContentFolderPage:
-        """List one level across the entire active index, with bounded output."""
+        """List one level across the entire active index, with bounded output.
+
+        Each call groups every active row of the website: the directory is a
+        URL expression with no index of its own, so the cost grows with the
+        website's size, not with the page returned. A stored path column
+        would be the next step if large websites make expansion slow.
+        """
         url = self._website_url_path()
         conditions = [
             InfoBlobs.website_id == website_id,
