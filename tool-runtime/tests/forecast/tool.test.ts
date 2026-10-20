@@ -23,10 +23,19 @@ function outcome(horizon: number, recentDays = 3): ForecastResult {
   };
 }
 
-function setup(result: ForecastResult) {
-  const run = mock(async (_job: ForecastJob) => result);
+/** What the model reads, whether or not a picture came with it. */
+const structured = (result: unknown) =>
+  (result instanceof RichResult ? result.structured : result) as Record<string, any>;
+
+const PNG = { png_base64: Buffer.from("png").toString("base64"), width: 1200, height: 675 };
+const view = { uri: "ui://forecast/forecast.html", html: "<html></html>", ui: { prefersBorder: true } };
+
+function setup(result: ForecastResult, withView = false) {
+  // The runner draws an image when the job asks for one, as the child does.
+  const run = mock(async (job: ForecastJob) => (job.image ? { ...result, image: PNG } : result));
   const download = mock(async () => ({ bytes: Buffer.from("Datum,kWh\n"), contentType: "text/csv", name: "el" }));
-  const tool = forecastTools(config, run, { allowedFileOrigins: [], maxBytes: 1_000_000, timeoutMs: 1000, download: download as never })[0]!;
+  const access = { allowedFileOrigins: [], maxBytes: 1_000_000, timeoutMs: 1000, download: download as never };
+  const tool = forecastTools(config, run, access, withView ? view : undefined)[0]!;
   return { tool, run, download };
 }
 
@@ -74,9 +83,39 @@ describe("create_forecast", () => {
     expect(run.mock.calls[0]![0].source).toMatchObject({ dateColumn: "Datum", valueColumn: "kWh" });
   });
 
+  test("shows hosts with views the interactive forecast and tells the model what they see", async () => {
+    const { tool, run } = setup(outcome(3), true);
+    expect(tool.view).toEqual(view);
+    const result = (await tool.execute({ source, ...columns, horizon: 3 }, { ...ctx, showsViews: true })) as Record<string, any>;
+    expect(run.mock.calls[0]![0].image).toBeUndefined();
+    expect(result.presentation).toBe("interactive");
+    expect(result.shown).toContain("interactive chart");
+    expect(result.source).toEqual({ filename: "el.xlsx", sheet: "Data", date_column: "Datum", value_column: "kWh" });
+  });
+
+  test.each([
+    ["a host without views", { showsViews: false }, {}],
+    ["an explicit image", { showsViews: true }, { format: "png" }],
+  ])("gives %s a picture of the same chart", async (_case, host, args) => {
+    const { tool, run } = setup(outcome(3), true);
+    const result = await tool.execute({ source, ...columns, horizon: 3, ...args }, { ...ctx, ...host });
+    expect(run.mock.calls[0]![0].image).toMatchObject({ language: "sv", chart: { width: 1200 } });
+    expect(result).toBeInstanceOf(RichResult);
+    const rich = result as RichResult;
+    expect(rich.images).toEqual([{ data: PNG.png_base64, mimeType: "image/png" }]);
+    expect(rich.structured).toMatchObject({ presentation: "image", shown_to_user: true });
+  });
+
+  test("keeps an image made for a document out of the chat", async () => {
+    const { tool } = setup(outcome(3), true);
+    const result = (await tool.execute({ source, ...columns, horizon: 3, display: "none" }, { ...ctx, showsViews: true })) as RichResult;
+    expect(result.structured).toMatchObject({ presentation: "image", shown_to_user: false });
+    expect(String(result.structured.use)).toContain("create_document");
+  });
+
   test("returns the forecast rounded for reading, with the model that made it", async () => {
     const { tool, run } = setup(outcome(3));
-    const result = (await tool.execute({ source, ...columns, horizon: 3, title: "El, 3 dagar" }, ctx)) as Record<string, any>;
+    const result = structured(await tool.execute({ source, ...columns, horizon: 3, title: "El, 3 dagar" }, ctx));
     expect(run.mock.calls[0]![0]).toMatchObject({
       kind: "forecast",
       horizon: 3,
@@ -92,7 +131,7 @@ describe("create_forecast", () => {
 
   test("says in words why the check against the last days is unavailable", async () => {
     const { tool } = setup({ ...outcome(3), holdout: { unavailable: "NO_OUTCOME" } });
-    const result = (await tool.execute({ source, ...columns, horizon: 3 }, ctx)) as Record<string, any>;
+    const result = structured(await tool.execute({ source, ...columns, horizon: 3 }, ctx));
     expect(result.holdout).toEqual({
       unavailable: "NO_OUTCOME",
       reason: "None of the last days has a value to compare with.",

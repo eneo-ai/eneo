@@ -27,6 +27,7 @@ import { chartTools } from "./tools/charts/tool";
 import { chartView } from "./tools/charts/view";
 import type { ForecastResult } from "./tools/forecast/ports";
 import { forecastTools } from "./tools/forecast/tool";
+import { forecastView } from "./tools/forecast/view";
 
 const config = loadConfig(process.env);
 const isolate = (job: SandboxJob, timeoutMs: number) =>
@@ -180,6 +181,7 @@ endpoints.push({
         async () => (await isolate({ job }, forecastJobTimeoutMs)) as ForecastResult,
       ),
     fileAccess,
+    await forecastView(),
   ),
 });
 

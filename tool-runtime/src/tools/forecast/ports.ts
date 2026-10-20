@@ -1,3 +1,4 @@
+import type { ChartConfig } from "../charts/config";
 import type { SheetSource } from "../documents/ports";
 import type { ForecastConfig } from "./config";
 import type { Holdout } from "./evaluate";
@@ -5,12 +6,16 @@ import type { Holdout } from "./evaluate";
 /** The two columns of a CSV or XLSX file a forecast reads: one row per day. */
 export type ForecastSource = SheetSource & { dateColumn: string; valueColumn: string };
 
-/** Child job: read one daily series from `source` and forecast `horizon` days after it. */
+/**
+ * Child job: read one daily series from `source` and forecast `horizon` days after it. With
+ * `image` the child also draws the forecast as a PNG, in the language and with the title given.
+ */
 export type ForecastJob = {
   kind: "forecast";
   source: ForecastSource;
   horizon: number;
   config: ForecastConfig;
+  image?: { chart: ChartConfig; language: "sv" | "en"; title?: string };
 };
 
 /** Three levels of a quantile forecast, one value per day. */
@@ -46,4 +51,6 @@ export type ForecastResult = {
   holdout: Holdout;
   /** The size of the model that made the forecast. */
   parameters: number;
+  /** The forecast drawn as a picture, when the job asked for one. */
+  image?: { png_base64: string; width: number; height: number };
 };
