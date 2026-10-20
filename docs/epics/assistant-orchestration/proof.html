@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>What the first task must prove</title><link rel="stylesheet" href="style.css">
+<style>
+.proof-row { display: grid; grid-template-columns: 155px 1fr 1fr; gap: 0; border: 1px solid #a5adb6; border-radius: 8px; overflow: hidden; margin-top: 8px; }
+.proof-row > div { padding: 11px 12px; font-size: 12px; line-height: 1.45; }
+.proof-row > div + div { border-left: 1px dashed #a5adb6; }
+.proof-row b { display: block; font-size: 12.5px; margin-bottom: 3px; }
+.head { border: none; color: #57606a; font-size: 11px; margin-top: 8px; }
+.head > div { font-size: 10px; font-weight: 650; text-transform: uppercase; letter-spacing: .05em; padding: 5px 12px; }
+.head > div + div { border-left: none; }
+.path { display: grid; grid-template-columns: 1fr 24px 1fr 24px 1fr; gap: 0; align-items: stretch; }
+.band { margin: 10px 0 17px; text-align: center; border: 1px solid #2f7a3e; background: #e8f5ec; padding: 9px; border-radius: 7px; font-size: 12px; }
+</style></head><body><main class="page">
+<p class="eyebrow">Eneo · Task #1151 · First executable slice</p>
+<h1>Prove delegation before enabling the new chat</h1>
+<p class="lead">Deterministic provider responses exercise the existing assistant execution. The proof covers contracts, not live-model answer quality.</p>
+<div class="path">
+  <div class="box"><b>Parent model/tool loop</b><span>Procurement → IT → IT follow-up</span></div>
+  <div class="arrow" aria-hidden="true">→</div>
+  <div class="box green"><b>Delegation boundary</b><span>Recheck access, reserve budget, pass focused context</span></div>
+  <div class="arrow" aria-hidden="true">→</div>
+  <div class="box orange"><b>Existing assistant execution</b><span>Its own configuration and model/tool rounds</span></div>
+</div>
+<div class="band">One run identity · One shared budget · One cancellation scope</div>
+<div class="proof-row head"><div>Case</div><div>What happens</div><div>What proves it</div></div>
+<div class="proof-row green"><div><b>Successful run</b>Two specialists and a follow-up</div><div>Return sourced results, then persist one parent answer.</div><div>Valid references; one visible conversation; all usage counted once.</div></div>
+<div class="proof-row orange"><div><b>Budget exhausted</b>Before the follow-up</div><div>Refuse another consultation and preserve earlier evidence.</div><div>No third consultation or new provider call. Child limits never reset the total.</div></div>
+<div class="proof-row red"><div><b>User stops</b>While IT is active</div><div>Cancel active work, prevent later calls and record a stopped outcome.</div><div>Local task cleanup and coherent parent state; no promise of remote rollback.</div></div>
+<div class="proof-row"><div><b>Access revoked</b>Before a consultation</div><div>Reject before starting the specialist or exposing protected content.</div><div>No specialist provider request and an explicit denied result.</div></div>
+<div class="proof-row orange"><div><b>Specialist timeout</b>Partial evidence remains</div><div>Keep earlier results and report the missing contribution.</div><div>The parent terminates within its deadline; no silent side-effect retry.</div></div>
+<span class="section-label">Decisions this proof must settle</span>
+<div class="three">
+  <div class="box"><b>Transport</b><span>Loopback MCP or an in-process tool adapter.</span></div>
+  <div class="box"><b>Persistence</b><span>Short commits; no parent transaction held over nested model work.</span></div>
+  <div class="box"><b>Concrete limits</b><span>Total work, duration and output bounds across parent and children.</span></div>
+</div>
+<div class="footer"><span>Then: implementation tasks → group-chat UI → shared-space integration</span><span>No product behavior enabled by #1151</span></div>
+</main></body></html>

@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>What the user sees</title><link rel="stylesheet" href="style.css">
+<style>
+.window { border: 1.5px solid #a5adb6; border-radius: 11px; overflow: hidden; background: #fff; }
+.bar { background: #f6f7f9; padding: 13px 15px; border-bottom: 1px solid #d0d7de; }
+.bar strong { display: block; font-size: 13px; }
+.bar small { display: block; font-size: 10px; color: #57606a; margin-top: 3px; }
+.chat { padding: 16px; min-height: 410px; }
+.user { background: #eff3f8; border-radius: 9px; margin: 0 0 21px 28px; padding: 11px 13px; font-size: 12px; line-height: 1.5; }
+.speaker { font-size: 12.5px; font-weight: 650; margin-bottom: 10px; }
+.progress { padding: 12px; border: 1px solid #d0d7de; border-radius: 8px; }
+.status { display: flex; align-items: flex-start; gap: 8px; font-size: 11.5px; line-height: 1.45; margin-top: 11px; }
+.status:first-child { margin-top: 0; }
+.tick { color: #2f7a3e; font-weight: 650; }
+.active { color: #9a5a13; }
+.stop { border: 1px solid #a5adb6; border-radius: 6px; padding: 5px 10px; background: white; color: #1f2328; font-family: inherit; font-size: 11px; margin-top: 14px; }
+.answer { font-size: 12px; line-height: 1.5; }
+.answer p { margin-bottom: 10px; }
+.source { color: #1d5aab; }
+.evidence { border-top: 1px solid #d0d7de; margin-top: 15px; padding-top: 10px; font-size: 11px; line-height: 1.5; }
+.composer { margin: 0 12px 12px; border: 1px solid #a5adb6; border-radius: 8px; padding: 12px; font-size: 11px; display: flex; justify-content: space-between; color: #57606a; }
+.notes { margin-top: 15px; }
+</style></head><body><main class="page">
+<p class="eyebrow">Eneo · Epic #1150 · Conceptual UI</p>
+<h1>Visible progress, one final answer</h1>
+<p class="lead">Two states of the same conversation. Swedish interface copy and source names are illustrative; this is not shipped UI.</p>
+<div class="two">
+<section>
+<h2>While specialists are working</h2>
+<div class="window" lang="sv">
+  <div class="bar"><strong>Inköp och IT</strong><small>Gruppchatt</small></div>
+  <div class="chat">
+    <div class="user">Vilka krav behöver vi kontrollera inför ett inköp av en molntjänst?</div>
+    <p class="speaker">Eneo arbetar</p>
+    <div class="progress">
+      <div class="status"><span class="tick">✓</span><span>Inköpsassistenten har svarat</span></div>
+      <div class="status"><span class="tick">✓</span><span>IT-assistenten har svarat</span></div>
+      <div class="status"><span class="active">●</span><span>Inväntar komplettering från<br>IT-assistenten</span></div>
+    </div>
+    <button class="stop" type="button">Stoppa</button>
+  </div>
+  <div class="composer"><span>Meddelandet bearbetas …</span><span>↑</span></div>
+</div>
+</section>
+<section>
+<h2>When the answer is ready</h2>
+<div class="window" lang="sv">
+  <div class="bar"><strong>Inköp och IT</strong><small>Gruppchatt</small></div>
+  <div class="chat">
+    <div class="user">Vilka krav behöver vi kontrollera inför ett inköp av en molntjänst?</div>
+    <p class="speaker">Eneo</p>
+    <div class="answer">
+      <p>Här är en sammanställning av underlaget från inköp och IT.</p>
+      <p><strong>Inköp</strong><br>[Sammanfattning av inköpskraven.] <span class="source">[1]</span></p>
+      <p><strong>IT</strong><br>[Sammanfattning med kompletteringen om datalagring.] <span class="source">[2]</span></p>
+      <p><strong>Återstår att klargöra</strong><br>[Eventuella luckor eller frågor till dig.]</p>
+    </div>
+    <div class="evidence">▸ Underlag · 2 assistenter · 3 frågor<br><span class="source">[1] Inköpsriktlinje &nbsp; [2] IT-riktlinje</span></div>
+  </div>
+  <div class="composer"><span>Skriv en följdfråga …</span><span>↑</span></div>
+</div>
+</section>
+</div>
+<div class="three notes">
+  <div class="box"><b>Progress from real events</b><span>Show which consultation is running and which has finished.</span></div>
+  <div class="box"><b>Evidence the user can inspect</b><span>Keep permitted sources and consultation results accessible.</span></div>
+  <div class="box"><b>Honest incomplete outcomes</b><span>Explain missing contributions, timeouts or a stopped turn.</span></div>
+</div>
+<div class="footer"><span>Operational progress and evidence · No hidden reasoning or system instructions</span><span>Design sketch · #1150</span></div>
+</main></body></html>

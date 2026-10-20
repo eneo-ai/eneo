@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>One conversation, several specialists</title><link rel="stylesheet" href="style.css"></head>
+<body><main class="page">
+<p class="eyebrow">Eneo · Epic #1150 · Proposed design</p>
+<h1>One conversation, several specialists</h1>
+<p class="lead">The orchestrator asks, checks what is missing and combines the evidence. Each specialist keeps its own configuration.</p>
+<div class="two">
+  <div class="box blue"><b>First: group chat</b><span>Choose from the specialists configured for this group.</span></div>
+  <div class="box dash"><b>Later: shared-space assistant</b><span>Use the same capability with the caller’s permitted space assistants.</span></div>
+</div>
+<div class="down" aria-hidden="true">↓</div>
+<div class="layer">
+  <div class="name"><b>1. Orchestrator</b><span>decides what to ask</span></div>
+  <div class="does"><span class="label">Responsibility</span><p>Choose relevant specialists, write focused questions, request missing evidence and compose one answer.</p></div>
+  <div><span class="label">Boundary</span><p>The model proposes calls. It cannot grant access or extend the run’s limits.</p></div>
+</div>
+<div class="layer green">
+  <div class="name"><b>2. Delegation</b><span>checks each consultation</span></div>
+  <div class="does"><span class="label">Responsibility</span><p>Recheck identity, scope and policy. Share the total budget and cancellation signal across the run.</p></div>
+  <div><span class="label">Boundary</span><p>Only permitted specialists and necessary context. One active specialist; no recursive delegation.</p></div>
+</div>
+<div class="layer orange">
+  <div class="name"><b>3. Specialist</b><span>existing assistant execution</span></div>
+  <div class="does"><span class="label">Responsibility</span><p>Use its model, instructions, knowledge, Skills and tools. Return evidence and a clear outcome.</p></div>
+  <div><span class="label">Boundary</span><p>Keep existing permissions and approvals. Child model and tool work consumes the shared budget.</p></div>
+</div>
+<div class="layer blue">
+  <div class="name"><b>4. Conversation</b><span>one user-facing history</span></div>
+  <div class="does"><span class="label">Responsibility</span><p>Keep the combined answer, source references, consultation outcomes and total usage.</p></div>
+  <div><span class="label">Boundary</span><p>No unrelated visible child chats. No double-counted usage or fabricated citations.</p></div>
+</div>
+<p class="caption">Task #1151 proves the execution boundary. Loopback MCP or an in-process tool adapter is still a decision to make; both must meet the same contract.</p>
+<div class="footer"><span>Blue: entry and answer · Green: enforcement · Orange: specialist execution</span><span>Planned behavior · No release assigned</span></div>
+</main></body></html>
