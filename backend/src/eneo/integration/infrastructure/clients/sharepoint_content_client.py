@@ -75,9 +75,9 @@ def _without_download_credentials(
     """The same error without the URL query and the request headers.
 
     A download URL is pre-authenticated: its query holds a bearer token
-    (``tempauth``), which aiohttp puts in the error text, and the request
-    headers hold our Graph token. Status and response headers stay for the
-    throttling and token-refresh handling.
+    (``tempauth``), which aiohttp puts in the error text. The request headers
+    go too, so no credential can reach a log through them. Status and response
+    headers stay for the throttling and token-refresh handling.
     """
     info = error.request_info
     return aiohttp.ClientResponseError(
@@ -500,10 +500,10 @@ class SharePointContentClient(BaseClient):
             # The status check raises, and so does the request itself, for
             # example after too many redirects or at an invalid redirect. from
             # None: a traceback must not show the original either.
+            # No Authorization header: the URL authorizes itself (tempauth),
+            # and the Graph token must not reach the host that serves it.
             try:
-                async with self.client.client.get(
-                    download_url, headers=self.headers
-                ) as response:
+                async with self.client.client.get(download_url) as response:
                     response.raise_for_status()
                     content_type = response.headers.get("Content-Type", "")
                     charset = response.charset

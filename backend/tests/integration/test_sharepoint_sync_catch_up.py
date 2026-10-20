@@ -30,6 +30,9 @@ from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_sharepoint_app_table import TenantSharePointApp
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
+from eneo.integration.domain.entities.sharepoint_subscription import (
+    SharePointSubscription,
+)
 from eneo.integration.infrastructure.sharepoint_sync_keys import (
     sync_catch_up_key,
     sync_pending_full_key,
@@ -248,6 +251,82 @@ async def test_a_connection_whose_owner_cannot_sign_in_is_not_a_candidate(
         candidates = await _candidate_ids(container)
 
     assert personal not in candidates
+
+
+async def _subscribe(container, knowledge_id: UUID) -> SharePointSubscription:
+    from eneo.database.tables.sharepoint_subscription_table import (
+        SharePointSubscription as SubscriptionDB,
+    )
+
+    session = container.session()
+    connection_id = await session.scalar(
+        sa.select(IntegrationKnowledgeDB.user_integration_id).where(
+            IntegrationKnowledgeDB.id == knowledge_id
+        )
+    )
+    subscription = SubscriptionDB(
+        user_integration_id=connection_id,
+        site_id="site-1",
+        subscription_id=f"graph-{uuid4()}",
+        drive_id="drive-1",
+        expires_at=datetime.now(timezone.utc) + timedelta(days=10),
+    )
+    session.add(subscription)
+    await session.flush()
+    await session.execute(
+        sa.update(IntegrationKnowledgeDB)
+        .where(IntegrationKnowledgeDB.id == knowledge_id)
+        .values(sharepoint_subscription_id=subscription.id)
+    )
+    return SharePointSubscription(
+        id=subscription.id,
+        user_integration_id=subscription.user_integration_id,
+        site_id=subscription.site_id,
+        subscription_id=subscription.subscription_id,
+        drive_id=subscription.drive_id,
+        expires_at=subscription.expires_at,
+    )
+
+
+async def _queue_by_path(container, path: str, knowledge_id: UUID) -> int:
+    """Queue a sync the way one path does; how many it queued."""
+    service = container.sharepoint_webhook_service()
+    if path == "follow-up":
+        return int(await service.queue_sync_for_knowledge(knowledge_id) is not None)
+    subscription = await _subscribe(container, knowledge_id)
+    if path == "missed-notifications":
+        return await service.queue_syncs_for_subscription(subscription)
+    jobs = sa.select(sa.func.count()).select_from(Jobs)
+    before = await container.session().scalar(jobs)
+    await service._queue_refresh_for_subscription(  # pyright: ignore[reportPrivateUsage]
+        subscription, [{"resourceData": {"id": f"item-{uuid4()}"}}]
+    )
+    return await container.session().scalar(jobs) - before
+
+
+@pytest.mark.parametrize("path", ["notification", "missed-notifications", "follow-up"])
+@pytest.mark.parametrize("owner", ["active", "deleted", "inactive"])
+async def test_no_path_queues_a_sync_for_an_owner_who_cannot_sign_in(
+    db_container, redis_client, path, owner
+):
+    """The catch-up rule above holds for every other path that queues a sync."""
+    async with db_container() as container:
+        personal = await _source(container)
+        if owner != "active":
+            values = (
+                {"deleted_at": datetime.now(timezone.utc)}
+                if owner == "deleted"
+                else {"state": "inactive"}
+            )
+            await container.session().execute(
+                sa.update(Users).where(Users.id == container.user().id).values(**values)
+            )
+        try:
+            queued = await _queue_by_path(container, path, personal)
+        finally:
+            await redis_client.delete(sync_queued_key(str(personal)))
+
+    assert queued == (1 if owner == "active" else 0)
 
 
 async def test_a_suspended_tenant_has_no_candidates(db_container):
