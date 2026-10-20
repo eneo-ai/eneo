@@ -43,6 +43,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     forced_tool_choice,
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
+    CompletionClient,
     ObservedTiming,
     ProviderCallStopped,
     ProviderRequestNotAdmitted,
@@ -187,7 +188,7 @@ def resolve_slot_classification_transport(
 
 async def classify_slots(
     *,
-    litellm_client: Any,
+    litellm_client: CompletionClient,
     completion_model_route: ResolvedCompletionModelRoute,
     classification_input: SlotClassificationInput,
     allowed_slot_values: Mapping[str, Collection[str]],

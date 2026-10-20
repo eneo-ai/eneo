@@ -51,6 +51,7 @@ from eneo.flows.ai_builder.ai_builder_flow_review_sample import (
     review_prompt_groups,
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
+    CompletionClient,
     ObservedTiming,
     complete_with_silence_deadline,
 )
@@ -651,7 +652,7 @@ def _unescaped_quote(quote: str) -> str:
 async def generate_review_suggestions(
     *,
     sample: FlowReviewSample,
-    litellm_client: Any,
+    litellm_client: CompletionClient,
     completion_model_route: ResolvedCompletionModelRoute,
     model_id: UUID,
     model_name: str,

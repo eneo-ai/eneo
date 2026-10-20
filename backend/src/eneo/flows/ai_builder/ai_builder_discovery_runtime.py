@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -48,7 +48,10 @@ from eneo.flows.ai_builder.ai_builder_framework_policy import (
     slot_names_blocked_by_explicit_uncertainty,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
-from eneo.flows.ai_builder.ai_builder_provider_call import ProviderWorkGate
+from eneo.flows.ai_builder.ai_builder_provider_call import (
+    CompletionClient,
+    ProviderWorkGate,
+)
 from eneo.flows.ai_builder.ai_builder_question_state import (
     assistant_question_id,
     last_answered_question,
@@ -563,7 +566,7 @@ async def build_runtime_discovery_context(
     conversation: list[ConversationMessage],
     *,
     flow: Flow | None = None,
-    litellm_client: Any | None = None,
+    litellm_client: CompletionClient | None = None,
     completion_model_route: ResolvedCompletionModelRoute | None = None,
     ui_language: str | None = None,
     tenant_id: UUID,
@@ -1029,7 +1032,7 @@ async def build_discovery_runtime_result(
     conversation: list[ConversationMessage],
     *,
     flow: Flow | None = None,
-    litellm_client: Any | None = None,
+    litellm_client: CompletionClient | None = None,
     completion_model_route: ResolvedCompletionModelRoute | None = None,
     ui_language: str | None = None,
     allow_classification: bool = True,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, AsyncGenerator, assert_never
+from typing import TYPE_CHECKING, AsyncGenerator, assert_never
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -98,7 +98,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_submission import (
     ProposalSubmissionOwner,
 )
 from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ProposalTurnTelemetry
-from eneo.flows.ai_builder.ai_builder_provider_call import ProviderWorkGate
+from eneo.flows.ai_builder.ai_builder_provider_call import (
+    CompletionClient,
+    ProviderWorkGate,
+)
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
     AIBuilderAvailableKnowledgeBaseResource,
@@ -167,7 +170,7 @@ class AIBuilderPlanner:
         *,
         user: "UserInDB",
         repo: AIBuilderRepository,
-        litellm_client: Any,
+        litellm_client: CompletionClient,
         quality_retry_warning_codes: set[str],
     ) -> None:
         self.user = user

@@ -108,7 +108,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     ToolRetryConfig,
     ToolRetryInvocation,
 )
-from eneo.flows.ai_builder.ai_builder_provider_call import ProviderWorkGate
+from eneo.flows.ai_builder.ai_builder_provider_call import (
+    CompletionClient,
+    ProviderWorkGate,
+)
 from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import resolve_locale
 from eneo.flows.ai_builder.ai_builder_resource_catalog import (
@@ -193,7 +196,7 @@ class ProposalSubmissionOwner:
         self,
         *,
         repo: AIBuilderRepository,
-        litellm_client: Any,
+        litellm_client: CompletionClient,
         quality_retry_warning_codes: frozenset[str],
         compiled_proposal_finalizer: CompiledProposalFinalizer | None = None,
     ) -> None:

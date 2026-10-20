@@ -32,6 +32,7 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     outbound_proposal_tool_schemas,
 )
 from eneo.flows.ai_builder.ai_builder_provider_call import (
+    CompletionClient,
     ObservedTiming,
     ProviderCallStopped,
     ProviderRequestNotAdmitted,
@@ -86,7 +87,7 @@ class LLMCompletionResponse:
 
 async def call_proposal_completion(
     *,
-    litellm_client: Any,
+    litellm_client: CompletionClient,
     request: ProposalCompletionRequest,
     usage_tracker: ProposalTurnTelemetry | None = None,
     call_kind: ProposalCallKind | None = None,
@@ -250,7 +251,7 @@ def _proposal_request_evidence(
 
 def make_usage_tracked_proposal_completion(
     *,
-    litellm_client: Any,
+    litellm_client: CompletionClient,
     usage_tracker: ProposalTurnTelemetry | None,
     call_kind: ProposalCallKind | None = None,
     provider_gate: ProviderWorkGate | None = None,

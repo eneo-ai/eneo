@@ -116,7 +116,10 @@ from eneo.flows.ai_builder.ai_builder_proposal_tool_contracts import (
     outbound_proposal_tool_schemas,
     proposal_turn_tool_schemas,
 )
-from eneo.flows.ai_builder.ai_builder_provider_call import ProviderWorkGate
+from eneo.flows.ai_builder.ai_builder_provider_call import (
+    CompletionClient,
+    ProviderWorkGate,
+)
 from eneo.flows.ai_builder.ai_builder_requirements_disclosure import (
     build_requirements_disclosure,
 )
@@ -221,7 +224,7 @@ logger = get_logger(__name__)
 @dataclass(frozen=True, slots=True)
 class PlannerRequestPreparationInput:
     conversation: list[ConversationMessage]
-    litellm_client: Any
+    litellm_client: CompletionClient
     completion_model_route: ResolvedCompletionModelRoute
     available_models: list[AIBuilderAvailableModelResource] | None
     available_kbs: list[AIBuilderAvailableKnowledgeBaseResource] | None
