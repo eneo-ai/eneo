@@ -4,6 +4,8 @@
  * dedupe logic.
  */
 
+import { fitKnowledgeName } from "../knowledge-names";
+
 export type SharePointSelectableType = "file" | "folder" | "site_root";
 
 export type SelectedTreeItem = {
@@ -115,7 +117,7 @@ export function buildBatchItems(
   const resourceType = site.type === "onedrive" ? "onedrive" : "site";
   return entries.map((entry) => {
     const trimmedName = entry.importName.trim();
-    const name = trimmedName.length > 0 ? trimmedName : entry.item.name;
+    const name = fitKnowledgeName(trimmedName.length > 0 ? trimmedName : entry.item.name);
 
     if (entry.item.type === "site_root") {
       return {

@@ -25,6 +25,7 @@
     "@astryxdesign/core": "0.6.4",
     "@astryxdesign/theme-neutral": "0.6.4",
     "@eneo/whats-new": "workspace:*",
+    "@eneo/eneo-js": "workspace:*",
     "@modelcontextprotocol/ext-apps": "2.0.3",
     "@radix-ui/react-use-controllable-state": "^1.2.3",
     "@streamdown/cjk": "^1.0.3",
