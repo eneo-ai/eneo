@@ -1986,6 +1986,7 @@
   "category_help": "Select a category to organize this template",
   "server_url_required": "Server URL",
   "server_url_hint": "Full URL to the MCP server endpoint (Streamable HTTP)",
+  "mcp_credential_requires_https": "A credential (bearer token, API key, or a user name and password in the URL) is sent only over https. Change the server URL to https://; plain http works only for localhost, 127.0.0.1 and [::1].",
   "authentication_type": "Authentication Type",
   "mcp_auth_type_none": "Public (no authentication)",
   "bearer_token": "Bearer Token",
@@ -6428,5 +6429,7 @@
   "workspace_preview_selection_actions": "Actions for selected rows",
   "side_panel_latest_answer": "Latest answer",
   "chat_quote_label": "Quote",
-  "chat_quote_remove": "Remove the quote"
+  "chat_quote_remove": "Remove the quote",
+  "file_preview_previous_version": "Previous version",
+  "file_preview_next_version": "Next version"
 }
