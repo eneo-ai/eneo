@@ -88,13 +88,14 @@ export function messageToolCalls(message: EneoUIMessage): ToolCallRecord[] {
       isBundled: eneo.is_bundled === true,
       appView: eneo.app_view ?? null,
       approved: asBoolean(eneo.approved),
+      // A finished part says how it ended: the SDK keeps the metadata of the
+      // call's input part, which still reads "pending" or "approved".
       resultStatus:
-        asString(eneo.result_status) ??
-        (part.state === "output-available"
+        part.state === "output-available"
           ? "succeeded"
           : part.state === "output-error"
             ? (part.errorText ?? "failed")
-            : null),
+            : asString(eneo.result_status),
       generatedFileIds: [...new Set([...recorded, ...(filesByCall.get(part.toolCallId) ?? [])])],
       part
     });

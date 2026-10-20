@@ -15,6 +15,7 @@ function answer(
     isBundled?: boolean;
     appView?: Record<string, unknown> | null;
     approved?: boolean | null;
+    resultStatus?: string;
     errorText?: string;
   }[]
 ): EneoUIMessage {
@@ -36,7 +37,8 @@ function answer(
               server_name: "runtime",
               is_bundled: call.isBundled ?? true,
               app_view: call.appView === undefined ? view : call.appView,
-              approved: call.approved ?? null
+              approved: call.approved ?? null,
+              ...(call.resultStatus ? { result_status: call.resultStatus } : {})
             }
           }
         }) as unknown as Part
@@ -100,6 +102,34 @@ describe("view-bearing calls", () => {
     expect(hasResult(call!, true)).toBe(false);
     expect(hasResult(call!, false)).toBe(true);
     expect(hasResult({ resultStatus: "pending", state: "input-available" }, false)).toBe(false);
+  });
+
+  // The SDK keeps the metadata of a call's input part, which was sent while
+  // the call was approved and about to run; its output part says it finished.
+  it("hands the result to the view of a streamed call once it has finished", () => {
+    const [done] = messageAppViewCalls(
+      answer([{ id: "c", toolName: "create_chart", resultStatus: "approved" }])
+    );
+    expect(hasResult(done!, false)).toBe(true);
+    const calls = messageAppViewCalls(
+      answer([
+        {
+          id: "failed",
+          toolName: "create_chart",
+          state: "output-error",
+          errorText: "failed",
+          resultStatus: "approved"
+        },
+        {
+          id: "running",
+          toolName: "create_chart",
+          state: "input-available",
+          resultStatus: "approved"
+        }
+      ])
+    );
+    expect(calls.map((call) => call.toolCallId)).toEqual(["running"]);
+    expect(hasResult(calls[0]!, false)).toBe(false);
   });
 
   it("parses a view defensively", () => {
