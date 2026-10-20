@@ -4,6 +4,7 @@
 <p class="eyebrow">Eneo · Epic #1150 · Proposed design</p>
 <h1>One conversation, several specialists</h1>
 <p class="lead">The orchestrator asks, checks what is missing and combines the evidence. Each specialist keeps its own configuration.</p>
+<div class="box green" style="margin-bottom:12px"><b>One space is the execution boundary</b><span>The server binds the caller, tenant and space. Its classification policy applies to the orchestrator, every specialist and their models/tools, including returned evidence.</span></div>
 <div class="two">
   <div class="box blue"><b>First: group chat</b><span>Choose from the specialists configured for this group.</span></div>
   <div class="box dash"><b>Later: shared-space assistant</b><span>Use the same capability with the caller’s permitted space assistants.</span></div>
@@ -16,7 +17,7 @@
 </div>
 <div class="layer green">
   <div class="name"><b>2. Delegation</b><span>checks each consultation</span></div>
-  <div class="does"><span class="label">Responsibility</span><p>Recheck identity, scope and policy. Share the total budget and cancellation signal across the run.</p></div>
+  <div class="does"><span class="label">Responsibility</span><p>Recheck access and classification before calls and evidence handoff. Share the total budget and cancellation signal.</p></div>
   <div><span class="label">Boundary</span><p>Only permitted specialists and necessary context. One active specialist; no recursive delegation.</p></div>
 </div>
 <div class="layer orange">
@@ -26,7 +27,7 @@
 </div>
 <div class="layer blue">
   <div class="name"><b>4. Conversation</b><span>one user-facing history</span></div>
-  <div class="does"><span class="label">Responsibility</span><p>Keep the combined answer, source references, consultation outcomes and total usage.</p></div>
+  <div class="does"><span class="label">Responsibility</span><p>Lead with the synthesized answer. Keep each actual specialist question, reply and source in expandable steps.</p></div>
   <div><span class="label">Boundary</span><p>No unrelated visible child chats. No double-counted usage or fabricated citations.</p></div>
 </div>
 <p class="caption">Task #1151 proves the execution boundary. Loopback MCP or an in-process tool adapter is still a decision to make; both must meet the same contract.</p>

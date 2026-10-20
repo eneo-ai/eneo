@@ -21,9 +21,10 @@
   <div class="arrow" aria-hidden="true">→</div>
   <div class="box orange"><b>Existing assistant execution</b><span>Its own configuration and model/tool rounds</span></div>
 </div>
-<div class="band">One run identity · One shared budget · One cancellation scope</div>
+<div class="band">One space and classification policy · One shared budget · One cancellation scope</div>
 <div class="proof-row head"><div>Case</div><div>What happens</div><div>What proves it</div></div>
-<div class="proof-row green"><div><b>Successful run</b>Two specialists and a follow-up</div><div>Return sourced results, then persist one parent answer.</div><div>Valid references; one visible conversation; all usage counted once.</div></div>
+<div class="proof-row green"><div><b>Successful run</b>Two specialists and a follow-up</div><div>Persist one parent answer plus actual specialist questions, replies and sources.</div><div>Three inspectable steps; valid references; all usage counted once.</div></div>
+<div class="proof-row red"><div><b>Wrong space or classification</b>Parent, child or tool</div><div>Reject an out-of-scope assistant or a provider below the space's requirement.</div><div>No protected input/output reaches an ineligible recipient, including the orchestrator.</div></div>
 <div class="proof-row orange"><div><b>Budget exhausted</b>Before the follow-up</div><div>Refuse another consultation and preserve earlier evidence.</div><div>No third consultation or new provider call. Child limits never reset the total.</div></div>
 <div class="proof-row red"><div><b>User stops</b>While IT is active</div><div>Cancel active work, prevent later calls and record a stopped outcome.</div><div>Local task cleanup and coherent parent state; no promise of remote rollback.</div></div>
 <div class="proof-row"><div><b>Access revoked</b>Before a consultation</div><div>Reject before starting the specialist or exposing protected content.</div><div>No specialist provider request and an explicit denied result.</div></div>

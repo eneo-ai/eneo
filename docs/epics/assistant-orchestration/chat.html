@@ -20,15 +20,19 @@
 .evidence { border-top: 1px solid #d0d7de; margin-top: 15px; padding-top: 10px; font-size: 11px; line-height: 1.5; }
 .composer { margin: 0 12px 12px; border: 1px solid #a5adb6; border-radius: 8px; padding: 12px; font-size: 11px; display: flex; justify-content: space-between; color: #57606a; }
 .notes { margin-top: 15px; }
+.detail { margin-top: 16px; }
+.detail-body { padding: 14px 16px; font-size: 12px; line-height: 1.5; }
+.detail-body p + p { margin-top: 10px; }
+.detail-label { display: block; color: #57606a; font-size: 10px; font-weight: 650; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 3px; }
 </style></head><body><main class="page">
 <p class="eyebrow">Eneo · Epic #1150 · Conceptual UI</p>
 <h1>Visible progress, one final answer</h1>
-<p class="lead">Two states of the same conversation. Swedish interface copy and source names are illustrative; this is not shipped UI.</p>
+<p class="lead">The orchestrator's synthesis is the main answer. Expand the steps to read each specialist's actual contribution. All text and sources below are illustrative.</p>
 <div class="two">
 <section>
 <h2>While specialists are working</h2>
 <div class="window" lang="sv">
-  <div class="bar"><strong>Inköp och IT</strong><small>Gruppchatt</small></div>
+  <div class="bar"><strong>Inköp och IT</strong><small>Space: Digital utveckling · Klassning: Intern</small></div>
   <div class="chat">
     <div class="user">Vilka krav behöver vi kontrollera inför ett inköp av en molntjänst?</div>
     <p class="speaker">Eneo arbetar</p>
@@ -45,26 +49,36 @@
 <section>
 <h2>When the answer is ready</h2>
 <div class="window" lang="sv">
-  <div class="bar"><strong>Inköp och IT</strong><small>Gruppchatt</small></div>
+  <div class="bar"><strong>Inköp och IT</strong><small>Space: Digital utveckling · Klassning: Intern</small></div>
   <div class="chat">
     <div class="user">Vilka krav behöver vi kontrollera inför ett inköp av en molntjänst?</div>
     <p class="speaker">Eneo</p>
     <div class="answer">
-      <p>Här är en sammanställning av underlaget från inköp och IT.</p>
-      <p><strong>Inköp</strong><br>[Sammanfattning av inköpskraven.] <span class="source">[1]</span></p>
-      <p><strong>IT</strong><br>[Sammanfattning med kompletteringen om datalagring.] <span class="source">[2]</span></p>
-      <p><strong>Återstår att klargöra</strong><br>[Eventuella luckor eller frågor till dig.]</p>
+      <p>Börja med att klargöra vilken information tjänsten ska hantera. Det avgör vilka IT-krav som behöver ingå i inköpsunderlaget. <span class="source">[1][2]</span></p>
+      <p>Be sedan leverantören beskriva både lagringsplats och varifrån support kan få åtkomst. Samla svaren i samma kravlista före bedömningen. <span class="source">[2]</span></p>
+      <p><strong>Återstår att klargöra</strong><br>Vilken information ska tjänsten hantera?</p>
     </div>
-    <div class="evidence">▸ Underlag · 2 assistenter · 3 frågor<br><span class="source">[1] Inköpsriktlinje &nbsp; [2] IT-riktlinje</span></div>
+    <div class="evidence">▸ Visa steg · 2 assistenter · 3 frågor<br><span class="source">[1] Inköpsriktlinje &nbsp; [2] IT-riktlinje</span></div>
   </div>
   <div class="composer"><span>Skriv en följdfråga …</span><span>↑</span></div>
 </div>
 </section>
 </div>
+<section class="detail">
+<h2>On demand: open the steps and inspect a reply</h2>
+<div class="window" lang="sv">
+  <div class="bar"><strong>▾ Steg · 2 assistenter · 3 frågor</strong><small>1 Inköp ✓ &nbsp; → &nbsp; 2 IT ✓ &nbsp; → &nbsp; 3 IT, komplettering ✓</small></div>
+  <div class="detail-body">
+    <p><span class="detail-label">Steg 3 · IT-assistenten · Klart</span><strong>Orkestrerarens fråga</strong><br>Räcker lagringsplatsen för bedömningen, eller behöver supportåtkomst också beskrivas?</p>
+    <p><strong>IT-assistentens svar</strong><br>Beskriv båda. Lagringsplatsen visar var informationen finns, medan supportåtkomsten visar varifrån den kan nås. Be leverantören redovisa detta innan bedömningen slutförs. <span class="source">[2]</span></p>
+    <p><span class="source">Källa: [2] IT-riktlinje, avsnitt om extern tjänst</span></p>
+  </div>
+</div>
+</section>
 <div class="three notes">
   <div class="box"><b>Progress from real events</b><span>Show which consultation is running and which has finished.</span></div>
-  <div class="box"><b>Evidence the user can inspect</b><span>Keep permitted sources and consultation results accessible.</span></div>
+  <div class="box"><b>Actual replies, saved per step</b><span>Each follow-up is a separate step. Reopen permitted questions, replies and sources from history.</span></div>
   <div class="box"><b>Honest incomplete outcomes</b><span>Explain missing contributions, timeouts or a stopped turn.</span></div>
 </div>
-<div class="footer"><span>Operational progress and evidence · No hidden reasoning or system instructions</span><span>Design sketch · #1150</span></div>
+<div class="footer"><span>Same space and access policy · No hidden reasoning or system instructions</span><span>Design sketch · #1150</span></div>
 </main></body></html>

@@ -13,7 +13,7 @@ Marketplace epic #546. `style.css` adapts the style from
 | --- | --- | --- |
 | `overview.html` | `orchestration-overview.png` | Ownership, boundaries and later space reuse |
 | `flow.html` | `orchestration-flow.png` | Two specialists and a focused follow-up |
-| `chat.html` | `orchestration-chat.png` | Working and completed conversation states |
+| `chat.html` | `orchestration-chat.png` | Progress, primary synthesis and expandable specialist replies |
 | `proof.html` | `orchestration-proof.png` | The first task's proof and failure cases |
 
 ## Regenerate
