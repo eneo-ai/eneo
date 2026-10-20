@@ -223,6 +223,9 @@ export async function runIsolated(
       child.on("close", (code) => {
         clearTimeout(timer);
         signal?.removeEventListener("abort", abort);
+        // Whatever the job started (a sidecar) is in its process group and outlives it if the
+        // job dies first, with no timer left to stop it; nothing of a job runs past its end.
+        kill();
         if (failure || code !== 0) {
           reject(failure ?? new ToolError("SANDBOX_CRASH", "Execution process failed."));
           return;

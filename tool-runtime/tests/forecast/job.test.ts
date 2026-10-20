@@ -1,10 +1,11 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { jobPaths, runIsolated } from "../../src/sandbox";
+import { confinement, jobPaths, runIsolated } from "../../src/sandbox";
 import { forecastConfigSchema } from "../../src/tools/forecast/config";
-import { forecastAvailable } from "../../src/tools/forecast/engine/timestral";
+import { FORECAST_PYTHON, forecastAvailable } from "../../src/tools/forecast/engine/timestral";
 import type { ForecastJob } from "../../src/tools/forecast/ports";
 import { tinyCheckpoint } from "./checkpoint";
 
@@ -27,22 +28,37 @@ async function job(modelPath: string): Promise<ForecastJob> {
   };
 }
 
-/** Processes whose command line names `path`: from /proc on Linux, from ps elsewhere. */
+/** The parent of a process: from /proc on Linux, from ps elsewhere. */
+async function parentOf(pid: number): Promise<number> {
+  if (process.platform === "linux") {
+    const stat = await Bun.file(`/proc/${pid}/stat`).text();
+    return Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+  }
+  return Number(Bun.spawnSync(["ps", "-o", "ppid=", "-p", String(pid)]).stdout.toString().trim());
+}
+
+/**
+ * Processes running `path`: as the program, or as the script its interpreter runs (a stand-in
+ * sidecar is a Bun script). A launcher that only names the path among its arguments, such as
+ * landrun granting it, is not one of them. From /proc on Linux, from ps elsewhere.
+ */
 async function running(path: string): Promise<number[]> {
+  const runs = (args: string[]) => args[0] === path || args[1] === path;
   if (process.platform === "linux") {
     const pids: number[] = [];
     for (const entry of await readdir("/proc")) {
       if (!/^\d+$/.test(entry)) continue;
       const command = await Bun.file(`/proc/${entry}/cmdline`).text().catch(() => "");
-      if (command.split("\0").includes(path)) pids.push(Number(entry));
+      if (runs(command.split("\0"))) pids.push(Number(entry));
     }
     return pids;
   }
   const listing = Bun.spawnSync(["ps", "-axo", "pid=,args="]).stdout.toString();
   return listing
     .split("\n")
-    .filter((line) => line.includes(path) && !line.includes("ps -axo"))
-    .map((line) => Number(line.trim().split(/\s+/)[0]));
+    .map((line) => line.trim().split(/\s+/))
+    .filter(([, ...args]) => runs(args))
+    .map(([pid]) => Number(pid));
 }
 
 describe("forecast job in a sandbox child", () => {
@@ -64,31 +80,76 @@ describe("forecast job in a sandbox child", () => {
     });
   });
 
-  test("leaves no sidecar behind when the call is cancelled", async () => {
-    // A stand-in sidecar that waits far past the cancellation. It is a Bun script because a
-    // confined child may start Bun and the forecast Python, nothing else (no /bin/sh).
-    const fake = join(directory, "fake-python");
-    await writeFile(fake, `#!${process.execPath}\nawait Bun.sleep(60_000);\n`, { mode: 0o755 });
+  /**
+   * A stand-in sidecar that waits far past any deadline: a venv whose python is the forecast
+   * interpreter itself, with a sitecustomize that sleeps before any script runs (Python loads it
+   * even in isolated mode). The child starts it exactly as it starts the real sidecar, under the
+   * same rules: its venv and the interpreter, nothing around them.
+   */
+  async function standIn(name: string): Promise<string> {
+    const real = realpathSync(FORECAST_PYTHON);
+    const version = Bun.spawnSync([real, "-c", "import sys; print('%d.%d' % sys.version_info[:2])"]).stdout.toString().trim();
+    const venv = join(directory, name, "venv");
+    const python = join(venv, "bin", "python");
+    await mkdir(join(venv, "bin"), { recursive: true });
+    await mkdir(join(venv, "lib", `python${version}`, "site-packages"), { recursive: true });
+    await writeFile(join(venv, "pyvenv.cfg"), `home = ${dirname(real)}\ninclude-system-site-packages = false\n`);
+    await writeFile(join(venv, "lib", `python${version}`, "site-packages", "sitecustomize.py"), "import time\ntime.sleep(60)\n");
+    await symlink(real, python);
+    return python;
+  }
+
+  /** Runs a forecast job with `python` as the sidecar until the sidecar is up. */
+  async function startWith(python: string, signal?: AbortSignal) {
     const previous = process.env.FORECAST_PYTHON;
-    process.env.FORECAST_PYTHON = fake;
-    try {
-      const controller = new AbortController();
-      const run = runIsolated({ job: await job(directory) }, 30_000, { signal: controller.signal });
-      // A job that fails before the sidecar starts must fail the test, not leave it waiting.
-      let settled: unknown;
-      run.catch((error) => (settled = error));
-      let pids: number[] = [];
-      while (!(pids = await running(fake)).length) {
-        if (settled) throw settled;
-        await Bun.sleep(50);
+    process.env.FORECAST_PYTHON = python;
+    const forecast = await job(directory);
+    // Where landrun is installed, the child must actually be confined for this to count.
+    const requireConfinement = confinement({ job: forecast }, directory).length > 0;
+    const run = runIsolated({ job: forecast }, 30_000, { signal, requireConfinement });
+    const restore = () => {
+      if (previous === undefined) delete process.env.FORECAST_PYTHON;
+      else process.env.FORECAST_PYTHON = previous;
+    };
+    // A job that fails before the sidecar starts must fail the test, not leave it waiting.
+    let settled: unknown;
+    run.catch((error) => (settled = error));
+    let pids: number[] = [];
+    while (!(pids = await running(python)).length) {
+      if (settled) {
+        restore();
+        throw settled;
       }
+      await Bun.sleep(50);
+    }
+    return { run, sidecar: pids[0]!, restore };
+  }
+
+  test.skipIf(!available)("leaves no sidecar behind when the call is cancelled", async () => {
+    const python = await standIn("cancelled");
+    const controller = new AbortController();
+    const { run, restore } = await startWith(python, controller.signal);
+    try {
       controller.abort();
       await expect(run).rejects.toMatchObject({ code: "CANCELLED" });
       await Bun.sleep(100);
-      expect(await running(fake)).toEqual([]);
+      expect(await running(python)).toEqual([]);
     } finally {
-      if (previous === undefined) delete process.env.FORECAST_PYTHON;
-      else process.env.FORECAST_PYTHON = previous;
+      restore();
+    }
+  });
+
+  test.skipIf(!available)("leaves no sidecar behind when the job process dies under it", async () => {
+    const python = await standIn("crashed");
+    const { run, sidecar, restore } = await startWith(python);
+    try {
+      // Only the Bun job that started the sidecar is killed, as an out-of-memory kill would.
+      process.kill(await parentOf(sidecar), "SIGKILL");
+      await expect(run).rejects.toMatchObject({ code: "SANDBOX_CRASH" });
+      await Bun.sleep(100);
+      expect(await running(python)).toEqual([]);
+    } finally {
+      restore();
     }
   });
 
