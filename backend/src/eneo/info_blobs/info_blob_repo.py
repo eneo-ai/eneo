@@ -1093,7 +1093,7 @@ class InfoBlobRepository:
         groups = (
             sa.select(
                 path.label("path"),
-                sa.func.count().label("count"),
+                sa.func.count().label("item_count"),
                 sa.func.bool_or(sa.func.strpos(tail, "/") > 1).label("has_children"),
             )
             .where(*conditions)
@@ -1106,7 +1106,7 @@ class InfoBlobRepository:
         rows = (await self.session.execute(query)).all()
         items = [
             WebsiteContentFolder(
-                path=row.path, count=row.count, has_children=row.has_children
+                path=row.path, count=row.item_count, has_children=row.has_children
             )
             for row in rows[:limit]
         ]
