@@ -11,9 +11,10 @@
   import TemplatePicker from "$lib/features/widget/admin/TemplatePicker.svelte";
   import WidgetEditor from "$lib/features/widget/admin/WidgetEditor.svelte";
   import { m } from "$lib/paraglide/messages";
-  import { tick, untrack } from "svelte";
+  import { onDestroy, tick, untrack } from "svelte";
+  import type { PageData } from "./$types";
 
-  let { data } = $props();
+  let { data }: { data: PageData } = $props();
 
   const {
     state: { currentSpace }
@@ -38,25 +39,60 @@
   // return there moves to the note saying what happened.
   let archived = $state(false);
   let archivedNote = $state<HTMLElement | null>(null);
-  async function onArchived() {
-    widget = null;
-    archived = true;
-    await tick();
-    archivedNote?.focus();
+  // A route visit owns its pending actions, including when history returns
+  // to the same assistant after visiting another one.
+  let owner = $state.raw({ assistantId: untrack(() => data.assistant.id) });
+  let destroyed = false;
+  onDestroy(() => {
+    destroyed = true;
+  });
+
+  $effect.pre(() => {
+    const assistantId = data.assistant.id;
+    if (assistantId === owner.assistantId) return;
+    untrack(() => {
+      owner = { assistantId };
+      widget = data.widget;
+      name = data.assistant.name;
+      templateId = templates.find((t) => t.is_default)?.id ?? "";
+      archived = false;
+    });
+  });
+
+  function isCurrent(candidate: typeof owner) {
+    return !destroyed && candidate === owner && candidate.assistantId === data.assistant.id;
   }
 
-  const create = createAsyncState(async () => {
-    try {
-      widget = await data.eneo.widgets.create({
-        spaceId: data.currentSpace.id,
-        target_id: data.assistant.id,
-        name: name.trim() || data.assistant.name,
-        language: "auto",
-        template_id: templateId || null
-      });
-    } catch (error) {
-      toastError(error, m.widget_admin_could_not_create());
-    }
+  const onArchived = $derived.by(() => {
+    const current = owner;
+    return async () => {
+      if (!isCurrent(current)) return;
+      widget = null;
+      archived = true;
+      await tick();
+      if (isCurrent(current)) archivedNote?.focus();
+    };
+  });
+
+  const create = $derived.by(() => {
+    const current = owner;
+    return createAsyncState(async () => {
+      try {
+        const created = await data.eneo.widgets.create({
+          spaceId: data.currentSpace.id,
+          target_id: data.assistant.id,
+          name: name.trim() || data.assistant.name,
+          language: "auto",
+          template_id: templateId || null
+        });
+        if (isCurrent(current)) {
+          widget = created;
+          archived = false;
+        }
+      } catch (error) {
+        if (isCurrent(current)) toastError(error, m.widget_admin_could_not_create());
+      }
+    });
   });
 </script>
 

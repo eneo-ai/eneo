@@ -102,6 +102,9 @@ class VisitorView:
         """The stream events a visitor gets for one pipeline event, in order."""
         if chunk.response_type in (
             ResponseType.REASONING,
+            # Partial JSON cannot be restricted to the one display argument.
+            # Visitors get only the sanitized TOOL_CALL activity below.
+            ResponseType.TOOL_CALL_DELTA,
             # Visitors are never asked to approve a tool.
             ResponseType.TOOL_APPROVAL_REQUIRED,
             ResponseType.TOOL_APPROVAL_TIMEOUT,

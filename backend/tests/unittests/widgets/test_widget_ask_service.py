@@ -336,6 +336,11 @@ async def _answer_with_everything():
     yield Completion(
         reasoning_content="Instruktionen säger…", response_type=ResponseType.REASONING
     )
+    yield Completion(
+        response_type=ResponseType.TOOL_CALL_DELTA,
+        tool_call_id="call_1",
+        arguments_delta=json.dumps({"query": "bibliotek", "private": RESOURCE_CONTENT}),
+    )
     yield _tool_event()
     yield Completion(
         text=f'Hej <inref id="{str(CITED_RESOURCE_ID)[:8]}"/>',

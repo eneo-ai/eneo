@@ -234,8 +234,9 @@
     onActivate={lifecycle(eneo.widgets.activate)}
     onPause={lifecycle(eneo.widgets.pause)}
     onArchive={async () => {
+      const completed = onArchived;
       await lifecycle(eneo.widgets.archive)();
-      onArchived?.();
+      completed?.();
     }}
   />
 

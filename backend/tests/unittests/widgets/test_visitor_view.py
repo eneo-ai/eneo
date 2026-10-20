@@ -237,6 +237,55 @@ def test_tool_event_keeps_the_call_and_the_argument_the_widget_shows():
     assert "email" in original.tool_calls_metadata[0].arguments
 
 
+@pytest.mark.parametrize("show_tool_activity", [True, False])
+@pytest.mark.parametrize("show_sources", [True, False])
+@pytest.mark.parametrize("fragmented", [True, False])
+def test_tool_argument_deltas_never_reach_visitor_sse(
+    show_tool_activity, show_sources, fragmented
+):
+    arguments = {"query": "bibliotek", "private": {"note": SECRET_CONTENT}}
+    raw = json.dumps(arguments, ensure_ascii=True)
+    pieces = [raw[:20], raw[20:45], raw[45:]] if fragmented else [raw]
+    call = replace(_tool_call(), arguments=arguments)
+    chunks = [
+        Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[
+                replace(call, arguments=None, result_status="pending", result=None)
+            ],
+        ),
+        *[
+            Completion(
+                response_type=ResponseType.TOOL_CALL_DELTA,
+                tool_call_id="call_1",
+                arguments_delta=piece,
+            )
+            for piece in pieces
+        ],
+        Completion(response_type=ResponseType.TOOL_CALL, tool_calls_metadata=[call]),
+        Completion(response_type=ResponseType.TEXT, text="Hej"),
+    ]
+    view = VisitorView(
+        _widget(show_tool_activity=show_tool_activity, show_sources=show_sources)
+    )
+    events = [
+        assistant_protocol.to_sse_response(visible, uuid4())
+        for chunk in chunks
+        for visible in view.events(chunk)
+    ]
+
+    assert [event.event for event in events] == (
+        ["tool_call", "tool_call", "text"] if show_tool_activity else ["text"]
+    )
+    payloads = [json.loads(event.data) for event in events]
+    assert all("arguments_delta" not in payload for payload in payloads)
+    assert SECRET_CONTENT not in json.dumps(payloads, ensure_ascii=False)
+    assert payloads[-1]["answer"] == "Hej"
+    if show_tool_activity:
+        assert payloads[0]["tools"][0]["result_status"] == "pending"
+        assert payloads[1]["tools"][0]["arguments"] == {"query": "bibliotek"}
+
+
 @pytest.mark.parametrize(
     ("arguments", "shown"),
     [

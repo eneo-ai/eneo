@@ -64,6 +64,7 @@
     "@vitest/browser-playwright": "4.1.11",
     "@vitest/coverage-v8": "4.1.11",
     "altcha": "^3.2.2",
+    "axe-core": "4.13.0",
     "bits-ui": "^2.18.1",
     "clsx": "^2.1.1",
     "docx-preview": "^0.4.1",

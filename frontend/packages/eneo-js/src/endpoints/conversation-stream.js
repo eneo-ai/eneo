@@ -1,6 +1,6 @@
 /**
  * Shared reader for the conversation SSE protocol (`first_chunk`, `text`,
- * `reasoning`, `image`, `eneo_event`, `token_usage`, `tool_call`, ...).
+ * `reasoning`, `image`, `token_usage`, `tool_call`, ...).
  * Used by the signed-in conversations endpoint and the anonymous widget
  * endpoint, which stream the same events from different paths.
  */
@@ -13,8 +13,9 @@ import { EneoError } from "../client/client.js";
  * @property {(data: import("../types/resources").SSE.Text) => void} [onText]
  * @property {(data: import("../types/resources").SSE.Reasoning) => void} [onReasoning]
  * @property {(data: import("../types/resources").SSE.Files) => void} [onImage]
- * @property {(data: import("../types/resources").SSE.Eneo | import("../types/resources").SSE.TokenUsage) => void} [onEneoEvent]
+ * @property {(data: import("../types/resources").SSE.TokenUsage) => void} [onEneoEvent]
  * @property {(data: import("../types/resources").SSE.ToolCall) => void} [onToolCall]
+ * @property {(data: import("../types/resources").SSE.ToolCallDelta) => void} [onToolCallDelta]
  * @property {(data: import("../types/resources").SSE.ToolApprovalRequired) => void} [onToolApprovalRequired]
  * @property {(data: import("../types/resources").SSE.ToolApprovalTimeout) => void} [onToolApprovalTimeout]
  * @property {(response: Response) => Promise<void> | void} [onOpen]
@@ -75,13 +76,16 @@ export async function readConversationStream(client, endpoint, args, callbacks, 
               callbacks?.onImage?.(data);
               break;
 
-            case "eneo_event":
             case "token_usage":
               callbacks?.onEneoEvent?.(data);
               break;
 
             case "tool_call":
               callbacks?.onToolCall?.(data);
+              break;
+
+            case "tool_call_delta":
+              callbacks?.onToolCallDelta?.(data);
               break;
 
             case "tool_approval_required":

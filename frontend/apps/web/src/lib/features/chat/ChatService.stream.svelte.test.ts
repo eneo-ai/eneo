@@ -38,6 +38,7 @@ function chatService(
 describe("ChatService stream finalization", () => {
   it("keeps arrival order when the stream ends with a withheld citation prefix", async () => {
     const ask = vi.fn().mockImplementation(async ({ callbacks }) => {
+      await callbacks.onOpen();
       callbacks.onFirstChunk({
         id: "message-1",
         session_id: "session-1",
@@ -61,6 +62,7 @@ describe("ChatService answers that break off mid-stream", () => {
   // Some text arrives and is rendered, then the stream fails.
   const brokenOff = () =>
     vi.fn().mockImplementation(async ({ callbacks }) => {
+      await callbacks.onOpen();
       callbacks.onFirstChunk({
         id: "message-1",
         session_id: "session-1",
@@ -82,7 +84,7 @@ describe("ChatService answers that break off mid-stream", () => {
     await chat.askQuestion("När har biblioteket öppet?");
 
     const answer = chat.currentConversation.messages.at(-1)?.answer ?? "";
-    expect(answer.startsWith(m.chat_stream_error_inline())).toBe(true);
+    expect(answer.startsWith(m.chat_answer_failed())).toBe(true);
   });
 
   it("keeps the partial answer and hands the failure to a caller that reports it itself", async () => {

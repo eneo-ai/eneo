@@ -103,6 +103,7 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
           conversation?: { id: string | null };
           question: string;
           callbacks?: {
+            onOpen?: () => Promise<void> | void;
             onFirstChunk?: (chunk: Record<string, unknown>) => void;
             onText?: (text: Record<string, unknown>) => void;
           };
@@ -117,6 +118,7 @@ vi.mock("@eneo/eneo-js", async (importOriginal) => {
           await new Promise<void>((resolve) => {
             fake.release = resolve;
           });
+          await callbacks?.onOpen?.();
           // A follow-up continues the conversation it was asked in.
           const session_id = conversation?.id || `session-${++fake.sessions}`;
           callbacks?.onFirstChunk?.({
@@ -653,7 +655,7 @@ describe("WidgetChat", () => {
     await expect.element(page.getByRole("alert")).toHaveTextContent("widget_error_incomplete");
     await expect.element(page.getByText("Biblioteket har öppet")).toBeVisible();
     expect(document.querySelector("[data-widget-chat] [role='log']")!.textContent).not.toContain(
-      "chat_stream_error_inline"
+      "chat_answer_failed"
     );
     // Nothing reads the broken-off answer out as if it were whole.
     expect(announced()).toBe("");
