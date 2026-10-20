@@ -4,7 +4,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import aiohttp
 import pytest
+from aiohttp import web
 from aiohttp.client_reqrep import RequestInfo
+from aiohttp.test_utils import TestServer
 from multidict import CIMultiDict, CIMultiDictProxy
 from yarl import URL
 
@@ -245,6 +247,8 @@ class TestFileDownloadExtraction:
 
         assert result.text is not None and "Whole body" in result.text
         assert client.client.client.get.call_count == 3
+        for call in client.client.client.get.call_args_list:
+            assert "headers" not in call.kwargs
 
     @pytest.mark.parametrize("encoding", ["gzip", "br", "deflate", "GZIP"])
     async def test_decompressed_body_is_not_measured_against_the_wire_length(
@@ -526,6 +530,50 @@ class TestRefusedDownloads:
 
         assert result.text is not None and "After refresh" in result.text
         assert signed_client.headers["Authorization"] == "Bearer fresh"
+
+
+class TestDownloadUrlGetsNoGraphToken:
+    """The download URL authorizes itself; the Graph token stays with Graph."""
+
+    async def test_no_authorization_header_reaches_the_download_host(
+        self, client: SharePointContentClient
+    ):
+        payload = docx_bytes("Served without a token")
+        seen: list[tuple[str, dict[str, str]]] = []
+
+        async def record(request: web.Request) -> web.StreamResponse:
+            seen.append((request.path, dict(request.headers)))
+            if len(seen) == 1:
+                return web.Response(status=503)
+            if request.path == "/download.aspx":
+                raise web.HTTPFound(f"/file?{request.query_string}")
+            return web.Response(body=payload, content_type=OCTET)
+
+        app = web.Application()
+        app.router.add_get("/{tail:.*}", record)
+        async with TestServer(app) as server:
+            client.get_file_metadata = AsyncMock(
+                return_value={
+                    "name": "report.docx",
+                    "@microsoft.graph.downloadUrl": str(
+                        server.make_url("/download.aspx?tempauth=signed")
+                    ),
+                }
+            )
+            with patch("asyncio.sleep", new=AsyncMock()):
+                result = await client.get_file_extraction_by_id("drive", "item")
+
+        assert result.text is not None and "Served without a token" in result.text
+        # The first answer is retried, the second is a same-host redirect.
+        assert [path for path, _ in seen] == [
+            "/download.aspx",
+            "/download.aspx",
+            "/file",
+        ]
+        for _, headers in seen:
+            assert "Authorization" not in headers
+            assert "mock-token" not in str(headers)
+        assert client.headers["Authorization"] == "Bearer mock-token"
 
 
 @pytest.mark.parametrize("status", [200, 403, 404, 410, 429, 503])

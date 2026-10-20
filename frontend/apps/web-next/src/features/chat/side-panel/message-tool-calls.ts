@@ -101,3 +101,32 @@ export function messageToolCalls(message: EneoUIMessage): ToolCallRecord[] {
   }
   return calls;
 }
+
+/**
+ * The messages with `file`, a version a reader saved of a document, added to
+ * the answer that holds the version it was edited from (the last answer when
+ * none does), as the backend has stored it. The messages are unchanged when
+ * the file is already there.
+ */
+export function addGeneratedFile(
+  messages: EneoUIMessage[],
+  file: EneoFileMetadata & { revises_file_id?: string | null }
+): EneoUIMessage[] {
+  const holds = (message: EneoUIMessage, id: string) =>
+    messageGeneratedFiles(message).some((other) => other.id === id);
+  const holder =
+    messages.find((message) => !!file.revises_file_id && holds(message, file.revises_file_id)) ??
+    messages.findLast((message) => message.role === "assistant");
+  if (!holder || holds(holder, file.id)) return messages;
+  return messages.map((message) =>
+    message === holder
+      ? {
+          ...message,
+          metadata: {
+            ...message.metadata,
+            generatedFiles: [...(message.metadata?.generatedFiles ?? []), file]
+          }
+        }
+      : message
+  );
+}

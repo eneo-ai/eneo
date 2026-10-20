@@ -187,6 +187,7 @@ class AssistantFactory:
             inline_file_text=assistant_in_db.inline_file_text,
             knowledge_mode=KnowledgeMode(assistant_in_db.knowledge_mode),
             icon_id=assistant_in_db.icon_id,
+            rerank_model_id=assistant_in_db.rerank_model_id,
         )
 
     def create_space_assistant_from_db(
@@ -317,4 +318,5 @@ class AssistantFactory:
             data_retention_days=assistant_in_db.data_retention_days,
             metadata_json=assistant_in_db.metadata_json,
             icon_id=assistant_in_db.icon_id,
+            rerank_model_id=assistant_in_db.rerank_model_id,
         )

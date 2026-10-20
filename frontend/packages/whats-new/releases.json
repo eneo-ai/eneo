@@ -311,11 +311,25 @@
             "href": "/admin/tools",
             "anchor": "admin-tools"
           }
+        },
+        {
+          "id": "account-news-navigation",
+          "type": "improved",
+          "area": "account",
+          "title": {
+            "en": "Browse news from your account sidebar",
+            "sv": "Läs nyheter från kontots sidomeny"
+          },
+          "body": {
+            "en": "You can switch between My account, Integrations, API keys and What's new in the same sidebar. Release notes use the available width at /news. Choose Later to see unread news again after 24 hours, or Not interested to dismiss this version.",
+            "sv": "Du kan växla mellan Mitt konto, Integrationer, API-nycklar och Nyheter i samma sidomeny. Nyheterna använder hela bredden på /news. Välj Senare för att se olästa nyheter igen efter 24 timmar, eller Inte intresserad för att stänga för den här versionen."
+          }
         }
       ]
     },
     {
       "version": "2.2.0",
+      "date": "2026-10-07",
       "entries": [
         {
           "id": "skills",

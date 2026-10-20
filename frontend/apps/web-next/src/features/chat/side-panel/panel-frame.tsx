@@ -114,6 +114,7 @@ export function PanelFrame({
   detail,
   status,
   actions,
+  toolbar,
   switcher,
   maximise,
   onClose,
@@ -127,6 +128,12 @@ export function PanelFrame({
   /** A line under the title that says what is going on (being written, an older version). */
   status?: ReactNode;
   actions?: ReactNode;
+  /**
+   * A row of the occupant's own beneath the header (a document's versions and
+   * export, or its save bar). It draws the border the header otherwise has, so
+   * the title keeps its width whatever the occupant can do.
+   */
+  toolbar?: ReactNode;
   switcher: PanelSwitcher | null;
   /** Null where there is nothing to maximise over (a sheet over the conversation). */
   maximise: PanelMaximise | null;
@@ -137,7 +144,12 @@ export function PanelFrame({
   const t = useTranslations();
   return (
     <>
-      <header className="border-ax-border flex min-h-14 shrink-0 items-center gap-2.5 border-b py-2 ps-4 pe-2.5">
+      <header
+        className={cn(
+          "border-ax-border flex min-h-14 shrink-0 items-center gap-2.5 py-2 ps-4 pe-2.5",
+          !toolbar && "border-b"
+        )}
+      >
         <span
           aria-hidden="true"
           className={cn(
@@ -171,6 +183,7 @@ export function PanelFrame({
           onClick={onClose}
         />
       </header>
+      {toolbar}
       {children}
     </>
   );

@@ -10,12 +10,12 @@ from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelPublicLegacy,
 )
 from eneo.integration.domain.skip_reasons import classify_skip_reason
+from eneo.integration.domain.sync_progress import IntegrationSyncProgress
 from eneo.integration.presentation.models import (
     IntegrationDocumentItem,
     IntegrationKnowledgeMetaData,
     IntegrationKnowledgePublic,
     IntegrationSkippedDocument,
-    IntegrationSyncProgress,
     SyncLog,
 )
 from eneo.jobs.job_models import Task

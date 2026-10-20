@@ -1,30 +1,27 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, NamedTuple, Protocol, cast
 from uuid import UUID, uuid4
 
 from typing_extensions import TypedDict
 
 from eneo.authentication.auth_models import is_service_api_key
 from eneo.integration.domain.entities.integration_knowledge import (
+    KNOWLEDGE_NAME_LENGTH_REASON,
+    KNOWLEDGE_NAME_MAX_LENGTH,
     IntegrationKnowledge,
 )
 from eneo.integration.domain.entities.oauth_token import OauthToken
+from eneo.integration.domain.task_params import (
+    ConfluenceContentTaskParam,
+    SharepointContentTaskParam,
+)
+from eneo.integration.domain.value_objects import IntegrationType
 from eneo.integration.infrastructure.content_service.types import (
     SharePointTokenProtocol,
 )
 from eneo.integration.infrastructure.detached_tasks import run_after_commit
-from eneo.integration.presentation.models import (
-    ConfluenceContentTaskParam,
-    IntegrationType,
-    SharepointContentTaskParam,
-)
-from eneo.integration.presentation.validation import (
-    KNOWLEDGE_NAME_LENGTH_REASON,
-    KNOWLEDGE_NAME_MAX_LENGTH,
-)
-from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import JobInDb, Task
 from eneo.main.exceptions import (
     BadRequestException,
@@ -96,6 +93,13 @@ class BatchIntegrationKnowledgeCreateResult(TypedDict):
     integration_knowledge_id: UUID | None
     job: "JobInDb | None"
     error: str | None
+
+
+class SpaceItem(NamedTuple):
+    """An item as its space showed it before a change, with that space."""
+
+    space: "Space"
+    knowledge: IntegrationKnowledge
 
 
 @dataclass(frozen=True)
@@ -295,7 +299,9 @@ class IntegrationKnowledgeService:
             wrapper_id=wrapper_id,
             wrapper_name=wrapper_name,
         )
-        self._dispatch_after_commit(dispatch)
+        await self.job_service.dispatch_after_commit(
+            dispatch.task, dispatch.job_id, dispatch.params
+        )
         return knowledge, job
 
     async def _prepare_import(
@@ -371,8 +377,8 @@ class IntegrationKnowledgeService:
         """Write one item and its first sync's job row.
 
         The job is not handed to the worker here: the caller dispatches it
-        once the item's writes are kept (``_dispatch_after_commit``), so an
-        item rolled back later never leaves the worker a job.
+        once the item's writes are kept (``JobService.dispatch_after_commit``),
+        so an item rolled back later never leaves the worker a job.
         """
         if not key:
             raise BadRequestException("Integration key is required")
@@ -446,15 +452,6 @@ class IntegrationKnowledgeService:
                 context, knowledge, key=key, is_onedrive=resource_type == "onedrive"
             )
         return knowledge, job, _PendingDispatch(task, job.id, params)
-
-    def _dispatch_after_commit(self, dispatch: _PendingDispatch) -> None:
-        """Hand a queued job to the worker once the request commits; never
-        after a rollback. Must run outside any savepoint."""
-
-        async def enqueue() -> None:
-            await job_manager.enqueue(dispatch.task, dispatch.job_id, dispatch.params)
-
-        run_after_commit(self.space_repo.session, enqueue)
 
     async def _link_subscription_on_import(
         self,
@@ -561,7 +558,9 @@ class IntegrationKnowledgeService:
                 )
                 results.append(_failed_batch_item(index, item, user_visible_error(exc)))
                 continue
-            self._dispatch_after_commit(dispatch)
+            await self.job_service.dispatch_after_commit(
+                dispatch.task, dispatch.job_id, dispatch.params
+            )
             results.append(
                 BatchIntegrationKnowledgeCreateResult(
                     index=index,
@@ -632,21 +631,25 @@ class IntegrationKnowledgeService:
         self,
         space_id: "UUID",
         integration_knowledge_id: "UUID",
-    ) -> None:
+    ) -> SpaceItem:
+        """Remove an item from the space it was created in; returns what was
+        removed, for the audit log."""
         space = await self.space_repo.one(id=space_id)
 
         # Membership is checked before the item is looked up so a non-member
         # cannot probe which items a space holds.
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_delete_integrations():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "User does not have permission to remove integration knowledge "
+                "from this space"
+            )
 
-        await self._remove_from_space(
-            space,
-            space.get_integration_knowledge(
-                integration_knowledge_id=integration_knowledge_id
-            ),
+        knowledge = space.get_integration_knowledge(
+            integration_knowledge_id=integration_knowledge_id
         )
+        await self._remove_from_space(space, knowledge)
+        return SpaceItem(space, knowledge)
 
     async def _remove_from_space(
         self, space: "Space", knowledge: IntegrationKnowledge
@@ -741,12 +744,19 @@ class IntegrationKnowledgeService:
         self,
         space_id: UUID,
         integration_knowledge_id: UUID,
-    ) -> "JobInDb":
-        """Trigger a full resync for an existing SharePoint integration knowledge."""
+    ) -> tuple["JobInDb", SpaceItem]:
+        """Trigger a full resync for an existing SharePoint integration knowledge.
+
+        Returns the job and the item synced, for the audit log.
+        """
         space = await self.space_repo.one(id=space_id)
+        # Membership before the item, as for a removal.
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_edit_integrations():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "User does not have permission to sync integration knowledge in "
+                "this space"
+            )
 
         knowledge = space.get_integration_knowledge(
             integration_knowledge_id=integration_knowledge_id
@@ -860,7 +870,7 @@ class IntegrationKnowledgeService:
             after_commit=True,
         )
 
-        return job
+        return job, SpaceItem(space, knowledge)
 
     async def update_knowledge_name(
         self,

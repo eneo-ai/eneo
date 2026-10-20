@@ -28,6 +28,9 @@ from eneo.embedding_models.presentation.embedding_model_models import (
 )
 from eneo.group_chat.presentation.models import GroupChatSparse
 from eneo.groups_legacy.api.group_models import GroupMetadata, GroupPublicWithMetadata
+from eneo.integration.domain.entities.integration_knowledge import (
+    KNOWLEDGE_NAME_MAX_LENGTH,
+)
 from eneo.integration.presentation.models import IntegrationKnowledgePublic
 from eneo.integration.presentation.validation import (
     BATCH_ITEM_NAME_MAX_LENGTH,
@@ -36,7 +39,6 @@ from eneo.integration.presentation.validation import (
     GRAPH_ID_MAX_LENGTH,
     GRAPH_ID_PATTERN,
     INTEGRATION_KEY_PATTERN,
-    KNOWLEDGE_NAME_MAX_LENGTH,
     SELECTED_ITEM_TYPE_MAX_LENGTH,
     SELECTED_ITEM_TYPE_PATTERN,
     validate_folder_path,

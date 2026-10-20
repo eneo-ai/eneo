@@ -2073,22 +2073,14 @@ class TestCreateSpaceIntegrationKnowledgeBatch:
         assert batch.integration_knowledge_repo.add.await_count == 3
         assert batch.space_repo.session.outcomes.count("rolled back") == 1
 
-    async def test_a_job_is_dispatched_only_after_its_item_is_kept(
-        self, batch, monkeypatch
-    ):
+    async def test_a_job_is_dispatched_only_after_its_item_is_kept(self, batch):
         """Enqueueing inside the savepoint left the worker a job for an item
         whose RELEASE then failed."""
-        registered = []
 
-        def record(session, start):
+        async def record(task, job_id, params):
             batch.space_repo.session.outcomes.append("dispatch")
-            registered.append(start)
 
-        monkeypatch.setattr(
-            "eneo.integration.application.integration_knowledge_service."
-            "run_after_commit",
-            record,
-        )
+        batch.job_service.dispatch_after_commit = AsyncMock(side_effect=record)
         # Each item opens its own savepoint and then one for its subscription.
         batch.space_repo.session.fail_release = {2}
 
@@ -2113,14 +2105,10 @@ class TestCreateSpaceIntegrationKnowledgeBatch:
             call.kwargs["enqueue"]
             for call in batch.job_service.queue_job.await_args_list
         } == {False}
-        enqueue = AsyncMock()
-        monkeypatch.setattr("eneo.jobs.job_manager.job_manager.enqueue", enqueue)
-        for start in registered:
-            await start()
-        assert [call.args[1] for call in enqueue.await_args_list] == [
-            results[0]["job"].id,
-            results[2]["job"].id,
-        ]
+        assert [
+            call.args[1]
+            for call in batch.job_service.dispatch_after_commit.await_args_list
+        ] == [results[0]["job"].id, results[2]["job"].id]
 
     async def test_a_name_the_api_cannot_store_fails_only_its_item(self, batch):
         """One long SharePoint name made the whole batch a 422."""
@@ -2297,12 +2285,13 @@ class TestTriggerFullSync:
             ),
         )
 
-        result = await service.trigger_full_sync(
+        job, synced = await service.trigger_full_sync(
             space_id=space.id,
             integration_knowledge_id=sharepoint_knowledge_user_oauth.id,
         )
 
-        assert result == queued_job
+        assert job == queued_job
+        assert synced == (space, sharepoint_knowledge_user_oauth)
         oauth_token_repo.one.assert_called_once_with(
             user_integration_id=sharepoint_knowledge_user_oauth.user_integration.id
         )
@@ -2383,12 +2372,13 @@ class TestTriggerFullSync:
             ),
         )
 
-        result = await service.trigger_full_sync(
+        job, synced = await service.trigger_full_sync(
             space_id=space.id,
             integration_knowledge_id=sharepoint_knowledge_user_oauth.id,
         )
 
-        assert result == queued_job
+        assert job == queued_job
+        assert synced == (space, sharepoint_knowledge_user_oauth)
         sharepoint_subscription_service.ensure_subscription_for_site.assert_called_once()
         job_service.queue_job.assert_called_once()
         # The failure is rolled back to its savepoint before the job is queued.

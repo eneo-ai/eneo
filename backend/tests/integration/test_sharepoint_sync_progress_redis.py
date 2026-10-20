@@ -8,12 +8,12 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.integration.domain.sync_progress import IntegrationSyncProgress
 from eneo.integration.infrastructure.sharepoint_sync_progress import (
     SharePointSyncProgressStore,
     SyncProgressReporter,
     sync_progress_key,
 )
-from eneo.integration.presentation.models import IntegrationSyncProgress
 
 # Microseconds, as datetime.now() gives them, must survive the comparison.
 STARTED = datetime(2026, 10, 14, 9, 0, 0, 123456, tzinfo=timezone.utc)

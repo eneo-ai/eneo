@@ -14,7 +14,7 @@ from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.integration.infrastructure.detached_tasks import run_detached
 from eneo.integration.infrastructure.sharepoint_sync_keys import (
-    SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
+    leave_marker,
     release_sync_queue_slot,
 )
 from eneo.integration.infrastructure.sharepoint_sync_keys import (
@@ -40,12 +40,12 @@ if TYPE_CHECKING:
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
-    from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
-        SharePointContentService,
-    )
-    from eneo.integration.presentation.models import (
+    from eneo.integration.domain.task_params import (
         ConfluenceContentTaskParam,
         SharepointContentTaskParam,
+    )
+    from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
+        SharePointContentService,
     )
 
 worker = Worker()
@@ -161,6 +161,20 @@ async def _queue_sync_job(knowledge_id: UUID, *, full: bool) -> None:
         await container.sharepoint_webhook_service().queue_sync_for_knowledge(
             knowledge_id, full=full
         )
+
+
+async def _leave_marker_or_fail(
+    redis_client: "redis.Redis", knowledge_id_str: str, *, full: bool = False
+) -> None:
+    """Leave the marker for the follow-up queued once the lease is released.
+
+    Unlike a webhook, a task leaves a marker only when it cannot serve the
+    change itself (another sync holds the lease, or its own pending pass
+    failed), so a marker it cannot leave fails its job rather than report
+    the change as handled.
+    """
+    if not await leave_marker(redis_client, knowledge_id_str, full=full):
+        raise RuntimeError("Could not leave the pending sync marker")
 
 
 async def _queue_follow_up(redis_client: "redis.Redis", knowledge_id: UUID) -> None:
@@ -404,9 +418,7 @@ async def _drain_pending_delta(
                 knowledge_id_str,
                 exc_info=True,
             )
-            await redis_client.set(
-                pending_key, "1", ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS
-            )
+            await _leave_marker_or_fail(redis_client, knowledge_id_str)
             break
     return result
 
@@ -471,11 +483,7 @@ async def pull_sharepoint_content(
                 return await _run_full_sync(
                     redis_client, knowledge_id_str, container, params
                 )
-            await redis_client.set(
-                _pending_full_key(knowledge_id_str),
-                "1",
-                ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS,
-            )
+            await _leave_marker_or_fail(redis_client, knowledge_id_str, full=True)
         # The holder reads the markers after releasing the lease; one that
         # released before the marker was set is caught by taking it here.
         async with _sync_lease(container, params) as (redis_client, acquired):
@@ -526,9 +534,7 @@ async def sync_sharepoint_delta(
                 f"Sync lease for knowledge {knowledge_id_str} is held by another "
                 "sync; leaving a pending marker for the lease holder"
             )
-            await redis_client.set(
-                pending_key, "1", ex=SHAREPOINT_SYNC_PENDING_TTL_SECONDS
-            )
+            await _leave_marker_or_fail(redis_client, knowledge_id_str)
         # The holder reads the markers after releasing the lease; one that
         # released before the marker was set is caught by taking it here.
         async with _sync_lease(container, params) as (redis_client, acquired):

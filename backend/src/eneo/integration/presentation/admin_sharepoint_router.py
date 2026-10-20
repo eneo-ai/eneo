@@ -157,18 +157,6 @@ class _SimpleGraphToken:
         self.base_url = "https://graph.microsoft.com"
 
 
-def _is_onedrive_subscription(subscription: SharePointSubscription) -> bool:
-    """Infer OneDrive subscriptions from stored identifiers.
-
-    OneDrive subscriptions store drive_id in both site_id and drive_id fields.
-    """
-    return bool(
-        subscription.site_id
-        and subscription.drive_id
-        and subscription.site_id == subscription.drive_id
-    )
-
-
 async def _get_sharepoint_token_for_user_integration(
     user_integration: UserIntegration,
     container: Container,
@@ -801,7 +789,7 @@ async def renew_expired_subscriptions(
                 success = await subscription_service.recreate_expired_subscription(
                     subscription=sub,
                     token=token,
-                    is_onedrive=_is_onedrive_subscription(sub),
+                    is_onedrive=sub.is_onedrive,
                 )
 
                 if success:
@@ -904,7 +892,7 @@ async def recreate_all_subscriptions(
             if await subscription_service.recreate_expired_subscription(
                 subscription=sub,
                 token=token,
-                is_onedrive=_is_onedrive_subscription(sub),
+                is_onedrive=sub.is_onedrive,
             ):
                 recreated += 1
             else:
@@ -1008,7 +996,7 @@ async def recreate_subscription(
         success = await subscription_service.recreate_expired_subscription(
             subscription=subscription,
             token=token,
-            is_onedrive=_is_onedrive_subscription(subscription),
+            is_onedrive=subscription.is_onedrive,
         )
 
         if not success:

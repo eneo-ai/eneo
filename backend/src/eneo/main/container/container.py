@@ -1323,6 +1323,7 @@ class Container(containers.DeclarativeContainer):
         api_key_scope_revoker=api_key_scope_revoker,
         effective_config_service=effective_config_service,
         skill_service=skill_service,
+        rerank_service=rerank_service,
     )
     org_space_assistant_role_service = providers.Factory(
         OrgSpaceAssistantRoleService,
@@ -1350,6 +1351,8 @@ class Container(containers.DeclarativeContainer):
         references_service=references_service,
         factory=helper_assistants_factory,
         audit_service=audit_service,
+        space_repo=space_repo,
+        rerank_service=rerank_service,
     )
     group_chat_service = providers.Factory(
         GroupChatService,

@@ -12,6 +12,7 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
+from eneo.integration.domain.value_objects import TenantIntegrationFilter
 from eneo.integration.presentation.models import (
     MAX_PAGE_OFFSET,
     Integration,
@@ -22,7 +23,6 @@ from eneo.integration.presentation.models import (
     SharePointTreeResponse,
     SyncLog,
     TenantIntegration,
-    TenantIntegrationFilter,
     TenantIntegrationList,
     UserIntegrationList,
 )
