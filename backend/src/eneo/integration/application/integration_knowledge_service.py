@@ -8,22 +8,20 @@ from typing_extensions import TypedDict
 
 from eneo.authentication.auth_models import is_service_api_key
 from eneo.integration.domain.entities.integration_knowledge import (
+    KNOWLEDGE_NAME_LENGTH_REASON,
+    KNOWLEDGE_NAME_MAX_LENGTH,
     IntegrationKnowledge,
 )
 from eneo.integration.domain.entities.oauth_token import OauthToken
+from eneo.integration.domain.task_params import (
+    ConfluenceContentTaskParam,
+    SharepointContentTaskParam,
+)
+from eneo.integration.domain.value_objects import IntegrationType
 from eneo.integration.infrastructure.content_service.types import (
     SharePointTokenProtocol,
 )
 from eneo.integration.infrastructure.detached_tasks import run_after_commit
-from eneo.integration.presentation.models import (
-    ConfluenceContentTaskParam,
-    IntegrationType,
-    SharepointContentTaskParam,
-)
-from eneo.integration.presentation.validation import (
-    KNOWLEDGE_NAME_LENGTH_REASON,
-    KNOWLEDGE_NAME_MAX_LENGTH,
-)
 from eneo.jobs.job_models import JobInDb, Task
 from eneo.main.exceptions import (
     BadRequestException,

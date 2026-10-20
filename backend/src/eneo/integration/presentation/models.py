@@ -35,6 +35,15 @@ from eneo.integration.domain.skip_reasons import (
     visible_skip_params,
     with_code,
 )
+
+# Re-exported: jobs queued before the task parameters moved to the domain are
+# pickled under this module's name.
+from eneo.integration.domain.task_params import (
+    ConfluenceContentTaskParam as ConfluenceContentTaskParam,
+)
+from eneo.integration.domain.task_params import (
+    SharepointContentTaskParam as SharepointContentTaskParam,
+)
 from eneo.integration.domain.value_objects import (
     IntegrationType,
     SkippedDetail,
@@ -230,23 +239,6 @@ class AuthCallbackParams(BaseModel):
     tenant_integration_id: UUID
     # The issued state is token_urlsafe(32), 43 characters.
     state: str = Field(max_length=256)
-
-
-class ConfluenceContentTaskParam(ResourceTaskParams):
-    token_id: UUID
-    space_key: str
-    integration_knowledge_id: UUID
-
-
-class SharepointContentTaskParam(ResourceTaskParams):
-    token_id: Optional[UUID] = None  # For user_oauth integrations
-    tenant_app_id: Optional[UUID] = None  # For tenant_app integrations
-    integration_knowledge_id: UUID
-    site_id: Optional[str] = None  # Required for SharePoint, None for OneDrive
-    drive_id: Optional[str] = None  # Required for OneDrive, optional for SharePoint
-    folder_id: Optional[str] = None
-    folder_path: Optional[str] = None
-    resource_type: str = "site"  # "site" for SharePoint, "onedrive" for OneDrive
 
 
 class ConfluenceContentProcessParam(ResourceTaskParams):

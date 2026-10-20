@@ -8,11 +8,8 @@ import pytest
 
 from eneo.info_blobs.info_blob import InfoBlobInDBNoText, SourceMetadataEntry
 from eneo.integration.application.integration_documents import (
-    document_items,
     document_url_anchor,
-    ordered_by_relative_path,
     relative_document_path,
-    skipped_documents,
 )
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
@@ -20,6 +17,11 @@ from eneo.integration.domain.entities.integration_knowledge import (
 from eneo.integration.domain.entities.sync_log import SyncLog
 from eneo.integration.domain.skip_reasons import classify_skip_reason
 from eneo.integration.presentation import models as presentation
+from eneo.integration.presentation.assemblers.integration_documents_assembler import (
+    document_items,
+    ordered_by_relative_path,
+    skipped_documents,
+)
 
 SITE = "https://contoso.sharepoint.com/sites/KS"
 FOLDER = f"{SITE}/Shared%20Documents/Protokoll"

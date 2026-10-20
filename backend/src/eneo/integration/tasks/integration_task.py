@@ -40,12 +40,12 @@ if TYPE_CHECKING:
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
-    from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
-        SharePointContentService,
-    )
-    from eneo.integration.presentation.models import (
+    from eneo.integration.domain.task_params import (
         ConfluenceContentTaskParam,
         SharepointContentTaskParam,
+    )
+    from eneo.integration.infrastructure.content_service.sharepoint_content_service import (
+        SharePointContentService,
     )
 
 worker = Worker()

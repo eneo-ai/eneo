@@ -26,8 +26,10 @@ from eneo.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
 from eneo.info_blobs.info_blob_repo import IntegrationDocumentSort
 from eneo.integration.application.integration_documents import (
     SortOrder,
-    document_items,
     document_url_anchor,
+)
+from eneo.integration.presentation.assemblers.integration_documents_assembler import (
+    document_items,
     ordered_by_relative_path,
     skipped_documents,
 )

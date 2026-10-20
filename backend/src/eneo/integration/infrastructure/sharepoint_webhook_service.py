@@ -31,6 +31,7 @@ from eneo.integration.domain.repositories.oauth_token_repo import OauthTokenRepo
 from eneo.integration.domain.repositories.sharepoint_subscription_repo import (
     SharePointSubscriptionRepository,
 )
+from eneo.integration.domain.task_params import SharepointContentTaskParam
 from eneo.integration.infrastructure.content_service.types import (
     SharePointWebhookNotification,
     SharePointWebhookPayload,
@@ -51,7 +52,6 @@ from eneo.integration.infrastructure.sharepoint_sync_keys import (
     sync_pending_key,
     sync_queued_key,
 )
-from eneo.integration.presentation.models import SharepointContentTaskParam
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_service import JobService

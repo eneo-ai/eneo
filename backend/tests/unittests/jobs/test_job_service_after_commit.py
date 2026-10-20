@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.integration.presentation.models import SharepointContentTaskParam
+from eneo.integration.domain.task_params import SharepointContentTaskParam
 from eneo.jobs.job_models import JobInDb, Task
 from eneo.jobs.job_service import JobService
 from eneo.main.models import Status
