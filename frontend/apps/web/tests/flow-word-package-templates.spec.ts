@@ -215,6 +215,8 @@ test("omitted Word template requires matching fields and recovers without losing
   page,
   request
 }) => {
+  // Export, three import plans, the import and screenshots at three widths.
+  test.setTimeout(120_000);
   const { flow } = await fixture(page, request, false);
   const file = await exportPackage(page, flow.id, false);
   const dialog = await openImport(page, file);

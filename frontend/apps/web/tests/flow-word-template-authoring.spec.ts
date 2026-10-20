@@ -13,6 +13,11 @@ const TEXT_STEP = "Source text";
 const FILE = new URL("../static/examples/eneo-word-template.docx", import.meta.url);
 const FIELDS_FILE = new URL("../static/examples/eneo-word-template-fields.docx", import.meta.url);
 
+// The editor sends a step's next save only after the previous one answers, and on a
+// shared CI runner one template save has taken 4 s, so a change that rides behind
+// another save needs more than expect's 5 s default to reach the backend.
+const expectSaved = expect.configure({ timeout: 15_000 });
+
 async function api(page: Page, request: APIRequestContext, path: string, data?: object) {
   const response = await backendFetch(page, request, path, {
     method: data ? "POST" : "GET",
@@ -100,14 +105,14 @@ test("ambiguous source names stay unmapped until the author makes an explicit ch
   const flow = await createFlow(page, request, false, ["Dokument", "Dokument!"]);
   await openTemplate(page, flow.id);
   await upload(page);
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id))?.placeholders)
     .toEqual(["dokument"]);
   const source = page.getByRole("button", { name: SOURCE });
   await expect(source).toContainText(/Select source|Välj källa/);
   await source.click();
   await page.getByRole("option", { name: /(?:from|från) Dokument$/ }).click();
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)
     .toBe("{{step_1.output.text}}");
 });
@@ -120,7 +125,7 @@ test("template replacement exposes obsolete mappings and removes only those mapp
   await openTemplate(page, flow.id);
   await upload(page);
   await mapText(page);
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)
     .toBe("{{step_1.output.text}}");
   await page.locator('input[type="file"][accept=".docx"]').setInputFiles({
@@ -145,7 +150,7 @@ test("template replacement exposes obsolete mappings and removes only those mapp
   await remove.press("Enter");
   await expect(name).toBeFocused();
   await expect(notice).toHaveCount(0);
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings)
     .toEqual({ namn: "" });
   await page.reload();
@@ -161,7 +166,7 @@ test("whole structured mappings show an accessible error and recover to a valid 
   const flow = await createFlow(page, request);
   await openTemplate(page, flow.id);
   await upload(page);
-  await expect
+  await expectSaved
     .poll(async () => Boolean((await savedTemplate(page, request, flow.id))?.template_asset_id))
     .toBe(true);
   const current = await api(page, request, `/api/v1/flows/${flow.id}/`);
@@ -201,7 +206,7 @@ test("whole structured mappings show an accessible error and recover to a valid 
   await expect(
     page.getByRole("status").filter({ hasText: /All fields are mapped|Alla fält är kopplade/ })
   ).toBeVisible();
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)
     .toBe("{{step_1.output.text}}");
 });
@@ -298,7 +303,7 @@ test("multi-field example shows real locations and keyboard navigation preserves
   await expect(source).toBeFocused();
   await source.press("Enter");
   await page.getByRole("option", { name: /Source text/ }).click();
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.bedomning)
     .toBe("{{step_1.output.text}}");
   const nameSource = page.getByRole("button", { name: /^(Text for|Text till) Namn$/ });
@@ -326,7 +331,7 @@ test("multi-field example shows real locations and keyboard navigation preserves
   await expect(source).toContainText(TEXT_STEP);
   await expect(nameSource).toContainText("brukarens_namn");
   await expect(nextSource).toContainText(/Leave empty|Lämna tomt/);
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id)).bindings)
     .toMatchObject({
       namn: "{{flow_input.brukarens_namn}}",
@@ -361,7 +366,7 @@ test("invalid Word files show actionable errors and a replacement upload recover
   await upload(page);
   await expect(error).toHaveCount(0);
   await mapText(page);
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)
     .toBe("{{step_1.output.text}}");
 });
@@ -430,7 +435,7 @@ test("simple mode exposes Word guidance, a valid example and editable field mapp
   });
   await exampleText.click();
   await mapText(page);
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)
     .toBe("{{step_1.output.text}}");
   await page.screenshot({ path: test.info().outputPath("word-mapping.png"), fullPage: true });
@@ -440,7 +445,7 @@ test("simple mode exposes Word guidance, a valid example and editable field mapp
   await expect(page.getByRole("button", { name: SOURCE })).toHaveText(
     /^(Leave empty|Lämna tomt)\s*$/
   );
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)
     .toBe("");
   await page.reload();
@@ -485,7 +490,7 @@ test("upload remains attached to its originating step while navigation stays usa
   if ((await result.getAttribute("aria-expanded")) !== "true") await result.click();
   await expect(page.getByRole("button", { name: SOURCE })).toBeVisible();
   await mapText(page);
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id))?.template_name)
     .toBe("slow-template.docx");
   const saved = await api(page, request, `/api/v1/flows/${flow.id}/`);
@@ -501,7 +506,7 @@ test("inspection failure preserves mappings and retries an uploaded asset withou
   await openTemplate(page, flow.id);
   await upload(page);
   await mapText(page);
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)
     .toBe("{{step_1.output.text}}");
   await expect(page.locator('[data-sonner-toast][data-type="success"]')).toHaveCount(0);
@@ -532,7 +537,7 @@ test("inspection failure preserves mappings and retries an uploaded asset withou
   await expect(page.getByRole("button", { name: RETRY })).toHaveCount(0);
   await expect(page.getByRole("button", { name: SOURCE })).toBeFocused();
   expect(uploads).toBe(1);
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id))?.template_name)
     .toBe("second-template.docx");
   expect((await savedTemplate(page, request, flow.id)).bindings.dokument).toBe(
@@ -554,7 +559,7 @@ test("template fields stay usable on laptops, desktop and ultrawide displays wit
   await page.keyboard.press("End");
   await page.keyboard.press("Enter");
   await expect(source).toBeFocused();
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)
     .toBe("{{datum}}");
   await source.click();
@@ -613,7 +618,7 @@ test("a browser-mapped template produces a downloadable Word document", async ({
   await openTemplate(page, flow.id);
   await upload(page);
   await mapText(page);
-  await expect
+  await expectSaved
     .poll(async () => (await savedTemplate(page, request, flow.id))?.bindings?.dokument)
     .toBe("{{step_1.output.text}}");
   const published = await backendFetch(page, request, `/api/v1/flows/${flow.id}/publish/`, {
