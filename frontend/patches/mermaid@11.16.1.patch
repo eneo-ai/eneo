@@ -1,0 +1,30 @@
+diff --git a/dist/mermaid.core.mjs b/dist/mermaid.core.mjs
+--- a/dist/mermaid.core.mjs
++++ b/dist/mermaid.core.mjs
+@@ -1319,6 +1319,9 @@
+   const diagramClassDefs = diag.renderer.getClasses?.(text, diag);
+   const rules = createUserStyles(config, diagramType, diagramClassDefs, idSelector);
+   const style1 = document.createElement("style");
++  // Eneo: use the request nonce before inserting the measurement SVG.
++  const styleNonce = globalThis.__webpack_nonce__;
++  if (styleNonce) style1.setAttribute("nonce", styleNonce);
+   style1.innerHTML = rules;
+   svg.insertBefore(style1, firstChild);
+   try {
+@@ -1348,6 +1351,16 @@
+       ADD_ATTR: DOMPURIFY_ATTR,
+       HTML_INTEGRATION_POINTS: { foreignobject: true }
+     });
++  }
++  // Eneo: sanitization and nonce hiding can remove the serialized nonce.
++  // Add it to the sanitized, inert SVG before Streamdown inserts that SVG.
++  if (styleNonce && !isSandboxed) {
++    const template = document.createElement("template");
++    template.innerHTML = svgCode;
++    const style = template.content.firstElementChild?.firstElementChild;
++    // Only the renderer's own, prepended style receives the nonce.
++    if (style?.localName === "style") style.setAttribute("nonce", styleNonce);
++    svgCode = template.innerHTML;
+   }
+   attachFunctions();
+   if (parseEncounteredException) {
