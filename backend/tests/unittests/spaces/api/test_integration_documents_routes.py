@@ -35,8 +35,10 @@ from eneo.integration.infrastructure.auth_service.org_token_provider import (
 from eneo.integration.infrastructure.sharepoint_sync_progress import (
     sync_progress_key,
 )
+from eneo.jobs.job_models import JobInDb, Task
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
+from eneo.main.models import Status
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB
 from eneo.server.exception_handlers import add_exception_handlers
@@ -397,6 +399,57 @@ async def test_non_member_is_refused_before_a_changed_item_is_looked_up(
     response = await _send(api, method, api.change_url(route, uuid4()))
 
     assert response.status_code == 403, response.text
+    api.space_repo.one.assert_awaited_once_with(id=api.space.id)
+
+
+@pytest.mark.parametrize(
+    ("method", "route", "action"),
+    [
+        pytest.param(
+            "DELETE", "remove/{id}/", "integration_knowledge_deleted", id="remove"
+        ),
+        pytest.param("POST", "{id}/sync/", "integration_knowledge_synced", id="sync"),
+    ],
+)
+async def test_a_change_loads_its_space_once_and_audits_the_item(
+    documents_api, method, route, action
+):
+    """The service checks access and hands back the snapshot the audit log uses."""
+    api = documents_api
+    api.user.roles = [
+        RoleInDB(
+            id=uuid4(),
+            name="Importer",
+            tenant_id=api.user.tenant_id,
+            permissions=[Permission.INTEGRATIONS],
+        )
+    ]
+    api.space.members[api.user.id].role = SpaceRoleValue.ADMIN
+    api.knowledge.user_integration.auth_type = "user_oauth"
+    api.knowledge.user_integration.id = uuid4()
+    api.knowledge.site_id = "contoso.sharepoint.com,site,web"
+    api.container.oauth_token_repo().one.return_value = MagicMock(id=uuid4())
+    jobs = AsyncMock()
+    jobs.queue_job.return_value = JobInDb(
+        id=uuid4(),
+        user_id=api.user.id,
+        task=Task.PULL_SHAREPOINT_CONTENT,
+        name=api.knowledge.name,
+        status=Status.QUEUED,
+    )
+    api.container.job_service.override(providers.Object(jobs))
+    audit = AsyncMock()
+    api.container.audit_service.override(providers.Object(audit))
+
+    response = await _send(api, method, api.change_url(route, api.knowledge.id))
+
+    assert response.status_code in (202, 204), response.text
+    api.space_repo.one.assert_awaited_once_with(id=api.space.id)
+    audit.log_async.assert_awaited_once()
+    logged = audit.log_async.await_args.kwargs
+    assert logged["action"].value == action
+    assert logged["entity_id"] == api.knowledge.id
+    assert api.space.name in logged["description"]
 
 
 @pytest.mark.parametrize(("method", "route"), CHANGE_ROUTES)

@@ -341,7 +341,7 @@ async def test_a_resync_survives_a_database_error_in_its_subscription_step(
 
         subscriptions = service.sharepoint_subscription_service
         subscriptions.ensure_subscription_for_site.side_effect = failing_ensure
-        job = await service.trigger_full_sync(setup.personal_space, knowledge_id)
+        job, _ = await service.trigger_full_sync(setup.personal_space, knowledge_id)
 
     await dispatches.wait_for(1)
     assert dispatches.knowledge_ids == [knowledge_id]

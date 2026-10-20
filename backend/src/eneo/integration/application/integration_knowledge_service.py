@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, NamedTuple, Protocol, cast
 from uuid import UUID, uuid4
 
 from typing_extensions import TypedDict
@@ -96,6 +96,13 @@ class BatchIntegrationKnowledgeCreateResult(TypedDict):
     integration_knowledge_id: UUID | None
     job: "JobInDb | None"
     error: str | None
+
+
+class SpaceItem(NamedTuple):
+    """An item as its space showed it before a change, with that space."""
+
+    space: "Space"
+    knowledge: IntegrationKnowledge
 
 
 @dataclass(frozen=True)
@@ -632,21 +639,25 @@ class IntegrationKnowledgeService:
         self,
         space_id: "UUID",
         integration_knowledge_id: "UUID",
-    ) -> None:
+    ) -> SpaceItem:
+        """Remove an item from the space it was created in; returns what was
+        removed, for the audit log."""
         space = await self.space_repo.one(id=space_id)
 
         # Membership is checked before the item is looked up so a non-member
         # cannot probe which items a space holds.
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_delete_integrations():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "User does not have permission to remove integration knowledge "
+                "from this space"
+            )
 
-        await self._remove_from_space(
-            space,
-            space.get_integration_knowledge(
-                integration_knowledge_id=integration_knowledge_id
-            ),
+        knowledge = space.get_integration_knowledge(
+            integration_knowledge_id=integration_knowledge_id
         )
+        await self._remove_from_space(space, knowledge)
+        return SpaceItem(space, knowledge)
 
     async def _remove_from_space(
         self, space: "Space", knowledge: IntegrationKnowledge
@@ -741,12 +752,19 @@ class IntegrationKnowledgeService:
         self,
         space_id: UUID,
         integration_knowledge_id: UUID,
-    ) -> "JobInDb":
-        """Trigger a full resync for an existing SharePoint integration knowledge."""
+    ) -> tuple["JobInDb", SpaceItem]:
+        """Trigger a full resync for an existing SharePoint integration knowledge.
+
+        Returns the job and the item synced, for the audit log.
+        """
         space = await self.space_repo.one(id=space_id)
+        # Membership before the item, as for a removal.
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_edit_integrations():
-            raise UnauthorizedException()
+            raise UnauthorizedException(
+                "User does not have permission to sync integration knowledge in "
+                "this space"
+            )
 
         knowledge = space.get_integration_knowledge(
             integration_knowledge_id=integration_knowledge_id
@@ -860,7 +878,7 @@ class IntegrationKnowledgeService:
             after_commit=True,
         )
 
-        return job
+        return job, SpaceItem(space, knowledge)
 
     async def update_knowledge_name(
         self,

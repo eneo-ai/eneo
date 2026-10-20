@@ -48,7 +48,7 @@ from eneo.integration.presentation.models import (
 )
 from eneo.jobs.job_models import JobPublic
 from eneo.main.container.container import Container
-from eneo.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.main.exceptions import NotFoundException
 from eneo.main.models import (
     NOT_PROVIDED,
     GeneralError,
@@ -1149,19 +1149,7 @@ async def delete_space_integration_knowledge(
 ):
     service = container.integration_knowledge_service()
 
-    # Membership before the item, so a non-member learns nothing about the
-    # space's items. Snapshotted before deletion for the audit log.
-    space = await container.space_repo().one(id=id)
-    actor = container.actor_manager().get_space_actor_from_space(space)
-    if not actor.can_delete_integrations():
-        raise UnauthorizedException(
-            "User does not have permission to remove integration knowledge from this space"
-        )
-    knowledge = space.get_integration_knowledge(
-        integration_knowledge_id=integration_knowledge_id
-    )
-
-    await service.remove_knowledge(
+    space, knowledge = await service.remove_knowledge(
         space_id=id, integration_knowledge_id=integration_knowledge_id
     )
 
@@ -1429,19 +1417,7 @@ async def trigger_integration_full_sync(
 ):
     service = container.integration_knowledge_service()
 
-    # Membership before the item, so a non-member learns nothing about the
-    # space's items. The same snapshot serves the audit log.
-    space = await container.space_repo().one(id=id)
-    actor = container.actor_manager().get_space_actor_from_space(space)
-    if not actor.can_edit_integrations():
-        raise UnauthorizedException(
-            "User does not have permission to sync integration knowledge in this space"
-        )
-    knowledge = space.get_integration_knowledge(
-        integration_knowledge_id=integration_knowledge_id
-    )
-
-    job = await service.trigger_full_sync(
+    job, (space, knowledge) = await service.trigger_full_sync(
         space_id=id,
         integration_knowledge_id=integration_knowledge_id,
     )

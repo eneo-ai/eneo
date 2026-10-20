@@ -2297,12 +2297,13 @@ class TestTriggerFullSync:
             ),
         )
 
-        result = await service.trigger_full_sync(
+        job, synced = await service.trigger_full_sync(
             space_id=space.id,
             integration_knowledge_id=sharepoint_knowledge_user_oauth.id,
         )
 
-        assert result == queued_job
+        assert job == queued_job
+        assert synced == (space, sharepoint_knowledge_user_oauth)
         oauth_token_repo.one.assert_called_once_with(
             user_integration_id=sharepoint_knowledge_user_oauth.user_integration.id
         )
@@ -2383,12 +2384,13 @@ class TestTriggerFullSync:
             ),
         )
 
-        result = await service.trigger_full_sync(
+        job, synced = await service.trigger_full_sync(
             space_id=space.id,
             integration_knowledge_id=sharepoint_knowledge_user_oauth.id,
         )
 
-        assert result == queued_job
+        assert job == queued_job
+        assert synced == (space, sharepoint_knowledge_user_oauth)
         sharepoint_subscription_service.ensure_subscription_for_site.assert_called_once()
         job_service.queue_job.assert_called_once()
         # The failure is rolled back to its savepoint before the job is queued.
