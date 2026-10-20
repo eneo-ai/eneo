@@ -31326,6 +31326,7 @@ export interface operations {
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
+                    | "tool_authorization_required"
                     | "token_usage";
                   /** TokenUsageEvent */
                   TokenUsageEvent: {
