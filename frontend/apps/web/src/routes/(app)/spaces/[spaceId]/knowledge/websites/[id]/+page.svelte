@@ -1,87 +1,108 @@
 <script lang="ts">
+  import { onMount, tick, untrack } from "svelte";
+  import { writable } from "svelte/store";
+  import type { CrawlRun } from "@eneo/eneo-js";
+  import { Info, LoaderCircle, TriangleAlert } from "@lucide/svelte";
   import { Page } from "$lib/components/layout";
+  import { selectPageTab } from "$lib/components/layout/Page/ctx";
   import { Button } from "$lib/components/ui/button/index.js";
   import { getEneo } from "$lib/core/Eneo";
   import { PAGINATION } from "$lib/core/constants";
   import { toastError } from "$lib/core/errors";
-  import CrawlRunActivity from "./CrawlRunActivity.svelte";
-  import { onMount, tick } from "svelte";
-  import { page } from "$app/state";
-  import { replaceState } from "$app/navigation";
-  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import WebsiteContent from "$lib/features/knowledge/WebsiteContent.svelte";
-  import CrawlRunDetailsContent from "$lib/features/knowledge/CrawlRunDetailsContent.svelte";
-  import CrawlRunStatus from "$lib/features/knowledge/CrawlRunStatus.svelte";
-  import { writable } from "svelte/store";
-  import CrawlLimitations from "./CrawlLimitations.svelte";
   import { formatDateTime } from "$lib/core/formatting/dateTime";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName.js";
-  import CrawlCreateRun from "./CrawlCreateRun.svelte";
-  import { m } from "$lib/paraglide/messages";
+  import CrawlRunDetailsContent from "$lib/features/knowledge/CrawlRunDetailsContent.svelte";
+  import CrawlRunStatus from "$lib/features/knowledge/CrawlRunStatus.svelte";
+  import SourceStat from "$lib/features/knowledge/components/SourceStat.svelte";
+  import SourceStats from "$lib/features/knowledge/components/SourceStats.svelte";
   import {
     hasCrawlIssues,
-    isCompletedWithMissingResources,
-    isActiveCrawlRun
+    isActiveCrawlRun,
+    isCompletedWithMissingResources
   } from "$lib/features/knowledge/crawlRunState";
-  import { Info, LoaderCircle, TriangleAlert } from "@lucide/svelte";
-  import type { CrawlRun } from "@eneo/eneo-js";
+  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { m } from "$lib/paraglide/messages";
+  import CrawlCreateRun from "./CrawlCreateRun.svelte";
+  import CrawlLimitations from "./CrawlLimitations.svelte";
+  import CrawlRunActivity from "./CrawlRunActivity.svelte";
+  import WebsiteContent from "./WebsiteContent.svelte";
   import { mergeLatestCrawlRun, pollWebsiteDetail } from "./websiteDetailPolling";
+  import type { PageData } from "./$types";
 
-  export let data;
+  let { data }: { data: PageData } = $props();
 
   const eneo = getEneo();
+  const {
+    state: { currentSpace }
+  } = getSpacesManager();
   const tabs = writable<string>();
-  let startDialogOpen = false;
-  let selectedProblemRunId: string | null = null;
-  let problemHeading: HTMLHeadingElement | undefined;
-  $: completedRuns = crawlRuns.filter((run) => !isActiveCrawlRun(run));
-  $: latestCompletedRun = completedRuns[0];
-  $: problemRun =
-    completedRuns.find((run) => run.id === selectedProblemRunId) ?? latestCompletedRun;
-  $: onrerun =
+
+  let startDialogOpen = $state(false);
+  let selectedProblemRunId = $state<string | null>(null);
+  let problemHeading = $state<HTMLHeadingElement | undefined>();
+
+  // Server data seeds the local copies; the effects below follow later server data.
+  // svelte-ignore state_referenced_locally
+  let crawlRuns = $state.raw(data.crawlRuns);
+  // svelte-ignore state_referenced_locally
+  let nextCrawlRunCursor = $state.raw(data.nextCrawlRunCursor);
+  // svelte-ignore state_referenced_locally
+  let totalCrawlRunCount = $state(data.totalCrawlRunCount);
+  // svelte-ignore state_referenced_locally
+  let infoBlobPage = $state.raw(data.infoBlobPage);
+  let loadingMoreCrawlRuns = $state(false);
+  // Request bookkeeping, never rendered.
+  let crawlRunPageGeneration = 0;
+  let pollingCrawlRuns = false;
+  let historyRunId = untrack(() => data.crawlRuns[0]?.id);
+  let contentRunId = untrack(() => data.crawlRuns.find((run) => !isActiveCrawlRun(run))?.id);
+
+  // Server data changes only when the route changes; polling results are kept otherwise.
+  $effect(() => {
+    const serverRuns = data.crawlRuns;
+    const serverCursor = data.nextCrawlRunCursor;
+    const serverTotal = data.totalCrawlRunCount;
+    untrack(() => {
+      crawlRuns = serverRuns;
+      nextCrawlRunCursor = serverCursor;
+      totalCrawlRunCount = serverTotal;
+      crawlRunPageGeneration += 1;
+      loadingMoreCrawlRuns = false;
+      historyRunId = serverRuns[0]?.id;
+    });
+  });
+  $effect(() => {
+    const serverPage = data.infoBlobPage;
+    const serverRuns = data.crawlRuns;
+    untrack(() => {
+      infoBlobPage = serverPage;
+      contentRunId = serverRuns.find((run) => !isActiveCrawlRun(run))?.id;
+    });
+  });
+
+  const completedRuns = $derived(crawlRuns.filter((run) => !isActiveCrawlRun(run)));
+  const latestCompletedRun = $derived<CrawlRun | undefined>(completedRuns[0]);
+  const problemRun = $derived(
+    completedRuns.find((run) => run.id === selectedProblemRunId) ?? latestCompletedRun
+  );
+  // History may contain an older last-known active state while its refresh fails.
+  const latestKnownRun = $derived<CrawlRun | undefined>(crawlRuns[0]);
+  const activeRun = $derived(
+    latestKnownRun && isActiveCrawlRun(latestKnownRun) ? latestKnownRun : undefined
+  );
+  const onrerun = $derived(
     !data.readonly && !activeRun
       ? () => {
           startDialogOpen = true;
         }
-      : undefined;
+      : undefined
+  );
 
   async function showProblems(run: CrawlRun) {
     selectedProblemRunId = run.id === latestCompletedRun?.id ? null : run.id;
-    tabs.set("problems");
-    const url = new URL(page.url);
-    url.searchParams.set("tab", "problems");
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- same page, changing only its tab
-    replaceState(url, { ...page.state, tab: "problems" });
+    selectPageTab(tabs, "problems");
     await tick();
     problemHeading?.focus();
-  }
-
-  let serverCrawlRuns = data.crawlRuns;
-  let crawlRuns = data.crawlRuns;
-  let nextCrawlRunCursor = data.nextCrawlRunCursor;
-  let totalCrawlRunCount = data.totalCrawlRunCount;
-  let crawlRunPageGeneration = 0;
-  let loadingMoreCrawlRuns = false;
-  let serverInfoBlobPage = data.infoBlobPage;
-  let infoBlobPage = data.infoBlobPage;
-  let pollingCrawlRuns = false;
-  let historyRunId = data.crawlRuns[0]?.id;
-  let contentRunId = data.crawlRuns.find((run) => !isActiveCrawlRun(run))?.id;
-
-  $: if (data.crawlRuns !== serverCrawlRuns) {
-    serverCrawlRuns = data.crawlRuns;
-    crawlRuns = data.crawlRuns;
-    nextCrawlRunCursor = data.nextCrawlRunCursor;
-    totalCrawlRunCount = data.totalCrawlRunCount;
-    crawlRunPageGeneration += 1;
-    loadingMoreCrawlRuns = false;
-    historyRunId = data.crawlRuns[0]?.id;
-  }
-
-  $: if (data.infoBlobPage !== serverInfoBlobPage) {
-    serverInfoBlobPage = data.infoBlobPage;
-    infoBlobPage = data.infoBlobPage;
-    contentRunId = data.crawlRuns.find((run) => !isActiveCrawlRun(run))?.id;
   }
 
   onMount(() => {
@@ -150,14 +171,6 @@
     };
   });
 
-  const {
-    state: { currentSpace }
-  } = getSpacesManager();
-
-  // History may contain an older last-known active state while its refresh fails.
-  $: latestKnownRun = crawlRuns[0];
-  $: activeRun = latestKnownRun && isActiveCrawlRun(latestKnownRun) ? latestKnownRun : undefined;
-
   async function loadMoreCrawlRuns() {
     if (nextCrawlRunCursor === null || loadingMoreCrawlRuns) return;
     const generation = crawlRunPageGeneration;
@@ -218,27 +231,22 @@
     {/if}
   </Page.Header>
   <Page.Main>
-    <div class="border-default grid gap-4 border-b py-4 pr-4 sm:grid-cols-3">
-      <div>
-        <p class="text-secondary text-xs">{m.website_source_latest_crawl()}</p>
-        <div class="mt-1">
-          {#if latestKnownRun}<CrawlRunStatus run={latestKnownRun} />{:else}<span
-              class="text-secondary text-sm">{m.this_website_not_crawled_before()}</span
-            >{/if}
-        </div>
-      </div>
-      <div>
-        <p class="text-secondary text-xs">{m.indexed_content()}</p>
-        <p class="mt-1 font-semibold tabular-nums">{infoBlobPage.total_count}</p>
-      </div>
-      <div>
-        <p class="text-secondary text-xs">{m.website_source_latest_completed()}</p>
-        <p class="mt-1 text-sm">
+    <div class="pt-4 pr-4">
+      <SourceStats columns={3}>
+        <SourceStat label={m.website_source_latest_crawl()} tone="text">
+          {#if latestKnownRun}
+            <CrawlRunStatus run={latestKnownRun} />
+          {:else}
+            <span class="text-secondary font-normal">{m.this_website_not_crawled_before()}</span>
+          {/if}
+        </SourceStat>
+        <SourceStat label={m.indexed_content()}>{infoBlobPage.total_count}</SourceStat>
+        <SourceStat label={m.website_source_latest_completed()} tone="text">
           {latestCompletedRun
             ? formatDateTime(latestCompletedRun.finished_at ?? latestCompletedRun.created_at)
             : "–"}
-        </p>
-      </div>
+        </SourceStat>
+      </SourceStats>
     </div>
     <Page.Tab id="problems">
       {#if $tabs === "problems"}
@@ -324,11 +332,12 @@
         <CrawlLimitations></CrawlLimitations>
       {/if}
       {#if latestCompletedRun && hasCrawlIssues(latestCompletedRun)}
+        {@const latest = latestCompletedRun}
         <div
           class="border-default mb-4 flex flex-wrap items-start justify-between gap-3 rounded-lg border p-4"
         >
           <div class="flex min-w-0 items-start gap-3">
-            {#if isCompletedWithMissingResources(latestCompletedRun)}
+            {#if isCompletedWithMissingResources(latest)}
               <Info class="text-secondary mt-0.5 size-4 shrink-0" aria-hidden="true" />
             {:else}
               <TriangleAlert
@@ -338,24 +347,26 @@
             {/if}
             <div>
               <h2 class="text-sm font-semibold">
-                {isCompletedWithMissingResources(latestCompletedRun)
+                {isCompletedWithMissingResources(latest)
                   ? m.crawl_content_has_missing()
                   : m.crawl_content_has_failures()}
               </h2>
               <p class="text-secondary mt-1 max-w-prose text-sm">
-                {m.crawl_content_failure_description({
-                  date: formatDateTime(latestCompletedRun.created_at)
-                })}
+                {m.crawl_content_failure_description({ date: formatDateTime(latest.created_at) })}
               </p>
             </div>
           </div>
-          <Button variant="outline" size="sm" onclick={() => showProblems(latestCompletedRun)}>
+          <Button variant="outline" size="sm" onclick={() => showProblems(latest)}>
             {m.website_source_see_problems()}
           </Button>
         </div>
       {/if}
       {#if $tabs === "blobs"}
-        <WebsiteContent websiteId={data.website.id} initialPage={infoBlobPage} />
+        <WebsiteContent
+          websiteId={data.website.id}
+          initialPage={infoBlobPage}
+          initialContent={data.initialContent}
+        />
       {/if}
     </Page.Tab>
   </Page.Main>

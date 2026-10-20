@@ -5198,6 +5198,7 @@
   "website_source_previous_crawl": "Previous crawl",
   "website_source_run_results": "Updated pages: {pages} · files: {files}",
   "website_source_run_unchanged": "Unchanged pages: {pages} · files: {files}",
+  "website_source_resource_count": "{count} resources",
   "activation_failed": "Activation failed — your account could not be created yet. Ask your administrator to create an invitation for your email address, then try again.",
   "mcp_tools_count": "{count, plural, one {# tool} other {# tools}}",
   "mcp_toggle_server": "Enable {name}",

@@ -9,14 +9,25 @@
   import * as Table from "$lib/components/ui/table/index.js";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
   import { formatDateTime } from "$lib/core/formatting/dateTime";
-  import BlobPreview from "./components/BlobPreview.svelte";
-  import WebsiteFolderNav from "./WebsiteFolderNav.svelte";
-  import CrawlLoadError from "./CrawlLoadError.svelte";
+  import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
+  import CrawlLoadError from "$lib/features/knowledge/CrawlLoadError.svelte";
   import { m } from "$lib/paraglide/messages";
+  import WebsiteFolderNav from "./WebsiteFolderNav.svelte";
+  import { readContentFilters, type WebsiteContentFilters } from "./websiteContentFilters";
 
-  let { websiteId, initialPage }: { websiteId: string; initialPage: WebsiteInfoBlobPage } =
-    $props();
+  let {
+    websiteId,
+    initialPage,
+    initialContent = null
+  }: {
+    websiteId: string;
+    /** The whole website's first page; a new crawl snapshot replaces it. */
+    initialPage: WebsiteInfoBlobPage;
+    /** The page the server already loaded for the filters the URL carries. */
+    initialContent?: (WebsiteContentFilters & { page: WebsiteInfoBlobPage }) | null;
+  } = $props();
   const eneo = getEneo();
+  let initialContentShown = false;
   let documents = $state<WebsiteInfoBlobPage | null>(null);
   let prefix = $state("");
   let query = $state("");
@@ -89,15 +100,25 @@
   });
 
   $effect(() => {
-    const urlPrefix = page.url.searchParams.get("prefix") ?? "";
-    const nextPrefix =
-      /^https?:\/\/[^?#]+\/$/.test(urlPrefix) && urlPrefix.length <= 2048 ? urlPrefix : "";
-    const nextQuery = (page.url.searchParams.get("q") ?? "").trim().slice(0, 200);
+    const { prefix: nextPrefix, q: nextQuery } = readContentFilters(page.url.searchParams);
     untrack(() => {
       if (nextPrefix === prefix && nextQuery === query) return;
       prefix = nextPrefix;
       query = nextQuery;
       searchText = nextQuery;
+      if (
+        !initialContentShown &&
+        initialContent &&
+        initialContent.prefix === nextPrefix &&
+        initialContent.q === nextQuery
+      ) {
+        initialContentShown = true;
+        generation += 1;
+        documents = initialContent.page;
+        loading = false;
+        failed = false;
+        return;
+      }
       documents = null;
       void load();
     });

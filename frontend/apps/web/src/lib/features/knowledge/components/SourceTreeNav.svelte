@@ -31,11 +31,14 @@
     query = $bindable(""),
     hint,
     leading,
-    trailing
+    trailing,
+    totalLabel
   }: {
     title: string;
     allLabel: string;
     total: number;
+    /** What `total` counts, read in place of the bare number by screen readers. */
+    totalLabel?: string;
     rows: Row[];
     selectedId: string | null;
     hrefFor: (id: string | null) => string;
@@ -86,7 +89,11 @@
             : 'hover:bg-hover-dimmer'}"
         >
           <span class="flex-1 truncate">{allLabel}</span>
-          <span class="text-secondary text-xs tabular-nums">{total}</span>
+          {#if totalLabel}<span class="sr-only">, {totalLabel}</span>{/if}
+          <span
+            class="text-secondary text-xs tabular-nums"
+            aria-hidden={totalLabel ? "true" : undefined}>{total}</span
+          >
         </a>
         <!-- eslint-enable svelte/no-navigation-without-resolve -->
       </li>

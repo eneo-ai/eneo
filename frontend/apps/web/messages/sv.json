@@ -5198,5 +5198,6 @@
   "website_source_choose_crawl": "Inläsning",
   "website_source_previous_crawl": "Tidigare inläsning",
   "website_source_run_results": "Uppdaterade sidor: {pages} · filer: {files}",
-  "website_source_run_unchanged": "Oförändrade sidor: {pages} · filer: {files}"
+  "website_source_run_unchanged": "Oförändrade sidor: {pages} · filer: {files}",
+  "website_source_resource_count": "{count} resurser"
 }

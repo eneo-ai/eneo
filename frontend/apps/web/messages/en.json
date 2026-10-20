@@ -5198,5 +5198,6 @@
   "website_source_choose_crawl": "Crawl",
   "website_source_previous_crawl": "Previous crawl",
   "website_source_run_results": "Updated pages: {pages} · files: {files}",
-  "website_source_run_unchanged": "Unchanged pages: {pages} · files: {files}"
+  "website_source_run_unchanged": "Unchanged pages: {pages} · files: {files}",
+  "website_source_resource_count": "{count} resources"
 }

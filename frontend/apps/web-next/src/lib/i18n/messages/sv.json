@@ -5198,6 +5198,7 @@
   "website_source_previous_crawl": "Tidigare inläsning",
   "website_source_run_results": "Uppdaterade sidor: {pages} · filer: {files}",
   "website_source_run_unchanged": "Oförändrade sidor: {pages} · filer: {files}",
+  "website_source_resource_count": "{count} resurser",
   "activation_failed": "Aktiveringen misslyckades – ditt konto kunde inte skapas ännu. Be din administratör skapa en inbjudan för din e-postadress och försök sedan igen.",
   "mcp_tools_count": "{count, plural, one {# verktyg} other {# verktyg}}",
   "mcp_toggle_server": "Aktivera {name}",

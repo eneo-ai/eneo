@@ -3,7 +3,9 @@
   import type { WebsiteContentFolder, WebsiteInfoBlobPage } from "@eneo/eneo-js";
   import Folder from "@lucide/svelte/icons/folder";
   import { getEneo } from "$lib/core/Eneo";
-  import SourceTreeNav, { type SourceTreeRow } from "./components/SourceTreeNav.svelte";
+  import SourceTreeNav, {
+    type SourceTreeRow
+  } from "$lib/features/knowledge/components/SourceTreeNav.svelte";
   import { m } from "$lib/paraglide/messages";
 
   let {
@@ -167,6 +169,7 @@
   title={m.website_source_structure()}
   allLabel={m.website_source_all_content()}
   {total}
+  totalLabel={m.website_source_resource_count({ count: total })}
   {rows}
   selectedId={selectedPrefix || null}
   {hrefFor}
@@ -178,6 +181,8 @@
       class="text-secondary size-3.5 shrink-0"
       aria-hidden="true"
     />{/snippet}
-  {#snippet trailing(row)}<span class="text-secondary text-xs tabular-nums">{row.count}</span
-    >{/snippet}
+  {#snippet trailing(row)}
+    <span class="sr-only">, {m.website_source_resource_count({ count: row.count ?? 0 })}</span>
+    <span class="text-secondary text-xs tabular-nums" aria-hidden="true">{row.count}</span>
+  {/snippet}
 </SourceTreeNav>

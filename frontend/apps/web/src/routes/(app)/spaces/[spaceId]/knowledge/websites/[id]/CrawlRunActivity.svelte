@@ -38,7 +38,8 @@
   {#if runs.length === 0}
     <p class="text-secondary py-6 text-sm">{m.this_website_not_crawled_before()}</p>
   {/if}
-  {#each days as day (formatDate(day.date))}
+  <!-- Legacy runs without a date all format to "", so the first run identifies the day. -->
+  {#each days as day (day.runs[0].id)}
     <SourceActivityDay date={day.date}>
       {#each day.runs as run (run.id)}
         <li class="border-dimmer flex gap-3 border-t py-3">

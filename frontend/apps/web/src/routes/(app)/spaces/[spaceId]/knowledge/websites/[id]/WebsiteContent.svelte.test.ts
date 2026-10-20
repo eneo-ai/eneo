@@ -4,7 +4,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import type { WebsiteInfoBlobPage } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import { expectNoAxeViolations } from "$lib/test/axe";
-import "../../../app.css";
+import "../../../../../../../app.css";
 
 const api = vi.hoisted(() => ({
   list: vi.fn(),
@@ -24,6 +24,9 @@ vi.mock("$app/navigation", () => ({
 import WebsiteContent from "./WebsiteContent.svelte";
 
 const origin = "https://example.test/";
+// The visible count is paired with a spoken unit, so the link name carries both.
+const folderName = (name: string, count: number) =>
+  new RegExp(`^${name} ?, ${m.website_source_resource_count({ count })}$`);
 const content = (name: string, path = ""): WebsiteInfoBlobPage["items"][number] => ({
   id: name,
   metadata: { title: name, url: `${origin}${path}${name}`, size: 100, embedding_model_id: "model" },
@@ -84,15 +87,15 @@ test("a late folder response cannot replace the currently selected folder", asyn
         resolveFirst = resolve;
       })
   );
-  await page.getByRole("link", { name: "A 40", exact: true }).click();
+  await page.getByRole("link", { name: folderName("A", 40) }).click();
   api.list.mockResolvedValueOnce(result([content("Document B", "B/")]));
-  await page.getByRole("link", { name: "B 80", exact: true }).click();
+  await page.getByRole("link", { name: folderName("B", 80) }).click();
   await expect.element(page.getByRole("button", { name: "Document B" })).toBeVisible();
   resolveFirst(result([content("Document A", "A/")]));
   await expect.element(page.getByRole("button", { name: "Document A" })).not.toBeInTheDocument();
   expect(api.route.url.searchParams.get("prefix")).toBe(`${origin}B/`);
   await expect
-    .element(page.getByRole("link", { name: "B 80", exact: true }))
+    .element(page.getByRole("link", { name: folderName("B", 80) }))
     .toHaveAttribute("aria-current", "page");
 });
 
@@ -116,7 +119,7 @@ test("folder failures are visible and retryable without blocking indexed content
   render(WebsiteContent, { websiteId: "website", initialPage: result() });
   await expect.element(page.getByRole("button", { name: "First document" })).toBeVisible();
   await page.getByRole("button", { name: m.source_tree_retry() }).click();
-  await expect.element(page.getByRole("link", { name: "A 40", exact: true })).toBeVisible();
+  await expect.element(page.getByRole("link", { name: folderName("A", 40) })).toBeVisible();
 });
 
 test("a deep link loads its selected prefix and query without loading every document", async () => {
@@ -159,16 +162,39 @@ test("directory pagination stays in its branch and nested folders load on expans
   );
   render(WebsiteContent, { websiteId: "website", initialPage: result() });
   await page.getByRole("button", { name: m.source_tree_more() }).click();
-  await expect.element(page.getByRole("link", { name: "B 80", exact: true })).toBeVisible();
+  await expect.element(page.getByRole("link", { name: folderName("B", 80) })).toBeVisible();
   expect(api.folders).not.toHaveBeenCalledWith(expect.objectContaining({ prefix: origin + "A/" }));
   await page
     .getByRole("button", { name: m.source_tree_expand({ name: "A" }), exact: true })
     .click();
-  await expect.element(page.getByRole("link", { name: "nested 20", exact: true })).toBeVisible();
+  await expect.element(page.getByRole("link", { name: folderName("nested", 20) })).toBeVisible();
   await page
     .getByRole("button", { name: m.source_tree_collapse({ name: "A" }), exact: true })
     .click();
   await expect
-    .element(page.getByRole("link", { name: "nested 20", exact: true }))
+    .element(page.getByRole("link", { name: folderName("nested", 20) }))
     .not.toBeInTheDocument();
+});
+
+test("a deep link rendered on the server does not fetch its selection again", async () => {
+  api.route.url = new URL(
+    `http://localhost/?tab=blobs&prefix=${encodeURIComponent(origin + "A/")}`
+  );
+  render(WebsiteContent, {
+    websiteId: "website",
+    initialPage: result(),
+    initialContent: { prefix: origin + "A/", q: "", page: result([content("guide.pdf", "A/")]) }
+  });
+  await expect.element(page.getByRole("button", { name: "guide.pdf" })).toBeVisible();
+  await expect
+    .element(page.getByRole("link", { name: folderName("A", 40) }))
+    .toHaveAttribute("aria-current", "page");
+  expect(api.list).not.toHaveBeenCalled();
+  await page.getByRole("link", { name: folderName("B", 80) }).click();
+  expect(api.list).toHaveBeenCalledExactlyOnceWith({
+    id: "website",
+    limit: 100,
+    cursor: null,
+    prefix: origin + "B/"
+  });
 });
