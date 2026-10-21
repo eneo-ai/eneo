@@ -10,7 +10,6 @@ case writes against a real database and reads the rows back with plain SQL.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -23,10 +22,8 @@ from eneo.database.tables.transcription_services_table import (
     SpacesTranscriptionServiceConnections,
     TranscriptionServiceConnections,
 )
-from eneo.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
 from eneo.flows.api import flow_authoring_router
 from eneo.flows.application.flow_authoring_command import (
-    AIBuilderFlowAuthoringOrigin,
     CreateFlowAuthoringCommand,
     EditFlowAuthoringCommand,
     FlowAuthoringCommandService,
@@ -49,20 +46,17 @@ from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.settings.encryption_service import EncryptionService
 from eneo.users.user import UserUpdate
-from tests.integration.flows.test_flow_authoring_edit_step_rows import (
-    _KEY,
-    _ROW_COLUMNS,
+from tests.integration.flows.flow_seed_support import (
+    ENCRYPTION_KEY,
+    ROW_COLUMNS,
     Row,
-    _apply_spec,
-    _edit,
-    _encryption,
-    _keep,
-    _kept_spec,
-    _rows,
-    _saved_flow,
-    _set_raw,
+    flow_service_encryption,
+    flow_space,
+    saved_three_step_flow,
+    set_step_columns,
+    step_rows,
 )
-from tests.integration.flows.test_flow_authoring_edit_step_rows import (
+from tests.integration.flows.flow_seed_support import (
     Saved as _RowsSaved,
 )
 
@@ -260,12 +254,9 @@ def _typed_spec(step_two: StepSpec) -> FlowDraftSpecCore:
     )
 
 
-def _origin(spec: FlowDraftSpecCore) -> AIBuilderFlowAuthoringOrigin:
-    return AIBuilderFlowAuthoringOrigin(
-        session_id=uuid4(),
-        plan_id=uuid4(),
-        spec_hash=spec.spec_hash(),
-        applied_at=datetime.now(timezone.utc),
+def _origin() -> FlowPackageAuthoringOrigin:
+    return FlowPackageAuthoringOrigin(
+        package_id="paket", package_version="1", content_checksum="0" * 64
     )
 
 
@@ -295,7 +286,7 @@ def _edit_command(
             "updated_step_fields": {
                 ref: frozenset(fields) for ref, fields in step_fields.items()
             },
-            "origin": _origin(spec),
+            "origin": _origin(),
         }
     )
 
@@ -305,12 +296,11 @@ async def _apply(db_container, command: EditFlowAuthoringCommand) -> None:
         await FlowAuthoringCommandService().apply(
             command=command,
             flow_service=container.flow_service(),
-            origin_policy=AIBuilderAuthoringPolicy(command.origin),  # type: ignore[arg-type]
         )
 
 
 def _differing(before: Row, after: Row) -> set[str]:
-    return {column for column in _ROW_COLUMNS if before[column] != after[column]}
+    return {column for column in ROW_COLUMNS if before[column] != after[column]}
 
 
 def _step_two(column: str, fill: str) -> StepSpec:
@@ -339,7 +329,7 @@ def _step_two(column: str, fill: str) -> StepSpec:
 async def test_a_sparse_edit_writes_only_the_column_it_names(
     db_container, typed: Saved, column: str, fill: str
 ) -> None:
-    before = await _rows(db_container, typed.flow_id)
+    before = await step_rows(db_container, typed.flow_id)
 
     await _apply(
         db_container,
@@ -349,7 +339,7 @@ async def test_a_sparse_edit_writes_only_the_column_it_names(
             {"existing_step_2": {column}},
         ),
     )
-    after = await _rows(db_container, typed.flow_id)
+    after = await step_rows(db_container, typed.flow_id)
 
     assert after[0] == before[0] and after[2] == before[2]
     written = column if before[1][column] != _WRITTEN[column] else None
@@ -379,7 +369,7 @@ async def test_naming_a_nullable_column_with_null_clears_it(
     starts from the saved flow sends it. The output config keeps its mode and
     type, so nothing but the named null can clear it."""
 
-    before = await _rows(db_container, typed.flow_id)
+    before = await step_rows(db_container, typed.flow_id)
     named = set(columns)
     values = {c: None if c in named else _SAVED_TWO[c] for c in _NULLABLE}
     step_two = _spec_step(
@@ -394,7 +384,7 @@ async def test_naming_a_nullable_column_with_null_clears_it(
         db_container,
         _edit_command(typed, _typed_spec(step_two), {"existing_step_2": named}),
     )
-    after = await _rows(db_container, typed.flow_id)
+    after = await step_rows(db_container, typed.flow_id)
 
     assert {c: after[1][c] for c in named} == dict.fromkeys(named)
     assert _differing(before[1], after[1]) == named | {"updated_at"}
@@ -408,82 +398,10 @@ _UPLOAD_OUTPUT = {
 }
 
 
-@pytest.mark.parametrize("input_type", list(_UPLOAD_OUTPUT))
-async def test_an_upload_step_named_with_a_null_input_config_is_cleared_through_the_builder_policy(
-    client, db_container, admin_user, patch_auth_service_jwt, input_type: str
-) -> None:
-    """The Builder's origin policy derives an upload configuration for a step
-    that takes files. A named null is the author's clear: it stays NULL."""
-
-    space_id, headers = await _space(client, db_container, admin_user)
-    output_mode, output_type = _UPLOAD_OUTPUT[input_type]
-    saved = await _flow(
-        db_container,
-        space_id,
-        headers,
-        [
-            {
-                "input_source": "flow_input",
-                "input_type": input_type,
-                "output_mode": output_mode,
-                "output_type": output_type,
-                "input_config": {
-                    "runtime_input": {
-                        "enabled": True,
-                        "required": True,
-                        "input_format": input_type,
-                        "description": "Ladda upp underlaget.",
-                    }
-                },
-            },
-            {
-                "input_source": "previous_step",
-                "input_type": "text",
-                "output_mode": "pass_through",
-                "output_type": "text",
-            },
-        ],
-        metadata_json={
-            "wizard": {
-                "transcription_enabled": True,
-                "transcription_model": {"id": str(uuid4())},
-            }
-        }
-        if input_type == "audio"
-        else None,
-    )
-    before = await _rows(db_container, saved.flow_id)
-    spec = FlowDraftSpecCore(
-        flow_name="Skrivregler",
-        flow_description="Läser, bedömer, skriver.",
-        steps=[
-            _spec_step(
-                1,
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType(input_type),
-                output_mode=OutputMode(output_mode),
-                output_type=OutputType(output_type),
-                input_config=None,
-            ),
-            _spec_step(2, input_source=InputSource.PREVIOUS_STEP),
-        ],
-    )
-
-    await _apply(
-        db_container,
-        _edit_command(saved, spec, {"existing_step_1": {"input_config"}}),
-    )
-    after = await _rows(db_container, saved.flow_id)
-
-    assert after[0]["input_config"] is None
-    assert _differing(before[0], after[0]) == {"input_config", "updated_at"}
-    assert after[1] == before[1]
-
-
 async def test_an_edit_naming_only_assistant_fields_writes_no_step_row(
     db_container, typed: Saved
 ) -> None:
-    before = await _rows(db_container, typed.flow_id)
+    before = await step_rows(db_container, typed.flow_id)
     step_two = _spec_step(
         2,
         input_source=InputSource.PREVIOUS_STEP,
@@ -503,7 +421,7 @@ async def test_an_edit_naming_only_assistant_fields_writes_no_step_row(
         ),
     )
 
-    assert await _rows(db_container, typed.flow_id) == before
+    assert await step_rows(db_container, typed.flow_id) == before
     async with db_container() as container:
         service = container.flow_service()
         flow = await service.get_flow(typed.flow_id)
@@ -517,7 +435,7 @@ async def test_a_command_naming_a_column_no_layer_owns_is_refused_before_any_wri
     """`timeout_seconds` is a column of the row, but not one an edit writes:
     no assistant field and no step column, so the command does not exist."""
 
-    before = await _rows(db_container, typed.flow_id)
+    before = await step_rows(db_container, typed.flow_id)
     step_two = _spec_step(
         2,
         input_source=InputSource.PREVIOUS_STEP,
@@ -530,7 +448,7 @@ async def test_a_command_naming_a_column_no_layer_owns_is_refused_before_any_wri
             typed, _typed_spec(step_two), {"existing_step_2": {"timeout_seconds"}}
         )
 
-    assert await _rows(db_container, typed.flow_id) == before
+    assert await step_rows(db_container, typed.flow_id) == before
     async with db_container() as container:
         flow = await container.flow_service().get_flow(typed.flow_id)
     assert flow.draft_revision == typed.revision
@@ -564,7 +482,7 @@ async def test_a_sparse_edit_keeps_a_manual_only_speaker_mapping_step(
             },
         ],
     )
-    before = await _rows(db_container, saved.flow_id)
+    before = await step_rows(db_container, saved.flow_id)
     spec = FlowDraftSpecCore(
         flow_name="Skrivregler",
         flow_description="Läser, bedömer, skriver.",
@@ -584,7 +502,7 @@ async def test_a_sparse_edit_keeps_a_manual_only_speaker_mapping_step(
         db_container,
         _edit_command(saved, spec, {"existing_step_2": {"user_description"}}),
     )
-    after = await _rows(db_container, saved.flow_id)
+    after = await step_rows(db_container, saved.flow_id)
 
     assert _differing(before[1], after[1]) == {"user_description", "updated_at"}
     assert after[0] == before[0]
@@ -600,7 +518,7 @@ async def test_a_sparse_edit_keeps_the_stored_credential_of_the_step_it_names(
     renames it: the token is the stored ciphertext, byte for byte, neither
     encrypted again nor refused as newly typed."""
 
-    with _encryption(True):
+    with flow_service_encryption(True):
         async with db_container() as container:
             service = container.flow_service()
             flow = await service.get_flow(typed.flow_id)
@@ -619,9 +537,9 @@ async def test_a_sparse_edit_keeps_the_stored_credential_of_the_step_it_names(
                 flow_id=flow.id, steps=steps, expected_revision=flow.draft_revision
             )
     typed.revision = flow.draft_revision
-    before = await _rows(db_container, typed.flow_id)
+    before = await step_rows(db_container, typed.flow_id)
     stored = before[2]["output_config"]["auth"]["token"]
-    assert EncryptionService(_KEY).decrypt(stored) == "lagrad-hemlighet"
+    assert EncryptionService(ENCRYPTION_KEY).decrypt(stored) == "lagrad-hemlighet"
     spec = _typed_spec(
         _spec_step(
             2,
@@ -634,12 +552,12 @@ async def test_a_sparse_edit_keeps_the_stored_credential_of_the_step_it_names(
     steps[2] = _spec_step(3, name="Skicka", input_source=InputSource.PREVIOUS_STEP)
     spec = spec.model_copy(update={"steps": steps})
 
-    with _encryption(active):
+    with flow_service_encryption(active):
         await _apply(
             db_container,
             _edit_command(typed, spec, {"existing_step_3": {"user_description"}}),
         )
-    after = await _rows(db_container, typed.flow_id)
+    after = await step_rows(db_container, typed.flow_id)
 
     assert after[2]["output_config"]["auth"]["token"] == stored
     assert after[2]["output_config"] == before[2]["output_config"]
@@ -649,12 +567,8 @@ async def test_a_sparse_edit_keeps_the_stored_credential_of_the_step_it_names(
 
 @pytest.fixture
 async def three_steps(client, db_container, admin_user, patch_auth_service_jwt):
-    from tests.integration.flows.test_flow_authoring_edit_step_rows import (
-        _space as _rows_space,
-    )
-
-    return await _saved_flow(
-        db_container, await _rows_space(client, db_container, admin_user)
+    return await saved_three_step_flow(
+        db_container, await flow_space(client, db_container, admin_user)
     )
 
 
@@ -672,31 +586,6 @@ async def _saved_metadata(db_container, flow_id: UUID) -> dict[str, JsonValue] |
         return await container.session().scalar(
             sa.select(Flows.metadata_json).where(Flows.id == flow_id)
         )
-
-
-async def test_an_unrelated_edit_keeps_legacy_form_field_types_byte_identical(
-    db_container, three_steps: _RowsSaved
-) -> None:
-    """`email`, `string` and `textarea` are types older writers saved; the
-    platform reads them as text. An edit through the whole Builder chain that
-    names no form field stores the form exactly as it was saved."""
-
-    async with db_container() as container:
-        await container.session().execute(
-            sa.update(Flows)
-            .where(Flows.id == three_steps.flow_id)
-            .values(metadata_json={"form_schema": _LEGACY_FORM})
-        )
-
-    await _edit(db_container, three_steps, [_keep(1, name="Läs"), _keep(2), _keep(3)])
-
-    metadata = await _saved_metadata(db_container, three_steps.flow_id)
-    assert metadata is not None
-    assert metadata["form_schema"] == _LEGACY_FORM
-
-
-def _form_edit(*fields: FormFieldSpec) -> FlowDraftSpecCore:
-    return _kept_spec(1, 2, 3).model_copy(update={"form_fields": list(fields)})
 
 
 _EPOST = FormFieldSpec(name="epost", type="text", label="E-post", required=True)
@@ -723,81 +612,6 @@ _LABELLED_LEGACY_FORM = {
 }
 
 
-@pytest.mark.parametrize(
-    ("edited", "expected"),
-    [
-        pytest.param(
-            [_EPOST.model_copy(update={"label": "Din e-post"}), _NAMN, _BESKRIVNING],
-            {"epost": ("email", "Din e-post", True)},
-            id="label",
-        ),
-        pytest.param(
-            [_EPOST, _NAMN.model_copy(update={"required": True}), _BESKRIVNING],
-            {"namn": ("string", "Namn", True)},
-            id="required",
-        ),
-        pytest.param(
-            [_BESKRIVNING, _EPOST, _NAMN],
-            {
-                "beskrivning": ("textarea", "Beskrivning", False),
-                "epost": ("email", "E-post", True),
-                "namn": ("string", "Namn", False),
-            },
-            id="reorder",
-        ),
-        pytest.param(
-            [_EPOST, _NAMN.model_copy(update={"type": "number"}), _BESKRIVNING],
-            {"namn": ("number", "Namn", False), "epost": ("email", "E-post", True)},
-            id="a real type change writes the new type",
-        ),
-    ],
-)
-async def test_an_edit_of_one_form_field_keeps_the_saved_legacy_type_of_every_field_whose_type_it_leaves(
-    db_container,
-    three_steps: _RowsSaved,
-    edited: list[FormFieldSpec],
-    expected: dict[str, tuple[str, str, bool]],
-) -> None:
-    """A label, a requiredness or an order is edited on a form saved with the
-    types an older writer gave it: each field whose normalized type is
-    unchanged keeps the type it was saved with, and carries the edited value;
-    a field whose type is changed is written with the new one."""
-
-    async with db_container() as container:
-        await container.session().execute(
-            sa.update(Flows)
-            .where(Flows.id == three_steps.flow_id)
-            .values(metadata_json={"form_schema": _LABELLED_LEGACY_FORM})
-        )
-
-    await _apply_spec(
-        db_container,
-        three_steps,
-        _form_edit(*edited),
-        removed=frozenset(),
-        updated=frozenset(),
-    )
-
-    metadata = await _saved_metadata(db_container, three_steps.flow_id)
-    assert metadata is not None
-    written = {
-        field["name"]: (field["type"], field["label"], field.get("required", False))
-        for field in metadata["form_schema"]["fields"]
-    }
-    assert (
-        written
-        == {
-            "epost": ("email", "E-post", True),
-            "namn": ("string", "Namn", False),
-            "beskrivning": ("textarea", "Beskrivning", False),
-        }
-        | expected
-    )
-    assert [f["name"] for f in metadata["form_schema"]["fields"]] == [
-        f.name for f in edited
-    ]
-
-
 # A full replace gives every column it omits its default.
 
 
@@ -811,9 +625,8 @@ def _new_step_spec(ref: str, **columns: Any) -> StepSpec:
     )
 
 
-@pytest.mark.parametrize("origin", ["package", "builder"])
 async def test_a_create_persists_the_default_of_every_column_it_omits(
-    client, db_container, admin_user, patch_auth_service_jwt, origin: str
+    client, db_container, admin_user, patch_auth_service_jwt
 ) -> None:
     space_id, _ = await _space(client, db_container, admin_user)
     spec = FlowDraftSpecCore(
@@ -824,13 +637,7 @@ async def test_a_create_persists_the_default_of_every_column_it_omits(
             _new_step_spec("b", input_source=InputSource.PREVIOUS_STEP),
         ],
     )
-    command_origin = (
-        _origin(spec)
-        if origin == "builder"
-        else FlowPackageAuthoringOrigin(
-            package_id="paket", package_version="1", content_checksum="0" * 64
-        )
-    )
+    command_origin = _origin()
     command = CreateFlowAuthoringCommand(
         space_id=space_id, spec=spec, origin=command_origin
     )
@@ -838,12 +645,9 @@ async def test_a_create_persists_the_default_of_every_column_it_omits(
         result = await FlowAuthoringCommandService().apply(
             command=command,
             flow_service=container.flow_service(),
-            origin_policy=AIBuilderAuthoringPolicy(command_origin)
-            if isinstance(command_origin, AIBuilderFlowAuthoringOrigin)
-            else None,
         )
 
-    rows = await _rows(db_container, result.flow_id)
+    rows = await step_rows(db_container, result.flow_id)
     for row in rows:
         assert row["input_type"] == "text"
         assert row["output_mode"] == "pass_through"
@@ -853,50 +657,8 @@ async def test_a_create_persists_the_default_of_every_column_it_omits(
         assert row["timeout_seconds"] is None
 
 
-@pytest.mark.parametrize("input_type", ["audio", "document", "file"])
-async def test_a_builder_create_derives_the_upload_configuration_of_a_file_step(
-    client, db_container, admin_user, patch_auth_service_jwt, input_type: str
-) -> None:
-    space_id, _ = await _space(client, db_container, admin_user)
-    output_mode, output_type = _UPLOAD_OUTPUT[input_type]
-    spec = FlowDraftSpecCore(
-        flow_name="Ny",
-        flow_description="",
-        steps=[
-            _new_step_spec(
-                "a",
-                input_type=InputType(input_type),
-                output_mode=OutputMode(output_mode),
-                output_type=OutputType(output_type),
-            )
-        ],
-    )
-    origin = _origin(spec)
-    async with db_container() as container:
-        result = await FlowAuthoringCommandService().apply(
-            command=CreateFlowAuthoringCommand(
-                space_id=space_id,
-                spec=spec,
-                origin=origin,
-                default_transcription_model_id=uuid4()
-                if input_type == "audio"
-                else None,
-            ),
-            flow_service=container.flow_service(),
-            origin_policy=AIBuilderAuthoringPolicy(origin),
-        )
-
-    (row,) = await _rows(db_container, result.flow_id)
-    runtime_input = row["input_config"]["runtime_input"]
-    assert runtime_input["enabled"] is True
-    assert runtime_input["input_format"] == input_type
-    for column in ("input_bindings", "output_contract", "review_policy"):
-        assert row[column] is None, column
-
-
-@pytest.mark.parametrize("origin", ["package", "builder"])
 async def test_an_audio_flow_a_command_creates_gets_the_default_speaker_service(
-    client, db_container, admin_user, patch_auth_service_jwt, origin: str
+    client, db_container, admin_user, patch_auth_service_jwt
 ) -> None:
     """The AI Builder's draft and an installed package go through the same
     draft write as the editor, so they get the organisation's default too."""
@@ -931,13 +693,7 @@ async def test_an_audio_flow_a_command_creates_gets_the_default_speaker_service(
             )
         ],
     )
-    command_origin = (
-        _origin(spec)
-        if origin == "builder"
-        else FlowPackageAuthoringOrigin(
-            package_id="paket", package_version="1", content_checksum="0" * 64
-        )
-    )
+    command_origin = _origin()
     async with db_container() as container:
         result = await FlowAuthoringCommandService().apply(
             command=CreateFlowAuthoringCommand(
@@ -947,9 +703,6 @@ async def test_an_audio_flow_a_command_creates_gets_the_default_speaker_service(
                 default_transcription_model_id=uuid4(),
             ),
             flow_service=container.flow_service(),
-            origin_policy=AIBuilderAuthoringPolicy(command_origin)
-            if isinstance(command_origin, AIBuilderFlowAuthoringOrigin)
-            else None,
         )
 
     async with db_container() as container:
@@ -1008,19 +761,19 @@ async def test_a_patch_without_steps_keeps_every_step_row_and_cleans_inactive_co
     of a mode a step does not run is dropped, as on every save. Everything
     else, ids included, stays."""
 
-    rows = await _rows(db_container, typed.flow_id)
-    await _set_raw(
+    rows = await step_rows(db_container, typed.flow_id)
+    await set_step_columns(
         db_container,
         rows[2]["id"],
         output_config={"url": "https://example.test", "body": "x"},
     )
-    before = await _rows(db_container, typed.flow_id)
+    before = await step_rows(db_container, typed.flow_id)
 
     response = await _patch(
         client, typed, {"name": "Nytt namn", "expected_revision": typed.revision}
     )
     assert response.status_code == 200, response.text
-    after = await _rows(db_container, typed.flow_id)
+    after = await step_rows(db_container, typed.flow_id)
 
     assert [row["id"] for row in after] == [row["id"] for row in before]
     assert after[:2] == before[:2]
@@ -1092,9 +845,9 @@ async def test_a_patch_replaces_the_step_list_it_sends(
     """A saved step left out of `steps` is deleted, the others keep their ids,
     and a column a step item omits is stored as NULL."""
 
-    rows = await _rows(db_container, typed.flow_id)
-    await _set_raw(db_container, rows[0]["id"], timeout_seconds=30)
-    rows = await _rows(db_container, typed.flow_id)
+    rows = await step_rows(db_container, typed.flow_id)
+    await set_step_columns(db_container, rows[0]["id"], timeout_seconds=30)
+    rows = await step_rows(db_container, typed.flow_id)
     first = _step_item(rows[0], output_type="text")
     third = _step_item(rows[2], step_order=2)
 
@@ -1104,7 +857,7 @@ async def test_a_patch_replaces_the_step_list_it_sends(
         {"steps": [first, third], "expected_revision": typed.revision},
     )
     assert response.status_code == 200, response.text
-    after = await _rows(db_container, typed.flow_id)
+    after = await step_rows(db_container, typed.flow_id)
 
     assert [row["id"] for row in after] == [rows[0]["id"], rows[2]["id"]]
     for column in ("output_contract", "review_policy", "timeout_seconds"):
@@ -1114,7 +867,7 @@ async def test_a_patch_replaces_the_step_list_it_sends(
 async def test_a_patch_on_a_stale_revision_is_refused_and_writes_nothing(
     client, db_container, typed: Saved
 ) -> None:
-    before = await _rows(db_container, typed.flow_id)
+    before = await step_rows(db_container, typed.flow_id)
 
     response = await _patch(
         client,
@@ -1124,7 +877,7 @@ async def test_a_patch_on_a_stale_revision_is_refused_and_writes_nothing(
 
     assert response.status_code == 400, response.text
     assert response.json()["code"] == "stale_revision"
-    assert await _rows(db_container, typed.flow_id) == before
+    assert await step_rows(db_container, typed.flow_id) == before
     assert (await _flow_columns(db_container, typed.flow_id))[
         "description"
     ] == "Läser, bedömer, skriver."
@@ -1173,7 +926,7 @@ async def test_a_named_step_whose_producer_moves_keeps_its_credential_beside_the
     renumbered, so it is no longer the stored one, and its token is still the
     stored credential, not encrypted a second time."""
 
-    with _encryption(True) as encryption:
+    with flow_service_encryption(True) as encryption:
         async with db_container() as container:
             service = container.flow_service()
             flow = await service.get_flow(three_steps.flow_id)
@@ -1191,7 +944,9 @@ async def test_a_named_step_whose_producer_moves_keeps_its_credential_beside_the
             flow = await service.update_flow(
                 flow_id=flow.id, steps=steps, expected_revision=flow.draft_revision
             )
-        stored = (await _rows(db_container, three_steps.flow_id))[2]["output_config"]
+        stored = (await step_rows(db_container, three_steps.flow_id))[2][
+            "output_config"
+        ]
         spec = FlowDraftSpecCore(
             flow_name="Tre steg",
             flow_description="Läser, bedömer, skriver.",
@@ -1212,7 +967,7 @@ async def test_a_named_step_whose_producer_moves_keeps_its_credential_beside_the
                 {"existing_step_3": {"user_description"}},
             ),
         )
-    written = (await _rows(db_container, three_steps.flow_id))[3]["output_config"]
+    written = (await step_rows(db_container, three_steps.flow_id))[3]["output_config"]
 
     assert encryption is not None
     assert written["auth"]["token"] == stored["auth"]["token"]

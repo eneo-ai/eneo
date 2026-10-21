@@ -103,7 +103,7 @@ Audit log retention is configured per tenant, in days, on the Audit Logs page an
 
 Conversation data (questions and app runs) has its own retention hierarchy, set per space, assistant, or app. See [Retention](/docs/audit-logging#retention) on the technical page for the hierarchy, its limits, and the API.
 
-Flow AI Builder conversation sessions follow the same Space/conversation retention. This is separate from Flow run-history policy.
+A flow authoring chat is an ordinary conversation and follows the same Space/conversation retention. This is separate from Flow run-history policy.
 
 Flow run and step history is never deleted by that scheduled worker. Its dedicated Organization → Space → Flow policy only sets eligibility or a human-review queue. See [Data retention and deletion](/guides/data-retention).
 

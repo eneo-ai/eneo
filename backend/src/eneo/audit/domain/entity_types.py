@@ -41,6 +41,7 @@ class EntityType(str, Enum):
     FLOW = "flow"
     FLOW_RUN = "flow_run"
     FLOW_RUN_REVIEW_CHECKPOINT = "flow_run_review_checkpoint"
+    # The retired AI Builder's entities, for the audit entries it wrote.
     AI_BUILDER_SESSION = "ai_builder_session"
     AI_BUILDER_CLIENT_ERROR = "ai_builder_client_error"
     DOCUMENT_TEMPLATE = "document_template"

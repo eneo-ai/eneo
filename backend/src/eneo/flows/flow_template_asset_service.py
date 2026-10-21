@@ -40,7 +40,7 @@ async def _single_chunk(payload: bytes) -> AsyncGenerator[bytes]:
 
 
 class AttachedTemplateFileUnavailableError(Exception):
-    """The selected Builder File disappeared before its retention fence."""
+    """The selected File disappeared before its retention fence."""
 
 
 class FlowTemplateAssetService:
@@ -139,10 +139,9 @@ class FlowTemplateAssetService:
     ) -> FlowTemplateAsset:
         """Promote an authorized existing File into a Flow template asset.
 
-        Builder attachments already own a durable File row. Reusing that row
-        keeps the asset foreign key as the retention boundary and avoids a
-        second copy whose lifecycle could drift from the selected attachment.
-        Session-membership validation remains the Builder lifecycle's concern.
+        The File already owns a durable row. Reusing that row keeps the asset
+        foreign key as the retention boundary and avoids a second copy whose
+        lifecycle could drift from the selected File.
         """
 
         flow = await self.flow_repo.get(

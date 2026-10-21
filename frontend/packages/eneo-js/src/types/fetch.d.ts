@@ -109,8 +109,7 @@ type EneoStreamingEndpoints =
   | "/api/v1/assistants/{id}/sessions/"
   | "/api/v1/analysis/assistants/{assistant_id}/"
   | "/api/v1/conversations/"
-  | "/api/v1/analysis/conversation-insights/"
-  | "/api/v1/flows/ai-builder/sessions/{session_id}/messages";
+  | "/api/v1/analysis/conversation-insights/";
 
 export type EneoStreamFunction = <Endpoint extends EneoStreamingEndpoints>(
   endpoint: Endpoint,

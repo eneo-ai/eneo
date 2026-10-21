@@ -6,7 +6,6 @@
   import { beforeNavigate, replaceState } from "$app/navigation";
   import { page } from "$app/state";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { getAppContext } from "$lib/core/AppContext";
   import { getFlowWizardMetadata, initFlowEditor } from "$lib/features/flows/FlowEditor";
   import {
     transcriptionModelNotChosen,
@@ -45,33 +44,19 @@
   import CheckCircle2 from "@lucide/svelte/icons/circle-check";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import ListTree from "@lucide/svelte/icons/list-tree";
-  import { type FlowRun, type FlowStep, type TranscriptionModel } from "@eneo/eneo-js";
+  import { type FlowRun, type TranscriptionModel } from "@eneo/eneo-js";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
   import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
-  import { getLocale } from "$lib/paraglide/runtime";
-  import { stepSourceLines } from "$lib/features/flows/flowStepMaterial";
-  import { listedToolOptions } from "$lib/features/flows/components/tool/toolInputConfig";
-  import {
-    answerLabel,
-    contractFieldCount,
-    inSentence
-  } from "$lib/features/flows/ai-builder/builderStepPhrases";
-  import type { AIBuilderStepIntent } from "$lib/features/flows/ai-builder/protocol";
   import { describeFlowSaveRefusal, FlowSaveFailedError } from "$lib/features/flows/FlowEditor";
-  import { tick, untrack } from "svelte";
+  import { untrack } from "svelte";
   import { MediaQuery } from "svelte/reactivity";
   import { slide } from "svelte/transition";
   import FlowDraftCheck from "$lib/features/flows/components/FlowDraftCheck.svelte";
   import FlowPageHeader from "$lib/features/flows/components/FlowPageHeader.svelte";
   import SelectAIModelV2 from "$lib/features/ai-models/components/SelectAIModelV2.svelte";
-  import FlowAIBuilderEditHost from "$lib/features/flows/ai-builder/FlowAIBuilderEditHost.svelte";
   import { resolveFlowCareDataPolicy } from "$lib/features/flows/flowCareDataPolicy";
   import { flowAllowsEvidenceExport } from "$lib/features/flows/flowEvidencePolicy";
-  import {
-    resolveAIBuilderApplyNavigation,
-    resolveApplyFocusedStepId
-  } from "$lib/features/flows/ai-builder/flowAIBuilderApplyNavigation";
   import {
     getFlowFormSchemaFields,
     getFlowFormSchemaMetadata
@@ -136,10 +121,7 @@
   const isDesktopStepLayout = new MediaQuery("(min-width: 80rem)");
   type BuilderStageId = 1 | 2 | 3 | 4 | 5;
   const FLOW_BUILDER_STAGE_IDS: readonly BuilderStageId[] = [1, 2, 3, 4, 5];
-  // Arriving from the AI Builder, the reader has just approved a list of steps;
-  // opening on "Grundinställningar" (the name and description the Builder just
-  // wrote) sends them backwards. `?stage=` lets the Builder hand over to the
-  // stage its work actually lives on.
+  // `?stage=` opens the editor on the stage a link points at.
   const requestedStage = (() => {
     const raw = Number(page.url.searchParams.get("stage"));
     return FLOW_BUILDER_STAGE_IDS.includes(raw as BuilderStageId) ? (raw as BuilderStageId) : 1;
@@ -149,15 +131,6 @@
   const {
     state: { currentSpace }
   } = getSpacesManager();
-  const { user } = getAppContext();
-  const canUseAIBuilder = user.hasPermission({
-    allOf: ["flows_manage", "flows_ai_builder"]
-  });
-  // Reviewing the published version's runs is its own role permission on
-  // top of the builder; both entry points read this one value.
-  const canReviewWithAIBuilder = user.hasPermission({
-    allOf: ["flows_manage", "flows_ai_builder", "flows_ai_builder_review"]
-  });
 
   const userMode = getFlowUserMode();
 
@@ -165,64 +138,6 @@
     flow: untrack(() => data.flow),
     eneo: untrack(() => data.eneo)
   });
-
-  // AI Builder service — initialized lazily when user switches to the AI Builder tab
-  let aiBuilderInitialized = $state(false);
-  let aiBuilderHost = $state<FlowAIBuilderEditHost | undefined>();
-  function ensureAIBuilder() {
-    if (!aiBuilderInitialized) {
-      aiBuilderInitialized = true;
-    }
-  }
-
-  function openWholeFlowAIBuilder() {
-    ensureAIBuilder();
-    setActiveTab("ai-builder");
-  }
-
-  // What the part the menu asks about is now, in the words the step list and
-  // the Builder use, so the Builder can ask about that part.
-  function stepPartNow(step: FlowStep, intent?: AIBuilderStepIntent): string | null {
-    if (intent === "input") {
-      return stepReads[$update.steps.findIndex((candidate) => candidate.id === step.id)] ?? null;
-    }
-    if (intent === "answer") {
-      const answer = answerLabel(step.output_type, contractFieldCount(step.output_contract));
-      return m.ai_builder_task_current_answers({ answer: inSentence(answer, getLocale()) });
-    }
-    return null;
-  }
-
-  async function openStepInAIBuilder(
-    step: FlowStep,
-    request?: string,
-    intent?: AIBuilderStepIntent
-  ) {
-    if (!step.id) return;
-    try {
-      await flowEditor.flushSaves();
-    } catch (error) {
-      if (!surfaceRoutedSaveRejection(error)) {
-        toast.error(getFlowRuntimeErrorMessage(error, m.flow_ai_builder_save_before_edit_failed()));
-      }
-      return;
-    }
-    if ($saveStatus !== "saved") {
-      toast.error(m.flow_ai_builder_save_before_edit_failed());
-      return;
-    }
-    ensureAIBuilder();
-    setActiveTab("ai-builder");
-    await tick();
-    await aiBuilderHost?.focusSavedFlowStep({
-      editContext: { kind: "saved_flow_step", flow_step_id: step.id },
-      stepName: step.user_description?.trim() || m.flow_step_unnamed(),
-      stepNumber: step.step_order,
-      request,
-      intent,
-      current: stepPartNow(step, intent)
-    });
-  }
 
   const {
     state: {
@@ -233,8 +148,7 @@
       isPublished,
       saveStatus,
       validationErrors,
-      serverValidationIssue,
-      toolOptions
+      serverValidationIssue
     }
   } = flowEditor;
   const careDataPolicy = $derived(resolveFlowCareDataPolicy($resource.metadata_json));
@@ -328,10 +242,10 @@
     };
   });
 
-  type FlowPageTab = "builder" | "history" | "ai-builder";
+  type FlowPageTab = "builder" | "history";
 
   function isFlowPageTab(value: string | null): value is FlowPageTab {
-    return value === "builder" || value === "history" || value === "ai-builder";
+    return value === "builder" || value === "history";
   }
 
   function resolveInitialTab(): FlowPageTab {
@@ -362,44 +276,11 @@
   }
 
   let activeTab = $state<FlowPageTab>(resolveInitialTab());
-  // While a change is being prepared in the AI builder, the flow's own primary
-  // action steps back: the only blue button on screen belongs to the change.
-  const changeInProgress = $derived(
-    activeTab === "ai-builder" && (aiBuilderHost?.hasChangeInProgress() ?? false)
-  );
-  $effect(() => {
-    if (!canUseAIBuilder && activeTab === "ai-builder") {
-      setActiveTab("builder");
-    }
-  });
-
-  $effect(() => {
-    if (activeTab === "ai-builder" && canUseAIBuilder) {
-      ensureAIBuilder();
-    }
-  });
-
-  // A request that travelled with a package import arrives in navigation
-  // state, is handed to the Builder once, and is dropped from the history
-  // entry so back or reload cannot replay it.
-  $effect(() => {
-    const carried = page.state.aiBuilderPrefill;
-    if (!carried || !canUseAIBuilder || !aiBuilderHost) return;
-    // The current dynamic flow route stays; only history state changes.
-    // eslint-disable-next-line svelte/no-navigation-without-resolve
-    replaceState(page.url, { ...page.state, aiBuilderPrefill: undefined });
-    void aiBuilderHost.carryRequest({ text: carried, requireStepScope: true });
-  });
-
   $effect(() => {
     const urlTab = page.url.searchParams.get("tab");
     if (!isFlowPageTab(urlTab) || urlTab === activeTab) return;
     if (pendingPersistedTab && urlTab !== pendingPersistedTab) return;
     if (pendingPersistedTab === urlTab) pendingPersistedTab = null;
-    if (urlTab === "ai-builder" && !canUseAIBuilder) {
-      setActiveTab("builder");
-      return;
-    }
     activeTab = urlTab;
   });
 
@@ -447,26 +328,6 @@
     typeof wizardMetadata.transcription_enabled === "boolean"
       ? wizardMetadata.transcription_enabled
       : hasAudioInputStep
-  );
-  // What each step reads, in the step list's words, for the Builder's rows.
-  const stepReads = $derived(
-    stepSourceLines(
-      $update.steps,
-      formSchemaMetadata,
-      transcriptionEnabled,
-      listedToolOptions($toolOptions)
-    ).map((line) => line?.text ?? null)
-  );
-  const stepChoices = $derived(
-    $update.steps
-      .map((step, index) => ({ step, reads: stepReads[index] }))
-      .filter(({ step }) => step.id)
-      .map(({ step, reads }) => ({
-        id: step.id!,
-        name: step.user_description?.trim() || m.flow_step_unnamed(),
-        order: step.step_order,
-        reads
-      }))
   );
   const isTranscriptionSkipped = $derived(!transcriptionEnabled);
   const transcriptionModelId = $derived(wizardReferenceId(wizardMetadata.transcription_model));
@@ -591,8 +452,7 @@
     {activeTab}
     tabs={[
       { value: "builder", label: m.flow_builder() },
-      { value: "history", label: m.flow_history() },
-      { value: "ai-builder", label: m.ai_builder_tab(), visible: canUseAIBuilder }
+      { value: "history", label: m.flow_history() }
     ]}
     tabIdPrefix="flow-detail-tab"
     onTabChange={(v) => {
@@ -608,11 +468,8 @@
       </div>
       <div class="hidden lg:contents">
         <!-- The mode also decides what the run history shows (step input, attempts,
-             the run ID), so it is offered wherever it has an effect. The AI
-             Builder discloses per card and has no mode. -->
-        {#if activeTab === "builder" || activeTab === "history"}
-          <FlowUserModeToggle />
-        {/if}
+             the run ID), so it is offered on both tabs. -->
+        <FlowUserModeToggle />
       </div>
       <FlowPackageExportDialog
         flow={$resource}
@@ -621,11 +478,7 @@
           saveDraftBeforeExport(() => flowEditor.flushSaves(), saveRefusalSentence)}
       />
       {#if $isPublished}
-        <!-- While a change is being prepared, the only primary on screen
-             belongs to the change: running the published version is a
-             different, quieter act. -->
         <Button
-          variant={changeInProgress ? "outline" : "default"}
           onclick={() => {
             showRunDialog = true;
           }}
@@ -1304,8 +1157,6 @@
                     transcriptionModel?.name ??
                     null}
                   formSchema={formSchemaMetadata}
-                  onBuildFlowWithAI={canUseAIBuilder ? openWholeFlowAIBuilder : undefined}
-                  onEditStepWithAI={canUseAIBuilder ? openStepInAIBuilder : undefined}
                   onOpenTranscriptionSettings={() => void navigateToStage(2)}
                   {speakerMappingStepOffered}
                   onAddSpeakerMappingStep={() =>
@@ -1468,52 +1319,6 @@
       </div>
     </div>
 
-    {#if canUseAIBuilder && aiBuilderInitialized}
-      <div
-        id="panel-ai-builder"
-        role="tabpanel"
-        tabindex="0"
-        aria-labelledby="flow-detail-tab-ai-builder"
-        hidden={activeTab !== "ai-builder"}
-        class="-ml-6 flex min-h-0 flex-1 flex-col overflow-y-clip"
-        class:hidden={activeTab !== "ai-builder"}
-      >
-        <FlowAIBuilderEditHost
-          bind:this={aiBuilderHost}
-          eneo={data.eneo}
-          spaceId={$currentSpace.id}
-          flowId={$resource.id}
-          canReview={canReviewWithAIBuilder && $resource.published_version != null}
-          {stepChoices}
-          flowIsPublished={$isPublished}
-          onapplied={async (detail) => {
-            try {
-              const updated = await data.eneo.flows.get({ id: detail.flow_id });
-              flowEditor.setResource(updated);
-              const navigation = resolveAIBuilderApplyNavigation({
-                stepCount: updated.steps?.length ?? 0,
-                requestedFocusStepIndex: detail.focusStepIndex
-              });
-              setActiveTab(navigation.activeTab);
-              builderStage = navigation.builderStage;
-              const focusedStepId = resolveApplyFocusedStepId(
-                updated.steps ?? [],
-                navigation.focusStepIndex
-              );
-              if (focusedStepId) {
-                flowEditor.selectStep(focusedStepId);
-              }
-              // The Builder's own receipt stays behind its tab; the reader,
-              // back in the editor, still hears that the change is in.
-              toast.success(m.ai_builder_applied_success_edit());
-            } catch (err) {
-              console.error("Failed to refresh flow after apply:", err);
-            }
-          }}
-        />
-      </div>
-    {/if}
-
     <div
       id="panel-history"
       role="tabpanel"
@@ -1534,22 +1339,6 @@
           const confirmedIds = new Set(runIds);
           optimisticHistoryRuns = optimisticHistoryRuns.filter((run) => !confirmedIds.has(run.id));
         }}
-        onreview={canReviewWithAIBuilder && $resource.published_version != null
-          ? async () => {
-              ensureAIBuilder();
-              setActiveTab("ai-builder");
-              await tick();
-              await aiBuilderHost?.openReview();
-            }
-          : undefined}
-        onrepair={canReviewWithAIBuilder && $resource.published_version != null
-          ? async (target) => {
-              ensureAIBuilder();
-              setActiveTab("ai-builder");
-              await tick();
-              await aiBuilderHost?.launchFailureRepair(target);
-            }
-          : undefined}
       />
     </div>
   </Page.Main>

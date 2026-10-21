@@ -3,7 +3,6 @@ import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const updateMappedExecutionPolicy = vi.hoisted(() => vi.fn());
-const updateAIBuilderBudgetSettings = vi.hoisted(() => vi.fn());
 const getFlowRetentionPolicy = vi.hoisted(() => vi.fn());
 const replaceOrganizationFlowRunRetentionPolicy = vi.hoisted(() => vi.fn());
 const replaceSpaceFlowRunRetentionPolicy = vi.hoisted(() => vi.fn());
@@ -29,7 +28,6 @@ vi.mock("$lib/core/Eneo", () => ({
       updateFlowInputLimits,
       updateFlowRuntimePolicy,
       updateMappedExecutionPolicy,
-      updateAIBuilderBudgetSettings,
       getFlowRetentionPolicy,
       replaceOrganizationFlowRunRetentionPolicy,
       replaceSpaceFlowRunRetentionPolicy,
@@ -140,7 +138,6 @@ function dataFor(access: Access) {
     flowInputLimits: access.admin ? full.flowInputLimits : null,
     flowRuntimePolicy: access.admin ? full.flowRuntimePolicy : null,
     mappedExecutionPolicy: access.admin ? full.mappedExecutionPolicy : null,
-    aiBuilderBudgetSettings: access.admin ? full.aiBuilderBudgetSettings : null,
     ragEvidencePolicy: access.admin ? full.ragEvidencePolicy : null,
     flowRunRetentionPolicy: retention ? full.flowRunRetentionPolicy : null,
     spaceTargets: retention ? full.spaceTargets : null,
@@ -150,12 +147,7 @@ function dataFor(access: Access) {
   };
 }
 
-const TABS = [
-  "Gallring och bevarande",
-  "Uppladdningar och körtider",
-  "AI-byggaren",
-  "Sparad källtext"
-];
+const TABS = ["Gallring och bevarande", "Uppladdningar och körtider", "Sparad källtext"];
 
 const LIMIT_LABEL = "Längsta tid till omprövning (dagar)";
 

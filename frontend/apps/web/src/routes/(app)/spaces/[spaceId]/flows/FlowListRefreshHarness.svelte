@@ -13,7 +13,6 @@
 
 <FlowsTable
   flows={$flows}
-  drafts={[]}
   refreshFailed={$refreshError !== null}
   refreshing={$refreshing}
   onretry={manager.refreshFlows}

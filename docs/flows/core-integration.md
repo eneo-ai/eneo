@@ -122,6 +122,18 @@ steps reorders without renumbering prompt reads (the Svelte editor renumbers
 them itself), a rename can make a kept read by step name name another step, and
 `update_step` patches a step's assistant even when another step shares it.
 
+### AI Builder removed
+
+The builder's package, router, settings, budgets, permissions
+(`flows_ai_builder`, `flows_ai_builder_review`), failure summary, retention job,
+OpenAPI surface, SDK client code, Svelte screens and tests are gone. Migration
+`202610212200` drops `builder_sessions`, `builder_plans`,
+`builder_session_files` and `builder_client_errors` and takes the two
+permissions out of every role; its downgrade recreates the tables empty and
+grants the permissions to Owner roles again. Audit action types and the
+`ai_builder` resource binding source stay for the rows already written;
+`metadata_json.ai_builder` is dropped when a flow is read and refused on write.
+
 ## Documents
 
 The tool runtime renders Markdown to Word and PDF and fills Word templates; the

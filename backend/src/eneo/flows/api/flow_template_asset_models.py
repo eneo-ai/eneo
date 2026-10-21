@@ -59,8 +59,7 @@ class FlowTemplatePlaceholderPublic(BaseModel):
     ``name`` is the control's tag (what bindings address), ``label`` its
     title, ``kind`` whether it takes a whole section (``rich``: paragraphs,
     lists, tables) or one line of text (``text``), and ``hint`` the
-    placeholder text the author wrote, which the AI Builder reads as the
-    instruction for that target.
+    placeholder text the author wrote, the instruction for that target.
     """
 
     name: str

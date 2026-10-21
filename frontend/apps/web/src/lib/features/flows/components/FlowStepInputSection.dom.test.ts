@@ -116,7 +116,7 @@ describe("FlowStepInputSection", () => {
   });
 
   // The editor shows a transcription no underlag section, but a binding set elsewhere
-  // (for example by the AI builder) still replaces its source at run time.
+  // (for example through the API) still replaces its source at run time.
   it("keeps a bound transcription's source locked without pointing to a section it lacks", () => {
     renderSection(
       { output_mode: "transcribe_only", input_type: "audio", output_type: "text" },

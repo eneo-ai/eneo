@@ -29,25 +29,3 @@ export function isUnattendedToolRefusal(value: unknown): value is UnattendedTool
 export function toolRefusalSentence(refusal: UnattendedToolRefusal): string {
   return TOOL_REFUSAL_SENTENCES[refusal]();
 }
-
-/** A tool a flow needs and cannot use, as the AI Builder names it in its answer. */
-export type UnusableTool = components["schemas"]["AIBuilderToolRefusal"];
-
-/** Why the AI Builder answered instead of building a step with a tool: a tool
- *  it cannot use, or a request it could not match to a tool it may use. */
-export type BuilderToolGuidance =
-  UnusableTool | components["schemas"]["AIBuilderToolRequestUnresolved"];
-
-/** Why `tool` cannot be used: the refusing level's sentence, or why no flow
- *  can read the arguments its schema describes. Null for a refusal that does
- *  not say which level refuses it. */
-export function unusableToolSentence(tool: UnusableTool): string | null {
-  switch (tool.kind) {
-    case "refused":
-      return tool.refusal ? toolRefusalSentence(tool.refusal) : null;
-    case "input_schema_invalid":
-      return m.flow_tool_unusable_input_schema_invalid();
-    case "input_schema_too_large":
-      return m.flow_tool_unusable_input_schema_too_large();
-  }
-}

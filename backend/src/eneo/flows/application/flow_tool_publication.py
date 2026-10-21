@@ -246,8 +246,7 @@ async def check_tool_configuration(
     check_schema: bool = True,
 ) -> ToolConfigurationFinding | None:
     """The first problem of a tool step's configuration against the tool's
-    approved input schema, None when there is none: publish's checks, which
-    the AI Builder runs on a proposed tool step too.
+    approved input schema, None when there is none: publish's checks.
 
     In order: a schema that is no valid JSON Schema of a draft Eneo supports
     (skipped with ``check_schema`` False, for a schema found valid before), an

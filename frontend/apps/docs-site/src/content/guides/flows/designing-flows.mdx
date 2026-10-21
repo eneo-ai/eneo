@@ -26,9 +26,9 @@ These examples use the API's `input_type`, `output_type`, and `output_mode` valu
 | `document`   | `json`        | `pass_through`    | Extract structured fields before comparison or review.        |
 | `audio`      | `text`        | `transcribe_only` | Transcribe audio before later text, JSON, or artifact steps.   |
 
-### Artifact steps the Builder creates
+### Artifact steps
 
-For generated PDF and DOCX outputs, the Builder prepares text in earlier steps and adds a separate `render_verbatim` step. For a fixed DOCX template, it creates a `template_fill` step using prepared text. These saved step shapes use the same API enum values:
+For generated PDF and DOCX outputs, prepare the text in earlier steps and add a separate `render_verbatim` step. For a fixed DOCX template, add a `template_fill` step that reads prepared text. These step shapes use the same API enum values:
 
 | `input_type` | `output_type` | `output_mode`    | Use it when                                      |
 | ------------ | ------------- | ---------------- | ------------------------------------------------ |

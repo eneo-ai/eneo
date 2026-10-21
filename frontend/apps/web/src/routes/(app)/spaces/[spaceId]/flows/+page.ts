@@ -1,6 +1,5 @@
 import { error } from "@sveltejs/kit";
 import { hasPermission } from "$lib/core/hasPermission";
-import { loadAIBuilderDrafts } from "./aiBuilderDrafts";
 import type { Eneo } from "@eneo/eneo-js";
 import { FlowListPaginationError, loadFlowList } from "$lib/features/flows/flowListLoader";
 import { m } from "$lib/paraglide/messages";
@@ -23,14 +22,11 @@ export const load = async (event: {
     throw error(403);
   }
 
-  const [flows, aiDrafts] = await Promise.all([
-    loadFlowList(eneo, currentSpace.id).catch((cause: unknown) => {
-      if (cause instanceof FlowListPaginationError) {
-        throw error(502, { status: 502, code: 0, message: m.flow_list_load_failed() });
-      }
-      throw cause;
-    }),
-    loadAIBuilderDrafts({ eneo, currentSpace, user })
-  ]);
-  return { flows, aiDrafts };
+  const flows = await loadFlowList(eneo, currentSpace.id).catch((cause: unknown) => {
+    if (cause instanceof FlowListPaginationError) {
+      throw error(502, { status: 502, code: 0, message: m.flow_list_load_failed() });
+    }
+    throw cause;
+  });
+  return { flows };
 };

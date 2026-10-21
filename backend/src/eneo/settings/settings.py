@@ -22,14 +22,6 @@ from eneo.flows.domain.rag_evidence_policy import (
     RAG_EVIDENCE_MAX_SOURCES_KEY,
     RAG_EVIDENCE_MAX_STEP_PASSAGE_BYTES_KEY,
 )
-from eneo.flows.flow_ai_builder_budget_settings import (
-    AI_BUILDER_BUDGET_MAX_TOKENS,
-    AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
-    AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
-    AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT,
-    AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS,
-    AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
-)
 from eneo.flows.flow_document_limits import FLOW_DOCUMENT_RENDER_HARD_LIMITS
 from eneo.flows.flow_input_limits import (
     FLOW_AUDIO_MIN_DURATION_SECONDS,
@@ -633,123 +625,6 @@ class FlowRagEvidencePolicyUpdate(BaseModel):
         ge=1,
         le=RAG_EVIDENCE_CEILINGS[RAG_EVIDENCE_MAX_RUN_VIEW_PASSAGE_BYTES_KEY],
         description="Set the per-run-view ceiling, or send null to restore the default.",
-    )
-
-
-class AIBuilderBudgetSettingsPublic(BaseModel):
-    conversation_safety_buffer_tokens: int
-    minimum_conversation_budget_tokens: int
-    # Context-window ceiling for any request that carries run evidence (the
-    # review's suggestions call and a review-backed proposal). None: the
-    # model's own window.
-    review_evidence_max_input_tokens: int | None
-    # Evidence share of a review-backed proposal prompt: the system bound or
-    # a tenant's lower value.
-    review_investigation_evidence_max_tokens: int
-    # The longest wait for the provider's next chunk once it has started
-    # answering. The tenant's own value in whole seconds, None while the
-    # deployment default applies. A call that may think (it sends a reasoning
-    # effort other than "none", or sends no effort on a route that reasons by
-    # default) is bounded by the call ceiling before its first output.
-    silence_timeout_seconds: int | None
-    silence_timeout_seconds_default: float
-    # The longest a whole provider call may take, however much it keeps
-    # producing. Same override convention as the silence timeout.
-    call_ceiling_seconds: int | None
-    call_ceiling_seconds_default: float
-    max_attachments: int
-    max_message_chars: int
-    max_template_inspection_uncompressed_bytes: int
-    max_template_placeholders: int
-    max_attachments_hard_limit: int
-    max_message_chars_hard_limit: int
-    max_template_inspection_uncompressed_bytes_hard_limit: int
-    max_template_placeholders_hard_limit: int
-    review_investigation_evidence_ceiling_tokens: int
-    max_template_archive_entries_per_file_hard_limit: int
-    max_template_uncompressed_bytes_per_file_hard_limit: int
-    max_planning_state_payload_bytes_hard_limit: int
-    budget_token_hard_limit: int
-
-
-AI_BUILDER_TIMING_ORDER_DESCRIPTION = (
-    "A change is refused with a 400 naming both values when it would break "
-    "the ordering: the silence timeout may not exceed the call ceiling."
-)
-
-
-class AIBuilderBudgetSettingsUpdate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    conversation_safety_buffer_tokens: int | None = Field(
-        default=None,
-        ge=1,
-        le=AI_BUILDER_BUDGET_MAX_TOKENS,
-    )
-    minimum_conversation_budget_tokens: int | None = Field(
-        default=None,
-        ge=1,
-        le=AI_BUILDER_BUDGET_MAX_TOKENS,
-    )
-    max_attachments: int | None = Field(
-        default=None,
-        ge=1,
-        le=AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
-    )
-    max_message_chars: int | None = Field(
-        default=None,
-        ge=1,
-        le=AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
-    )
-    max_template_inspection_uncompressed_bytes: int | None = Field(
-        default=None,
-        ge=1,
-        le=AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
-    )
-    max_template_placeholders: int | None = Field(
-        default=None,
-        ge=1,
-        le=AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT,
-    )
-    review_evidence_max_input_tokens: int | None = Field(
-        default=None,
-        ge=1,
-        le=AI_BUILDER_BUDGET_MAX_TOKENS,
-        description=(
-            "Context-window ceiling, in tokens, for any request that carries run "
-            "evidence: the review's suggestions call and a review-backed proposal. "
-            "Send null to let the model's own context window decide."
-        ),
-    )
-    review_investigation_evidence_max_tokens: int | None = Field(
-        default=None,
-        ge=1,
-        le=AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS,
-        description=(
-            "Tokens of review evidence (facts, scopes, run and step metadata, "
-            "excerpts) a review-backed proposal prompt may carry, at most the "
-            "conservative system bound in "
-            "review_investigation_evidence_ceiling_tokens. Null, or the bound "
-            "itself, removes the tenant override so the tenant follows the bound."
-        ),
-    )
-    silence_timeout_seconds: StrictInt | None = Field(
-        default=None,
-        ge=1,
-        description=(
-            "Seconds the Builder waits for the provider's next chunk once it has "
-            "started answering. Send null to restore the deployment default. "
-            + AI_BUILDER_TIMING_ORDER_DESCRIPTION
-        ),
-    )
-    call_ceiling_seconds: StrictInt | None = Field(
-        default=None,
-        ge=1,
-        description=(
-            "Seconds one whole provider call may take, thinking included. Send "
-            "null to restore the deployment default. "
-            + AI_BUILDER_TIMING_ORDER_DESCRIPTION
-        ),
     )
 
 

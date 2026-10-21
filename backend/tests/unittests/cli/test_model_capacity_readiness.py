@@ -4,7 +4,6 @@ from uuid import UUID, uuid4
 import pytest
 
 from eneo.completion_models.domain.completion_model import CompletionModel
-from eneo.spaces.space_factory import SpaceFactory
 from eneo.tenants.tenant import TenantInDB
 from tests.flow_snapshot_fixtures import assistant_snapshot
 
@@ -49,27 +48,13 @@ def model(owner, *, output=4096):
 
 
 class Repository:
-    def __init__(self, owners, spaces=()):
+    def __init__(self, owners):
         self.owners = owners
-        self.spaces = spaces
 
     async def tenants(self, tenant_id):
         for owner in self.owners:
             if tenant_id is None or owner.id == tenant_id:
                 yield owner
-
-    async def builder_spaces(self, owner):
-        for space in self.spaces:
-            if space.tenant_id == owner.id:
-                yield space
-
-    async def active_provider_ids(self, owner):
-        return {
-            m.provider_id
-            for s in self.spaces
-            if s.tenant_id == owner.id
-            for m in s.completion_models
-        }
 
     async def published_flows(self, owner):
         for item in ():
@@ -78,49 +63,6 @@ class Repository:
     async def runs_for_tenant(self, owner):
         for item in ():
             yield item
-
-
-def space(owner, models):
-    result = SpaceFactory.create_space("space", owner.id)
-    result.id = uuid4()
-    result.completion_models = models
-    return result
-
-
-@pytest.mark.asyncio
-async def test_builder_reports_old_stored_values_without_claiming_verification():
-    from eneo.cli.model_capacity_readiness import report_tenant
-
-    owner = tenant()
-    old = model(owner)
-    other = model(owner, output=4097)
-    repository = Repository([owner], [space(owner, [old, other])])
-
-    result = await report_tenant(repository, owner)
-
-    assert len(result["models"]) == 2
-    records = {r["model_id"]: r for r in result["models"]}
-    record = records[str(old.id)]
-    assert record == {
-        "model_id": str(old.id),
-        "name": "model",
-        "provider_id": str(old.provider_id),
-        "provider_type": "openai",
-        "route": "openai/model",
-        "stored": {
-            "max_input_tokens": 16384,
-            "max_output_tokens": 4096,
-        },
-        "uses": {"builder": {"count": 1}},
-        "availability": {"builder": "ready"},
-        "missing_dimensions": [],
-        "verification": "unverified",
-    }
-    assert records[str(other.id)]["verification"] == "unverified"
-    assert records[str(other.id)]["stored"]["max_output_tokens"] == 4097
-    assert result["summary"]["unusable_models"] == 0
-    assert result["summary"]["usable_models"] == 2
-    assert result["summary"]["disabled_uses"] == []
 
 
 def version(owner, flow_id, assistant_ids, number=1, modes=None):
@@ -165,8 +107,8 @@ def version(owner, flow_id, assistant_ids, number=1, modes=None):
 
 
 class FlowRepository(Repository):
-    def __init__(self, owners, spaces=()):
-        super().__init__(owners, spaces)
+    def __init__(self, owners):
+        super().__init__(owners)
         self.flows = []
         self.runs = []
         self.versions = {}
@@ -187,6 +129,62 @@ class FlowRepository(Repository):
 
     async def assistant_model(self, owner, assistant_id):
         return self.assistants[owner.id, assistant_id]
+
+    def publish(self, owner, completion):
+        """A published flow whose one step runs ``completion``; its id."""
+        from eneo.flows.domain.flow import FlowSparse
+
+        flow_id, assistant_id = uuid4(), uuid4()
+        self.flows.append(
+            FlowSparse(
+                id=flow_id,
+                tenant_id=owner.id,
+                space_id=uuid4(),
+                name="private",
+                published_version=1,
+            )
+        )
+        self.versions[owner.id, flow_id, 1] = version(owner, flow_id, [assistant_id])
+        self.assistants[owner.id, assistant_id] = completion
+        return flow_id
+
+
+@pytest.mark.asyncio
+async def test_report_shows_stored_values_without_claiming_verification():
+    from eneo.cli.model_capacity_readiness import report_tenant
+
+    owner = tenant()
+    old = model(owner)
+    other = model(owner, output=4097)
+    repository = FlowRepository([owner])
+    flow_id = repository.publish(owner, old)
+    repository.publish(owner, other)
+
+    result = await report_tenant(repository, owner)
+
+    assert len(result["models"]) == 2
+    records = {r["model_id"]: r for r in result["models"]}
+    record = records[str(old.id)]
+    assert record == {
+        "model_id": str(old.id),
+        "name": "model",
+        "provider_id": str(old.provider_id),
+        "provider_type": "openai",
+        "route": "openai/model",
+        "stored": {
+            "max_input_tokens": 16384,
+            "max_output_tokens": 4096,
+        },
+        "uses": {"published_flow": {"count": 1, "ids": [str(flow_id)]}},
+        "availability": {"published_flow": "ready"},
+        "missing_dimensions": [],
+        "verification": "unverified",
+    }
+    assert records[str(other.id)]["verification"] == "unverified"
+    assert records[str(other.id)]["stored"]["max_output_tokens"] == 4097
+    assert result["summary"]["unusable_models"] == 0
+    assert result["summary"]["usable_models"] == 2
+    assert result["summary"]["disabled_uses"] == []
 
 
 @pytest.mark.asyncio
@@ -272,9 +270,7 @@ async def test_json_tenant_filter_exit_codes_and_content_allowlist(capsys):
 
     selected, foreign = tenant(), tenant()
     good, bad = model(selected), model(foreign, output=None)
-    repository = FlowRepository(
-        [selected, foreign], [space(selected, [good]), space(foreign, [bad])]
-    )
+    repository = FlowRepository([selected, foreign])
     for owner, completion in [(selected, good), (foreign, bad)]:
         fid, aid = uuid4(), uuid4()
         repository.flows.append(
@@ -322,7 +318,7 @@ async def test_json_tenant_filter_exit_codes_and_content_allowlist(capsys):
     assert all_reports[1]["summary"]["disabled_uses"] == [
         {
             "model_id": str(bad.id),
-            "uses": ["builder", "published_flow", "resumable_run"],
+            "uses": ["published_flow", "resumable_run"],
         }
     ]
     assert await run_report(repository, tenant_id=uuid4(), output_format="json") == 2
@@ -488,32 +484,24 @@ async def test_completion_step_without_a_model_leaves_the_report_incomplete(
 
 
 @pytest.mark.asyncio
-async def test_builder_eligibility_and_text_with_unknown_capacity(capsys):
+async def test_text_report_with_unknown_capacity(capsys):
     from eneo.cli.model_capacity_readiness import run_report
 
     owner = tenant()
-    unknown, disabled, inactive = model(owner, output=None), model(owner), model(owner)
+    unknown = model(owner, output=None)
     unknown.max_input_tokens = None
-    loaded = space(owner, [unknown, disabled, inactive])
-    disabled.is_org_enabled = False
-
-    class ActiveRepository(FlowRepository):
-        async def active_provider_ids(self, owner):
-            return {unknown.provider_id, disabled.provider_id}
-
-    repository = ActiveRepository([owner], [loaded])
+    repository = FlowRepository([owner])
+    repository.publish(owner, unknown)
     assert await run_report(repository, tenant_id=None, output_format="text") == 1
     output = capsys.readouterr().out
     assert str(unknown.id) in output
-    assert str(disabled.id) not in output
-    assert str(inactive.id) not in output
     assert 'Stored: {"max_input_tokens": null, "max_output_tokens": null}' in output
     assert "Missing: max_input_tokens, max_output_tokens" in output
     assert "Usable models: 0" in output
     assert "Unusable models: 1" in output
     assert "Availability: capacity_undeclared" in output
     assert "Verification: unverified" in output
-    assert f"Would disable {unknown.id}: builder" in output
+    assert f"Would disable {unknown.id}: published_flow" in output
 
 
 @pytest.mark.asyncio
@@ -542,47 +530,21 @@ async def test_incomplete_scan_emits_no_partial_report(capsys):
 
 
 @pytest.mark.asyncio
-async def test_structural_usability_uses_tenant_safety_and_runtime_zero():
+async def test_structural_usability_keeps_no_safety_margin_at_runtime():
     from eneo.cli.model_capacity_readiness import report_tenant
-    from eneo.flows.domain.flow import FlowSparse
 
     owner = tenant()
-    owner.flow_settings = {"ai_builder": {"conversation_safety_buffer_tokens": 10}}
     small = model(owner)
-    small.max_input_tokens = 11
-    repository = FlowRepository([owner], [space(owner, [small])])
-    fid, aid = uuid4(), uuid4()
-    repository.flows.append(
-        FlowSparse(
-            id=fid, tenant_id=owner.id, space_id=uuid4(), name="", published_version=1
-        )
-    )
-    repository.versions[owner.id, fid, 1] = version(owner, fid, [aid])
-    repository.assistants[owner.id, aid] = small
+    small.max_input_tokens = 1
+    repository = FlowRepository([owner])
+    repository.publish(owner, small)
     report = await report_tenant(repository, owner)
     assert report["models"][0]["availability"] == {
-        "builder": "capacity_too_small",
-        "published_flow": "ready",
+        "published_flow": "capacity_too_small",
     }
-    assert report["summary"]["unusable_models"] == 1
     assert report["summary"]["disabled_uses"] == [
-        {"model_id": str(small.id), "uses": ["builder"]}
+        {"model_id": str(small.id), "uses": ["published_flow"]}
     ]
-    small.max_input_tokens = 12
+    small.max_input_tokens = 2
     report = await report_tenant(repository, owner)
     assert report["summary"]["usable_models"] == 1
-
-
-# Mutant: the report resolves the policy with the deadline check on, so one
-# tenant whose deadlines conflict aborts a report that reads only the buffer.
-@pytest.mark.asyncio
-async def test_a_conflicting_deadline_pair_does_not_stop_the_report():
-    from eneo.cli.model_capacity_readiness import report_tenant
-
-    owner = tenant()
-    owner.flow_settings = {"ai_builder": {"call_ceiling_seconds": 1}}
-    repository = Repository([owner], [space(owner, [model(owner)])])
-
-    result = await report_tenant(repository, owner)
-
-    assert len(result["models"]) == 1

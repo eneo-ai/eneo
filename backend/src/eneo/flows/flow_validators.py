@@ -1357,8 +1357,7 @@ def validate_template_binding_scalar(
 
     What a DOCX placeholder may read: a value ``whole_reference_value`` knows
     that is a scalar. An explicit blank is allowed. Publication applies it to
-    persisted steps; the Builder applies the same rule to mappings an edit
-    keeps.
+    persisted steps.
     """
 
     if not binding.strip():
@@ -1707,8 +1706,7 @@ def _validate_template_binding_present(
     """Refuse a placeholder bound to a step field that is not a required field of one type.
 
     The fill step stops the run on null and on a key the step did not write,
-    and treats "" as a deliberate omission. The Builder makes its own bound
-    fields meet the rule; this is the rule for every other author.
+    and treats "" as a deliberate omission.
     """
 
     source = template_binding_structured_source(

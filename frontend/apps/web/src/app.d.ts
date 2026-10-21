@@ -24,9 +24,6 @@ declare global {
       /** Selected session in an assistant, useful for keeping history with pushState */
       conversation?: { id: string };
       tab?: string;
-      /** A change request carried from a package import to the flow's AI
-       *  Builder; consumed once by the flow page. */
-      aiBuilderPrefill?: string;
     }
     // interface Platform {}
   }

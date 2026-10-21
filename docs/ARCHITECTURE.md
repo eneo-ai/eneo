@@ -269,9 +269,8 @@ a tool changes something: a run that is started again calls the tool again, and
 Eneo does not prevent the repeated change.
 
 A step's model gets no MCP tools: Eneo rejects MCP-bearing current assistants,
-persisted Builder plans, packages, and historical published definitions before
-it mutates Flow state or performs external work. The Flow AI Builder proposes
-no tool step, and package export refuses a flow that has one.
+packages, and historical published definitions before it mutates Flow state or
+performs external work. Package export refuses a flow that has a tool step.
 
 Standalone assistants and conversations retain their separately owned MCP
 behavior. Flow accepts HTTP GET as an input source and sends terminal HTTP POST

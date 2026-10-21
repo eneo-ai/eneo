@@ -6,9 +6,6 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from eneo.flows.ai_builder.ai_builder_form_fields import (
-    extract_form_fields_from_metadata,
-)
 from eneo.flows.application.flow_authoring_refusal import FlowAuthoringRefusalCode
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftStepChangeKind,
@@ -29,13 +26,34 @@ from eneo.flows.flow_authoring_spec import (
     OutputMode,
     OutputType,
     StepSpec,
+    authoring_form_field,
 )
-from eneo.flows.flow_metadata import normalize_flow_metadata_for_write
+from eneo.flows.flow_metadata import (
+    form_fields_in_display_order,
+    normalize_flow_metadata_for_write,
+)
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from eneo.main.exceptions import BadRequestException
 from tests.unittests.flows.source_ref_runtime_test_support import (
     runtime_source_ref_text,
 )
+
+
+def extract_form_fields_from_metadata(
+    metadata_json: dict[str, Any],
+) -> list[FormFieldSpec] | None:
+    """The saved form fields as an edit reads them back: in display order,
+    each at its saved array index."""
+
+    raw_fields = metadata_json["form_schema"]["fields"]
+    saved = [field for field in raw_fields if isinstance(field, dict)]
+    index = {id(field): position for position, field in enumerate(raw_fields)}
+    fields = [
+        spec
+        for field in form_fields_in_display_order(saved)
+        if (spec := authoring_form_field(field, index=index[id(field)])) is not None
+    ]
+    return fields or None
 
 
 def _step_spec(
@@ -1820,13 +1838,13 @@ def test_every_reader_of_a_saved_unsupported_field_type_raises_the_persisted_rea
         {"name": "bad", "type": saved_type, "label": "Bad", "order": 1},
     ]
 
-    with pytest.raises(BadRequestException) as from_builder:
+    with pytest.raises(BadRequestException) as from_read_back:
         extract_form_fields_from_metadata({"form_schema": {"fields": saved}})
     with pytest.raises(BadRequestException) as from_compile:
         _form_fields_after(_authored(("ok", "text", "Ok")), saved)
 
     # The index names the saved array position, as the persisted read does.
-    assert "fields[1].type" in str(from_builder.value)
+    assert "fields[1].type" in str(from_read_back.value)
     assert "fields[1].type" in str(from_compile.value)
 
 
@@ -1838,12 +1856,12 @@ def test_a_saved_unsupported_field_type_is_reported_at_its_raw_array_index() -> 
         {"name": "bad", "type": "password", "label": "Bad"},
     ]
 
-    with pytest.raises(BadRequestException) as from_builder:
+    with pytest.raises(BadRequestException) as from_read_back:
         extract_form_fields_from_metadata({"form_schema": {"fields": saved}})
     with pytest.raises(BadRequestException) as from_compile:
         _form_fields_after(_authored(("ok", "text", "Ok")), saved)
 
-    assert "fields[2].type" in str(from_builder.value)
+    assert "fields[2].type" in str(from_read_back.value)
     assert "fields[2].type" in str(from_compile.value)
 
 

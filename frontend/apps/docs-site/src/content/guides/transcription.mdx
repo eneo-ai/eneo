@@ -28,7 +28,7 @@ Before you start, make sure the provider's endpoint is reachable from the Eneo b
 2. Give each space that needs the model access to it. In the space's **Settings**, under **Advanced Settings**, switch the model on in **Transcription models**.
 3. Check the result. Open a flow draft in the space, go to its **Transcription** stage and turn transcription on. The model is in the **Model** list.
 
-A flow stores the model it transcribes with, and Eneo never picks one on its own. To spare flow authors the choice, mark one transcription model as the organisation's default: open the model's **Edit** dialog and tick **Default** (**standard**). Flows that the AI Builder creates and flows that are imported then get that model filled in, in spaces that can use it. With no default marked, the author chooses the model in the flow's **Transcription** stage, and the flow cannot be published until one is chosen.
+A flow stores the model it transcribes with, and Eneo never picks one on its own. To spare flow authors the choice, mark one transcription model as the organisation's default: open the model's **Edit** dialog and tick **Default** (**standard**). Flows that are imported then get that model filled in, in spaces that can use it. With no default marked, the author chooses the model in the flow's **Transcription** stage, and the flow cannot be published until one is chosen.
 
 ## Set up live transcription
 
@@ -153,7 +153,7 @@ You can also tick **Default for new flows** in the dialog when you connect a ser
 
 What the default does:
 
-- When a flow draft that transcribes is saved without a choice of service, Eneo stores the default as the flow's service, whether or not the flow identifies speakers. This happens only in a space that can use the service, and it also covers flows that the AI Builder creates and flows that are imported. A flow whose author chose no service keeps that choice.
+- When a flow draft that transcribes is saved without a choice of service, Eneo stores the default as the flow's service, whether or not the flow identifies speakers. This happens only in a space that can use the service, and it also covers flows that are imported. A flow whose author chose no service keeps that choice.
 - The author sees the service in the flow's **Transcription** stage, marked "(default)", and can choose another.
 - The default only fills in drafts. A published flow keeps the service it was published with: marking another service, or clearing the mark, changes nothing for it.
 - Eneo never works out a default on its own. With no default marked, or in a space that cannot use the default, the author chooses.

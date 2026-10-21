@@ -11,10 +11,6 @@ describe("hasPermission", () => {
     expect(can("flows_view")).toBe(true);
     expect(can("flows_run")).toBe(true);
     expect(can("flows_manage")).toBe(true);
-    expect(can("flows_ai_builder")).toBe(true);
-    // Reviewing runs with the AI builder is a feature an organisation turns
-    // on per role; the legacy grant never implies it.
-    expect(can("flows_ai_builder_review")).toBe(false);
   });
 
   it("treats flows_manage as implying view and run", () => {
@@ -26,16 +22,15 @@ describe("hasPermission", () => {
     expect(can("flows_view")).toBe(true);
     expect(can("flows_run")).toBe(true);
     expect(can("flows_manage")).toBe(true);
-    expect(can("flows_ai_builder")).toBe(false);
   });
 
-  it("requires both manage and ai builder for builder-only access checks", () => {
+  it("requires every permission an allOf check names", () => {
     const can = hasPermission({
-      roles: [{ id: "1", name: "Builder Only", permissions: ["flows_ai_builder"] }],
+      roles: [{ id: "1", name: "Viewer", permissions: ["flows_view"] }],
       predefined_roles: []
     });
 
-    expect(can({ allOf: ["flows_manage", "flows_ai_builder"] })).toBe(false);
+    expect(can({ allOf: ["flows_view", "flows_manage"] })).toBe(false);
   });
 
   it("denies all flow access when the user has no roles", () => {
@@ -47,6 +42,5 @@ describe("hasPermission", () => {
     expect(can("flows_view")).toBe(false);
     expect(can("flows_run")).toBe(false);
     expect(can("flows_manage")).toBe(false);
-    expect(can("flows_ai_builder")).toBe(false);
   });
 });
