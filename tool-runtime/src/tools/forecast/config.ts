@@ -23,6 +23,12 @@ export const forecastConfigSchema = z
 export type ForecastConfig = z.infer<typeof forecastConfigSchema>;
 
 /**
+ * The identifier Eneo's catalog uses for the checkpoint at `model_path`: the one model a runtime
+ * has today. A call that names another model is refused, never served by this one.
+ */
+export const DEFAULT_FORECAST_MODEL = "default";
+
+/**
  * The Python with torch and timestral; the image installs it here, a developer may point
  * elsewhere. Read when asked, so a sandbox started later sees the environment of that moment.
  */
