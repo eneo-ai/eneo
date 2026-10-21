@@ -46,6 +46,8 @@ import { conversationUploads, type PanelContents } from "./side-panel/panel-cont
 import type { PreviewQuote } from "./side-panel/side-panel-store";
 import { composeQuotedQuestion } from "./side-panel/question-quote";
 import { SidePanel } from "./side-panel/side-panel";
+import type { ToolCallRecord } from "./side-panel/message-tool-calls";
+import { finishedToolCallIds, newlyFinishedToolCalls } from "./finished-tool-calls";
 import { SidePanelProvider, useSidePanel } from "./side-panel/use-side-panel";
 import { isExportableDocument } from "./side-panel/file-panel";
 import { appViewSubject, appViewTitle, messageAppViewCalls } from "@/features/mcp-apps/mcp-apps";
@@ -60,7 +62,7 @@ import { ChatTools, mcpConversationOptions } from "./mcp-controls";
 import type { PendingUpload } from "./message-files";
 import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 import { historyQueryKey } from "./session-actions";
-import { StartState } from "./start-state";
+import { StartState, type StartHeadingLevel } from "./start-state";
 import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
 import { useToolChoices } from "./use-tool-choices";
 
@@ -168,6 +170,19 @@ type ChatViewProps = {
   partnerToken?: ReactNode;
   activity: ActivityState | null;
   onActivityChange: (next: ActivityState | null) => void;
+  /**
+   * A tool call of this visit reached its result or failed, once per call
+   * (calls already in `initialMessages` are not reported). For a page that
+   * shows what the conversation's tools change, such as a flow's definition.
+   */
+  onToolCallFinished?: (call: ToolCallRecord) => void;
+  /** An answer ended: finished, stopped or failed. */
+  onAnswerFinished?: () => void;
+  /**
+   * Outline level of the start state's heading: 1 (default) on a chat page,
+   * lower where the chat sits inside a page with its own h1.
+   */
+  startHeadingLevel?: StartHeadingLevel;
 };
 
 /**
@@ -197,7 +212,10 @@ function ConversationView({
   modelSelector,
   partnerToken,
   activity,
-  onActivityChange
+  onActivityChange,
+  onToolCallFinished,
+  onAnswerFinished,
+  startHeadingLevel
 }: ChatViewProps) {
   const t = useTranslations();
   const { featureFlags, can } = useAppContext();
@@ -369,6 +387,7 @@ function ConversationView({
         if (mounted.current) {
           if (isAbort) announce(t("chat_announce_stopped"));
           else if (!isError) announce(t("chat_announce_answer_ready"));
+          onAnswerFinished?.();
         }
         // Auto-title after the first exchange of a fresh conversation (also when
         // the view has gone: the history then lists it under its title).
@@ -539,6 +558,20 @@ function ConversationView({
   const openAttachmentDialog = useCallback(() => {
     fileInput.current?.click();
   }, []);
+
+  // Tool calls that had finished before this visit are not news; the first
+  // run takes them as seen.
+  const seenToolCalls = useRef<Set<string> | null>(null);
+  const reportToolCall = useEffectEvent((call: ToolCallRecord) => onToolCallFinished?.(call));
+  useEffect(() => {
+    if (seenToolCalls.current === null) {
+      seenToolCalls.current = new Set(finishedToolCallIds(messages));
+      return;
+    }
+    for (const call of newlyFinishedToolCalls(messages, seenToolCalls.current)) {
+      reportToolCall(call);
+    }
+  }, [messages]);
 
   const started = messages.length > 0 || pendingQuestion !== null;
   const reportStarted = useEffectEvent((value: boolean) => onStartedChange?.(value));
@@ -890,6 +923,7 @@ function ConversationView({
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
           <StartState
             partner={partner}
+            headingLevel={startHeadingLevel}
             onPickStarter={(prompt) => {
               setInput(prompt);
               startTextareaRef.current?.focus();
