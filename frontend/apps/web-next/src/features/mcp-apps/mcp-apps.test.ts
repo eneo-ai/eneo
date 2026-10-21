@@ -15,34 +15,39 @@ function answer(
     isBundled?: boolean;
     appView?: Record<string, unknown> | null;
     approved?: boolean | null;
-    resultStatus?: string;
+    /** The `result_status` the stream's input chunk carried, and its output chunk's. */
+    inputStatus?: string;
+    outputStatus?: string;
     errorText?: string;
   }[]
 ): EneoUIMessage {
   return {
     id: "answer",
     role: "assistant",
-    parts: calls.map(
-      (call) =>
-        ({
-          type: "dynamic-tool",
-          toolName: call.toolName,
-          toolCallId: call.id,
-          state: call.state ?? "output-available",
-          input: call.input ?? {},
-          output: { status: "succeeded" },
-          errorText: call.errorText,
-          callProviderMetadata: {
-            eneo: {
-              server_name: "runtime",
-              is_bundled: call.isBundled ?? true,
-              app_view: call.appView === undefined ? view : call.appView,
-              approved: call.approved ?? null,
-              ...(call.resultStatus ? { result_status: call.resultStatus } : {})
-            }
-          }
-        }) as unknown as Part
-    )
+    parts: calls.map((call) => {
+      const eneo = {
+        server_name: "runtime",
+        is_bundled: call.isBundled ?? true,
+        app_view: call.appView === undefined ? view : call.appView,
+        approved: call.approved ?? null
+      };
+      // The AI SDK keeps the input chunk's metadata and the output chunk's apart.
+      return {
+        type: "dynamic-tool",
+        toolName: call.toolName,
+        toolCallId: call.id,
+        state: call.state ?? "output-available",
+        input: call.input ?? {},
+        output: { status: "succeeded" },
+        errorText: call.errorText,
+        callProviderMetadata: {
+          eneo: { ...eneo, ...(call.inputStatus ? { result_status: call.inputStatus } : {}) }
+        },
+        ...(call.outputStatus
+          ? { resultProviderMetadata: { eneo: { ...eneo, result_status: call.outputStatus } } }
+          : {})
+      } as unknown as Part;
+    })
   };
 }
 
@@ -104,32 +109,35 @@ describe("view-bearing calls", () => {
     expect(hasResult({ resultStatus: "pending", state: "input-available" }, false)).toBe(false);
   });
 
-  // The SDK keeps the metadata of a call's input part, which was sent while
-  // the call was approved and about to run; its output part says it finished.
+  // A streamed call's input chunk was sent while the call was approved and
+  // about to run; its output chunk says how it ended.
   it("hands the result to the view of a streamed call once it has finished", () => {
-    const [done] = messageAppViewCalls(
-      answer([{ id: "c", toolName: "create_chart", resultStatus: "approved" }])
-    );
-    expect(hasResult(done!, false)).toBe(true);
     const calls = messageAppViewCalls(
       answer([
+        {
+          id: "done",
+          toolName: "create_chart",
+          inputStatus: "approved",
+          outputStatus: "succeeded"
+        },
         {
           id: "failed",
           toolName: "create_chart",
           state: "output-error",
           errorText: "failed",
-          resultStatus: "approved"
+          inputStatus: "approved",
+          outputStatus: "failed"
         },
         {
           id: "running",
           toolName: "create_chart",
           state: "input-available",
-          resultStatus: "approved"
+          inputStatus: "approved"
         }
       ])
     );
-    expect(calls.map((call) => call.toolCallId)).toEqual(["running"]);
-    expect(hasResult(calls[0]!, false)).toBe(false);
+    expect(calls.map((call) => call.toolCallId)).toEqual(["done", "running"]);
+    expect(calls.map((call) => hasResult(call, false))).toEqual([true, false]);
   });
 
   it("parses a view defensively", () => {

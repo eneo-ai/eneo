@@ -1376,8 +1376,10 @@ class MCPProxySession:
             result = self._truncate_tool_result(result, server.purpose)
             if is_error:
                 blocks: list[Any] = list(result.get("content") or [])
+                # Eneo's notes start on a line of their own: the adapter joins
+                # a result's text blocks as they are.
                 if auth_denied:
-                    blocks.append({"type": "text", "text": AUTH_DENIED_NOTICE})
+                    blocks.append({"type": "text", "text": f"\n{AUTH_DENIED_NOTICE}"})
                 # Invalid arguments need a corrected call, not a different file
                 # reader. Keep recovery guidance after truncation in either case.
                 hint = (
@@ -1387,7 +1389,7 @@ class MCPProxySession:
                     else self._reference_fallback_hint(tool_name, arguments)
                 )
                 if hint:
-                    blocks.append({"type": "text", "text": hint})
+                    blocks.append({"type": "text", "text": f"\n{hint}"})
                 if auth_denied or hint:
                     result = {**result, "content": blocks}
             return result

@@ -27,14 +27,15 @@ type ToolLike = {
 /**
  * The `eneo` provider metadata of a tool part (server_name, title, purpose,
  * approved), wherever the AI SDK put it: saved sessions use
- * `providerMetadata`, live streams `callProviderMetadata` /
- * `resultProviderMetadata`.
+ * `providerMetadata`; live streams the output chunk's `resultProviderMetadata`
+ * once the call has finished, which is newer than the input chunk's
+ * `callProviderMetadata` (still "pending" or "approved").
  */
 export function eneoToolMetadata(part: ToolLike): Record<string, unknown> {
   for (const provider of [
     part.providerMetadata,
-    part.callProviderMetadata,
-    part.resultProviderMetadata
+    part.resultProviderMetadata,
+    part.callProviderMetadata
   ]) {
     const eneo =
       provider && typeof provider === "object" && "eneo" in provider

@@ -347,12 +347,12 @@ def test_build_tool_result_with_references_skips_unciteable_resources():
     assert refs == []
 
 
-def test_build_tool_result_with_references_keeps_text_blocks_apart():
-    # A refusal from the tool and the recovery note Eneo appends are two blocks.
+def test_build_tool_result_with_references_keeps_eneos_note_on_its_own_line():
+    # A refusal from the tool, and the recovery note the proxy appends to it.
     llm_text, display_text, refs, _ = _build_tool_result_with_references(
         content_list=[
             {"type": "text", "text": "SHORT_HISTORY: too short. Request ID: r1"},
-            {"type": "text", "text": "The attached file itself is still readable."},
+            {"type": "text", "text": "\nThe attached file itself is still readable."},
         ],
         tool_call_id="call_1",
         mcp_tool_name="server__tool",
@@ -363,6 +363,33 @@ def test_build_tool_result_with_references_keeps_text_blocks_apart():
     assert llm_text == expected
     assert display_text == expected
     assert refs == []
+
+
+def test_build_tool_result_with_references_joins_a_servers_text_blocks_as_they_are():
+    # A server may split one payload across text blocks.
+    llm_text, display_text, _, _ = _build_tool_result_with_references(
+        content_list=[
+            {"type": "text", "text": '{"rows": [1, '},
+            {"type": "text", "text": "2]}"},
+        ],
+        tool_call_id="call_1",
+        mcp_tool_name="server__tool",
+        existing_prefixes=set(),
+    )
+
+    assert llm_text == display_text == '{"rows": [1, 2]}'
+
+
+def test_build_tool_result_with_references_leaves_empty_text_blocks_empty():
+    # Empty, so a failed call falls back to "Tool execution failed".
+    llm_text, display_text, _, _ = _build_tool_result_with_references(
+        content_list=[{"type": "text", "text": ""}, {"type": "text", "text": ""}],
+        tool_call_id="call_1",
+        mcp_tool_name="server__tool",
+        existing_prefixes=set(),
+    )
+
+    assert llm_text == display_text == ""
 
 
 def test_build_tool_result_with_references_turns_image_blocks_into_generated_images():
