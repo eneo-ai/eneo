@@ -1,4 +1,6 @@
 {
+  "flow_step_editor_save_failed": "Steget kunde inte sparas. Försök igen.",
+  "flow_step_editor_value_invalid": "Ett värde har fel format. Kontrollera fältet och spara igen.",
   "access_disabled": "Din åtkomst till Eneo har tillfälligt inaktiverats. Kontakta din administratör för att återfå åtkomsten för din organisation.",
   "activation_failed": "Aktiveringen misslyckades – ditt konto kunde inte skapas ännu. Be din administratör skapa en inbjudan för din e-postadress och försök sedan igen.",
   "mcp_tools_count": "{count, plural, one {# verktyg} other {# verktyg}}",

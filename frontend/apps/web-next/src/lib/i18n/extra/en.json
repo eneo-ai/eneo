@@ -1,4 +1,6 @@
 {
+  "flow_step_editor_save_failed": "The step could not be saved. Try again.",
+  "flow_step_editor_value_invalid": "A value has the wrong format. Check the field and save again.",
   "access_disabled": "Your access to Eneo has been temporarily disabled. Please contact your administrator to regain access for your organisation.",
   "activation_failed": "Activation failed — your account could not be created yet. Ask your administrator to create an invitation for your email address, then try again.",
   "mcp_tools_count": "{count, plural, one {# tool} other {# tools}}",

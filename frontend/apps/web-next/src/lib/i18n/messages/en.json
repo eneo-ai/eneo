@@ -8687,6 +8687,8 @@
   "speaker_service_note_unreachable": "Unreachable",
   "speaker_service_note_timeout": "No answer in time",
   "speaker_service_note_malformed": "Unrecognised answer",
+  "flow_step_editor_save_failed": "The step could not be saved. Try again.",
+  "flow_step_editor_value_invalid": "A value has the wrong format. Check the field and save again.",
   "activation_failed": "Activation failed — your account could not be created yet. Ask your administrator to create an invitation for your email address, then try again.",
   "mcp_tools_count": "{count, plural, one {# tool} other {# tools}}",
   "mcp_toggle_server": "Enable {name}",
