@@ -1019,7 +1019,10 @@ one row per day, oldest first: an ISO date column (YYYY-MM-DD) and a numeric
 value column, with at least 28 days of history. An empty cell is a day whose
 value is unknown, not zero. Data per hour or per event, days without a row or
 other date formats are first turned into one row per day with **Ask a file**
-(`query_table` with export). A forecast reaches at most 180 days ahead.
+(`query_table` with export). A forecast reaches at most 180 days ahead and
+starts the day after the last day with a value: empty days at the end of the
+file, as in a sheet laid out for the whole year, are left out, and the method
+under the chart says how many.
 
 For each day the forecast gives the median (P50: half the outcomes are expected
 below it, half above) and an interval (P10–P90). The interval holds for each day on its own: about eight outcomes in
