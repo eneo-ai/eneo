@@ -11,7 +11,8 @@ vi.mock("@lucide/svelte", () => ({
   FilePlus: "FilePlus",
   FileSearch: "FileSearch",
   Globe: "Globe",
-  Image: "Image"
+  Image: "Image",
+  TrendingUp: "TrendingUp"
 }));
 
 import {

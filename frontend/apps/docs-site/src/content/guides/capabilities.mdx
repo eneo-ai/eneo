@@ -30,7 +30,7 @@ import { Callout } from 'nextra/components'
 | **Create a file** (_Skapa fil_) | Lets the assistant draft and revise Markdown documents in Eneo, export Word (DOCX) and PDF, fill templates, and create Excel (XLSX) workbooks                                 | The provider **built into Eneo**, or an external MCP server                             |
 | **Charts** (_Diagram_)          | Lets the assistant compare values and show trends with interactive bar, line, pie and scatter charts, or export PNG images when requested                                     | The provider **built into Eneo**, or an external MCP server                             |
 | **Compute** (_Beräkning_)       | Lets the assistant run exact arithmetic, statistics, date and text calculations in an isolated JavaScript sandbox, show the result as a table and export it as CSV           | The provider **built into Eneo**, or an external MCP server                             |
-| **Forecast** (_Prognos_)        | Lets the assistant forecast the coming days of a daily series in a CSV or Excel file: the most likely value and an interval for each day, checked against the last days      | The provider **built into Eneo**, or an external MCP server                             |
+| **Forecast** (_Prognos_)        | Lets the assistant forecast the coming days of a daily series in a CSV or Excel file: a median and an interval for each day, checked against the last days      | The provider **built into Eneo**, or an external MCP server                             |
 
 The key ideas:
 
@@ -1021,11 +1021,13 @@ value is unknown, not zero. Data per hour or per event, days without a row or
 other date formats are first turned into one row per day with **Ask a file**
 (`query_table` with export). A forecast reaches at most 180 days ahead.
 
-For each day the forecast gives the most likely value (P50) and an interval
-(P10–P90). The interval holds for each day on its own: about eight outcomes in
+For each day the forecast gives the median (P50: half the outcomes are expected
+below it, half above) and an interval (P10–P90). The interval holds for each day on its own: about eight outcomes in
 ten fall inside it when the model fits the data, and its bounds are not added
 across days. The tool also checks how the same forecast would have done on the
-last days of the history, compared with repeating last week.
+last days of the history, compared with repeating last week. The check needs
+history before those days as well: with a short history or too many missing
+days it is unavailable, and the result says why.
 
 The bundled forecast view shows the recent history, the forecast and its
 interval, opening on the days ahead:
