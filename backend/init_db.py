@@ -11,7 +11,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from eneo.server.dependencies.predefined_roles import (
     load_predefined_roles_from_config,
 )
-from eneo.users.password import validate_new_local_password
+from eneo.users.password import (
+    PasswordPolicyViolationError,
+    validate_new_local_password,
+)
 
 
 # Configuration
@@ -118,7 +121,15 @@ def add_tenant_user(
                     f"{tenant_name}. Set DEFAULT_USER_EMAIL to that address or "
                     "choose another DEFAULT_USER_NAME."
                 )
-            salt, hashed_pass = create_salt_and_hashed_password(user_password)
+            try:
+                salt, hashed_pass = create_salt_and_hashed_password(user_password)
+            except PasswordPolicyViolationError as e:
+                # Caught by the generic handler below, this left a fresh
+                # install with no tenant or user and a zero exit status.
+                raise SystemExit(
+                    f"Refusing to create default user {user_email}: "
+                    f"DEFAULT_USER_PASSWORD is not accepted. {e}"
+                ) from e
             add_user_query = sql.SQL(
                 "INSERT INTO users (username, email, password, salt, tenant_id, used_tokens, state, password_changed_at, password_change_required) VALUES (%s, %s, %s, %s, %s, %s, %s, now(), %s) RETURNING id"
             )

@@ -27,6 +27,34 @@ async def test_baseline_seed_keeps_real_password_hashing(admin_user):
     assert AuthService.verify_password(password, hashed_password)
 
 
+@pytest.mark.integration
+async def test_seed_refuses_a_password_below_the_local_policy(test_settings):
+    import psycopg2
+
+    from init_db import add_tenant_user
+
+    conn = psycopg2.connect(
+        host=test_settings.postgres_host,
+        port=test_settings.postgres_port,
+        dbname=test_settings.postgres_db,
+        user=test_settings.postgres_user,
+        password=test_settings.postgres_password,
+    )
+    try:
+        with pytest.raises(SystemExit, match="DEFAULT_USER_PASSWORD"):
+            add_tenant_user(
+                conn,
+                tenant_name=f"short-seed-{uuid4().hex[:8]}",
+                quota_limit=1000000,
+                user_name="short_seed_user",
+                user_email="short-seed@example.com",
+                user_password="x" * (LOCAL_PASSWORD_POLICY.min_length - 1),
+            )
+    finally:
+        conn.rollback()
+        conn.close()
+
+
 async def _create_local_user(
     client, super_api_key: str, *, password_change_required: bool | None = None
 ) -> tuple[str, str]:
