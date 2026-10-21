@@ -1,8 +1,6 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
 
-    Licensed under the MIT License.
-
     MCP server controls for the chat input toolbar: pick which of the partner's
     MCP servers are active for this conversation and whether tool calls run
     automatically or require per-call approval. State is owned by the parent

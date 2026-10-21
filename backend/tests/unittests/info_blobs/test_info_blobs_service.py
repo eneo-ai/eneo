@@ -124,8 +124,22 @@ async def test_get_by_website_page_projects_original_availability(setup: Setup):
         website_id=website_id,
         limit=3,
         cursor=cursor,
+        q="",
+        prefix="",
     )
     setup.repo.hydrate_original_availability.assert_awaited_once_with([stored])
+
+
+async def test_website_folder_listing_requires_content_read_permission(setup: Setup):
+    website_id = uuid4()
+    setup.service.space_service.get_space_by_website.return_value = MagicMock()
+    actor = setup.service.actor_manager.get_space_actor_from_space.return_value
+    actor.can_read_info_blobs.return_value = False
+
+    with pytest.raises(UnauthorizedException):
+        await setup.service.get_website_folders(website_id)
+
+    setup.repo.get_website_folders.assert_not_awaited()
 
 
 async def test_update_fails_if_info_blob_with_same_name_exists(setup: Setup):

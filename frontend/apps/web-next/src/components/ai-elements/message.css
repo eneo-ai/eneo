@@ -1,0 +1,81 @@
+/* Scoped to rendered answers; colours follow the existing Eneo/Astryx theme. */
+@layer utilities {
+  .eneo-answer {
+    overflow-wrap: anywhere;
+  }
+
+  .eneo-answer [data-streamdown="code-block"],
+  .eneo-answer [data-streamdown="mermaid-block"] {
+    margin-block: 1.25rem;
+    border-color: var(--color-border);
+    border-radius: var(--radius-container);
+    overflow: hidden;
+  }
+
+  .eneo-answer [data-streamdown="code-block-body"] {
+    font-size: 0.875rem;
+    line-height: 1.7;
+    overflow-wrap: normal;
+  }
+
+  .eneo-answer [data-streamdown="blockquote"] {
+    border-color: var(--color-border);
+    color: var(--color-text-secondary);
+    font-style: normal;
+  }
+
+  /* Mermaid's dark edge labels fall just below 4.5:1. Use the app's paired
+     surface/text tokens instead of its independently chosen label colours. */
+  .eneo-answer [data-streamdown="mermaid"] .edgeLabel p {
+    background-color: var(--color-background-surface) !important;
+    color: var(--color-text-primary) !important;
+  }
+
+  /* Give zoom controls their own row instead of covering diagram labels.
+     Streamdown sets an inline canvas height; let the toolbar join its layout. */
+  .eneo-answer [data-streamdown="mermaid"] > div {
+    height: auto !important;
+  }
+
+  .eneo-answer [data-streamdown="mermaid"] > div > div:has(> button) {
+    position: static;
+    flex-direction: row;
+    align-self: flex-end;
+    margin: 0.5rem;
+  }
+
+  .eneo-answer [data-streamdown="code-block"] button:focus-visible,
+  .eneo-answer [data-streamdown="mermaid-block"] button:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+
+  @media (pointer: coarse) {
+    .eneo-answer [data-streamdown="code-block"] button,
+    .eneo-answer [data-streamdown="mermaid-block"] button {
+      min-width: 44px;
+      min-height: 44px;
+    }
+  }
+}
+
+/* KaTeX ships unlayered CSS. Keep these two overrides scoped to answers. */
+.eneo-answer .katex {
+  font-size: 1.08em;
+}
+
+.eneo-answer .katex-display {
+  margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /*
+   * The global 0.01ms transition rule also affects Mermaid's temporary SVG
+   * outside the answer. Mermaid measures it synchronously: transitioning
+   * transforms produce a viewBox for intermediate positions and clip nodes.
+   */
+  svg[id^="mermaid-"],
+  svg[id^="mermaid-"] * {
+    transition-property: none !important;
+  }
+}

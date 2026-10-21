@@ -12,7 +12,8 @@ type Query = { offset?: number; limit?: number; skip?: number };
 
 const state = vi.hoisted(() => ({
   space: null as unknown,
-  progress: [] as unknown[],
+  /** The running syncs; a promise answers when it settles. */
+  progress: [] as unknown[] | Promise<unknown[]>,
   /** An item's skipped list; "error" fails the request, a promise answers when it settles. */
   skipped: {} as Record<string, unknown>,
   /** An item's documents, or a function of the requested page (a promise answers when it settles). */
@@ -67,7 +68,7 @@ vi.mock("@/lib/api/browser", () => {
   ): Answer | Promise<Answer> => {
     const itemId = options?.params?.path?.integration_knowledge_id ?? "";
     if (path === "/api/v1/spaces/{id}/knowledge/integrations/sync-progress/") {
-      return { data: { items: state.progress } };
+      return Promise.resolve(state.progress).then((items) => ({ data: { items } }));
     }
     if (path.endsWith("/documents/skipped/")) {
       state.requests.push(`skipped ${itemId}`);
@@ -712,7 +713,7 @@ describe("WrapperDetail navigation", () => {
     fireEvent.click(link);
 
     const heading = await screen.findByRole("heading", { level: 2, name: "Protokoll" });
-    await waitFor(() => expect(document.activeElement).toBe(heading), { timeout: 1500 });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
   });
 
   it("moves focus to the next folder's row when one is deleted from its row", async () => {
@@ -737,14 +738,12 @@ describe("WrapperDetail navigation", () => {
     await waitFor(() =>
       expect(within(overview).queryByRole("link", { name: "Protokoll" })).toBeNull()
     );
-    await waitFor(
-      () =>
-        expect(document.activeElement).toBe(
-          within(screen.getByRole("table", { name: "Mappar i Byggnad" })).getByRole("link", {
-            name: "Rutiner"
-          })
-        ),
-      { timeout: 1500 }
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(screen.getByRole("table", { name: "Mappar i Byggnad" })).getByRole("link", {
+          name: "Rutiner"
+        })
+      )
     );
   });
 
@@ -980,9 +979,7 @@ describe("WrapperDetail navigation", () => {
 
     expect(screen.getByRole("tab", { name: /Problem/ }).getAttribute("aria-selected")).toBe("true");
     expect(showProblems.isConnected).toBe(false);
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
-      timeout: 1500
-    });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
   });
 });
 
@@ -1002,9 +999,8 @@ describe("WrapperDetail documents", () => {
     focusFixup();
 
     expect(await screen.findByRole("button", { name: /Dokument 51\.docx/ })).toBeTruthy();
-    await waitFor(
-      () => expect(document.activeElement).toBe(screen.getByRole("region", { name: "Mallar" })),
-      { timeout: 1500 }
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("region", { name: "Mallar" }))
     );
     expect(screen.getByText(/^Visar 51–60 av 60/)).toBeTruthy();
     announcements.stop();
@@ -1243,9 +1239,7 @@ describe("WrapperDetail problems", () => {
     fireEvent.click(retry);
 
     await waitFor(() => expect(screen.queryByRole("button", { name: "Försök igen" })).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
-      timeout: 1500
-    });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
   });
 
   it("shows failed folders without speaking the banner, on every return from Problems or later", async () => {
@@ -1273,11 +1267,26 @@ describe("WrapperDetail problems", () => {
     expect(liveRegion()).toBe("");
   });
 
+  it("says nothing of a sync that already ran when the page opened", async () => {
+    const { said } = recordAnnouncements();
+    const answer = holdProgress();
+    show([mall]);
+    await nextFrame();
+
+    answer([running("i1", 4)]);
+    expect(await screen.findByRole("heading", { name: "Synk pågår" })).toBeTruthy();
+    await nextFrame();
+    expect(said).toEqual([]);
+  });
+
   it("tells a sync that failed here once, by the sync's own announcement", async () => {
     const { said } = recordAnnouncements();
-    state.progress = [running("i1", 4)];
+    const answer = holdProgress();
     const { queryClient } = show([mall]);
+    await nextFrame();
+    answer([running("i1", 4)]);
     expect(await screen.findByRole("heading", { name: "Synk pågår" })).toBeTruthy();
+    await nextFrame();
 
     state.space = makeSpace({
       integrations: [
@@ -1297,6 +1306,22 @@ describe("WrapperDetail problems", () => {
     expect(said).not.toContain("Senaste synken av 1 mapp misslyckades");
   });
 });
+
+/** Holds the progress poll's answer back until it is given: the page opens before it knows what runs. */
+function holdProgress() {
+  let answer!: (items: unknown[]) => void;
+  state.progress = new Promise((resolve) => {
+    answer = resolve;
+  });
+  return answer;
+}
+
+/** Lets a frame pass: Astryx writes an announcement into its region in the next frame. */
+function nextFrame() {
+  return act(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve)))
+  );
+}
 
 function running(itemId: string, done: number) {
   return {

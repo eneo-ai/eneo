@@ -15,7 +15,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import { browserApi } from "@/lib/api/browser";
-import { rescueFocus } from "@/lib/focus-rescue";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { useHydrated } from "@/lib/hooks/use-hydrated";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { IntegrationActions, WrapperActions } from "../actions";
@@ -118,8 +118,9 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const baseId = useId();
   const panelId = `${baseId}-panel`;
   const tabId = (tab: SourceTab) => `${baseId}-tab-${tab}`;
+  const rescue = useFocusRescue();
   // By id, not a ref: the in-place links that call it are built during render (react-hooks/refs).
-  const focusPanelIfLost = () => rescueFocus(document.getElementById(panelId));
+  const focusPanelIfLost = () => rescue(document.getElementById(panelId));
   // The view follows the address: a navigation here with other parameters (a
   // link, a toast's Show) changes it. An in-place change sets the view and
   // writes the address it reads from, so the two never disagree.
@@ -140,7 +141,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const { view } = shown;
   const { tab } = view;
 
-  const { progress, queued } = useSyncProgress();
+  const { progress, queued, loaded: progressLoaded } = useSyncProgress();
   const summary = summarizeSource(source.items, progress, queued);
   const syncActive = isSyncActive(summary);
   const multiple = source.items.length > 1;
@@ -171,7 +172,11 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const skippedTotal = skippedLoaded
     ? source.items.reduce((sum, item) => sum + (skippedByItem[item.id]?.total ?? 0), 0)
     : null;
-  useSourceAnnouncements(source.name, summary, problems ? problemCount : null);
+  useSourceAnnouncements(
+    source.name,
+    progressLoaded ? summary : null,
+    problems ? problemCount : null
+  );
 
   const listHref = `/spaces/${routeId}/knowledge?tab=integrations`;
   const adminIntegrationsUrl = hydrated
@@ -205,7 +210,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
       next.tab === "content" && next.folder && next.folder !== view.folder
         ? `folder-documents-${next.folder}`
         : null;
-    rescueFocus(
+    rescue(
       () =>
         (folderHeading ? document.getElementById(folderHeading) : null) ??
         document.getElementById(panelId)

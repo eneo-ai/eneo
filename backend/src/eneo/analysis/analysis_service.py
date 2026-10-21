@@ -1,4 +1,3 @@
-# MIT License
 import asyncio
 from collections import Counter
 from datetime import datetime, timedelta, timezone

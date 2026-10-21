@@ -72,6 +72,11 @@ export default async function LoginPage({
           <AlertDescription>{t("logout_success")}</AlertDescription>
         </Alert>
       )}
+      {message === "password_changed" && (
+        <Alert>
+          <AlertDescription>{t("password_changed_login_again")}</AlertDescription>
+        </Alert>
+      )}
       {multiTenantFederation ? (
         <>
           <TenantFederationLogin next={next} />

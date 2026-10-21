@@ -1,5 +1,3 @@
-# MIT License
-
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, AsyncIterator, Optional, cast
 from uuid import UUID, uuid4

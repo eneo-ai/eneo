@@ -1,10 +1,11 @@
 import { describe, expect, test } from "vitest";
+import { generatePassword } from "@eneo/eneo-js/auth/password-generator";
 import {
   firstInvalidPasswordField,
   getPasswordPolicyChecks,
   normalizeLocalPasswordCapability,
   newPasswordsMatch,
-  isCurrentPasswordChangeDialogSubmission,
+  isCurrentPasswordChangeSubmission,
   validateNewPassword,
   validateNewPasswordPair,
   validatePasswordChange,
@@ -125,44 +126,24 @@ describe("live password policy feedback", () => {
   });
 });
 
-describe("administrator password entry", () => {
+describe("new password and confirmation", () => {
   const newPassword = "a sufficiently long new password";
 
   test.each(["a", "å", "🔑"])("accepts 12 characters and rejects 11 for %s", (character) => {
     const accepted = character.repeat(12);
     const rejected = character.repeat(11);
     expect(
-      validateNewPasswordPair(
-        { newPassword: accepted, confirmPassword: accepted },
-        eneoCapability,
-        false
-      )
+      validateNewPasswordPair({ newPassword: accepted, confirmPassword: accepted }, eneoCapability)
     ).toEqual({});
     expect(
-      validateNewPasswordPair(
-        { newPassword: rejected, confirmPassword: rejected },
-        eneoCapability,
-        false
-      )
+      validateNewPasswordPair({ newPassword: rejected, confirmPassword: rejected }, eneoCapability)
     ).toEqual({ newPassword: "too_short" });
-  });
-
-  test("allows updating account details without changing the password", () => {
-    expect(
-      validateNewPasswordPair({ newPassword: "", confirmPassword: "" }, eneoCapability, false)
-    ).toEqual({});
   });
 
   test("requires a password and confirmation when creating an account", () => {
     expect(
       validateNewPasswordPair({ newPassword: "", confirmPassword: "" }, eneoCapability)
     ).toEqual({ newPassword: "required", confirmPassword: "required" });
-  });
-
-  test("sets a new password without requiring the current password", () => {
-    expect(
-      validateNewPasswordPair({ newPassword, confirmPassword: newPassword }, eneoCapability, false)
-    ).toEqual({});
   });
 
   test.each([
@@ -178,7 +159,48 @@ describe("administrator password entry", () => {
       { newPassword: "too_long_bytes" }
     ]
   ])("rejects invalid password pairs: %j", (values, errors) => {
-    expect(validateNewPasswordPair(values, eneoCapability, false)).toEqual(errors);
+    expect(validateNewPasswordPair(values, eneoCapability)).toEqual(errors);
+  });
+});
+
+describe("generated administrator passwords", () => {
+  const flags = [
+    "requiresUppercase",
+    "requiresLowercase",
+    "requiresNumber",
+    "requiresSymbol"
+  ] as const;
+
+  // The shared generator and this app's validator must agree on every policy
+  // the backend can send, or an administrator could issue a refused password.
+  test.each(
+    Array.from({ length: 2 ** flags.length }, (_, mask) =>
+      Object.fromEntries(flags.map((flag, bit) => [flag, (mask & (1 << bit)) !== 0]))
+    )
+  )("meet the policy %j", (classes) => {
+    for (const [minLength, maxBytes] of [
+      [12, 72],
+      [40, 72],
+      [12, 16]
+    ]) {
+      const capability = {
+        source: "eneo" as const,
+        policy: {
+          requiresUppercase: false,
+          requiresLowercase: false,
+          requiresNumber: false,
+          requiresSymbol: false,
+          ...classes,
+          minLength,
+          maxBytes
+        }
+      };
+      for (let i = 0; i < 25; i++) {
+        expect(
+          validateNewPassword(generatePassword(capability.policy), capability)
+        ).toBeUndefined();
+      }
+    }
   });
 });
 
@@ -219,9 +241,9 @@ describe("password change validation", () => {
   });
 
   test("rejects a result from a closed or subsequently reopened dialog", () => {
-    expect(isCurrentPasswordChangeDialogSubmission(true, 3, 3)).toBe(true);
-    expect(isCurrentPasswordChangeDialogSubmission(false, 4, 3)).toBe(false);
-    expect(isCurrentPasswordChangeDialogSubmission(true, 4, 3)).toBe(false);
+    expect(isCurrentPasswordChangeSubmission(true, 3, 3)).toBe(true);
+    expect(isCurrentPasswordChangeSubmission(false, 4, 3)).toBe(false);
+    expect(isCurrentPasswordChangeSubmission(true, 4, 3)).toBe(false);
   });
 
   test("rejects a mistyped confirmation", () => {

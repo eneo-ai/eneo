@@ -22,6 +22,7 @@ const PUBLIC_PREFIXES = [
   "/logout",
   "/healthz",
   "/deactivated",
+  "/password-change",
   "/activate",
   // The invitation notice (links to /login; Zitadel registration is not ported).
   "/invite",
@@ -75,6 +76,10 @@ function createSecurityRequestHeaders(request: NextRequest, nonce: string, csp: 
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);
+  // The page being rendered, for server-side redirects that should bring the
+  // user back here afterwards (see lib/api/server.ts). Set here so a client
+  // cannot supply its own value.
+  requestHeaders.set("x-eneo-path", request.nextUrl.pathname + request.nextUrl.search);
   return requestHeaders;
 }
 
@@ -125,7 +130,7 @@ export async function proxy(request: NextRequest) {
   const apiRequest = pathname.startsWith("/api/");
   const publicPage = isPublic(pathname);
   // These public pages can consume an existing session during RSC rendering.
-  const sessionPage = ["/deactivated", "/activate", "/module-login"].some(
+  const sessionPage = ["/deactivated", "/activate", "/module-login", "/password-change"].some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
   const pass = () => authenticatedResponse(securityRequestHeaders, csp);
