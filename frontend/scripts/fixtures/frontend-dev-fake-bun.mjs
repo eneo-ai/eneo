@@ -26,6 +26,9 @@ function runWorker(kind) {
 const command = args.join(" ");
 if (command === "run --cwd packages/ui build:dev") {
   record("build:start");
+} else if (command === "run --cwd packages/widget-loader build:dev") {
+  record("loader:start");
+  process.exit(Number(process.env.ENEO_FRONTEND_DEV_FIXTURE_LOADER_EXIT ?? 0));
 } else if (command === "run --cwd packages/ui dev") {
   runWorker("ui");
 } else if (command === "run --cwd apps/web dev") {

@@ -1609,6 +1609,7 @@
   "integration_announce_sync_stopped": "Sync of {name} is no longer running",
   "file_preview_previous_version": "Previous version",
   "file_preview_next_version": "Next version",
+  "templates": "Templates",
   "integration_activity_reconcile_warning": "<label>Reconciliation warning:</label> {warning}",
   "integration_progress_step_done_named": "<hidden>Done:</hidden> {step}"
 }

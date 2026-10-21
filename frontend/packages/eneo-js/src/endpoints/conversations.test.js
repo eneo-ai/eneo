@@ -142,3 +142,32 @@ test("a failed answer without a reason is reported as a stream error", async () 
     (error) => error instanceof EneoError && error.response.code === "stream_error"
   );
 });
+
+test("signed-in chat delivers incremental tool arguments through the shared SSE reader", async () => {
+  const deltas = [
+    { session_id: "s", tool_call_id: "call-1", arguments_delta: '{"title":"Budget' },
+    { session_id: "s", tool_call_id: "call-1", arguments_delta: ' report","content":"Hello"}' }
+  ];
+  const events = [
+    'event: first_chunk\ndata: {"session_id":"s","answer":""}\n\n',
+    ...deltas.map((delta) => `event: tool_call_delta\ndata: ${JSON.stringify(delta)}\n\n`),
+    'event: text\ndata: {"session_id":"s","answer":"Done","references":[]}\n\n'
+  ];
+  const conversations = initConversations(
+    createClient({
+      baseUrl: "https://eneo.example",
+      fetch: async () =>
+        new Response(events.join(""), { headers: { "Content-Type": "text/event-stream" } })
+    })
+  );
+  const received = [];
+  const response = await conversations.ask({
+    chatPartner: { id: "assistant-1", type: "assistant" },
+    question: "Create a report",
+    files: [],
+    callbacks: { onToolCallDelta: (delta) => received.push(delta) }
+  });
+
+  assert.deepEqual(received, deltas);
+  assert.equal(response.answer, "Done");
+});

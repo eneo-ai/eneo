@@ -50,6 +50,8 @@
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
   import { hasPermission } from "$lib/core/hasPermission.js";
   import { m } from "$lib/paraglide/messages";
+  import { docsUrl } from "$lib/core/docs";
+  import { getLocale } from "$lib/paraglide/runtime";
   import { toast } from "svelte-sonner";
   import ByteLimitField from "./ByteLimitField.svelte";
   import StorageConnectionSection from "./StorageConnectionSection.svelte";
@@ -863,7 +865,7 @@
                         {/if}
                         {#if objectStoreUnavailable}
                           <Button
-                            href="https://docs.eneo.ai/guides/object-content-storage"
+                            href={docsUrl("guides/object-content-storage", getLocale())}
                             target="_blank"
                             rel="noreferrer"
                             variant="link"

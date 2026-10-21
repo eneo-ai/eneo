@@ -71,6 +71,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     federation_config: dict[str, Any] = Field(default_factory=dict)
     crawler_settings: dict[str, Any] = Field(default_factory=dict)
     api_key_policy: dict[str, Any] = Field(default_factory=dict)
+    widget_policy: dict[str, Any] = Field(default_factory=dict)
     favorite_providers: list[str] = Field(default_factory=list)
 
     @field_validator("favorite_providers")

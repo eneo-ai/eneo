@@ -29,6 +29,8 @@
   import { getEneo } from "$lib/core/Eneo";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
+  import { docsUrl } from "$lib/core/docs";
 
   type Capability = {
     configured: boolean;
@@ -894,7 +896,11 @@
                   <li>{m.storage_switch_checklist_reversible()}</li>
                 </ul>
                 <Button
-                  href="https://docs.eneo.ai/guides/object-content-storage#move-to-another-s3-compatible-service"
+                  href={docsUrl(
+                    "guides/object-content-storage",
+                    getLocale(),
+                    "move-to-another-s3-compatible-service"
+                  )}
                   target="_blank"
                   rel="noreferrer"
                   variant="link"

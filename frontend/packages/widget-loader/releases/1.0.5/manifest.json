@@ -1,0 +1,11 @@
+{
+  "version": "1.0.5",
+  "channel": "v1",
+  "file": "eneo.js",
+  "integrity": "sha384-wmQIMQzTT7FQ/mcTRV3pAHTZs49ATAWPVZrqHW8hsRHyAWwxxVx55sbeJdX+T6WC",
+  "bytes": 15279,
+  "gzip_bytes": 5131,
+  "css_file": "eneo.css",
+  "css_integrity": "sha384-sa2+Lvd6YTrqscv0M9ao6X7mh0YM2z1IEvTQCsb50u9v+bDwZBTEgPVaduXZyEtw",
+  "css_bytes": 3495
+}

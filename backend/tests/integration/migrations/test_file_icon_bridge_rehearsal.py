@@ -570,6 +570,7 @@ async def test_released_upgrade_recovers_from_process_death_and_backup_restore(
                     await asyncio.sleep(0.05)
             assert worker.returncode == 0, worker.stderr.read().decode()[-2000:]
         report["worker"] = json.loads((path / "worker.json").read_text())
+        assert not report["worker"]["application_loaded"]
         assert (
             report["worker"]["max_rss_bytes"]
             <= report["acceptance"]["maximum_worker_rss_bytes"]
