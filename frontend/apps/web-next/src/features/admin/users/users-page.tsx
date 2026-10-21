@@ -15,7 +15,7 @@ import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
 import { rolesQueryOptions } from "@/features/admin/roles/roles";
-import { rescueFocus } from "@/lib/focus-rescue";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { UserEditorDialog } from "./user-editor";
 import { UserTable } from "./user-table";
 import { adminUsersQueryOptions, MIN_SEARCH_LENGTH, type StateFilter } from "./users";
@@ -58,6 +58,7 @@ export function AdminUsersPage() {
   const tabLabel = (value: StateFilter) =>
     value === "active" ? t("active_users") : t("inactive_users");
   const panelRef = useRef<HTMLDivElement>(null);
+  const rescue = useFocusRescue();
   const announce = useAnnounce();
   const isNarrow = useMediaQuery(NARROW_QUERY);
 
@@ -125,7 +126,7 @@ export function AdminUsersPage() {
     setPage(next);
     // The pressed button stays focused, except "next"/"previous" at the last
     // or first page, which becomes disabled: then focus moves to the panel.
-    rescueFocus(panelRef.current);
+    rescue(panelRef.current);
   }
 
   let results: React.ReactNode;
@@ -139,7 +140,7 @@ export function AdminUsersPage() {
         <UserTable
           users={users}
           label={tabLabel(stateFilter)}
-          onRemoved={() => rescueFocus(panelRef.current)}
+          onRemoved={() => rescue(panelRef.current)}
         />
       </div>
     );
@@ -194,7 +195,7 @@ export function AdminUsersPage() {
       </TabList>
 
       {/* One panel for both tabs; it takes focus when an action removed the
-          focused row (see rescueFocus). */}
+          focused row (see useFocusRescue). */}
       <div
         ref={panelRef}
         role="tabpanel"

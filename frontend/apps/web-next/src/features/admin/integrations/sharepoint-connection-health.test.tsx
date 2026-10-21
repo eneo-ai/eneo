@@ -312,12 +312,10 @@ describe("SharePointConnectionHealth", () => {
     await waitFor(() =>
       expect(within(health).queryByRole("button", { name: "Förnya utgångna" })).toBeNull()
     );
-    await waitFor(
-      () =>
-        expect(document.activeElement).toBe(
-          within(health).getByRole("button", { name: "Visa bevakningar" })
-        ),
-      { timeout: 1500 }
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(health).getByRole("button", { name: "Visa bevakningar" })
+      )
     );
   });
 
