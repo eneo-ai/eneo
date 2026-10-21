@@ -30,6 +30,7 @@ from eneo.flows.api.flow_live_transcription_models import (
     LIVE_TRANSCRIPTION_SUBPROTOCOL,
     LIVE_TRANSCRIPTION_TICKET_PREFIX,
 )
+from eneo.flows.application.feature_gate import require_flows_enabled
 from eneo.flows.runtime.live_transcription.relay import (
     LiveSessionEnded,
     LiveSessionStats,
@@ -45,6 +46,7 @@ from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
+    NotFoundException,
     ProviderInactiveException,
     ProviderNotFoundException,
 )
@@ -188,6 +190,12 @@ async def _load_upstream_target(grant: LiveTranscriptionGrant) -> _UpstreamTarge
     )
     async with sessionmanager.session() as session, session.begin():
         container = Container(session=providers.Object(session))
+        try:
+            await require_flows_enabled(
+                container.feature_flag_service(), grant.tenant_id
+            )
+        except NotFoundException as exc:
+            raise unavailable from exc
         row = (
             await session.execute(
                 sa.select(

@@ -60,6 +60,7 @@ from eneo.flow_packages.api import (
 from eneo.flow_packages.api import (
     tenant_router as flow_package_tenant_router,
 )
+from eneo.flows.api.feature_gate import require_flow_feature
 from eneo.flows.api.flow_live_transcription_socket_router import (
     router as flow_live_transcription_socket_router,
 )
@@ -135,10 +136,11 @@ from eneo.security_classifications.presentation.security_classification_router i
 from eneo.server.websockets.websocket_router import router as websocket_router
 from eneo.services.service_router import router as services_router
 from eneo.settings.settings_router import (
-    router as settings_router,
+    flow_settings_admin_router,
+    settings_admin_router,
 )
 from eneo.settings.settings_router import (
-    settings_admin_router,
+    router as settings_router,
 )
 from eneo.skills.presentation.organization_skill_router import (
     router as organization_skill_router,
@@ -294,6 +296,16 @@ router.include_router(
     prefix="/settings",
     tags=["settings"],
     dependencies=[
+        Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+        Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+    ],
+)
+router.include_router(
+    flow_settings_admin_router,
+    prefix="/settings",
+    tags=["settings"],
+    dependencies=[
+        Depends(require_flow_feature),
         Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
         Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     ],
@@ -510,6 +522,7 @@ router.include_router(
     prefix=FLOW_ROOT_PATH,
     tags=["flows"],
     dependencies=[
+        Depends(require_flow_feature),
         Depends(
             require_resource_permission_for_method(
                 "flows",
@@ -524,6 +537,7 @@ router.include_router(
     prefix="/flows/{id}",
     tags=["flow-packages"],
     dependencies=[
+        Depends(require_flow_feature),
         Depends(require_resource_permission_for_method("flows")),
         Depends(require_api_key_scope_check(resource_type="flow", path_param="id")),
     ],
@@ -533,6 +547,7 @@ router.include_router(
     prefix="/flow-packages",
     tags=["flow-packages"],
     dependencies=[
+        Depends(require_flow_feature),
         Depends(require_resource_permission_for_method("flows")),
         Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
     ],
@@ -553,6 +568,7 @@ router.include_router(
     prefix="/spaces/{id}/flow-packages",
     tags=["flow-packages"],
     dependencies=[
+        Depends(require_flow_feature),
         Depends(require_resource_permission_for_method("flows")),
         Depends(require_api_key_scope_check(resource_type="space", path_param="id")),
     ],
@@ -649,7 +665,7 @@ router.include_router(
     flow_tool_usage_router,
     prefix="/mcp-servers",
     tags=["mcp-servers"],
-    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+    dependencies=[Depends(require_flow_feature), *TENANT_ADMIN_API_KEY_GUARDS],
 )
 router.include_router(
     document_template_router,

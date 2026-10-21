@@ -503,6 +503,16 @@ async def setup_database(
             true, now(), now())
         ON CONFLICT (name) DO NOTHING
     """)
+    # Flows are off in production until the integrated core is verified; the
+    # flow contract tests run with the flag on, and tests of the gate turn it
+    # off for their tenant.
+    cursor.execute("""
+        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'flows_core',
+            'Flows: authoring, publishing and running flows, and their settings',
+            true, now(), now())
+        ON CONFLICT (name) DO UPDATE SET enabled = true
+    """)
     cursor.execute("""
         SELECT new_write_storage_target, session_file_limit_bytes,
             session_image_limit_bytes, knowledge_file_limit_bytes,
@@ -613,6 +623,16 @@ async def cleanup_database(
             'Global feature flag to enable/disable audit logging',
             true, now(), now())
         ON CONFLICT (name) DO NOTHING
+    """)
+    # Flows are off in production until the integrated core is verified; the
+    # flow contract tests run with the flag on, and tests of the gate turn it
+    # off for their tenant.
+    cursor.execute("""
+        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'flows_core',
+            'Flows: authoring, publishing and running flows, and their settings',
+            true, now(), now())
+        ON CONFLICT (name) DO UPDATE SET enabled = true
     """)
     cursor.execute(
         """

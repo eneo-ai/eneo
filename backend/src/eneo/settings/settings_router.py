@@ -88,6 +88,8 @@ logger = get_logger(__name__)
 
 router = APIRouter()
 settings_admin_router = APIRouter()
+# Flow settings; mounted behind the flows feature flag.
+flow_settings_admin_router = APIRouter()
 _TENANT_SETTINGS_ADMIN_ACCESS_REASON = (
     "Administering tenant settings requires the admin permission."
 )
@@ -507,7 +509,7 @@ def get_formats():
     return to_paginated_response(supported_mimes())
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-input-limits",
     response_model=FlowInputLimitsPublic,
     operation_id="get_flow_input_limits",
@@ -536,7 +538,7 @@ async def get_flow_input_limits(
     return await service.get_flow_input_limits()
 
 
-@settings_admin_router.patch(
+@flow_settings_admin_router.patch(
     "/flow-input-limits",
     response_model=FlowInputLimitsPublic,
     operation_id="update_flow_input_limits",
@@ -573,7 +575,7 @@ async def update_flow_input_limits(
     return await service.update_flow_input_limits(payload)
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-document-render-limits",
     response_model=FlowDocumentRenderLimitsPublic,
     operation_id="get_flow_document_render_limits",
@@ -598,7 +600,7 @@ async def get_flow_document_render_limits(
     return await service.get_flow_document_render_limits()
 
 
-@settings_admin_router.patch(
+@flow_settings_admin_router.patch(
     "/flow-document-render-limits",
     response_model=FlowDocumentRenderLimitsPublic,
     operation_id="update_flow_document_render_limits",
@@ -631,7 +633,7 @@ async def update_flow_document_render_limits(
     return await service.update_flow_document_render_limits(payload)
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-runtime-policy",
     response_model=FlowRuntimePolicyPublic,
     operation_id="get_flow_runtime_policy",
@@ -658,7 +660,7 @@ async def get_flow_runtime_policy(
     return await service.get_flow_runtime_policy()
 
 
-@settings_admin_router.patch(
+@flow_settings_admin_router.patch(
     "/flow-runtime-policy",
     response_model=FlowRuntimePolicyPublic,
     operation_id="update_flow_runtime_policy",
@@ -694,7 +696,7 @@ async def update_flow_runtime_policy(
     return await service.update_flow_runtime_policy(payload)
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-mapped-execution-policy",
     response_model=FlowMappedExecutionPolicyPublic,
     operation_id="get_mapped_execution_policy",
@@ -719,7 +721,7 @@ async def get_mapped_execution_policy(
     return await service.get_mapped_execution_policy()
 
 
-@settings_admin_router.patch(
+@flow_settings_admin_router.patch(
     "/flow-mapped-execution-policy",
     response_model=FlowMappedExecutionPolicyPublic,
     operation_id="update_mapped_execution_policy",
@@ -751,7 +753,7 @@ async def update_mapped_execution_policy(
     return await service.update_mapped_execution_policy(payload)
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-rag-evidence-policy",
     response_model=FlowRagEvidencePolicyPublic,
     operation_id="get_rag_evidence_policy",
@@ -775,7 +777,7 @@ async def get_rag_evidence_policy(
     return await service.get_rag_evidence_policy()
 
 
-@settings_admin_router.patch(
+@flow_settings_admin_router.patch(
     "/flow-rag-evidence-policy",
     response_model=FlowRagEvidencePolicyPublic,
     operation_id="update_rag_evidence_policy",
@@ -806,7 +808,7 @@ async def update_rag_evidence_policy(
     return await service.update_rag_evidence_policy(payload)
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-evidence-policy",
     response_model=FlowEvidencePolicyPublic,
     operation_id="get_flow_evidence_policy",
@@ -831,7 +833,7 @@ async def get_flow_evidence_policy(
     return await service.get_flow_evidence_policy()
 
 
-@settings_admin_router.patch(
+@flow_settings_admin_router.patch(
     "/flow-evidence-policy",
     response_model=FlowEvidencePolicyPublic,
     operation_id="update_flow_evidence_policy",
@@ -863,7 +865,7 @@ async def update_flow_evidence_policy(
     return await service.update_flow_evidence_policy(payload)
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-retention-policy",
     response_model=FlowRetentionPolicyPublic,
     operation_id="get_flow_retention_policy",
@@ -888,7 +890,7 @@ async def get_flow_retention_policy(
     return await service.get_flow_retention_policy()
 
 
-@settings_admin_router.patch(
+@flow_settings_admin_router.patch(
     "/flow-retention-policy",
     response_model=FlowRetentionPolicyPublic,
     operation_id="update_flow_retention_policy",
@@ -919,7 +921,7 @@ async def update_flow_retention_policy(
     return await service.update_flow_retention_policy(payload)
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-run-retention-policy",
     response_model=FlowRunRetentionPolicySettings,
     operation_id="get_organization_flow_run_retention_policy",
@@ -941,7 +943,7 @@ async def get_organization_flow_run_retention_policy(
     return await container.flow_run_retention_policy_service().get_organization()
 
 
-@settings_admin_router.put(
+@flow_settings_admin_router.put(
     "/flow-run-retention-policy",
     response_model=FlowRunRetentionPolicySettings,
     operation_id="replace_organization_flow_run_retention_policy",
@@ -971,7 +973,7 @@ async def replace_organization_flow_run_retention_policy(
     )
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-run-retention-policy/hold-review-limit",
     response_model=FlowRetentionHoldReviewLimit,
     operation_id="get_flow_retention_hold_review_limit",
@@ -995,7 +997,7 @@ async def get_flow_retention_hold_review_limit(
     return await container.flow_run_retention_policy_service().get_hold_review_limit()
 
 
-@settings_admin_router.put(
+@flow_settings_admin_router.put(
     "/flow-run-retention-policy/hold-review-limit",
     response_model=FlowRetentionHoldReviewLimit,
     operation_id="replace_flow_retention_hold_review_limit",
@@ -1027,7 +1029,7 @@ async def replace_flow_retention_hold_review_limit(
     )
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-run-retention-policy/targets/spaces",
     response_model=FlowRunRetentionSpaceTargetPage,
     operation_id="list_flow_run_retention_space_targets",
@@ -1055,7 +1057,7 @@ async def list_flow_run_retention_space_targets(
     )
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-run-retention-policy/targets/spaces/{space_id}/flows",
     response_model=FlowRunRetentionFlowTargetPage,
     operation_id="list_flow_run_retention_flow_targets",
@@ -1090,7 +1092,7 @@ async def list_flow_run_retention_flow_targets(
     )
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-run-retention-policy/spaces/{space_id}",
     response_model=FlowRunRetentionPolicySettings,
     operation_id="get_space_flow_run_retention_policy",
@@ -1121,7 +1123,7 @@ async def get_space_flow_run_retention_policy(
     )
 
 
-@settings_admin_router.put(
+@flow_settings_admin_router.put(
     "/flow-run-retention-policy/spaces/{space_id}",
     response_model=FlowRunRetentionPolicySettings,
     operation_id="replace_space_flow_run_retention_policy",
@@ -1155,7 +1157,7 @@ async def replace_space_flow_run_retention_policy(
     )
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-run-retention-policy/flows/{flow_id}",
     response_model=FlowRunRetentionPolicySettings,
     operation_id="get_flow_run_retention_policy",
@@ -1184,7 +1186,7 @@ async def get_flow_run_retention_policy(
     return await container.flow_run_retention_policy_service().get_flow(flow_id=flow_id)
 
 
-@settings_admin_router.put(
+@flow_settings_admin_router.put(
     "/flow-run-retention-policy/flows/{flow_id}",
     response_model=FlowRunRetentionPolicySettings,
     operation_id="replace_flow_run_retention_policy",
@@ -1219,7 +1221,7 @@ async def replace_flow_run_retention_policy(
     )
 
 
-@settings_admin_router.post(
+@flow_settings_admin_router.post(
     "/flow-run-retention-policy/purge",
     response_model=FlowRunHistoryPurgePublic,
     operation_id="purge_organization_flow_run_history",
@@ -1253,7 +1255,7 @@ async def purge_organization_flow_run_history(
     )
 
 
-@settings_admin_router.post(
+@flow_settings_admin_router.post(
     "/flow-run-retention-policy/spaces/{space_id}/purge",
     response_model=FlowRunHistoryPurgePublic,
     operation_id="purge_space_flow_run_history",
@@ -1288,7 +1290,7 @@ async def purge_space_flow_run_history(
     )
 
 
-@settings_admin_router.post(
+@flow_settings_admin_router.post(
     "/flow-run-retention-policy/flows/{flow_id}/purge",
     response_model=FlowRunHistoryPurgePublic,
     operation_id="purge_flow_run_history",
@@ -1332,7 +1334,7 @@ _FLOW_RETENTION_HOLD_EFFECT = (
 )
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-retention-holds",
     response_model=FlowRetentionHoldPage,
     operation_id="list_flow_retention_holds",
@@ -1365,7 +1367,7 @@ async def list_flow_retention_holds(
     )
 
 
-@settings_admin_router.post(
+@flow_settings_admin_router.post(
     "/flow-retention-holds",
     response_model=FlowRetentionHoldPlacement,
     status_code=201,
@@ -1412,7 +1414,7 @@ async def place_flow_retention_hold(
     return await container.flow_retention_hold_service().place(payload)
 
 
-@settings_admin_router.post(
+@flow_settings_admin_router.post(
     "/flow-retention-holds/{hold_id}/extend-review",
     response_model=FlowRetentionHold,
     operation_id="extend_flow_retention_hold_review",
@@ -1464,7 +1466,7 @@ async def extend_flow_retention_hold_review(
     )
 
 
-@settings_admin_router.post(
+@flow_settings_admin_router.post(
     "/flow-retention-holds/{hold_id}/release",
     response_model=FlowRetentionHold,
     operation_id="release_flow_retention_hold",
@@ -1506,7 +1508,7 @@ async def release_flow_retention_hold(
     )
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-run-retention-policy/review-queue",
     response_model=FlowRunRetentionReviewPage,
     operation_id="list_organization_flow_run_retention_review_queue",
@@ -1542,7 +1544,7 @@ async def list_organization_flow_run_retention_review_queue(
     )
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-run-retention-policy/spaces/{space_id}/review-queue",
     response_model=FlowRunRetentionReviewPage,
     operation_id="list_space_flow_run_retention_review_queue",
@@ -1581,7 +1583,7 @@ async def list_space_flow_run_retention_review_queue(
     )
 
 
-@settings_admin_router.get(
+@flow_settings_admin_router.get(
     "/flow-run-retention-policy/flows/{flow_id}/review-queue",
     response_model=FlowRunRetentionReviewPage,
     operation_id="list_flow_run_retention_review_queue",
