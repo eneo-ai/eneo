@@ -114,6 +114,16 @@ Verktyg** says on the Forecast card that the function needs a model, and it
 cannot be turned on there. Other deployments see no warning. Calls are not
 refused; a forecast without its model fails with `MODEL_UNAVAILABLE`.
 
+The checkpoint is also a catalog model (`forecast_models`): turning the bundled
+Forecast source on provisions, per tenant, a provider of type
+`eneo_tool_service` (`is_managed`; its URL and token stay in the deployment
+settings) and a forecast model keyed `default`, the checkpoint at
+`FORECAST_MODEL_PATH`. The source references it (`mcp_servers.forecast_model_id`),
+so the model's on/off switch, deprecation, provider state and classification
+feed the source's `readiness_reason` and effective classification like an
+image model's do. The backend sends the key as `X-Eneo-Model`; the runtime
+refuses any key it does not have instead of falling back.
+
 ## 3. Ask-time resolution
 
 For each capability an assistant requests, the provider is attached only when all of these hold:
