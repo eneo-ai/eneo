@@ -6,7 +6,7 @@
 
 **Democratic AI Platform for the Public Sector**
 
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](LICENSE)
 [![Made for: Public Sector](https://img.shields.io/badge/Made%20for-Public%20Sector-green)](https://github.com/eneo-ai/eneo)
 [![Contributions Welcome](https://img.shields.io/badge/Contributions-Welcome-brightgreen.svg)](#contributing)
 [![Contributors](https://img.shields.io/github/contributors/eneo-ai/eneo)](https://github.com/eneo-ai/eneo/graphs/contributors)
@@ -190,7 +190,11 @@ Copyright (C) 2023-2025 Sundsvall Municipality & Ånge Municipality
 Licensed under GNU Affero General Public License v3.0
 ```
 
-See [LICENSE](LICENSE) for full license text.
+The repository-root [LICENSE](LICENSE) is the source of truth for Eneo's own code,
+including files without a license header.
+
+Incorporated third-party code and dependencies retain their own licenses and
+attribution notices, documented with the corresponding code or dependency.
 
 ---
 

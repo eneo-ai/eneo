@@ -1,4 +1,3 @@
-
 from datetime import datetime
 from typing import Any, NamedTuple
 from uuid import UUID
