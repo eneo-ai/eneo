@@ -5230,7 +5230,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create Authoring Chat */
+    /**
+     * Open Flow Authoring Chat
+     * @description Open the caller's chat for editing this flow with an assistant, creating it on first use. The chat is an ordinary conversation whose assistant reaches only this flow through its tools, and it starts in view mode: the tools read the flow but change nothing until the caller turns on edit mode. Each user has one chat per flow; calling again returns it.
+     */
     post: operations["get_or_create_flow_authoring_chat"];
     delete?: never;
     options?: never;
@@ -5251,7 +5254,10 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Change Authoring Mode */
+    /**
+     * Set Flow Authoring Mode
+     * @description Turn the authoring chat's edit mode on or off. In edit mode the chat's tools may change the draft through the same validation, permissions, classification and audit as the editor; leaving it waits for a change in progress and stops the next one. The switch is fenced on the draft revision the caller last read, so a mode change made against a stale draft is refused with `stale_revision`.
+     */
     patch: operations["set_flow_authoring_mode"];
     trace?: never;
   };
@@ -5268,7 +5274,10 @@ export interface paths {
     delete?: never;
     options?: never;
     head?: never;
-    /** Update Flow and Step Assistants */
+    /**
+     * Update Flow and Step Assistants
+     * @description Apply one editor change to a draft flow and its flow-managed step assistants in a single revision: flow settings, sparse step edits, new steps with their assistants, and `step_order` to move, insert or remove steps. The change is fenced on `expected_revision` and either saves as a whole or not at all. Reads of a step that moves follow it; a change that removes a step another step reads, or moves it after that step, is refused with `flow_step_read_lost_producer`. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
+     */
     patch: operations["update_flow_editor"];
     trace?: never;
   };
@@ -19468,6 +19477,7 @@ export interface components {
       | "flow_run_retry_prefix_unsupported"
       | "flow_run_required_step_input_missing"
       | "flow_document_runtime_required"
+      | "flow_step_read_lost_producer"
       | "flow_run_runtime_input_disabled"
       | "flow_run_top_level_file_ids_not_supported"
       | "flow_run_idempotency_conflict"
@@ -19952,7 +19962,13 @@ export interface components {
      * @enum {string}
      */
     FlowAuthoringInputType: "text" | "json" | "audio" | "document" | "file" | "any";
-    /** FlowAuthoringModeRequest */
+    /**
+     * FlowAuthoringModeRequest
+     * @example {
+     *       "editing": true,
+     *       "expected_revision": 4
+     *     }
+     */
     FlowAuthoringModeRequest: {
       /** Editing */
       editing: boolean;
@@ -20254,8 +20270,65 @@ export interface components {
       step_id: string;
     };
     /**
+     * FlowEditorStepSlot
+     * @description A place in the new step order: a saved step, or a new step by its index
+     *     in ``new_steps``.
+     */
+    FlowEditorStepSlot: {
+      /** New Step */
+      new_step?: number | null;
+      /** Step Id */
+      step_id?: string | null;
+    };
+    /**
      * FlowEditorUpdateRequest
      * @description One revision-fenced edit of the definition and its managed assistants.
+     *
+     *     ``step_order``, when given, is the new order of the steps: the saved steps
+     *     it leaves out are removed, and new steps sit where it places them (else
+     *     they follow the saved steps). Reads of a step that moves follow it; a
+     *     read that would lose its step refuses the edit.
+     * @example {
+     *       "definition": {
+     *         "description": "Summarize and file citizen letters."
+     *       },
+     *       "expected_revision": 4,
+     *       "new_steps": [
+     *         {
+     *           "assistant": {
+     *             "prompt": {
+     *               "text": "Check the summary against the letter."
+     *             }
+     *           },
+     *           "configuration": {
+     *             "input_source": "previous_step",
+     *             "input_type": "text",
+     *             "output_mode": "compose_text",
+     *             "output_type": "text"
+     *           },
+     *           "name": "Check the facts"
+     *         }
+     *       ],
+     *       "step_edits": [
+     *         {
+     *           "changes": {
+     *             "user_description": "Write the reply"
+     *           },
+     *           "step_id": "00000000-0000-0000-0000-000000000102"
+     *         }
+     *       ],
+     *       "step_order": [
+     *         {
+     *           "step_id": "00000000-0000-0000-0000-000000000101"
+     *         },
+     *         {
+     *           "new_step": 0
+     *         },
+     *         {
+     *           "step_id": "00000000-0000-0000-0000-000000000102"
+     *         }
+     *       ]
+     *     }
      */
     FlowEditorUpdateRequest: {
       /** Assistants */
@@ -20267,6 +20340,8 @@ export interface components {
       new_steps?: components["schemas"]["FlowEditorNewStep"][];
       /** Step Edits */
       step_edits?: components["schemas"]["FlowEditorStepChange"][];
+      /** Step Order */
+      step_order?: components["schemas"]["FlowEditorStepSlot"][] | null;
     };
     /** FlowEvidenceExportTooLargeContext */
     FlowEvidenceExportTooLargeContext: {
@@ -63180,6 +63255,7 @@ export interface operations {
       query?: never;
       header?: never;
       path: {
+        /** @description Identifier of the draft flow to edit. */
         id: string;
       };
       cookie?: never;
@@ -63192,33 +63268,65 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "assistant_id": "00000000-0000-0000-0000-000000000201",
+           *       "editing": false,
+           *       "flow_id": "00000000-0000-0000-0000-000000000001",
+           *       "session_id": "00000000-0000-0000-0000-000000000301"
+           *     }
+           */
           "application/json": components["schemas"]["FlowAuthoringChatPublic"];
         };
       };
-      /** @description Invalid configuration or stale revision. */
+      /** @description The space has no default model that supports tools. */
       400: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "code": "bad_request",
+           *       "eneo_error_code": 9007,
+           *       "message": "Choose a default model that supports tools for this space."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description The caller cannot manage this flow or chat. */
+      /** @description The caller cannot edit this flow, or called with an API key: the authoring chat takes a signed-in session. */
       403: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "code": "insufficient_space_permission",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to edit flows in this space."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Flow or chat not found in the caller scope. */
+      /** @description The flow, or the caller's chat for it, is not in the caller's scope. */
       404: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow authoring chat not found."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
@@ -63238,7 +63346,9 @@ export interface operations {
       query?: never;
       header?: never;
       path: {
+        /** @description Identifier of the draft flow to edit. */
         id: string;
+        /** @description Identifier of the chat's conversation. */
         session_id: string;
       };
       cookie?: never;
@@ -63255,33 +63365,65 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "assistant_id": "00000000-0000-0000-0000-000000000201",
+           *       "editing": true,
+           *       "flow_id": "00000000-0000-0000-0000-000000000001",
+           *       "session_id": "00000000-0000-0000-0000-000000000301"
+           *     }
+           */
           "application/json": components["schemas"]["FlowAuthoringChatPublic"];
         };
       };
-      /** @description Invalid configuration or stale revision. */
+      /** @description The draft moved on since `expected_revision`. */
       400: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "code": "stale_revision",
+           *       "eneo_error_code": 9007,
+           *       "message": "The flow draft changed since it was read."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description The caller cannot manage this flow or chat. */
+      /** @description The caller cannot edit this flow, or called with an API key: the authoring chat takes a signed-in session. */
       403: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "code": "insufficient_space_permission",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to edit flows in this space."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description Flow or chat not found in the caller scope. */
+      /** @description The flow, or the caller's chat for it, is not in the caller's scope. */
       404: {
         headers: {
           [name: string]: unknown;
         };
         content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow authoring chat not found."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
@@ -63318,6 +63460,50 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description The change is invalid, the draft moved on since `expected_revision` (`stale_revision`), or a step would lose a step it reads (`flow_step_read_lost_producer`). */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller lacks the required shared-space role, `flow_owner_required` when the caller is not allowed to override another member's draft, and the current fail-closed `flow_service_key_principal_not_supported` when a service-key principal calls flow authoring endpoints before first-class support lands. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "api_key_scope"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "API key space scope does not match requested flow."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or step not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */

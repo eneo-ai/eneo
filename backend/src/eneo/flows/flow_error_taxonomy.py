@@ -84,6 +84,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Configure the shared tool runtime before publishing or starting a run.",
         user_action="Ask an administrator to configure document rendering.",
     ),
+    FlowApiErrorCode.STEP_READ_LOST_PRODUCER: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="A step order change removes a step another step reads, or moves it to where that step cannot read it.",
+        consumer_action="Change the read named by step_id, site and reads_step in the error context, or keep each step before the steps that read it.",
+        user_action="Change what the step reads first, or keep each step before the steps that use it.",
+    ),
     FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_REQUIRES_ONE_AUDIO_FILE: _entry(
         category="Run input",
         surfaced_through="API error response",

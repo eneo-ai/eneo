@@ -405,14 +405,28 @@ async def add_step(
     name: str,
     configuration: dict[str, Any],
     assistant_changes: dict[str, Any] | None = None,
+    position: int | None = None,
 ) -> CallToolResult:
-    """Append a step with a new managed assistant, atomically. Use core configuration field names."""
+    """Add a step with a new managed assistant, atomically: last, or at `position`
+    (1 is first). Reads of the steps after it move with them. Use core
+    configuration field names."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_models import FlowEditorUpdateRequest
-        from eneo.flows.application.flow_authoring_operations import apply_editor_update
+        from eneo.flows.application.flow_authoring_operations import (
+            apply_editor_update,
+            get_flow,
+        )
 
         require_safe_model_configuration(configuration, {})
+        step_order = None
+        if position is not None:
+            flow = await get_flow(chat.flow_id, request, container)
+            slots: list[dict[str, Any]] = [
+                {"step_id": str(step.id)} for step in flow.steps
+            ]
+            slots.insert(_index_at(position, len(slots) + 1), {"new_step": 0})
+            step_order = slots
         updated = await apply_editor_update(
             chat.flow_id,
             request,
@@ -427,17 +441,95 @@ async def add_step(
                             "assistant": assistant_changes or {},
                         }
                     ],
+                    "step_order": step_order,
                 }
             ),
             container,
         )
+        added = updated.steps[-1 if position is None else position - 1]
         return page_result(
-            {"saved": True, "step_id": str(updated.steps[-1].id)},
+            {"saved": True, "step_id": str(added.id)},
             flow_id=chat.flow_id,
             revision=updated.draft_revision,
         )
 
     return await _call(ctx, operation, editing=True)
+
+
+@mcp.tool()
+async def move_step(
+    ctx: Context, expected_revision: int, step_id: UUID, position: int
+) -> CallToolResult:
+    """Move a saved step to `position` (1 is first). Reads of moved steps
+    follow them; a move that leaves a step before a step it reads is refused."""
+
+    async def operation(container, chat, request):
+        from eneo.flows.application.flow_authoring_operations import get_flow
+
+        flow = await get_flow(chat.flow_id, request, container)
+        ids = [step.id for step in flow.steps]
+        if step_id not in ids:
+            raise NotFoundException("Step not found.")
+        ids.remove(step_id)
+        ids.insert(_index_at(position, len(ids) + 1), step_id)
+        return await _save_order(container, chat, request, expected_revision, ids)
+
+    return await _call(ctx, operation, editing=True)
+
+
+@mcp.tool()
+async def remove_step(
+    ctx: Context, expected_revision: int, step_id: UUID
+) -> CallToolResult:
+    """Remove a saved step and its managed assistant. Refused while another
+    step still reads it; change that read first."""
+
+    async def operation(container, chat, request):
+        from eneo.flows.application.flow_authoring_operations import get_flow
+
+        flow = await get_flow(chat.flow_id, request, container)
+        ids = [step.id for step in flow.steps]
+        if step_id not in ids:
+            raise NotFoundException("Step not found.")
+        ids.remove(step_id)
+        return await _save_order(container, chat, request, expected_revision, ids)
+
+    return await _call(ctx, operation, editing=True)
+
+
+def _index_at(position: int, places: int) -> int:
+    if not 1 <= position <= places:
+        raise BadRequestException(f"position must be between 1 and {places}.")
+    return position - 1
+
+
+async def _save_order(container, chat, request, expected_revision, ids):
+    from eneo.flows.api.flow_models import FlowEditorUpdateRequest
+    from eneo.flows.application.flow_authoring_operations import apply_editor_update
+
+    updated = await apply_editor_update(
+        chat.flow_id,
+        request,
+        FlowEditorUpdateRequest.model_validate(
+            {
+                "expected_revision": expected_revision,
+                "definition": {},
+                "step_order": [{"step_id": str(step_id)} for step_id in ids],
+            }
+        ),
+        container,
+    )
+    return page_result(
+        {
+            "saved": True,
+            "steps": [
+                {"step_id": str(step.id), "step_order": step.step_order}
+                for step in updated.steps
+            ],
+        },
+        flow_id=chat.flow_id,
+        revision=updated.draft_revision,
+    )
 
 
 @mcp.tool()

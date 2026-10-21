@@ -7,10 +7,12 @@ one path. Callers own a transaction; exceptions must reach its context manager.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import cast
 from uuid import UUID
 
 from fastapi import Request
 
+from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
@@ -25,10 +27,15 @@ from eneo.flows.api.flow_definition_access import (
 )
 from eneo.flows.api.flow_models import (
     FlowCreateRequest,
+    FlowEditorStepPatch,
     FlowEditorUpdateRequest,
     FlowPublic,
     FlowStepCreateRequest,
     FlowUpdateRequest,
+)
+from eneo.flows.application.flow_step_structure import (
+    PlacedStep,
+    restructure_steps,
 )
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_access_policy import FlowApiAction
@@ -38,12 +45,14 @@ from eneo.flows.flow_api_exceptions import (
 )
 from eneo.flows.flow_authoring_name import FlowNameTakenError
 from eneo.flows.flow_evidence_policy import flow_evidence_metadata_facts
+from eneo.flows.infrastructure.flow_repo import DraftRevisionReservation
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
     ConflictException,
     NotFoundException,
 )
 from eneo.main.models import NOT_PROVIDED
+from eneo.prompts.api.prompt_models import PromptCreate
 
 _FLOW_NAME_TAKEN_MESSAGE = "A flow with this name already exists in this space."
 
@@ -340,20 +349,18 @@ async def apply_editor_update(
     # updated assistant against its final step configuration, without cleaning
     # inactive settings the editor never changed.
     changed = {change.step_id: change.changes for change in update.step_edits}
-    existing_ids = {step.id for step in access.flow.steps}
-    if changed.keys() - existing_ids:
+    saved_by_id = {step.id: step for step in access.flow.steps if step.id is not None}
+    placed_ids: set[UUID] = (
+        {slot.step_id for slot in update.step_order if slot.step_id is not None}
+        if update.step_order is not None
+        else set()
+    )
+    if (changed.keys() | placed_ids) - saved_by_id.keys():
         raise NotFoundException("Step not found.")
     overridden_steps = None
-    if changed or update.new_steps:
-        overridden_steps = [
-            FlowStep.model_validate(
-                {**step.model_dump(), **changed[step.id].model_dump(exclude_unset=True)}
-            )
-            if step.id is not None and step.id in changed
-            else step
-            for step in access.flow.steps
-        ]
-        for new_step in update.new_steps:
+    if changed or update.new_steps or update.step_order is not None:
+        new_flow_steps: list[FlowStep] = []
+        for index, new_step in enumerate(update.new_steps):
             assistant, _ = await service.create_flow_assistant(
                 flow_id=id, name=new_step.name
             )
@@ -367,14 +374,12 @@ async def apply_editor_update(
                 {
                     **new_step.configuration.model_dump(exclude_unset=True),
                     "assistant_id": assistant.id,
-                    "step_order": max(
-                        (step.step_order for step in overridden_steps), default=0
-                    )
-                    + 1,
+                    # Numbered with the others below.
+                    "step_order": len(access.flow.steps) + index + 1,
                     "user_description": new_step.name,
                 }
             )
-            overridden_steps.append(FlowAssembler().to_domain_step(step_request))
+            new_flow_steps.append(FlowAssembler().to_domain_step(step_request))
             user = container.user()
             await container.audit_service().log_async(
                 tenant_id=user.tenant_id,
@@ -389,6 +394,15 @@ async def apply_editor_update(
                     extra={"flow_id": str(id), "origin": "flow_managed"},
                 ),
             )
+        overridden_steps = await _place_steps(
+            update=update,
+            changed=changed,
+            saved_steps=access.flow.steps,
+            new_steps=new_flow_steps,
+            reservation=reservation,
+            container=container,
+            flow_id=id,
+        )
     unchanged_ids: frozenset[UUID] = (
         frozenset(
             step.id
@@ -406,3 +420,97 @@ async def apply_editor_update(
         unchanged_step_ids=unchanged_ids,
         steps_override=overridden_steps,
     )
+
+
+async def _place_steps(
+    *,
+    update: "FlowEditorUpdateRequest",
+    changed: Mapping[UUID, FlowEditorStepPatch],
+    saved_steps: list[FlowStep],
+    new_steps: list[FlowStep],
+    reservation: DraftRevisionReservation,
+    container: Container,
+    flow_id: UUID,
+) -> list[FlowStep]:
+    """The steps in their new order, with the reads of moved steps following
+    them, and the prompts that read moved steps renumbered in the same
+    reservation."""
+
+    saved_by_id = {step.id: step for step in saved_steps if step.id is not None}
+
+    def saved_place(step_id: UUID) -> PlacedStep:
+        saved = saved_by_id[step_id]
+        patch = changed.get(step_id)
+        if patch is None:
+            return PlacedStep(step=saved, saved=saved)
+        written = patch.model_dump(exclude_unset=True)
+        return PlacedStep(
+            step=FlowStep.model_validate({**saved.model_dump(), **written}),
+            saved=saved,
+            written_columns=frozenset(written),
+        )
+
+    if update.step_order is None:
+        placed = [
+            saved_place(step.id) for step in saved_steps if step.id is not None
+        ] + [PlacedStep(step=step) for step in new_steps]
+    else:
+        placed = [
+            saved_place(slot.step_id)
+            if slot.step_id is not None
+            else PlacedStep(step=new_steps[cast(int, slot.new_step)])
+            for slot in update.step_order
+        ]
+    reordered = len(placed) - len(new_steps) != len(saved_steps) or any(
+        item.saved is not None and item.saved.step_order != position
+        for position, item in enumerate(placed, start=1)
+    )
+    service = container.flow_service()
+    stored = (
+        await service.get_flow_assistant_prompts(await service.get_flow(flow_id))
+        if reordered
+        else {}
+    )
+    rewritten = frozenset(
+        change.assistant_id
+        for change in update.assistants
+        if "prompt" in change.changes.model_fields_set
+    )
+    structure = restructure_steps(
+        placed,
+        prompts={assistant_id: prompt.text for assistant_id, prompt in stored.items()},
+        rewritten_prompts=rewritten,
+    )
+    user = container.user()
+    for assistant_id, text in structure.renumbered_prompts.items():
+        assistant, _ = await service.update_reserved_flow_assistant(
+            reservation=reservation,
+            assistant_id=assistant_id,
+            update=AssistantUpdateCommand(
+                prompt=PromptCreate(
+                    text=text, description=stored[assistant_id].description
+                )
+            ),
+            classification_judged_by_flow_update=True,
+        )
+        await container.audit_service().log_async(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=ActionType.ASSISTANT_UPDATED,
+            entity_type=EntityType.ASSISTANT,
+            entity_id=assistant.id,
+            description=(
+                f"Renumbered the step references in the prompt of '{assistant.name}' "
+                f"for flow {flow_id}"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=assistant,
+                extra={
+                    "flow_id": str(flow_id),
+                    "origin": "flow_managed",
+                    "reason": "step_order_changed",
+                },
+            ),
+        )
+    return structure.steps

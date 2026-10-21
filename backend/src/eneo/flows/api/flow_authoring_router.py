@@ -676,6 +676,65 @@ __all__ = ["router"]
     response_model=FlowPublic,
     operation_id="update_flow_editor",
     summary="Update Flow and Step Assistants",
+    description=(
+        "Apply one editor change to a draft flow and its flow-managed step "
+        "assistants in a single revision: flow settings, sparse step edits, new "
+        "steps with their assistants, and `step_order` to move, insert or remove "
+        "steps. The change is fenced on `expected_revision` and either saves as "
+        "a whole or not at all. Reads of a step that moves follow it; a change "
+        "that removes a step another step reads, or moves it after that step, is "
+        "refused with `flow_step_read_lost_producer`. "
+        f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
+    ),
+    responses={
+        400: error_response(
+            description=(
+                "The change is invalid, the draft moved on since "
+                "`expected_revision` (`stale_revision`), or a step would lose a "
+                "step it reads (`flow_step_read_lost_producer`)."
+            ),
+            examples={
+                FlowApiErrorCode.STALE_REVISION.value: {
+                    "summary": "The draft changed since it was read",
+                    "value": {
+                        "message": "The flow draft changed since it was read.",
+                        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+                        "code": FlowApiErrorCode.STALE_REVISION.value,
+                    },
+                },
+                FlowApiErrorCode.STEP_READ_LOST_PRODUCER.value: {
+                    "summary": "A step reads a step the change removes",
+                    "value": {
+                        "message": (
+                            "Write (step 3) reads a step this change removes: "
+                            "step 2 in its prompt. Change that read first, or "
+                            "keep each step before the steps that read it."
+                        ),
+                        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+                        "code": FlowApiErrorCode.STEP_READ_LOST_PRODUCER.value,
+                        "context": {
+                            "step_id": "00000000-0000-0000-0000-000000000103",
+                            "step_order": 3,
+                            "site": "prompt",
+                            "reads_step": 2,
+                        },
+                    },
+                },
+            },
+        ),
+        403: error_response(
+            description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow or step not found in tenant scope.",
+            message="Flow not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+    },
 )
 @endpoint_access(
     authentication=Authentication.USER,

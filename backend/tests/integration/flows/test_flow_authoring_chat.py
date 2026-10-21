@@ -262,3 +262,173 @@ async def test_a_token_for_another_chat_reaches_no_flow(
 
     assert result.isError
     assert flow["name"] not in result.content[0].text
+
+
+def _new_step(name: str, prompt: str, *, input_source: str) -> dict:
+    return {
+        "name": name,
+        "configuration": {
+            "input_source": input_source,
+            "input_type": "text",
+            "output_mode": "compose_text",
+            "output_type": "text",
+        },
+        "assistant": {"prompt": {"text": prompt}},
+    }
+
+
+async def _prompt(client, base: str, headers, step: dict) -> str:
+    response = await client.get(
+        base + f"/assistants/{step['assistant_id']}/", headers=headers
+    )
+    assert response.status_code == 200, response.text
+    return response.json()["prompt"]["text"]
+
+
+async def test_reordered_steps_keep_reading_the_steps_they_read(client, enabled_flow):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    created = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": flow["draft_revision"],
+            "definition": {},
+            "new_steps": [
+                _new_step("Collect", "Collect the facts.", input_source="flow_input"),
+                _new_step(
+                    "Write",
+                    "Write from {{step_1.output}}.",
+                    input_source="previous_step",
+                ),
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    collect, write = created.json()["steps"]
+
+    inserted = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": created.json()["draft_revision"],
+            "definition": {},
+            "new_steps": [
+                _new_step("Greet", "Greet the reader.", input_source="flow_input")
+            ],
+            "step_edits": [
+                {
+                    "step_id": collect["id"],
+                    "changes": {"input_source": "previous_step"},
+                }
+            ],
+            "step_order": [
+                {"new_step": 0},
+                {"step_id": collect["id"]},
+                {"step_id": write["id"]},
+            ],
+        },
+    )
+
+    assert inserted.status_code == 200, inserted.text
+    saved = inserted.json()
+    assert saved["draft_revision"] == created.json()["draft_revision"] + 1
+    assert [step["user_description"] for step in saved["steps"]] == [
+        "Greet",
+        "Collect",
+        "Write",
+    ]
+    assert await _prompt(client, base, headers, saved["steps"][2]) == (
+        "Write from {{step_2.output}}."
+    )
+
+    refused = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": saved["draft_revision"],
+            "definition": {},
+            "step_order": [
+                {"step_id": saved["steps"][0]["id"]},
+                {"step_id": write["id"]},
+            ],
+        },
+    )
+
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["code"] == "flow_step_read_lost_producer"
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == saved["draft_revision"]
+    assert len(current["steps"]) == 3
+
+
+async def test_chat_moves_and_removes_steps_through_the_same_rules(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    created = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": flow["draft_revision"],
+            "definition": {},
+            "new_steps": [
+                _new_step("Collect", "Collect the facts.", input_source="flow_input"),
+                _new_step("Check", "Check the facts.", input_source="previous_step"),
+                _new_step("Draft", "Draft a text.", input_source="previous_step"),
+                _new_step(
+                    "Write",
+                    "Write from {{step_2.output}}.",
+                    input_source="previous_step",
+                ),
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    collect, check, draft, write = created.json()["steps"]
+    revision = created.json()["draft_revision"]
+    url = base + "/authoring-chat/"
+    chat = (await client.post(url, headers=headers)).json()
+    mode = await client.patch(
+        url + chat["session_id"] + "/",
+        headers=headers,
+        json={"expected_revision": revision, "editing": True},
+    )
+    assert mode.status_code == 200, mode.text
+    ctx = _loopback_ctx(await _chat_token(db_container, admin_user, chat))
+
+    refused = await flows.remove_step(ctx, revision, UUID(check["id"]))
+    assert refused.isError
+    assert _page(refused)["code"] == "flow_step_read_lost_producer"
+
+    moved = await flows.move_step(ctx, revision, UUID(draft["id"]), 2)
+    assert not moved.isError, moved.content[0].text
+    revision += 1
+    order = json.loads(_page(moved)["content"])["steps"]
+    assert [item["step_id"] for item in order] == [
+        collect["id"],
+        draft["id"],
+        check["id"],
+        write["id"],
+    ]
+    assert await _prompt(client, base, headers, write) == (
+        "Write from {{step_3.output}}."
+    )
+
+    removed = await flows.remove_step(ctx, revision, UUID(draft["id"]))
+    assert not removed.isError, removed.content[0].text
+    revision += 1
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert [step["id"] for step in current["steps"]] == [
+        collect["id"],
+        check["id"],
+        write["id"],
+    ]
+    assert await _prompt(client, base, headers, write) == (
+        "Write from {{step_2.output}}."
+    )
+
+    ahead = await flows.move_step(ctx, revision, UUID(write["id"]), 2)
+    assert ahead.isError
+    assert _page(ahead)["code"] == "flow_step_read_lost_producer"

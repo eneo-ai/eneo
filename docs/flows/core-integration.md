@@ -67,6 +67,22 @@ Each group lands as its own commit with the reference tests it touches.
 | Flow run retention | deletions of retention services | Open decision, see below |
 | Develop-era reversions in platform files | for example `worker/routes.py` API key maintenance | Not transferred; the reference behaviour stays |
 
+## Authoring through the core
+
+The editor (`PATCH /flows/{id}/editor/`) and the chat's loopback tools share
+`flow_authoring_operations.apply_editor_update`. Moving, inserting and removing
+steps (`step_order`, and the `move_step`, `remove_step` and positioned
+`add_step` tools) used to be safe only in the AI Builder; the core now does it
+in `flow_step_structure.py`: aliases a kept step reads (`step_N` in its
+bindings, interpolated configuration and prompt) follow their producers, and a
+change that removes a read step or moves it after its reader is refused with
+`flow_step_read_lost_producer`.
+
+The `flows_core` gate authenticates in its own session and commits before the
+route's container authenticates. Sharing a request with a function-scoped
+route, an open gate transaction held the row of a legacy key hash it had just
+upgraded, and the route's own authentication of the same key waited on it.
+
 ## Documents
 
 The tool runtime renders Markdown to Word and PDF and fills Word templates; the

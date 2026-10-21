@@ -24,6 +24,7 @@ class FlowApiErrorCode(StrEnum):
     RUN_RETRY_PREFIX_UNSUPPORTED = "flow_run_retry_prefix_unsupported"
     RUN_REQUIRED_STEP_INPUT_MISSING = "flow_run_required_step_input_missing"
     DOCUMENT_RUNTIME_REQUIRED = "flow_document_runtime_required"
+    STEP_READ_LOST_PRODUCER = "flow_step_read_lost_producer"
     RUN_RUNTIME_INPUT_DISABLED = "flow_run_runtime_input_disabled"
     RUN_TOP_LEVEL_FILE_IDS_NOT_SUPPORTED = "flow_run_top_level_file_ids_not_supported"
     RUN_IDEMPOTENCY_CONFLICT = "flow_run_idempotency_conflict"

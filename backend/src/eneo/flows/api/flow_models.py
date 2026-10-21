@@ -1087,15 +1087,70 @@ class FlowEditorNewStep(BaseModel):
         return self
 
 
-class FlowEditorUpdateRequest(BaseModel):
-    """One revision-fenced edit of the definition and its managed assistants."""
+class FlowEditorStepSlot(BaseModel):
+    """A place in the new step order: a saved step, or a new step by its index
+    in ``new_steps``."""
 
     model_config = ConfigDict(extra="forbid")
+
+    step_id: UUID | None = None
+    new_step: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def name_exactly_one_step(self) -> Self:
+        if (self.step_id is None) == (self.new_step is None):
+            raise ValueError("A slot names either a saved step or a new step.")
+        return self
+
+
+class FlowEditorUpdateRequest(BaseModel):
+    """One revision-fenced edit of the definition and its managed assistants.
+
+    ``step_order``, when given, is the new order of the steps: the saved steps
+    it leaves out are removed, and new steps sit where it places them (else
+    they follow the saved steps). Reads of a step that moves follow it; a
+    read that would lose its step refuses the edit."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "expected_revision": 4,
+                "definition": {"description": "Summarize and file citizen letters."},
+                "new_steps": [
+                    {
+                        "name": "Check the facts",
+                        "configuration": {
+                            "input_source": "previous_step",
+                            "input_type": "text",
+                            "output_mode": "compose_text",
+                            "output_type": "text",
+                        },
+                        "assistant": {
+                            "prompt": {"text": "Check the summary against the letter."}
+                        },
+                    }
+                ],
+                "step_order": [
+                    {"step_id": "00000000-0000-0000-0000-000000000101"},
+                    {"new_step": 0},
+                    {"step_id": "00000000-0000-0000-0000-000000000102"},
+                ],
+                "step_edits": [
+                    {
+                        "step_id": "00000000-0000-0000-0000-000000000102",
+                        "changes": {"user_description": "Write the reply"},
+                    }
+                ],
+            }
+        },
+    )
 
     expected_revision: int = Field(ge=0)
     new_steps: list[FlowEditorNewStep] = Field(
         default_factory=list[FlowEditorNewStep], max_length=256
     )
+    step_order: list[FlowEditorStepSlot] | None = Field(default=None, max_length=256)
     step_edits: list[FlowEditorStepChange] = Field(
         default_factory=list[FlowEditorStepChange], max_length=256
     )
@@ -1118,6 +1173,19 @@ class FlowEditorUpdateRequest(BaseModel):
         ids = [change.assistant_id for change in self.assistants]
         if len(ids) != len(set(ids)):
             raise ValueError("An assistant can only be updated once per edit.")
+        if self.step_order is not None:
+            if "steps" in self.definition.model_fields_set:
+                raise ValueError("Use step_order or a full replacement, not both.")
+            placed_ids = [slot.step_id for slot in self.step_order if slot.step_id]
+            if len(placed_ids) != len(set(placed_ids)):
+                raise ValueError("A step can only be placed once.")
+            placed_new = sorted(
+                slot.new_step for slot in self.step_order if slot.new_step is not None
+            )
+            if placed_new != list(range(len(self.new_steps))):
+                raise ValueError("step_order must place every new step once.")
+            if {change.step_id for change in self.step_edits} - set(placed_ids):
+                raise ValueError("A step the edit removes cannot also be changed.")
         return self
 
 

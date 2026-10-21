@@ -250,6 +250,12 @@ def input_binding_alias_reads(
     return reads
 
 
+def prompt_alias_reads(prompt: str, *, step_order: int) -> list[StepAliasRead]:
+    """The steps the prompt of the step at `step_order` reads by alias."""
+
+    return _alias_reads("prompt", [((), prompt)], visible_below=step_order)
+
+
 def config_alias_reads(channel: ConfigChannel | None) -> list[StepAliasRead]:
     """The steps a configuration column reads by alias at the strings the
     runtime interpolates, `channel`'s sites, none when it is not one."""

@@ -79,6 +79,7 @@ const FLOW_API_ERROR_MESSAGES = {
   flow_run_retry_prefix_unsupported: m.flow_error_flow_run_retry_prefix_unsupported,
   flow_run_required_step_input_missing: m.flow_error_flow_run_required_step_input_missing,
   flow_document_runtime_required: m.flow_error_flow_document_runtime_required,
+  flow_step_read_lost_producer: m.flow_error_flow_step_read_lost_producer,
   flow_run_runtime_input_disabled: m.flow_error_flow_run_runtime_input_disabled,
   flow_run_top_level_file_ids_not_supported: m.flow_error_flow_run_top_level_file_ids_not_supported,
   flow_run_idempotency_conflict: m.flow_error_flow_run_idempotency_conflict,
