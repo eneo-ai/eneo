@@ -271,7 +271,9 @@ export function usePersonalChatSkills({
         latestId !== null &&
         latestNumber !== null &&
         latestId !== binding.skill_revision_id &&
-        !summary?.execution_blocked
+        !summary?.execution_blocked &&
+        // A deactivated Skill keeps running at its pin but cannot move.
+        summary?.is_active !== false
           ? { id: latestId, number: latestNumber }
           : null
     } satisfies PersonalSkillRow;

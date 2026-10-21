@@ -454,6 +454,31 @@ describe("ChatSkills", () => {
     );
   });
 
+  it("offers no version move for a deactivated skill in the chat", async () => {
+    configuration = {
+      ...configuration,
+      bindings: [
+        {
+          ...answers,
+          is_active: false,
+          skill_revision_id: "answers-r1",
+          revision_number: 1,
+          attachable_revision_id: "answers-r3",
+          attachable_revision_number: 3
+        }
+      ]
+    };
+    renderSkills();
+    const popover = await openSkills();
+    const row = rowOf(
+      within(popover).getByRole("radiogroup", { name: "Läge för Mina svarspreferenser" })
+    );
+
+    expect(within(row).queryByText("Ny version finns")).toBeNull();
+    expect(within(row).queryByRole("button", { name: "Använd senaste versionen" })).toBeNull();
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+
   it("keeps a skill an administrator blocked as it is", async () => {
     configuration = { ...configuration, bindings: [{ ...answers, execution_blocked: true }] };
     renderSkills();
