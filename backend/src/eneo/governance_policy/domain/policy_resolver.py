@@ -1,6 +1,4 @@
 # Copyright (c) 2026 Sundsvalls Kommun
-#
-# Licensed under the MIT License.
 
 """Pure resolver: maps (assistant, scope, policy, tenant context) -> EffectiveConfig.
 

@@ -443,8 +443,6 @@ async def run_crawl(
     id: Annotated[UUID, Path(description="Unique identifier of the website to crawl")],
     container: ContainerDep,
 ):
-    # MIT License
-
     service = container.website_crud_service()
     crawl_run = await service.crawl_website(id)
 
