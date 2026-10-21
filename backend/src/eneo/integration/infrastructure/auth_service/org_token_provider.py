@@ -93,10 +93,10 @@ class SharePointCredentialsRefusedError(BadRequestException):
     """A browse or preview refused because the organisation's credentials no
     longer work; served like ``SharePointCredentialsInvalidError``."""
 
-    code = SharePointCredentialsInvalidError.code
-
     def __init__(self) -> None:
-        super().__init__(CREDENTIALS_INVALID_MESSAGE)
+        super().__init__(
+            CREDENTIALS_INVALID_MESSAGE, code=SharePointCredentialsInvalidError.code
+        )
 
 
 def _error_body(exc: httpx.HTTPStatusError) -> dict[str, object]:

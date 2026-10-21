@@ -66,10 +66,10 @@ _ACTIVE_CAPABILITY_INDEX = "uq_mcp_servers_tenant_active_capability"
 class MCPServerCredentialTransportError(BadRequestException):
     """The saved server would send its credential to a plain-http address."""
 
-    code = "mcp_credential_requires_https"
-
     def __init__(self) -> None:
-        super().__init__(CREDENTIAL_TRANSPORT_REQUIREMENT)
+        super().__init__(
+            CREDENTIAL_TRANSPORT_REQUIREMENT, code="mcp_credential_requires_https"
+        )
 
 
 def _require_credential_transport(http_auth_type: str, http_url: str) -> None:
