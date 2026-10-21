@@ -43,6 +43,7 @@ from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.spaces.utils.space_utils import effective_space_ids_for
+from eneo.tenants.tenant import TenantInDB
 from eneo.user_groups.user_group import UserGroupState
 from eneo.users.user import UserGroupInDBRead, UserInDB
 
@@ -230,6 +231,7 @@ async def test_the_access_facts_decide_as_the_loaded_space(
 class Tenancy:
     """A fresh tenant, so its organization space holds only this test's rows."""
 
+    tenant: TenantInDB
     tenant_id: UUID
     caller_id: UUID
     organization: UUID
@@ -244,6 +246,7 @@ class Tenancy:
             update={
                 "id": self.caller_id,
                 "tenant_id": self.tenant_id,
+                "tenant": self.tenant,
                 "user_groups": [
                     UserGroupInDBRead(id=group_id, name=str(group_id))
                     for group_id in group_ids
@@ -306,7 +309,10 @@ async def tenancy(db_container, tenant_factory, user_factory) -> Tenancy:
                 dict(space_id=other_space, user_group_id=deleted_group, role="admin"),
             ],
         )
+        tenant = await container.tenant_repo().get(tenant_id)
+        assert tenant is not None
     return Tenancy(
+        tenant=tenant,
         tenant_id=tenant_id,
         caller_id=caller_id,
         organization=organization,
@@ -322,7 +328,7 @@ async def test_space_facts_hold_only_the_callers_memberships(
     db_container, admin_user, tenancy
 ):
     caller = tenancy.caller(admin_user, tenancy.group, tenancy.deleted_group)
-    async with db_container(user=caller) as container:
+    async with db_container(user=caller, tenant=tenancy.tenant) as container:
         repo = container.space_repo()
         facts = await repo.get_space_access_facts(tenancy.space)
         other = await repo.get_space_access_facts(tenancy.other_space)
@@ -350,7 +356,9 @@ async def test_space_facts_of_another_tenant_are_not_found(
     db_container, admin_user, tenancy
 ):
     # Even a space the caller's id holds a seat in.
-    async with db_container(user=tenancy.caller(admin_user)) as container:
+    async with db_container(
+        user=tenancy.caller(admin_user), tenant=tenancy.tenant
+    ) as container:
         repo = container.space_repo()
         with pytest.raises(NotFoundException):
             await repo.get_space_access_facts(tenancy.foreign_space)
@@ -362,7 +370,7 @@ async def test_facts_for_many_spaces_leave_out_other_tenants(
     db_container, admin_user, tenancy
 ):
     caller = tenancy.caller(admin_user, tenancy.group)
-    async with db_container(user=caller) as container:
+    async with db_container(user=caller, tenant=tenancy.tenant) as container:
         repo = container.space_repo()
         facts = await repo.get_spaces_access_facts(
             [tenancy.space, tenancy.other_space, tenancy.foreign_space, uuid4()]
@@ -429,7 +437,9 @@ async def test_visible_knowledge_ids_are_what_the_space_loader_shows(
             ],
         )
 
-    async with db_container(user=tenancy.caller(admin_user)) as container:
+    async with db_container(
+        user=tenancy.caller(admin_user), tenant=tenancy.tenant
+    ) as container:
         repo = container.space_repo()
         visible = await repo.get_visible_integration_knowledge_ids(
             tenancy.space, tenancy.organization
@@ -468,7 +478,7 @@ async def test_another_tenants_group_attached_to_a_space_grants_nothing(
 
     # The caller's own record claims the group, as a corrupt sync could.
     caller = tenancy.caller(admin_user, foreign_group)
-    async with db_container(user=caller) as container:
+    async with db_container(user=caller, tenant=tenancy.tenant) as container:
         repo = container.space_repo()
         facts = await repo.get_space_access_facts(tenancy.other_space)
         many = await repo.get_spaces_access_facts([tenancy.other_space])
@@ -625,7 +635,7 @@ async def test_a_key_brings_only_the_resource_it_is_scoped_to(
         async with db_container() as container:
             caller = await container.user_service()._build_service_user(key)
 
-    async with db_container(user=caller) as container:
+    async with db_container(user=caller, tenant=tenancy.tenant) as container:
         facts = await container.space_repo().get_spaces_access_facts(
             [tenancy.space, tenancy.other_space]
         )
