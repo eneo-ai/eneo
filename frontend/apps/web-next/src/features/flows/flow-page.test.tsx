@@ -1,0 +1,282 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { Suspense } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { makeSpace } from "@/features/spaces/testing/space-fixture";
+import { makeFlow, makeStep } from "./flow-fixtures";
+import { flowKeys, type FlowPublic } from "./flows-api";
+import { FlowPage } from "./flow-page";
+
+type Reply = { data?: unknown; error?: unknown; response: Response };
+
+const ok = (data: unknown): Reply => ({ data, response: new Response(null, { status: 200 }) });
+const refused = (status: number, body: Record<string, unknown>): Reply => ({
+  error: { eneo_error_code: 9007, ...body },
+  response: new Response(null, { status })
+});
+
+const state = vi.hoisted(() => ({
+  announce: vi.fn(),
+  flow: null as unknown,
+  chat: null as unknown,
+  editor: null as unknown,
+  publish: null as unknown,
+  unpublish: null as unknown,
+  mode: null as unknown
+}));
+
+const api = vi.hoisted(() => ({
+  GET: vi.fn(async (path: string) => {
+    if (path === "/api/v1/flows/{id}/") return state.flow;
+    if (path === "/api/v1/assistants/{id}/") {
+      return {
+        data: { id: "assistant-chat", name: "Medborgarbrev", mcp_servers: [] },
+        response: new Response()
+      };
+    }
+    if (path === "/api/v1/conversations/{session_id}/") {
+      return { data: { id: "session-1", name: "", messages: [] }, response: new Response() };
+    }
+    return { data: undefined, response: new Response() };
+  }),
+  POST: vi.fn(async (path: string) => {
+    if (path === "/api/v1/flows/{id}/authoring-chat/") return state.chat;
+    if (path === "/api/v1/flows/{id}/publish/") return state.publish;
+    if (path === "/api/v1/flows/{id}/unpublish/") return state.unpublish;
+    return { data: undefined, response: new Response() };
+  }),
+  PATCH: vi.fn(async (path: string) => {
+    if (path === "/api/v1/flows/{id}/editor/") return state.editor;
+    if (path === "/api/v1/flows/{id}/authoring-chat/{session_id}/") return state.mode;
+    return { data: undefined, response: new Response() };
+  }),
+  PUT: vi.fn(),
+  DELETE: vi.fn()
+}));
+
+vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
+  useAnnounce: () => state.announce
+}));
+// The conversation itself is the chat feature's; the page only follows what it reports.
+vi.mock("@/features/chat/chat-view", () => ({
+  ChatView: ({
+    onToolCallFinished,
+    onAnswerFinished
+  }: {
+    onToolCallFinished: (call: { serverName: string; isInternal: boolean }) => void;
+    onAnswerFinished: () => void;
+  }) => (
+    <div>
+      <button
+        type="button"
+        onClick={() => onToolCallFinished({ serverName: "flows", isInternal: true })}
+      >
+        Verktyg klart
+      </button>
+      <button type="button" onClick={onAnswerFinished}>
+        Svar klart
+      </button>
+    </div>
+  )
+}));
+vi.mock("@/features/spaces/use-space", async () => {
+  const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
+  const { makeSpace: space } = await import("@/features/spaces/testing/space-fixture");
+  return { useSpace: () => useSpaceFromQuery(() => space({})) };
+});
+
+const steps = [
+  makeStep(1, { user_description: "Sammanfatta" }),
+  makeStep(2, { user_description: "Skriv svar" })
+];
+
+beforeEach(() => {
+  state.flow = ok(makeFlow({ steps }));
+  // Without edit access the chat is not offered; most tests are about the definition.
+  state.chat = refused(403, { code: "insufficient_space_permission", message: "No." });
+});
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+function renderPage(flow: FlowPublic = makeFlow({ steps })) {
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(flowKeys.flow(flow.id), flow);
+  queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
+  return renderInApp(
+    <Suspense>
+      <FlowPage flowId={flow.id} />
+    </Suspense>,
+    {
+      queryClient,
+      appContext: testAppContext({ permissions: ["flows_view", "flows_manage"] })
+    }
+  );
+}
+
+function editorBody() {
+  const call = api.PATCH.mock.calls.find(([path]) => path === "/api/v1/flows/{id}/editor/");
+  return (call as unknown as [string, { body: unknown }] | undefined)?.[1].body;
+}
+
+describe("FlowPage", () => {
+  it("shows the definition beside the chat", async () => {
+    const { container } = renderPage();
+    expect(screen.getByRole("heading", { level: 1, name: "Medborgarbrev" })).toBeTruthy();
+    expect(screen.getByText("Utkast")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Flödets definition" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Steg" })).toBeTruthy();
+    expect(await screen.findByText("Chatten är inte tillgänglig")).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
+  it("moves a step through the editor, fenced on the revision on screen", async () => {
+    state.editor = ok(
+      makeFlow({
+        draft_revision: 5,
+        steps: [
+          { ...steps[1]!, step_order: 1 },
+          { ...steps[0]!, step_order: 2 }
+        ]
+      })
+    );
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Flytta ner Steg 1: Sammanfatta" }));
+
+    await waitFor(() =>
+      expect(state.announce).toHaveBeenCalledWith("Steg 1: Sammanfatta flyttades till plats 2")
+    );
+    expect(editorBody()).toEqual({
+      step_order: [{ step_id: "step-2" }, { step_id: "step-1" }],
+      definition: {},
+      expected_revision: 4
+    });
+    const firstStep = screen.getAllByRole("article")[0]!;
+    expect(within(firstStep).getByText("Skriv svar")).toBeTruthy();
+  });
+
+  it("explains a refused removal by the step that reads the removed one", async () => {
+    state.editor = refused(400, {
+      code: "flow_step_read_lost_producer",
+      message: "Skriv svar (step 2) reads a step this change removes: step 1 in its prompt.",
+      context: { step_id: "step-2", step_order: 2, site: "prompt", reads_step: 1 }
+    });
+    renderPage();
+    const trigger = screen.getByRole("button", { name: "Fler åtgärder för Steg 1: Sammanfatta" });
+    fireEvent.click(trigger);
+    const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort steg" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort steget?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort steg" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("Ändringen sparades inte")).toBeTruthy();
+    expect(
+      within(alert).getByText(/Steg 2: Skriv svar läser Steg 1: Sammanfatta i sin instruktion/)
+    ).toBeTruthy();
+    expect(editorBody()).toMatchObject({ step_order: [{ step_id: "step-2" }] });
+  });
+
+  it("reloads a draft that changed elsewhere and says so", async () => {
+    state.editor = refused(400, { code: "stale_revision", message: "Stale." });
+    state.flow = ok(makeFlow({ draft_revision: 7, steps }));
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Flytta upp Steg 2: Skriv svar" }));
+
+    expect(await screen.findByText("Flödet hade ändrats")).toBeTruthy();
+    await waitFor(() =>
+      expect(api.GET).toHaveBeenCalledWith("/api/v1/flows/{id}/", expect.anything())
+    );
+  });
+
+  it("publishes the revision on screen and puts a refusal on the step it names", async () => {
+    state.publish = refused(400, {
+      code: "typed_io_tool_not_allowed",
+      message: "Tool not allowed.",
+      context: { step_order: 2, refusal: "space" }
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Publicera" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("Flödet publicerades inte")).toBeTruthy();
+    expect(within(alert).getByText(/^Steg 2: Skriv svar: /)).toBeTruthy();
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/flows/{id}/publish/", {
+      params: { path: { id: "flow-1" }, query: { expected_revision: 4 } }
+    });
+  });
+
+  it("keeps a published flow read only until it is unpublished", async () => {
+    const published = makeFlow({ steps, published_version: 3 });
+    state.unpublish = ok({ ...published, published_version: null });
+    renderPage(published);
+    expect(screen.getByText("Publicerad, version 3")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Flytta/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Avpublicera för att ändra" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Avpublicera flödet?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Avpublicera" }));
+
+    await waitFor(() =>
+      expect(state.announce).toHaveBeenCalledWith("Flödet avpublicerades. Nu kan du ändra det.")
+    );
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/flows/{id}/unpublish/", {
+      params: { path: { id: "flow-1" }, query: { expected_revision: 4 } }
+    });
+    expect(
+      await screen.findByRole("button", { name: "Flytta ner Steg 1: Sammanfatta" })
+    ).toBeTruthy();
+  });
+
+  it("shows what the chat's tools changed and says so", async () => {
+    const chat = { flow_id: "flow-1", assistant_id: "assistant-chat", session_id: "session-1" };
+    state.chat = ok({ ...chat, editing: true });
+    state.flow = ok(
+      makeFlow({
+        draft_revision: 5,
+        steps: [...steps, makeStep(3, { user_description: "Granska svaret" })]
+      })
+    );
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
+
+    expect(await screen.findByText("Granska svaret")).toBeTruthy();
+    expect(state.announce).toHaveBeenCalledWith("Flödet uppdaterades från chatten");
+
+    // An answer that changed nothing is not news.
+    state.announce.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Svar klart" }));
+    await waitFor(() =>
+      expect(api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/")).toHaveLength(2)
+    );
+    expect(state.announce).not.toHaveBeenCalled();
+  });
+
+  it("turns on the chat's edit mode, fenced on the revision on screen", async () => {
+    const chat = { flow_id: "flow-1", assistant_id: "assistant-chat", session_id: "session-1" };
+    state.chat = ok({ ...chat, editing: false });
+    state.mode = ok({ ...chat, editing: true });
+    renderPage();
+
+    expect(await screen.findByText("Chatten läser bara")).toBeTruthy();
+    fireEvent.click(screen.getByRole("switch", { name: /Redigeringsläge/ }));
+
+    expect(await screen.findByText("Chatten kan ändra flödet")).toBeTruthy();
+    await waitFor(() =>
+      expect(state.announce).toHaveBeenCalledWith(
+        "Redigeringsläget är på. Chatten kan nu ändra flödet."
+      )
+    );
+    expect(api.PATCH).toHaveBeenCalledWith("/api/v1/flows/{id}/authoring-chat/{session_id}/", {
+      params: { path: { id: "flow-1", session_id: "session-1" } },
+      body: { editing: true, expected_revision: 4 }
+    });
+  });
+});

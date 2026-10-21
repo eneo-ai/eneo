@@ -1,0 +1,269 @@
+"use client";
+
+import { Badge } from "@astryxdesign/core/Badge";
+import { Button } from "@astryxdesign/core/Button";
+import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
+import { Heading } from "@astryxdesign/core/Heading";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { Token } from "@astryxdesign/core/Token";
+import { ArrowDown, ArrowUp, Ellipsis, Plus, Workflow } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { useId, useState } from "react";
+import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { EmptyState } from "@/components/composites/empty-state";
+import type { FlowStep } from "./flows-api";
+import { inputTypeLabel, producesLabel, readLabel, stepLabel } from "./flow-labels";
+import { stepName, stepReaders, stepReads } from "./flow-steps";
+
+/** The id of a step's control, so focus can be put back on it after the list re-renders. */
+export function stepControlId(stepId: string, control: "open" | "up" | "down"): string {
+  return `flow-step-${stepId}-${control}`;
+}
+
+type StepActions = {
+  onOpen: (step: FlowStep) => void;
+  onMove: (step: FlowStep, delta: -1 | 1) => void;
+  /** Resolves once the removal is saved or refused. */
+  onRemove: (step: FlowStep) => Promise<unknown>;
+  /** Opens the add dialog for a 1-based position. */
+  onAdd: (position: number) => void;
+};
+
+function StepCard({
+  step,
+  steps,
+  index,
+  canEdit,
+  actions
+}: {
+  step: FlowStep;
+  steps: readonly FlowStep[];
+  index: number;
+  canEdit: boolean;
+  actions: StepActions & { onAskRemove: (step: FlowStep) => void };
+}) {
+  const t = useTranslations();
+  const titleId = useId();
+  const id = step.id ?? "";
+  const label = stepLabel(step, t);
+  const reads = stepReads(step, steps);
+  const review = step.review_policy?.mode;
+
+  return (
+    <article
+      aria-labelledby={titleId}
+      className="border-ax-border bg-ax-card rounded-ax-container flex flex-col gap-3 border p-4"
+    >
+      <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+        <div className="flex min-w-0 flex-[1_1_14rem] flex-col gap-1">
+          <Heading level={3} id={titleId} weight="semibold" wordBreak="break-word">
+            <span className="text-ax-text-secondary block text-xs font-medium">
+              {t("flows_step_label_unnamed", { order: step.step_order })}
+            </span>
+            <span className="text-base">{stepName(step) ?? t("flows_step_unnamed")}</span>
+          </Heading>
+          {review ? (
+            <span>
+              <Badge
+                variant="warning"
+                label={review === "edit" ? t("flows_review_edit") : t("flows_review_view")}
+              />
+            </span>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-1">
+          <Button
+            id={stepControlId(id, "open")}
+            label={canEdit ? t("flows_step_open_edit") : t("flows_step_open_view")}
+            aria-label={
+              canEdit
+                ? t("flows_step_open_edit_named", { step: label })
+                : t("flows_step_open_view_named", { step: label })
+            }
+            size="sm"
+            onClick={() => actions.onOpen(step)}
+          />
+          {canEdit ? (
+            <>
+              <IconButton
+                id={stepControlId(id, "up")}
+                label={t("flows_step_move_up", { step: label })}
+                icon={<ArrowUp aria-hidden="true" />}
+                variant="ghost"
+                size="sm"
+                isDisabled={index === 0}
+                onClick={() => actions.onMove(step, -1)}
+              />
+              <IconButton
+                id={stepControlId(id, "down")}
+                label={t("flows_step_move_down", { step: label })}
+                icon={<ArrowDown aria-hidden="true" />}
+                variant="ghost"
+                size="sm"
+                isDisabled={index === steps.length - 1}
+                onClick={() => actions.onMove(step, 1)}
+              />
+              <DropdownMenu
+                placement="below"
+                alignment="end"
+                hasChevron={false}
+                button={{
+                  label: t("flows_step_more", { step: label }),
+                  variant: "ghost",
+                  size: "sm",
+                  icon: <Ellipsis aria-hidden="true" />,
+                  isIconOnly: true
+                }}
+                items={[
+                  {
+                    id: "before",
+                    label: t("flows_step_add_before"),
+                    onClick: () => actions.onAdd(step.step_order)
+                  },
+                  {
+                    id: "after",
+                    label: t("flows_step_add_after"),
+                    onClick: () => actions.onAdd(step.step_order + 1)
+                  },
+                  { type: "divider" },
+                  {
+                    id: "remove",
+                    label: t("flows_step_remove"),
+                    variant: "destructive",
+                    onClick: () => actions.onAskRemove(step)
+                  }
+                ]}
+              />
+            </>
+          ) : null}
+        </div>
+      </div>
+      <MetadataList label={{ position: "start", width: "7rem" }}>
+        <MetadataListItem label={t("flows_step_reads")}>
+          <span className="flex flex-wrap gap-1">
+            {reads.map((read) => (
+              <Token
+                key={read.kind === "step" ? `step-${read.order}` : read.kind}
+                size="sm"
+                color={read.kind === "step" && read.step === null ? "red" : "default"}
+                label={readLabel(read, t)}
+              />
+            ))}
+          </span>
+        </MetadataListItem>
+        <MetadataListItem label={t("flows_step_takes")}>
+          {inputTypeLabel(step.input_type, t)}
+        </MetadataListItem>
+        <MetadataListItem label={t("flows_step_produces")}>
+          {producesLabel(step, t)}
+        </MetadataListItem>
+      </MetadataList>
+    </article>
+  );
+}
+
+/**
+ * The flow's steps in run order, each with what it reads, what it takes and
+ * what it produces. Editors open a step, move it up or down with buttons
+ * (there is no drag), add a step before or after it and remove it after a
+ * confirmation that names the steps that read it.
+ */
+export function FlowStepList({
+  steps,
+  canEdit,
+  headingRef,
+  ...actions
+}: StepActions & {
+  steps: readonly FlowStep[];
+  canEdit: boolean;
+  headingRef: React.Ref<HTMLHeadingElement>;
+}) {
+  const t = useTranslations();
+  const headingId = useId();
+  const [removing, setRemoving] = useState<FlowStep | null>(null);
+  const [removePending, setRemovePending] = useState(false);
+  const readers = removing ? stepReaders(removing, steps) : [];
+
+  const addButton = (
+    <Button
+      label={t("flows_add_step")}
+      icon={<Plus aria-hidden="true" />}
+      size="sm"
+      onClick={() => actions.onAdd(steps.length + 1)}
+    />
+  );
+
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2
+          id={headingId}
+          ref={headingRef}
+          tabIndex={-1}
+          className="text-ax-text focus-visible:outline-ring rounded-ax-inner text-lg font-semibold focus-visible:outline-2 focus-visible:outline-offset-2"
+        >
+          {t("flows_steps_heading")}
+        </h2>
+        {canEdit && steps.length > 0 ? addButton : null}
+      </div>
+      {steps.length === 0 ? (
+        <EmptyState
+          icon={<Workflow />}
+          hue="purple"
+          headingLevel={3}
+          isCompact
+          title={t("flows_steps_empty_title")}
+          description={
+            canEdit ? t("flows_steps_empty_description") : t("flows_steps_empty_read_only")
+          }
+          actions={canEdit ? addButton : undefined}
+        />
+      ) : (
+        <ol className="flex flex-col gap-2">
+          {steps.map((step, index) => (
+            <li key={step.id ?? step.step_order}>
+              <StepCard
+                step={step}
+                steps={steps}
+                index={index}
+                canEdit={canEdit}
+                actions={{ ...actions, onAskRemove: setRemoving }}
+              />
+            </li>
+          ))}
+        </ol>
+      )}
+      <ConfirmDialogControlled
+        open={removing !== null}
+        onOpenChange={(open) => {
+          if (!open) setRemoving(null);
+        }}
+        title={t("flows_remove_step_title")}
+        description={
+          removing === null
+            ? ""
+            : readers.length > 0
+              ? t("flows_remove_step_read_by", {
+                  step: stepLabel(removing, t),
+                  readers: readers.map((reader) => stepLabel(reader, t)).join(", ")
+                })
+              : t("flows_remove_step_description", { step: stepLabel(removing, t) })
+        }
+        confirmLabel={t("flows_step_remove")}
+        variant="destructive"
+        pending={removePending}
+        onConfirm={() => {
+          if (!removing) return;
+          setRemovePending(true);
+          // The dialog stays until the core has answered; a refusal is shown
+          // above the definition.
+          void actions.onRemove(removing).finally(() => {
+            setRemovePending(false);
+            setRemoving(null);
+          });
+        }}
+      />
+    </section>
+  );
+}

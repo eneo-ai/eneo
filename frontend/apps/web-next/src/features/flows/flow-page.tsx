@@ -1,0 +1,407 @@
+"use client";
+
+import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { useAnnounce } from "@astryxdesign/core/hooks";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useTranslations } from "next-intl";
+import { useCallback, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { QuietBanner } from "@/components/astryx/banner";
+import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { PageHeader } from "@/components/composites/page-header";
+import { useAppContext } from "@/components/providers/app-context";
+import { browserApi } from "@/lib/api/browser";
+import { focusAfterRemoval } from "@/lib/focus-after-removal";
+import { useFocusRescue } from "@/lib/focus-rescue";
+import { cn } from "@/lib/utils";
+import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
+import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
+import { useSpace } from "@/features/spaces/use-space";
+import { AddStepDialog } from "./editor/add-step-dialog";
+import { FlowStepEditor } from "./editor/flow-step-editor";
+import {
+  flowKeys,
+  flowQueryOptions,
+  publishFlow,
+  refusalCode,
+  storeFlow,
+  unpublishFlow,
+  updateFlowEditor,
+  type FlowDefinitionUpdate,
+  type FlowEditorUpdate,
+  type FlowPublic,
+  type FlowStep
+} from "./flows-api";
+import { FlowChatPanel } from "./flow-chat-panel";
+import { stepLabel } from "./flow-labels";
+import { flowRefusalMessage, STALE_REVISION } from "./flow-refusals";
+import { FlowSettings } from "./flow-settings";
+import { FlowStatusBadge } from "./flow-status";
+import { FlowStepList, stepControlId } from "./flow-step-list";
+import { orderWithMove, orderWithout, stepsInOrder } from "./flow-steps";
+
+type Notice = { key: number; status: "error" | "warning"; title: string; description: string };
+type View = "definition" | "chat";
+type EditorChange = Omit<FlowEditorUpdate, "expected_revision" | "definition"> & {
+  definition?: FlowDefinitionUpdate;
+};
+
+/** After a move the moved step's button keeps focus; at an end, where it is disabled, its twin. */
+function focusMoveControl(stepId: string, delta: -1 | 1) {
+  requestAnimationFrame(() => {
+    const same = document.getElementById(stepControlId(stepId, delta < 0 ? "up" : "down"));
+    const other = document.getElementById(stepControlId(stepId, delta < 0 ? "down" : "up"));
+    const target = same instanceof HTMLButtonElement && !same.disabled ? same : other;
+    target?.focus();
+  });
+}
+
+/**
+ * A flow's page: its definition (settings and steps, each with what it reads
+ * and produces) beside its chat. Changes go through the core's editor as one
+ * revision-fenced edit each; a refusal is shown above both columns with how
+ * to fix it, and a stale draft is reloaded. Publishing freezes the
+ * definition until it is unpublished. On a phone the two columns are one
+ * view at a time.
+ */
+export function FlowPage({ flowId }: { flowId: string }) {
+  const t = useTranslations();
+  const announce = useAnnounce();
+  const queryClient = useQueryClient();
+  const rescue = useFocusRescue();
+  const { routeId } = useSpace();
+  const { can } = useAppContext();
+  const spaceName = useSpaceDisplayName();
+  const sections = useSpaceSections();
+  const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
+  const steps = stepsInOrder(flow);
+  const isPublished = flow.published_version != null;
+  const canManage = can("flows_manage");
+  const canEdit = canManage && !isPublished;
+
+  const stepsHeadingRef = useRef<HTMLHeadingElement>(null);
+  const editorRef = useRef<HTMLElement>(null);
+  const noticeKey = useRef(0);
+  const [notice, setNotice] = useState<Notice | null>(null);
+  const [view, setView] = useState<View>("definition");
+  const [openStepId, setOpenStepId] = useState<string | null>(null);
+  const [addAt, setAddAt] = useState<number | null>(null);
+  const [confirmUnpublish, setConfirmUnpublish] = useState(false);
+
+  /** A refusal above both columns; a stale draft is reloaded first. */
+  const refused = useCallback(
+    (error: unknown, title: string, against: readonly FlowStep[]) => {
+      const stale = refusalCode(error) === STALE_REVISION;
+      if (stale) void queryClient.invalidateQueries({ queryKey: flowKeys.flow(flowId) });
+      noticeKey.current += 1;
+      setNotice({
+        key: noticeKey.current,
+        status: stale ? "warning" : "error",
+        title: stale ? t("flows_notice_stale_title") : title,
+        description: flowRefusalMessage(error, against, t)
+      });
+    },
+    [flowId, queryClient, t]
+  );
+
+  const saved = (updated: FlowPublic) => {
+    storeFlow(queryClient, updated);
+    setNotice(null);
+  };
+
+  const edit = useMutation({
+    mutationFn: (change: EditorChange) =>
+      updateFlowEditor(flowId, {
+        ...change,
+        definition: change.definition ?? {},
+        expected_revision: flow.draft_revision
+      }),
+    onSuccess: saved,
+    onError: (error) => refused(error, t("flows_notice_not_saved"), steps)
+  });
+
+  const publish = useMutation({
+    mutationFn: () => publishFlow(flow),
+    onSuccess: (updated) => {
+      saved(updated);
+      announce(t("flows_published", { version: updated.published_version ?? "" }));
+    },
+    onError: (error) => refused(error, t("flows_notice_not_published"), steps)
+  });
+
+  const unpublish = useMutation({
+    mutationFn: () => unpublishFlow(flow),
+    onSuccess: (updated) => {
+      saved(updated);
+      setConfirmUnpublish(false);
+      announce(t("flows_unpublished"));
+    },
+    onError: (error) => {
+      setConfirmUnpublish(false);
+      refused(error, t("flows_notice_not_unpublished"), steps);
+    }
+  });
+
+  /** After the chat's tools ran or it answered: reread the flow and say when it changed. */
+  const refreshFromChat = useCallback(async () => {
+    const before = queryClient.getQueryData<FlowPublic>(flowKeys.flow(flowId));
+    try {
+      const after = await queryClient.query({
+        ...flowQueryOptions(browserApi, flowId),
+        staleTime: 0
+      });
+      const changed =
+        before !== undefined &&
+        (after.draft_revision !== before.draft_revision ||
+          after.published_version !== before.published_version);
+      if (changed) {
+        void queryClient.invalidateQueries({ queryKey: flowKeys.list(after.space_id) });
+        announce(t("flows_chat_changed_flow"));
+      }
+    } catch {
+      // The next action reads the flow again; a failed reread is not news.
+    }
+  }, [announce, flowId, queryClient, t]);
+
+  function requestPublish() {
+    if (publish.isPending) return;
+    if (steps.length === 0) {
+      noticeKey.current += 1;
+      setNotice({
+        key: noticeKey.current,
+        status: "error",
+        title: t("flows_notice_not_published"),
+        description: t("flows_publish_needs_steps")
+      });
+      return;
+    }
+    publish.mutate();
+  }
+
+  function openStep(step: FlowStep) {
+    if (!step.id) return;
+    // Rendered before focus moves, so the editor is there to take it.
+    flushSync(() => setOpenStepId(step.id ?? null));
+    editorRef.current?.focus();
+  }
+
+  function closeStep() {
+    const id = openStepId;
+    setOpenStepId(null);
+    if (id)
+      requestAnimationFrame(() => document.getElementById(stepControlId(id, "open"))?.focus());
+  }
+
+  function moveStep(step: FlowStep, delta: -1 | 1) {
+    if (edit.isPending || !step.id) return;
+    const order = orderWithMove(steps, step.id, delta);
+    if (!order) return;
+    const id = step.id;
+    edit.mutate(
+      { step_order: order },
+      {
+        onSuccess: () => {
+          announce(
+            t("flows_step_moved", { step: stepLabel(step, t), position: step.step_order + delta })
+          );
+          focusMoveControl(id, delta);
+        }
+      }
+    );
+  }
+
+  async function removeStep(step: FlowStep) {
+    if (!step.id) return;
+    const next = focusAfterRemoval(document.getElementById(stepControlId(step.id, "open")));
+    try {
+      await edit.mutateAsync({ step_order: orderWithout(steps, step.id) });
+      announce(t("flows_step_removed", { step: stepLabel(step, t) }));
+      rescue(() => next() ?? stepsHeadingRef.current);
+    } catch {
+      // Refused: the notice above the columns says why.
+    }
+  }
+
+  async function saveSettings(definition: FlowDefinitionUpdate): Promise<boolean> {
+    try {
+      await edit.mutateAsync({ definition });
+      announce(t("flows_settings_saved"));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  const openedStep = openStepId ? steps.find((step) => step.id === openStepId) : undefined;
+
+  const actions = canManage ? (
+    <div className="flex flex-wrap items-center gap-2">
+      {isPublished ? (
+        <Button
+          label={t("unpublish")}
+          onClick={() => setConfirmUnpublish(true)}
+          isLoading={unpublish.isPending}
+          isInterruptible
+        />
+      ) : (
+        <Button
+          label={t("publish")}
+          variant="primary"
+          onClick={requestPublish}
+          isLoading={publish.isPending}
+          isInterruptible
+        />
+      )}
+    </div>
+  ) : undefined;
+
+  return (
+    <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
+      <div className="border-ax-border flex flex-col gap-3 border-b px-6 pt-4 pb-3">
+        <PageHeader
+          title={flow.name}
+          description={flow.description?.trim() || undefined}
+          breadcrumbs={[
+            { label: spaceName, href: spaceLandingHref(sections, routeId) },
+            { label: t("flows"), href: `/spaces/${routeId}/flows` },
+            { label: flow.name, current: true }
+          ]}
+          actions={
+            <>
+              <FlowStatusBadge publishedVersion={flow.published_version} />
+              {actions}
+            </>
+          }
+        />
+        {notice ? (
+          <Banner
+            key={notice.key}
+            status={notice.status}
+            title={notice.title}
+            description={notice.description}
+            isDismissable
+            dismissLabel={t("flows_notice_dismiss")}
+            onDismiss={() => setNotice(null)}
+          />
+        ) : null}
+        <div className="lg:hidden">
+          <SegmentedControl
+            label={t("flows_view_label")}
+            value={view}
+            onChange={(next) => setView(next as View)}
+            layout="fill"
+          >
+            <SegmentedControlItem value="definition" label={t("flows_view_definition")} />
+            <SegmentedControlItem value="chat" label={t("flows_view_chat")} />
+          </SegmentedControl>
+        </div>
+      </div>
+
+      <div className="flex min-w-0 flex-col lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,0.8fr)]">
+        <section
+          aria-label={t("flows_definition_heading")}
+          className={cn(
+            "flex min-w-0 flex-col gap-6 px-6 py-5 lg:min-h-0 lg:overflow-y-auto",
+            view !== "definition" && "max-lg:hidden"
+          )}
+        >
+          {openedStep?.id ? (
+            <section
+              ref={editorRef}
+              tabIndex={-1}
+              aria-label={t("flows_step_editor_region", { step: stepLabel(openedStep, t) })}
+              className="focus-visible:outline-ring rounded-ax-inner focus-visible:outline-2 focus-visible:outline-offset-2"
+            >
+              <FlowStepEditor
+                flow={flow}
+                stepId={openedStep.id}
+                readOnly={!canEdit}
+                onSaved={(updated) => {
+                  saved(updated);
+                  announce(t("flows_step_saved", { step: stepLabel(openedStep, t) }));
+                }}
+                onCancel={closeStep}
+              />
+            </section>
+          ) : (
+            <>
+              {isPublished ? (
+                <QuietBanner
+                  status="info"
+                  title={t("flows_published_title", { version: flow.published_version ?? "" })}
+                  description={
+                    canManage ? t("flows_published_description") : t("flows_published_read_only")
+                  }
+                  collapsible={false}
+                  endContent={
+                    canManage ? (
+                      <Button
+                        label={t("flows_unpublish_to_edit")}
+                        size="sm"
+                        onClick={() => setConfirmUnpublish(true)}
+                      />
+                    ) : undefined
+                  }
+                />
+              ) : null}
+              <FlowStepList
+                steps={steps}
+                canEdit={canEdit}
+                headingRef={stepsHeadingRef}
+                onOpen={openStep}
+                onMove={moveStep}
+                onRemove={removeStep}
+                onAdd={(position) => setAddAt(position)}
+              />
+              <FlowSettings flow={flow} canEdit={canEdit} onSave={saveSettings} />
+            </>
+          )}
+        </section>
+
+        <section
+          aria-label={t("flows_chat_heading")}
+          className={cn(
+            "border-ax-border flex h-[85dvh] min-h-[28rem] min-w-0 flex-col border-t lg:h-auto lg:min-h-0 lg:border-t-0 lg:border-l",
+            view !== "chat" && "max-lg:hidden"
+          )}
+        >
+          <FlowChatPanel
+            flow={flow}
+            onFlowMayHaveChanged={() => void refreshFromChat()}
+            onRefused={(error, title) => refused(error, title, steps)}
+          />
+        </section>
+      </div>
+
+      {canEdit ? (
+        <AddStepDialog
+          flow={flow}
+          position={addAt ?? steps.length + 1}
+          open={addAt !== null}
+          onOpenChange={(open) => {
+            if (!open) setAddAt(null);
+          }}
+          onSaved={(updated) => {
+            saved(updated);
+            setAddAt(null);
+            announce(t("flows_step_added"));
+          }}
+        />
+      ) : null}
+      <ConfirmDialogControlled
+        open={confirmUnpublish}
+        onOpenChange={(open) => {
+          if (!unpublish.isPending) setConfirmUnpublish(open);
+        }}
+        title={t("flows_unpublish_title")}
+        description={t("flows_unpublish_description")}
+        confirmLabel={t("unpublish")}
+        variant="default"
+        pending={unpublish.isPending}
+        onConfirm={() => unpublish.mutate()}
+      />
+    </div>
+  );
+}
