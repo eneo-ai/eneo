@@ -1,3 +1,4 @@
+import json
 from hashlib import sha256
 from uuid import UUID, uuid4
 
@@ -14,6 +15,7 @@ from eneo.websites.domain.crawl_run import CrawlType
 pytestmark = pytest.mark.integration
 
 _ACTIVE_WEBSITE_CURSOR_INDEX = "ix_info_blobs_active_website_cursor"
+_ACTIVE_WEBSITE_PATH_INDEX = "ix_info_blobs_active_website_path"
 _WEBSITE_INDEX = "ix_info_blobs_website_id"
 
 
@@ -476,3 +478,109 @@ async def test_deep_website_cursor_page_uses_the_active_composite_index(
         count_plan = count_explain[0]["Plan"]
         assert _WEBSITE_INDEX in _plan_index_names(count_plan)
         assert count_plan["Actual Rows"] == 1
+
+
+def _sql_literal(value: object) -> str:
+    if isinstance(value, int):
+        return str(value)
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+async def _prepared_plan(session, statement) -> dict[str, object]:
+    """How PostgreSQL plans ``statement`` as asyncpg sends it: prepared, then
+    executed with its bound values. A literal-bound copy would hide an
+    expression that only matches the index once parameters are inlined."""
+    compiled = statement.compile(dialect=session.get_bind().dialect)
+    values = ", ".join(
+        _sql_literal(compiled.params[name]) for name in compiled.positiontup or ()
+    )
+    connection = await session.connection()
+    await connection.exec_driver_sql(f"PREPARE website_content AS {compiled}")
+    try:
+        explain = (
+            await connection.exec_driver_sql(
+                f"EXPLAIN (FORMAT JSON) EXECUTE website_content({values})"
+            )
+        ).scalar()
+    finally:
+        await connection.exec_driver_sql("DEALLOCATE website_content")
+    if isinstance(explain, str):
+        explain = json.loads(explain)
+    return explain[0]["Plan"]
+
+
+async def test_directory_queries_range_over_the_website_path_index(
+    db_container, monkeypatch
+) -> None:
+    origin = "https://municipality.example/"
+    async with db_container() as container:
+        session = container.session()
+        user = container.user()
+        model_id = await session.scalar(sa.select(EmbeddingModels.id).limit(1))
+        website = Websites(
+            name="Large municipal website",
+            url=origin,
+            download_files=False,
+            crawl_type=CrawlType.CRAWL,
+            update_interval="never",
+            size=0,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            embedding_model_id=model_id,
+        )
+        session.add(website)
+        await session.flush()
+        await session.execute(
+            sa.insert(InfoBlobs),
+            [
+                {
+                    "id": UUID(int=2_000_000 + position),
+                    "title": f"Page {position}",
+                    "url": f"{origin}section-{position % 40}/sub-{position % 3}/"
+                    f"page-{position}",
+                    "text": "x",
+                    "size": 1,
+                    "source_id": uuid4(),
+                    "version_state": InfoBlobVersionState.ACTIVE.value,
+                    "user_id": user.id,
+                    "tenant_id": user.tenant_id,
+                    "website_id": website.id,
+                    "embedding_model_id": model_id,
+                }
+                for position in range(4000)
+            ],
+        )
+        await session.execute(sa.text("ANALYZE info_blobs"))
+
+        statements: list[object] = []
+        for method in ("scalar", "scalars", "execute"):
+            original = getattr(session, method)
+
+            async def capture(statement, *args, _original=original, **kwargs):
+                # scalar() and scalars() may delegate to execute(): keep each once.
+                if not any(seen is statement for seen in statements):
+                    statements.append(statement)
+                return await _original(statement, *args, **kwargs)
+
+            monkeypatch.setattr(session, method, capture)
+
+        repo = container.info_blob_repo()
+        directory = f"{origin}section-7/"
+        page = await repo.get_by_website_page(website.id, prefix=directory, limit=20)
+        folders = await repo.get_website_folders(website.id, prefix=directory)
+        monkeypatch.undo()
+
+        assert page.total_count == 100
+        assert all(item.url.startswith(directory) for item in page.items)
+        in_directory = [position for position in range(4000) if position % 40 == 7]
+        assert [(folder.path, folder.count) for folder in folders.items] == [
+            (
+                f"{directory}sub-{part}/",
+                sum(position % 3 == part for position in in_directory),
+            )
+            for part in range(3)
+        ]
+        count_query, page_query, folder_query = statements
+        for statement in (count_query, page_query, folder_query):
+            plan = await _prepared_plan(session, statement)
+            assert _ACTIVE_WEBSITE_PATH_INDEX in _plan_index_names(plan), plan
