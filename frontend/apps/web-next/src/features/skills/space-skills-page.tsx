@@ -110,6 +110,14 @@ export function SpaceSkillsPage() {
             {skill.display_name}
           </Link>
           <span className="text-ax-text-secondary text-xs break-all">{skill.slug}</span>
+          {/* In the personal space: whether the person's personal chat uses it.
+              Here, not under Status: the name column never gets narrower than
+              240 px, room for the whole badge, where Status's 120 px cut it off. */}
+          {space.personal && (
+            <span className="mt-1.5 empty:hidden">
+              <PersonalChatSkillStatus skillId={skill.id} />
+            </span>
+          )}
         </span>
       )
     },
@@ -124,14 +132,10 @@ export function SpaceSkillsPage() {
       header: t("status"),
       width: proportional(1),
       renderCell: (skill) => (
-        <span className="flex flex-col items-start gap-1.5">
-          <StatusLabel
-            status={skill.is_active ? "success" : "neutral"}
-            label={t(skill.is_active ? "skills_available_status" : "skills_unavailable_status")}
-          />
-          {/* In the personal space: whether the person's personal chat uses it. */}
-          {space.personal && <PersonalChatSkillStatus skillId={skill.id} />}
-        </span>
+        <StatusLabel
+          status={skill.is_active ? "success" : "neutral"}
+          label={t(skill.is_active ? "skills_available_status" : "skills_unavailable_status")}
+        />
       )
     },
     {

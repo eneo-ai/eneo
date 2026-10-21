@@ -295,6 +295,8 @@ export function usePersonalChatSkills({ withLibrary = false }: { withLibrary?: b
       assistantId !== null &&
       (canEdit || organisation.length > 0 || (data?.bindings.length ?? 0) > 0),
     failure,
+    /** Forgets the last refusal (the control closed: it belongs to that visit). */
+    dismissFailure: () => setFailure(null),
     change: (change: PersonalSkillChange) => save.mutate(change)
   };
 }

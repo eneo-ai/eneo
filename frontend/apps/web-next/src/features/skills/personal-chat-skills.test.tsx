@@ -112,10 +112,11 @@ describe("the personal chat on the personal space's Skills pages", () => {
   it("marks each skill the personal chat uses with its mode in the list", async () => {
     renderInApp(<SpaceSkillsPage />, { appContext: appContext() });
 
-    const answersRow = (await screen.findByRole("link", { name: "Mina svarspreferenser" })).closest(
-      "tr"
-    )!;
-    expect(await within(answersRow).findByText("Personlig chatt · Alltid")).toBeTruthy();
+    // Under the name, whose column keeps room for the whole badge.
+    const answersName = (
+      await screen.findByRole("link", { name: "Mina svarspreferenser" })
+    ).closest("td")!;
+    expect(await within(answersName).findByText("Personlig chatt · Alltid")).toBeTruthy();
     const notesRow = screen.getByRole("link", { name: "Mötesanteckningar" }).closest("tr")!;
     expect(within(notesRow).queryByText(/Personlig chatt/)).toBeNull();
   });

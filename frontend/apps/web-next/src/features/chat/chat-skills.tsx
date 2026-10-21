@@ -8,7 +8,7 @@ import { Popover } from "@astryxdesign/core/Popover";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { BookOpenCheck, Lock, Plus, RefreshCw, Search, Settings, X } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { TextInput } from "@/components/astryx/text-input";
 import { QueryStateBoundary } from "@/components/composites/query-state";
@@ -29,6 +29,13 @@ type PersonalChatSkills = ReturnType<typeof usePersonalChatSkills>;
 
 /** Beyond this many own Skills the list gets a search field. */
 const SEARCH_FROM = 8;
+
+/**
+ * What Astryx's Popover adds around its content, above the trigger: the 4 px
+ * gap, 12 px of padding above and below and the 16 px gutter at the top of
+ * the window.
+ */
+const POPOVER_CHROME = 44;
 
 /**
  * A chosen "Vid behov" or "Alltid" takes the accent; a chosen "Av" keeps the
@@ -203,14 +210,45 @@ function OwnSkills({ skills, stacked }: { skills: PersonalChatSkills; stacked: b
   );
 }
 
+/**
+ * A ref for the panel that keeps it within the room above its trigger.
+ * Astryx caps a popover to the window, not to that room, so where the
+ * composer sits mid-page (the start state) a long list grew over the pill
+ * and the composer; the list scrolls inside instead, and the header and
+ * links stay in view.
+ */
+function useFitAbove(anchor?: RefObject<HTMLElement | null>) {
+  const panel = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = panel.current;
+    const trigger = anchor?.current;
+    if (!element || !trigger) return;
+    const fit = () => {
+      const room = trigger.getBoundingClientRect().top - POPOVER_CHROME;
+      element.style.maxHeight = `${Math.max(0, room)}px`;
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    window.addEventListener("scroll", fit, true);
+    return () => {
+      window.removeEventListener("resize", fit);
+      window.removeEventListener("scroll", fit, true);
+    };
+  }, [anchor]);
+  return panel;
+}
+
 /** What the popover and the bottom sheet show: header, both layers, links. */
 function SkillsPanel({
   skills,
   stacked,
+  anchor,
   onClose
 }: {
   skills: PersonalChatSkills;
   stacked: boolean;
+  /** The popover's trigger: the panel fits in the room above it. */
+  anchor?: RefObject<HTMLElement | null>;
   /** The sheet's visible close button; the popover has its own. */
   onClose?: () => void;
 }) {
@@ -218,10 +256,11 @@ function SkillsPanel({
   const { routeId } = useSpace();
   const { layer, running, canEdit } = skills;
   const base = `/spaces/${routeId}/skills`;
+  const panel = useFitAbove(anchor);
 
   return (
-    <div className={cn("flex min-h-0 flex-col gap-3", stacked ? "p-4" : "p-1")}>
-      <div className="flex items-start gap-3">
+    <div ref={panel} className={cn("flex min-h-0 flex-col gap-3", stacked ? "p-4" : "p-1")}>
+      <div className="flex shrink-0 items-start gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <p className="text-sm font-semibold">{t("personal_chat_skills_button")}</p>
           <p className="text-ax-text-secondary text-xs">{t("personal_chat_skills_scope")}</p>
@@ -252,7 +291,7 @@ function SkillsPanel({
           <div
             className={cn(
               "flex flex-col gap-4",
-              !stacked && "max-h-[min(28rem,60vh)] overflow-y-auto pe-1"
+              !stacked && "max-h-[28rem] min-h-0 flex-auto overflow-y-auto pe-1"
             )}
           >
             {layer?.status === "suspended" && layer.reason && (
@@ -283,7 +322,7 @@ function SkillsPanel({
       {canEdit && (
         <div
           className={cn(
-            "border-ax-border flex flex-wrap items-center justify-between gap-2 border-t pt-2",
+            "border-ax-border flex shrink-0 flex-wrap items-center justify-between gap-2 border-t pt-2",
             stacked && "[&>*]:flex-1"
           )}
         >
@@ -317,16 +356,24 @@ function SkillsPanel({
 export function ChatSkills() {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
+  const pillRef = useRef<HTMLButtonElement>(null);
   // The composer's toolbar goes icon-only below 40rem (max-sm); so does this.
   const wide = useMediaQuery("(min-width: 40rem)");
   const skills = usePersonalChatSkills({ withLibrary: open });
   if (!skills.visible) return null;
+
+  // A refusal belongs to the visit that made it: closing forgets it.
+  const changeOpen = (next: boolean) => {
+    if (!next) skills.dismissFailure();
+    setOpen(next);
+  };
 
   const label = skills.running
     ? t("personal_chat_skills_button_label", { count: skills.running.total })
     : t("personal_chat_skills_button");
   const pill = (props: { onClick?: () => void }) => (
     <button
+      ref={pillRef}
       type="button"
       aria-haspopup="dialog"
       aria-expanded={open}
@@ -348,14 +395,14 @@ export function ChatSkills() {
     return (
       <Popover
         isOpen={open}
-        onOpenChange={setOpen}
+        onOpenChange={changeOpen}
         placement="above"
         alignment="start"
         width={480}
         label={t("personal_chat_skills_button")}
         closeButtonLabel={t("close")}
         // Mounted only while open, so a closed popover holds no radios.
-        content={open ? <SkillsPanel skills={skills} stacked={false} /> : null}
+        content={open ? <SkillsPanel skills={skills} stacked={false} anchor={pillRef} /> : null}
       >
         {pill({})}
       </Popover>
@@ -366,12 +413,12 @@ export function ChatSkills() {
       {pill({ onClick: () => setOpen(true) })}
       <BottomSheet
         isOpen={open}
-        onOpenChange={setOpen}
+        onOpenChange={changeOpen}
         label={t("personal_chat_skills_button")}
         // A search field brings up the keyboard: only a tall sheet makes room for it.
         height={skills.rows.length >= SEARCH_FROM ? "tall" : "80dvh"}
       >
-        <SkillsPanel skills={skills} stacked onClose={() => setOpen(false)} />
+        <SkillsPanel skills={skills} stacked onClose={() => changeOpen(false)} />
       </BottomSheet>
     </>
   );

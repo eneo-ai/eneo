@@ -278,6 +278,47 @@ describe("ChatSkills", () => {
     expect(within(answersMode).getByRole("radio", { name: "Alltid", checked: true })).toBeTruthy();
   });
 
+  it("forgets a refusal once the control closes", async () => {
+    api.POST.mockImplementation(() => refused(500, { message: "Boom" }));
+    renderSkills();
+    let popover = await openSkills();
+    fireEvent.click(
+      within(
+        within(popover).getByRole("radiogroup", { name: "Läge för Mina svarspreferenser" })
+      ).getByRole("radio", { name: "Vid behov" })
+    );
+    const refusal = "Ändringen sparades inte. Försök igen.";
+    expect(await within(popover).findByText(refusal)).toBeTruthy();
+
+    // Closed with the trigger, then opened again.
+    const trigger = screen.getByRole("button", { name: "Skills i din personliga chatt: 2" });
+    fireEvent.click(trigger);
+    await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
+    popover = await openSkills();
+    expect(within(popover).queryByText(refusal)).toBeNull();
+  });
+
+  it("fits the popover in the room above the pill, so it never covers the composer", async () => {
+    renderSkills();
+    const trigger = await screen.findByRole("button", { name: "Skills i din personliga chatt: 2" });
+    // The pill sits 400 px down the window (jsdom has no layout of its own).
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 300, y: 400, width: 96, height: 32 })
+    );
+    const popover = await openSkills();
+    // 400 px less the popover's 4 px gap, 24 px of padding and 16 px window gutter.
+    const panel = within(popover)
+      .getByText("Gäller alla dina personliga chattar")
+      .closest("[style*='max-height']") as HTMLElement;
+    expect(panel.style.maxHeight).toBe("356px");
+    // The list scrolls inside; the header and the links stay.
+    const list = within(popover)
+      .getByRole("list", { name: "Dina skills" })
+      .closest(".overflow-y-auto");
+    expect(list).not.toBeNull();
+    expect(within(popover).getByRole("link", { name: "Hantera skills" })).toBeTruthy();
+  });
+
   it("explains a paused layer and counts only the organisation's skills", async () => {
     configuration = {
       ...configuration,
