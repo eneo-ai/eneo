@@ -25,6 +25,11 @@ export class EneoApiError extends Error {
   readonly errorId?: string;
   /** Structured error payload (`details` on GeneralError), when present. */
   readonly details?: unknown;
+  /**
+   * Why the request was refused (`context` on GeneralError), when present:
+   * the facts a refusal names, such as the step a change would break.
+   */
+  readonly context?: Record<string, unknown>;
 
   constructor(
     message: string,
@@ -35,6 +40,7 @@ export class EneoApiError extends Error {
       traceId?: string;
       errorId?: string;
       details?: unknown;
+      context?: Record<string, unknown>;
     }
   ) {
     super(message);
@@ -45,6 +51,7 @@ export class EneoApiError extends Error {
     this.traceId = options.traceId;
     this.errorId = options.errorId;
     this.details = options.details;
+    this.context = options.context;
   }
 }
 
@@ -70,6 +77,7 @@ function parseErrorBody(body: unknown): {
   reason?: string;
   errorId?: string;
   details?: unknown;
+  context?: Record<string, unknown>;
 } {
   if (!isRecord(body)) return {};
 
@@ -79,7 +87,8 @@ function parseErrorBody(body: unknown): {
       code: typeof body.eneo_error_code === "number" ? body.eneo_error_code : undefined,
       reason: typeof body.code === "string" ? body.code : undefined,
       errorId: typeof body.error_id === "string" ? body.error_id : undefined,
-      details: body.details ?? undefined
+      details: body.details ?? undefined,
+      context: isRecord(body.context) ? body.context : undefined
     };
   }
 
@@ -114,14 +123,15 @@ export async function errorCodeFromResponse(response: Response): Promise<number 
 }
 
 export function apiErrorFromResponse(response: Response, body: unknown): EneoApiError {
-  const { message, code, reason, errorId, details } = parseErrorBody(body);
+  const { message, code, reason, errorId, details, context } = parseErrorBody(body);
   return new EneoApiError(message ?? `Request failed with status ${response.status}`, {
     status: response.status,
     code,
     reason,
     traceId: extractTraceId(response.headers),
     errorId,
-    details
+    details,
+    context
   });
 }
 

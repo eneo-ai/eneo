@@ -32,6 +32,22 @@ describe("apiErrorFromResponse", () => {
     expect(error.details).toEqual({ quota: 100 });
   });
 
+  it("keeps the context a refusal names", () => {
+    const error = apiErrorFromResponse(errorResponse(400), {
+      message: "Write (step 3) reads a step this change removes: step 2 in its prompt.",
+      eneo_error_code: 9007,
+      code: "flow_step_read_lost_producer",
+      context: { step_order: 3, site: "prompt", reads_step: 2 }
+    });
+
+    expect(error.reason).toBe("flow_step_read_lost_producer");
+    expect(error.context).toEqual({ step_order: 3, site: "prompt", reads_step: 2 });
+    expect(
+      apiErrorFromResponse(errorResponse(400), { message: "x", context: ["not", "a", "record"] })
+        .context
+    ).toBeUndefined();
+  });
+
   it("keeps the backend error id on unexpected failures", () => {
     const error = apiErrorFromResponse(errorResponse(500, { "x-trace-id": "trace-123" }), {
       error: "Internal server error",
