@@ -305,6 +305,66 @@ describe("Tools capability configuration", () => {
       .toHaveAttribute("href", "/admin/models?tab=image_models");
   });
 
+  it("keeps a Prognos source following its model's class unless an edit changes the class", async () => {
+    const own = { id: "s2", name: "Klass 2", security_level: 2 };
+    const inherited = { id: "s3", name: "Klass 3", security_level: 3 };
+    const forecast = source({
+      mcp_server_id: "forecast",
+      name: "Forecast",
+      purpose: "forecast",
+      http_auth_type: "bundled",
+      http_url: "http://runtime:8765/forecast",
+      image_model_id: null,
+      image_model: null,
+      forecast_model_id: "f1",
+      forecast_model: {
+        id: "f1",
+        name: "default",
+        nickname: "Timestral",
+        provider_name: "Eneo tool service",
+        is_enabled: true
+      },
+      // No class of its own: the API reports the forecast model's.
+      security_classification: inherited
+    });
+    const offer = [
+      { tool: "forecast", purpose: "forecast", available: true, mcp_server_id: "forecast" }
+    ];
+    render(ToolsPage, {
+      data: {
+        ...(pageData([forecast], offer) as object),
+        securityClassifications: { security_classifications: [inherited, own] }
+      } as never
+    });
+    const edit = async () => {
+      await page.getByRole("button", { name: `${m.actions()}: ${m.forecast()}` }).click();
+      await page.getByRole("menuitem", { name: m.tools_change(), exact: true }).click();
+    };
+    const lastUpdate = () =>
+      (api.mcpServers.update.mock.lastCall as unknown[] | undefined)?.[0] as Record<
+        string,
+        unknown
+      >;
+
+    // Only the name: the class is left out, so a later class on the model still applies.
+    await edit();
+    await page.getByRole("textbox", { name: m.name(), exact: false }).fill("Prognos för ekonomi");
+    await page.getByRole("button", { name: m.save(), exact: true }).click();
+    await vi.waitFor(() =>
+      expect(lastUpdate()).toMatchObject({ id: "forecast", name: "Prognos för ekonomi" })
+    );
+    expect("security_classification" in lastUpdate()).toBe(false);
+
+    // A class the admin chooses becomes the source's own.
+    await edit();
+    await page.getByRole("button", { name: m.security_classification() }).click();
+    await page.getByRole("option", { name: "Klass 2" }).click();
+    await page.getByRole("button", { name: m.save(), exact: true }).click();
+    await vi.waitFor(() =>
+      expect(lastUpdate()).toMatchObject({ security_classification: { id: "s2" } })
+    );
+  });
+
   it("keeps an edit action and allows disabling a blocked active source", async () => {
     show([source({ readiness_reason: "model_disabled" })]);
     await expect

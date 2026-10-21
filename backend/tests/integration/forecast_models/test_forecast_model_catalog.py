@@ -439,6 +439,58 @@ class TestTheSourcesOwnClassification:
             effective = source.effective_security_classification
             assert effective is not None and effective.id == own_id
 
+    async def test_without_its_own_it_follows_the_model_after_an_edit(
+        self, client, db_container, admin_user, headers
+    ):
+        async with db_container() as container:
+            session = container.session()
+            await session.execute(
+                sa.update(Tenants)
+                .where(Tenants.id == admin_user.tenant_id)
+                .values(security_enabled=True)
+            )
+            internal_id = (
+                await _classification(session, admin_user.tenant_id, "Internal", 1)
+            ).id
+            confidential_id = (
+                await _classification(session, admin_user.tenant_id, "Confidential", 2)
+            ).id
+            model_id = await ensure_default_forecast_model(
+                session, admin_user.tenant_id
+            )
+            await session.execute(
+                sa.update(ForecastModels)
+                .where(ForecastModels.id == model_id)
+                .values(security_classification_id=internal_id)
+            )
+            source_id = (
+                await _forecast_source(session, admin_user.tenant_id, model_id)
+            ).id
+
+        # The edit forms leave the class out when the admin did not change it.
+        updated = await client.post(
+            f"/api/v1/mcp-servers/{source_id}/",
+            json={"name": "Prognos"},
+            headers=headers,
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["security_classification"]["id"] == str(internal_id)
+
+        # Classified again under Admin > Models, the model takes the source with it.
+        async with db_container() as container:
+            await container.session().execute(
+                sa.update(ForecastModels)
+                .where(ForecastModels.id == model_id)
+                .values(security_classification_id=confidential_id)
+            )
+
+        async with db_container() as container:
+            row = await container.session().get(MCPServers, source_id)
+            assert row is not None and row.security_classification_id is None
+        shown = await client.get(f"/api/v1/mcp-servers/{source_id}/", headers=headers)
+        assert shown.status_code == 200, shown.text
+        assert shown.json()["security_classification"]["id"] == str(confidential_id)
+
 
 class TestGovernance:
     async def test_an_admin_lists_and_governs_the_model_in_one_audited_call(
