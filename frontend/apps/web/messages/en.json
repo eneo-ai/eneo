@@ -4012,6 +4012,8 @@
   "audit_action_rerank_model_updated_description": "Logs changes to a rerank model",
   "audit_action_rerank_model_deleted": "Rerank Model Deleted",
   "audit_action_rerank_model_deleted_description": "Logs when a rerank model is removed from the tenant",
+  "audit_action_forecast_model_updated": "Forecast Model Updated",
+  "audit_action_forecast_model_updated_description": "Logs changes to a forecast model (on/off, security classification or name)",
   "audit_action_transcription_model_migrated_description": "Logs when usage is migrated between transcription models",
   "audit_action_transcription_model_updated_description": "Logs changes to a transcription model",
   "audit_action_user_created_description": "Logs when a new user is created",
