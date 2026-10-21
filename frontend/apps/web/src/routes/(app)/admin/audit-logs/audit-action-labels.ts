@@ -525,6 +525,14 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_updated,
     description: m.audit_action_flow_updated_description
   },
+  flow_authoring_chat_created: {
+    name: m.audit_action_flow_authoring_chat_created,
+    description: m.audit_action_flow_authoring_chat_created_description
+  },
+  flow_authoring_mode_changed: {
+    name: m.audit_action_flow_authoring_mode_changed,
+    description: m.audit_action_flow_authoring_mode_changed_description
+  },
   flow_deleted: {
     name: m.audit_action_flow_deleted,
     description: m.audit_action_flow_deleted_description

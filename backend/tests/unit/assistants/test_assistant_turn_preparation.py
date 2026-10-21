@@ -26,6 +26,7 @@ from eneo.completion_models.infrastructure.completion_service import CompletionS
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
 from eneo.main.exceptions import (
+    NotFoundException,
     SecurityClassificationMismatchException,
     UnauthorizedException,
 )
@@ -262,6 +263,42 @@ def turn(monkeypatch: pytest.MonkeyPatch) -> TurnFixture:
     return TurnFixture(
         service, assistant, space, user, session, history, provider, requests
     )
+
+
+async def test_a_hidden_assistant_answers_only_in_its_authoring_chat(
+    turn: TurnFixture,
+):
+    turn.assistant.hidden = True
+    flow_id = uuid4()
+    bound = AsyncMock(return_value=flow_id)
+    turn.service._authoring_chat_flow_id = bound
+
+    with pytest.raises(NotFoundException):
+        await turn.service._prepare_turn(
+            question="Change the flow", assistant_id=turn.assistant.id
+        )
+    bound.assert_not_awaited()
+
+    prepared = await turn.service._prepare_turn(
+        question="Change the flow",
+        assistant_id=turn.assistant.id,
+        session_id=turn.session.id,
+    )
+
+    bound.assert_awaited_once_with(
+        session_id=turn.session.id, assistant_id=turn.assistant.id
+    )
+    assert prepared.authoring_flow_id == flow_id
+
+
+async def test_an_ordinary_assistant_turn_has_no_authoring_flow(turn: TurnFixture):
+    prepared = await turn.service._prepare_turn(
+        question="Check the purchase",
+        assistant_id=turn.assistant.id,
+        session_id=turn.session.id,
+    )
+
+    assert prepared.authoring_flow_id is None
 
 
 async def test_prepare_does_not_start_inference_or_create_conversation(

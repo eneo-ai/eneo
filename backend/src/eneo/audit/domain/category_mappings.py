@@ -100,6 +100,8 @@ CATEGORY_MAPPINGS = {
     ActionType.TRANSCRIPTION_MODEL_UPDATED.value: "user_actions",
     ActionType.FLOW_CREATED.value: "user_actions",
     ActionType.FLOW_UPDATED.value: "user_actions",
+    ActionType.FLOW_AUTHORING_CHAT_CREATED.value: "user_actions",
+    ActionType.FLOW_AUTHORING_MODE_CHANGED.value: "user_actions",
     ActionType.FLOW_DELETED.value: "user_actions",
     ActionType.FLOW_PUBLISHED.value: "user_actions",
     ActionType.FLOW_UNPUBLISHED.value: "user_actions",

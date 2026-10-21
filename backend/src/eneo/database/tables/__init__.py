@@ -19,6 +19,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.feature_flag_table",
     "eneo.database.tables.file_icon_backfill_table",
     "eneo.database.tables.files_table",
+    "eneo.database.tables.flow_authoring_chats_table",
     "eneo.database.tables.flow_tables",
     "eneo.database.tables.group_chats_table",
     "eneo.database.tables.groups_spaces_table",

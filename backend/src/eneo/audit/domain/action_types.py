@@ -130,6 +130,8 @@ class ActionType(str, Enum):
     TEMPLATE_DELETED = "template_deleted"
     FLOW_CREATED = "flow_created"
     FLOW_UPDATED = "flow_updated"
+    FLOW_AUTHORING_CHAT_CREATED = "flow_authoring_chat_created"
+    FLOW_AUTHORING_MODE_CHANGED = "flow_authoring_mode_changed"
     FLOW_DELETED = "flow_deleted"
     FLOW_PUBLISHED = "flow_published"
     FLOW_UNPUBLISHED = "flow_unpublished"

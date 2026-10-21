@@ -294,6 +294,8 @@ class _PreparedAssistantTurn:
     model_route: str
     initial_skill_context_tokens: int
     is_personal_default: bool
+    # The flow a hidden assistant's chat edits; its turns get the flows tools.
+    authoring_flow_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -3352,6 +3354,7 @@ class AssistantService:
         tool_assistant_id: UUID | None = None,
         disabled_mcp_server_ids: list[UUID] | None = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
+        session_id: UUID | None = None,
     ) -> _PreparedAssistantTurn:
         """Resolve the ordinary ask policy without creating conversation rows."""
         # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
@@ -3373,11 +3376,21 @@ class AssistantService:
 
         space = await self.space_repo.get_space_by_assistant(
             assistant_id=assistant_id,
-            hidden_assistant_ids=(
-                {tool_assistant_id} if tool_assistant_id is not None else frozenset()
-            ),
+            hidden_assistant_ids={
+                assistant_id,
+                *({tool_assistant_id} if tool_assistant_id is not None else set()),
+            },
         )
         active_assistant = space.get_assistant(assistant_id=assistant_id)
+        authoring_flow_id: UUID | None = None
+        if active_assistant.hidden:
+            # A hidden assistant answers only in the flow authoring chat it was
+            # made for, continued by the person the chat belongs to.
+            if session_id is None or tool_assistant_id is not None:
+                raise NotFoundException("Assistant not found.")
+            authoring_flow_id = await self._authoring_chat_flow_id(
+                session_id=session_id, assistant_id=assistant_id
+            )
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         # The personal chat is the personal space's default assistant — gated by
@@ -3628,7 +3641,25 @@ class AssistantService:
             model_route=model_route,
             initial_skill_context_tokens=initial_skill_snapshot.measurement.tokens,
             is_personal_default=is_personal_default,
+            authoring_flow_id=authoring_flow_id,
         )
+
+    async def _authoring_chat_flow_id(
+        self, *, session_id: UUID, assistant_id: UUID
+    ) -> UUID:
+        """The flow the chat edits, after the binding's own access checks."""
+        from dependency_injector import providers
+
+        from eneo.flows.application.flow_authoring_chat import load_authoring_chat
+        from eneo.main.container.container import Container
+        from eneo.main.container.container_overrides import override_user
+
+        container = Container(session=providers.Object(self.repo.session))
+        override_user(container=container, user=self.user)
+        chat = await load_authoring_chat(
+            container, session_id=session_id, assistant_id=assistant_id
+        )
+        return chat.flow_id
 
     async def _execute_turn(
         self,
@@ -3660,6 +3691,10 @@ class AssistantService:
                 scoped_token = self.auth_service.create_scoped_mcp_token(
                     self.user,
                     assistant_id=prepared.assistant_to_ask.id,
+                    # The flows tools find their flow through the chat.
+                    session_id=(
+                        session.id if prepared.authoring_flow_id is not None else None
+                    ),
                     table_tools=table_tools_attached,
                 )
             return scoped_token
@@ -3696,6 +3731,19 @@ class AssistantService:
                 token=mint_scoped_token(),
                 tenant_id=self.user.tenant_id,
                 source_labels=prepared.assistant_to_ask.knowledge_source_labels(),
+            )
+
+        # A flow authoring chat edits its flow through the loopback flows
+        # tools; a model without tool calling only talks about it.
+        flows_mcp_server = None
+        if (
+            prepared.authoring_flow_id is not None
+            and prepared.effective_completion_model.supports_tool_calling
+        ):
+            from eneo.internal_mcp.flows import build_flows_mcp_server
+
+            flows_mcp_server = await build_flows_mcp_server(
+                token=mint_scoped_token(), tenant_id=self.user.tenant_id
             )
 
         # Referenced attachments: whenever signed reference URLs render in the
@@ -3806,9 +3854,11 @@ class AssistantService:
             completion_prompt_files=completion_file_inputs.completion_prompt_files,
             skill_runtime=prepared.skill_runtime,
             knowledge_mcp_server=knowledge_mcp_server,
-            internal_mcp_servers=(
-                [files_mcp_server] if files_mcp_server is not None else []
-            ),
+            internal_mcp_servers=[
+                server
+                for server in (files_mcp_server, flows_mcp_server)
+                if server is not None
+            ],
         )
 
         return response, datastore_result
@@ -3835,6 +3885,7 @@ class AssistantService:
             tool_assistant_id=tool_assistant_id,
             disabled_mcp_server_ids=disabled_mcp_server_ids,
             disabled_capabilities=disabled_capabilities,
+            session_id=session_id,
         )
         active_assistant = prepared.active_assistant
         assistant_to_ask = prepared.assistant_to_ask

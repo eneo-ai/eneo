@@ -3523,7 +3523,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 206 actions with their enabled status for the modal UI.
+     * @description Retrieve all 208 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -5219,6 +5219,40 @@ export interface paths {
      * @description Update a flow-managed assistant that belongs to the specified draft flow. Only fields accepted by `FlowAssistantPatchRequest` are applied; omitted fields are left unchanged. Use this endpoint for assistant details that should travel with the flow authoring experience, not for updating unrelated shared assistants. The assistant is part of the flow's draft: the update advances the flow's `draft_revision` by one and returns it, fenced on `expected_revision` like a flow update. The caller must own the draft; tenant admins and space owners may override draft ownership. Existing action, space permission and API-key scope checks apply.
      */
     patch: operations["update_flow_assistant"];
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/authoring-chat/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Create Authoring Chat */
+    post: operations["get_or_create_flow_authoring_chat"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/authoring-chat/{session_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Change Authoring Mode */
+    patch: operations["set_flow_authoring_mode"];
     trace?: never;
   };
   "/api/v1/flows/{id}/editor/": {
@@ -13142,6 +13176,8 @@ export interface components {
       | "template_deleted"
       | "flow_created"
       | "flow_updated"
+      | "flow_authoring_chat_created"
+      | "flow_authoring_mode_changed"
       | "flow_deleted"
       | "flow_published"
       | "flow_unpublished"
@@ -15437,7 +15473,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 87,
+     *           "action_count": 89,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -19431,6 +19467,7 @@ export interface components {
       | "flow_run_retry_nothing_to_reuse"
       | "flow_run_retry_prefix_unsupported"
       | "flow_run_required_step_input_missing"
+      | "flow_document_runtime_required"
       | "flow_run_runtime_input_disabled"
       | "flow_run_top_level_file_ids_not_supported"
       | "flow_run_idempotency_conflict"
@@ -19879,6 +19916,26 @@ export interface components {
       /** Websites */
       websites?: components["schemas"]["ModelId"][] | null;
     };
+    /** FlowAuthoringChatPublic */
+    FlowAuthoringChatPublic: {
+      /**
+       * Assistant Id
+       * Format: uuid
+       */
+      assistant_id: string;
+      /** Editing */
+      editing: boolean;
+      /**
+       * Flow Id
+       * Format: uuid
+       */
+      flow_id: string;
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+    };
     /**
      * FlowAuthoringInputSource
      * @description Input sources an authoring spec can carry.
@@ -19895,6 +19952,13 @@ export interface components {
      * @enum {string}
      */
     FlowAuthoringInputType: "text" | "json" | "audio" | "document" | "file" | "any";
+    /** FlowAuthoringModeRequest */
+    FlowAuthoringModeRequest: {
+      /** Editing */
+      editing: boolean;
+      /** Expected Revision */
+      expected_revision: number;
+    };
     /**
      * FlowAuthoringOutputMode
      * @description Output modes an authoring spec can carry.
@@ -63097,6 +63161,127 @@ export interface operations {
            *       "message": "Flow assistant not found."
            *     }
            */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_or_create_flow_authoring_chat: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowAuthoringChatPublic"];
+        };
+      };
+      /** @description Invalid configuration or stale revision. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The caller cannot manage this flow or chat. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or chat not found in the caller scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  set_flow_authoring_mode: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowAuthoringModeRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowAuthoringChatPublic"];
+        };
+      };
+      /** @description Invalid configuration or stale revision. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The caller cannot manage this flow or chat. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow or chat not found in the caller scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
