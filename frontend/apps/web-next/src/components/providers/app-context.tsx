@@ -12,6 +12,11 @@ export type AppContextData = {
   limits: Schema<"Limits">;
   featureFlags: {
     showWebSearch: boolean;
+    /**
+     * The tenant has flows (the `flows_core` gate) and the user may reach
+     * them. Read once on the server; when it is off the flow routes 404.
+     */
+    flows: boolean;
   };
   /** Deployment-configured links (env). `null` when not configured: hide the link. */
   links: {

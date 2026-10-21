@@ -5,8 +5,8 @@ import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator } from "@/components/composites/save-status";
-import { useSpaceDisplayName } from "./frame/space-header";
-import { spaceLandingHref, spaceSections, type SpaceSectionId } from "./frame/space-sections";
+import { useSpaceDisplayName, useSpaceSections } from "./frame/space-header";
+import { spaceLandingHref, type SpaceSectionId } from "./frame/space-sections";
 import { useSpace } from "./use-space";
 
 /**
@@ -26,9 +26,9 @@ export function EditorHeader({
   actions?: React.ReactNode;
 }) {
   const t = useTranslations();
-  const { space, routeId, can } = useSpace();
+  const { routeId } = useSpace();
   const spaceName = useSpaceDisplayName();
-  const sections = spaceSections(space, can, routeId);
+  const sections = useSpaceSections();
 
   return (
     <PageHeader

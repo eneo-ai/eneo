@@ -8,12 +8,18 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { Building2, ShieldCheck, SquarePen, User } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { iconUrl } from "@/components/composites/icon-field";
+import { useAppContext } from "@/components/providers/app-context";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { cn } from "@/lib/utils";
 import { AddMemberDialog } from "../members/space-members";
 import { memberDisplayName, personToneClass } from "../members/member-avatar";
 import { useSpace } from "../use-space";
-import { spaceLandingHref, spaceSections, type SpaceRoute } from "./space-sections";
+import {
+  spaceLandingHref,
+  spaceSections,
+  type SpaceRoute,
+  type SpaceSection
+} from "./space-sections";
 import { SpaceTabs } from "./space-tabs";
 
 const VISIBLE_MEMBERS = 3;
@@ -25,6 +31,13 @@ export function useSpaceDisplayName(): string {
   if (space.personal) return t("personal");
   if (space.organization) return t("organization");
   return space.name;
+}
+
+/** The space's tabs for this user, flows included when the tenant has them. */
+export function useSpaceSections(): SpaceSection[] {
+  const { space, routeId, can } = useSpace();
+  const { featureFlags } = useAppContext();
+  return spaceSections(space, can, routeId, { flows: featureFlags.flows });
 }
 
 function MemberStack() {
@@ -60,7 +73,7 @@ export function SpaceHeader({ route }: { route: Extract<SpaceRoute, { kind: "pag
   const t = useTranslations();
   const { space, routeId, can } = useSpace();
   const name = useSpaceDisplayName();
-  const sections = spaceSections(space, can, routeId);
+  const sections = useSpaceSections();
   const isHeading = route.isSectionRoot;
   const isShared = !space.personal && !space.organization;
   const description = space.personal
