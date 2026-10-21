@@ -289,6 +289,55 @@ describe("FlowRunPage", () => {
       ).toEqual({ edited_value: { mottagare: "A", antal: 3 }, expected_checkpoint_revision: 1 });
     });
 
+    it("reviews a speaker mapping as one name per speaker", async () => {
+      answerReview(
+        makeCheckpoint({
+          output_type: "json",
+          current_payload_json: {
+            structured: {
+              speakers: [
+                { label: "SPEAKER_00", name: "Anna", confidence: "high", evidence: "Hälsar" },
+                { label: "SPEAKER_01", name: null, confidence: "low", evidence: "" }
+              ]
+            }
+          }
+        })
+      );
+      state.routes["PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/"] =
+        () => ({ body: makeCheckpoint({ revision: 2 }) });
+      state.routes[
+        "POST /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve-and-continue/"
+      ] = () => ({ body: { checkpoint: makeCheckpoint(), run: makeRunSummary() } });
+      const { container } = renderRun(["flows_view", "flows_manage"]);
+
+      const panel = await screen.findByRole("region", { name: "Granska steg 2: Skriv svar" });
+      expect((within(panel).getByLabelText(/^Namn för SPEAKER_00/) as HTMLInputElement).value).toBe(
+        "Anna"
+      );
+      await expectNoAxeViolations(container);
+      fireEvent.change(within(panel).getByLabelText(/^Namn för SPEAKER_01/), {
+        target: { value: "Bo" }
+      });
+      fireEvent.click(
+        within(panel).getByRole("button", { name: messages.flow_runs_review_approve_changed })
+      );
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_runs_review_approved)
+      );
+      expect(
+        calls("PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/")[0]?.init
+          .body
+      ).toEqual({
+        edited_value: {
+          speakers: [
+            { label: "SPEAKER_00", name: "Anna", confidence: "high", evidence: "Hälsar" },
+            { label: "SPEAKER_01", name: "Bo", confidence: "low", evidence: "" }
+          ]
+        },
+        expected_checkpoint_revision: 1
+      });
+    });
+
     it("asks for a reason before rejecting", async () => {
       answerReview();
       state.routes[
@@ -335,6 +384,80 @@ describe("FlowRunPage", () => {
       expect(await screen.findByText(messages.flow_runs_review_not_allowed)).toBeTruthy();
       expect(screen.getByText("Hej Anna, tack för ditt brev.")).toBeTruthy();
       expect(screen.queryByRole("button", { name: messages.flow_runs_review_approve })).toBeNull();
+    });
+  });
+
+  describe("transcript", () => {
+    const SOURCE =
+      "GET /api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/attempts/{attempt_no}/transcript-source/";
+    const CORRECTIONS = "GET /api/v1/flows/{id}/runs/{run_id}/transcript-corrections/";
+    const EDIT = "PATCH /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/";
+
+    function answerAudioRun() {
+      answerRun(makeRunSummary());
+      state.routes[STEPS] = () => ({
+        body: [
+          makeRunStep(1, {
+            input_payload_json: {
+              transcription: { file_ids: ["audio-1"], source: { attempt_no: 1 } }
+            }
+          }),
+          makeRunStep(2)
+        ]
+      });
+      state.routes[SOURCE] = () => ({
+        body: {
+          status: "present",
+          run_id: "run-1",
+          step_id: "step-1",
+          attempt_no: 1,
+          source_hash: "hash-1",
+          bounds: { segments_bytes: 1, detail_bytes: 0, words_bytes: 0, segments_count: 2 },
+          component_omissions: {},
+          start_segment_index: 0,
+          page_size: 200,
+          max_response_bytes: 1000000,
+          next_segment_index: null,
+          segments: [
+            { segment_index: 0, start: 0, end: 3, speaker: "SPEAKER_00", text: "Välkomna." },
+            { segment_index: 1, start: 65, end: 70, speaker: "SPEAKER_01", text: "Tack." }
+          ]
+        }
+      });
+      state.routes[CORRECTIONS] = () => ({ body: [] });
+    }
+
+    it("shows each line with its time and speaker, and saves the speakers' names", async () => {
+      answerAudioRun();
+      state.routes[EDIT] = () => ({ body: {} });
+      const { container } = renderRun(["flows_view", "flows_manage"]);
+
+      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      expect(within(lines).getByText("1:05")).toBeTruthy();
+      expect(within(lines).getByText("SPEAKER_01:")).toBeTruthy();
+      await expectNoAxeViolations(container);
+
+      fireEvent.change(screen.getByLabelText("Namn för SPEAKER_00"), { target: { value: "Anna" } });
+      fireEvent.click(
+        screen.getByRole("button", { name: messages.flow_runs_transcript_names_save })
+      );
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_runs_transcript_names_saved)
+      );
+      expect(calls(EDIT)[0]?.init.body).toEqual({
+        expected_revision: null,
+        segments_hash: "hash-1",
+        occurrences: [],
+        speaker_edits: [],
+        speaker_names: { SPEAKER_00: "Anna", SPEAKER_01: null }
+      });
+    });
+
+    it("lets only someone who may review name the speakers", async () => {
+      answerAudioRun();
+      renderRun(["flows_view", "flows_run"]);
+      await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      expect(screen.queryByLabelText("Namn för SPEAKER_00")).toBeNull();
     });
   });
 });

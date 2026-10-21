@@ -15,8 +15,18 @@ export type DraftField = {
   value: string;
 };
 
+/** One diarized speaker of a speaker-mapping step, with the name the step proposed. */
+export type DraftSpeaker = {
+  label: string;
+  name: string;
+  /** The rest of the row as the step proposed it (confidence, evidence), sent back unchanged. */
+  rest: Record<string, unknown>;
+};
+
 export type ReviewDraft =
   | { kind: "text"; text: string }
+  /** A speaker mapping (`{ speakers: [{ label, name, … }] }`): one name per speaker. */
+  | { kind: "speakers"; speakers: DraftSpeaker[]; rest: Record<string, unknown> }
   /** A flat JSON object: one control per field. */
   | { kind: "fields"; fields: DraftField[] }
   /** Any other JSON value: edited as JSON text. */
@@ -36,6 +46,20 @@ function scalarKind(value: unknown): DraftField["kind"] | null {
   return null;
 }
 
+/** The speakers of a speaker mapping, or null when the value is not one. */
+function speakerRows(value: unknown): DraftSpeaker[] | null {
+  if (!isRecord(value) || !Array.isArray(value.speakers) || value.speakers.length === 0) {
+    return null;
+  }
+  const rows: DraftSpeaker[] = [];
+  for (const item of value.speakers) {
+    if (!isRecord(item) || typeof item.label !== "string") return null;
+    const { label, name, ...rest } = item;
+    rows.push({ label, name: typeof name === "string" ? name : "", rest });
+  }
+  return rows;
+}
+
 /** The working copy of what the checkpoint holds now. */
 export function reviewDraftOf(
   checkpoint: Pick<ReviewCheckpoint, "output_type" | "current_payload_json">
@@ -46,6 +70,11 @@ export function reviewDraftOf(
   }
   if (checkpoint.output_type === "json") {
     const value = payload.structured ?? {};
+    const speakers = speakerRows(value);
+    if (speakers && isRecord(value)) {
+      const rest = Object.fromEntries(Object.entries(value).filter(([key]) => key !== "speakers"));
+      return { kind: "speakers", speakers, rest };
+    }
     if (isRecord(value) && Object.keys(value).length > 0) {
       const fields = Object.entries(value).map(([name, item]) => {
         const kind = scalarKind(item);
@@ -93,6 +122,18 @@ export function editedValueOf(
   switch (draft.kind) {
     case "text":
       return { ok: true, value: draft.text };
+    case "speakers":
+      return {
+        ok: true,
+        value: {
+          ...draft.rest,
+          speakers: draft.speakers.map((speaker) => ({
+            ...speaker.rest,
+            label: speaker.label,
+            name: speaker.name.trim() || null
+          }))
+        }
+      };
     case "fields": {
       const value: Record<string, Scalar> = {};
       for (const field of draft.fields) {

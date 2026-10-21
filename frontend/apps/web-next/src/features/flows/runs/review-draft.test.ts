@@ -39,6 +39,42 @@ describe("reviewDraftOf", () => {
     expect(reviewDraftOf(nested).kind).toBe("json");
   });
 
+  it("names the speakers of a speaker mapping one by one, keeping what else the step proposed", () => {
+    const checkpoint = makeCheckpoint({
+      output_type: "json",
+      current_payload_json: {
+        structured: {
+          speakers: [
+            { label: "SPEAKER_00", name: "Anna", confidence: "high", evidence: "Säger sitt namn" },
+            { label: "SPEAKER_01", name: null, confidence: "low", evidence: "" }
+          ]
+        }
+      }
+    });
+    const draft = reviewDraftOf(checkpoint);
+    expect(draft).toMatchObject({
+      kind: "speakers",
+      speakers: [
+        { label: "SPEAKER_00", name: "Anna" },
+        { label: "SPEAKER_01", name: "" }
+      ]
+    });
+    if (draft.kind !== "speakers") return;
+    const edited = editedValueOf({
+      ...draft,
+      speakers: draft.speakers.map((speaker) => ({ ...speaker, name: speaker.name || " Bo " }))
+    });
+    expect(edited).toEqual({
+      ok: true,
+      value: {
+        speakers: [
+          { label: "SPEAKER_00", name: "Anna", confidence: "high", evidence: "Säger sitt namn" },
+          { label: "SPEAKER_01", name: "Bo", confidence: "low", evidence: "" }
+        ]
+      }
+    });
+  });
+
   it("reviews a document step as its file", () => {
     expect(reviewDraftOf(makeCheckpoint({ output_type: "pdf" })).kind).toBe("file");
   });

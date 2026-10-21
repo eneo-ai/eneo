@@ -34,7 +34,9 @@ import { JsonValue } from "./run-json";
 import { refusalText, runErrorText } from "./run-messages";
 import { progressSignature, runStepViews, tokenTotal } from "./run-progress";
 import { RunKnowledge } from "./run-knowledge";
-import { RunSteps } from "./run-steps";
+import { RunSteps, stepTitle } from "./run-steps";
+import { RunTranscripts } from "./run-transcript";
+import { transcriptTargets } from "./transcript";
 import {
   canRedispatch,
   createPollClock,
@@ -525,6 +527,25 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 />
               )}
             </Section>
+            {transcriptTargets(steps.data).length > 0 ? (
+              <Section title={t("flow_runs_transcript_heading")}>
+                <RunTranscripts
+                  flowId={flowId}
+                  runId={runId}
+                  targets={transcriptTargets(steps.data)}
+                  labelFor={(target) =>
+                    stepTitle(
+                      runStepViews(progress.data.graph, steps.data).find(
+                        (step) => step.order === target.stepOrder
+                      ) ?? { order: target.stepOrder, label: "" },
+                      t
+                    )
+                  }
+                  mayEdit={can("flows_manage")}
+                  runCompleted={status === "completed"}
+                />
+              </Section>
+            ) : null}
             <Section title={t("flow_runs_knowledge_heading")}>
               <RunKnowledge
                 flowId={flowId}

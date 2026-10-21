@@ -23,6 +23,7 @@ import {
   reviewOptions,
   type DraftField,
   type DraftProblem,
+  type DraftSpeaker,
   type EditedValue,
   type ReviewDraft
 } from "./review-draft";
@@ -102,6 +103,41 @@ function FieldsEditor({
               />
             )}
           </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SpeakersEditor({
+  baseId,
+  speakers,
+  onChange
+}: {
+  baseId: string;
+  speakers: DraftSpeaker[];
+  onChange: (speakers: DraftSpeaker[]) => void;
+}) {
+  const t = useTranslations();
+  return (
+    <div id={`${baseId}-editor`} className="flex flex-col gap-3">
+      <p className="text-ax-text-secondary text-sm">{t("flow_runs_review_speakers_hint")}</p>
+      {speakers.map((speaker) => {
+        const evidence =
+          typeof speaker.rest.evidence === "string" ? speaker.rest.evidence.trim() : "";
+        return (
+          <TextInput
+            key={speaker.label}
+            label={t("flow_runs_review_speaker_name", { label: speaker.label })}
+            description={evidence || undefined}
+            value={speaker.name}
+            onChange={(name) =>
+              onChange(
+                speakers.map((item) => (item.label === speaker.label ? { ...item, name } : item))
+              )
+            }
+            width="100%"
+          />
         );
       })}
     </div>
@@ -319,6 +355,12 @@ export function ReviewPanel({
             width="100%"
           />
         </div>
+      ) : draft.kind === "speakers" ? (
+        <SpeakersEditor
+          baseId={baseId}
+          speakers={draft.speakers}
+          onChange={(speakers) => setDraft({ ...draft, speakers })}
+        />
       ) : draft.kind === "fields" ? (
         <FieldsEditor
           baseId={baseId}
@@ -339,7 +381,9 @@ export function ReviewPanel({
           />
         </div>
       )}
-      {options.canEdit && problem?.field === null && draft.kind === "fields" ? (
+      {options.canEdit &&
+      problem?.field === null &&
+      (draft.kind === "fields" || draft.kind === "speakers") ? (
         <p className="text-ax-error text-sm">{problem.message}</p>
       ) : null}
 

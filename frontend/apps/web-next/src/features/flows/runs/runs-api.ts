@@ -341,3 +341,95 @@ export function rejectReview(checkpoint: CheckpointRef, reason: string): Promise
 export function newIdempotencyKey(): string {
   return crypto.randomUUID();
 }
+
+export type TranscriptSourcePage = Schema<"PresentTranscriptSourcePage">;
+
+/**
+ * The transcript source of one transcription attempt, all pages read in
+ * order: its raw lines, the hash corrections are anchored to, and its
+ * speaker review. `omitted` and `unavailable` sources carry no lines.
+ */
+export async function getTranscriptSource(
+  flowId: string,
+  runId: string,
+  target: { stepId: string; attemptNo: number },
+  signal?: AbortSignal
+): Promise<
+  | { status: "present"; segments: unknown[]; sourceHash: string }
+  | { status: "omitted"; tooLarge: boolean }
+  | { status: "unavailable" }
+> {
+  const segments: unknown[] = [];
+  let sourceHash: string | null = null;
+  let start = 0;
+  for (;;) {
+    const page = await unwrap(
+      browserApi.GET(
+        "/api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/attempts/{attempt_no}/transcript-source/",
+        {
+          params: {
+            path: {
+              flow_id: flowId,
+              run_id: runId,
+              step_id: target.stepId,
+              attempt_no: target.attemptNo
+            },
+            query: { start_segment_index: start }
+          },
+          signal
+        }
+      )
+    );
+    // Reason 1 is a source too large to page; 2 and 3 have no lines to page.
+    if (page.status === "omitted") return { status: "omitted", tooLarge: page.reason === 1 };
+    if (page.status !== "present") return { status: "unavailable" };
+    sourceHash ??= page.source_hash;
+    segments.push(...page.segments);
+    if (page.next_segment_index === null) break;
+    if (page.next_segment_index <= start)
+      throw new Error("Transcript source paging did not advance");
+    start = page.next_segment_index;
+  }
+  return { status: "present", segments, sourceHash: sourceHash ?? "" };
+}
+
+export function transcriptQueryOptions(
+  flowId: string,
+  runId: string,
+  target: { stepId: string; attemptNo: number }
+) {
+  return queryOptions({
+    queryKey: [...runKeys.run(flowId, runId), "transcript", target.stepId, target.attemptNo],
+    queryFn: ({ signal }) => getTranscriptSource(flowId, runId, target, signal),
+    // A finished attempt's source does not change.
+    staleTime: Infinity
+  });
+}
+
+export function transcriptCorrectionsQueryOptions(flowId: string, runId: string) {
+  return queryOptions({
+    queryKey: [...runKeys.run(flowId, runId), "transcript-corrections"],
+    queryFn: ({ signal }) =>
+      unwrap(
+        browserApi.GET("/api/v1/flows/{id}/runs/{run_id}/transcript-corrections/", {
+          params: { path: { id: flowId, run_id: runId } },
+          signal
+        })
+      )
+  });
+}
+
+/** Replaces one transcription step's corrections (the whole set, revision-fenced). */
+export function editTranscriptCorrections(
+  flowId: string,
+  runId: string,
+  stepId: string,
+  body: Schema<"FlowTranscriptCorrectionsEditRequest">
+) {
+  return unwrap(
+    browserApi.PATCH("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/", {
+      params: { path: { id: flowId, run_id: runId, step_id: stepId } },
+      body
+    })
+  );
+}
