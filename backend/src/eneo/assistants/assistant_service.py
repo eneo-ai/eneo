@@ -103,11 +103,16 @@ from eneo.roles.permissions import (
 )
 from eneo.services.service import DatastoreResult
 from eneo.services.service_repo import ServiceRepository
+from eneo.skills.domain.personal_chat_skill_layers import (
+    PersonalSkillLayerSave,
+    assert_personal_skill_layer_save,
+)
 from eneo.skills.domain.skill import (
     AssistantPinAdvanceIncompatibleReason,
     AssistantSkillConfigurationProjection,
     AssistantSkillRuntimeProjection,
     PersonalChatPinOverride,
+    PersonalSkillLayerDecision,
     ResolvedSkillBinding,
     SkillActivationEvidence,
     SkillActivationFallbackReason,
@@ -115,6 +120,7 @@ from eneo.skills.domain.skill import (
     SkillActivationRejectionReason,
     SkillActivationUnavailableException,
     SkillBindingIntent,
+    SkillBindingProjection,
     SkillComposition,
     SkillExecutionReference,
     SkillRuntimePolicy,
@@ -373,6 +379,30 @@ def filter_mcp_tool_references(
         get_id_func=lambda ref: ref.id,
     )
     return cited + display_only
+
+
+def _organisation_binding_projections(
+    effective_config: "EffectiveConfig | None",
+) -> tuple[SkillBindingProjection, ...]:
+    """The personal chat policy's Skills, in run order, blocked ones flagged."""
+    if effective_config is None:
+        return ()
+    resolution = effective_config.governance_skill_resolution
+    return tuple(
+        sorted(
+            (
+                *(
+                    SkillBindingProjection(binding=binding, execution_blocked=False)
+                    for binding in resolution.eligible
+                ),
+                *(
+                    SkillBindingProjection(binding=binding, execution_blocked=True)
+                    for binding in resolution.blocked
+                ),
+            ),
+            key=lambda projection: projection.binding.position,
+        )
+    )
 
 
 class AssistantService:
@@ -703,6 +733,24 @@ class AssistantService:
                 else await self._persistent_prompt_files(assistant, model)
             ),
         )
+
+    async def _personal_layer_decision(
+        self, *, space: "Space", assistant: Assistant
+    ) -> PersonalSkillLayerDecision | None:
+        """The personal chat's own-Skill decision for its stored state."""
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
+        )
+        model = self._context_model(assistant, effective_config=effective_config)
+        if model is None:
+            return None
+        plan = await self._create_skill_turn_plan(
+            assistant=assistant,
+            effective_config=effective_config,
+            space_is_personal=True,
+            model=model,
+        )
+        return plan.personal_layer
 
     async def _persistent_prompt_files(
         self, assistant: Assistant, model: "CompletionModel"
@@ -1091,6 +1139,7 @@ class AssistantService:
         on_demand_skill_ids_requiring_validation: frozenset[UUID] = frozenset(),
         validate_all_on_demand_candidates: bool = False,
         mcp_servers_override: list["MCPServer"] | None = None,
+        personal_layer_save: PersonalSkillLayerSave | None = None,
     ) -> None:
         """Reject saving when the system prompt + persistent attachments don't
         fit the model's context window with room left to ask a question.
@@ -1128,6 +1177,10 @@ class AssistantService:
             model=model,
             prompt_files=completion_prompt_files,
         )
+        if personal_layer_save is not None:
+            assert_personal_skill_layer_save(
+                personal_layer_save, skill_plan.personal_layer
+            )
         validation_plan = (
             skill_plan.for_full_save_validation()
             if validate_all_on_demand_candidates
@@ -1723,7 +1776,7 @@ class AssistantService:
                 insight_enabled,
                 inline_file_text,
                 knowledge_mode,
-                skill_binding_intents,
+                None if is_personal_default else skill_binding_intents,
             )
         ) or any(
             is_provided(value)
@@ -1751,6 +1804,30 @@ class AssistantService:
                     "auth_layer": "domain_policy",
                 },
             )
+
+        # The person's own Skills in the personal chat are authorized by
+        # PERSONAL_SKILLS alone; broad Assistant editing never stands in for it.
+        if (
+            is_personal_default
+            and skill_binding_intents is not None
+            and Permission.PERSONAL_SKILLS not in self.user.permissions
+        ):
+            raise UnauthorizedException(
+                "Choosing your own Skills for the personal chat needs the "
+                "Own Skills permission",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "update",
+                    "auth_layer": "domain_policy",
+                },
+            )
+        # The save transition rule compares against the stored personal layer.
+        personal_layer_before = (
+            await self._personal_layer_decision(space=space, assistant=assistant)
+            if is_personal_default
+            else None
+        )
 
         update_effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED
         if is_personal_default and reasoning_effort_only_update:
@@ -2069,6 +2146,7 @@ class AssistantService:
         )
 
         on_demand_skill_ids_requiring_validation: frozenset[UUID] = frozenset()
+        removal_only = False
         if skill_binding_intents is not None:
             replacement = await self.skill_service.replace_assistant_bindings(
                 space_id=assistant.space_id,
@@ -2078,6 +2156,7 @@ class AssistantService:
             on_demand_skill_ids_requiring_validation = (
                 replacement.on_demand_skill_ids_requiring_validation
             )
+            removal_only = replacement.removal_only
 
         # Validate before persisting (the in-memory assistant already reflects the
         # final model + prompt + attachments from update() above), so a save that
@@ -2107,6 +2186,15 @@ class AssistantService:
                     or mcp_tools is not None
                 ),
                 mcp_servers_override=mcp_servers_for_validation,
+                personal_layer_save=(
+                    PersonalSkillLayerSave(
+                        before=personal_layer_before,
+                        bindings_changed=skill_binding_intents is not None,
+                        removal_only=removal_only,
+                    )
+                    if is_personal_default
+                    else None
+                ),
             )
 
         await self.repo.apply_update(
@@ -2310,21 +2398,23 @@ class AssistantService:
         )
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         assistant = space.get_assistant(assistant_id=assistant_id)
-        if space.is_personal() and assistant.is_default:
-            return AssistantSkillConfigurationProjection(
-                bindings=tuple(bindings),
-                runtime=None,
-            )
+        personal_chat = space.is_personal() and assistant.is_default
 
         effective_config = await self._resolve_effective_config(
             space=space,
             assistant=assistant,
+        )
+        # The personal chat also shows the organisation's Skills, which run
+        # first and which the person cannot change.
+        organisation_bindings = (
+            _organisation_binding_projections(effective_config) if personal_chat else ()
         )
         model = self._context_model(assistant, effective_config=effective_config)
         if model is None:
             return AssistantSkillConfigurationProjection(
                 bindings=tuple(bindings),
                 runtime=None,
+                organisation_bindings=organisation_bindings,
             )
 
         skill_plan = await self._create_skill_turn_plan(
@@ -2344,6 +2434,8 @@ class AssistantService:
                 effective_model_id=model.id,
                 snapshot=runtime.snapshot(),
             ),
+            organisation_bindings=organisation_bindings,
+            personal_layer=skill_plan.personal_layer,
         )
 
     async def is_help_assistant(self, assistant_id: UUID) -> bool:

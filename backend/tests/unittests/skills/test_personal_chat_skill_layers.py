@@ -4,17 +4,23 @@ at all, and never weakens the organisation layer
 
 from uuid import uuid4
 
+import pytest
+
 from eneo.completion_models.domain.skill_activation import (
     SkillActivationFallbackReason,
     SkillActivationRejectionReason,
 )
 from eneo.skills.domain.personal_chat_skill_layers import (
+    PersonalSkillLayerDecision,
     PersonalSkillLayerReason,
+    PersonalSkillLayerSave,
     PersonalSkillLayerStatus,
+    assert_personal_skill_layer_save,
     assess_personal_skill_layer,
     compose_layers,
 )
 from eneo.skills.domain.skill import (
+    PersonalSkillLayerRejectedError,
     ResolvedSkillBinding,
     SkillActivationMode,
     SkillBindingSource,
@@ -253,3 +259,60 @@ def test_layers_compose_organisation_first_with_contiguous_positions():
     positions = [binding.position for binding in composed.eligible]
     assert positions == sorted(positions)
     assert len(set(positions)) == len(positions)
+
+
+_APPLIED = PersonalSkillLayerDecision(status=PersonalSkillLayerStatus.APPLIED)
+_EMPTY = PersonalSkillLayerDecision(status=PersonalSkillLayerStatus.EMPTY)
+
+
+def _suspended(reason=PersonalSkillLayerReason.MODEL_CONTEXT_EXCEEDED):
+    return PersonalSkillLayerDecision(
+        status=PersonalSkillLayerStatus.SUSPENDED, reason=reason
+    )
+
+
+def _save(*, before=None, bindings_changed=False, removal_only=False):
+    return PersonalSkillLayerSave(
+        before=before, bindings_changed=bindings_changed, removal_only=removal_only
+    )
+
+
+@pytest.mark.parametrize(
+    ("save", "after"),
+    [
+        (_save(bindings_changed=True), _EMPTY),
+        (_save(bindings_changed=True), _APPLIED),
+        (_save(bindings_changed=True, removal_only=True), _suspended()),
+        (_save(before=_suspended()), _suspended()),
+        (
+            _save(before=_APPLIED),
+            _suspended(PersonalSkillLayerReason.PERMISSION_MISSING),
+        ),
+        (_save(before=None), _suspended()),
+    ],
+    ids=[
+        "switching-off-the-last-skill",
+        "an-admissible-change",
+        "removing-while-still-over-a-limit",
+        "a-model-switch-while-already-paused",
+        "a-model-switch-after-revocation",
+        "no-stored-decision",
+    ],
+)
+def test_save_transitions_that_are_accepted(save, after):
+    assert_personal_skill_layer_save(save, after)
+
+
+@pytest.mark.parametrize(
+    ("save", "after"),
+    [
+        (_save(bindings_changed=True), _suspended()),
+        (_save(before=_APPLIED), _suspended()),
+    ],
+    ids=["an-addition-that-does-not-fit", "a-model-switch-that-breaks-a-working-layer"],
+)
+def test_save_transitions_that_are_refused(save, after):
+    with pytest.raises(PersonalSkillLayerRejectedError) as raised:
+        assert_personal_skill_layer_save(save, after)
+
+    assert raised.value.details == {"reason": "model_context_exceeded", "detail": None}

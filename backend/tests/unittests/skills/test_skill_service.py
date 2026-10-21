@@ -1084,17 +1084,19 @@ async def test_explicit_empty_reference_list_clears_all_app_bindings():
     )
 
 
-async def test_personal_default_assistant_direct_binding_fails_closed():
+async def test_the_personal_chat_owner_reads_its_own_skill_bindings():
     space = _space(personal=True, default_assistant=True)
     repo = AsyncMock()
-    repo.list_assistant_bindings.return_value = [_binding()]
+    own = _binding()
+    repo.list_assistant_bindings.return_value = [own]
     service = _service(space=space, repo=repo)
 
-    with pytest.raises(BadRequestException, match="invalid direct Skill bindings"):
-        await service.list_assistant_bindings(
-            space_id=space.id,
-            assistant_id=space.assistant.id,
-        )
+    bindings = await service.list_assistant_bindings(
+        space_id=space.id,
+        assistant_id=space.assistant.id,
+    )
+
+    assert bindings == [own]
 
 
 @pytest.mark.parametrize(

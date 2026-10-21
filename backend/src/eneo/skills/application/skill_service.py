@@ -525,8 +525,15 @@ class SkillService:
         references: list[SkillBindingReference],
         existing: list[ResolvedSkillBinding],
         requested_modes: dict[UUID, SkillActivationMode] | None = None,
+        personal_chat_layer: bool = False,
     ) -> list[ResolvedSkillBinding]:
-        await self._validate_reference_count(tenant_id=tenant_id, references=references)
+        # The personal chat's own layer takes only the owner's personal-space
+        # Skills, and its count is the layer assessment's: organisation plus
+        # own Skills together, where removing Skills must always be possible.
+        if not personal_chat_layer:
+            await self._validate_reference_count(
+                tenant_id=tenant_id, references=references
+            )
         retained_by_reference, new_references = await self._resolve_retained_references(
             tenant_id=tenant_id,
             parent_space_id=space_id,
@@ -549,6 +556,10 @@ class SkillService:
             for reference in new_references
             if reference not in local_references
         ]
+        if catalogue_references and personal_chat_layer:
+            raise BadRequestException(
+                "The personal chat can only use Skills from your personal space"
+            )
         # Reading the destination space's Skills is not enough: PERSONAL_SKILLS
         # opens your own personal space without granting Use Skills, which
         # alone covers organisation Skills, new or retained.
@@ -649,6 +660,15 @@ class SkillService:
         space = await self._space(space_id)
         assistant = space.get_assistant(assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
+        if space.is_personal() and assistant.is_default:
+            # The personal chat's own Skills belong to its owner: readable
+            # through the personal chat, as a revoked owner still needs to see
+            # what is paused.
+            if not actor.can_read_default_assistant():
+                raise UnauthorizedException(
+                    "You do not have permission to read this personal chat"
+                )
+            return await self.repo.list_assistant_bindings(assistant_id=assistant_id)
         if not actor.can_read_assistant(assistant=assistant):
             raise UnauthorizedException(
                 "You do not have permission to read this Assistant"
@@ -657,14 +677,7 @@ class SkillService:
             raise UnauthorizedException(
                 "You do not have permission to read Skills in this Space"
             )
-        bindings = await self.repo.list_assistant_bindings(assistant_id=assistant_id)
-        if space.is_personal() and assistant.is_default:
-            if bindings:
-                raise BadRequestException(
-                    "Personal default Assistant has invalid direct Skill bindings"
-                )
-            return []
-        return bindings
+        return await self.repo.list_assistant_bindings(assistant_id=assistant_id)
 
     async def list_assistant_binding_projections(
         self,
@@ -693,18 +706,29 @@ class SkillService:
         space = await self._space(space_id)
         assistant = space.get_assistant(assistant_id)
         actor = self.actor_manager.get_space_actor_from_space(space)
-        if not actor.can_edit_assistants():
-            raise UnauthorizedException(
-                "You do not have permission to edit this Assistant"
-            )
-        if not actor.can_use_skills():
-            raise UnauthorizedException(
-                "You do not have permission to attach Skills in this Space"
-            )
-        if space.is_personal() and assistant.is_default:
-            raise BadRequestException(
-                "Personal default Assistant Skills are controlled by tenant governance"
-            )
+        personal_chat = space.is_personal() and assistant.is_default
+        if personal_chat:
+            # Organisation Skills reach the personal chat only through its
+            # policy; the person may add only their own personal-space Skills,
+            # and only with PERSONAL_SKILLS, whatever else the role allows.
+            if not actor.can_edit_default_assistant():
+                raise UnauthorizedException(
+                    "You do not have permission to edit this personal chat"
+                )
+            if Permission.PERSONAL_SKILLS not in self.user.permissions:
+                raise UnauthorizedException(
+                    "Choosing your own Skills for the personal chat needs the "
+                    "Own Skills permission"
+                )
+        else:
+            if not actor.can_edit_assistants():
+                raise UnauthorizedException(
+                    "You do not have permission to edit this Assistant"
+                )
+            if not actor.can_use_skills():
+                raise UnauthorizedException(
+                    "You do not have permission to attach Skills in this Space"
+                )
         locked_space_id = await self.repo.lock_assistant_space_for_update(
             assistant_id=assistant_id
         )
@@ -726,6 +750,16 @@ class SkillService:
             references=references,
             existing=existing,
             requested_modes=requested_modes,
+            personal_chat_layer=personal_chat,
+        )
+        existing_identities = {
+            (binding.skill_id, binding.skill_revision_id, binding.activation_mode)
+            for binding in existing
+        }
+        removal_only = all(
+            (binding.skill_id, binding.skill_revision_id, binding.activation_mode)
+            in existing_identities
+            for binding in resolved
         )
         on_demand_skill_ids_requiring_validation = frozenset(
             binding.skill_id
@@ -748,6 +782,7 @@ class SkillService:
             on_demand_skill_ids_requiring_validation=(
                 on_demand_skill_ids_requiring_validation
             ),
+            removal_only=removal_only,
         )
 
     async def list_app_bindings(

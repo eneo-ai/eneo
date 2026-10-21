@@ -95,6 +95,9 @@ class ErrorCodes(int, Enum):
     # A prompt library entry the personal assistant governance policy uses
     # cannot be deleted until the policy stops using it.
     PROMPT_IN_USE_BY_GOVERNANCE = 9069
+    # A personal chat save whose own Skills would not run as configured. The
+    # details carry the layer reason so clients can explain it in their language.
+    PERSONAL_SKILLS_REJECTED = 9080
 
 
 class NotFoundException(Exception):

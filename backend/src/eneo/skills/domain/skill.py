@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Literal, TypeAlias
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -941,6 +941,9 @@ class SkillBindingIntent:
 class AssistantSkillBindingReplacement:
     bindings: tuple[ResolvedSkillBinding, ...]
     on_demand_skill_ids_requiring_validation: frozenset[UUID]
+    # True when the new set only drops existing bindings (no addition, mode or
+    # revision change); the personal chat always accepts such a save.
+    removal_only: bool = False
 
 
 @dataclass(frozen=True)
@@ -959,6 +962,10 @@ class AssistantSkillRuntimeProjection:
 class AssistantSkillConfigurationProjection:
     bindings: tuple[SkillBindingProjection, ...]
     runtime: AssistantSkillRuntimeProjection | None
+    # Personal chat only: the organisation layer (read-only) and whether the
+    # person's own Skills (``bindings``) run.
+    organisation_bindings: tuple[SkillBindingProjection, ...] = ()
+    personal_layer: PersonalSkillLayerDecision | None = None
 
 
 @dataclass(frozen=True)
@@ -1133,6 +1140,42 @@ class SkillActivationRejection(BaseModel):
     reason: SkillActivationRejectionReason
 
 
+_PERSONAL_SKILL_LAYER_MESSAGES = {
+    PersonalSkillLayerReason.PERMISSION_MISSING: (
+        "Your role does not allow your own Skills in the personal chat"
+    ),
+    PersonalSkillLayerReason.ATTACHMENT_LIMIT_EXCEEDED: (
+        "Together with the organisation's Skills, your Skills exceed the "
+        "number of Skills allowed"
+    ),
+    PersonalSkillLayerReason.MODEL_CONTEXT_EXCEEDED: (
+        "Your Skills and the organisation's do not fit this model's context window"
+    ),
+    PersonalSkillLayerReason.ON_DEMAND_UNAVAILABLE: (
+        "Skills on demand are not available with this model or policy; "
+        "choose Always or another model"
+    ),
+    PersonalSkillLayerReason.PERSONAL_SKILL_DOES_NOT_FIT: (
+        "One of your on-demand Skills is too large to activate with this model"
+    ),
+    PersonalSkillLayerReason.ORGANISATION_SKILL_CROWDED_OUT: (
+        "Your Skills would leave no room for one of the organisation's on-demand Skills"
+    ),
+}
+
+
+class PersonalSkillLayerRejectedError(Exception):
+    """A personal chat save whose own Skills would not run as configured."""
+
+    def __init__(self, decision: PersonalSkillLayerDecision) -> None:
+        assert decision.reason is not None
+        self.details = {
+            "reason": decision.reason.value,
+            "detail": decision.detail.value if decision.detail is not None else None,
+        }
+        super().__init__(_PERSONAL_SKILL_LAYER_MESSAGES[decision.reason])
+
+
 class _SkillActivationEvidenceFields(BaseModel):
     """Strict, body-free facts retained with one Question; versions below."""
 
@@ -1257,10 +1300,12 @@ class SkillActivationEvidenceV2(_SkillActivationEvidenceFields):
         return self
 
 
-SkillActivationEvidence = Annotated[
-    SkillActivationEvidenceV1 | SkillActivationEvidenceV2,
-    Field(discriminator="version"),
-]
+# A plain union on purpose: V1 forbids extra fields and V2 requires version 2,
+# so each payload matches exactly one, and the OpenAPI schema keeps `version`
+# an integer (a discriminator would publish it as a string key).
+SkillActivationEvidence: TypeAlias = (
+    SkillActivationEvidenceV1 | SkillActivationEvidenceV2
+)
 
 
 @dataclass(frozen=True)

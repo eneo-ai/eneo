@@ -25,6 +25,7 @@ from eneo.skills.domain.personal_chat_skill_layers import plan_personal_chat_tur
 from eneo.skills.domain.skill import (
     AssistantPinAdvanceIncompatibleReason,
     PersonalChatPinOverride,
+    PersonalSkillLayerStatus,
     ResolvedSkillBinding,
     SkillActivationMode,
     SkillBindingProjection,
@@ -1383,7 +1384,16 @@ async def test_skill_configuration_projects_saved_modes_and_exact_runtime(
 
 
 @pytest.mark.asyncio
-async def test_personal_default_skill_configuration_has_no_direct_runtime():
+async def test_personal_chat_configuration_shows_both_layers_and_the_decision():
+    organisation = replace(
+        _resolved_skill(
+            name="Klarsprak", position=0, activation_mode=SkillActivationMode.ALWAYS
+        ),
+        source=SkillBindingSource.ORGANIZATION,
+    )
+    own = _resolved_skill(
+        name="Svar", position=0, activation_mode=SkillActivationMode.ALWAYS
+    )
     assistant = _assistant_with_runtime_model()
     assistant.is_default = True
     space = MagicMock()
@@ -1391,18 +1401,46 @@ async def test_personal_default_skill_configuration_has_no_direct_runtime():
     space.get_assistant.return_value = assistant
     service = _service()
     service.space_repo.get_space_by_assistant.return_value = space
-    service.skill_service.list_assistant_binding_projections.return_value = []
-    service._resolve_effective_config = AsyncMock()
+    service.skill_service.list_assistant_binding_projections.return_value = [
+        SkillBindingProjection(binding=own, execution_blocked=False)
+    ]
+    service.skill_service.resolve_assistant_bindings_for_runtime.return_value = (
+        SkillRuntimeResolution(eligible=(own,), blocked=())
+    )
+    policy = SkillRuntimePolicy(
+        selective_activation_enabled=True,
+        max_attached_skills=100,
+        context_share_percent=10,
+        max_activations_per_turn=3,
+    )
+    service.skill_service.create_personal_chat_turn_plan.side_effect = (
+        lambda **kwargs: plan_personal_chat_turn(
+            **kwargs, policy=policy, holds_permission=True
+        )
+    )
+    service._resolve_effective_config = AsyncMock(
+        return_value=SimpleNamespace(
+            models_enforced=False,
+            prompt_enforced=False,
+            enforced_prompt_text=None,
+            governance_skill_resolution=SkillRuntimeResolution(
+                eligible=(organisation,), blocked=()
+            ),
+        )
+    )
 
     configuration = await service.get_skill_configuration(
         space_id=assistant.space_id,
         assistant_id=assistant.id,
     )
 
-    assert configuration.bindings == ()
-    assert configuration.runtime is None
-    service._resolve_effective_config.assert_not_awaited()
-    service.skill_service.create_turn_plan.assert_not_awaited()
+    assert [p.binding.skill_id for p in configuration.bindings] == [own.skill_id]
+    assert [p.binding.skill_id for p in configuration.organisation_bindings] == [
+        organisation.skill_id
+    ]
+    assert configuration.personal_layer is not None
+    assert configuration.personal_layer.status is PersonalSkillLayerStatus.APPLIED
+    assert configuration.runtime is not None
 
 
 @pytest.mark.asyncio

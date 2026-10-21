@@ -8,7 +8,7 @@ saves, preflight, configuration reads and turns alike
 """
 
 from collections.abc import Iterable, Sequence
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from uuid import UUID
 
 from eneo.files.attachment_budget import prompt_and_files_fit_context
@@ -16,6 +16,7 @@ from eneo.files.file_models import File
 from eneo.skills.domain.skill import (
     PersonalSkillLayerDecision,
     PersonalSkillLayerReason,
+    PersonalSkillLayerRejectedError,
     PersonalSkillLayerStatus,
     ResolvedSkillBinding,
     SkillActivationFallbackReason,
@@ -200,6 +201,40 @@ def plan_personal_chat_turn(
     )
 
 
+@dataclass(frozen=True)
+class PersonalSkillLayerSave:
+    """What a personal chat save changes, for the save transition rule."""
+
+    before: PersonalSkillLayerDecision | None
+    bindings_changed: bool
+    removal_only: bool
+
+
+def assert_personal_skill_layer_save(
+    save: PersonalSkillLayerSave, after: PersonalSkillLayerDecision | None
+) -> None:
+    """Refuse a save whose own Skills would not run as configured.
+
+    Switching the last Skill off and removing Skills are always allowed, so a
+    person can recover after an administrator lowers a limit. A change that
+    leaves the own Skills alone (a model switch, for instance) is refused only
+    when it would break a layer that runs now; a layer already paused, or
+    paused for a missing permission, never blocks it.
+    """
+    if after is None or after.status is not PersonalSkillLayerStatus.SUSPENDED:
+        return
+    if save.bindings_changed:
+        if save.removal_only:
+            return
+        raise PersonalSkillLayerRejectedError(after)
+    if (
+        save.before is not None
+        and save.before.applies
+        and after.reason is not PersonalSkillLayerReason.PERMISSION_MISSING
+    ):
+        raise PersonalSkillLayerRejectedError(after)
+
+
 def _applied(personal: SkillRuntimeResolution) -> PersonalSkillLayerDecision:
     return PersonalSkillLayerDecision(
         status=PersonalSkillLayerStatus.APPLIED, bindings=personal.eligible
@@ -222,6 +257,8 @@ def _on_demand_ids(bindings: Iterable[ResolvedSkillBinding]) -> frozenset[UUID]:
 
 __all__ = [
     "PersonalSkillLayerDecision",
+    "PersonalSkillLayerSave",
+    "assert_personal_skill_layer_save",
     "PersonalSkillLayerReason",
     "PersonalSkillLayerStatus",
     "assess_personal_skill_layer",

@@ -11,7 +11,9 @@ import { isSkillCall } from "./tool-presentation";
 
 export type PersistedMessage = Schema<"Message">;
 export type ChatTurnDiagnostics = Schema<"ChatTurnDiagnostics">;
-export type SkillActivationEvidence = Schema<"SkillActivationEvidenceV1">;
+// V2 adds the personal chat's own-Skill layer; every other field is shared.
+export type SkillActivationEvidence =
+  Schema<"SkillActivationEvidenceV1"> | Schema<"SkillActivationEvidenceV2">;
 export type SkillActivationReference = Schema<"SkillActivationReference">;
 export type SkillActivationRejection = Schema<"SkillActivationRejection">;
 
