@@ -1,5 +1,3 @@
-# MIT License
-
 from pathlib import Path
 from typing import TYPE_CHECKING
 

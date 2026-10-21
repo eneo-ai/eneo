@@ -1,5 +1,3 @@
-# MIT License
-
 from eneo.main.models import PaginatedResponse
 from eneo.roles.role import RoleInDB, RolePublic, RolesPaginatedResponse
 
