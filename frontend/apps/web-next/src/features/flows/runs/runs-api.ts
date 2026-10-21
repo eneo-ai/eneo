@@ -2,6 +2,7 @@ import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { browserApi, type EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { proxiedDownloadPath } from "@/features/files/signed-file-url";
 
 /**
  * The flow-core run endpoints the run screens use: the run contract, uploads,
@@ -46,9 +47,13 @@ export const runKeys = {
   run: (flowId: string, runId: string) => ["flows", flowId, "runs", runId] as const,
   progress: (flowId: string, runId: string) =>
     ["flows", flowId, "runs", runId, "progress"] as const,
-  detail: (flowId: string, runId: string) => ["flows", flowId, "runs", runId, "detail"] as const,
-  steps: (flowId: string, runId: string) => ["flows", flowId, "runs", runId, "steps"] as const,
-  review: (flowId: string, runId: string) => ["flows", flowId, "runs", runId, "review"] as const,
+  /** `version`: what the content-free reads said about the run when this was read. */
+  detail: (flowId: string, runId: string, version: string) =>
+    ["flows", flowId, "runs", runId, "detail", version] as const,
+  steps: (flowId: string, runId: string, version: string) =>
+    ["flows", flowId, "runs", runId, "steps", version] as const,
+  review: (flowId: string, runId: string, version: string) =>
+    ["flows", flowId, "runs", runId, "review", version] as const,
   evidence: (flowId: string, runId: string) => ["flows", flowId, "runs", runId, "evidence"] as const
 };
 
@@ -99,9 +104,18 @@ export function runsListQueryOptions(flowId: string, filter: RunsFilter = { mine
   });
 }
 
-export function runDetailQueryOptions(api: EneoClient, flowId: string, runId: string) {
+/**
+ * The run's audited detail, read once per `version` of the run (see
+ * `progressSignature`): a run that has not moved is not read again.
+ */
+export function runDetailQueryOptions(
+  api: EneoClient,
+  flowId: string,
+  runId: string,
+  version: string
+) {
   return queryOptions({
-    queryKey: runKeys.detail(flowId, runId),
+    queryKey: runKeys.detail(flowId, runId, version),
     queryFn: ({ signal }): Promise<RunDetail> =>
       unwrap(
         api.GET("/api/v1/flows/{id}/runs/{run_id}/", {
@@ -112,9 +126,9 @@ export function runDetailQueryOptions(api: EneoClient, flowId: string, runId: st
   });
 }
 
-export function runStepsQueryOptions(flowId: string, runId: string) {
+export function runStepsQueryOptions(flowId: string, runId: string, version: string) {
   return queryOptions({
-    queryKey: runKeys.steps(flowId, runId),
+    queryKey: runKeys.steps(flowId, runId, version),
     queryFn: ({ signal }): Promise<RunStep[]> =>
       unwrap(
         browserApi.GET("/api/v1/flows/{id}/runs/{run_id}/steps/", {
@@ -212,29 +226,39 @@ export function redispatchRun(
   );
 }
 
-/** A short-lived download link for a file a run produced. */
-export function artifactDownloadUrl(flowId: string, runId: string, fileId: string) {
-  return unwrap(
+/** A short-lived download path (through the app's proxy) for a file a run produced. */
+export async function artifactDownloadPath(
+  flowId: string,
+  runId: string,
+  fileId: string
+): Promise<string> {
+  const signed = await unwrap(
     browserApi.POST("/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/", {
       params: { path: { id: flowId, run_id: runId, file_id: fileId } },
       body: { content_disposition: "attachment", expires_in: 300 }
     })
   );
+  return proxiedDownloadPath(signed.url, fileId);
 }
 
-/** A short-lived download link for a file a run received as input. */
-export function inputFileDownloadUrl(flowId: string, runId: string, fileId: string) {
-  return unwrap(
+/** A short-lived download path (through the app's proxy) for a file a run received as input. */
+export async function inputFileDownloadPath(
+  flowId: string,
+  runId: string,
+  fileId: string
+): Promise<string> {
+  const signed = await unwrap(
     browserApi.POST("/api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/", {
       params: { path: { id: flowId, run_id: runId, file_id: fileId } },
       body: { content_disposition: "attachment", expires_in: 300 }
     })
   );
+  return proxiedDownloadPath(signed.url, fileId);
 }
 
-export function activeReviewQueryOptions(flowId: string, runId: string) {
+export function activeReviewQueryOptions(flowId: string, runId: string, version: string) {
   return queryOptions({
-    queryKey: runKeys.review(flowId, runId),
+    queryKey: runKeys.review(flowId, runId, version),
     queryFn: ({ signal }): Promise<ReviewCheckpoint | null> =>
       unwrap(
         browserApi.GET("/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/", {

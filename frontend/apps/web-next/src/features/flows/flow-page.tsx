@@ -6,7 +6,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -44,7 +44,7 @@ import { FlowStatusBadge } from "./flow-status";
 import { FlowStepList, stepControlId } from "./flow-step-list";
 import { orderWithMove, orderWithout, stepsInOrder } from "./flow-steps";
 import { runKeys } from "./runs/runs-api";
-import { FlowRunsList } from "./runs/runs-list";
+import { FlowRunsList, runHref } from "./runs/runs-list";
 import { StartRunDialog } from "./runs/start-run-dialog";
 
 type Notice = { key: number; status: "error" | "warning"; title: string; description: string };
@@ -97,6 +97,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const [addAt, setAddAt] = useState<number | null>(null);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
   const [starting, setStarting] = useState(false);
+  const router = useRouter();
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<PageTab>(
     searchParams.get("tab") === "runs" ? "runs" : "definition"
@@ -457,11 +458,12 @@ export function FlowPage({ flowId }: { flowId: string }) {
           flow={flow}
           open={starting}
           onOpenChange={setStarting}
-          onStarted={() => {
+          onStarted={(run) => {
             setStarting(false);
             void queryClient.invalidateQueries({ queryKey: runKeys.list(flow.id) });
-            selectTab("runs");
             announce(t("flow_runs_started"));
+            // The run's own page follows it while it moves.
+            router.push(runHref(routeId, flow.id, run.id));
           }}
         />
       ) : null}
