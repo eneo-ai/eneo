@@ -170,4 +170,14 @@ describe("MessageResponse", () => {
     );
     await expectNoAxeViolations(container);
   });
+
+  it("gives display formulas a named scroll region while keeping inline math inline", async () => {
+    const { container } = renderAnswer(vi.fn(), "Med $x$:\n\n\\[x^2 + y^2 = z^2\\]");
+    const formula = screen.getByRole("region", { name: "Formel" });
+    expect(formula.querySelector("math")?.getAttribute("display")).toBe("block");
+    expect(container.querySelectorAll("math")).toHaveLength(2);
+    expect(container.querySelector("p")?.querySelector("math")).not.toBeNull();
+    expect(formula.hasAttribute("tabindex")).toBe(false);
+    await expectNoAxeViolations(container);
+  });
 });

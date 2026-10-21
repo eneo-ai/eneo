@@ -6734,5 +6734,8 @@
   "file_preview_previous_version": "Föregående version",
   "file_preview_next_version": "Nästa version",
   "integration_activity_reconcile_warning": "<label>Avstämningsvarning:</label> {warning}",
-  "integration_progress_step_done_named": "<hidden>Klart:</hidden> {step}"
+  "integration_progress_step_done_named": "<hidden>Klart:</hidden> {step}",
+  "chat_md_formula_label": "Formel",
+  "chat_md_download_diagram_format": "Ladda ner diagram som {format}",
+  "chat_md_diagram_label": "Diagram"
 }

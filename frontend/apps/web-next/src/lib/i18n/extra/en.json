@@ -1610,5 +1610,8 @@
   "file_preview_previous_version": "Previous version",
   "file_preview_next_version": "Next version",
   "integration_activity_reconcile_warning": "<label>Reconciliation warning:</label> {warning}",
-  "integration_progress_step_done_named": "<hidden>Done:</hidden> {step}"
+  "integration_progress_step_done_named": "<hidden>Done:</hidden> {step}",
+  "chat_md_formula_label": "Formula",
+  "chat_md_download_diagram_format": "Download diagram as {format}",
+  "chat_md_diagram_label": "Diagram"
 }

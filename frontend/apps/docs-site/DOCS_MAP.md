@@ -56,6 +56,12 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 
 ## Knowledge, retrieval, MCP and skills
 
+React beta answer presentation and copying
+(`frontend/apps/web-next/src/components/ai-elements/**`,
+`frontend/apps/web-next/src/features/chat/copy-assistant-answer.ts`,
+`frontend/packages/markdown-math/**`) are documented in
+`guides/capabilities.mdx#formatted-answers-in-the-react-beta`.
+
 The cross-feature responsibility map, the three execution tiers (loopback,
 bundled runtime, external), the design rationale and the state boundaries live
 in `docs/tool-architecture.mdx`. Keep that overview aligned when changing

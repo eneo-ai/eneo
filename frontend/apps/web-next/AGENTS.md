@@ -139,6 +139,9 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
     (screen-reader-only) cell content escaped its scroll box and widened the
     page: `@/components/astryx/table` names the region, and `globals.css`
     (section 9) makes the scroll box `relative`.
+  - ScrollableArea's `axis="inline"` adds an `inline` class that collides with
+    Tailwind's display utility. `globals.css` restores block layout for its
+    viewport so overflowing content stays contained and keyboard-scrollable.
   - DateInput's calendar toggle is its 16 px icon, below the 24 px target
     size: `globals.css` (section 11) grows it. DateRangeInput's toggle
     (`astryx-date-range-input-toggle-icon`) is as small; extend section 11
@@ -184,6 +187,12 @@ the default name on a backend name collision (9017).
   the stale patch and the guard tests in `src/components/astryx/` fail:
   recreate it with `bun patch @astryxdesign/core` (keep the diff free of bun's
   `.bun-tag-*` file), or drop a part Astryx has fixed.
+  - Mermaid 11.16.1 inserts SVG styles without a CSP nonce. The
+    `mermaid@11.16.1` patch uses `NonceProvider`'s request nonce while measuring,
+    parsing and displaying the SVG. Serialization hides a live node's nonce,
+    so it is restored on inert markup before sanitization and display. The production
+    `tests/answer-presentation.spec.ts` covers this; retain the patch on upgrades
+    until upstream supports nonces, then remove it once that test passes.
 - **Theme**: `src/theme/eneo-theme.ts` extends Astryx Neutral with the Eneo
   palette, radii, shadows and fonts; it is the single source of truth.
   `bun run theme:build` compiles it to `src/theme/eneo.{css,js,d.ts}`
