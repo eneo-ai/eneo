@@ -109,7 +109,7 @@ from eneo.skills.domain.skill import (
     AssistantSkillRuntimeProjection,
     PersonalChatPinOverride,
     ResolvedSkillBinding,
-    SkillActivationEvidenceV1,
+    SkillActivationEvidence,
     SkillActivationFallbackReason,
     SkillActivationMode,
     SkillActivationRejectionReason,
@@ -281,7 +281,7 @@ class _PreparedAssistantTurn:
     skill_plan: SkillTurnPlan
     skill_runtime: "SkillActivationRuntime"
     skill_composition: SkillComposition
-    skill_activation: SkillActivationEvidenceV1
+    skill_activation: SkillActivationEvidence
     model_route: str
     initial_skill_context_tokens: int
     is_personal_default: bool
@@ -640,31 +640,15 @@ class AssistantService:
             return effective_config.enforced_prompt_text
         return assistant.get_prompt_text()
 
-    async def _resolve_assistant_skill_runtime(
-        self,
-        *,
-        assistant: Assistant,
-        effective_config: "EffectiveConfig | None",
-        space_is_personal: bool,
+    async def _direct_skill_resolution(
+        self, assistant: Assistant
     ) -> SkillRuntimeResolution:
         assistant_id = cast(UUID | None, assistant.id)
-        direct_resolution = (
-            await self.skill_service.resolve_assistant_bindings_for_runtime(
-                assistant_id=assistant_id
-            )
-            if assistant_id is not None
-            else SkillRuntimeResolution(eligible=(), blocked=())
-        )
-
-        if not (space_is_personal and assistant.is_default):
-            return direct_resolution
-        if direct_resolution.eligible or direct_resolution.blocked:
-            raise BadRequestException(
-                "Personal default Assistant has invalid direct Skill bindings"
-            )
-        if effective_config is None:
+        if assistant_id is None:
             return SkillRuntimeResolution(eligible=(), blocked=())
-        return effective_config.governance_skill_resolution
+        return await self.skill_service.resolve_assistant_bindings_for_runtime(
+            assistant_id=assistant_id
+        )
 
     async def _create_skill_turn_plan(
         self,
@@ -673,7 +657,16 @@ class AssistantService:
         effective_config: "EffectiveConfig | None",
         space_is_personal: bool,
         base_instructions_override: str | None = None,
+        model: "CompletionModel | None" = None,
+        prompt_files: Sequence[File] | None = None,
     ) -> SkillTurnPlan:
+        """The turn's Skill plan; the personal chat adds its own layer.
+
+        The personal chat runs the organisation layer (the personal chat
+        policy) and then the person's own Skills, when the layer assessment
+        admits them. Without a model nothing can be measured, and no turn can
+        run, so the plan then covers the organisation layer alone.
+        """
         base_instructions = (
             base_instructions_override
             if base_instructions_override is not None
@@ -682,14 +675,51 @@ class AssistantService:
                 effective_config,
             )
         )
-        resolution = await self._resolve_assistant_skill_runtime(
-            assistant=assistant,
-            effective_config=effective_config,
-            space_is_personal=space_is_personal,
+        if not (space_is_personal and assistant.is_default):
+            return await self.skill_service.create_turn_plan(
+                base_instructions=base_instructions,
+                resolution=await self._direct_skill_resolution(assistant),
+            )
+        organisation = (
+            effective_config.governance_skill_resolution
+            if effective_config is not None
+            else SkillRuntimeResolution(eligible=(), blocked=())
         )
-        return await self.skill_service.create_turn_plan(
+        if model is None:
+            return await self.skill_service.create_turn_plan(
+                base_instructions=base_instructions,
+                resolution=organisation,
+            )
+        return await self.skill_service.create_personal_chat_turn_plan(
             base_instructions=base_instructions,
-            resolution=resolution,
+            organisation=organisation,
+            personal=await self._direct_skill_resolution(assistant),
+            model_route=model.get_model_route(),
+            max_input_tokens=model.max_input_tokens,
+            supports_tool_calling=model.supports_tool_calling,
+            prompt_files=(
+                prompt_files
+                if prompt_files is not None
+                else await self._persistent_prompt_files(assistant, model)
+            ),
+        )
+
+    async def _persistent_prompt_files(
+        self, assistant: Assistant, model: "CompletionModel"
+    ) -> list[File]:
+        """Persistent attachments exactly as a request inlines them for ``model``.
+
+        Attachments marked "open with tool" are sent as signed URLs and cost
+        nothing; the same predicate decides what ask() inlines.
+        """
+        url_only_attachments = assistant.url_only_attachment_ids(model)
+        return inlined_attachments(
+            await self._completion_prompt_files_for_model(
+                persistent_attachments=assistant.attachments,
+                completion_model=model,
+                url_only_ids=url_only_attachments,
+            ),
+            url_only_attachments,
         )
 
     async def _ensure_governance_policy_allows_update(
@@ -1085,10 +1115,18 @@ class AssistantService:
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant
         )
+        model = self._context_model(assistant, effective_config=effective_config)
+        completion_prompt_files = (
+            await self._persistent_prompt_files(assistant, model)
+            if model is not None
+            else []
+        )
         skill_plan = await self._create_skill_turn_plan(
             assistant=assistant,
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
+            model=model,
+            prompt_files=completion_prompt_files,
         )
         validation_plan = (
             skill_plan.for_full_save_validation()
@@ -1103,7 +1141,6 @@ class AssistantService:
                 if binding.binding.activation_mode is SkillActivationMode.ON_DEMAND
             )
         candidate_skill_ids = frozenset(candidate_ids)
-        model = self._context_model(assistant, effective_config=effective_config)
         if model is None:
             if candidate_skill_ids:
                 raise BadRequestException(
@@ -1111,17 +1148,6 @@ class AssistantService:
                 )
             return
 
-        # Attachments marked "open with tool" are sent as signed URLs and cost
-        # nothing here; the same predicate decides what ask() inlines.
-        url_only_attachments = assistant.url_only_attachment_ids(model)
-        completion_prompt_files = inlined_attachments(
-            await self._completion_prompt_files_for_model(
-                persistent_attachments=assistant.attachments,
-                completion_model=model,
-                url_only_ids=url_only_attachments,
-            ),
-            url_only_attachments,
-        )
         if effective_config is not None and effective_config.mcp_enforced:
             effective_mcp_servers = effective_config.available_mcp_servers
         elif mcp_servers_override is not None:
@@ -2218,13 +2244,14 @@ class AssistantService:
         effective_config = await self._resolve_effective_config(
             space=space, assistant=assistant
         )
+        model = self._context_model(assistant, effective_config=effective_config)
         skill_plan = await self._create_skill_turn_plan(
             assistant=assistant,
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
             base_instructions_override=prompt_override,
+            model=model,
         )
-        model = self._context_model(assistant, effective_config=effective_config)
         prompt_tokens = 0
         skill_context_tokens = 0
         if model is not None:
@@ -2304,6 +2331,7 @@ class AssistantService:
             assistant=assistant,
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
+            model=model,
         )
         runtime = skill_plan.to_activation_runtime(
             selected_model_route=model.get_model_route(),
@@ -2490,7 +2518,7 @@ class AssistantService:
 
         def _final_skill_runtime_state() -> tuple[
             tuple[SkillExecutionReference, ...],
-            SkillActivationEvidenceV1,
+            SkillActivationEvidence,
         ]:
             assert completion_model is not None
             snapshot = skill_runtime.snapshot()
@@ -3360,6 +3388,7 @@ class AssistantService:
             assistant=assistant_to_ask,
             effective_config=effective_config,
             space_is_personal=space.is_personal(),
+            model=effective_completion_model,
         )
         model_route = effective_completion_model.get_model_route()
         skill_runtime = skill_plan.to_activation_runtime(

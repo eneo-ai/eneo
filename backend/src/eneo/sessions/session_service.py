@@ -32,7 +32,7 @@ from eneo.sessions.session import (
 )
 from eneo.sessions.sessions_repo import OwnedChatPartner, SessionRepository
 from eneo.skills.domain.skill import (
-    SkillActivationEvidenceV1,
+    SkillActivationEvidence,
     SkillExecutionReference,
 )
 from eneo.users.user import UserInDB
@@ -89,7 +89,7 @@ async def persist_partial_question_answer(
     completion_model_id: UUID | None = None,
     reasoning: str | None = None,
     skill_provenance: Sequence[SkillExecutionReference] | None = None,
-    skill_activation: SkillActivationEvidenceV1 | None = None,
+    skill_activation: SkillActivationEvidence | None = None,
     generated_files: Sequence[File] | None = None,
     tool_calls: list[ToolCallInfo] | None = None,
 ) -> None:
@@ -138,7 +138,7 @@ async def persist_final_skill_runtime_state(
     tenant_id: UUID,
     question_id: UUID,
     skill_provenance: Sequence[SkillExecutionReference],
-    skill_activation: SkillActivationEvidenceV1,
+    skill_activation: SkillActivationEvidence,
 ) -> None:
     """Commit final Skill evidence independently of a failing request transaction."""
 
@@ -371,7 +371,7 @@ class SessionService:
         assistant_id: UUID | None,
         completion_model: CompletionModel | None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
-        skill_activation: SkillActivationEvidenceV1 | None = None,
+        skill_activation: SkillActivationEvidence | None = None,
     ) -> QuestionAdd:
         completion_model_id = completion_model.id if completion_model else None
         completion_model_name = completion_model.name if completion_model else None
@@ -418,7 +418,7 @@ class SessionService:
         group_chat_id: UUID | None = None,
         completion_model: CompletionModel | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
-        skill_activation: SkillActivationEvidenceV1 | None = None,
+        skill_activation: SkillActivationEvidence | None = None,
     ) -> tuple[SessionInDB, UUID, datetime | None]:
         """Commit a new conversation and its first user message atomically."""
         session_add = self._build_session_add(
@@ -450,7 +450,7 @@ class SessionService:
         assistant_id: UUID | None = None,
         completion_model: CompletionModel | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
-        skill_activation: SkillActivationEvidenceV1 | None = None,
+        skill_activation: SkillActivationEvidence | None = None,
     ) -> tuple[UUID, datetime | None]:
         """Persist a placeholder Question row with the user's message and an empty answer.
 
@@ -500,7 +500,7 @@ class SessionService:
         mcp_tool_references: list["McpToolReference"] | None = None,
         reasoning: str | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
-        skill_activation: SkillActivationEvidenceV1 | None = None,
+        skill_activation: SkillActivationEvidence | None = None,
     ) -> None:
         """Update a placeholder Question row with the final assistant answer."""
         completion_model_id = completion_model.id if completion_model else None

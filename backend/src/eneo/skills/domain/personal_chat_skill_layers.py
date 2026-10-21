@@ -160,6 +160,46 @@ def assess_personal_skill_layer(
     return _applied(personal)
 
 
+def plan_personal_chat_turn(
+    *,
+    base_instructions: str,
+    organisation: SkillRuntimeResolution,
+    personal: SkillRuntimeResolution,
+    policy: SkillRuntimePolicy,
+    holds_permission: bool,
+    model_route: str,
+    max_input_tokens: int,
+    supports_tool_calling: bool,
+    prompt_files: Sequence[File],
+) -> SkillTurnPlan:
+    """The personal chat's turn plan, carrying the layer decision.
+
+    An applied personal layer composes after the organisation layer; any
+    other outcome plans the organisation layer alone.
+    """
+    decision = assess_personal_skill_layer(
+        base_instructions=base_instructions,
+        organisation=organisation,
+        personal=personal,
+        policy=policy,
+        holds_permission=holds_permission,
+        model_route=model_route,
+        max_input_tokens=max_input_tokens,
+        supports_tool_calling=supports_tool_calling,
+        prompt_files=prompt_files,
+    )
+    return SkillTurnPlan.create(
+        base_instructions=base_instructions,
+        resolution=(
+            compose_layers(organisation=organisation, personal=personal)
+            if decision.applies
+            else organisation
+        ),
+        policy=policy,
+        personal_layer=decision,
+    )
+
+
 def _applied(personal: SkillRuntimeResolution) -> PersonalSkillLayerDecision:
     return PersonalSkillLayerDecision(
         status=PersonalSkillLayerStatus.APPLIED, bindings=personal.eligible
@@ -186,4 +226,5 @@ __all__ = [
     "PersonalSkillLayerStatus",
     "assess_personal_skill_layer",
     "compose_layers",
+    "plan_personal_chat_turn",
 ]

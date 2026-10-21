@@ -21,6 +21,7 @@ from eneo.completion_models.infrastructure.completion_service import (
 from eneo.files.attachment_budget import attachment_token_ceiling
 from eneo.files.file_models import FileType
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.skills.domain.personal_chat_skill_layers import plan_personal_chat_turn
 from eneo.skills.domain.skill import (
     AssistantPinAdvanceIncompatibleReason,
     PersonalChatPinOverride,
@@ -2071,16 +2072,22 @@ async def test_personal_chat_only_keeps_on_demand_configuration_for_safe_fallbac
     space.is_personal.return_value = True
     service = _service()
     service._resolve_effective_config = AsyncMock(return_value=effective_config)
+    policy = SkillRuntimePolicy(
+        selective_activation_enabled=selective_activation_enabled,
+        max_attached_skills=100,
+        context_share_percent=10,
+        max_activations_per_turn=3,
+    )
     service.skill_service.create_turn_plan.side_effect = (
         lambda *, base_instructions, resolution: SkillTurnPlan.create(
             base_instructions=base_instructions,
             resolution=resolution,
-            policy=SkillRuntimePolicy(
-                selective_activation_enabled=selective_activation_enabled,
-                max_attached_skills=100,
-                context_share_percent=10,
-                max_activations_per_turn=3,
-            ),
+            policy=policy,
+        )
+    )
+    service.skill_service.create_personal_chat_turn_plan.side_effect = (
+        lambda **kwargs: plan_personal_chat_turn(
+            **kwargs, policy=policy, holds_permission=True
         )
     )
 

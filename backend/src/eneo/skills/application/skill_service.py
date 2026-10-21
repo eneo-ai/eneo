@@ -3,6 +3,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from eneo.files.file_models import File
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -10,6 +11,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.roles.permissions import Permission, validate_permission
+from eneo.skills.domain.personal_chat_skill_layers import plan_personal_chat_turn
 from eneo.skills.domain.skill import (
     MAX_SKILL_CATALOG_PAGE_LIMIT,
     MAX_SKILL_CATALOG_QUERY_LENGTH,
@@ -1049,6 +1051,37 @@ class SkillService:
             base_instructions=base_instructions,
             resolution=resolution,
             policy=policy,
+        )
+
+    async def create_personal_chat_turn_plan(
+        self,
+        *,
+        base_instructions: str,
+        organisation: SkillRuntimeResolution,
+        personal: SkillRuntimeResolution,
+        model_route: str,
+        max_input_tokens: int,
+        supports_tool_calling: bool,
+        prompt_files: Sequence[File],
+    ) -> SkillTurnPlan:
+        """The personal chat's plan: organisation Skills, then admitted own Skills.
+
+        PERSONAL_SKILLS is read from the caller on every plan, so removing it
+        suspends the person's own Skills from the next turn.
+        """
+        policy = await self.repo.get_or_seed_runtime_policy(
+            tenant_id=self.user.tenant_id
+        )
+        return plan_personal_chat_turn(
+            base_instructions=base_instructions,
+            organisation=organisation,
+            personal=personal,
+            policy=policy,
+            holds_permission=Permission.PERSONAL_SKILLS in self.user.permissions,
+            model_route=model_route,
+            max_input_tokens=max_input_tokens,
+            supports_tool_calling=supports_tool_calling,
+            prompt_files=prompt_files,
         )
 
     async def compose_for_app(
