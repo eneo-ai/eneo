@@ -381,6 +381,19 @@ class BulkWebsiteDeleteResponse(BaseModel):
     errors: list[WebsiteBulkActionError]
 
 
+class WebsiteContentFolderPublic(BaseModel):
+    """A directory prefix in indexed resource URLs; counts include descendants."""
+
+    path: str
+    count: int
+    has_children: bool
+
+
+class WebsiteContentFoldersPublic(BaseModel):
+    items: list[WebsiteContentFolderPublic]
+    next_cursor: str | None
+
+
 class WebsiteExistsResponse(BaseModel):
     """Response model for checking if a website URL exists on the Organization space."""
 
