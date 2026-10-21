@@ -57,10 +57,16 @@
 
     saving = true;
     try {
-      saved = await eneo.users.updatePasswordLifecyclePolicy({
-        require_change_after_admin_set: requireChange,
-        max_age_days: parsedMaxAge
-      });
+      // Only the edited rules travel: PATCH merges them server-side, so an
+      // untouched rule another admin just changed is not overwritten.
+      const updates: Partial<PasswordLifecyclePolicy> = {};
+      if (requireChange !== (saved.require_change_after_admin_set !== false)) {
+        updates.require_change_after_admin_set = requireChange;
+      }
+      if (parsedMaxAge !== (saved.max_age_days ?? null)) {
+        updates.max_age_days = parsedMaxAge;
+      }
+      saved = await eneo.users.updatePasswordLifecyclePolicy(updates);
       requireChange = saved.require_change_after_admin_set !== false;
       maxAgeDays = saved.max_age_days == null ? "" : String(saved.max_age_days);
       submitted = false;

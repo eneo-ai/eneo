@@ -72,6 +72,21 @@ describe("password policy panel", () => {
     await expect.element(page.getByLabelText("admin_password_policy_max_age")).toHaveValue("45");
   });
 
+  test("sends only the rule that changed", async () => {
+    updatePasswordLifecyclePolicy.mockResolvedValue({
+      require_change_after_admin_set: true,
+      max_age_days: 60
+    });
+    render(PasswordPolicyPanel, {
+      policy: { require_change_after_admin_set: true, max_age_days: null }
+    });
+
+    await page.getByLabelText("admin_password_policy_max_age").fill("60");
+    await page.getByRole("button", { name: "save" }).click();
+
+    expect(updatePasswordLifecyclePolicy).toHaveBeenCalledWith({ max_age_days: 60 });
+  });
+
   test("rejects a malformed age before calling the backend and explains why", async () => {
     render(PasswordPolicyPanel, {
       policy: { require_change_after_admin_set: true, max_age_days: 30 }

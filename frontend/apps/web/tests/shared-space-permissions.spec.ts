@@ -49,15 +49,19 @@ test("a shared-space viewer can read the space but cannot create assistants or m
   await expect(page).toHaveURL(/\/login/);
   await loginViaUi(page, viewerEmail, viewerPassword);
 
-  // Admin-created accounts choose their own password before using the space.
-  await expect(page).toHaveURL(/\/password-change/);
-  const chosenPassword = "ViewerChosenPassword2!";
-  await page.getByLabel("Nuvarande lösenord").fill(viewerPassword);
-  await page.getByLabel("Nytt lösenord", { exact: true }).fill(chosenPassword);
-  await page.getByLabel("Bekräfta nytt lösenord").fill(chosenPassword);
-  await page.getByRole("button", { name: "Byt lösenord" }).click();
-  await expect(page).toHaveURL(/\/login\?message=password_changed/);
-  await loginViaUi(page, viewerEmail, chosenPassword);
+  // Admin-created accounts normally choose their own password first. The rule
+  // is tenant-wide and password-lifecycle.spec toggles it in another worker, so
+  // a viewer created in that window signs straight in; the forced flow itself is
+  // pinned there, this test pins the space permissions.
+  if (new URL(page.url()).pathname === "/password-change") {
+    const chosenPassword = "ViewerChosenPassword2!";
+    await page.getByLabel("Nuvarande lösenord").fill(viewerPassword);
+    await page.getByLabel("Nytt lösenord", { exact: true }).fill(chosenPassword);
+    await page.getByLabel("Bekräfta nytt lösenord").fill(chosenPassword);
+    await page.getByRole("button", { name: "Byt lösenord" }).click();
+    await expect(page).toHaveURL(/\/login\?message=password_changed/);
+    await loginViaUi(page, viewerEmail, chosenPassword);
+  }
 
   await page.goto(`/spaces/${space.id}/members`);
   await expect(page.getByRole("heading", { name: /^(Members|Medlemmar)$/i })).toBeVisible();

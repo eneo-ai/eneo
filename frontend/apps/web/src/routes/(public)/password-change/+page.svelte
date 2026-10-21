@@ -10,7 +10,9 @@
   const description = $derived(
     data.reason === "expired"
       ? m.password_change_required_expired()
-      : m.password_change_required_admin_set()
+      : data.reason === "admin_set"
+        ? m.password_change_required_admin_set()
+        : m.password_change_not_available()
   );
   // A relative action replaces the page's query string, so `next` has to ride along.
   const action = $derived(
@@ -30,7 +32,7 @@
       {action}
       currentPasswordHint={m.password_change_required_current_hint()}
     />
-  {:else}
+  {:else if data.reason !== null}
     <AuthAlert tone="error">
       <p>{m.password_change_not_available()}</p>
     </AuthAlert>

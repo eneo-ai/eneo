@@ -114,6 +114,20 @@ describe("forced password change page", () => {
     expect(redirect.location).not.toContain("evil.example");
   });
 
+  test("an unreadable account state shows the unavailable notice instead of leaving", async () => {
+    mocks.discoverLocalPasswordState.mockResolvedValue({
+      capability: { source: "unavailable", policy: null },
+      changeReason: null,
+      username: null
+    });
+    const data = await load(event("https://eneo.example/password-change?next=%2Fspaces") as never);
+    expect(data).toMatchObject({
+      capability: { source: "unavailable" },
+      reason: null,
+      next: "/spaces"
+    });
+  });
+
   test("a successful change signs this browser out and carries the destination to login", async () => {
     const form = new FormData();
     form.set("currentPassword", "one-time password");

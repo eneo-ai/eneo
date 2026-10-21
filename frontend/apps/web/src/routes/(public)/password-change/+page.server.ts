@@ -25,7 +25,9 @@ export const load: PageServerLoad = async (event) => {
   }
 
   const state = await discoverLocalPasswordState(passwordRequestContext(event));
-  if (state.changeReason === null) {
+  // Only a positive "nothing required" answer sends the user on; when the
+  // backend could not be read the app shell would just bounce them back here.
+  if (state.changeReason === null && state.capability.source !== "unavailable") {
     redirect(302, resolveSafeLoginDestination(requestedDestination(event.url)));
   }
 
