@@ -174,15 +174,12 @@ export function newPasswordsMatch(values: NewPasswordValues): boolean {
   return values.newPassword.length > 0 && values.newPassword === values.confirmPassword;
 }
 
-/** Admin edits may leave both fields empty; setting a password always requires a matching pair. */
+/** Setting a password always requires a matching pair. */
 export function validateNewPasswordPair(
   values: NewPasswordValues,
-  capability: PasswordChangeCapability,
-  required = true
+  capability: PasswordChangeCapability
 ): NewPasswordFieldErrors {
   const errors: NewPasswordFieldErrors = {};
-  if (!required && !values.newPassword && !values.confirmPassword) return errors;
-
   if (!values.newPassword) errors.newPassword = "required";
   if (!values.confirmPassword) errors.confirmPassword = "required";
 

@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { brokenRule, readPasswordPolicy } from "@/features/auth/password-policy";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 
@@ -50,18 +52,35 @@ async function renderEditor(
             roles: { items: [] }
           })
   );
-  renderInApp(<UserEditorDialog open onOpenChange={() => {}} user={user} />);
+  const { queryClient } = renderInApp(<Harness user={user} />);
+  const invalidate = vi.spyOn(queryClient, "invalidateQueries");
   const dialog = screen.getByRole("dialog", {
     name: user ? "Redigera användare" : "Skapa en ny användare"
   });
   await within(dialog).findByLabelText("Användare");
-  return dialog;
+  return { dialog, invalidate };
+}
+
+function Harness({ user }: { user?: AdminUser }) {
+  const [open, setOpen] = useState(true);
+  return <UserEditorDialog open={open} onOpenChange={setOpen} user={user} />;
+}
+
+/** The password a save sent, checked against the policy the backend sent. */
+function sentPassword(call: number) {
+  const password = (api.POST.mock.calls[call]?.[1] as { body: { password?: string } }).body
+    .password;
+  expect(password).toEqual(expect.any(String));
+  expect(brokenRule(password!, readPasswordPolicy(policy)!)).toBeUndefined();
+  return password!;
 }
 
 const field = (dialog: HTMLElement, name: RegExp) =>
   within(dialog).getByLabelText(name) as HTMLInputElement;
 const type = (dialog: HTMLElement, name: RegExp, value: string) =>
   fireEvent.change(field(dialog, name), { target: { value } });
+const replaceSwitch = (dialog: HTMLElement) =>
+  within(dialog).getByRole("switch", { name: /^Generera ett nytt lösenord/ });
 const submit = (dialog: HTMLElement) =>
   fireEvent.submit(
     within(dialog)
@@ -82,37 +101,19 @@ const errorOf = (input: HTMLInputElement) =>
 afterEach(() => vi.clearAllMocks());
 
 describe("UserEditorDialog", () => {
-  it("states the backend's password policy before the field", async () => {
-    const dialog = await renderEditor();
+  it("offers no field for typing a password and says one is generated", async () => {
+    const { dialog } = await renderEditor();
 
-    for (const input of [field(dialog, /^Lösenord/), field(dialog, /^Bekräfta lösenord/)]) {
-      expect(input.getAttribute("type")).toBe("password");
-      expect(input.getAttribute("autocomplete")).toBe("new-password");
-      expect(input.getAttribute("aria-required")).toBe("true");
-    }
-    // The policy's rules, not a length of its own (WCAG 3.3.2), before the
-    // fields and read with them.
-    const checklist = within(dialog).getByText(
-      "Det nya lösenordet måste uppfylla följande krav:"
-    ).parentElement!;
-    expect(
-      within(checklist)
-        .getAllByRole("listitem")
-        .map((item) => item.textContent)
-    ).toEqual([
-      "Använd minst 12 tecken – Inte uppfyllt ännu",
-      "Inkludera en siffra 0–9 – Inte uppfyllt ännu",
-      "Lösenorden matchar – Inte uppfyllt ännu"
-    ]);
-    for (const input of [field(dialog, /^Lösenord/), field(dialog, /^Bekräfta lösenord/)]) {
-      expect(input.getAttribute("aria-describedby")?.split(" ")).toContain(checklist.id);
-    }
+    expect(dialog.querySelector('input[type="password"]')).toBeNull();
+    within(dialog).getByText(
+      "Eneo genererar ett lösenord som uppfyller lösenordspolicyn och visar det när kontot har skapats. Användaren måste välja ett eget lösenord vid nästa inloggning."
+    );
     expect(api.GET).toHaveBeenCalledWith("/api/v1/users/password-policy/");
     await expectNoAxeViolations(document.body);
   });
 
   it("shows each problem at its field on submit and moves focus to the first", async () => {
-    const dialog = await renderEditor();
+    const { dialog } = await renderEditor();
     const create = within(dialog).getByRole("button", { name: "Skapa användare" });
     // Never disabled: pressing it says what is missing.
     expect((create as HTMLButtonElement).disabled).toBe(false);
@@ -123,47 +124,18 @@ describe("UserEditorDialog", () => {
     expect(errorOf(field(dialog, /^E-post/))).toContain(
       "Ange en e-postadress, till exempel namn@kommun.se."
     );
-    expect(errorOf(field(dialog, /^Lösenord/))).toContain("Ange ett nytt lösenord.");
     expect(document.activeElement).toBe(field(dialog, /^Användarnamn/));
     expect(api.POST).not.toHaveBeenCalled();
     expect(toast.warning).not.toHaveBeenCalled();
     await expectNoAxeViolations(document.body);
   });
 
-  it("checks a new user's password against the policy and its confirmation", async () => {
-    const dialog = await renderEditor();
-    type(dialog, /^Användarnamn/, "anna.lind");
-    type(dialog, /^E-post/, "anna.lind@example.se");
-
-    type(dialog, /^Lösenord/, "sommar-2026");
-    type(dialog, /^Bekräfta lösenord/, "sommar-2026");
-    submit(dialog);
-    expect(errorOf(field(dialog, /^Lösenord/))).toContain("Använd minst 12 tecken");
-    expect(document.activeElement).toBe(field(dialog, /^Lösenord/));
-
-    type(dialog, /^Lösenord/, "sommarlovet-kommer");
-    type(dialog, /^Bekräfta lösenord/, "sommarlovet-kommer");
-    submit(dialog);
-    expect(errorOf(field(dialog, /^Lösenord/))).toContain("Inkludera en siffra 0–9");
-
-    type(dialog, /^Lösenord/, "sommarlovet-2026");
-    type(dialog, /^Bekräfta lösenord/, "sommarlovet-2025");
-    submit(dialog);
-    expect(errorOf(field(dialog, /^Bekräfta lösenord/))).toContain(
-      "Lösenorden matchar inte. Skriv samma lösenord i båda fälten."
-    );
-    expect(document.activeElement).toBe(field(dialog, /^Bekräfta lösenord/));
-    expect(api.POST).not.toHaveBeenCalled();
-  });
-
   it("creates the user, keeping focus on the busy button", async () => {
     let resolve: (value: unknown) => void = () => {};
     api.POST.mockReturnValue(new Promise((settle) => (resolve = settle)));
-    const dialog = await renderEditor();
+    const { dialog } = await renderEditor();
     type(dialog, /^Användarnamn/, "anna.lind");
     type(dialog, /^E-post/, "anna.lind@example.se");
-    type(dialog, /^Lösenord/, "sommarlovet-2026");
-    type(dialog, /^Bekräfta lösenord/, "sommarlovet-2026");
     const create = within(dialog).getByRole("button", { name: "Skapa användare" });
     create.focus();
 
@@ -173,12 +145,38 @@ describe("UserEditorDialog", () => {
     expect((create as HTMLButtonElement).disabled).toBe(false);
     expect(document.activeElement).toBe(create);
     expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/users/", {
-      body: expect.objectContaining({ username: "anna.lind", password: "sommarlovet-2026" })
+      body: expect.objectContaining({ username: "anna.lind", email: "anna.lind@example.se" })
     });
+    sentPassword(0);
     resolve({ data: {}, response: new Response("{}") });
   });
 
-  it("says at the password field what the backend refuses about it", async () => {
+  it("shows a new user's generated password once, then refreshes the list", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog, invalidate } = await renderEditor();
+    type(dialog, /^Användarnamn/, "anna.lind");
+    type(dialog, /^E-post/, "anna.lind@example.se");
+
+    submit(dialog);
+
+    const reveal = await screen.findByRole("dialog", { name: "Kontot har skapats" });
+    const password = sentPassword(0);
+    within(reveal).getByText(password);
+    within(reveal).getByText(
+      "Lämna lösenordet till anna.lind@example.se. Det visas inte igen. Användaren måste välja ett eget lösenord vid nästa inloggning."
+    );
+    expect(screen.queryByRole("dialog", { name: "Skapa en ny användare" })).toBeNull();
+    // The list keeps its rows, and this dialog its row, while the password shows.
+    expect(invalidate).not.toHaveBeenCalled();
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.click(within(reveal).getByRole("button", { name: "Klar" }));
+
+    await waitFor(() => expect(screen.queryByText(password)).toBeNull());
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin-users"] });
+  });
+
+  it("toasts a refused save and keeps the form", async () => {
     api.POST.mockImplementation(() =>
       Promise.resolve({
         error: {
@@ -188,60 +186,54 @@ describe("UserEditorDialog", () => {
         response: new Response(null, { status: 400 })
       })
     );
-    const dialog = await renderEditor();
+    const { dialog } = await renderEditor();
     type(dialog, /^Användarnamn/, "anna.lind");
     type(dialog, /^E-post/, "anna.lind@example.se");
-    type(dialog, /^Lösenord/, "sommarlovet-2026");
-    type(dialog, /^Bekräfta lösenord/, "sommarlovet-2026");
 
     submit(dialog);
 
-    await waitFor(() =>
-      expect(errorOf(field(dialog, /^Lösenord/))).toContain(
-        "Det nya lösenordet uppfyller inte den aktuella lösenordspolicyn."
-      )
-    );
-    expect(document.activeElement).toBe(field(dialog, /^Lösenord/));
-    expect(toast.error).not.toHaveBeenCalled();
-    // Changing the password clears it.
-    type(dialog, /^Lösenord/, "sommarlovet-2027");
-    expect(errorOf(field(dialog, /^Lösenord/))).toBeNull();
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(screen.getByRole("dialog", { name: "Skapa en ny användare" })).toBe(dialog);
+    expect(field(dialog, /^E-post/).value).toBe("anna.lind@example.se");
   });
 
-  it("keeps an existing user's password unless a new one is typed twice", async () => {
-    api.POST.mockReturnValue(new Promise(() => {}));
-    const dialog = await renderEditor(existing);
-    const password = field(dialog, /^Lösenord/);
-
-    expect(password.getAttribute("aria-required")).toBeNull();
+  it("keeps an existing user's password unless a new one is generated", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog, invalidate } = await renderEditor(existing);
+    const toggle = replaceSwitch(dialog);
+    expect((toggle as HTMLInputElement).checked).toBe(false);
     // The one-time sentence follows when the tenant rule is on (mocked on above).
-    const hint = within(dialog).getByText(
-      /^Lämna båda fälten tomma för att behålla lösenordet\. .* Användaren måste välja ett eget lösenord vid sin första inloggning\.$/
-    );
-    expect(password.getAttribute("aria-describedby")?.split(" ")).toContain(hint.id);
-
-    // A new password needs its confirmation…
-    type(dialog, /^Lösenord/, "vinterlovet-2026");
-    expect(field(dialog, /^Bekräfta lösenord/).getAttribute("aria-required")).toBe("true");
-    submit(dialog);
-    expect(errorOf(field(dialog, /^Bekräfta lösenord/))).toContain(
-      "Skriv det nya lösenordet en gång till."
+    within(dialog).getByText(
+      /^Det nuvarande lösenordet slutar fungera när du sparar\. .* Användaren måste välja ett eget lösenord vid nästa inloggning\.$/
     );
     await expectNoAxeViolations(document.body);
 
-    // …and without one the rest saves.
-    type(dialog, /^Lösenord/, "");
     submit(dialog);
+
     await waitFor(() =>
       expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/users/{username}/", {
         params: { path: { username: "bo.ek" } },
         body: expect.objectContaining({ email: "bo.ek@example.se", password: undefined })
       })
     );
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin-users"] }));
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
-  it("says so when the policy cannot be read, and saves no new account without it", async () => {
-    const dialog = await renderEditor(undefined, {
+  it("replaces an existing user's password and shows the new one once", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog } = await renderEditor(existing);
+
+    fireEvent.click(replaceSwitch(dialog));
+    submit(dialog);
+
+    const reveal = await screen.findByRole("dialog", { name: "Nytt lösenord har satts" });
+    within(reveal).getByText(sentPassword(0));
+    expect(api.POST.mock.calls[0]?.[0]).toBe("/api/v1/admin/users/{username}/");
+  });
+
+  it("says so when the policy cannot be read, and generates no password without it", async () => {
+    const { dialog } = await renderEditor(undefined, {
       policyResponse: Promise.resolve({
         error: { message: "Boom" },
         response: new Response(null, { status: 500 })
@@ -250,7 +242,6 @@ describe("UserEditorDialog", () => {
     await within(dialog).findByText(
       "Lösenordspolicyn kunde inte hämtas. Ladda om sidan för att försöka igen."
     );
-    expect(within(dialog).queryByLabelText(/^Lösenord/)).toBeNull();
     type(dialog, /^Användarnamn/, "anna.lind");
     type(dialog, /^E-post/, "anna.lind@example.se");
 

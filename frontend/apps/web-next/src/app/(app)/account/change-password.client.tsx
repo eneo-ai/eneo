@@ -53,12 +53,7 @@ export function ChangePasswordForm({
   const focusField = (field: Field) =>
     ({ current: currentRef, next: nextRef, confirm: confirmRef })[field].current?.focus();
 
-  const pair = newPasswordErrors(t, {
-    password: next,
-    confirmation: confirm,
-    policy,
-    required: true
-  });
+  const pair = newPasswordErrors(t, { password: next, confirmation: confirm, policy });
   const errors: Record<Field, string | undefined> = {
     current: current ? serverErrors.current : t("change_password_current_required"),
     next: pair.password ?? (next === current ? t("password_must_be_different") : serverErrors.next),

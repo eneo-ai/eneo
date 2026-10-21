@@ -112,11 +112,18 @@ provisioned through OIDC or SCIM have no local password at all.
 
 | Rule | Default | Effect |
 |------|---------|--------|
-| `require_change_after_admin_set` | on | A password chosen by someone other than the account (an administrator in **Admin → Users**, the sysadmin API, or the `DEFAULT_USER_PASSWORD` seed) is a one-time password. The account must choose its own at its next password sign-in. |
+| `require_change_after_admin_set` | on | A password set by someone other than the account (generated in **Admin → Users**, set through the sysadmin API, or the `DEFAULT_USER_PASSWORD` seed) is a one-time password. The account must choose its own at its next password sign-in. |
 | `max_age_days` | unset | A local password must be replaced after this many days. The age counts from the last change; passwords that existed before the lifecycle was introduced count from that upgrade. |
 
 Administrators edit the policy under **Admin → Users → Password policy**
-(`GET`/`PATCH /api/v1/admin/password-policy`). The sysadmin API may create an
+(`GET`/`PATCH /api/v1/admin/password-policy`).
+
+Administrators never type a password in **Admin → Users**. Creating an
+account, or choosing **Generate a new password** for an existing one, has the
+browser generate a random password that meets the local password policy from
+`GET /api/v1/users/password-policy/`, so a change to that policy needs no change
+in the frontend. The password is shown once after saving, for the administrator
+to hand over. The sysadmin API may create an
 account with `password_change_required: false` to skip the initial mandatory
 change. This does not exempt the password from `max_age_days`.
 
