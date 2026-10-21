@@ -5221,6 +5221,23 @@ export interface paths {
     patch: operations["update_flow_assistant"];
     trace?: never;
   };
+  "/api/v1/flows/{id}/editor/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /** Update Flow and Step Assistants */
+    patch: operations["update_flow_editor"];
+    trace?: never;
+  };
   "/api/v1/flows/{id}/graph/": {
     parameters: {
       query?: never;
@@ -20147,6 +20164,46 @@ export interface components {
       /** Step Changes */
       step_changes: components["schemas"]["StepChange"][];
     };
+    /** FlowEditorAssistantChange */
+    FlowEditorAssistantChange: {
+      /**
+       * Assistant Id
+       * Format: uuid
+       */
+      assistant_id: string;
+      changes: components["schemas"]["FlowAssistantUpdateRequest"];
+    };
+    /** FlowEditorNewStep */
+    FlowEditorNewStep: {
+      assistant?: components["schemas"]["FlowAssistantUpdateRequest"];
+      configuration: components["schemas"]["PartialFlowEditorStepPatch"];
+      /** Name */
+      name: string;
+    };
+    /** FlowEditorStepChange */
+    FlowEditorStepChange: {
+      changes: components["schemas"]["PartialFlowEditorStepPatch"];
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+    };
+    /**
+     * FlowEditorUpdateRequest
+     * @description One revision-fenced edit of the definition and its managed assistants.
+     */
+    FlowEditorUpdateRequest: {
+      /** Assistants */
+      assistants?: components["schemas"]["FlowEditorAssistantChange"][];
+      definition: components["schemas"]["PartialFlowUpdateRequest"];
+      /** Expected Revision */
+      expected_revision: number;
+      /** New Steps */
+      new_steps?: components["schemas"]["FlowEditorNewStep"][];
+      /** Step Edits */
+      step_edits?: components["schemas"]["FlowEditorStepChange"][];
+    };
     /** FlowEvidenceExportTooLargeContext */
     FlowEvidenceExportTooLargeContext: {
       /** Detail */
@@ -34082,6 +34139,82 @@ export interface components {
       output_cost_per_token?: number | string | null;
       /** Stability */
       stability?: string | null;
+    };
+    /**
+     * PartialFlowEditorStepPatch
+     * @example {
+     *       "assistant_id": "00000000-0000-0000-0000-000000000001",
+     *       "input_source": "flow_input",
+     *       "input_type": "audio",
+     *       "output_mode": "transcribe_only",
+     *       "output_type": "text",
+     *       "step_order": 1,
+     *       "user_description": "Transcribe incoming audio"
+     *     }
+     */
+    PartialFlowEditorStepPatch: {
+      /** Assistant Id */
+      assistant_id?: string | null;
+      /**
+       * Id
+       * @description Persisted draft step id. Omit for a new step; include it to update, reorder, or retain an existing draft step.
+       */
+      id?: string | null;
+      /** Input Bindings */
+      input_bindings?: {
+        [key: string]: unknown;
+      } | null;
+      /** Input Config */
+      input_config?: components["schemas"]["FlowStepInputConfig"] | null;
+      /** Input Contract */
+      input_contract?: {
+        [key: string]: unknown;
+      } | null;
+      /** @description Where the step's input comes from. `tool` names one MCP tool in `input_config.tool` (`mcp_server_id`, `tool_id`, `arguments`). Each argument is a fixed JSON value or one whole reference such as `{{flow_input.field}}`. A fixed string cannot contain `{{...}}`: it is read as a reference, and there is no escape syntax. Argument values are stored and returned as written and are not treated as secrets, so a credential does not belong in one; the MCP server's credential is stored with the server. A tool step reads text or JSON, takes no uploaded files and cannot use the output mode `template_fill`. Publish also requires each reference to name one of these: an earlier step's text (`step_N.output.text`, or the step's name alone), its status, its error message or a field of its declared contract, a declared run-form field, or a runtime variable. Publish does not judge whether a runtime variable that depends on the run's data (a transcript, an upload) has a value in a run. Any other configuration is refused with `typed_io_tool_invalid_config`. A run calls the tool once per step attempt and takes its answer as the step's input: for `input_type` `json` the structured content, or text that is a JSON object or array; for `text` the text. */
+      input_source?: components["schemas"]["FlowInputSource"] | null;
+      input_type?: components["schemas"]["FlowInputType"] | null;
+      /** Output Classification Override */
+      output_classification_override?: number | null;
+      /** Output Config */
+      output_config?:
+        | ({
+            /**
+             * FlowStepRetrievalPolicy
+             * @description Versioned policy embedded in the existing per-step output config JSON.
+             */
+            retrieval_policy?: {
+              /**
+               * Mode
+               * @enum {string}
+               */
+              mode: "best_effort" | "fail_closed";
+              /**
+               * Version
+               * @constant
+               */
+              version: 1;
+            };
+          } & {
+            [key: string]: unknown;
+          })
+        | null;
+      /** Output Contract */
+      output_contract?: {
+        [key: string]: unknown;
+      } | null;
+      output_mode?: components["schemas"]["FlowOutputMode"] | null;
+      output_type?: components["schemas"]["FlowOutputType"] | null;
+      /** @description Optional human-in-the-loop checkpoint for this step. Set mode to `view` to pause after the step until a reviewer approves it, or `edit` to let the reviewer edit the step output before downstream steps continue. Use `null` or omit the field for no pause. Review policy cannot be combined with outbound delivery output modes. */
+      review_policy?: components["schemas"]["FlowStepReviewPolicy"] | null;
+      /** Step Order */
+      step_order?: number | null;
+      /**
+       * Timeout Seconds
+       * @description Optional per-step execution budget in seconds: one wall-clock deadline for the whole step execution, covering input resolution (including transcription), retrieval, every provider request of the step and finalization. Unset, the effective runtime policy's default applies (the organisation's flow runtime settings, else the deployment default); a value above that policy's maximum fails the step with a validation error when it starts. Exhaustion fails the run with `flow_step_timeout`.
+       */
+      timeout_seconds?: number | null;
+      /** User Description */
+      user_description?: string | null;
     };
     /**
      * PartialFlowUpdateRequest
@@ -62978,6 +63111,41 @@ export interface operations {
       };
     };
   };
+  update_flow_editor: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowEditorUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_flow_graph: {
     parameters: {
       query?: {
@@ -63270,7 +63438,9 @@ export interface operations {
   };
   publish_flow: {
     parameters: {
-      query?: never;
+      query?: {
+        expected_revision?: number | null;
+      };
       header?: never;
       path: {
         /** @description Identifier of the draft flow definition to publish. */
@@ -67340,7 +67510,9 @@ export interface operations {
   };
   unpublish_flow: {
     parameters: {
-      query?: never;
+      query?: {
+        expected_revision?: number | null;
+      };
       header?: never;
       path: {
         /** @description Identifier of the published flow definition to unpublish. */

@@ -1044,6 +1044,83 @@ class FlowAssistantUpdateRequest(BaseModel):
     icon_id: UUID | None | NotProvided = Field(default=NOT_PROVIDED)
 
 
+@partial_model
+class FlowEditorStepPatch(FlowStepUpdateRequest):
+    """A sparse edit using the core's existing field types and validation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class FlowEditorStepChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    step_id: UUID
+    changes: FlowEditorStepPatch
+
+    @model_validator(mode="after")
+    def preserve_step_identity(self) -> Self:
+        if self.changes.model_fields_set & {"id", "assistant_id", "step_order"}:
+            raise ValueError("Sparse edits cannot change step identity or ordering.")
+        return self
+
+
+class FlowEditorAssistantChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    assistant_id: UUID
+    changes: FlowAssistantUpdateRequest
+
+
+class FlowEditorNewStep(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=200)
+    configuration: FlowEditorStepPatch
+    assistant: FlowAssistantUpdateRequest = Field(
+        default_factory=FlowAssistantUpdateRequest
+    )
+
+    @model_validator(mode="after")
+    def preserve_server_assigned_identity(self) -> Self:
+        if self.configuration.model_fields_set & {"id", "assistant_id", "step_order"}:
+            raise ValueError(
+                "New steps receive their identity and order from the core."
+            )
+        return self
+
+
+class FlowEditorUpdateRequest(BaseModel):
+    """One revision-fenced edit of the definition and its managed assistants."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=0)
+    new_steps: list[FlowEditorNewStep] = Field(
+        default_factory=list[FlowEditorNewStep], max_length=256
+    )
+    step_edits: list[FlowEditorStepChange] = Field(
+        default_factory=list[FlowEditorStepChange], max_length=256
+    )
+    definition: FlowUpdateRequest
+    assistants: list[FlowEditorAssistantChange] = Field(
+        default_factory=list[FlowEditorAssistantChange], max_length=256
+    )
+
+    @model_validator(mode="after")
+    def validate_revision_and_assistants(self) -> Self:
+        if self.definition.expected_revision not in (None, self.expected_revision):
+            raise ValueError("Definition and editor revisions must agree.")
+        if (
+            self.step_edits or self.new_steps
+        ) and "steps" in self.definition.model_fields_set:
+            raise ValueError("Use sparse step edits or a full replacement, not both.")
+        step_ids = [change.step_id for change in self.step_edits]
+        if len(step_ids) != len(set(step_ids)):
+            raise ValueError("A step can only be updated once per edit.")
+        ids = [change.assistant_id for change in self.assistants]
+        if len(ids) != len(set(ids)):
+            raise ValueError("An assistant can only be updated once per edit.")
+        return self
+
+
 # A security-classification preview evaluates the same fields and writes
 # nothing, so its candidates take `FlowAssistantUpdateRequest` without the fence.
 class FlowAssistantPatchRequest(FlowAssistantUpdateRequest):

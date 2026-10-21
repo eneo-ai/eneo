@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Annotated
 from uuid import UUID
 
@@ -20,16 +19,13 @@ from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_definition_access import (
     SERVICE_KEY_ADMIN_REQUIRED_MESSAGE,
-    require_flow_current_definition_access,
     require_flow_delete_access,
-    require_flow_edit_access,
-    require_flow_publish_access,
     require_flow_published_runtime_access,
-    require_flow_unpublish_access,
 )
 from eneo.flows.api.flow_models import (
     PAGINATED_FLOW_SPARSE_RESPONSE_EXAMPLE,
     FlowCreateRequest,
+    FlowEditorUpdateRequest,
     FlowPublic,
     FlowSparsePublic,
     FlowUpdateRequest,
@@ -38,22 +34,20 @@ from eneo.flows.api.flow_runtime_paths import (
     PUBLISHED_FLOW_RUNTIME_PATH,
     FlowRuntimePublic,
 )
+from eneo.flows.application import flow_authoring_operations as authoring_operations
 from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import (
     FlowBadRequestException,
     FlowUnauthorizedException,
 )
-from eneo.flows.flow_authoring_name import FlowNameTakenError
-from eneo.flows.flow_evidence_policy import flow_evidence_metadata_facts
 from eneo.flows.principal import FlowPrincipal
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
-    ConflictException,
     ErrorCodes,
 )
-from eneo.main.models import NOT_PROVIDED, OffsetPaginatedResponse
+from eneo.main.models import OffsetPaginatedResponse
 from eneo.server.dependencies.container import get_container
 
 router = APIRouter()
@@ -114,40 +108,6 @@ _FLOW_NAME_TAKEN_RESPONSE = error_response(
 )
 
 
-def _flow_name_taken_conflict() -> ConflictException:
-    return ConflictException(
-        _FLOW_NAME_TAKEN_MESSAGE, code=FlowApiErrorCode.FLOW_NAME_TAKEN.value
-    )
-
-
-def _classification_override_step_orders(
-    flow_data: FlowCreateRequest | FlowUpdateRequest,
-) -> list[int]:
-    steps = flow_data.steps
-    if not steps:
-        return []
-    return [
-        step.step_order
-        for step in steps
-        if step.output_classification_override is not None
-    ]
-
-
-def _evidence_export_change(
-    *,
-    before: Mapping[str, object] | None,
-    after: Mapping[str, object] | None,
-) -> dict[str, object] | None:
-    """Whether a flow's evidence may be exported is an access decision, so the
-    audit entry says what the switch was and what it became."""
-
-    old = flow_evidence_metadata_facts(before).export_allowed
-    new = flow_evidence_metadata_facts(after).export_allowed
-    if old == new:
-        return None
-    return {"evidence_export_allowed": {"old": old, "new": new}}
-
-
 @router.post(
     "/",
     response_model=FlowPublic,
@@ -184,70 +144,9 @@ async def create_flow(
     flow_in: FlowCreateRequest,
     container: Container = Depends(_MUTATING_CONTAINER),
 ):
-    access_context = await flow_access_context.resolve_space_access_context(
-        request,
-        container,
-        space_id=flow_in.space_id,
-        required_access=FlowApiAction.EDIT,
-        scope_mismatch_message=(
-            f"API key is scoped to space '{flow_access_context.get_scope_filter(request).space_id}'. "
-            f"Cannot create flow in space '{flow_in.space_id}'."
-        ),
+    return await authoring_operations.create_flow(
+        request=request, container=container, flow_in=flow_in
     )
-    if not access_context.actor.can_create_flows():
-        raise FlowUnauthorizedException(
-            "You do not have permission to create flows in this space.",
-            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
-            context={"auth_layer": "space_membership"},
-        )
-
-    assembler = FlowAssembler()
-    flow_service = container.flow_service()
-    user = container.user()
-
-    try:
-        created = await flow_service.create_flow(
-            space_id=flow_in.space_id,
-            name=flow_in.name,
-            description=flow_in.description,
-            steps=[assembler.to_domain_step(step) for step in flow_in.steps],
-            metadata_json=flow_in.metadata_json,
-        )
-    except FlowNameTakenError as exc:
-        raise _flow_name_taken_conflict() from exc
-
-    created_flow_id = created.require_persisted_id()
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=user.tenant_id,
-        actor_id=user.id,
-        action=ActionType.FLOW_CREATED,
-        entity_type=EntityType.FLOW,
-        entity_id=created_flow_id,
-        description=f"Created flow '{created.name}'",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=created,
-            changes=_evidence_export_change(before=None, after=created.metadata_json),
-        ),
-    )
-    overrides = _classification_override_step_orders(flow_in)
-    if overrides:
-        await audit_service.log_async(
-            tenant_id=user.tenant_id,
-            actor_id=user.id,
-            action=ActionType.FLOW_CLASSIFICATION_OVERRIDE,
-            entity_type=EntityType.FLOW,
-            entity_id=created_flow_id,
-            description="Configured output classification overrides for flow steps.",
-            metadata=AuditMetadata.standard(
-                actor=user,
-                target=created,
-                changes={"step_orders": overrides},
-            ),
-        )
-
-    return assembler.to_public(created)
 
 
 @router.get(
@@ -461,14 +360,9 @@ async def get_flow(
         get_container(with_user=True, with_module_user=True)
     ),
 ):
-    access_context = await require_flow_current_definition_access(
-        request,
-        container,
-        flow_id=id,
+    return await authoring_operations.get_flow(
+        id=id, request=request, container=container
     )
-    assembler = FlowAssembler()
-
-    return assembler.to_public(access_context.flow)
 
 
 @router.get(
@@ -578,70 +472,9 @@ async def update_flow(
     flow_in: FlowUpdateRequest,
     container: Container = Depends(_MUTATING_CONTAINER),
 ):
-    access_context = await require_flow_edit_access(request, container, flow_id=id)
-
-    assembler = FlowAssembler()
-    payload = flow_in.model_dump(exclude_unset=True)
-    steps = None
-    if "steps" in payload:
-        steps = [assembler.to_domain_step_for_update(step) for step in flow_in.steps]
-
-    # Without the editor's own revision the write is fenced on the one this
-    # request was authorized at, which is also the state the audit entry below
-    # compares against.
-    expected_revision = (
-        access_context.flow.draft_revision
-        if flow_in.expected_revision is None
-        else flow_in.expected_revision
+    return await authoring_operations.update_flow(
+        id=id, request=request, container=container, flow_in=flow_in
     )
-    try:
-        updated = await container.flow_service().update_flow(
-            flow_id=id,
-            name=payload.get("name", NOT_PROVIDED),
-            description=payload.get("description", NOT_PROVIDED),
-            steps=steps,
-            metadata_json=payload.get("metadata_json", NOT_PROVIDED),
-            expected_revision=expected_revision,
-        )
-    except FlowNameTakenError as exc:
-        raise _flow_name_taken_conflict() from exc
-
-    updated_flow_id = updated.require_persisted_id()
-    user = container.user()
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=user.tenant_id,
-        actor_id=user.id,
-        action=ActionType.FLOW_UPDATED,
-        entity_type=EntityType.FLOW,
-        entity_id=updated_flow_id,
-        description=f"Updated flow '{updated.name}'",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=updated,
-            changes=_evidence_export_change(
-                before=access_context.flow.metadata_json,
-                after=updated.metadata_json,
-            ),
-        ),
-    )
-    overrides = _classification_override_step_orders(flow_in)
-    if overrides:
-        await audit_service.log_async(
-            tenant_id=user.tenant_id,
-            actor_id=user.id,
-            action=ActionType.FLOW_CLASSIFICATION_OVERRIDE,
-            entity_type=EntityType.FLOW,
-            entity_id=updated_flow_id,
-            description="Updated output classification overrides for flow steps.",
-            metadata=AuditMetadata.standard(
-                actor=user,
-                target=updated,
-                changes={"step_orders": overrides},
-            ),
-        )
-
-    return assembler.to_public(updated)
 
 
 @router.delete(
@@ -779,21 +612,11 @@ async def publish_flow(
     ],
     request: Request,
     container: Container = Depends(_MUTATING_CONTAINER),
+    expected_revision: Annotated[int | None, Query(ge=0)] = None,
 ):
-    await require_flow_publish_access(request, container, flow_id=id)
-
-    published = await container.flow_service().publish_flow(flow_id=id)
-    user = container.user()
-    await container.audit_service().log_async(
-        tenant_id=user.tenant_id,
-        actor_id=user.id,
-        action=ActionType.FLOW_PUBLISHED,
-        entity_type=EntityType.FLOW,
-        entity_id=id,
-        description=f"Published flow '{published.name}' as version {published.published_version}",
-        metadata=AuditMetadata.standard(actor=user, target=published),
+    return await authoring_operations.publish_flow(
+        id=id, request=request, container=container, expected_revision=expected_revision
     )
-    return FlowAssembler().to_public(published)
 
 
 @router.post(
@@ -838,21 +661,33 @@ async def unpublish_flow(
     ],
     request: Request,
     container: Container = Depends(_MUTATING_CONTAINER),
+    expected_revision: Annotated[int | None, Query(ge=0)] = None,
 ):
-    await require_flow_unpublish_access(request, container, flow_id=id)
-
-    unpublished = await container.flow_service().unpublish_flow(flow_id=id)
-    user = container.user()
-    await container.audit_service().log_async(
-        tenant_id=user.tenant_id,
-        actor_id=user.id,
-        action=ActionType.FLOW_UNPUBLISHED,
-        entity_type=EntityType.FLOW,
-        entity_id=id,
-        description=f"Unpublished flow '{unpublished.name}'",
-        metadata=AuditMetadata.standard(actor=user, target=unpublished),
+    return await authoring_operations.unpublish_flow(
+        id=id, request=request, container=container, expected_revision=expected_revision
     )
-    return FlowAssembler().to_public(unpublished)
 
 
 __all__ = ["router"]
+
+
+@router.patch(
+    "/{id}/editor/",
+    response_model=FlowPublic,
+    operation_id="update_flow_editor",
+    summary="Update Flow and Step Assistants",
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
+async def update_flow_editor(
+    id: UUID,
+    request: Request,
+    update: FlowEditorUpdateRequest,
+    container: Container = Depends(_MUTATING_CONTAINER),
+) -> FlowPublic:
+    return await authoring_operations.apply_editor_update(
+        id=id, request=request, update=update, container=container
+    )
