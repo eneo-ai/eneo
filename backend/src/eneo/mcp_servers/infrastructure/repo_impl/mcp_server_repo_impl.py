@@ -52,11 +52,15 @@ class MCPServerRepoImpl(
 ):
     def __init__(self, session: "AsyncSession", mapper: MCPServerMapper):
         super().__init__(session=session, model=MCPServersTable, mapper=mapper)
-        # Audience groups and the backing image model are part of the
-        # provider's identity for resolution, so every single-row read
-        # carries them.
+        # Audience groups, the server's own classification and the backing
+        # model are part of the provider's identity for resolution, so every
+        # read carries them. An update writes the classification back, so a
+        # read without it would clear it.
         self._options = [
             selectinload(self._db_model.user_groups),
+            selectinload(self._db_model.security_classification).selectinload(
+                SecurityClassificationDBModel.tenant
+            ),
             *backing_model_options(),
         ]
 
@@ -161,14 +165,7 @@ class MCPServerRepoImpl(
         query = (
             select(self._db_model)
             .where(self._db_model.tenant_id == tenant_id)
-            .options(
-                selectinload(self._db_model.tools),
-                selectinload(self._db_model.user_groups),
-                selectinload(self._db_model.security_classification).selectinload(
-                    SecurityClassificationDBModel.tenant
-                ),
-                *backing_model_options(),
-            )
+            .options(selectinload(self._db_model.tools), *self._options)
             .order_by(self._db_model.created_at, self._db_model.id)
         )
         result = await self.session.scalars(query)
