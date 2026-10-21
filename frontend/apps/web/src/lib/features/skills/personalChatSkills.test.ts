@@ -112,6 +112,20 @@ describe("the person's own Skill rows", () => {
     expect(rows[0].binding).toBe(saved[0]);
   });
 
+  test("re-adds a Skill no loaded page shows at its newest revision, and keeps its pin on a mode change", () => {
+    const saved = [binding("a", { attachable_revision_id: "a-r2", attachable_revision_number: 2 })];
+    const [row] = personalSkillRows(saved, [], personalSkillBindings(saved));
+
+    expect(withPersonalSkillMode(personalSkillBindings(saved), row, "on_demand")).toEqual([
+      { skill_id: "a", skill_revision_id: "a-r1", activation_mode: "on_demand" }
+    ]);
+    const off = withPersonalSkillMode(personalSkillBindings(saved), row, "off");
+    expect(off).toEqual([]);
+    expect(withPersonalSkillMode(off, row, "always")).toEqual([
+      { skill_id: "a", skill_revision_id: "a-r2", activation_mode: "always" }
+    ]);
+  });
+
   test("follows the change being saved and keeps Skills in the chat that no loaded page shows", () => {
     const saved = [binding("a", { attachable_revision_id: "a-r2" }), binding("z", { position: 1 })];
     const moved = [

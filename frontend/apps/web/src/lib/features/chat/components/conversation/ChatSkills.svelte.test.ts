@@ -521,6 +521,26 @@ describe("ChatSkills", () => {
     expect(mocks.list).toHaveBeenCalledTimes(2);
   });
 
+  it("offers the next page when a page holds no Skill that can join the chat", async () => {
+    server = personalChatServer({ bindings: [] });
+    mocks.list.mockImplementation(async ({ cursor }: { cursor: string | null }) =>
+      cursor
+        ? libraryPage([librarySkill("translate", "Engelsk översättning")])
+        : {
+            items: [{ ...librarySkill("old", "Gammal skill"), is_active: false }],
+            next_cursor: "page-2"
+          }
+    );
+    renderControl();
+    await openControl(1);
+
+    const loadMore = page.getByRole("button", { name: m.load_more() });
+    await expect.element(loadMore).toBeVisible();
+    await expect.element(page.getByText(m.personal_chat_skills_empty())).not.toBeInTheDocument();
+    await loadMore.click();
+    await expect.element(modeGroup("Engelsk översättning")).toBeVisible();
+  });
+
   it("lets a later choice for the same Skill replace an earlier refusal", async () => {
     let release!: () => void;
     server.hold = new Promise((resolve) => (release = resolve));

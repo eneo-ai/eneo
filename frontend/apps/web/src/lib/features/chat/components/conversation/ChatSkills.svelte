@@ -353,18 +353,6 @@
                 {@render ownSkill(owner, row, sheet)}
               {/each}
             </ul>
-            {#if owner.library.hasMore && !owner.library.loading}
-              <div class={cn("py-1", gutter)}>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={owner.library.loadingMore}
-                  onclick={() => owner.library.loadMore()}
-                >
-                  {owner.library.loadingMore ? m.loading() : m.load_more()}
-                </Button>
-              </div>
-            {/if}
           {:else if owner.library.loading || (owner.canEdit && !owner.libraryLoaded && !loadError)}
             <p
               class="text-muted-foreground flex items-center justify-center gap-2 py-4 text-sm"
@@ -373,6 +361,8 @@
               <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
               {m.loading()}
             </p>
+          {:else if owner.library.hasMore}
+            <!-- Nothing here can join the chat, but a later page may. -->
           {:else if owner.library.query}
             <p class={cn("text-muted-foreground py-3 text-sm", gutter)} role="status">
               {m.personal_chat_skills_search_empty()}
@@ -388,6 +378,18 @@
                   {m.skills_library_create()}
                 </Button>
               {/if}
+            </div>
+          {/if}
+          {#if owner.library.hasMore && !owner.library.loading}
+            <div class={cn("py-1", gutter)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={owner.library.loadingMore}
+                onclick={() => owner.library.loadMore()}
+              >
+                {owner.library.loadingMore ? m.loading() : m.load_more()}
+              </Button>
             </div>
           {/if}
         </div>

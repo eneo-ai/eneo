@@ -110,7 +110,8 @@ export function personalSkillRows(
           id: binding.skill_id,
           name: binding.display_name,
           description: binding.description,
-          revisionId: binding.skill_revision_id
+          // Re-added after Av, it joins at the newest revision, not the old pin.
+          revisionId: binding.attachable_revision_id ?? binding.skill_revision_id
         }));
   return [...listed, ...unlisted].map((skill) => {
     const binding = savedById.get(skill.id);
