@@ -16,6 +16,7 @@ from eneo.skills.domain.skill import (
     AssistantSkillBindingReplacement,
     NormalizedSkillContent,
     PersonalChatPinOverride,
+    PersonalDefaultsSnapshot,
     PublishedSkillDeactivationError,
     ResolvedSkillBinding,
     Skill,
@@ -919,6 +920,14 @@ class SkillService:
                     block=block,
                     binding=binding,
                 )
+
+    async def personal_defaults_fit_snapshot(
+        self, *, lock_runtime_policy: bool
+    ) -> PersonalDefaultsSnapshot:
+        return await self.repo.personal_defaults_fit_snapshot(
+            tenant_id=self.user.tenant_id,
+            lock_runtime_policy=lock_runtime_policy,
+        )
 
     async def resolve_governance_bindings_for_runtime(
         self,

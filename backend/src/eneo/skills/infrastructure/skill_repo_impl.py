@@ -1905,6 +1905,28 @@ class SkillRepoImpl:
             query = query.with_for_update(read=True, of=SkillRuntimePolicies)
         return await self.session.scalar(query)
 
+    async def personal_defaults_fit_snapshot(
+        self, *, tenant_id: UUID, lock_runtime_policy: bool
+    ) -> PersonalDefaultsSnapshot:
+        """Version every input a personal chat fit validation reads.
+
+        Personal-default row versions plus the runtime-policy version. With
+        ``lock_runtime_policy`` the runtime-policy row is held FOR SHARE, which
+        callers take only after the exclusive fit token (lock order: policy
+        row, fit token, then other rows).
+        """
+        snapshot = await AssistantRepository.get_personal_defaults_snapshot(
+            session=self.session,
+            tenant_id=tenant_id,
+        )
+        return replace(
+            snapshot,
+            runtime_policy_version=await self._runtime_policy_version(
+                tenant_id=tenant_id,
+                shared_lock=lock_runtime_policy,
+            ),
+        )
+
     async def stage_personal_chat_skill_pin_advance(
         self,
         *,
@@ -2012,18 +2034,8 @@ class SkillRepoImpl:
         if binding.skill_revision_id != expected_pinned_revision_id:
             raise SkillRevisionConflictError
 
-        personal_defaults_snapshot = (
-            await AssistantRepository.get_personal_defaults_snapshot(
-                session=self.session,
-                tenant_id=tenant_id,
-            )
-        )
-        personal_defaults_snapshot = replace(
-            personal_defaults_snapshot,
-            runtime_policy_version=await self._runtime_policy_version(
-                tenant_id=tenant_id,
-                shared_lock=False,
-            ),
+        personal_defaults_snapshot = await self.personal_defaults_fit_snapshot(
+            tenant_id=tenant_id, lock_runtime_policy=False
         )
         return PersonalChatPinAdvanceStage(
             advance=PersonalChatPinAdvance(
@@ -2066,10 +2078,12 @@ class SkillRepoImpl:
         runtime-policy row is then held FOR SHARE, draining an in-flight update
         and making later updates wait until this short apply completes.
 
-        Waiting for the token cannot deadlock: an Assistant save holds only its
-        row and the shared token, never policy, Skill, or binding locks. A
-        governance save holds the policy row and never takes this token, so the
-        NOWAIT policy lock refuses before confirm can wait. Runtime-policy
+        Every writer follows one lock order: policy row, fit token, then other
+        rows. Waiting for the token cannot deadlock: an Assistant save holds
+        only its row and the shared token, never policy, Skill, or binding
+        locks. A governance save takes the policy row before the exclusive
+        token, so while it runs the NOWAIT policy lock refuses before confirm
+        can wait. Runtime-policy
         updates hold only their own row FOR UPDATE; they take neither the token
         nor policy, Skill, or binding locks, so our FOR SHARE wait cannot form a
         cycle. The binding recheck, guarded write, and policy-row bump then
@@ -2116,19 +2130,8 @@ class SkillRepoImpl:
             tenant_id=tenant_id,
             shared=False,
         )
-        runtime_policy_version = await self._runtime_policy_version(
-            tenant_id=tenant_id,
-            shared_lock=True,
-        )
-        current_personal_defaults_snapshot = (
-            await AssistantRepository.get_personal_defaults_snapshot(
-                session=self.session,
-                tenant_id=tenant_id,
-            )
-        )
-        current_personal_defaults_snapshot = replace(
-            current_personal_defaults_snapshot,
-            runtime_policy_version=runtime_policy_version,
+        current_personal_defaults_snapshot = await self.personal_defaults_fit_snapshot(
+            tenant_id=tenant_id, lock_runtime_policy=True
         )
         if current_personal_defaults_snapshot != personal_defaults_snapshot:
             return PersonalChatPinConfirmOutcome.PERSONAL_DEFAULTS_CHANGED

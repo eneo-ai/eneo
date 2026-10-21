@@ -255,6 +255,10 @@ class SkillRepo(Protocol):
         reason: str,
     ) -> SkillExecutionBlockChange | None: ...
 
+    async def personal_defaults_fit_snapshot(
+        self, *, tenant_id: UUID, lock_runtime_policy: bool
+    ) -> PersonalDefaultsSnapshot: ...
+
     async def stage_personal_chat_skill_pin_advance(
         self,
         *,

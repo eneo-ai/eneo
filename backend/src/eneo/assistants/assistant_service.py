@@ -1266,6 +1266,32 @@ class AssistantService:
             )
         return resolved_model
 
+    async def confirm_personal_default_governance_fit(self) -> None:
+        """Validate a staged personal chat policy save against every personal chat.
+
+        The caller already holds the policy row. The fleet walk first runs
+        without the fit token, so Assistant saves are not blocked while it runs.
+        The exclusive token then drains in-flight Assistant saves and makes new
+        ones wait until this transaction commits, so they validate against the
+        new policy. The walk repeats, now under the token, only when a personal
+        chat or the runtime policy changed meanwhile. Lock order: policy row,
+        fit token, then other rows (the same order as pin confirmation).
+        """
+        snapshot = await self.skill_service.personal_defaults_fit_snapshot(
+            lock_runtime_policy=False
+        )
+        await self.assert_personal_default_governance_context_fit()
+        await acquire_personal_default_fit_lock(
+            session=self.repo.session,
+            tenant_id=self.user.tenant_id,
+            shared=False,
+        )
+        confirmed = await self.skill_service.personal_defaults_fit_snapshot(
+            lock_runtime_policy=True
+        )
+        if confirmed != snapshot:
+            await self.assert_personal_default_governance_context_fit()
+
     async def assert_personal_default_governance_context_fit(
         self,
         *,
