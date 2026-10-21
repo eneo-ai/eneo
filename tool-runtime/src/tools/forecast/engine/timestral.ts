@@ -102,7 +102,7 @@ function json(text: string): unknown {
 }
 
 /** The sidecar's answer, checked: a day for each day asked for, finite numbers only. */
-function engineResult(stdout: string, horizon: number, holdout: boolean): EngineResult {
+export function engineResult(stdout: string, horizon: number, holdout: boolean): EngineResult {
   const days = z.array(z.number().finite()).length(horizon);
   const interval = z.object({ p10: days, p50: days, p90: days });
   const parsed = z

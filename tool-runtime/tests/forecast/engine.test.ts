@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { forecastAvailable, timestralEngine } from "../../src/tools/forecast/engine/timestral";
+import { engineResult, forecastAvailable, timestralEngine } from "../../src/tools/forecast/engine/timestral";
 import { tinyCheckpoint } from "./checkpoint";
 
 const directory = await mkdtemp(join(tmpdir(), "forecast-engine-test-"));
@@ -74,5 +74,27 @@ describe.skipIf(!(await forecastAvailable()))("the Timestral engine", () => {
     await expect(other({ values: daily(60), horizon: 3, holdout: false })).rejects.toMatchObject({
       code: "MODEL_UNAVAILABLE",
     });
+  });
+});
+
+describe("the sidecar's answer", () => {
+  const days = (n: number) => Array.from({ length: n }, (_, i) => 100 + i);
+  const interval = (n: number) => ({ p10: days(n), p50: days(n), p90: days(n) });
+  const answer = (fields: Record<string, unknown> = {}) =>
+    JSON.stringify({ forecast: interval(3), parameters: 28_000_000, ...fields });
+
+  test("is read when it has a finite value for each day asked for", () => {
+    expect(engineResult(answer(), 3, false).forecast.p50).toEqual([100, 101, 102]);
+    expect(engineResult(answer({ holdout: interval(3) }), 3, true).holdout).toEqual(interval(3));
+  });
+
+  test.each([
+    ["output that is not JSON", "Traceback (most recent call last)", false],
+    ["a day too few", answer({ forecast: { ...interval(3), p90: days(2) } }), false],
+    ["a value that is not a number", answer({ forecast: { ...interval(3), p50: [100, null, 102] } }), false],
+    ["no check when one was asked for", answer(), true],
+    ["no size of the model", JSON.stringify({ forecast: interval(3) }), false],
+  ])("refuses %s as a failed model", (_case, stdout, holdout) => {
+    expect(() => engineResult(stdout, 3, holdout)).toThrow(expect.objectContaining({ code: "ENGINE_FAILED" }));
   });
 });

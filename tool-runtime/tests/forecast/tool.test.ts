@@ -59,6 +59,9 @@ describe("create_forecast", () => {
     expect(listed.description).toContain("one row per day");
     expect(listed.description).toContain("query_table");
     expect(listed.description).toContain("Never add P10 or P90");
+    // The forecast starts after the last value, not after the file's last date.
+    expect(listed.description).toContain("the day after the last day with a value");
+    expect(listed.inputSchema.properties.horizon.description).toContain("after the last day with a value");
   });
 
   test("runs a call that also repeats the columns in the source", async () => {

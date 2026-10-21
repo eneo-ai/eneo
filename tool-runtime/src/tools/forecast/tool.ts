@@ -50,7 +50,7 @@ export function forecastTools(
       .min(1)
       .max(config.max_horizon_days)
       .describe(
-        `Days to forecast after the last date in the file, at most ${config.max_horizon_days}.`,
+        `Days to forecast, from the day after the last day with a value in the file, at most ${config.max_horizon_days}.`,
       ),
     title: z
       .string()
@@ -76,7 +76,7 @@ export function forecastTools(
       name: "create_forecast",
       title: "Create forecast",
       description:
-        "Forecast the coming days of a daily series in a CSV or XLSX file: for each day the most likely value (P50) and an interval (P10-P90), with a check of how the same forecast would have done on the last days of the history. Use it when the user asks what a daily measure (cases, visits, bookings, energy use) will be in the coming days or weeks. The file needs one row per day: a date column (YYYY-MM-DD) and a numeric value column. When the data is per hour or per event, has missing days, or uses another date format, first use query_table to produce one row per day (0 where no activity means zero, empty where the value is unknown) with export=true and display=none, and pass that export. Leave out today if the day is not over. The model knows only the history: not the weather, holidays, school breaks or planned changes. Say so when it matters and add what you know about such days yourself. Never add P10 or P90 across days. Report the check against the last days as it is, including when it is unavailable.",
+        "Forecast the coming days of a daily series in a CSV or XLSX file: for each day the most likely value (P50) and an interval (P10-P90), with a check of how the same forecast would have done on the last days of the history. Use it when the user asks what a daily measure (cases, visits, bookings, energy use) will be in the coming days or weeks. The file needs one row per day: a date column (YYYY-MM-DD) and a numeric value column. The forecast starts the day after the last day with a value: empty days at the end of the file (a sheet laid out in advance) are left out, and history.empty_end_days says how many. When the data is per hour or per event, has missing days, or uses another date format, first use query_table to produce one row per day (0 where no activity means zero, empty where the value is unknown) with export=true and display=none, and pass that export. Leave out today if the day is not over. The model knows only the history: not the weather, holidays, school breaks or planned changes. Say so when it matters and add what you know about such days yourself. Never add P10 or P90 across days. Report the check against the last days as it is, including when it is unavailable.",
       inputSchema: input.shape,
       readOnly: true,
       async execute(raw, ctx) {
