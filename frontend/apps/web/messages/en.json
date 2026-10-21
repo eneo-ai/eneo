@@ -5176,6 +5176,7 @@
   "password_change_required_admin_set": "The password you signed in with was set by an administrator and can only be used once. Choose your own password to continue.",
   "password_change_required_expired": "Your password has expired under your organisation's password policy. Choose a new password to continue.",
   "password_change_required_current_hint": "Enter the password you just signed in with as the current password.",
+  "password_change_required_expired_current_hint": "Enter the password that has expired as the current password.",
   "admin_password_change_required_badge": "One-time password",
   "admin_password_one_time_hint": "The user must choose their own password at their next sign-in.",
   "admin_password_generated_hint": "Eneo generates a password that meets the password policy and shows it once the account has been created.",

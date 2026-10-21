@@ -14,6 +14,13 @@
         ? m.password_change_required_admin_set()
         : m.password_change_not_available()
   );
+  // "The password you just signed in with" only fits a one-time password: an
+  // expired one may belong to a session that started days ago.
+  const currentPasswordHint = $derived(
+    data.reason === "expired"
+      ? m.password_change_required_expired_current_hint()
+      : m.password_change_required_current_hint()
+  );
   // A relative action replaces the page's query string, so `next` has to ride along.
   const action = $derived(
     data.next ? `?/changePassword&next=${encodeURIComponent(data.next)}` : "?/changePassword"
@@ -30,7 +37,7 @@
       capability={data.capability}
       username={data.username}
       {action}
-      currentPasswordHint={m.password_change_required_current_hint()}
+      {currentPasswordHint}
     />
   {:else if data.reason !== null}
     <AuthAlert tone="error">

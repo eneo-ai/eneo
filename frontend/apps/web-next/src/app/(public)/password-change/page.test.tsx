@@ -16,7 +16,7 @@ afterEach(() => {
   ChangePasswordForm.mockClear();
 });
 
-function me(changeRequired: boolean) {
+function me(changeRequired: boolean, reason: "admin_set" | "expired" = "admin_set") {
   return new Response(
     JSON.stringify({
       email: "person@example.com",
@@ -32,7 +32,7 @@ function me(changeRequired: boolean) {
         }
       },
       password_status: changeRequired
-        ? { change_required: true, reason: "admin_set" }
+        ? { change_required: true, reason }
         : { change_required: false, reason: null }
     }),
     { status: 200, headers: { "content-type": "application/json" } }
@@ -40,12 +40,12 @@ function me(changeRequired: boolean) {
 }
 
 /** Renders the page and returns the props the form was given. */
-async function renderForm(next?: string) {
-  vi.stubGlobal("fetch", async () => me(true));
+async function renderForm(next?: string, reason?: "admin_set" | "expired") {
+  vi.stubGlobal("fetch", async () => me(true, reason));
   const page = await PasswordChangePage({ searchParams: Promise.resolve({ next }) });
   const form = page.props.children;
   expect(form.type).toBe(ChangePasswordForm);
-  return form.props as { afterChangeHref: string };
+  return form.props as { afterChangeHref: string; currentPasswordHint: string };
 }
 
 describe("password-change session recovery", () => {
@@ -72,6 +72,15 @@ describe("password-change session recovery", () => {
     );
     expect((await renderForm("//evil.example")).afterChangeHref).toBe(
       "/logout?reason=password_changed"
+    );
+  });
+
+  it("asks for the password just used only when it was one-time", async () => {
+    expect((await renderForm(undefined, "admin_set")).currentPasswordHint).toBe(
+      "password_change_required_current_hint"
+    );
+    expect((await renderForm(undefined, "expired")).currentPasswordHint).toBe(
+      "password_change_required_expired_current_hint"
     );
   });
 

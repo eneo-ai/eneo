@@ -77,7 +77,13 @@ export default async function PasswordChangePage({
         <ChangePasswordForm
           policy={capability.policy}
           email={me.email}
-          currentPasswordHint={t("password_change_required_current_hint")}
+          currentPasswordHint={
+            // "Just signed in with" only fits a one-time password; an expired
+            // one may belong to a session that started days ago.
+            reason === "expired"
+              ? t("password_change_required_expired_current_hint")
+              : t("password_change_required_current_hint")
+          }
           afterChangeHref={passwordChangedLogoutUrl(next)}
         />
       ) : (
