@@ -83,6 +83,45 @@ route's container authenticates. Sharing a request with a function-scoped
 route, an open gate transaction held the row of a legacy key hash it had just
 upgraded, and the route's own authentication of the same key waited on it.
 
+### Rules moved from the AI Builder
+
+The builder enforced some rules only on what it compiled. They now hold for
+every author, at publish unless noted:
+
+- An assistant prompt (on a step that runs a model) and an HTTP request
+  (`http_get` input, `http_post` webhook) may read only what the run has when it
+  interpolates them: a declared form field, a runtime variable, the text,
+  status, error or structured output of an earlier step (a webhook also its own
+  step), or a field that step's contract declares. A prompt's runtime variables
+  include `section_index` only on a step that processes each section. The
+  refusals reuse the input binding codes with `field` naming the site.
+- A template field may read an earlier step by its name, which is that step's
+  text, but nothing below the name.
+- `source_refs` may not list the same material twice, and a structured source
+  ref must name a producer that yields structured output and a field its
+  contract declares.
+- A per-source reader writes one `documents` array with the source fields the
+  run fills in; an item map reads and writes one array of objects. Both were
+  refused only when the run reached the step.
+- An audio step's uploads must be audio (`runtime_input.input_format`), checked
+  on every save: with another format the run accepts other files and never
+  transcribes. A document step may still take audio uploads, which the run
+  transcribes.
+- A new step's name in the editor update is stripped and must not be blank.
+
+The chat's instructions carry the essentials of the builder's planner guidance:
+step kinds, uploads, form fields, `{{ step_N.output... }}` reads and that
+publishing names what to fix.
+
+Dismissed: the builder's catalog references (model and knowledge refs), plan
+step refs, quality lints, topology preferences and intent heuristics have no
+meaning outside its planner. Steps without names stay publishable, because the
+run reads steps by position. A flow_input file step without uploads keeps
+reading the run's text, as the editor allows. Still open: a full `PUT` of the
+steps reorders without renumbering prompt reads (the Svelte editor renumbers
+them itself), a rename can make a kept read by step name name another step, and
+`update_step` patches a step's assistant even when another step shares it.
+
 ## Documents
 
 The tool runtime renders Markdown to Word and PDF and fills Word templates; the
