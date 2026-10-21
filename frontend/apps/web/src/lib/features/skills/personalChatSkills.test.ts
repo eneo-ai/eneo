@@ -125,7 +125,7 @@ describe("the person's own Skill rows", () => {
 });
 
 describe("Skills that run in the personal chat", () => {
-  test("counts the organisation's unblocked Skills and the person's own only while they apply", () => {
+  test("counts the organisation's unblocked Skills and the person's own unless they are paused", () => {
     const organisation_bindings = [
       binding("org-1"),
       binding("org-2", { activation_mode: "on_demand" }),
@@ -152,6 +152,11 @@ describe("Skills that run in the personal chat", () => {
         personal_layer: { status: "suspended", reason: "model_context_exceeded", detail: null }
       })
     ).toEqual({ always: 1, on_demand: 1 });
+    // Without a model there is no assessment, and nothing says they are paused.
+    expect(runningPersonalChatSkills({ bindings, organisation_bindings, runtime: null })).toEqual({
+      always: 1,
+      on_demand: 2
+    });
   });
 });
 

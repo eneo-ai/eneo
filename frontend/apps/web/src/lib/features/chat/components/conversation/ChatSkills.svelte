@@ -38,8 +38,7 @@
     Lock,
     Plus,
     Search,
-    Settings2,
-    X
+    Settings2
   } from "@lucide/svelte";
   import { RadioGroup as RadioGroupPrimitive, useId } from "bits-ui";
   import { untrack } from "svelte";
@@ -78,7 +77,8 @@
         readLibrary: () => listPersonalSpaceSkills(eneo, spaceId),
         save: (bindings) => updateDefaultAssistantSkills(assistant, bindings)
       },
-      user.hasPermission("personal_skills")
+      // Saving the personal chat's own Skills takes both.
+      user.hasPermission({ allOf: ["personal_chat", "personal_skills"] })
     );
   }
 
@@ -98,6 +98,12 @@
   );
   const running = $derived(configuration ? runningPersonalChatSkills(configuration) : null);
   const runningCount = $derived(running ? running.always + running.on_demand : 0);
+  // No number until it is known: a 0 while loading would be wrong.
+  const triggerName = $derived(
+    running
+      ? m.personal_chat_skills_button_label({ count: runningCount })
+      : m.personal_chat_skills_button()
+  );
   const layer = $derived(configuration?.personal_layer ?? null);
   const canCreate = $derived(
     (skills?.canEdit ?? false) && ($currentSpace.skill_permissions?.includes("create") ?? false)
@@ -132,13 +138,13 @@
     popoverOpen = open;
   }
 
-  function isReadOnly(owner: PersonalChatSkills, row: OwnSkillRow) {
-    return !owner.canEdit || row.binding?.execution_blocked === true;
+  function canChange(owner: PersonalChatSkills, row: OwnSkillRow) {
+    return owner.canEdit && row.binding?.execution_blocked !== true;
   }
 
   function segmentClass(mode: PersonalSkillMode, sheet: boolean) {
     return cn(
-      "text-muted-foreground focus-visible:ring-ring/50 data-[state=unchecked]:hover:text-foreground inline-flex items-center justify-center rounded-md border border-transparent px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-3 data-readonly:pointer-events-none data-[state=checked]:font-semibold",
+      "text-muted-foreground focus-visible:ring-ring/50 data-[state=unchecked]:hover:text-foreground inline-flex items-center justify-center rounded-md border border-transparent px-2.5 text-xs font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-3 data-[state=checked]:font-semibold",
       sheet ? "h-11 text-sm" : "h-7",
       // Off is a neutral state; only a mode that runs takes the accent.
       mode === "off"
@@ -165,7 +171,6 @@
 )}
   <RadioGroup.Root
     bind:value={() => row.mode, (mode) => owner.setMode(row, mode as PersonalSkillMode)}
-    readonly={isReadOnly(owner, row)}
     orientation="horizontal"
     aria-label={m.personal_chat_skills_mode_group_label({ name: row.name })}
     aria-describedby={describedBy}
@@ -199,12 +204,17 @@
           </p>
         {/if}
       </div>
-      {@render modeControl(
-        owner,
-        row,
-        sheet,
-        row.description ? `${id}-description ${id}-status` : `${id}-status`
-      )}
+      {#if canChange(owner, row)}
+        {@render modeControl(
+          owner,
+          row,
+          sheet,
+          row.description ? `${id}-description ${id}-status` : `${id}-status`
+        )}
+      {:else}
+        <!-- Not the person's choice right now: the saved mode is told, not offered. -->
+        <p class="text-muted-foreground shrink-0 text-xs">{activationModeLabel(row.mode)}</p>
+      {/if}
     </div>
     <div id="{id}-status">
       {#if row.binding?.execution_blocked}
@@ -348,7 +358,7 @@
               {#if canCreate}
                 <Button size="sm" href={resolve("/spaces/personal/skills/new")}>
                   <Plus data-icon="inline-start" aria-hidden="true" />
-                  {m.skills_create_action()}
+                  {m.skills_library_create()}
                 </Button>
               {/if}
             </div>
@@ -392,7 +402,7 @@
           href={resolve("/spaces/personal/skills/new")}
         >
           <Plus data-icon="inline-start" aria-hidden="true" />
-          {m.skills_create_action()}
+          {m.skills_library_create()}
         </Button>
       {/if}
     </div>
@@ -404,8 +414,8 @@
     <Popover.Trigger
       class={buttonVariants({ variant: runningCount > 0 ? "secondary" : "ghost", size: "sm" }) +
         " h-9 shrink-0 gap-1 rounded-lg px-2 @[40rem]/composer:gap-1.5 @[40rem]/composer:px-3"}
-      title={m.personal_chat_skills_button_label({ count: runningCount })}
-      aria-label={m.personal_chat_skills_button_label({ count: runningCount })}
+      title={triggerName}
+      aria-label={triggerName}
     >
       <BookOpenCheck class="size-4" aria-hidden="true" />
       <span bind:this={label} class="hidden @[40rem]/composer:inline"
@@ -442,16 +452,15 @@
       showCloseButton={false}
       class="gap-0 rounded-t-xl p-0 data-[side=bottom]:h-[80dvh]"
     >
-      <Sheet.Header class="border-b pr-14">
+      <Sheet.Header class="border-b pr-24">
         <Sheet.Title>{m.personal_chat_skills_button()}</Sheet.Title>
         {@render summary()}
       </Sheet.Header>
       <Sheet.Close
-        class={buttonVariants({ variant: "ghost", size: "icon" }) +
-          " absolute top-2 right-2 size-11"}
-        aria-label={m.close()}
+        class={buttonVariants({ variant: "ghost", size: "sm" }) +
+          " absolute top-2 right-2 h-11 px-3"}
       >
-        <X aria-hidden="true" />
+        {m.close()}
       </Sheet.Close>
       {@render body(skills, true)}
     </Sheet.Content>

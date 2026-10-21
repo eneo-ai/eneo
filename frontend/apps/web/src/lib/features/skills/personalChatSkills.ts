@@ -147,12 +147,12 @@ export function withLatestPersonalSkillRevision(
 
 /**
  * Skills that run in the personal chat, per mode: the organisation's unless
- * blocked, and the person's own only while their layer applies.
+ * blocked, and the person's own unless blocked or paused.
  */
 export function runningPersonalChatSkills(
   configuration: AssistantSkillConfiguration
 ): Record<SkillActivationMode, number> {
-  const own = configuration.personal_layer?.status === "applied" ? configuration.bindings : [];
+  const own = configuration.personal_layer?.status === "suspended" ? [] : configuration.bindings;
   const running = [...(configuration.organisation_bindings ?? []), ...own].filter(
     (binding) => !binding.execution_blocked
   );

@@ -19,11 +19,17 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("$app/paths", () => ({ resolve: (path: string) => path }));
-vi.mock("$lib/core/AppContext", () => ({
-  getAppContext: () => ({
-    user: { hasPermission: (permission: string) => mocks.permissions.has(permission) }
-  })
-}));
+vi.mock("$lib/core/AppContext", async () => {
+  const { hasPermission } = await import("$lib/core/hasPermission");
+  return {
+    getAppContext: () => ({
+      user: {
+        hasPermission: (required: Parameters<ReturnType<typeof hasPermission>>[0]) =>
+          hasPermission({ roles: [{ permissions: [...mocks.permissions] } as never] })(required)
+      }
+    })
+  };
+});
 vi.mock("$lib/core/Eneo", () => ({
   getEneo: () => ({
     skills: { getAssistantConfiguration: mocks.getAssistantConfiguration, list: mocks.list }
@@ -131,6 +137,10 @@ function modeGroup(name: string) {
   return page.getByRole("radiogroup", { name: m.personal_chat_skills_mode_group_label({ name }) });
 }
 
+function ownSkillRow(name: string) {
+  return page.getByRole("listitem").filter({ hasText: name });
+}
+
 async function openControl(count: number) {
   await page.getByRole("button", { name: m.personal_chat_skills_button_label({ count }) }).click();
 }
@@ -138,10 +148,19 @@ async function openControl(count: number) {
 describe("ChatSkills", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.permissions = new Set(["personal_skills"]);
+    mocks.permissions = new Set(["personal_chat", "personal_skills"]);
     mocks.getAssistantConfiguration.mockResolvedValue(configuration());
     mocks.list.mockResolvedValue(libraryPage(LIBRARY));
     mocks.updateDefaultAssistantSkills.mockResolvedValue(undefined);
+  });
+
+  it("is named Skills until it knows how many run", async () => {
+    mocks.getAssistantConfiguration.mockReturnValue(new Promise(() => {}));
+    renderControl();
+
+    await expect
+      .element(page.getByRole("button", { name: m.personal_chat_skills_button(), exact: true }))
+      .toBeVisible();
   });
 
   it("names the Skills that run and lists the organisation's apart from the person's own", async () => {
@@ -268,9 +287,12 @@ describe("ChatSkills", () => {
       .element(page.getByText(m.personal_chat_skills_reason_model_context_exceeded()))
       .toBeVisible();
     // Switching off stays possible while paused: it is the way out.
-    await expect
-      .element(modeGroup("Mötesanteckningar"))
-      .not.toHaveAttribute("aria-readonly", "true");
+    await modeGroup("Mötesanteckningar")
+      .getByRole("radio", { name: m.personal_chat_skills_mode_off() })
+      .click();
+    expect(mocks.updateDefaultAssistantSkills).toHaveBeenCalledWith({ id: "default-assistant" }, [
+      { skill_id: "answers", skill_revision_id: "answers-r1", activation_mode: "always" }
+    ]);
   });
 
   it("offers to create a first Skill when the person has none", async () => {
@@ -286,12 +308,12 @@ describe("ChatSkills", () => {
 
     await expect.element(page.getByText(m.personal_chat_skills_empty())).toBeVisible();
     await expect
-      .element(page.getByRole("link", { name: m.skills_create_action() }))
+      .element(page.getByRole("link", { name: m.skills_library_create() }))
       .toHaveAttribute("href", "/spaces/personal/skills/new");
   });
 
   it("shows retained own Skills read-only, with no library, when the role no longer allows them", async () => {
-    mocks.permissions = new Set();
+    mocks.permissions = new Set(["personal_chat"]);
     mocks.getAssistantConfiguration.mockResolvedValue(
       configuration({
         bindings: [ANSWERS],
@@ -304,18 +326,15 @@ describe("ChatSkills", () => {
     await expect
       .element(page.getByText(m.personal_chat_skills_reason_permission_missing()))
       .toBeVisible();
+    // The saved mode is told, not offered.
+    expect(modeGroup("Mina svarspreferenser").elements()).toHaveLength(0);
     await expect
-      .element(modeGroup("Mina svarspreferenser"))
-      .toHaveAttribute("aria-readonly", "true");
-    // Still reachable, so the saved choice can be read out, but not changed.
-    (
-      modeGroup("Mina svarspreferenser")
-        .getByRole("radio", { name: m.skills_activation_mode_always() })
-        .element() as HTMLElement
-    ).focus();
-    await userEvent.keyboard("{ArrowLeft}");
-    await userEvent.keyboard(" ");
-    expect(mocks.updateDefaultAssistantSkills).not.toHaveBeenCalled();
+      .element(
+        ownSkillRow("Mina svarspreferenser").getByText(m.skills_activation_mode_always(), {
+          exact: true
+        })
+      )
+      .toBeVisible();
     expect(mocks.list).not.toHaveBeenCalled();
     expect(
       page.getByRole("link", { name: m.personal_chat_skills_manage() }).elements()
@@ -363,8 +382,11 @@ describe("ChatSkills", () => {
     renderControl();
     await openControl(2);
 
-    await expect.element(page.getByText(m.personal_chat_skills_blocked())).toBeVisible();
-    await expect.element(modeGroup("Mötesanteckningar")).toHaveAttribute("aria-readonly", "true");
+    await expect
+      .element(ownSkillRow("Mötesanteckningar").getByText(m.personal_chat_skills_blocked()))
+      .toBeVisible();
+    expect(modeGroup("Mötesanteckningar").elements()).toHaveLength(0);
+    await expect.element(modeGroup("Mina svarspreferenser")).toBeVisible();
   });
 
   it("searches the person's own Skills once there are more than seven", async () => {
@@ -394,5 +416,10 @@ describe("ChatSkills", () => {
     await expect.element(sheet).toHaveAttribute("data-slot", "sheet-content");
     await expect.element(sheet.getByRole("radiogroup").first()).toBeVisible();
     await expectNoAxeViolations(document.body);
+
+    const close = sheet.getByRole("button", { name: m.close(), exact: true });
+    await expect.element(close).toHaveTextContent(m.close());
+    await close.click();
+    await expect.element(sheet).not.toBeInTheDocument();
   });
 });
