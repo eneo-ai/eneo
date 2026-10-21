@@ -38,12 +38,15 @@ import { RunSteps } from "./run-steps";
 import {
   canRedispatch,
   createPollClock,
+  isAwaitingReview,
   isCancellable,
   runDurationMs,
   runStatusView,
   shouldPoll
 } from "./run-status";
+import { ReviewPanel } from "./review-panel";
 import {
+  activeReviewQueryOptions,
   cancelRun,
   getRunGraph,
   getRunStatus,
@@ -264,6 +267,11 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     enabled: signature !== null,
     placeholderData: keepPreviousData
   });
+  const awaitingReview = progress.data ? isAwaitingReview(progress.data.status.status) : false;
+  const review = useQuery({
+    ...activeReviewQueryOptions(flowId, runId, signature ?? ""),
+    enabled: awaitingReview
+  });
 
   const summary: RunSummary | undefined = progress.data?.status;
   const status = summary?.status ?? null;
@@ -465,6 +473,28 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
         ) : (
           <>
             {run ? <RunProblem run={run} /> : null}
+            {awaitingReview && review.isError ? (
+              <ListError
+                error={review.error}
+                title={t("flow_runs_review_failed_to_load")}
+                onRetry={() => void review.refetch()}
+                isRetrying={review.isFetching}
+              />
+            ) : awaitingReview && review.data ? (
+              <ReviewPanel
+                key={`${review.data.id}:${review.data.revision}`}
+                checkpoint={review.data}
+                mayReview={can("flows_manage")}
+                now={progress.data.checkedAt}
+                onStale={(message) =>
+                  setNotice({
+                    status: "warning",
+                    title: t("flow_runs_review_stale_title"),
+                    description: message
+                  })
+                }
+              />
+            ) : null}
             <Section title={t("flow_runs_result_heading")}>
               {detail.isError ? (
                 <ListError

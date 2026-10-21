@@ -10,7 +10,13 @@ import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { makeFlow } from "../flow-fixtures";
 import { flowKeys } from "../flows-api";
-import { makeRunDetail, makeRunGraph, makeRunStep, makeRunSummary } from "./run-fixtures";
+import {
+  makeCheckpoint,
+  makeRunDetail,
+  makeRunGraph,
+  makeRunStep,
+  makeRunSummary
+} from "./run-fixtures";
 import type { RunDetail, RunSummary } from "./runs-api";
 
 const state = vi.hoisted(() => ({
@@ -41,6 +47,7 @@ const STATUS = "GET /api/v1/flows/{id}/runs/{run_id}/status/";
 const GRAPH = "GET /api/v1/flows/{id}/graph/";
 const DETAIL = "GET /api/v1/flows/{id}/runs/{run_id}/";
 const STEPS = "GET /api/v1/flows/{id}/runs/{run_id}/steps/";
+const REVIEW = "GET /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/";
 
 const graph = makeRunGraph([
   { order: 1, label: "Sammanfatta", status: "completed" },
@@ -191,5 +198,143 @@ describe("FlowRunPage", () => {
 
     await act(() => vi.advanceTimersByTimeAsync(20_000));
     expect(calls(STATUS)).toHaveLength(3);
+  });
+
+  describe("review", () => {
+    function answerReview(checkpoint = makeCheckpoint()) {
+      const waiting = makeRunSummary({ status: "awaiting_review", finished_at: null });
+      answerRun(waiting, makeRunDetail({ ...waiting, result: null }));
+      state.routes[REVIEW] = () => ({ body: checkpoint });
+    }
+
+    it("approves the reviewer's correction and lets the run go on", async () => {
+      answerReview();
+      state.routes["PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/"] =
+        () => ({ body: makeCheckpoint({ revision: 2, state: "edited" }) });
+      state.routes[
+        "POST /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve-and-continue/"
+      ] = () => ({
+        body: { checkpoint: makeCheckpoint({ state: "resumed" }), run: makeRunSummary() }
+      });
+      const { container } = renderRun(["flows_view", "flows_manage"]);
+
+      const panel = await screen.findByRole("region", { name: "Granska steg 2: Skriv svar" });
+      await expectNoAxeViolations(container);
+      fireEvent.change(within(panel).getByLabelText(/^Stegets text/), {
+        target: { value: "Hej Anna, tack för ditt brev. Vi återkommer." }
+      });
+      fireEvent.click(
+        within(panel).getByRole("button", { name: messages.flow_runs_review_approve_changed })
+      );
+
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_runs_review_approved)
+      );
+      const edit = calls(
+        "PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/"
+      )[0];
+      expect(edit?.init.body).toEqual({
+        edited_value: "Hej Anna, tack för ditt brev. Vi återkommer.",
+        expected_checkpoint_revision: 1
+      });
+      const approve = calls(
+        "POST /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve-and-continue/"
+      )[0];
+      expect(approve?.init.body).toEqual({ expected_checkpoint_revision: 2 });
+      expect(
+        (approve?.init as { params?: { header?: Record<string, string> } }).params?.header
+      ).toEqual({ "Idempotency-Key": "review-approve:checkpoint-1:2" });
+    });
+
+    it("edits a structured output field by field and puts problems at the field", async () => {
+      answerReview(
+        makeCheckpoint({
+          output_type: "json",
+          current_payload_json: { structured: { mottagare: "Anna", antal: 2 } },
+          original_payload_json: { structured: { mottagare: "Anna", antal: 2 } }
+        })
+      );
+      state.routes["PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/"] =
+        () => ({
+          status: 400,
+          body: {
+            message: "Review checkpoint step 2 output: 'mottagare' is too short",
+            code: "typed_io_contract_violation",
+            context: { payload_field: "mottagare" }
+          }
+        });
+      const { container } = renderRun(["flows_view", "flows_manage"]);
+
+      const panel = await screen.findByRole("region", { name: "Granska steg 2: Skriv svar" });
+      await expectNoAxeViolations(container);
+      const count = within(panel).getByLabelText(/^antal/);
+      fireEvent.change(count, { target: { value: "två" } });
+      fireEvent.click(within(panel).getByRole("button", { name: messages.flow_runs_review_save }));
+      expect(await within(panel).findByText("antal måste vara ett tal.")).toBeTruthy();
+      expect(document.activeElement).toBe(count);
+      expect(
+        calls("PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/")
+      ).toHaveLength(0);
+
+      fireEvent.change(count, { target: { value: "3" } });
+      fireEvent.change(within(panel).getByLabelText(/^mottagare/), { target: { value: "A" } });
+      fireEvent.click(within(panel).getByRole("button", { name: messages.flow_runs_review_save }));
+      expect(
+        await within(panel).findByText(messages.flow_error_typed_io_contract_violation)
+      ).toBeTruthy();
+      expect(document.activeElement).toBe(within(panel).getByLabelText(/^mottagare/));
+      expect(
+        calls("PATCH /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/")[0]?.init
+          .body
+      ).toEqual({ edited_value: { mottagare: "A", antal: 3 }, expected_checkpoint_revision: 1 });
+    });
+
+    it("asks for a reason before rejecting", async () => {
+      answerReview();
+      state.routes[
+        "POST /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/"
+      ] = () => ({ body: makeCheckpoint({ state: "rejected" }) });
+      renderRun(["flows_view", "flows_manage"]);
+
+      const panel = await screen.findByRole("region", { name: "Granska steg 2: Skriv svar" });
+      fireEvent.click(
+        within(panel).getByRole("button", { name: messages.flow_runs_review_reject })
+      );
+      const confirm = within(panel).getByRole("button", {
+        name: messages.flow_runs_review_reject_confirm
+      });
+      fireEvent.click(confirm);
+      expect(
+        await within(panel).findByText(messages.flow_runs_review_reject_reason_required)
+      ).toBeTruthy();
+      expect(document.activeElement).toBe(within(panel).getByLabelText(/^Varför avvisar du/));
+
+      fireEvent.change(within(panel).getByLabelText(/^Varför avvisar du/), {
+        target: { value: "Fel mottagare" }
+      });
+      fireEvent.click(confirm);
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_runs_review_rejected)
+      );
+      expect(
+        calls("POST /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/")[0]
+          ?.init.body
+      ).toEqual({ expected_checkpoint_revision: 1, reason: "Fel mottagare" });
+    });
+
+    it("offers no decision once the review time has run out", async () => {
+      answerReview(makeCheckpoint({ expires_at: "2026-10-01T00:00:00Z" }));
+      renderRun(["flows_view", "flows_manage"]);
+      expect(await screen.findByText(messages.flow_runs_review_expired_title)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: messages.flow_runs_review_approve })).toBeNull();
+    });
+
+    it("shows the output to someone who may not review, and says who can", async () => {
+      answerReview();
+      renderRun(["flows_view", "flows_run"]);
+      expect(await screen.findByText(messages.flow_runs_review_not_allowed)).toBeTruthy();
+      expect(screen.getByText("Hej Anna, tack för ditt brev.")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: messages.flow_runs_review_approve })).toBeNull();
+    });
   });
 });
