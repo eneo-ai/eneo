@@ -12,8 +12,8 @@ from eneo.settings.settings import (
     FlowRagEvidencePolicyUpdate,
 )
 from eneo.settings.settings_router import (
+    flow_settings_admin_router,
     get_rag_evidence_policy,
-    settings_admin_router,
     update_rag_evidence_policy,
 )
 
@@ -77,7 +77,7 @@ def test_update_payload_rejects_a_value_above_its_ceiling() -> None:
 
 def test_rag_evidence_policy_openapi_is_complete_for_admin_clients() -> None:
     app = FastAPI()
-    app.include_router(settings_admin_router, prefix="/api/v1/settings")
+    app.include_router(flow_settings_admin_router, prefix="/api/v1/settings")
     schema = app.openapi()
     path = schema["paths"]["/api/v1/settings/flow-rag-evidence-policy"]
 

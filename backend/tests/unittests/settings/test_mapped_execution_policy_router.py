@@ -12,8 +12,8 @@ from eneo.settings.settings import (
     FlowMappedExecutionPolicyUpdate,
 )
 from eneo.settings.settings_router import (
+    flow_settings_admin_router,
     get_mapped_execution_policy,
-    settings_admin_router,
     update_mapped_execution_policy,
 )
 
@@ -72,7 +72,7 @@ async def test_patch_mapped_execution_policy_preserves_null_clear_intent() -> No
 
 def test_mapped_execution_policy_openapi_is_complete_for_admin_clients() -> None:
     app = FastAPI()
-    app.include_router(settings_admin_router, prefix="/api/v1/settings")
+    app.include_router(flow_settings_admin_router, prefix="/api/v1/settings")
     schema = app.openapi()
     path = schema["paths"]["/api/v1/settings/flow-mapped-execution-policy"]
 

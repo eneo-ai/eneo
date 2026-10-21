@@ -29,19 +29,22 @@ class FlowAuditContract:
 
 
 def _configurable(
-    action: ActionType,
+    actions: ActionType | tuple[ActionType, ...],
     *,
     owner: str,
     metadata_keys: tuple[str, ...],
+    idempotency: str = "one event per accepted request; retries may be distinct actions",
+    actor: str = "authenticated user or API-key principal",
 ) -> FlowAuditContract:
+    normalized_actions = actions if isinstance(actions, tuple) else (actions,)
     return FlowAuditContract(
-        actions=(action,),
+        actions=normalized_actions,
         owner=owner,
         assurance=AuditAssurance.CONFIGURABLE_ASYNC,
-        actor="authenticated user or API-key principal",
+        actor=actor,
         outcome="successful request",
         metadata_keys=metadata_keys,
-        idempotency="one event per accepted request; retries may be distinct actions",
+        idempotency=idempotency,
         failure="configuration or queue failure does not roll back the request",
     )
 
@@ -320,6 +323,33 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
         ActionType.FLOW_UPDATED,
         owner="flow_authoring_router.update_flow",
         metadata_keys=(*_FLOW_METADATA, "changed_fields"),
+    ),
+    "update_flow_editor": _configurable(
+        (
+            ActionType.FLOW_UPDATED,
+            ActionType.ASSISTANT_UPDATED,
+            ActionType.ASSISTANT_CREATED,
+        ),
+        owner="flow_authoring_operations.apply_editor_update",
+        metadata_keys=(*_FLOW_METADATA, "changed_fields", "origin"),
+        idempotency=(
+            "one flow event per accepted change, and one per step assistant it "
+            "creates or updates"
+        ),
+    ),
+    "get_or_create_flow_authoring_chat": _configurable(
+        ActionType.FLOW_AUTHORING_CHAT_CREATED,
+        owner="flow_authoring_chat.get_or_create_authoring_chat",
+        metadata_keys=(*_FLOW_METADATA, "assistant_id", "session_id"),
+        idempotency="one event when the chat is created; reopening it emits none",
+        actor="signed-in user; API keys are refused",
+    ),
+    "set_flow_authoring_mode": _configurable(
+        ActionType.FLOW_AUTHORING_MODE_CHANGED,
+        owner="flow_authoring_chat.set_authoring_mode",
+        metadata_keys=(*_FLOW_METADATA, "session_id", "editing"),
+        idempotency="one event per mode change; setting the current mode emits none",
+        actor="signed-in user; API keys are refused",
     ),
     "delete_flow": _required_transaction(
         ActionType.FLOW_DELETED,

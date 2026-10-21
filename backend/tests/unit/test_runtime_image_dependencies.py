@@ -10,13 +10,21 @@ APPLICATION_IMAGE_DOCKERFILES = (
 )
 NATIVE_RUNTIME_PACKAGES = (
     "ffmpeg",
+    "libmagic1",
+    "libsndfile1",
+)
+# The tool runtime lays out PDFs with WeasyPrint; the devcontainer runs that
+# runtime for the backend's document tests. The backend image renders none.
+DOCUMENT_RENDERER_DOCKERFILES = (
+    REPO_ROOT / ".devcontainer" / "Dockerfile",
+    REPO_ROOT / "tool-runtime" / "Dockerfile",
+)
+DOCUMENT_RENDERER_PACKAGES = (
     "fontconfig",
     "fonts-dejavu-core",
     "libharfbuzz-subset0",
-    "libmagic1",
     "libpango-1.0-0",
     "libpangoft2-1.0-0",
-    "libsndfile1",
 )
 RUNTIME_BOOTSTRAP_FILES = (
     REPO_ROOT / ".devcontainer" / "post-create.sh",
@@ -97,6 +105,16 @@ def test_application_images_install_native_runtime_dependencies() -> None:
         installed_packages = _apt_install_packages(dockerfile)
 
         for package in NATIVE_RUNTIME_PACKAGES:
+            assert package in installed_packages, (
+                f"{dockerfile.relative_to(REPO_ROOT)} must install {package}"
+            )
+
+
+def test_document_renderer_images_install_pdf_layout_dependencies() -> None:
+    for dockerfile in DOCUMENT_RENDERER_DOCKERFILES:
+        installed_packages = _apt_install_packages(dockerfile)
+
+        for package in DOCUMENT_RENDERER_PACKAGES:
             assert package in installed_packages, (
                 f"{dockerfile.relative_to(REPO_ROOT)} must install {package}"
             )

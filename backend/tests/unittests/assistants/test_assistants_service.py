@@ -1496,7 +1496,7 @@ async def test_update_persists_only_the_updated_assistant(setup: Setup):
 
 
 async def test_error_when_assistant_cannot_be_used_in_space(setup: Setup):
-    assistant = MagicMock(completion_model_id=uuid4(), space_id=uuid4())
+    assistant = MagicMock(completion_model_id=uuid4(), space_id=uuid4(), hidden=False)
     space = MagicMock()
     space.get_assistant.return_value = assistant
     space.can_ask_assistant.side_effect = ModelNotAvailableException(

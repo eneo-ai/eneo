@@ -9,6 +9,9 @@ from eneo.server.dependencies.container import get_container
 
 
 async def require_flow_feature(
+    # Mount it after every API key guard of the router: its authentication
+    # authorizes the key against the guards stashed on the request so far,
+    # and without them it falls back to the stricter basic method check.
     # Its own session, whose authentication commits before the route's runs:
     # authenticating can write (a legacy key hash is upgraded on first use),
     # and a write held open here would block the route authenticating the

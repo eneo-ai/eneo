@@ -147,3 +147,6 @@ async def change_authoring_mode(
         editing=body.editing,
         expected_revision=body.expected_revision,
     )
+
+
+__all__ = ["router"]
