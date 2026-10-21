@@ -148,6 +148,8 @@ export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
 export type WebsiteInfoBlobPage =
   components["schemas"]["CursorPaginatedResponse_InfoBlobPublicNoText_"];
+export type WebsiteContentFolder = components["schemas"]["WebsiteContentFolderPublic"];
+export type WebsiteContentFolders = components["schemas"]["WebsiteContentFoldersPublic"];
 export type WebsiteBulkActionError = components["schemas"]["WebsiteBulkActionError"];
 export type Settings = components["schemas"]["SettingsPublic"];
 export type WhatsNewState = components["schemas"]["WhatsNewStatePublic"];

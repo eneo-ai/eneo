@@ -592,7 +592,6 @@ class UserService:
         signing_algos: list[str],
         correlation_id: str | None = None,
     ):
-        # MIT License
         correlation_id = correlation_id or "no-correlation-id"
 
         logger.debug(

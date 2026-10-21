@@ -11,7 +11,7 @@ unknown, so a rotation limit counts from this deployment rather than forcing
 every account to change at once.
 
 Revision ID: 202610161000
-Revises: 202610191600
+Revises: 202610211200
 Create Date: 2026-10-16
 """
 
@@ -23,7 +23,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "202610161000"
-down_revision: str | None = "202610191600"
+down_revision: str | None = "202610211200"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -24,6 +24,7 @@
   import type { IntegrationSyncProgress } from "$lib/features/integrations/syncProgress";
   import { useSyncProgress } from "$lib/features/integrations/useSyncProgress.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { embeddingModelGroupTitle } from "$lib/features/ai-models/modelLabels";
   import IntegrationActions from "./IntegrationActions.svelte";
   import SharePointWrapperActions from "./SharePointWrapperActions.svelte";
   import SourceNameCell from "./SourceNameCell.svelte";
@@ -136,14 +137,6 @@
       (curr, idx, models) => idx === models.findIndex((other) => other.id === curr.id)
     );
   });
-
-  const useEmbeddingModelGroups = derived(
-    [embeddingModels, currentSpace],
-    ([$embeddingModels, $currentSpace]) =>
-      $embeddingModels.length > 1 ||
-      $currentSpace.embedding_models.length > 1 ||
-      $embeddingModels.some((model) => !model.inSpace)
-  );
 
   // --- Table setup ---
 
@@ -331,17 +324,11 @@
   </div>
 {:else}
   <Table.Root {viewModel} resourceName="integration">
-    {#if $useEmbeddingModelGroups}
-      {#each $embeddingModels as embeddingModel (embeddingModel.id)}
-        <Table.Group
-          title={embeddingModel.inSpace
-            ? embeddingModel.name
-            : embeddingModel.name + ` (${m.disabled()})`}
-          filterFn={createModelFilter(embeddingModel.id)}
-        ></Table.Group>
-      {/each}
-    {:else}
-      <Table.Group></Table.Group>
-    {/if}
+    {#each $embeddingModels as embeddingModel (embeddingModel.id)}
+      <Table.Group
+        title={embeddingModelGroupTitle(embeddingModel, embeddingModel.inSpace)}
+        filterFn={createModelFilter(embeddingModel.id)}
+      ></Table.Group>
+    {/each}
   </Table.Root>
 {/if}
