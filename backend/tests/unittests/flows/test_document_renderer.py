@@ -4,60 +4,35 @@ from __future__ import annotations
 
 import io
 import zipfile
-from collections.abc import Sequence
-from pathlib import Path
-from unittest.mock import patch
 
 import pdfplumber
 import pytest
 from docx import Document
 from docx.oxml.ns import qn
 
+from eneo.document_templates import runtime_client
 from eneo.flows.runtime.document_rendering.blocks import DocumentBlock, InlineTextRun
-from eneo.flows.runtime.document_rendering.docx_renderer import DocxDocumentRenderer
-from eneo.flows.runtime.document_rendering.html_blocks import (
-    blocks_to_html_document,
-)
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.flows.runtime.document_rendering.markdown_blocks import (
     parse_markdown_blocks,
 )
-from eneo.flows.runtime.document_rendering.renderers import RenderedDocument
 from eneo.flows.runtime.document_rendering.service import (
     DocumentRenderService,
     default_document_render_service,
 )
-from eneo.flows.runtime.document_rendering.weasyprint_renderer import (
-    WeasyPrintDocumentRenderer,
-    _deny_external_fetch,
-    _load_weasyprint_api,
-    configure_weasyprint_dependency_logging,
-)
 from eneo.main.exceptions import TypedIOValidationException
 from tests.docx_template_fixtures import docx_paragraphs, docx_tables
+
+pytestmark = pytest.mark.usefixtures("shared_document_runtime")
 
 _render_service = default_document_render_service()
 
 
-def _weasyprint_native_stack_available() -> bool:
-    try:
-        _load_weasyprint_api()
-    except (ImportError, OSError):
-        return False
-    return True
-
-
-requires_weasyprint_native_stack = pytest.mark.skipif(
-    not _weasyprint_native_stack_available(),
-    reason="WeasyPrint native libraries are not installed in this local environment.",
-)
-
 # --- PDF rendering ---
 
 
-@requires_weasyprint_native_stack
-def test_render_pdf_valid_blob():
-    blob, mimetype = _render_service.render_document(
+async def test_render_pdf_valid_blob():
+    blob, mimetype = await _render_service.render_document(
         "Hello world", "pdf", step_order=1, title="Rapport"
     )
     assert isinstance(blob, bytes)
@@ -65,19 +40,17 @@ def test_render_pdf_valid_blob():
     assert blob[:5] == b"%PDF-"
 
 
-@requires_weasyprint_native_stack
-def test_render_pdf_correct_mime():
-    _, mimetype = _render_service.render_document(
+async def test_render_pdf_correct_mime():
+    _, mimetype = await _render_service.render_document(
         "Test", "pdf", step_order=1, title="Rapport"
     )
     assert mimetype == "application/pdf"
 
 
-@requires_weasyprint_native_stack
-def test_render_pdf_markdown_headings_and_lists_as_readable_document():
+async def test_render_pdf_markdown_headings_and_lists_as_readable_document():
     text = "# Titel\n\n## Sammanfattning\n\n- punkt ett\n- punkt två\n\n1. nästa steg"
 
-    blob, _ = _render_service.render_document(
+    blob, _ = await _render_service.render_document(
         text, "pdf", step_order=1, title="Rapport"
     )
 
@@ -90,11 +63,10 @@ def test_render_pdf_markdown_headings_and_lists_as_readable_document():
     assert "## Sammanfattning" not in page_text
 
 
-@requires_weasyprint_native_stack
-def test_render_pdf_markdown_table_outputs_cells_without_separator_row():
+async def test_render_pdf_markdown_table_outputs_cells_without_separator_row():
     text = "| Namn | Värde |\n| --- | --- |\n| Kommun | Sundsvall |"
 
-    blob, _ = _render_service.render_document(
+    blob, _ = await _render_service.render_document(
         text, "pdf", step_order=1, title="Rapport"
     )
 
@@ -126,8 +98,7 @@ def test_markdown_blocks_normalize_common_markdown_control_syntax():
     ]
 
 
-@requires_weasyprint_native_stack
-def test_render_pdf_markdown_inline_syntax_as_readable_text():
+async def test_render_pdf_markdown_inline_syntax_as_readable_text():
     text = (
         "Medarbetarsamtal – Sammanfattning & Plan\n\n"
         "**Medarbetare:** Leona\n"
@@ -137,7 +108,7 @@ def test_render_pdf_markdown_inline_syntax_as_readable_text():
         "Leona visar tydliga framsteg inom **svenska** och `matematik`."
     )
 
-    blob, _ = _render_service.render_document(
+    blob, _ = await _render_service.render_document(
         text, "pdf", step_order=1, title="Rapport"
     )
 
@@ -210,8 +181,8 @@ def test_markdown_blocks_preserve_inline_run_semantics():
 # --- DOCX rendering ---
 
 
-def test_render_docx_valid_blob():
-    blob, mimetype = _render_service.render_document(
+async def test_render_docx_valid_blob():
+    blob, mimetype = await _render_service.render_document(
         "Hello world", "docx", step_order=1, title="Rapport"
     )
     assert isinstance(blob, bytes)
@@ -220,8 +191,8 @@ def test_render_docx_valid_blob():
     assert blob[:2] == b"PK"
 
 
-def test_render_docx_correct_mime():
-    _, mimetype = _render_service.render_document(
+async def test_render_docx_correct_mime():
+    _, mimetype = await _render_service.render_document(
         "Test", "docx", step_order=1, title="Rapport"
     )
     assert (
@@ -230,18 +201,20 @@ def test_render_docx_correct_mime():
     )
 
 
-def test_render_docx_empty_output_still_valid():
+async def test_render_docx_empty_output_still_valid():
     """Empty markdown should still produce a readable DOCX file."""
-    blob, _ = _render_service.render_document("", "docx", step_order=1, title="Rapport")
+    blob, _ = await _render_service.render_document(
+        "", "docx", step_order=1, title="Rapport"
+    )
     doc = Document(io.BytesIO(blob))
     assert isinstance(blob, bytes)
     assert len(docx_paragraphs(doc)) >= 1
 
 
-def test_render_docx_preserves_swedish_characters():
+async def test_render_docx_preserves_swedish_characters():
     """Swedish characters should survive DOCX rendering."""
     text = "Svenska tecken: å ä ö"
-    blob, _ = _render_service.render_document(
+    blob, _ = await _render_service.render_document(
         text, "docx", step_order=1, title="Rapport"
     )
     doc = Document(io.BytesIO(blob))
@@ -251,10 +224,10 @@ def test_render_docx_preserves_swedish_characters():
     assert "ö" in all_text
 
 
-def test_render_docx_markdown_table_creates_table():
+async def test_render_docx_markdown_table_creates_table():
     """Markdown table syntax should become a DOCX table."""
     text = "| Namn | Värde |\n| --- | --- |\n| Kommun | Sundsvall |"
-    blob, _ = _render_service.render_document(
+    blob, _ = await _render_service.render_document(
         text, "docx", step_order=1, title="Rapport"
     )
     doc = Document(io.BytesIO(blob))
@@ -263,7 +236,7 @@ def test_render_docx_markdown_table_creates_table():
     assert docx_tables(doc)[0].cell(1, 1).text == "Sundsvall"
 
 
-def test_render_docx_markdown_inline_syntax_as_readable_text():
+async def test_render_docx_markdown_inline_syntax_as_readable_text():
     text = (
         "**Medarbetare:** Leona\n\n"
         "---\n\n"
@@ -271,7 +244,7 @@ def test_render_docx_markdown_inline_syntax_as_readable_text():
         "Träna `skrivande` och ~~gamla mål~~."
     )
 
-    blob, _ = _render_service.render_document(
+    blob, _ = await _render_service.render_document(
         text, "docx", step_order=1, title="Rapport"
     )
 
@@ -286,8 +259,8 @@ def test_render_docx_markdown_inline_syntax_as_readable_text():
     assert "~~" not in all_text
 
 
-def test_render_docx_preserves_inline_bold_runs():
-    blob, _ = _render_service.render_document(
+async def test_render_docx_preserves_inline_bold_runs():
+    blob, _ = await _render_service.render_document(
         "**Medarbetare:** Leona", "docx", step_order=1, title="Rapport"
     )
 
@@ -298,9 +271,9 @@ def test_render_docx_preserves_inline_bold_runs():
     assert "".join(run.text for run in paragraph.runs) == "Medarbetare: Leona"
 
 
-def test_render_structured_docx_uses_schema_titles_and_tables():
+async def test_render_structured_docx_uses_schema_titles_and_tables():
     """Validated JSON contracts should render as semantic DOCX content."""
-    blob, _ = _render_service.render_structured_document(
+    blob, _ = await _render_service.render_structured_document(
         {
             "summary": "Kort sammanfattning",
             "actions": [
@@ -342,9 +315,9 @@ def test_render_structured_docx_uses_schema_titles_and_tables():
     assert docx_tables(doc)[0].cell(1, 1).text == "Läsa mer"
 
 
-def test_render_structured_docx_pins_null_and_empty_array_values():
+async def test_render_structured_docx_pins_null_and_empty_array_values():
     """Missing structured values should stay visible instead of disappearing."""
-    blob, _ = _render_service.render_structured_document(
+    blob, _ = await _render_service.render_structured_document(
         {"summary": None, "notes": []},
         "docx",
         step_order=1,
@@ -365,9 +338,9 @@ def test_render_structured_docx_pins_null_and_empty_array_values():
     assert "-" in all_text
 
 
-def test_render_structured_docx_escapes_scalar_markdown_control_text():
+async def test_render_structured_docx_escapes_scalar_markdown_control_text():
     """JSON strings are data and must not become document structure."""
-    blob, _ = _render_service.render_structured_document(
+    blob, _ = await _render_service.render_structured_document(
         {"summary": "Rad ett\n# Inte en rubrik\n```inte kod```"},
         "docx",
         step_order=1,
@@ -388,9 +361,9 @@ def test_render_structured_docx_escapes_scalar_markdown_control_text():
     assert "Inte en rubrik" not in paragraph_texts
 
 
-def test_render_structured_docx_table_cells_preserve_pipe_characters():
+async def test_render_structured_docx_table_cells_preserve_pipe_characters():
     """Escaped Markdown table pipes should round-trip into DOCX table cells."""
-    blob, _ = _render_service.render_structured_document(
+    blob, _ = await _render_service.render_structured_document(
         {"rows": [{"name": "A | B", "value": "C"}]},
         "docx",
         step_order=1,
@@ -403,15 +376,14 @@ def test_render_structured_docx_table_cells_preserve_pipe_characters():
     assert docx_tables(doc)[0].cell(1, 0).text == "A | B"
 
 
-@requires_weasyprint_native_stack
-def test_render_structured_pdf_table_does_not_truncate_long_cell_values():
+async def test_render_structured_pdf_table_does_not_truncate_long_cell_values():
     """PDF fallback tables should prefer readable wrapping over lossy truncation."""
     long_value = (
         "Detaljerad uppföljning med tillräckligt många ord för att behöva "
         "radbrytas i PDF-tabellen och ändå behålla unique-tail-token."
     )
 
-    blob, _ = _render_service.render_structured_document(
+    blob, _ = await _render_service.render_structured_document(
         {"actions": [{"owner": "Leona", "task": long_value}]},
         "pdf",
         step_order=1,
@@ -427,8 +399,7 @@ def test_render_structured_pdf_table_does_not_truncate_long_cell_values():
     assert "token" in normalized_text
 
 
-@requires_weasyprint_native_stack
-def test_render_structured_pdf_table_repeats_headers_after_page_break():
+async def test_render_structured_pdf_table_repeats_headers_after_page_break():
     rows = [
         {
             "owner": f"Person {index}",
@@ -440,7 +411,7 @@ def test_render_structured_pdf_table_repeats_headers_after_page_break():
         for index in range(45)
     ]
 
-    blob, _ = _render_service.render_structured_document(
+    blob, _ = await _render_service.render_structured_document(
         {"actions": rows},
         "pdf",
         step_order=1,
@@ -469,9 +440,8 @@ def test_render_structured_pdf_table_repeats_headers_after_page_break():
     assert "Uppgift" in second_page_text
 
 
-@requires_weasyprint_native_stack
-def test_pdf_metadata_title_is_the_document_name():
-    blob, _ = _render_service.render_document(
+async def test_pdf_metadata_title_is_the_document_name():
+    blob, _ = await _render_service.render_document(
         "Hej", "pdf", step_order=1, title="Nämndmöte 2026-09-23"
     )
 
@@ -479,185 +449,36 @@ def test_pdf_metadata_title_is_the_document_name():
         assert pdf.metadata["Title"] == "Nämndmöte 2026-09-23"
 
 
-def test_pdf_renderer_uses_safe_semantic_weasyprint_options():
-    captured_html_kwargs: dict[str, object] = {}
-    captured_pdf_kwargs: dict[str, object] = {}
+async def test_document_render_service_raises_stable_error_without_leaking_details(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def failing_runtime(**_: object) -> tuple[bytes, str]:
+        raise runtime_client.RuntimeUnavailable("internal path /tmp/secret-file")
 
-    class _FakeHtml:
-        def __init__(self, **kwargs: object) -> None:
-            captured_html_kwargs.update(kwargs)
-
-        def write_pdf(self, **kwargs: object) -> bytes:
-            captured_pdf_kwargs.update(kwargs)
-            return b"%PDF-stub"
-
-    class _FakeCss:
-        def __init__(self, **kwargs: object) -> None:
-            pass
-
-    class _FakeFontConfiguration:
-        pass
-
-    with patch(
-        "eneo.flows.runtime.document_rendering.weasyprint_renderer."
-        "_load_weasyprint_api",
-        return_value=(_FakeHtml, _FakeCss, _FakeFontConfiguration),
-    ):
-        rendered = WeasyPrintDocumentRenderer().render(
-            [DocumentBlock(kind="paragraph", text="Tillgänglig rapport")],
-            title="Nämndmöte 2026-09-23",
-        )
-
-    assert rendered.blob == b"%PDF-stub"
-    assert "<title>Nämndmöte 2026-09-23</title>" in str(captured_html_kwargs["string"])
-    assert captured_html_kwargs["media_type"] == "print"
-    assert captured_html_kwargs["url_fetcher"] is _deny_external_fetch
-    assert captured_pdf_kwargs["pdf_tags"] is True
-    assert captured_pdf_kwargs["srgb"] is True
-    assert captured_pdf_kwargs["font_config"] is not None
-    assert "pdf_variant" not in captured_pdf_kwargs
-
-
-def test_html_document_escapes_untrusted_text():
-    html = blocks_to_html_document(
-        [DocumentBlock(kind="paragraph", text='<script>alert("x")</script>')],
-        title='Output "test"',
-    )
-
-    assert "<script>" not in html
-    assert "&lt;script&gt;" in html
-    assert "Output &quot;test&quot;" in html
-
-
-def test_markdown_image_url_is_rendered_as_text_not_external_resource():
-    blocks = parse_markdown_blocks(["![Alt text](https://example.com/tracker.png)"])
-
-    html = blocks_to_html_document(blocks, title="Output")
-
-    assert "<img" not in html
-    assert "https://example.com/tracker.png" not in html
-    assert "<p>Alt text</p>" in html
-
-
-def test_html_document_preserves_inline_semantics():
-    html = blocks_to_html_document(
-        [
-            DocumentBlock(
-                kind="paragraph",
-                text="Viktig text",
-                runs=(
-                    InlineTextRun("Viktig", bold=True),
-                    InlineTextRun(" text"),
-                ),
-            )
-        ],
-        title="Output",
-    )
-
-    assert "<strong>Viktig</strong> text" in html
-
-
-def test_html_document_marks_table_headers_as_column_headers():
-    html = blocks_to_html_document(
-        [
-            DocumentBlock(
-                kind="table",
-                rows=(("Område", "Status"), ("Svenska", "Utvecklas")),
-            )
-        ],
-        title="Output",
-    )
-
-    assert '<th scope="col">Område</th>' in html
-    assert '<th scope="col">Status</th>' in html
-
-
-def test_html_document_keeps_header_semantics_for_header_only_tables():
-    html = blocks_to_html_document(
-        [DocumentBlock(kind="table", rows=(("Område", "Status"),))],
-        title="Output",
-    )
-
-    assert "<thead>" in html
-    assert '<th scope="col">Område</th>' in html
-    assert "<td>Område</td>" not in html
-
-
-def test_pdf_renderer_denies_external_resource_fetches():
-    with pytest.raises(Exception, match="External PDF resource loading is disabled"):
-        _deny_external_fetch("https://example.com/tracker.png")
-
-
-def test_pdf_renderer_suppresses_noisy_font_subset_logs():
-    configure_weasyprint_dependency_logging()
-
-    import logging
-
-    assert logging.getLogger("fontTools.subset").getEffectiveLevel() >= logging.WARNING
-    assert logging.getLogger("weasyprint").getEffectiveLevel() >= logging.WARNING
-
-
-def test_document_render_service_can_use_injected_renderer():
-    class _FakeRenderer:
-        output_type = "pdf"
-
-        def render(
-            self,
-            blocks: Sequence[DocumentBlock],
-            *,
-            title: str,
-        ) -> RenderedDocument:
-            assert [(block.kind, block.text) for block in blocks] == [
-                ("paragraph", "Hello")
-            ]
-            return RenderedDocument(blob=b"custom", mimetype="application/custom-pdf")
-
-    service = DocumentRenderService(renderers=(_FakeRenderer(),))
-
-    assert service.render_document("Hello", "pdf", step_order=9, title="Rapport") == (
-        b"custom",
-        "application/custom-pdf",
-    )
-
-
-def test_document_render_service_raises_stable_error_without_leaking_details():
-    class _FailingRenderer:
-        output_type = "pdf"
-
-        def render(
-            self,
-            blocks: Sequence[DocumentBlock],
-            *,
-            title: str,
-        ) -> RenderedDocument:
-            raise RuntimeError("internal path /tmp/secret-file")
-
-    service = DocumentRenderService(renderers=(_FailingRenderer(),))
+    monkeypatch.setattr(runtime_client, "render_document", failing_runtime)
 
     with pytest.raises(TypedIOValidationException) as exc_info:
-        service.render_document("Hello", "pdf", step_order=1, title="Rapport")
+        await _render_service.render_document(
+            "Hello", "pdf", step_order=1, title="Rapport"
+        )
 
     assert exc_info.value.code == "typed_io_render_failed"
-    assert str(exc_info.value) == "Document render failed."
     assert "secret-file" not in str(exc_info.value)
 
 
-def test_document_render_service_rejects_outputs_over_render_limits():
-    service = DocumentRenderService(renderers=(WeasyPrintDocumentRenderer(),))
+async def test_document_render_service_rejects_outputs_over_render_limits():
+    service = DocumentRenderService()
     text = "x" * 500_001
 
     with pytest.raises(TypedIOValidationException, match="too large"):
-        service.render_document(text, "pdf", step_order=1, title="Rapport")
+        await service.render_document(text, "pdf", step_order=1, title="Rapport")
 
 
-def test_document_render_service_uses_injected_render_limits():
-    service = DocumentRenderService(
-        renderers=(WeasyPrintDocumentRenderer(),),
-        limits=DocumentRenderLimits(max_source_chars=5),
-    )
+async def test_document_render_service_uses_injected_render_limits():
+    service = DocumentRenderService(limits=DocumentRenderLimits(max_source_chars=5))
 
     with pytest.raises(TypedIOValidationException) as exc_info:
-        service.render_document("123456", "pdf", step_order=1, title="Rapport")
+        await service.render_document("123456", "pdf", step_order=1, title="Rapport")
 
     assert exc_info.value.context == {
         "metric": "source_chars",
@@ -666,13 +487,13 @@ def test_document_render_service_uses_injected_render_limits():
     }
 
 
-def test_document_render_service_rejects_too_many_table_cells():
-    service = DocumentRenderService(renderers=(WeasyPrintDocumentRenderer(),))
+async def test_document_render_service_rejects_too_many_table_cells():
+    service = DocumentRenderService()
     row = tuple(f"cell-{index}" for index in range(50))
     rows = tuple(row for _ in range(1_001))
 
     with pytest.raises(TypedIOValidationException) as exc_info:
-        service.render_blocks(
+        await service.render_blocks(
             [DocumentBlock(kind="table", rows=rows)],
             "pdf",
             step_order=1,
@@ -687,11 +508,11 @@ def test_document_render_service_rejects_too_many_table_cells():
     }
 
 
-def test_document_render_service_rejects_too_many_structured_list_items():
+async def test_document_render_service_rejects_too_many_structured_list_items():
     data: list[object] = [None] * 5_001
 
     with pytest.raises(TypedIOValidationException) as exc_info:
-        _render_service.render_structured_document(
+        await _render_service.render_structured_document(
             data, "pdf", step_order=1, title="Rapport"
         )
 
@@ -703,7 +524,7 @@ def test_document_render_service_rejects_too_many_structured_list_items():
     }
 
 
-def test_document_render_service_rejects_deep_structured_values_before_conversion():
+async def test_document_render_service_rejects_deep_structured_values_before_conversion():
     data: list[object] = []
     current = data
     for _ in range(33):
@@ -712,7 +533,7 @@ def test_document_render_service_rejects_deep_structured_values_before_conversio
         current = child
 
     with pytest.raises(TypedIOValidationException) as exc_info:
-        _render_service.render_structured_document(
+        await _render_service.render_structured_document(
             data, "docx", step_order=1, title="Rapport"
         )
 
@@ -721,10 +542,10 @@ def test_document_render_service_rejects_deep_structured_values_before_conversio
     assert exc_info.value.context["metric"] == "structured_depth"
 
 
-def test_render_docx_markdown_lists_and_code_blocks():
+async def test_render_docx_markdown_lists_and_code_blocks():
     """Lists and fenced code blocks should be represented in DOCX text."""
     text = "# Titel\n\n- punkt ett\n- punkt två\n\n```python\nprint('hej')\n```"
-    blob, _ = _render_service.render_document(
+    blob, _ = await _render_service.render_document(
         text, "docx", step_order=1, title="Rapport"
     )
     doc = Document(io.BytesIO(blob))
@@ -734,10 +555,10 @@ def test_render_docx_markdown_lists_and_code_blocks():
     assert "print('hej')" in all_text
 
 
-def test_render_docx_very_long_output():
+async def test_render_docx_very_long_output():
     """Very long markdown output should produce a valid DOCX without exceptions."""
     text = ("Rad med innehåll och åäö.\n" * 5000).strip()
-    blob, _ = _render_service.render_document(
+    blob, _ = await _render_service.render_document(
         text, "docx", step_order=1, title="Rapport"
     )
     doc = Document(io.BytesIO(blob))
@@ -748,19 +569,20 @@ def test_render_docx_very_long_output():
 # --- Error handling ---
 
 
-def test_render_unsupported_type_raises():
+async def test_render_unsupported_type_raises():
     with pytest.raises(TypedIOValidationException, match="Unsupported document type"):
-        _render_service.render_document("Test", "html", step_order=1, title="Rapport")
+        await _render_service.render_document(
+            "Test", "html", step_order=1, title="Rapport"
+        )
 
 
 # --- Unicode rendering ---
 
 
-@requires_weasyprint_native_stack
-def test_render_pdf_unicode_characters():
+async def test_render_pdf_unicode_characters():
     """Em-dash, Swedish chars, curly quotes must render without error."""
     text = "Em-dash \u2014 and Swedish: \u00e5\u00e4\u00f6 and curly \u201cquotes\u201d"
-    blob, mimetype = _render_service.render_document(
+    blob, mimetype = await _render_service.render_document(
         text, "pdf", step_order=1, title="Rapport"
     )
     assert isinstance(blob, bytes)
@@ -768,10 +590,9 @@ def test_render_pdf_unicode_characters():
     assert blob[:5] == b"%PDF-"
 
 
-@requires_weasyprint_native_stack
-def test_render_pdf_font_fallback():
+async def test_render_pdf_font_fallback():
     """System font fallback should keep Unicode PDF rendering available."""
-    blob, _ = _render_service.render_document(
+    blob, _ = await _render_service.render_document(
         "Em-dash \u2014 and curly \u201cquotes\u201d",
         "pdf",
         step_order=1,
@@ -781,7 +602,7 @@ def test_render_pdf_font_fallback():
     assert blob[:5] == b"%PDF-"
 
 
-def test_single_field_json_envelope_unwraps_to_formatted_document() -> None:
+async def test_single_field_json_envelope_unwraps_to_formatted_document() -> None:
     # Live incident 2026-08-05 (run 4fc4b445): the writer wrapped good
     # markdown in {"document_body": ...}; rendering the envelope verbatim
     # produced a document of braces and escapes. A one-field string
@@ -791,7 +612,7 @@ def test_single_field_json_envelope_unwraps_to_formatted_document() -> None:
         '## Sammanfattning\\nKort text.\\n\\n- Beslut 1\\n- Beslut 2"\n}'
     )
 
-    blob, _ = _render_service.render_document(
+    blob, _ = await _render_service.render_document(
         envelope, "docx", step_order=5, title="Rapport"
     )
 
@@ -802,12 +623,12 @@ def test_single_field_json_envelope_unwraps_to_formatted_document() -> None:
     assert not any(text.strip().startswith("{") for text in texts)
 
 
-def test_multi_field_json_text_renders_verbatim() -> None:
+async def test_multi_field_json_text_renders_verbatim() -> None:
     # A multi-key object cannot be unwrapped losslessly; rendering it
     # verbatim is honest and stays diagnosable.
     text = '{"first": "a", "second": "b"}'
 
-    blob, _ = _render_service.render_document(
+    blob, _ = await _render_service.render_document(
         text, "docx", step_order=2, title="Rapport"
     )
 
@@ -824,8 +645,8 @@ def _docx_styled(blob: bytes) -> list[tuple[str, str]]:
     return docx_styled_paragraphs(blob)
 
 
-def test_generic_docx_contains_no_fixed_organisation_or_logo() -> None:
-    blob, _ = _render_service.render_document(
+async def test_generic_docx_contains_no_fixed_organisation_or_logo() -> None:
+    blob, _ = await _render_service.render_document(
         "# Rapport\n\nText.", "docx", step_order=1, title="Rapport"
     )
     document = Document(io.BytesIO(blob))
@@ -840,14 +661,21 @@ def test_generic_docx_contains_no_fixed_organisation_or_logo() -> None:
             if name.startswith(("word/header", "word/footer")) and name.endswith(".xml")
         ]
         assert all("Sundsvall" not in xml and "logotyp" not in xml for xml in furniture)
-        assert any('w:instr="PAGE"' in xml for xml in furniture)
+        # A page number field, simple or complex.
+        assert any(
+            'w:instr="PAGE"' in xml or ">PAGE</w:instrText>" in xml for xml in furniture
+        )
     for section in document.sections:
         assert all(not paragraph.text for paragraph in section.header.paragraphs)
-        assert all(not paragraph.text for paragraph in section.footer.paragraphs)
+        # The footer names the document and the page, nothing fixed.
+        footer = " ".join(paragraph.text for paragraph in section.footer.paragraphs)
+        for word in ("Rapport", "Sida", "av"):
+            footer = footer.replace(word, "")
+        assert not footer.strip()
 
 
-def test_render_docx_preserves_a_short_pre_title_paragraph() -> None:
-    blob, _ = _render_service.render_document(
+async def test_render_docx_preserves_a_short_pre_title_paragraph() -> None:
+    blob, _ = await _render_service.render_document(
         "Sekretessklass: Begränsad\n\n# Rapport\n\nBrödtext.",
         "docx",
         step_order=1,
@@ -859,16 +687,16 @@ def test_render_docx_preserves_a_short_pre_title_paragraph() -> None:
     assert styled[1] == ("Heading 1", "Rapport")
 
 
-def test_docx_title_is_the_document_name_not_its_first_heading() -> None:
-    blob, _ = _render_service.render_document(
+async def test_docx_title_is_the_document_name_not_its_first_heading() -> None:
+    blob, _ = await _render_service.render_document(
         "# Rapport\n\nText.", "docx", step_order=1, title="Nämndmöte 2026-09-23"
     )
 
     assert Document(io.BytesIO(blob)).core_properties.title == "Nämndmöte 2026-09-23"
 
 
-def test_render_docx_keeps_a_real_opening_paragraph() -> None:
-    blob, _ = _render_service.render_document(
+async def test_render_docx_keeps_a_real_opening_paragraph() -> None:
+    blob, _ = await _render_service.render_document(
         "Inledning som är innehåll.\n\nAndra stycket.\n\n# Rubrik",
         "docx",
         step_order=1,
@@ -878,8 +706,10 @@ def test_render_docx_keeps_a_real_opening_paragraph() -> None:
     assert ("Normal", "Inledning som är innehåll.") in _docx_styled(blob)
 
 
-def test_render_docx_nested_lists_use_level_styles_and_numbering_restarts() -> None:
-    blob, _ = _render_service.render_document(
+async def test_render_docx_nested_lists_use_level_styles_and_numbering_restarts() -> (
+    None
+):
+    blob, _ = await _render_service.render_document(
         "# T\n\n- A\n  - A1\n    - A2\n- B\n\n1. Ett\n2. Två\n\nText\n\n1. Ny",
         "docx",
         step_order=1,
@@ -891,11 +721,20 @@ def test_render_docx_nested_lists_use_level_styles_and_numbering_restarts() -> N
     assert ("List Bullet 2", "A1") in styled
     assert ("List Bullet 3", "A2") in styled
     assert ("List Number", "Ny") in styled
-    xml = zipfile.ZipFile(io.BytesIO(blob)).read("word/document.xml").decode()
-    numbering = zipfile.ZipFile(io.BytesIO(blob)).read("word/numbering.xml").decode()
-    # Each numbered list gets its own numbering instance with a start override.
-    assert numbering.count("<w:startOverride") == 2
-    assert xml.count("<w:numPr>") == 3
+    # Each numbered list gets its own numbering instance, starting at 1.
+    document = Document(io.BytesIO(blob))
+    number_ids = {
+        paragraph.text: paragraph._p.pPr.numPr.numId.val
+        for paragraph in docx_paragraphs(document)
+        if paragraph.text in ("Ett", "Två", "Ny")
+    }
+    assert number_ids["Ett"] == number_ids["Två"] != number_ids["Ny"]
+    numbering = document.part.numbering_part.element
+    for label in ("Ett", "Ny"):
+        start = numbering.num_having_numId(number_ids[label]).find(
+            ".//" + qn("w:startOverride")
+        )
+        assert start is not None and start.get(qn("w:val")) == "1"
 
 
 @pytest.mark.parametrize(
@@ -908,15 +747,17 @@ def test_render_docx_nested_lists_use_level_styles_and_numbering_restarts() -> N
         "1. Parent\n   1. Child\n\n   Continuation text.\n2. Next",
     ],
 )
-def test_document_render_rejects_unsupported_list_nesting(text: str) -> None:
+async def test_document_render_rejects_unsupported_list_nesting(text: str) -> None:
     with pytest.raises(TypedIOValidationException) as info:
-        _render_service.render_document(text, "docx", step_order=1, title="Rapport")
+        await _render_service.render_document(
+            text, "docx", step_order=1, title="Rapport"
+        )
     assert info.value.code == "typed_io_render_failed"
 
 
-def test_nested_numbered_lists_restart_under_each_parent() -> None:
+async def test_nested_numbered_lists_restart_under_each_parent() -> None:
     text = "1. A\n   1. A1\n   2. A2\n2. B\n   1. B1"
-    blob, _ = _render_service.render_document(
+    blob, _ = await _render_service.render_document(
         text, "docx", step_order=1, title="Rapport"
     )
     document = Document(io.BytesIO(blob))
@@ -938,12 +779,12 @@ def test_nested_numbered_lists_restart_under_each_parent() -> None:
     }
     assert starts["A1"] == "1"
     assert starts["B1"] == "1"
-    html = blocks_to_html_document(parse_markdown_blocks(text.splitlines()), title="T")
-    assert html.count("<ol>") == 3
 
 
-def test_render_docx_writes_links_as_hyperlinks_and_inherits_style_emphasis() -> None:
-    blob, _ = _render_service.render_document(
+async def test_render_docx_writes_links_as_hyperlinks_and_inherits_style_emphasis() -> (
+    None
+):
+    blob, _ = await _render_service.render_document(
         "# Titel\n\nLäs [riktlinjen](https://example.se/r) och **viktigt**.",
         "docx",
         step_order=1,
@@ -966,8 +807,10 @@ def test_render_docx_writes_links_as_hyperlinks_and_inherits_style_emphasis() ->
     assert title.runs[0].bold is None
 
 
-def test_render_docx_tables_carry_a_repeating_header_row_and_table_style() -> None:
-    blob, _ = _render_service.render_document(
+async def test_render_docx_tables_carry_a_repeating_header_row_and_table_style() -> (
+    None
+):
+    blob, _ = await _render_service.render_document(
         "# T\n\n| A | B |\n|---|---|\n| 1 | 2 |",
         "docx",
         step_order=1,
@@ -977,13 +820,13 @@ def test_render_docx_tables_carry_a_repeating_header_row_and_table_style() -> No
     from tests.docx_template_fixtures import docx_tables
 
     table = docx_tables(blob)[0]
-    assert table.style.name == "Table Grid"
+    # The header row repeats on every page and is read as the header.
     assert table.rows[0]._tr.trPr.find(qn("w:tblHeader")) is not None
-    assert table._tbl.tblPr.find(qn("w:tblLook")).get(qn("w:firstRow")) == "1"
+    assert all(run.bold for run in table.rows[0].cells[0].paragraphs[0].runs)
 
 
-def test_render_docx_supports_six_heading_levels_and_rejects_skips() -> None:
-    blob, _ = _render_service.render_document(
+async def test_render_docx_supports_six_heading_levels_and_rejects_skips() -> None:
+    blob, _ = await _render_service.render_document(
         "# 1\n\n## 2\n\n### 3\n\n#### 4\n\n##### 5\n\n###### 6",
         "docx",
         step_order=1,
@@ -992,14 +835,6 @@ def test_render_docx_supports_six_heading_levels_and_rejects_skips() -> None:
     assert ("Heading 6", "6") in _docx_styled(blob)
 
     with pytest.raises(TypedIOValidationException, match="skip a level"):
-        _render_service.render_document(
+        await _render_service.render_document(
             "# 1\n\n### 3", "docx", step_order=1, title="Rapport"
         )
-
-
-def test_render_docx_requires_the_standard_template() -> None:
-    renderer = DocxDocumentRenderer(template_path=Path("/nonexistent/dokument.docx"))
-    service = DocumentRenderService(renderers=(renderer,))
-
-    with pytest.raises(TypedIOValidationException):
-        service.render_document("# T", "docx", step_order=1, title="Rapport")

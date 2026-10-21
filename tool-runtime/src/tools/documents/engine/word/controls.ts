@@ -49,9 +49,22 @@ function textRun(value: string, properties?: Element): Element {
   ]);
 }
 
-/** Writes a text value into a control, keeping the formatting of the run it held. */
+/**
+ * Writes a text value into a control, keeping the formatting of the run it held. A text
+ * control takes one line unless it is a plain text control marked multi-line: Word keeps a
+ * single-line control's value on one line, so its lines are joined with spaces.
+ */
 export function placeValue(sdt: Element, value: string): void {
   const properties = find(sdt, "w:sdtPr");
+  const multiline = ["1", "true", "on"].includes(
+    attr(find(properties, "w:text"), "w:multiLine") ?? "",
+  );
+  if (!multiline)
+    value = value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .join(" ");
   const content = find(sdt, "w:sdtContent") ?? element("w:sdtContent");
   if (!find(sdt, "w:sdtContent")) (sdt.elements ??= []).push(content);
   for (const marker of findAll(properties, "w:showingPlcHdr")) remove(properties!, marker);

@@ -54,15 +54,15 @@ from eneo.flows.flow_resource_bindings import FlowResourceBindingSource
 from eneo.flows.flow_template_asset_service import (
     AttachedTemplateFileUnavailableError,
 )
-from eneo.flows.runtime.document_rendering.docx_content_controls import (
-    append_rich_control,
-    append_text_control,
-)
 from eneo.flows.runtime.docx_template_runtime import (
     extract_docx_text,
     render_docx_template,
 )
 from eneo.main.exceptions import BadRequestException
+from tests.docx_controls import (
+    append_rich_control,
+    append_text_control,
+)
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
@@ -743,7 +743,7 @@ async def test_materialized_template_attachment_publish_validates_controls_and_p
             asset_id=materialized.binding.local_id,
         )
         assert pinned_file.blob is not None
-        rendered, _mime = render_docx_template(
+        rendered, _mime = await render_docx_template(
             template_bytes=pinned_file.blob,
             template_name=pinned_file.name,
             context={"case_id": "KS-2026-42", "body": "**Verifierad** bakgrund."},

@@ -6,7 +6,7 @@ Run from ``backend/``::
 
 The templates land in ``src/eneo/flows/runtime/templates/standard/`` and are
 committed, so a build here is a reviewable change. Every fill target is a Word
-content control (see ``eneo.flows.runtime.document_rendering.docx_content_controls``) with a tag
+content control (authored with ``tests/docx_controls.py``) with a tag
 the flow binds to, a label, and placeholder text that doubles as the authoring
 hint the AI Builder reads. The template owns everything visual: sv-SE
 language, the built-in heading styles with a house look, list styles, a table
@@ -27,9 +27,9 @@ from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Cm, Pt, RGBColor
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from eneo.flows.runtime.document_rendering.docx_content_controls import (  # noqa: E402
+from tests.docx_controls import (  # noqa: E402
     append_rich_control,
     append_text_control,
 )

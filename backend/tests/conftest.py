@@ -80,6 +80,7 @@ pytest_plugins = [
     "tests.integration.fixtures.spaces",  # Space fixtures
     "tests.integration.fixtures.organization_knowledge",  # Organization knowledge fixtures
     "tests.integration.fixtures.integrations",  # Integration fixtures (SharePoint, etc.)
+    "tests.document_runtime_support",  # The shared document runtime (tool-runtime)
 ]
 
 

@@ -50,7 +50,7 @@ class PdfOutputFormatSpec:
                     mimetype="application/pdf",
                 )
             )
-        return render_document_output(
+        return await render_document_output(
             full_text,
             output_type=FlowOutputType.PDF.value,
             step_order=step_order,

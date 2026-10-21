@@ -49,6 +49,9 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.flows.flow_resource_bindings import ResourceSlotKind, ResourceSlotRef
 
+# Template inspection runs in the shared tool runtime.
+pytestmark = pytest.mark.usefixtures("shared_document_runtime")
+
 
 def _template_envelope(
     *, included: bool = True, shared: bool = False
@@ -194,14 +197,16 @@ def _rewrite_zip(content: bytes, transform) -> bytes:
     return result.getvalue()
 
 
-def test_missing_template_blocks_install_until_a_matching_docx_is_reviewed() -> None:
+async def test_missing_template_blocks_install_until_a_matching_docx_is_reviewed() -> (
+    None
+):
     omitted = read_flow_package(write_flow_package(_template_envelope(included=False)))
     candidates = FlowPackageImportPlannerCandidates()
-    plan = build_flow_package_import_plan(omitted, candidates=candidates)
+    plan = await build_flow_package_import_plan(omitted, candidates=candidates)
     assert not plan.can_install_as_draft
     assert plan.dependency_resolutions[0].install_blocks
     with pytest.raises(FlowPackageValidationError) as error:
-        resolve_flow_package_install_command(
+        await resolve_flow_package_install_command(
             envelope=omitted,
             import_plan=plan,
             expected_content_checksum=omitted.content_checksum,
@@ -210,10 +215,10 @@ def test_missing_template_blocks_install_until_a_matching_docx_is_reviewed() -> 
             candidates=candidates,
         )
     assert error.value.code is FlowPackageErrorCode.TEMPLATE_UPLOAD_REQUIRED
-    files = resolve_flow_package_template_files(
+    files = await resolve_flow_package_template_files(
         omitted, [_upload(_template_envelope())]
     )
-    reviewed = build_flow_package_import_plan(
+    reviewed = await build_flow_package_import_plan(
         omitted, candidates=candidates, template_files=files
     )
     assert reviewed.can_install_as_draft
@@ -222,7 +227,7 @@ def test_missing_template_blocks_install_until_a_matching_docx_is_reviewed() -> 
         == files["template_asset.report"].checksum
     )
     checksums = {ref: file.checksum for ref, file in files.items()}
-    command = resolve_flow_package_install_command(
+    command = await resolve_flow_package_install_command(
         envelope=omitted,
         import_plan=reviewed,
         expected_content_checksum=omitted.content_checksum,
@@ -236,11 +241,11 @@ def test_missing_template_blocks_install_until_a_matching_docx_is_reviewed() -> 
         ref: identity.checksum
         for ref, identity in command.selection.template_uploads.items()
     } == checksums
-    renamed = resolve_flow_package_template_files(
+    renamed = await resolve_flow_package_template_files(
         omitted,
         [_upload(_template_envelope()).model_copy(update={"filename": "Renamed.docx"})],
     )
-    renamed_command = resolve_flow_package_install_command(
+    renamed_command = await resolve_flow_package_install_command(
         envelope=omitted,
         import_plan=reviewed,
         expected_content_checksum=omitted.content_checksum,
@@ -252,7 +257,7 @@ def test_missing_template_blocks_install_until_a_matching_docx_is_reviewed() -> 
     )
     assert command.selection.storage_json() != renamed_command.selection.storage_json()
     with pytest.raises(FlowPackageValidationError) as changed:
-        resolve_flow_package_install_command(
+        await resolve_flow_package_install_command(
             envelope=omitted,
             import_plan=reviewed,
             expected_content_checksum=omitted.content_checksum,
@@ -265,7 +270,9 @@ def test_missing_template_blocks_install_until_a_matching_docx_is_reviewed() -> 
     assert changed.value.code is FlowPackageErrorCode.CHECKSUM_MISMATCH
 
 
-def test_replacement_with_changed_tags_is_rejected_with_actionable_context() -> None:
+async def test_replacement_with_changed_tags_is_rejected_with_actionable_context() -> (
+    None
+):
     original = _template_envelope()
     content = next(iter(original.template_payloads.values()))
     changed = _rewrite_zip(
@@ -275,7 +282,7 @@ def test_replacement_with_changed_tags_is_rejected_with_actionable_context() -> 
         else data,
     )
     with pytest.raises(FlowPackageValidationError) as error:
-        resolve_flow_package_template_files(
+        await resolve_flow_package_template_files(
             _template_envelope(included=False), [_upload(original, changed)]
         )
     assert error.value.code is FlowPackageErrorCode.TEMPLATE_FIELDS_MISMATCH
@@ -293,7 +300,7 @@ def test_replacement_with_changed_tags_is_rejected_with_actionable_context() -> 
         "included_override",
     ],
 )
-def test_unreviewable_template_uploads_fail_closed(case: str) -> None:
+async def test_unreviewable_template_uploads_fail_closed(case: str) -> None:
     original = _template_envelope()
     omitted = _template_envelope(included=False)
     upload = _upload(original)
@@ -306,7 +313,7 @@ def test_unreviewable_template_uploads_fail_closed(case: str) -> None:
     if case == "included_override":
         omitted = original
     with pytest.raises(FlowPackageValidationError) as error:
-        resolve_flow_package_template_files(
+        await resolve_flow_package_template_files(
             omitted, [upload, upload] if case == "duplicate" else [upload]
         )
     assert error.value.code is FlowPackageErrorCode.TEMPLATE_FILE_INVALID
@@ -323,12 +330,12 @@ def test_changed_packaged_word_bytes_fail_checksum_verification() -> None:
     assert error.value.code is FlowPackageErrorCode.CHECKSUM_MISMATCH
 
 
-def test_shared_template_is_stored_once_and_resolves_for_both_steps() -> None:
+async def test_shared_template_is_stored_once_and_resolves_for_both_steps() -> None:
     envelope = _template_envelope(shared=True)
     package = write_flow_package(envelope)
     imported = read_flow_package(package)
     assert len(imported.spec.steps) == 2
-    assert len(resolve_flow_package_template_files(imported)) == 1
+    assert len(await resolve_flow_package_template_files(imported)) == 1
     with zipfile.ZipFile(BytesIO(package)) as archive:
         assert (
             len([name for name in archive.namelist() if name.startswith("templates/")])
@@ -336,7 +343,9 @@ def test_shared_template_is_stored_once_and_resolves_for_both_steps() -> None:
         )
 
 
-def test_template_package_does_not_disable_strict_validation_of_other_steps() -> None:
+async def test_template_package_does_not_disable_strict_validation_of_other_steps() -> (
+    None
+):
     from eneo.flows.flow_authoring_spec import FormFieldSpec
 
     envelope = _template_envelope(shared=True)
@@ -350,7 +359,7 @@ def test_template_package_does_not_disable_strict_validation_of_other_steps() ->
     step.output_config = None
     step.assistant_spec.instructions = "Read {{ indata_text }}"
     with pytest.raises(FlowPackageValidationError) as error:
-        build_flow_package_import_plan(
+        await build_flow_package_import_plan(
             envelope, candidates=FlowPackageImportPlannerCandidates()
         )
     assert error.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID

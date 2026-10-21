@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -72,3 +72,42 @@ class DocumentBlock:
 
 
 EMPTY_VALUE_PLACEHOLDER = "-"
+
+
+def normalize_document_headings(
+    blocks: list[DocumentBlock],
+    *,
+    heading_base: int = 0,
+    section_label: str = "the document",
+) -> list[DocumentBlock]:
+    """Number the headings from 1, keeping their relative levels.
+
+    The shallowest heading becomes level 1, written below ``heading_base`` (the
+    level of the heading a template section sits under). A heading that skips a
+    level, or an outline deeper than a document supports, is refused.
+    """
+
+    source_levels = [max(block.level, 1) for block in blocks if block.kind == "heading"]
+    if not source_levels:
+        return blocks
+    shallowest = min(source_levels)
+    previous = 0
+    normalized: list[DocumentBlock] = []
+    for block in blocks:
+        if block.kind == "heading":
+            level = 1 + max(block.level, 1) - shallowest
+            if level > previous + 1:
+                raise DocumentStructureError(
+                    f"The headings in {section_label} skip a level (a level "
+                    f"{level} heading follows level {previous}); use each heading "
+                    "level in order."
+                )
+            if heading_base + level > MAX_HEADING_LEVEL:
+                raise DocumentStructureError(
+                    f"The headings in {section_label} go deeper than the "
+                    f"{MAX_HEADING_LEVEL} levels a document supports."
+                )
+            block = replace(block, level=level)
+            previous = level
+        normalized.append(block)
+    return normalized

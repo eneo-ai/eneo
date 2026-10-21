@@ -50,7 +50,7 @@ class FlowPackageTemplateUpload(BaseModel):
     )
 
 
-def inspect_package_template(
+async def inspect_package_template(
     content: bytes,
     *,
     filename: str,
@@ -60,7 +60,7 @@ def inspect_package_template(
     """The fields of a Word file; pass the ``checksum`` already computed for it."""
 
     checksum = checksum or hashlib.sha256(content).hexdigest()
-    fields = inspect_docx_template_bytes(content, filename=filename)
+    fields = await inspect_docx_template_bytes(content, filename=filename)
     return FlowPackageTemplateDescriptor(
         filename=filename,
         checksum=checksum,
@@ -92,7 +92,7 @@ class _ResolvedTemplate:
     inspected: FlowPackageTemplateDescriptor
 
 
-def resolve_flow_package_template_files(
+async def resolve_flow_package_template_files(
     envelope: FlowPackageEnvelope,
     uploads: Sequence[FlowPackageTemplateUpload] = (),
 ) -> dict[str, FlowPackageTemplateFile]:
@@ -119,7 +119,7 @@ def resolve_flow_package_template_files(
     ):
         raise _invalid_upload("The Word template uploads exceed the size limit.")
 
-    packaged = _packaged_templates(envelope, requirements)
+    packaged = await _packaged_templates(envelope, requirements)
     files = {ref: resolved.file for ref, resolved in packaged.items()}
     if not uploads:
         return files
@@ -162,7 +162,7 @@ def resolve_flow_package_template_files(
                 included=False,
             )
         )
-    uploaded = _resolve_candidates(
+    uploaded = await _resolve_candidates(
         candidates,
         known=packaged.values(),
         spent=sum(resolved.unpacked_bytes for resolved in packaged.values()),
@@ -171,7 +171,7 @@ def resolve_flow_package_template_files(
     return files
 
 
-def _packaged_templates(
+async def _packaged_templates(
     envelope: FlowPackageEnvelope,
     requirements: Mapping[str, FlowPackageTemplateAssetRequirement],
 ) -> dict[str, _ResolvedTemplate]:
@@ -191,10 +191,10 @@ def _packaged_templates(
                     included=True,
                 )
             )
-    return _resolve_candidates(candidates, known=(), spent=0)
+    return await _resolve_candidates(candidates, known=(), spent=0)
 
 
-def _resolve_candidates(
+async def _resolve_candidates(
     candidates: Sequence[_TemplateCandidate],
     *,
     known: Iterable[_ResolvedTemplate],
@@ -239,7 +239,7 @@ def _resolve_candidates(
         actual = inspected.get(candidate.checksum)
         if actual is None:
             try:
-                actual = inspect_package_template(
+                actual = await inspect_package_template(
                     candidate.content,
                     filename=candidate.filename,
                     included=False,

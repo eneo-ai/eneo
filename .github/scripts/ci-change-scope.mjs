@@ -98,7 +98,15 @@ function isFullCiFile(file) {
 }
 
 function isBackendFile(file) {
-  return file.startsWith("backend/");
+  // Flow document tests render through the tool runtime's document engine.
+  return (
+    file.startsWith("backend/") ||
+    file.startsWith("tool-runtime/src/tools/documents/") ||
+    file.startsWith("tool-runtime/tests/support/") ||
+    ["tool-runtime/src/server.ts", "tool-runtime/src/main.ts", "tool-runtime/bun.lock"].includes(
+      file,
+    )
+  );
 }
 
 function isShippedFrontendFile(file) {
@@ -185,6 +193,7 @@ function runSelfTest() {
   assert.equal(classify(["backend/src/eneo/server/main.py"]).docker_backend, true);
 
   assert.equal(classify(["scripts/backend_test_shard.py"]).backend, true);
+  assert.equal(classify(["tool-runtime/src/tools/documents/control.ts"]).backend, true);
   assert.equal(classify(["scripts/backend_test_shard.py"]).scripts, true);
 
   assert.equal(classify(["frontend/apps/web/src/routes/+page.svelte"]).frontend, true);

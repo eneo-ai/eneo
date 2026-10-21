@@ -171,9 +171,6 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.runtime.document_rendering.docx_content_controls import (
-    append_text_control,
-)
 from eneo.icons.icon import IconMetadataCreate
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, NotFoundException
@@ -182,6 +179,9 @@ from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserUpdate
+from tests.docx_controls import (
+    append_text_control,
+)
 from tests.fixtures import mint_v2_api_key
 from tests.integration.flows.conftest import assert_call_evidence_after_own_details
 from tests.unittests.flows.ai_builder.proposal_turn_builders import provider_work_gate

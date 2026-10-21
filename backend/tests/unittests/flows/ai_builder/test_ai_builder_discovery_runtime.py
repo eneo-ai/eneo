@@ -2770,7 +2770,7 @@ async def test_runtime_refits_saturated_attachment_before_admitting_transcript()
         owner_user_id=uuid4(),
         tenant_id=uuid4(),
     )
-    attachment_context = build_ai_builder_attachment_context_for_model(
+    attachment_context = await build_ai_builder_attachment_context_for_model(
         [attachment],
         policy=AIBuilderAttachmentContextPolicy(),
         model_name="gpt-test",

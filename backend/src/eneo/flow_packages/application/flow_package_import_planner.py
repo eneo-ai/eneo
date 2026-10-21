@@ -126,7 +126,7 @@ class FlowPackageImportPlannerCandidates(BaseModel):
                 )
 
 
-def build_flow_package_import_plan(
+async def build_flow_package_import_plan(
     envelope: FlowPackageEnvelope,
     *,
     candidates: FlowPackageImportPlannerCandidates,
@@ -155,7 +155,7 @@ def build_flow_package_import_plan(
     resolved_template_files = (
         template_files
         if template_files is not None
-        else resolve_flow_package_template_files(envelope)
+        else await resolve_flow_package_template_files(envelope)
     )
     dependency_resolutions = [
         _resolve_requirement(

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
-import logging
-from collections.abc import Iterable, Sequence
-from typing import Any, NoReturn, cast
+from collections.abc import Sequence
+from typing import Any, cast
 
+from eneo.document_templates import runtime_client
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.runtime.document_rendering.blocks import DocumentBlock
-from eneo.flows.runtime.document_rendering.docx_renderer import DocxDocumentRenderer
+from eneo.flows.runtime.document_rendering.blocks import (
+    DocumentBlock,
+    normalize_document_headings,
+)
 from eneo.flows.runtime.document_rendering.limits import (
     DEFAULT_DOCUMENT_RENDER_LIMITS,
     DocumentRenderLimits,
@@ -15,56 +17,41 @@ from eneo.flows.runtime.document_rendering.limits import (
     ensure_source_within_limits,
     ensure_structured_value_within_limits,
 )
-from eneo.flows.runtime.document_rendering.markdown_blocks import (
-    parse_markdown_blocks,
-)
-from eneo.flows.runtime.document_rendering.renderers import DocumentRenderer
+from eneo.flows.runtime.document_rendering.markdown_blocks import parse_markdown_blocks
 from eneo.flows.runtime.document_rendering.structured_blocks import (
     structured_data_to_blocks,
 )
-from eneo.flows.runtime.document_rendering.weasyprint_renderer import (
-    WeasyPrintDocumentRenderer,
-)
-from eneo.main.exceptions import TypedIOValidationException
+from eneo.main.exceptions import BadRequestException, TypedIOValidationException
+from eneo.main.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class DocumentRenderService:
+    """Flow-specific admission/projection; the shared runtime owns all rendering."""
+
     def __init__(
-        self,
-        renderers: Iterable[DocumentRenderer],
-        *,
-        limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS,
+        self, *, limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS
     ) -> None:
-        self._renderers = {renderer.output_type: renderer for renderer in renderers}
         self._limits = limits
 
     @property
     def limits(self) -> DocumentRenderLimits:
         return self._limits
 
-    def render_document(
-        self,
-        text: str,
-        output_type: str,
-        *,
-        step_order: int,
-        title: str,
+    async def render_document(
+        self, text: str, output_type: str, *, step_order: int, title: str
     ) -> tuple[bytes, str]:
         ensure_source_within_limits(text, limits=self._limits)
-        source_text = _unwrap_single_field_text_envelope(
-            text,
-            step_order=step_order,
-        )
-        return self.render_blocks(
-            parse_markdown_blocks(source_text.splitlines()),
+        source = _unwrap_single_field_text_envelope(text, step_order=step_order)
+        return await self.render_blocks(
+            parse_markdown_blocks(source.splitlines()),
             output_type,
             step_order=step_order,
             title=title,
         )
 
-    def render_structured_document(
+    async def render_structured_document(
         self,
         data: dict[str, Any] | list[Any],
         output_type: str,
@@ -74,22 +61,14 @@ class DocumentRenderService:
         schema: dict[str, Any] | None = None,
     ) -> tuple[bytes, str]:
         ensure_structured_value_within_limits(data, limits=self._limits)
-        try:
-            blocks = structured_data_to_blocks(data, schema=schema)
-        except TypedIOValidationException:
-            raise
-        except Exception as exc:
-            _raise_render_failed(
-                output_type=output_type, step_order=step_order, exc=exc
-            )
-        return self.render_blocks(
-            blocks,
+        return await self.render_blocks(
+            structured_data_to_blocks(data, schema=schema),
             output_type,
             step_order=step_order,
             title=title,
         )
 
-    def render_blocks(
+    async def render_blocks(
         self,
         blocks: Sequence[DocumentBlock],
         output_type: str,
@@ -97,34 +76,42 @@ class DocumentRenderService:
         step_order: int,
         title: str,
     ) -> tuple[bytes, str]:
+        from eneo.flows.runtime.document_rendering.markdown_projection import (
+            blocks_to_markdown,
+        )
+
+        blocks = normalize_document_headings(list(blocks))
         ensure_blocks_within_limits(blocks, limits=self._limits)
-        renderer = self._renderers.get(output_type)
-        if renderer is None:
+        return await self._render(blocks_to_markdown(blocks), output_type, title)
+
+    async def _render(
+        self, content: str, output_type: str, title: str
+    ) -> tuple[bytes, str]:
+        if output_type not in {"docx", "pdf"}:
             raise TypedIOValidationException(
-                f"Unsupported document type: {output_type}",
+                "Unsupported document type.",
                 code=FlowApiErrorCode.TYPED_IO_RENDER_FAILED.value,
             )
         try:
-            return renderer.render(blocks, title=title).as_tuple()
-        except TypedIOValidationException:
-            raise
-        except Exception as exc:
-            _raise_render_failed(
-                output_type=output_type, step_order=step_order, exc=exc
+            return await runtime_client.render_document(
+                content=content, title=title, output_type=output_type
             )
+        except BadRequestException as exc:
+            raise TypedIOValidationException(
+                "The document could not be rendered within its limits.",
+                code=FlowApiErrorCode.TYPED_IO_RENDER_FAILED.value,
+            ) from exc
+        except runtime_client.RuntimeUnavailable as exc:
+            raise TypedIOValidationException(
+                "The shared document runtime is unavailable.",
+                code=FlowApiErrorCode.TYPED_IO_RENDER_FAILED.value,
+            ) from exc
 
 
 def default_document_render_service(
-    *,
-    limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS,
+    *, limits: DocumentRenderLimits = DEFAULT_DOCUMENT_RENDER_LIMITS
 ) -> DocumentRenderService:
-    return DocumentRenderService(
-        renderers=(
-            WeasyPrintDocumentRenderer(),
-            DocxDocumentRenderer(),
-        ),
-        limits=limits,
-    )
+    return DocumentRenderService(limits=limits)
 
 
 def _unwrap_single_field_text_envelope(text: str, *, step_order: int) -> str:
@@ -157,19 +144,3 @@ def _unwrap_single_field_text_envelope(text: str, *, step_order: int) -> str:
         extra={"step_order": step_order, "field_name": field_name},
     )
     return value
-
-
-def _raise_render_failed(
-    *,
-    output_type: str,
-    step_order: int,
-    exc: Exception,
-) -> NoReturn:
-    logger.exception(
-        "Document render failed",
-        extra={"output_type": output_type, "step_order": step_order},
-    )
-    raise TypedIOValidationException(
-        "Document render failed.",
-        code=FlowApiErrorCode.TYPED_IO_RENDER_FAILED.value,
-    ) from exc

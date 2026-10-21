@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import inspect
 import json
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -44,7 +45,7 @@ class RenderDocumentFn(Protocol):
         *,
         step_order: int,
         title: str,
-    ) -> tuple[bytes, str]: ...
+    ) -> tuple[bytes, str] | Awaitable[tuple[bytes, str]]: ...
 
 
 class RenderStructuredDocumentFn(Protocol):
@@ -56,7 +57,7 @@ class RenderStructuredDocumentFn(Protocol):
         step_order: int,
         title: str,
         schema: FlowPersistedJsonObject | None = None,
-    ) -> tuple[bytes, str]: ...
+    ) -> tuple[bytes, str] | Awaitable[tuple[bytes, str]]: ...
 
 
 class EnsureSourceWithinLimitsFn(Protocol):
@@ -232,13 +233,14 @@ async def process_structured_document_output(
         output_contract,
         label=f"Step {step_order} output",
     )
-    blob, mimetype = context.render_structured_document(
+    rendered = context.render_structured_document(
         structured_output,
         output_type,
         step_order=step_order,
         title=context.document_title,
         schema=output_contract,
     )
+    blob, mimetype = await rendered if inspect.isawaitable(rendered) else rendered
     return OutputFormatProcessingResult(
         structured_output=structured_output,
         artifact=RenderedOutputArtifact(blob=blob, mimetype=mimetype),
@@ -247,19 +249,20 @@ async def process_structured_document_output(
     )
 
 
-def render_document_output(
+async def render_document_output(
     full_text: str,
     *,
     output_type: str,
     step_order: int,
     context: OutputFormatProcessingContext,
 ) -> OutputFormatProcessingResult:
-    blob, mimetype = context.render_document(
+    rendered = context.render_document(
         full_text,
         output_type,
         step_order=step_order,
         title=context.document_title,
     )
+    blob, mimetype = await rendered if inspect.isawaitable(rendered) else rendered
     return OutputFormatProcessingResult(
         artifact=RenderedOutputArtifact(blob=blob, mimetype=mimetype)
     )

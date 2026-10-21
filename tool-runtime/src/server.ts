@@ -44,6 +44,8 @@ export type ServerOptions = {
   maxBodyBytes?: number;
   /** Reads a Word template's fields and checks, at POST /templates/inspect (a .docx body). */
   inspectTemplate?: (template: Buffer) => Promise<unknown>;
+  /** Trusted backend rendering; uses the same bounded sandbox as document MCP tools. */
+  renderDocument?: (input: unknown) => Promise<{ buffer: Buffer; mimetype: string }>;
 };
 const MAX_TEMPLATE_BYTES = 5 * 1024 * 1024;
 
@@ -112,7 +114,8 @@ export function createHandler(options: ServerOptions) {
     const diagnostics = url.pathname === "/diagnostics";
     const template = url.pathname === "/templates/builtin.docx" && !!options.builtinTemplate;
     const inspect = url.pathname === "/templates/inspect" && !!options.inspectTemplate;
-    if (!endpoint && !diagnostics && !template && !inspect)
+    const render = url.pathname === "/documents/render" && !!options.renderDocument;
+    if (!endpoint && !diagnostics && !template && !inspect && !render)
       return new Response("Not found", { status: 404 });
     if (request.headers.has("origin")) return new Response("Forbidden origin", { status: 403 });
     const header = request.headers.get("authorization") ?? "";
@@ -121,6 +124,30 @@ export function createHandler(options: ServerOptions) {
         status: 401,
         headers: { "www-authenticate": "Bearer" },
       });
+    if (render) {
+      if (request.method === "GET")
+        return Response.json(
+          { protocol: 1, formats: ["docx", "pdf"], template_fill: true },
+          { headers: { "cache-control": "no-store" } },
+        );
+      if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      if (controlActive >= 4) return new Response("Busy", { status: 429 });
+      controlActive++;
+      try {
+        const input = await boundedJson(request, 16 * 1024 * 1024);
+        const result = await options.renderDocument!(input);
+        return new Response(new Uint8Array(result.buffer), {
+          headers: { "content-type": result.mimetype, "cache-control": "no-store" },
+        });
+      } catch (error) {
+        if (error instanceof BodyError)
+          return new Response(error.message, { status: error.status });
+        const failure = publicError(error);
+        return Response.json(failure, { status: failure.code === "INTERNAL_ERROR" ? 500 : 422 });
+      } finally {
+        controlActive--;
+      }
+    }
     if (inspect) {
       if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
       if (controlActive >= 4) return new Response("Busy", { status: 429 });

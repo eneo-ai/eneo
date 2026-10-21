@@ -573,7 +573,9 @@ def test_validate_rechecks_selected_model_hard_requirements_at_install_time() ->
     assert exc_info.value.context["reason"] == "model_context_too_small"
 
 
-def test_validate_rejects_model_that_became_ineligible_after_import_plan() -> None:
+async def test_validate_rejects_model_that_became_ineligible_after_import_plan() -> (
+    None
+):
     model_id = uuid4()
     slot_ref = _slot_ref(ResourceSlotKind.MODEL, "structured")
     binding = _binding(
@@ -599,7 +601,7 @@ def test_validate_rejects_model_that_became_ineligible_after_import_plan() -> No
             )
         ]
     )
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         envelope,
         candidates=_candidates(models=[_model_candidate(model_id)]),
     )
@@ -618,13 +620,13 @@ def test_validate_rejects_model_that_became_ineligible_after_import_plan() -> No
     assert exc_info.value.context["reason"] == "model_context_too_small"
 
 
-def test_resolved_install_command_rejects_package_changed_after_plan() -> None:
+async def test_resolved_install_command_rejects_package_changed_after_plan() -> None:
     envelope = _envelope()
     candidates = _candidates(models=[_model_candidate(uuid4())])
-    plan = build_flow_package_import_plan(envelope, candidates=candidates)
+    plan = await build_flow_package_import_plan(envelope, candidates=candidates)
 
     with pytest.raises(FlowPackageValidationError) as exc_info:
-        resolve_flow_package_install_command(
+        await resolve_flow_package_install_command(
             envelope=envelope,
             import_plan=plan,
             expected_content_checksum="f" * 64,
@@ -660,18 +662,20 @@ def test_import_selection_canonicalizes_semantically_unordered_bindings() -> Non
     assert first.model_dump(mode="json") == reversed_selection.model_dump(mode="json")
 
 
-def test_resolved_install_command_uses_declared_slot_label_for_retry_identity() -> None:
+async def test_resolved_install_command_uses_declared_slot_label_for_retry_identity() -> (
+    None
+):
     envelope = _envelope()
     model_id = UUID("11111111-1111-4111-8111-111111111111")
     candidates = _candidates(models=[_model_candidate(model_id)])
-    plan = build_flow_package_import_plan(envelope, candidates=candidates)
+    plan = await build_flow_package_import_plan(envelope, candidates=candidates)
     tampered_label = ResourceSlotRef(
         kind=ResourceSlotKind.MODEL,
         slot="structured",
         label="Client supplied label",
     )
 
-    command = resolve_flow_package_install_command(
+    command = await resolve_flow_package_install_command(
         envelope=envelope,
         import_plan=plan,
         expected_content_checksum=plan.content_checksum,
@@ -799,12 +803,12 @@ async def _install_as_draft(
     candidates: FlowPackageImportPlannerCandidates,
     default_transcription_model_id: UUID | None = None,
 ) -> FlowPackageInstallResult:
-    import_plan = build_flow_package_import_plan(
+    import_plan = await build_flow_package_import_plan(
         envelope,
         candidates=candidates,
         default_transcription_model_id=default_transcription_model_id,
     )
-    command = resolve_flow_package_install_command(
+    command = await resolve_flow_package_install_command(
         envelope=envelope,
         import_plan=import_plan,
         expected_content_checksum=import_plan.content_checksum,
@@ -1007,8 +1011,8 @@ async def test_install_normalizes_literal_disabled_config_without_changing_envel
     envelope = read_flow_package(write_flow_package(envelope))
     original = envelope.model_dump(mode="json")
     candidates = _candidates()
-    plan = build_flow_package_import_plan(envelope, candidates=candidates)
-    command = resolve_flow_package_install_command(
+    plan = await build_flow_package_import_plan(envelope, candidates=candidates)
+    command = await resolve_flow_package_install_command(
         envelope=envelope,
         import_plan=plan,
         expected_content_checksum=envelope.content_checksum,
@@ -1085,7 +1089,7 @@ async def test_export_install_preserves_upload_transcription_dependency(
     )
     envelope = read_flow_package(write_flow_package(exported))
     candidates, target_model_id = _transcription_target(target)
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         envelope,
         candidates=candidates,
         default_transcription_model_id=target_model_id,
@@ -1191,7 +1195,7 @@ async def test_export_install_preserves_previous_step_audio_upload_transcription
     envelope = read_flow_package(write_flow_package(envelope))
     assert envelope.spec.steps[0].name == ""
     candidates, target_model_id = _transcription_target(target)
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         envelope,
         candidates=candidates,
         default_transcription_model_id=target_model_id,

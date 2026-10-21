@@ -207,7 +207,7 @@ async def validate_flow_package(
     require_flow_action(container.user(), FlowApiAction.EDIT)
     envelope = await _read_flow_package(package_file)
     try:
-        resolve_flow_package_template_files(envelope)
+        await resolve_flow_package_template_files(envelope)
     except FlowPackageValidationError as exc:
         raise _bad_flow_package_request(exc) from exc
     return FlowPackageValidationPublic.from_envelope(envelope)
@@ -311,8 +311,8 @@ async def create_flow_package_import_plan(
                 code=FlowPackageErrorCode.TEMPLATE_FILE_INVALID,
                 message="The Word template uploads are not valid.",
             ) from exc
-        template_files = resolve_flow_package_template_files(envelope, uploads)
-        return build_flow_package_import_plan(
+        template_files = await resolve_flow_package_template_files(envelope, uploads)
+        return await build_flow_package_import_plan(
             envelope,
             candidates=candidates,
             default_transcription_model_id=(
@@ -415,7 +415,7 @@ async def import_flow_package_as_draft(
     # Every cheap bound and each distinct Word file's one inspection run before
     # the space lock is taken, so a refused package never holds it.
     try:
-        template_files = resolve_flow_package_template_files(
+        template_files = await resolve_flow_package_template_files(
             envelope, import_request.template_uploads
         )
     except FlowPackageValidationError as exc:
@@ -446,7 +446,7 @@ async def import_flow_package_as_draft(
         current_access_context.space
     )
     try:
-        import_plan = build_flow_package_import_plan(
+        import_plan = await build_flow_package_import_plan(
             envelope,
             candidates=candidates,
             default_transcription_model_id=default_transcription_model_id,
@@ -458,7 +458,7 @@ async def import_flow_package_as_draft(
     failure_selection = selection
 
     try:
-        command = resolve_flow_package_install_command(
+        command = await resolve_flow_package_install_command(
             envelope=envelope,
             import_plan=import_plan,
             expected_content_checksum=import_request.expected_content_checksum,

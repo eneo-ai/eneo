@@ -627,4 +627,23 @@ def _flow_worker_environment(*, settings: Settings, queue_name: str) -> dict[str
             "LITELLM_LOCAL_MODEL_COST_MAP": "True",
         }
     )
+    if settings.tool_runtime_url and settings.tool_runtime_token:
+        environment.update(
+            TOOL_RUNTIME_URL=settings.tool_runtime_url,
+            TOOL_RUNTIME_TOKEN=settings.tool_runtime_token,
+        )
     return environment
+
+
+@pytest.fixture(autouse=True)
+def flows_document_runtime(
+    document_runtime_server: tuple[str, str],
+    test_settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flow runs render and fill documents in the shared tool runtime, in this
+    process and in the worker processes a test starts."""
+
+    url, token = document_runtime_server
+    monkeypatch.setattr(test_settings, "tool_runtime_url", url)
+    monkeypatch.setattr(test_settings, "tool_runtime_token", token)

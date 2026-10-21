@@ -251,17 +251,31 @@ jobs:
         run: uv lock --check
 
       - name: Install native libraries
-        # The libraries backend/Dockerfile installs for WeasyPrint (PDF output)
-        # and audio. Without libharfbuzz-subset0 WeasyPrint warns at import,
-        # and pytest turns that warning into an error; ffmpeg backs the audio
-        # tests.
+        # ffmpeg backs the audio tests. Pango, HarfBuzz and the fonts are what
+        # the tool runtime's PDF sidecar (WeasyPrint) needs: document tests
+        # render through a real tool runtime.
         run: >-
           sudo apt-get update &&
           sudo apt-get install -y --no-install-recommends ffmpeg fontconfig
-          fonts-dejavu-core libharfbuzz-subset0 libpango-1.0-0 libpangoft2-1.0-0
+          fonts-dejavu-core fonts-liberation libharfbuzz0b libharfbuzz-subset0
+          libpango-1.0-0 libpangoft2-1.0-0 && sudo fc-cache -f
 
       - name: Install dependencies
         run: uv sync --python 3.11 --frozen --all-groups
+
+      - name: Set up Bun for the document runtime
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install the document runtime
+        # Flow document tests start tool-runtime/tests/support/document-control-server.ts;
+        # its PDF output runs in the same sidecar environment as the image.
+        working-directory: tool-runtime
+        run: |
+          bun install --frozen-lockfile
+          sudo python3 -m venv /opt/pdf
+          sudo /opt/pdf/bin/pip install --no-cache-dir --require-hashes -r scripts/requirements-pdf.txt
 
       - name: Run unit tests
         if: matrix.suite == 'unit'

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import io
-import json
 import zipfile
 from pathlib import Path
 
@@ -10,16 +9,10 @@ from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
-from eneo.flows.runtime.document_rendering import docx_content_controls
 from eneo.flows.runtime.document_rendering.blocks import DocumentStructureError
-from eneo.flows.runtime.document_rendering.docx_content_controls import (
-    HEADING_PREVIEW_MAX_CHARS,
-    DocxTemplateContractError,
-    append_rich_control,
-    append_text_control,
-)
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
 from eneo.flows.runtime.docx_template_runtime import (
+    DocxTemplateContractError,
     extract_docx_template_text_preview,
     extract_docx_text,
     inspect_docx_template_bytes,
@@ -31,6 +24,7 @@ from eneo.main.exceptions import (
     FileNotSupportedException,
     TypedIOValidationException,
 )
+from tests.docx_controls import append_rich_control, append_text_control
 from tests.docx_template_fixtures import (
     control_template_bytes,
     docx_paragraph_texts,
@@ -38,6 +32,8 @@ from tests.docx_template_fixtures import (
     docx_styled_paragraphs,
     docx_tables,
 )
+
+pytestmark = pytest.mark.usefixtures("shared_document_runtime")
 
 _RAPPORT_TEXT = [
     ("titel", "Titel", "Rapportens titel"),
@@ -66,14 +62,14 @@ def _bytes(document) -> bytes:
 # --- discovery ------------------------------------------------------------------
 
 
-def test_downloadable_field_example_fills_distinct_places_and_keeps_fixed_headings() -> (
+async def test_downloadable_field_example_fills_distinct_places_and_keeps_fixed_headings() -> (
     None
 ):
     template = (
         Path(__file__).resolve().parents[4]
         / "frontend/apps/web/static/examples/eneo-word-template-fields.docx"
     ).read_bytes()
-    fields = inspect_docx_template_bytes(template, filename="example.docx")
+    fields = await inspect_docx_template_bytes(template, filename="example.docx")
     assert [
         (field["name"], field["kind"], field["section_heading"]) for field in fields
     ] == [
@@ -83,7 +79,7 @@ def test_downloadable_field_example_fills_distinct_places_and_keeps_fixed_headin
         ("nasta_steg", "rich", "Nästa steg"),
     ]
 
-    result, _ = render_docx_template(
+    result, _ = await render_docx_template(
         template_bytes=template,
         template_name="example.docx",
         context={
@@ -106,7 +102,9 @@ def test_downloadable_field_example_fills_distinct_places_and_keeps_fixed_headin
     ]
 
 
-def test_inspection_identifies_nearest_heading_for_inline_and_section_fields() -> None:
+async def test_inspection_identifies_nearest_heading_for_inline_and_section_fields() -> (
+    None
+):
     document = Document()
     append_text_control(
         document.add_paragraph("Namn: "), tag="namn", label="Namn", hint="Namn här"
@@ -124,7 +122,9 @@ def test_inspection_identifies_nearest_heading_for_inline_and_section_fields() -
     )
     append_rich_control(document, tag="plan", label="Plan", hint="Plan här")
 
-    fields = inspect_docx_template_bytes(_bytes(document), filename="sections.docx")
+    fields = await inspect_docx_template_bytes(
+        _bytes(document), filename="sections.docx"
+    )
 
     assert [(field["name"], field["section_heading"]) for field in fields] == [
         ("namn", None),
@@ -134,7 +134,9 @@ def test_inspection_identifies_nearest_heading_for_inline_and_section_fields() -
     ]
 
 
-def test_control_preview_preserves_paragraphs_inline_runs_breaks_and_tabs() -> None:
+async def test_control_preview_preserves_paragraphs_inline_runs_breaks_and_tabs() -> (
+    None
+):
     document = Document()
     control = append_rich_control(document, tag="dokument", label="Dokument", hint="")
     content = control.find(qn("w:sdtContent"))
@@ -147,7 +149,9 @@ def test_control_preview_preserves_paragraphs_inline_runs_breaks_and_tabs() -> N
     content.append(paragraph._p)
     content.append(document.add_paragraph("Andra stycket.")._p)
 
-    fields = inspect_docx_template_bytes(_bytes(document), filename="example.docx")
+    fields = await inspect_docx_template_bytes(
+        _bytes(document), filename="example.docx"
+    )
 
     assert fields[0]["hint"] == (
         "Exempelmall\n\nFörsta stycket.\nNästa rad\tmed tabulator.\n\nAndra stycket."
@@ -155,26 +159,26 @@ def test_control_preview_preserves_paragraphs_inline_runs_breaks_and_tabs() -> N
 
 
 @pytest.mark.parametrize("text", ["Ordinary source document", "Case: {{ case_id }}"])
-def test_empty_control_discovery_is_allowed_but_template_use_is_rejected(
+async def test_empty_control_discovery_is_allowed_but_template_use_is_rejected(
     text: str,
 ) -> None:
     document = Document()
     document.add_paragraph(text)
     blob = _bytes(document)
 
-    assert inspect_docx_template_placeholders(blob, filename="source.docx") == ()
+    assert await inspect_docx_template_placeholders(blob, filename="source.docx") == ()
     with pytest.raises(DocxTemplateContractError, match="at least one") as info:
-        inspect_docx_template_bytes(blob, filename="template.docx")
+        await inspect_docx_template_bytes(blob, filename="template.docx")
     assert info.value.code == "flow_template_no_controls"
     with pytest.raises(TypedIOValidationException, match="at least one"):
-        render_docx_template(
+        await render_docx_template(
             template_bytes=blob, template_name="mall.docx", context={}, step_order=1
         )
 
 
-def test_corrupt_pinned_template_has_typed_runtime_failure() -> None:
+async def test_corrupt_pinned_template_has_typed_runtime_failure() -> None:
     with pytest.raises(TypedIOValidationException) as info:
-        render_docx_template(
+        await render_docx_template(
             template_bytes=b"not a docx",
             template_name="mall.docx",
             context={},
@@ -183,8 +187,12 @@ def test_corrupt_pinned_template_has_typed_runtime_failure() -> None:
     assert info.value.code == "typed_io_template_render_failed"
 
 
-def test_inspect_lists_controls_with_kind_label_and_hint_in_document_order() -> None:
-    placeholders = inspect_docx_template_bytes(_rapport(), filename="rapport.docx")
+async def test_inspect_lists_controls_with_kind_label_and_hint_in_document_order() -> (
+    None
+):
+    placeholders = await inspect_docx_template_bytes(
+        _rapport(), filename="rapport.docx"
+    )
 
     assert placeholders == [
         {
@@ -222,65 +230,33 @@ def test_inspect_lists_controls_with_kind_label_and_hint_in_document_order() -> 
     ]
 
 
-def test_inspect_bounds_the_heading_preview_and_reads_each_heading_once(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    document = Document()
-    document.add_heading("Rubrik " * 15_000, level=1)
-    for index in range(100):
-        append_rich_control(
-            document, tag=f"avsnitt_{index}", label=f"Avsnitt {index}", hint=""
-        )
-    buffer = io.BytesIO()
-    document.save(buffer)
-    reads = 0
-    read_heading = docx_content_controls._heading_preview
-
-    def counting(heading: object) -> str | None:
-        nonlocal reads
-        reads += 1
-        return read_heading(heading)
-
-    monkeypatch.setattr(docx_content_controls, "_heading_preview", counting)
-
-    fields = inspect_docx_template_bytes(buffer.getvalue(), filename="stor.docx")
-
-    assert len(fields) == 100
-    assert reads == 1
-    assert {len(field["section_heading"]) for field in fields} == {
-        HEADING_PREVIEW_MAX_CHARS
-    }
-    assert all(field["section_heading"].endswith("…") for field in fields)
-    assert len(json.dumps(fields)) < 100 * (HEADING_PREVIEW_MAX_CHARS + 400)
-
-
-def test_inspect_rejects_macro_enabled_filenames_before_reading() -> None:
+async def test_inspect_rejects_macro_enabled_filenames_before_reading() -> None:
     with pytest.raises(FileNotSupportedException):
-        inspect_docx_template_bytes(_rapport(), filename="rapport.docm")
+        await inspect_docx_template_bytes(_rapport(), filename="rapport.docm")
 
 
-def test_inspect_rejects_a_control_without_a_tag() -> None:
+async def test_inspect_rejects_a_control_without_a_tag() -> None:
     document = Document()
     sdt = append_rich_control(document, tag="tmp", label="Avsnitt", hint="x")
     properties = sdt.find(qn("w:sdtPr"))
     properties.remove(properties.find(qn("w:tag")))
 
     with pytest.raises(DocxTemplateContractError) as info:
-        inspect_docx_template_bytes(_bytes(document), filename="t.docx")
+        await inspect_docx_template_bytes(_bytes(document), filename="t.docx")
     assert info.value.code == "flow_template_control_untagged"
 
 
-def test_inspect_rejects_duplicate_tags() -> None:
+async def test_inspect_rejects_duplicate_tags() -> None:
     document = Document()
     append_rich_control(document, tag="avsnitt", label="A", hint="a")
     append_rich_control(document, tag="avsnitt", label="B", hint="b")
 
     with pytest.raises(DocxTemplateContractError) as info:
-        inspect_docx_template_bytes(_bytes(document), filename="t.docx")
+        await inspect_docx_template_bytes(_bytes(document), filename="t.docx")
     assert info.value.code == "flow_template_control_duplicate"
 
 
-def test_inspect_rejects_nested_controls() -> None:
+async def test_inspect_rejects_nested_controls() -> None:
     document = Document()
     outer = append_rich_control(document, tag="outer", label="Outer", hint="o")
     inner = OxmlElement("w:sdt")
@@ -293,11 +269,11 @@ def test_inspect_rejects_nested_controls() -> None:
     outer.find(qn("w:sdtContent")).append(inner)
 
     with pytest.raises(DocxTemplateContractError) as info:
-        inspect_docx_template_bytes(_bytes(document), filename="t.docx")
+        await inspect_docx_template_bytes(_bytes(document), filename="t.docx")
     assert info.value.code == "flow_template_control_nested"
 
 
-def test_inspect_rejects_controls_mapped_to_custom_xml() -> None:
+async def test_inspect_rejects_controls_mapped_to_custom_xml() -> None:
     document = Document()
     sdt = append_rich_control(document, tag="mapped", label="Mapped", hint="m")
     binding = OxmlElement("w:dataBinding")
@@ -306,11 +282,11 @@ def test_inspect_rejects_controls_mapped_to_custom_xml() -> None:
     sdt.find(qn("w:sdtPr")).append(binding)
 
     with pytest.raises(DocxTemplateContractError) as info:
-        inspect_docx_template_bytes(_bytes(document), filename="t.docx")
+        await inspect_docx_template_bytes(_bytes(document), filename="t.docx")
     assert info.value.code == "flow_template_control_mapped"
 
 
-def test_inspect_rejects_unsupported_control_kinds() -> None:
+async def test_inspect_rejects_unsupported_control_kinds() -> None:
     document = Document()
     paragraph = document.add_paragraph("Datum: ")
     sdt = append_text_control(paragraph, tag="datum", label="Datum", hint="d")
@@ -319,13 +295,15 @@ def test_inspect_rejects_unsupported_control_kinds() -> None:
     properties.append(OxmlElement("w:date"))
 
     with pytest.raises(DocxTemplateContractError) as info:
-        inspect_docx_template_bytes(_bytes(document), filename="t.docx")
+        await inspect_docx_template_bytes(_bytes(document), filename="t.docx")
     assert info.value.code == "flow_template_control_unsupported"
     assert "date control" in str(info.value)
 
 
 @pytest.mark.parametrize("shape", ["body_text", "custom_xml_parent"])
-def test_inspect_rejects_controls_outside_the_structural_profile(shape: str) -> None:
+async def test_inspect_rejects_controls_outside_the_structural_profile(
+    shape: str,
+) -> None:
     document = Document()
     sdt = append_rich_control(document, tag="value", label="Value", hint="v")
     if shape == "body_text":
@@ -336,36 +314,36 @@ def test_inspect_rejects_controls_outside_the_structural_profile(shape: str) -> 
         wrapper.append(sdt)
 
     with pytest.raises(DocxTemplateContractError) as info:
-        inspect_docx_template_bytes(_bytes(document), filename="t.docx")
+        await inspect_docx_template_bytes(_bytes(document), filename="t.docx")
     assert info.value.code == "flow_template_control_placement"
 
 
-def test_inspect_rejects_controls_in_table_cells_and_headers() -> None:
+async def test_inspect_rejects_controls_in_table_cells_and_headers() -> None:
     in_cell = Document()
     cell_paragraph = in_cell.add_table(rows=1, cols=1).cell(0, 0).paragraphs[0]
     append_text_control(cell_paragraph, tag="cell", label="Cell", hint="c")
     with pytest.raises(DocxTemplateContractError) as info:
-        inspect_docx_template_bytes(_bytes(in_cell), filename="t.docx")
+        await inspect_docx_template_bytes(_bytes(in_cell), filename="t.docx")
     assert info.value.code == "flow_template_control_placement"
 
     in_header = Document()
     header_paragraph = in_header.sections[0].header.paragraphs[0]
     append_text_control(header_paragraph, tag="header", label="Header", hint="h")
     with pytest.raises(DocxTemplateContractError) as info:
-        inspect_docx_template_bytes(_bytes(in_header), filename="t.docx")
+        await inspect_docx_template_bytes(_bytes(in_header), filename="t.docx")
     assert info.value.code == "flow_template_control_placement"
 
 
-def test_inspect_normalizes_corrupt_archives() -> None:
+async def test_inspect_normalizes_corrupt_archives() -> None:
     with pytest.raises(BadRequestException):
-        inspect_docx_template_bytes(b"not a docx", filename="t.docx")
+        await inspect_docx_template_bytes(b"not a docx", filename="t.docx")
 
 
 # --- fill -------------------------------------------------------------------------
 
 
-def test_render_writes_markdown_sections_with_the_template_styles() -> None:
-    blob, mimetype = render_docx_template(
+async def test_render_writes_markdown_sections_with_the_template_styles() -> None:
+    blob, mimetype = await render_docx_template(
         template_bytes=_rapport(),
         template_name="mall.docx",
         context={
@@ -411,12 +389,12 @@ def test_render_writes_markdown_sections_with_the_template_styles() -> None:
     assert "PlaceholderText" not in xml
 
 
-def test_render_keeps_relative_heading_levels_under_the_section_heading() -> None:
+async def test_render_keeps_relative_heading_levels_under_the_section_heading() -> None:
     template = control_template_bytes(
         rich=[("avsnitt", "Avsnitt", "x")], heading_level=2
     )
 
-    blob, _ = render_docx_template(
+    blob, _ = await render_docx_template(
         template_bytes=template,
         template_name="mall.docx",
         context={"avsnitt": "# Delrubrik\n\nText\n\n## Underrubrik"},
@@ -429,9 +407,9 @@ def test_render_keeps_relative_heading_levels_under_the_section_heading() -> Non
     assert ("Heading 4", "Underrubrik") in styles
 
 
-def test_render_rejects_skipped_heading_levels_by_section() -> None:
+async def test_render_rejects_skipped_heading_levels_by_section() -> None:
     with pytest.raises(DocumentStructureError, match="section 'Analys'"):
-        render_docx_template(
+        await render_docx_template(
             template_bytes=_rapport(),
             template_name="mall.docx",
             context={
@@ -444,14 +422,14 @@ def test_render_rejects_skipped_heading_levels_by_section() -> None:
         )
 
 
-def test_render_text_controls_take_one_line_unless_multiline() -> None:
+async def test_render_text_controls_take_one_line_unless_multiline() -> None:
     document = Document()
     single = document.add_paragraph("En rad: ")
     append_text_control(single, tag="en", label="En", hint="e")
     multi = document.add_paragraph("Flera: ")
     append_text_control(multi, tag="flera", label="Flera", hint="f", multiline=True)
 
-    blob, _ = render_docx_template(
+    blob, _ = await render_docx_template(
         template_bytes=_bytes(document),
         template_name="mall.docx",
         context={"en": "första\nandra", "flera": "första\nandra"},
@@ -464,8 +442,10 @@ def test_render_text_controls_take_one_line_unless_multiline() -> None:
     assert "Flera: första" in texts[1]
 
 
-def test_render_removes_a_control_bound_to_empty_and_keeps_static_content() -> None:
-    blob, _ = render_docx_template(
+async def test_render_removes_a_control_bound_to_empty_and_keeps_static_content() -> (
+    None
+):
+    blob, _ = await render_docx_template(
         template_bytes=_rapport(),
         template_name="mall.docx",
         context={"titel": "T", "datum": "", "sammanfattning": "S", "analys": ""},
@@ -479,18 +459,18 @@ def test_render_removes_a_control_bound_to_empty_and_keeps_static_content() -> N
     assert "Underrubriker" not in extract_docx_text(blob)
 
 
-def test_render_rejects_missing_and_valueless_bindings_before_writing() -> None:
+async def test_render_rejects_missing_and_valueless_bindings_before_writing() -> None:
     with pytest.raises(
         TypedIOValidationException, match="Unresolved template placeholders: analys"
     ):
-        render_docx_template(
+        await render_docx_template(
             template_bytes=_rapport(),
             template_name="mall.docx",
             context={"titel": "T", "datum": "D", "sammanfattning": "S"},
             step_order=1,
         )
     with pytest.raises(TypedIOValidationException, match="without a value: datum"):
-        render_docx_template(
+        await render_docx_template(
             template_bytes=_rapport(),
             template_name="mall.docx",
             context={"titel": "T", "datum": None, "sammanfattning": "S", "analys": "A"},
@@ -498,9 +478,9 @@ def test_render_rejects_missing_and_valueless_bindings_before_writing() -> None:
         )
 
 
-def test_render_holds_the_whole_document_to_the_render_limits() -> None:
+async def test_render_holds_the_whole_document_to_the_render_limits() -> None:
     with pytest.raises(TypedIOValidationException):
-        render_docx_template(
+        await render_docx_template(
             template_bytes=_rapport(),
             template_name="mall.docx",
             context={
@@ -522,7 +502,7 @@ def test_render_holds_the_whole_document_to_the_render_limits() -> None:
         (DocumentRenderLimits(max_text_chars=7), "text_chars"),
     ],
 )
-def test_render_counts_inline_values_in_aggregate_limits(
+async def test_render_counts_inline_values_in_aggregate_limits(
     second_kind: str, limits: DocumentRenderLimits, metric: str
 ) -> None:
     second = ("second", "Second", "s")
@@ -531,7 +511,7 @@ def test_render_counts_inline_values_in_aggregate_limits(
         rich=[second] if second_kind == "rich" else [],
     )
     with pytest.raises(TypedIOValidationException) as info:
-        render_docx_template(
+        await render_docx_template(
             template_bytes=template,
             template_name="mall.docx",
             context={"first": "abcd", "second": "efgh"},
@@ -542,13 +522,13 @@ def test_render_counts_inline_values_in_aggregate_limits(
     assert info.value.context["metric"] == metric
 
 
-def test_render_refuses_a_template_that_left_the_supported_profile() -> None:
+async def test_render_refuses_a_template_that_left_the_supported_profile() -> None:
     document = Document()
     append_rich_control(document, tag="a", label="A", hint="a")
     append_rich_control(document, tag="a", label="B", hint="b")
 
     with pytest.raises(TypedIOValidationException, match="no longer fillable"):
-        render_docx_template(
+        await render_docx_template(
             template_bytes=_bytes(document),
             template_name="mall.docx",
             context={"a": "x"},
@@ -559,13 +539,15 @@ def test_render_refuses_a_template_that_left_the_supported_profile() -> None:
 # --- extraction ---------------------------------------------------------------------
 
 
-def test_extract_docx_text_reads_control_content_and_skips_page_furniture() -> None:
+async def test_extract_docx_text_reads_control_content_and_skips_page_furniture() -> (
+    None
+):
     document = Document()
     document.sections[0].header.paragraphs[0].text = "Sidhuvud"
     document.add_paragraph("Före")
     append_rich_control(document, tag="mitt", label="Mitt", hint="Placeholder")
     document.add_paragraph("Efter")
-    blob, _ = render_docx_template(
+    blob, _ = await render_docx_template(
         template_bytes=_bytes(document),
         template_name="mall.docx",
         context={"mitt": "Inuti kontrollen\n\n| A | B |\n|---|---|\n| 1 | 2 |"},

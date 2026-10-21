@@ -33,18 +33,26 @@ arm fixes it), so specs may not name a model or a knowledge source.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import functools
 import hashlib
 import importlib
 import json
 import threading
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Coroutine,
+    Mapping,
+    Sequence,
+)
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Protocol, cast
+from typing import Any, Protocol, TypeVar, cast
 from urllib.error import URLError
 from uuid import UUID, uuid4
 
@@ -124,6 +132,20 @@ _REFUSING_EXCEPTIONS: tuple[type[Exception], ...] = (
 
 # --------------------------------------------------------------------------
 # The frozen spec set
+
+
+_T = TypeVar("_T")
+
+
+def _run_to_completion(coroutine: Coroutine[Any, Any, _T]) -> _T:
+    """Run a coroutine from this synchronous tool, also when its caller is
+    already inside an event loop (the tests drive it from one)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coroutine).result()
 
 
 @dataclass(frozen=True, slots=True)
@@ -405,7 +427,7 @@ def _template_file_issues(
     except (ValueError, OSError) as error:
         return [ContractIssue("template_file_unresolved", f"{name}: {error}")]
     try:
-        names = docx_template_placeholder_names(blob, filename=name)
+        names = _run_to_completion(docx_template_placeholder_names(blob, filename=name))
     except BadRequestException as error:
         return [_refusal_issue(error)]
     issues: list[ContractIssue] = []

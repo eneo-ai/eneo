@@ -258,6 +258,9 @@ from tests.unittests.flows.ai_builder.proposal_turn_builders import (
     resolved_whole_request_budget,
 )
 
+# Templates are read and documents rendered in the shared tool runtime.
+pytestmark = pytest.mark.usefixtures("shared_document_runtime")
+
 _DISCOVERY_STATUSES = {"understanding_request", "reading_sources"}
 
 
@@ -2027,13 +2030,13 @@ async def test_prepare_planner_request_asks_when_attachment_schema_direction_is_
     provider_callback.assert_awaited_once()
 
 
-def test_preprovider_gate_promotes_structural_schema_refusal() -> None:
+async def test_preprovider_gate_promotes_structural_schema_refusal() -> None:
     attachment = _make_file(
         name="expected.schema.json",
         text='{"description":"' + ("x" * SCHEMA_MAX_JSON_BYTES) + '"}',
         mimetype="application/schema+json",
     )
-    attachment_context = build_ai_builder_attachment_context([attachment])
+    attachment_context = await build_ai_builder_attachment_context([attachment])
     assert attachment_context is not None
 
     with pytest.raises(AIBuilderBadRequestException) as exc_info:
@@ -2082,13 +2085,15 @@ async def test_prepare_planner_request_rejects_canonical_schema_expansion_before
     provider_callback.assert_not_awaited()
 
 
-def test_preprovider_gate_keeps_unclassified_large_json_text_nonblocking() -> None:
+async def test_preprovider_gate_keeps_unclassified_large_json_text_nonblocking() -> (
+    None
+):
     attachment = _make_file(
         name="large-example.txt",
         text='{"records":"' + ("x" * SCHEMA_MAX_JSON_BYTES) + '"}',
         mimetype="text/plain",
     )
-    attachment_context = build_ai_builder_attachment_context([attachment])
+    attachment_context = await build_ai_builder_attachment_context([attachment])
     assert attachment_context is not None
 
     result = validate_preprovider_schema_gate(
@@ -2155,8 +2160,8 @@ async def test_send_message_builds_attachment_context_once_before_request_prepar
             mimetype="application/json",
         ),
     ]
-    prepared_context = build_ai_builder_attachment_context(attachments)
-    build_context = MagicMock(return_value=prepared_context)
+    prepared_context = await build_ai_builder_attachment_context(attachments)
+    build_context = AsyncMock(return_value=prepared_context)
     captured_request: PlannerRequestPreparationInput | None = None
 
     async def stop_after_request(
@@ -2746,7 +2751,9 @@ async def test_prepare_planner_request_uses_proposal_task_after_confirmation() -
     ] == ["case_id"]
 
 
-def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> None:
+async def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> (
+    None
+):
     model_name = "gpt-4o-mini"
     current_turn = ConversationMessage(
         role="user",
@@ -2754,7 +2761,7 @@ def test_real_proposal_boundary_fits_attachments_and_protects_current_turn() -> 
     )
     history = ConversationMessage(role="user", content="old context " * 5_000)
     attachment_text = "ATTACHMENT-EVIDENCE " * 5_000
-    attachment_context = build_ai_builder_attachment_context(
+    attachment_context = await build_ai_builder_attachment_context(
         [_make_file(attachment_text)]
     )
     assert attachment_context is not None
@@ -2890,7 +2897,7 @@ def _litellm_function_estimate(tool_schema: dict[str, Any], model_name: str) -> 
     ) - litellm.token_counter(model=model_name, messages=empty)
 
 
-def test_proposal_attachment_fitting_reserves_the_whole_create_schema() -> None:
+async def test_proposal_attachment_fitting_reserves_the_whole_create_schema() -> None:
     # The Builder expands attachment text into whatever room the tool reserve
     # says is left, so a schema charged at a fraction of its cost let the
     # attachment overrun the window. Size the window so it fits the old charge
@@ -2900,7 +2907,7 @@ def test_proposal_attachment_fitting_reserves_the_whole_create_schema() -> None:
         role="user", content="Build the confirmed reporting flow."
     )
     attachment_text = "ATTACHMENT-EVIDENCE " * 2_000
-    attachment_context = build_ai_builder_attachment_context(
+    attachment_context = await build_ai_builder_attachment_context(
         [_make_file(attachment_text)]
     )
     assert attachment_context is not None

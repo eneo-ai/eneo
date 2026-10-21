@@ -58,6 +58,9 @@ from eneo.main.exceptions import (
 )
 from tests.docx_template_fixtures import control_template_bytes
 
+# Template inspection and filling run in the shared tool runtime.
+pytestmark = pytest.mark.usefixtures("shared_document_runtime")
+
 
 def _build_template_bytes() -> bytes:
     return control_template_bytes(

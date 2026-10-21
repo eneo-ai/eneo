@@ -46,6 +46,9 @@ from eneo.flows.flow_resource_bindings import ResourceSlotKind, ResourceSlotRef
 from eneo.main.exceptions import FileTooLargeException
 from tests.docx_template_fixtures import control_template_bytes
 
+# Template inspection runs in the shared tool runtime.
+pytestmark = pytest.mark.usefixtures("shared_document_runtime")
+
 _SLOTS = 256
 
 
@@ -127,13 +130,13 @@ def _spy_inspection(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     return calls
 
 
-def test_one_packaged_docx_in_256_slots_is_inspected_once(
+async def test_one_packaged_docx_in_256_slots_is_inspected_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     content = _docx()
     calls = _spy_inspection(monkeypatch)
 
-    files = resolve_flow_package_template_files(
+    files = await resolve_flow_package_template_files(
         _envelope_with_slots(40, content, included=True)
     )
 
@@ -141,13 +144,13 @@ def test_one_packaged_docx_in_256_slots_is_inspected_once(
     assert len(calls) == 1
 
 
-def test_one_docx_uploaded_for_many_slots_is_inspected_once(
+async def test_one_docx_uploaded_for_many_slots_is_inspected_once(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     content = _docx()
     calls = _spy_inspection(monkeypatch)
 
-    files = resolve_flow_package_template_files(
+    files = await resolve_flow_package_template_files(
         _envelope_with_slots(30, content),
         [_upload(index, content) for index in range(30)],
     )
@@ -168,7 +171,7 @@ def _big_unpacked_docx(marker: str, unpacked_bytes: int) -> bytes:
     return buffer.getvalue()
 
 
-def test_the_unpacked_budget_counts_every_slot_not_distinct_files(
+async def test_the_unpacked_budget_counts_every_slot_not_distinct_files(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _spy_inspection(monkeypatch)
@@ -177,20 +180,20 @@ def test_the_unpacked_budget_counts_every_slot_not_distinct_files(
     envelope = _envelope_with_slots(3, content, included=True)
 
     with pytest.raises(FlowPackageValidationError) as error:
-        resolve_flow_package_template_files(envelope)
+        await resolve_flow_package_template_files(envelope)
 
     assert error.value.code is FlowPackageErrorCode.TEMPLATE_FILE_INVALID
     assert "too large when unpacked" in str(error.value)
     assert calls == []
 
 
-def test_256_slots_of_a_large_file_are_refused_up_front_but_small_reuse_passes(
+async def test_256_slots_of_a_large_file_are_refused_up_front_but_small_reuse_passes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _spy_inspection(monkeypatch)
     big = _big_unpacked_docx("big", MAX_TEMPLATE_UNCOMPRESSED_BYTES - 1024)
     with pytest.raises(FlowPackageValidationError) as error:
-        resolve_flow_package_template_files(
+        await resolve_flow_package_template_files(
             _envelope_with_slots(_SLOTS, big, included=True)
         )
     assert "too large when unpacked" in str(error.value)
@@ -199,7 +202,7 @@ def test_256_slots_of_a_large_file_are_refused_up_front_but_small_reuse_passes(
     small = _docx()
     assert (
         len(
-            resolve_flow_package_template_files(
+            await resolve_flow_package_template_files(
                 _envelope_with_slots(40, small, included=True)
             )
         )
@@ -207,7 +210,7 @@ def test_256_slots_of_a_large_file_are_refused_up_front_but_small_reuse_passes(
     )
 
 
-def test_distinct_big_uploads_over_the_budget_are_refused_before_inspection(
+async def test_distinct_big_uploads_over_the_budget_are_refused_before_inspection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _spy_inspection(monkeypatch)
@@ -215,7 +218,7 @@ def test_distinct_big_uploads_over_the_budget_are_refused_before_inspection(
     contents = [_big_unpacked_docx(f"t{index}", each) for index in range(3)]
 
     with pytest.raises(FlowPackageValidationError) as error:
-        resolve_flow_package_template_files(
+        await resolve_flow_package_template_files(
             _envelope_with_slots(3, contents[0]),
             [_upload(index, content) for index, content in enumerate(contents)],
         )
@@ -225,7 +228,7 @@ def test_distinct_big_uploads_over_the_budget_are_refused_before_inspection(
 
 
 @pytest.mark.parametrize("name", ["../Other.docx", "Bad\x00Name.docx", "a/b.docx"])
-def test_every_slots_filename_is_validated_even_when_its_bytes_were_seen(
+async def test_every_slots_filename_is_validated_even_when_its_bytes_were_seen(
     monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
     content = _docx()
@@ -237,7 +240,7 @@ def test_every_slots_filename_is_validated_even_when_its_bytes_were_seen(
     )
 
     with pytest.raises(FlowPackageValidationError) as error:
-        resolve_flow_package_template_files(
+        await resolve_flow_package_template_files(
             _envelope_with_slots(2, content), [first, second]
         )
 
@@ -245,7 +248,7 @@ def test_every_slots_filename_is_validated_even_when_its_bytes_were_seen(
     assert error.value.context["slot_ref"] == _slot(1).ref
 
 
-def test_each_payload_is_hashed_once(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_each_payload_is_hashed_once(monkeypatch: pytest.MonkeyPatch) -> None:
     content = _docx()
     uploaded_envelope = _envelope_with_slots(30, content)
     uploads = [_upload(index, content) for index in range(30)]
@@ -266,7 +269,7 @@ def test_each_payload_is_hashed_once(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hashlib, "sha256", counting)
 
     # Uploaded: one hash per payload, none again at inspection.
-    resolve_flow_package_template_files(uploaded_envelope, uploads)
+    await resolve_flow_package_template_files(uploaded_envelope, uploads)
     assert len(hashes) == 30
 
     # Packaged: the envelope check hashes a payload shared by 40 slots once, and
@@ -277,11 +280,11 @@ def test_each_payload_is_hashed_once(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert len(hashes) == 1
     hashes.clear()
-    resolve_flow_package_template_files(packaged_envelope)
+    await resolve_flow_package_template_files(packaged_envelope)
     assert hashes == []
 
 
-def test_reading_a_package_does_not_open_its_word_files(
+async def test_reading_a_package_does_not_open_its_word_files(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from eneo.flow_packages.infrastructure.flow_package_zip_reader import (
@@ -301,11 +304,11 @@ def test_reading_a_package_does_not_open_its_word_files(
 
     # Resolving is the caller's explicit, single step.
     assert calls == []
-    resolve_flow_package_template_files(envelope)
+    await resolve_flow_package_template_files(envelope)
     assert len(calls) == 1
 
 
-def test_replacement_uploads_over_the_aggregate_encoded_limit_are_refused_before_decode(
+async def test_replacement_uploads_over_the_aggregate_encoded_limit_are_refused_before_decode(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     decoded: list[int] = []
@@ -326,7 +329,9 @@ def test_replacement_uploads_over_the_aggregate_encoded_limit_are_refused_before
     ]
 
     with pytest.raises(FlowPackageValidationError) as error:
-        resolve_flow_package_template_files(_envelope_with_slots(4, _docx()), uploads)
+        await resolve_flow_package_template_files(
+            _envelope_with_slots(4, _docx()), uploads
+        )
 
     assert error.value.code is FlowPackageErrorCode.TEMPLATE_FILE_INVALID
     assert decoded == []

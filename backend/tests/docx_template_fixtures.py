@@ -15,7 +15,7 @@ from docx.oxml.ns import qn
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 
-from eneo.flows.runtime.document_rendering.docx_content_controls import (
+from tests.docx_controls import (
     append_rich_control,
     append_text_control,
 )

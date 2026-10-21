@@ -52,6 +52,9 @@ from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from tests.docx_template_fixtures import control_template_bytes
 
+# Template inspection and filling run in the shared tool runtime.
+pytestmark = pytest.mark.usefixtures("shared_document_runtime")
+
 
 @pytest.mark.anyio
 async def test_export_service_builds_zip_with_side_effect_free_dependencies() -> None:

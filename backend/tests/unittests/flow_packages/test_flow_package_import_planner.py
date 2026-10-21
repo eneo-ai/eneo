@@ -174,7 +174,7 @@ async def test_wildcard_projection_planner_publish_runtime_parity(case):
             else "flow_input_binding_unsupported_key"
         )
         with pytest.raises(FlowPackageValidationError) as imported:
-            build_flow_package_import_plan(
+            await build_flow_package_import_plan(
                 envelope, candidates=FlowPackageImportPlannerCandidates()
             )
         assert imported.value.context["reason"] == error_code
@@ -183,7 +183,7 @@ async def test_wildcard_projection_planner_publish_runtime_parity(case):
         assert published_error.value.code == error_code
         return
 
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         envelope, candidates=FlowPackageImportPlannerCandidates()
     )
     assert plan.can_install_as_draft
@@ -228,7 +228,7 @@ async def test_wildcard_projection_planner_publish_runtime_parity(case):
 
 
 @pytest.mark.parametrize("with_item_map", [False, True])
-def test_imported_section_processing_planner_publish_parity(
+async def test_imported_section_processing_planner_publish_parity(
     with_item_map: bool,
 ) -> None:
     bindings, source, projected = _wildcard_projection_case()
@@ -267,7 +267,7 @@ def test_imported_section_processing_planner_publish_parity(
     if with_item_map:
         message = "Section processing cannot be nested with item_map or per_source."
         with pytest.raises(FlowPackageValidationError, match=message) as planned:
-            build_flow_package_import_plan(
+            await build_flow_package_import_plan(
                 imported, candidates=FlowPackageImportPlannerCandidates()
             )
         assert planned.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
@@ -276,7 +276,7 @@ def test_imported_section_processing_planner_publish_parity(
             validate_step_graph(published, require_complete_template_fill_config=True)
         assert rejected.value.code == "flow_step_invalid"
     else:
-        plan = build_flow_package_import_plan(
+        plan = await build_flow_package_import_plan(
             imported, candidates=FlowPackageImportPlannerCandidates()
         )
         assert plan.can_install_as_draft
@@ -284,7 +284,9 @@ def test_imported_section_processing_planner_publish_parity(
         validate_step_graph(published, require_complete_template_fill_config=True)
 
 
-def test_planner_returns_unresolved_required_when_no_matching_model_exists() -> None:
+async def test_planner_returns_unresolved_required_when_no_matching_model_exists() -> (
+    None
+):
     envelope = _envelope(
         requirements=[
             FlowPackageModelRequirement(
@@ -293,7 +295,7 @@ def test_planner_returns_unresolved_required_when_no_matching_model_exists() -> 
         ]
     )
 
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         envelope,
         candidates=FlowPackageImportPlannerCandidates(),
     )
@@ -310,7 +312,7 @@ def test_planner_returns_unresolved_required_when_no_matching_model_exists() -> 
     assert plan.can_publish_after_import is False
 
 
-def test_planner_resolves_required_model_when_exact_candidate_exists() -> None:
+async def test_planner_resolves_required_model_when_exact_candidate_exists() -> None:
     envelope = _envelope(
         requirements=[
             FlowPackageModelRequirement(
@@ -332,7 +334,7 @@ def test_planner_resolves_required_model_when_exact_candidate_exists() -> None:
         model="gpt-5.4-mini",
     )
 
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         envelope,
         candidates=FlowPackageImportPlannerCandidates(models=[candidate]),
     )
@@ -356,7 +358,7 @@ def test_planner_resolves_required_model_when_exact_candidate_exists() -> None:
     assert plan.can_publish_after_import is True
 
 
-def test_planner_preserves_model_rejection_telemetry() -> None:
+async def test_planner_preserves_model_rejection_telemetry() -> None:
     envelope = _envelope(
         requirements=[
             FlowPackageModelRequirement(
@@ -371,7 +373,7 @@ def test_planner_preserves_model_rejection_telemetry() -> None:
         model="unknown",
     )
 
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         envelope,
         candidates=FlowPackageImportPlannerCandidates(models=[candidate]),
     )
@@ -388,7 +390,7 @@ def test_planner_preserves_model_rejection_telemetry() -> None:
     ]
 
 
-def test_planner_blocks_required_knowledge_without_candidates() -> None:
+async def test_planner_blocks_required_knowledge_without_candidates() -> None:
     envelope = _envelope(
         requirements=[
             FlowPackageKnowledgeRequirement(
@@ -397,7 +399,7 @@ def test_planner_blocks_required_knowledge_without_candidates() -> None:
         ]
     )
 
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         envelope,
         candidates=FlowPackageImportPlannerCandidates(),
     )
@@ -413,7 +415,7 @@ def test_planner_blocks_required_knowledge_without_candidates() -> None:
     assert plan.can_publish_after_import is False
 
 
-def test_planner_marks_required_knowledge_with_suggestions_as_confirmation_only() -> (
+async def test_planner_marks_required_knowledge_with_suggestions_as_confirmation_only() -> (
     None
 ):
     envelope = _envelope(
@@ -429,7 +431,7 @@ def test_planner_marks_required_knowledge_with_suggestions_as_confirmation_only(
         label="Local policy",
     )
 
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         envelope,
         candidates=FlowPackageImportPlannerCandidates(knowledge=[candidate]),
     )
@@ -446,7 +448,7 @@ def test_planner_marks_required_knowledge_with_suggestions_as_confirmation_only(
     assert plan.can_publish_after_import is True
 
 
-def test_planner_skips_optional_requirement_without_candidates() -> None:
+async def test_planner_skips_optional_requirement_without_candidates() -> None:
     envelope = _envelope(
         requirements=[
             FlowPackageKnowledgeRequirement(
@@ -456,7 +458,7 @@ def test_planner_skips_optional_requirement_without_candidates() -> None:
         ]
     )
 
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         envelope,
         candidates=FlowPackageImportPlannerCandidates(),
     )
@@ -472,7 +474,9 @@ def test_planner_skips_optional_requirement_without_candidates() -> None:
     assert plan.can_publish_after_import is True
 
 
-def test_planner_marks_template_assets_as_unsupported_until_installer_exists() -> None:
+async def test_planner_marks_template_assets_as_unsupported_until_installer_exists() -> (
+    None
+):
     envelope = _envelope(
         requirements=[
             FlowPackageTemplateAssetRequirement(
@@ -481,7 +485,7 @@ def test_planner_marks_template_assets_as_unsupported_until_installer_exists() -
         ]
     )
 
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         envelope,
         candidates=FlowPackageImportPlannerCandidates(),
     )
@@ -495,7 +499,7 @@ def test_planner_marks_template_assets_as_unsupported_until_installer_exists() -
     assert resolution.suggestions == []
 
 
-def test_import_plan_resolutions_are_discriminated_by_requirement_kind() -> None:
+async def test_import_plan_resolutions_are_discriminated_by_requirement_kind() -> None:
     envelope = _envelope(
         requirements=[
             FlowPackageModelRequirement(
@@ -507,7 +511,7 @@ def test_import_plan_resolutions_are_discriminated_by_requirement_kind() -> None
         ]
     )
 
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         envelope,
         candidates=FlowPackageImportPlannerCandidates(),
     )
@@ -521,7 +525,7 @@ def test_import_plan_resolutions_are_discriminated_by_requirement_kind() -> None
     assert reparsed_resolutions[1].kind is FlowPackageRequirementKind.KNOWLEDGE
 
 
-def test_planner_caps_and_orders_suggestions_deterministically() -> None:
+async def test_planner_caps_and_orders_suggestions_deterministically() -> None:
     envelope = _envelope(
         requirements=[
             FlowPackageKnowledgeRequirement(
@@ -538,11 +542,11 @@ def test_planner_caps_and_orders_suggestions_deterministically() -> None:
         for index in range(60)
     ]
 
-    first_plan = build_flow_package_import_plan(
+    first_plan = await build_flow_package_import_plan(
         envelope,
         candidates=FlowPackageImportPlannerCandidates(knowledge=candidates),
     )
-    second_plan = build_flow_package_import_plan(
+    second_plan = await build_flow_package_import_plan(
         envelope,
         candidates=FlowPackageImportPlannerCandidates(
             knowledge=list(reversed(candidates))
@@ -558,8 +562,8 @@ def test_planner_caps_and_orders_suggestions_deterministically() -> None:
     assert first_plan.model_dump(mode="json") == second_plan.model_dump(mode="json")
 
 
-def test_planner_accepts_zero_requirements_as_publishable() -> None:
-    plan = build_flow_package_import_plan(
+async def test_planner_accepts_zero_requirements_as_publishable() -> None:
+    plan = await build_flow_package_import_plan(
         _envelope(
             requirements=[],
             assistant=AssistantSpec(instructions="No package resources."),
@@ -601,7 +605,7 @@ def test_envelope_rejects_draft_ref_not_declared_by_requirements() -> None:
     }
 
 
-def test_planner_rejects_invalid_flow_graph_before_install() -> None:
+async def test_planner_rejects_invalid_flow_graph_before_install() -> None:
     resource_free_assistant = AssistantSpec(instructions="No package resources.")
     envelope = _envelope(
         requirements=[],
@@ -617,7 +621,7 @@ def test_planner_rejects_invalid_flow_graph_before_install() -> None:
     )
 
     with pytest.raises(FlowPackageValidationError) as exc_info:
-        build_flow_package_import_plan(
+        await build_flow_package_import_plan(
             envelope,
             candidates=FlowPackageImportPlannerCandidates(),
         )
@@ -637,7 +641,7 @@ def test_planner_rejects_invalid_flow_graph_before_install() -> None:
         ),
     ],
 )
-def test_planner_refuses_a_package_that_reads_run_text_its_form_run_never_collects(
+async def test_planner_refuses_a_package_that_reads_run_text_its_form_run_never_collects(
     instructions: str, question: str | None, form_fields: list[str]
 ) -> None:
     envelope = _envelope(
@@ -651,7 +655,7 @@ def test_planner_refuses_a_package_that_reads_run_text_its_form_run_never_collec
     ]
 
     with pytest.raises(FlowPackageValidationError) as exc_info:
-        build_flow_package_import_plan(
+        await build_flow_package_import_plan(
             envelope, candidates=FlowPackageImportPlannerCandidates()
         )
 
@@ -659,18 +663,20 @@ def test_planner_refuses_a_package_that_reads_run_text_its_form_run_never_collec
     assert exc_info.value.context["reason"] == "flow_input_alias_not_received"
 
 
-def test_planner_accepts_a_package_that_reads_the_run_text_of_a_free_text_run() -> None:
+async def test_planner_accepts_a_package_that_reads_the_run_text_of_a_free_text_run() -> (
+    None
+):
     envelope = _envelope(
         requirements=[],
         assistant=AssistantSpec(instructions="Sammanfatta {{ indata_text }}"),
     )
 
-    build_flow_package_import_plan(
+    await build_flow_package_import_plan(
         envelope, candidates=FlowPackageImportPlannerCandidates()
     )
 
 
-def test_planner_refuses_a_package_with_more_steps_than_a_flow_can_have() -> None:
+async def test_planner_refuses_a_package_with_more_steps_than_a_flow_can_have() -> None:
     assistant = AssistantSpec(instructions="No package resources.")
 
     def package(step_count: int) -> FlowPackageEnvelope:
@@ -688,14 +694,14 @@ def test_planner_refuses_a_package_with_more_steps_than_a_flow_can_have() -> Non
             ],
         )
 
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         package(MAX_FLOW_AUTHORING_STEPS),
         candidates=FlowPackageImportPlannerCandidates(),
     )
     assert plan.package_summary.steps_count == MAX_FLOW_AUTHORING_STEPS
 
     with pytest.raises(FlowPackageValidationError) as exc_info:
-        build_flow_package_import_plan(
+        await build_flow_package_import_plan(
             package(MAX_FLOW_AUTHORING_STEPS + 1),
             candidates=FlowPackageImportPlannerCandidates(),
         )
@@ -707,7 +713,7 @@ def test_planner_refuses_a_package_with_more_steps_than_a_flow_can_have() -> Non
     assert str(MAX_FLOW_AUTHORING_STEPS + 1) in str(exc_info.value)
 
 
-def test_planner_rejects_section_step_whose_prompt_reads_json_step() -> None:
+async def test_planner_rejects_section_step_whose_prompt_reads_json_step() -> None:
     original = _envelope(
         requirements=[],
         extra_steps=[
@@ -745,7 +751,7 @@ def test_planner_rejects_section_step_whose_prompt_reads_json_step() -> None:
     original.spec.steps[0].output_type = OutputType.JSON
 
     with pytest.raises(FlowPackageValidationError) as exc_info:
-        build_flow_package_import_plan(
+        await build_flow_package_import_plan(
             original, candidates=FlowPackageImportPlannerCandidates()
         )
 
@@ -755,7 +761,7 @@ def test_planner_rejects_section_step_whose_prompt_reads_json_step() -> None:
     }
 
 
-def test_planner_rejects_empty_flow_before_reporting_publishable() -> None:
+async def test_planner_rejects_empty_flow_before_reporting_publishable() -> None:
     envelope = _envelope(
         requirements=[],
         assistant=AssistantSpec(instructions="No package resources."),
@@ -769,7 +775,7 @@ def test_planner_rejects_empty_flow_before_reporting_publishable() -> None:
     )
 
     with pytest.raises(FlowPackageValidationError) as exc_info:
-        build_flow_package_import_plan(
+        await build_flow_package_import_plan(
             envelope,
             candidates=FlowPackageImportPlannerCandidates(),
         )
@@ -794,7 +800,7 @@ def test_planner_rejects_empty_flow_before_reporting_publishable() -> None:
         ),
     ],
 )
-def test_planner_fills_only_a_marked_default_transcription_model(
+async def test_planner_fills_only_a_marked_default_transcription_model(
     input_type: InputType,
     input_config: FlowPersistedJsonObject | None,
 ) -> None:
@@ -815,15 +821,15 @@ def test_planner_fills_only_a_marked_default_transcription_model(
         ]
     )
 
-    no_model = build_flow_package_import_plan(
+    no_model = await build_flow_package_import_plan(
         envelope,
         candidates=FlowPackageImportPlannerCandidates(),
         default_transcription_model_id=None,
     )
-    unmarked = build_flow_package_import_plan(
+    unmarked = await build_flow_package_import_plan(
         envelope, candidates=usable, default_transcription_model_id=None
     )
-    marked = build_flow_package_import_plan(
+    marked = await build_flow_package_import_plan(
         envelope, candidates=usable, default_transcription_model_id=UUID(model_id)
     )
 
@@ -883,7 +889,7 @@ def test_audio_upload_graph_requires_transcription_model(
     }
 
 
-def test_planner_omits_model_slot_that_no_step_reads() -> None:
+async def test_planner_omits_model_slot_that_no_step_reads() -> None:
     # The spec loader strips model_ref from a rendering step, so a package that
     # declared a model only for such steps carries a slot nothing reads. The
     # plan neither shows it nor requires a binding for it.
@@ -912,7 +918,7 @@ def test_planner_omits_model_slot_that_no_step_reads() -> None:
         ],
     )
 
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         envelope,
         candidates=FlowPackageImportPlannerCandidates(),
     )
@@ -926,8 +932,8 @@ def test_planner_omits_model_slot_that_no_step_reads() -> None:
     }
 
 
-def test_planner_summary_counts_requirements_by_kind() -> None:
-    plan = build_flow_package_import_plan(
+async def test_planner_summary_counts_requirements_by_kind() -> None:
+    plan = await build_flow_package_import_plan(
         _envelope(
             requirements=[
                 FlowPackageModelRequirement(
@@ -953,8 +959,10 @@ def test_planner_summary_counts_requirements_by_kind() -> None:
     assert plan.can_install_as_draft is False
 
 
-def test_import_plan_storage_projection_round_trips_without_computed_fields() -> None:
-    plan = build_flow_package_import_plan(
+async def test_import_plan_storage_projection_round_trips_without_computed_fields() -> (
+    None
+):
+    plan = await build_flow_package_import_plan(
         _envelope(
             requirements=[],
             assistant=AssistantSpec(instructions="No package resources."),

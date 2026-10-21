@@ -1,5 +1,6 @@
 """Build the downloadable example for filling separate places in a Word template."""
 
+import sys
 from pathlib import Path
 from typing import cast
 
@@ -11,7 +12,9 @@ from docx.shared import Cm, Pt, RGBColor
 from docx.styles.style import ParagraphStyle
 from lxml import etree
 
-from eneo.flows.runtime.document_rendering.docx_content_controls import (
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from tests.docx_controls import (  # noqa: E402
     append_rich_control,
     append_text_control,
 )

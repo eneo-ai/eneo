@@ -121,6 +121,7 @@ from eneo.flows.published_definition import (
     parse_verified_published_definition,
 )
 from eneo.flows.published_runtime import load_published_definition
+from eneo.flows.runtime.document_runtime_preflight import require_document_runtime
 from eneo.flows.runtime.live_transcription.repository import (
     LiveTranscriptRepository,
     LiveTranscriptScope,
@@ -628,6 +629,7 @@ class FlowRunService:
         max_speakers: int | None | NotProvided,
         reused_step_ids: frozenset[UUID],
     ) -> _PreparedRunCreation:
+        await require_document_runtime(definition.runtime_steps())
         normalized_inline_payload = normalize_and_validate_flow_run_payload(
             metadata=definition.metadata(),
             payload=input_payload_json,

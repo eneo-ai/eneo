@@ -842,7 +842,7 @@ def test_plan_proposal_prompt_renders_template_placeholder_evidence() -> None:
     assert "Use output_fields consistent with these user-declared fields." not in prompt
 
 
-def test_plan_proposal_prompt_preserves_inspected_control_metadata() -> None:
+async def test_plan_proposal_prompt_preserves_inspected_control_metadata() -> None:
     blob = control_template_bytes(
         text=[("titel", "Rapportens titel", "Ange ärendets namn")],
         rich=[("analys", "Ekonomisk analys", "Jämför kostnaderna i en tabell")],
@@ -863,7 +863,7 @@ def test_plan_proposal_prompt_preserves_inspected_control_metadata() -> None:
         rich=[("analys", "Miljöanalys", "Beskriv påverkan på naturen")],
     )
     other = attachment.model_copy(update={"id": UUID(int=4), "blob": other_blob})
-    context = build_ai_builder_attachment_context([attachment, other])
+    context = await build_ai_builder_attachment_context([attachment, other])
     assert context is not None
     state = PlanningState.empty()
     state.output_schema_evidence = context.output_schema_evidence

@@ -43,7 +43,7 @@ from eneo.flows.flow_authoring_spec import (
     OutputType,
     StepSpec,
 )
-from eneo.flows.runtime.document_rendering.docx_content_controls import (
+from tests.docx_controls import (
     append_text_control,
 )
 from tests.integration.flows.conftest import _flow_worker_environment

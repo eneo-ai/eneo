@@ -77,6 +77,13 @@ def _entry(
 
 
 FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
+    FlowApiErrorCode.DOCUMENT_RUNTIME_REQUIRED: _entry(
+        category="Flow settings",
+        surfaced_through="API error response",
+        cause="The flow has document steps and the shared tool runtime is not configured.",
+        consumer_action="Configure the shared tool runtime before publishing or starting a run.",
+        user_action="Ask an administrator to configure document rendering.",
+    ),
     FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_REQUIRES_ONE_AUDIO_FILE: _entry(
         category="Run input",
         surfaced_through="API error response",

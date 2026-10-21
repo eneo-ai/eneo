@@ -104,7 +104,7 @@ class FlowTemplateAssetService:
                 if content.variant is FileContentVariant.ORIGINAL
             )
             document_bytes = b"".join([chunk async for chunk in original.chunks])
-            placeholders = docx_template_placeholder_names(
+            placeholders = await docx_template_placeholder_names(
                 document_bytes,
                 filename=prepared.name,
             )
@@ -162,7 +162,9 @@ class FlowTemplateAssetService:
                 "The selected DOCX template could not be read because the file content is missing.",
                 code=FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value,
             )
-        placeholders = docx_template_placeholder_names(file.blob, filename=file.name)
+        placeholders = await docx_template_placeholder_names(
+            file.blob, filename=file.name
+        )
         reusable = await self.template_asset_repo.find_ready_for_file(
             flow_id=persisted_flow_id,
             tenant_id=self.user.tenant_id,
@@ -202,7 +204,9 @@ class FlowTemplateAssetService:
             "file_id": file.id,
             "file_name": file.name,
             "template_name": asset.name,
-            "placeholders": inspect_docx_template_bytes(file.blob, filename=file.name),
+            "placeholders": await inspect_docx_template_bytes(
+                file.blob, filename=file.name
+            ),
             "extracted_text_preview": extract_docx_template_text_preview(file.blob),
             "status": asset.status,
         }
@@ -253,7 +257,9 @@ class FlowTemplateAssetService:
     ) -> tuple[FlowTemplateAsset, File, tuple[str, ...]]:
         asset, file = await self.get_asset_with_file(flow_id=flow_id, asset_id=asset_id)
         # Publication preserves its existing archive error for absent bytes.
-        names = docx_template_placeholder_names(file.blob or b"", filename=file.name)
+        names = await docx_template_placeholder_names(
+            file.blob or b"", filename=file.name
+        )
         return asset, file, names
 
     async def get_asset_with_file(

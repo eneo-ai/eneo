@@ -36,17 +36,11 @@ ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base
 # Production stage
 FROM python:3.11-slim-bookworm
 
-# Runtime dependencies:
-# - ffmpeg/libsndfile1 support audio; libmagic1 supports file type detection.
-# - fontconfig/fonts/harfbuzz/pango support WeasyPrint PDF rendering.
+# Runtime dependencies: ffmpeg/libsndfile1 support audio; libmagic1 supports
+# file type detection. Documents are rendered by the tool runtime image.
 RUN apt-get update && apt-get install -y \
     ffmpeg \
-    fontconfig \
-    fonts-dejavu-core \
-    libharfbuzz-subset0 \
     libmagic1 \
-    libpango-1.0-0 \
-    libpangoft2-1.0-0 \
     libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 

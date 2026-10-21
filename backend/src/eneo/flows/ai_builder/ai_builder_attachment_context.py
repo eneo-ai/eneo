@@ -450,7 +450,7 @@ def _template_placeholder_evidence(
     return tuple(evidence)
 
 
-def build_ai_builder_attachment_context(
+async def build_ai_builder_attachment_context(
     files: list[File],
     *,
     policy: AIBuilderAttachmentContextPolicy | None = None,
@@ -461,7 +461,7 @@ def build_ai_builder_attachment_context(
 
     resolved_policy = policy or AIBuilderAttachmentContextPolicy()
     readable_text_by_file = {file.id: readable_attachment_text(file) for file in files}
-    template_placeholders_by_file = _inspect_template_placeholders(
+    template_placeholders_by_file = await _inspect_template_placeholders(
         files,
         policy=resolved_policy,
     )
@@ -521,7 +521,7 @@ def build_ai_builder_attachment_context(
     )
 
 
-def build_ai_builder_attachment_context_for_model(
+async def build_ai_builder_attachment_context_for_model(
     files: list[File],
     *,
     policy: AIBuilderAttachmentContextPolicy,
@@ -558,7 +558,7 @@ def build_ai_builder_attachment_context_for_model(
             <= attachment_token_budget
         )
 
-    return build_ai_builder_attachment_context(
+    return await build_ai_builder_attachment_context(
         files,
         policy=policy,
         fits_context=fits_context,
@@ -703,7 +703,7 @@ def _validate_attachment_planning_state_payload(
         )
 
 
-def _inspect_template_placeholders(
+async def _inspect_template_placeholders(
     files: list[File],
     *,
     policy: AIBuilderAttachmentContextPolicy,
@@ -733,7 +733,7 @@ def _inspect_template_placeholders(
             )
 
         try:
-            placeholders = inspect_docx_template_placeholders(
+            placeholders = await inspect_docx_template_placeholders(
                 file.blob,
                 filename=file.name,
             )

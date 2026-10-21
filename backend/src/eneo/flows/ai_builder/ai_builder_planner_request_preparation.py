@@ -346,7 +346,7 @@ async def prepare_planner_request(
         attachment_context_result = request.prepared_attachment_context
         schema_candidates = request.prepared_schema_candidates
     else:
-        attachment_context_result = build_ai_builder_attachment_context_for_model(
+        attachment_context_result = await build_ai_builder_attachment_context_for_model(
             request.attachment_files,
             policy=request.attachment_context_policy,
             model_name=request.completion_model_route.litellm_model,

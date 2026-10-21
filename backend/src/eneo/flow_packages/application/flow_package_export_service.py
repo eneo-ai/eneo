@@ -202,7 +202,7 @@ class FlowPackageExportService:
                     raise BadRequestException(
                         "The original Word template is unavailable."
                     )
-                descriptor = inspect_package_template(
+                descriptor = await inspect_package_template(
                     file.blob, filename=asset.name, included=include_templates
                 )
             except (BadRequestException, NotFoundException, ValueError) as exc:

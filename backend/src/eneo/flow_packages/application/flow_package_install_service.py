@@ -88,7 +88,7 @@ class ResolvedFlowPackageInstallCommand:
         return self.import_plan.target_state.default_transcription_model_id
 
 
-def resolve_flow_package_install_command(
+async def resolve_flow_package_install_command(
     *,
     envelope: FlowPackageEnvelope,
     import_plan: FlowPackageImportPlan,
@@ -130,7 +130,7 @@ def resolve_flow_package_install_command(
     files = (
         template_files
         if template_files is not None
-        else resolve_flow_package_template_files(envelope)
+        else await resolve_flow_package_template_files(envelope)
     )
     upload_checksums = {
         requirement.slot_ref.ref: files[requirement.slot_ref.ref].checksum

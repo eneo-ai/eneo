@@ -44,6 +44,9 @@ from tests.unittests.flows.ai_builder.test_ai_builder_runtime_lineage import (
     no_result_evidence,
 )
 
+# Templates are read and documents rendered in the shared tool runtime.
+pytestmark = pytest.mark.usefixtures("shared_document_runtime")
+
 _SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
 
 
@@ -355,7 +358,7 @@ def test_a_template_file_that_cannot_be_resolved_is_a_typed_issue_never_a_skip(
     assert [i.code for i in issues] == ["template_file_unresolved"]
 
 
-def test_the_template_is_read_by_the_harnesss_own_fixture_function(
+async def test_the_template_is_read_by_the_harnesss_own_fixture_function(
     arm: ModuleType, harness: ModuleType
 ) -> None:
     """The bytes are the manifest-verified fixture the run uploads."""
@@ -368,7 +371,7 @@ def test_the_template_is_read_by_the_harnesss_own_fixture_function(
 
     from eneo.flows.runtime.docx_template_runtime import docx_template_placeholder_names
 
-    names = docx_template_placeholder_names(read(name), filename=name)
+    names = await docx_template_placeholder_names(read(name), filename=name)
     spec = _template_spec(
         output_config={
             "bindings": {

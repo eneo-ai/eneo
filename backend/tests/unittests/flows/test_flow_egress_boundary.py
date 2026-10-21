@@ -22,8 +22,8 @@ This is a guard for known direct sinks, not a proof. It cannot see dynamic
 imports (``importlib.import_module``, ``__import__``), names built at run time
 (``getattr(module, name)``), aliases made any other way than ``import ... as`` or
 ``alias = module``, or a connection opened inside an allowed package: an SDK such
-as litellm or redis connects on its own, and weasyprint's URL fetcher is denied by
-the renderer, not here. Reviewing what a new allowlist entry can reach is part of
+as litellm or redis connects on its own; documents are rendered by the shared tool
+runtime, whose own sandbox decides what it may fetch. Reviewing what a new allowlist entry can reach is part of
 adding it.
 
 The live-transcription exception connects to an endpoint a flow author cannot
@@ -102,8 +102,6 @@ FIRST_PARTY_CONNECTORS = {
 ALLOWED_THIRD_PARTY = {
     "anyio": "async helpers; its connect and DNS functions are refused by name below",
     "dependency_injector": "wiring",
-    "docx": "Word documents, in memory",
-    "docx2python": "Word documents, in memory",
     "fastapi": "the HTTP API flows serve",
     "httpx": "passive types and exceptions only, checked separately below",
     "jsonschema": (
@@ -112,7 +110,6 @@ ALLOWED_THIRD_PARTY = {
         "import it"
     ),
     "litellm": "model provider SDK; the destination is the tenant's provider setting",
-    "lxml": "XML, in memory",
     "magic": "file type sniffing, in memory",
     "markdown_it": "markdown rendering",
     "opentelemetry": "telemetry to the operator's collector",

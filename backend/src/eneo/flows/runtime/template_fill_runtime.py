@@ -182,7 +182,7 @@ async def complete_template_fill_step(
 ) -> StepExecutionOutput:
     current_stage = "rendering the DOCX template"
     try:
-        blob, mimetype = render_docx_template(
+        blob, mimetype = await render_docx_template(
             template_bytes=prepared.template_blob,
             template_name=prepared.template_file_name,
             context=prepared.resolved_bindings,

@@ -13,6 +13,7 @@ import type { QueryJobResult, SheetMetadata } from "./tools/tabular/ports";
 import { tabularTools } from "./tools/tabular/tool";
 import { queryResultView } from "./tools/tabular/view";
 import { computeResultView } from "./tools/compute/view";
+import { documentControlRenderer } from "./tools/documents/control";
 import type { InspectResult, RenderResult } from "./tools/documents/ports";
 import {
   builtinTemplateProvider,
@@ -172,6 +173,7 @@ const fetch = createHandler({
   endpoints,
   builtinTemplate,
   inspectTemplate: inspector,
+  renderDocument: documentControlRenderer(render, config.documents.max_export_bytes),
   maxBodyBytes: config.maxBodyBytes,
 });
 

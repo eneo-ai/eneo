@@ -106,6 +106,7 @@ from eneo.flows.published_definition import (
     build_published_definition_json,
     parse_published_runtime_steps,
 )
+from eneo.flows.runtime.document_runtime_preflight import require_document_runtime
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from eneo.settings.encryption_service import EncryptionService
@@ -633,6 +634,7 @@ class FlowService:
 
     async def publish_flow(self, *, flow_id: UUID) -> Flow:
         flow = await self.get_flow(flow_id)
+        await require_document_runtime(flow.steps)
         normalized_metadata = normalize_persisted_flow_metadata(flow.metadata_json)
         # The graph check reads each assistant's prompt (an input channel), so
         # the assistants load first, once the scope check has cleared them.

@@ -62,10 +62,28 @@ Each group lands as its own commit with the reference tests it touches.
 | --- | --- | --- |
 | Shared authoring operations for REST and MCP | `flows/application/flow_authoring_operations.py`, `flow_authoring_router.py`, `flow_models.py` | Transfer |
 | Flow-bound chat and loopback `flows` MCP server | `flow_authoring_chat*.py`, `flow_authoring_chats` table, `internal_mcp/flows.py`, session-bound internal tokens | Transfer and tidy |
-| Document rendering through tool-runtime | `document_rendering/*`, `docx_template_runtime.py`, `document_runtime_preflight.py`, `document_templates/runtime_client.py`, `tool-runtime/src/tools/documents/control.ts` | Transfer |
+| Document rendering through tool-runtime | `document_rendering/*`, `docx_template_runtime.py`, `document_runtime_preflight.py`, `document_templates/runtime_client.py`, `tool-runtime/src/tools/documents/control.ts` | Transferred; the reference's template and rendering tests run against a real runtime |
 | Worker settings | `worker/flow_tasks.py`, `worker/arq.py` | Not yet: the reference already dispatches through ARQ and JobManager with separate execution and maintenance queues |
 | Flow run retention | deletions of retention services | Open decision, see below |
 | Develop-era reversions in platform files | for example `worker/routes.py` API key maintenance | Not transferred; the reference behaviour stays |
+
+## Documents
+
+The tool runtime renders Markdown to Word and PDF and fills Word templates; the
+Python Word writer, content-control engine and WeasyPrint renderer are gone from
+the backend. The core keeps the flow template contract: the runtime reports each
+control's facts (container, table cell, heading level, refusal reason) and
+`docx_template_runtime.py` applies the reference's profile and error codes on
+top. Two runtime changes came from the reference's tests: a single-line text
+control joins its lines with spaces, and a control's hint keeps its paragraphs,
+line breaks and tabs. Busy runtime answers (429) are retried briefly. The
+adoption checkpoint's rewritten template tests were not taken; the reference's
+own tests are kept and pass through the runtime, except where they asserted the
+retired engine's internals (injected renderers, WeasyPrint options).
+
+Backend tests start `tool-runtime/tests/support/document-control-server.ts`
+through the `shared_document_runtime` fixture; CI installs Bun, the runtime and
+its PDF sidecar in the backend job.
 
 ## Open decisions
 

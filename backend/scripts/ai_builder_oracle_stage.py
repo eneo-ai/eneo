@@ -29,15 +29,17 @@ usage: ai_builder_oracle_stage.py --cases-file CASES --selection SELECTION.json 
 from __future__ import annotations
 
 import argparse
+import asyncio
+import concurrent.futures
 import csv
 import hashlib
 import importlib
 import io
 import json
 import sys
-from collections.abc import Mapping, Sequence
+from collections.abc import Coroutine, Mapping, Sequence
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 _SCRIPTS = Path(__file__).resolve().parent
 # Standalone script: a test loads it by path, which does not put this directory
@@ -78,6 +80,20 @@ AUTHOR_DOCS: tuple[tuple[str, int | None, int | None], ...] = (
 )
 
 
+_T = TypeVar("_T")
+
+
+def _run_to_completion(coroutine: Coroutine[Any, Any, _T]) -> _T:
+    """Run a coroutine from this synchronous tool, also when its caller is
+    already inside an event loop (the tests drive it from one)."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, coroutine).result()
+
+
 def _sha256(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
@@ -115,7 +131,9 @@ def _docx_rendering(payload: bytes, *, filename: str) -> str:
     )
 
     text = extract_docx_text(payload)
-    fields = inspect_docx_template_placeholders(payload, filename=filename)
+    fields = _run_to_completion(
+        inspect_docx_template_placeholders(payload, filename=filename)
+    )
     if not fields:
         return text
     lines = [f"- {field.name} — {field.label} ({field.kind})" for field in fields]

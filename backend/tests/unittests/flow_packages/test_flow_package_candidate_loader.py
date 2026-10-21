@@ -212,7 +212,7 @@ def test_knowledge_candidates_use_domain_labels_and_fallbacks() -> None:
     }
 
 
-def test_loaded_candidates_feed_import_plan_exact_model_resolution() -> None:
+async def test_loaded_candidates_feed_import_plan_exact_model_resolution() -> None:
     model = _completion_model(
         id=UUID("15151515-1515-4515-8515-151515151515"),
         name="Local GPT",
@@ -227,7 +227,7 @@ def test_loaded_candidates_feed_import_plan_exact_model_resolution() -> None:
         websites=[],
         integration_knowledge=[],
     )
-    plan = build_flow_package_import_plan(
+    plan = await build_flow_package_import_plan(
         _envelope(
             requirements=[
                 FlowPackageModelRequirement(

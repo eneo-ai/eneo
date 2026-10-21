@@ -893,3 +893,22 @@ class TextExtractor:
         return await extract_in_process(
             filepath, mimetype, filename or filepath.name, limits=limits
         )
+
+
+def extract_docx_body_text(document_bytes: bytes) -> str:
+    """Read body paragraphs, controls and tables using the shared Word reader.
+
+    Page furniture is deliberately excluded for consumers of a document's body.
+    Callers enforce archive limits before passing untrusted bytes here.
+    """
+    from io import BytesIO
+
+    with docx2python(BytesIO(document_bytes)) as content:
+        return "\n\n".join(
+            paragraph.strip()
+            for table in content.body
+            for row in table
+            for cell in row
+            for paragraph in cell
+            if paragraph.strip()
+        )

@@ -614,40 +614,41 @@ itself is deterministic and reports zero model tokens.
 
 ### How do DOCX templates and DOCX rendering work?
 
-Both DOCX modes write through one owner, `document_rendering/docx_writer.py`,
-which turns the block model (headings, paragraphs, bullet and numbered lists
-nested up to three levels, tables, code, bold, italic, code spans, links) into
-WordprocessingML using the target document's own styles: `Heading N`, `List
-Bullet`/`List Number` and their level variants, the template's default table
-style with the first row marked as a repeating header row, and a fresh numbering
-instance per numbered list, including a restart for each new nested list. Mixed
-bullet/number nesting, nesting beyond three levels, nested numbered lists
-that do not start at one, and parent-item text after a nested list are refused
-with a typed error. Put all parent-item text before its nested list. The writer
-uses the template's styles and preserves its static content; authors still need
-to check their template and filled output in Word. Skipped heading levels and
-headings deeper than six are refused.
+The shared tool runtime renders and fills every Word and PDF document, the same
+engine the chat document tools use. The core prepares what it sends and checks
+what comes back: `runtime/document_rendering/service.py` holds a document to
+the render limits and turns the block model into Markdown
+(`markdown_projection.py`) with its headings numbered from one; skipped heading
+levels and outlines deeper than six levels are refused before the runtime is
+called. The runtime writes headings, paragraphs, bullet and numbered lists,
+tables with a repeating header row, code, bold, italic, code spans and links
+with the template's own styles, and a fresh numbering instance per numbered
+list. Mixed bullet/number nesting, nesting beyond three levels, nested numbered
+lists that do not start at one, and parent-item text after a nested list are
+refused with a typed error.
 
-`render_verbatim` fills the standard body template
-(`runtime/templates/standard/dokument.docx`). It preserves text before the title;
-writer guidance asks the model to start with a title. The runtime template has
-styles, Swedish language and page numbering, with no organisation name or logo.
-`template_fill` writes into Word
-content controls (`runtime/document_rendering/docx_content_controls.py`): the control's tag is the
-placeholder name a binding addresses, the title is its label, and the
-placeholder text is the authoring hint the AI Builder reads. Two kinds are
-supported: body-level rich text controls (a whole section; markdown is parsed
+`render_verbatim` renders into the runtime's built-in template: styles,
+Swedish language, the document title and page numbering in the footer, no
+organisation name or logo. Publishing a flow with a Word or PDF step, or
+starting its run, is refused with `flow_document_runtime_required` when no
+runtime answers (`runtime/document_runtime_preflight.py`).
+
+`template_fill` writes into Word content controls
+(`runtime/docx_template_runtime.py`): the control's tag is the placeholder name
+a binding addresses, the title is its label, and the placeholder text is the
+authoring hint the AI Builder reads. The runtime reads the controls and reports
+where each one sits; the core holds them to the flow profile. Two kinds are
+supported: body-level rich text controls (a whole section; Markdown is parsed
 and sub-headings are placed relative to the nearest preceding heading) and
 inline text controls (one line, or several with `multiLine`). Controls without
 a tag, duplicate tags, nested controls, XML-mapped controls, other control
 kinds and controls in table cells, headers or footers are refused at
 inspection, before a template can be selected. Rich controls must be direct
 children of the document body; text controls must be inside body paragraphs.
-Templates must contain at least one supported control. Existing templates that
-use `{{...}}` text placeholders must be converted to tagged Word content controls
-and uploaded again before publication. Upload, publish and runtime reject a
-template with no controls; ordinary DOCX attachments can still be used as source
-documents in the Builder.
+Templates must contain at least one supported control; `{{...}}` text
+placeholders are not fill targets and must be converted to tagged Word content
+controls before publication. Ordinary DOCX attachments can still be used as
+source documents in the Builder.
 Every control must have a binding before publication. Bindings must select text
 outputs, scalar fields in declared output contracts, scalar form fields or known
 scalar system values. Whole objects, arrays and unknown value shapes are refused
@@ -655,15 +656,13 @@ at publication. A binding that resolves to nothing at runtime is an error; an
 explicit empty binding removes the control and keeps the surrounding static
 content. Source and text size limits include both inline fields and rich sections.
 The finished document's text is read through `docx2python`, which sees control
-content; python-docx's paragraph API does not.
+content.
 
-The templates (`dokument`, `rapport`, `motesprotokoll`) are built by
+The example templates (`dokument`, `rapport`, `motesprotokoll`) are built by
 `backend/scripts/build_standard_docx_templates.py` and committed under
-`backend/src/eneo/flows/runtime/templates/standard/`. Only `dokument` is a runtime
-default. `rapport` and `motesprotokoll` are neutral developer examples: copy a
-file from that directory, add branding and edit controls in Word's Developer
-tab, then upload it as a DOCX template in the Flow editor or attach it in the
-AI Builder. There is currently no example-template download in the editor.
+`backend/src/eneo/flows/runtime/templates/standard/`. They are neutral
+developer examples: copy a file from that directory, add branding and edit
+controls in Word's Developer tab, then upload it as a DOCX template.
 
 The Builder projects each selected control's tag, kind, label and hint into its
 proposal prompt as bounded, untrusted template evidence. Selecting a different

@@ -4,7 +4,7 @@
 // content controls and {{placeholders}} (see inspect.ts); a control is reduced to a
 // placeholder of its own before the one patch call (controls.ts), and list definitions are
 // added to the numbering part first (numbering.ts).
-import { PatchType, TextRun, patchDocument, type IPatch } from "docx";
+import { Paragraph, PatchType, TextRun, patchDocument, type IPatch } from "docx";
 import { ToolError } from "../../../../errors";
 import { parseMarkdown, type Block } from "../../markdown/parse";
 import type { DocumentSpec } from "../../ports";
@@ -134,7 +134,10 @@ async function patchTemplate(
       // A name may recur, in the body and in a header alike; every occurrence takes the value.
       for (const { placeholder, sdt } of controls) {
         if (placeholder.name !== fill.placeholder.name || !placeholder.supported) continue;
-        if (fill.value === "") {
+        if (
+          fill.value === "" &&
+          !(fill.placeholder === inspection.contentPlaceholder && options.title !== undefined)
+        ) {
           removeControl(part.root, sdt);
           continue;
         }
@@ -197,6 +200,7 @@ async function patchTemplate(
       lists: own,
       headingShift: patch.headingShift,
     });
+    if (!children.length) children.push(new Paragraph({ children: [] }));
     patches[patch.token] = {
       type: PatchType.DOCUMENT,
       children:
@@ -242,6 +246,7 @@ async function setCoreProperties(
   set("dc:title", properties.title);
   set("dc:language", properties.language);
   set("dc:creator", properties.creator);
+  set("cp:lastModifiedBy", properties.creator);
   zip.file("docProps/core.xml", serializeXml(core));
   return Buffer.from(await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
 }
@@ -282,7 +287,7 @@ export async function renderIntoTemplate(
       placeholder.location === "body" &&
       ["title", "titel", "rubrik"].includes(placeholder.name.toLowerCase()),
   );
-  const lead = !titled && !startsWithTitle;
+  const lead = document.includeTitle !== false && !titled && !startsWithTitle;
   const content = inspection.contentPlaceholder;
   if (content) fills.push({ placeholder: content, value: document.content });
   return patchTemplate(zip, inspection, fills, {

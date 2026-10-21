@@ -637,7 +637,7 @@ class AIBuilderPlanner:
         # pass over the request is what the first question waits on.
         if attachment_files:
             yield build_status_event(AIBuilderStatus.READING_SOURCES)
-        prepared_attachment_context = build_ai_builder_attachment_context_for_model(
+        prepared_attachment_context = await build_ai_builder_attachment_context_for_model(
             attachment_files or [],
             policy=attachment_context_policy,
             model_name=litellm_model,

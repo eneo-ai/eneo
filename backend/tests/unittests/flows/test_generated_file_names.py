@@ -15,6 +15,9 @@ from eneo.flows.runtime.document_rendering.service import (
 )
 from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 
+# Templates are read and documents rendered in the shared tool runtime.
+pytestmark = pytest.mark.usefixtures("shared_document_runtime")
+
 # 22:30 UTC on 23 September is already the 24th in Stockholm; Eneo has no
 # time zone to name that day by, so a run is dated by its UTC day.
 RUN_CREATED_AT = datetime(2026, 9, 23, 22, 30, tzinfo=timezone.utc)
@@ -195,11 +198,13 @@ def test_a_flow_named_after_a_windows_device_downloads_under_a_usable_name(
 
 
 @pytest.mark.parametrize("noncharacter", ["\ufffe", "\uffff", "\ufdd0"])
-def test_a_noncharacter_leaves_a_title_a_docx_can_carry(noncharacter: str) -> None:
+async def test_a_noncharacter_leaves_a_title_a_docx_can_carry(
+    noncharacter: str,
+) -> None:
     names = _names(f"Möte{noncharacter}", _step(1, "docx"))
     title = names.stem(step_order=1, output_type="docx")
 
-    blob, _ = default_document_render_service().render_document(
+    blob, _ = await default_document_render_service().render_document(
         "Text", "docx", step_order=1, title=title
     )
 

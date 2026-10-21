@@ -23,6 +23,9 @@ from eneo.flows.runtime.docx_template_runtime import (
 from eneo.main.exceptions import BadRequestException
 from tests.docx_template_fixtures import control_template_bytes
 
+# Templates are read and documents rendered in the shared tool runtime.
+pytestmark = pytest.mark.usefixtures("shared_document_runtime")
+
 _SCRIPTS = Path(__file__).resolve().parents[4] / "scripts"
 SENTINEL = "ORACLE-SENTINEL-2b9c"
 
@@ -400,11 +403,11 @@ TEMPLATE_FIELD_COUNTS = {
 }
 
 
-def _platform_field_lines(payload: bytes, name: str) -> list[str]:
+async def _platform_field_lines(payload: bytes, name: str) -> list[str]:
     """The fields the platform's own reader finds, one staged line each."""
     return [
         f"- {spec.name} — {spec.label} ({spec.kind})"
-        for spec in inspect_docx_template_placeholders(payload, filename=name)
+        for spec in await inspect_docx_template_placeholders(payload, filename=name)
     ]
 
 
@@ -443,7 +446,7 @@ def test_a_template_rendering_ends_with_its_fields_in_document_order(
     )
 
 
-def test_every_selected_template_lists_exactly_the_platforms_fields(
+async def test_every_selected_template_lists_exactly_the_platforms_fields(
     harness: ModuleType, stage: ModuleType, tmp_path: Path
 ) -> None:
     """Each selected case's attachments are staged from the corpus: a document
@@ -461,7 +464,9 @@ def test_every_selected_template_lists_exactly_the_platforms_fields(
             )
             payload = (stage.FIXTURES / name).read_bytes()
             lines = (
-                _platform_field_lines(payload, name) if name.endswith(".docx") else []
+                await _platform_field_lines(payload, name)
+                if name.endswith(".docx")
+                else []
             )
             if not lines:
                 assert FIELDS_HEADING not in rendering, (case_id, name)
@@ -484,7 +489,7 @@ def test_every_selected_template_lists_exactly_the_platforms_fields(
     assert "- upphorande_anledning — Anledning (text)\n- besked_datum — " in nar07
 
 
-def test_a_docx_without_fields_is_rendered_exactly_as_its_text(
+async def test_a_docx_without_fields_is_rendered_exactly_as_its_text(
     harness: ModuleType, stage: ModuleType, tmp_path: Path
 ) -> None:
     plain = Document()
@@ -502,7 +507,7 @@ def test_a_docx_without_fields_is_rendered_exactly_as_its_text(
     plain_fixtures = 0
     for path in sorted(stage.FIXTURES.glob("*.docx")):
         payload = path.read_bytes()
-        if _platform_field_lines(payload, path.name):
+        if await _platform_field_lines(payload, path.name):
             continue
         plain_fixtures += 1
         assert stage._extract_text(path) == extract_docx_text(payload), path.name
