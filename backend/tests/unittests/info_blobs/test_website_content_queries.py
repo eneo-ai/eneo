@@ -5,6 +5,10 @@ from uuid import uuid4
 
 from sqlalchemy.dialects import postgresql
 
+from eneo.database.tables.info_blobs_table import (
+    website_navigation_path,
+    website_path_below,
+)
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 
 
@@ -35,7 +39,10 @@ async def test_content_filters_apply_to_both_count_and_page_without_loading_text
     for statement in sql:
         assert str(website_id) in statement
         assert "version_state = 'active'" in statement
-        assert r"LIKE 'https://example.test/A\%20B\_/%'" in statement
+        # A byte-order range, not LIKE: the website path index serves it.
+        assert "COLLATE \"C\") >= 'https://example.test/A%20B_/'" in statement
+        assert "COLLATE \"C\") < 'https://example.test/A%20B_0'" in statement
+        assert "LIKE 'https://example.test" not in statement
         assert r"ILIKE '%50\%\_pdf%'" in statement
         # The search runs below the selected directory, never over the host.
         assert "substr(" in statement
@@ -85,3 +92,19 @@ async def test_directory_query_limits_output_and_filters_before_grouping():
     assert "info_blobs.text" not in sql
     assert result.items == []
     assert result.next_cursor is None
+
+
+def test_navigation_path_inlines_its_constants_like_its_index():
+    compiled = website_navigation_path().compile(dialect=postgresql.dialect())
+    assert compiled.params == {}
+    assert "'^https?://[^/]+$'" in str(compiled)
+
+
+def test_directory_range_ends_at_the_successor_of_its_last_character():
+    compiled = website_path_below("https://example.test/Å/").compile(
+        dialect=postgresql.dialect()
+    )
+    assert sorted(compiled.params.values()) == [
+        "https://example.test/Å/",
+        "https://example.test/Å0",
+    ]

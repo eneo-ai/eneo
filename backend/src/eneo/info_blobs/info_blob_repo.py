@@ -18,6 +18,8 @@ from eneo.database.tables.info_blobs_table import (
     InfoBlobs,
     InfoBlobVersionState,
     active_info_blob_version,
+    website_navigation_path,
+    website_path_below,
     website_source_url_equals,
 )
 from eneo.database.tables.integration_table import IntegrationKnowledge
@@ -1022,12 +1024,8 @@ class InfoBlobRepository:
                 _title_or_url_matches(q.strip(), self._website_search_path(prefix))
             )
         if prefix:
-            # URL paths are case sensitive. Escape LIKE metacharacters in real URLs.
-            conditions.append(
-                self._website_url_path().like(
-                    f"{_like_literal(prefix)}%", escape=_LIKE_ESCAPE
-                )
-            )
+            # URL paths are case sensitive; the range compares them byte by byte.
+            conditions.append(website_path_below(prefix))
         total_count = await self.session.scalar(
             sa.select(sa.func.count()).select_from(InfoBlobs).where(*conditions)
         )
@@ -1056,26 +1054,13 @@ class InfoBlobRepository:
         )
 
     @staticmethod
-    def _website_url_path() -> ColumnElement[str]:
-        # Legacy rows predate website_source_url. Strip queries/fragments only
-        # for navigation; the stored source identity and content links stay intact.
-        path = sa.func.split_part(
-            sa.func.split_part(
-                sa.func.coalesce(InfoBlobs.website_source_url, InfoBlobs.url), "?", 1
-            ),
-            "#",
-            1,
-        )
-        return sa.case((path.op("~")(r"^https?://[^/]+$"), path + "/"), else_=path)
-
-    @staticmethod
     def _website_search_path(prefix: str) -> ColumnElement[str]:
         """The URL below the selected directory, or below the origin.
 
         The scheme and host are never searched, so the website's own name does
         not match every resource. Mirrors ``url_anchor`` for integrations.
         """
-        url = InfoBlobRepository._website_url_path()
+        url = website_navigation_path()
         if prefix:
             return sa.func.substr(url, len(prefix) + 1)
         return sa.func.regexp_replace(url, r"^https?://[^/]+", "")
@@ -1090,12 +1075,12 @@ class InfoBlobRepository:
     ) -> WebsiteContentFolderPage:
         """List one level across the entire active index, with bounded output.
 
-        Each call groups every active row of the website: the directory is a
-        URL expression with no index of its own, so the cost grows with the
-        website's size, not with the page returned. A stored path column
-        would be the next step if large websites make expansion slow.
+        Below a directory, ``ix_info_blobs_active_website_path`` limits the
+        grouping to that directory's rows. The website level groups every
+        active row of the website, so its cost grows with the website's size,
+        not with the page returned.
         """
-        url = self._website_url_path()
+        url = website_navigation_path()
         conditions = [
             InfoBlobs.website_id == website_id,
             active_info_blob_version(),
@@ -1105,7 +1090,7 @@ class InfoBlobRepository:
             remainder = sa.func.substr(url, len(prefix) + 1)
             conditions.extend(
                 [
-                    url.like(f"{_like_literal(prefix)}%", escape=_LIKE_ESCAPE),
+                    website_path_below(prefix),
                     sa.func.strpos(remainder, "/") > 0,
                     sa.func.split_part(remainder, "/", 1) != "",
                 ]
