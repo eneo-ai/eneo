@@ -21,11 +21,13 @@ export function dailySeries(rows: Cell[][], dateAt: number, valueAt: number): Da
   const values: (number | null)[] = [];
   let from = "";
   for (const [index, row] of rows.entries()) {
-    const time = dayOf(row[dateAt] ?? null, index + 1);
+    // Rows as the reader counts them in the file, with the header as row 1.
+    const line = index + 2;
+    const time = dayOf(row[dateAt] ?? null, line);
     if (previous !== undefined && time <= previous)
       throw new ToolError(
         "UNORDERED_DATES",
-        `Row ${index + 1}: ${isoDay(time)} comes after ${isoDay(previous)}. ` +
+        `Row ${line}: ${isoDay(time)} comes after ${isoDay(previous)}. ` +
           "Dates must be in ascending order with each day once; sort or aggregate the rows with query_table.",
       );
     if (previous !== undefined && time > previous + DAY_MS)
@@ -37,7 +39,7 @@ export function dailySeries(rows: Cell[][], dateAt: number, valueAt: number): Da
       );
     if (previous === undefined) from = isoDay(time);
     previous = time;
-    values.push(valueOf(row[valueAt] ?? null, index + 1));
+    values.push(valueOf(row[valueAt] ?? null, line));
   }
   return { from, values };
 }
@@ -71,12 +73,15 @@ function valueOf(cell: Cell, row: number): number | null {
   );
 }
 
-/** A calendar day as UTC midnight. A CSV or XLSX date arrives as `YYYY-MM-DD` (sources.ts). */
+/**
+ * A calendar day as UTC midnight. A CSV or XLSX date arrives as `YYYY-MM-DD` (sources.ts); a
+ * system export that writes each day as midnight (`2026-01-01 00:00:00`) is the same day.
+ */
 function dayOf(cell: Cell, row: number): number {
   const text = String(cell ?? "").trim();
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  const match = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]00:00(?::00(?:\.0+)?)?(?:Z|[+-]00:?00)?)?$/.exec(text);
   const time = match ? Date.UTC(+match[1]!, +match[2]! - 1, +match[3]!) : NaN;
-  if (match && isoDay(time) === text) return time;
+  if (match && isoDay(time) === text.slice(0, 10)) return time;
   const timed = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(text);
   throw new ToolError(
     "INVALID_DATES",

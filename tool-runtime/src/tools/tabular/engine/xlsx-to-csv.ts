@@ -288,14 +288,18 @@ async function emptyFormulaResults(
   return result;
 }
 
+/**
+ * A date as text: a date with no time of day is written as one, so the column types as DATE
+ * rather than TIMESTAMP; a column mixing both still types as TIMESTAMP.
+ */
+export function dateText(value: Date): string {
+  const iso = value.toISOString();
+  return iso.endsWith("T00:00:00.000Z") ? iso.slice(0, 10) : iso;
+}
+
 function cellToText(value: ExcelJS.CellValue): string {
   if (value === null || value === undefined) return "";
-  if (value instanceof Date) {
-    // A cell holding only a date (no time of day) is written as one, so the column types
-    // as DATE rather than TIMESTAMP; a column mixing both still types as TIMESTAMP.
-    const iso = value.toISOString();
-    return iso.endsWith("T00:00:00.000Z") ? iso.slice(0, 10) : iso;
-  }
+  if (value instanceof Date) return dateText(value);
   if (typeof value === "object") {
     if ("richText" in value)
       return value.richText.map((run) => run.text).join("");

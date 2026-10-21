@@ -65,13 +65,13 @@ const BASE_RULES = [
  * The forecast sidecar's Python (tools/forecast/engine/timestral.ts) with torch's native
  * libraries inside its venv, as the environment names it when a child is started.
  */
-function forecastPythonRules(): string[] {
+function forecastPython(): string[] {
   const python = process.env.FORECAST_PYTHON ?? "/opt/forecast/bin/python3";
-  return ["--rox", dirname(dirname(python)), "--rox", realBinary(python)];
+  return [dirname(dirname(python)), realBinary(python)];
 }
 
-/** The files one job may touch beyond its private directory. */
-export type JobPaths = { read?: string[]; write?: string[] };
+/** The files one job may touch beyond its private directory, and programs it may run. */
+export type JobPaths = { read?: string[]; write?: string[]; execute?: string[] };
 
 /**
  * The files each kind of job needs. A compromised child can open these and nothing else of
@@ -105,9 +105,11 @@ export function jobPaths(job: SandboxJob["job"]): JobPaths {
       return { write: job.source?.path ? [dirname(job.source.path)] : [] };
     case "forecast":
       // The model the operator mounted, and the source (converted to CSV next to itself).
+      // Only a forecast may run the sidecar's Python and load torch from its venv.
       return {
         read: [job.config.model_path],
         write: job.source.path ? [dirname(job.source.path)] : [],
+        execute: forecastPython(),
       };
   }
 }
@@ -135,10 +137,10 @@ export function confinement(job: SandboxJob, directory: string): string[] {
     "--ignore-missing",
     ...["--env", "PATH", "--env", "TMPDIR", "--env", "PDF_PYTHON", "--env", "FORECAST_PYTHON"],
     ...BASE_RULES,
-    ...forecastPythonRules(),
     ...["--rw", directory],
     ...(paths.read ?? []).flatMap((path) => ["--ro", path]),
     ...(paths.write ?? []).flatMap((path) => ["--rw", path]),
+    ...(paths.execute ?? []).flatMap((path) => ["--rox", path]),
     "--",
   ];
 }

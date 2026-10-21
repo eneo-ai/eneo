@@ -177,11 +177,6 @@ describe("forecast job", () => {
         "SHORT_HISTORY",
       ],
       [
-        "the last days have no values",
-        { start: "2026-06-01", days: 120, horizon: 7, value: (d: number) => (d >= 113 ? null : weekly(d)) },
-        "NO_OUTCOME",
-      ],
-      [
         "a weekday has no value in the last four weeks before them",
         // The last days are 108-114; day 108's weekday falls on 80, 87, 94 and 101 in the four weeks before.
         { start: "2026-06-01", days: 115, horizon: 7, value: (d: number) => ([80, 87, 94, 101].includes(d) ? null : weekly(d)) },
@@ -194,6 +189,29 @@ describe("forecast job", () => {
       expect(calls[0]!.holdout).toBe(false);
       expect(result.holdout).toEqual({ unavailable: reason as HoldoutUnavailable });
     });
+  });
+
+  test("starts after the last day with a value when the file's dates run on", async () => {
+    // A sheet laid out for the whole period: the last 7 dates have no value yet.
+    const source = await csv("planned.csv", "2026-06-01", 120, (d) => (d >= 113 ? null : 100 + (d % 7) * 10));
+    const { engine, calls } = constantEngine();
+    const result = await executeForecast({ kind: "forecast", source, horizon: 7, config }, engine);
+    expect(calls[0]!.values).toHaveLength(113);
+    expect(calls[0]!.values.at(-1)).not.toBeNull();
+    expect(result.history).toMatchObject({ to: "2026-09-21", days: 113, empty_end_days: 7 });
+    expect(result.forecast.from).toBe("2026-09-22");
+    expect(result.holdout).toMatchObject({ scored: 7 });
+  });
+
+  test("reads a date written as midnight as that day", async () => {
+    const path = join(directory, "midnight.csv");
+    const lines = ["Datum,kWh"];
+    for (let day = 0; day < 40; day++)
+      lines.push(`${new Date(Date.UTC(2026, 7, 1 + day)).toISOString().slice(0, 10)} 00:00:00,${100 + day}`);
+    await writeFile(path, lines.join("\n") + "\n");
+    const source = { index: 0, path, isXlsx: false, dateColumn: "Datum", valueColumn: "kWh" };
+    const result = await executeForecast({ kind: "forecast", source, horizon: 3, config }, constantEngine().engine);
+    expect(result.history).toMatchObject({ from: "2026-08-01", days: 40 });
   });
 
   test("returns the most recent days for a chart and the size of the model", async () => {
@@ -223,7 +241,8 @@ describe("forecast job", () => {
       executeForecast({ kind: "forecast", source, horizon: 3, config }, constantEngine().engine),
     );
     expect(error.code).toBe("TOO_MANY_MISSING");
-    expect(error.message).toContain("40 of 60 days");
+    // The two empty days at the end are not history; 38 of the 58 before them are empty.
+    expect(error.message).toContain("38 of 58 days");
   });
 
   test("reads only the most recent days of a long history", async () => {
@@ -244,14 +263,14 @@ describe("forecast job", () => {
   });
 
   test.each([
-    ["a value that is not a date", "Datum,kWh\n2026-09-01,1\nvecka 36,2\n", "INVALID_DATES", 'Row 2: "vecka 36"'],
+    ["a value that is not a date", "Datum,kWh\n2026-09-01,1\nvecka 36,2\n", "INVALID_DATES", 'Row 3: "vecka 36"'],
     // A reader that guesses formats would take 1/9/2026 for one of two different days.
-    ["a date that is not ISO", "Datum,kWh\n1/9/2026,1\n2/9/2026,2\n", "INVALID_DATES", 'Row 1: "1/9/2026"'],
-    ["a value that is not a number", "Datum,kWh\n2026-09-01,100\n2026-09-02,#DIV/0!\n", "INVALID_VALUES", 'Row 2: "#DIV/0!"'],
+    ["a date that is not ISO", "Datum,kWh\n1/9/2026,1\n2/9/2026,2\n", "INVALID_DATES", 'Row 2: "1/9/2026"'],
+    ["a value that is not a number", "Datum,kWh\n2026-09-01,100\n2026-09-02,#DIV/0!\n", "INVALID_VALUES", 'Row 3: "#DIV/0!"'],
     // Beyond what the model's single precision holds, a value would silently become unknown.
-    ["a value too large to be a number", "Datum,kWh\n2026-09-01,100\n2026-09-02,1e309\n", "INVALID_VALUES", 'Row 2: "1e309"'],
-    ["a value too large for the model", "Datum,kWh\n2026-09-01,100\n2026-09-02,1e40\n", "INVALID_VALUES", 'Row 2: "1e40"'],
-    ["a time of day", "Datum,kWh\n2026-09-01 08:00:00,1\n2026-09-02 08:00:00,2\n", "INVALID_DATES", "Row 1"],
+    ["a value too large to be a number", "Datum,kWh\n2026-09-01,100\n2026-09-02,1e309\n", "INVALID_VALUES", 'Row 3: "1e309"'],
+    ["a value too large for the model", "Datum,kWh\n2026-09-01,100\n2026-09-02,1e40\n", "INVALID_VALUES", 'Row 3: "1e40"'],
+    ["a time of day", "Datum,kWh\n2026-09-01 08:00:00,1\n2026-09-02 08:00:00,2\n", "INVALID_DATES", "Row 2"],
     ["dates out of order", "Datum,kWh\n2026-09-02,1\n2026-09-01,2\n", "UNORDERED_DATES", "2026-09-01"],
     ["a repeated date", "Datum,kWh\n2026-09-01,1\n2026-09-01,2\n", "UNORDERED_DATES", "2026-09-01"],
   ])("refuses %s", async (_case, text, code, detail) => {

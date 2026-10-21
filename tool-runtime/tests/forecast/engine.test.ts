@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmod, copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,9 +11,14 @@ afterAll(() => rm(directory, { recursive: true, force: true }));
 const daily = (days: number) =>
   Array.from({ length: days }, (_, day) => 100 + 30 * Math.sin((2 * Math.PI * day) / 7));
 
-describe.skipIf(!(await forecastAvailable()))("the Timestral engine", async () => {
-  const modelPath = await tinyCheckpoint(directory);
-  const engine = timestralEngine({ modelPath, threads: 1 });
+// Bun still runs a skipped describe's body, so nothing in it may need the sidecar.
+describe.skipIf(!(await forecastAvailable()))("the Timestral engine", () => {
+  let modelPath = "";
+  let engine: ReturnType<typeof timestralEngine>;
+  beforeAll(async () => {
+    modelPath = await tinyCheckpoint(directory);
+    engine = timestralEngine({ modelPath, threads: 1 });
+  });
 
   test("returns P10 <= P50 <= P90 for every day of the horizon, and the model's size", async () => {
     const result = await engine({ values: daily(90), horizon: 14, holdout: false });

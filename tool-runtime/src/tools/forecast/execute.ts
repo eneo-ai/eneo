@@ -29,7 +29,12 @@ export async function executeForecast(
       `${unread.slice(0, 5).join(", ")}${unread.length > 5 ? ` and ${unread.length - 5} more` : ""} ` +
         "hold formulas without a saved result. Open the workbook in Excel, let it calculate, save it and attach it again.",
     );
-  const series = dailySeries(rows, dateAt, valueAt);
+  const daily = dailySeries(rows, dateAt, valueAt);
+  // Dates after the last value (a sheet laid out for the whole year) are not history: the
+  // forecast starts after the last day that has a value.
+  const observed = daily.values.findLastIndex((value) => value !== null) + 1;
+  const series = { ...daily, values: daily.values.slice(0, observed) };
+  const emptyEnd = daily.values.length - observed;
   const { config } = job;
   const days = series.values.length;
   if (days < config.min_history_days)
@@ -61,6 +66,7 @@ export async function executeForecast(
       to: isoDay(start + (days - 1) * DAY_MS),
       days,
       missing,
+      ...(emptyEnd ? { empty_end_days: emptyEnd } : {}),
       ...(capped
         ? { used_from: isoDay(start + (days - values.length) * DAY_MS), used_days: values.length }
         : {}),

@@ -181,7 +181,8 @@ function csv(result: ForecastResult): string {
 /** The shortest number that is the same single-precision value as `value`. */
 function single(value: number): number {
   const target = Math.fround(value);
-  for (let digits = 1; digits < 9; digits++) {
+  // Nine significant digits always identify a single-precision value.
+  for (let digits = 1; digits <= 9; digits++) {
     const short = Number(value.toPrecision(digits));
     if (Math.fround(short) === target) return short;
   }

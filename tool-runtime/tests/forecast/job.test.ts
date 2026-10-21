@@ -64,10 +64,11 @@ async function running(path: string): Promise<number[]> {
 describe("forecast job in a sandbox child", () => {
   test("may read only its checkpoint and write only next to its source", async () => {
     const forecast = await job("/models/forecast");
-    expect(jobPaths(forecast)).toEqual({
-      read: ["/models/forecast"],
-      write: [dirname(forecast.source.path!)],
-    });
+    const paths = jobPaths(forecast);
+    expect(paths).toMatchObject({ read: ["/models/forecast"], write: [dirname(forecast.source.path!)] });
+    // Only a forecast job may run the sidecar's Python; a compute job may not.
+    expect(paths.execute).toContain(dirname(dirname(process.env.FORECAST_PYTHON ?? "/opt/forecast/bin/python3")));
+    expect(jobPaths({ kind: "compute", code: "1", input: null } as never).execute).toBeUndefined();
   });
 
   test.skipIf(!available)("forecasts from a file in a fresh process", async () => {

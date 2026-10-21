@@ -6,6 +6,7 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod";
 import { ToolError } from "../../../errors";
 import type { EngineResult, ForecastEngine } from "../ports";
 
@@ -56,16 +57,25 @@ export function timestralEngine(options: { modelPath: string; threads: number })
       stdout: "pipe",
       stderr: "pipe",
     });
-    const timer = setTimeout(() => child.kill("SIGKILL"), SIDECAR_TIMEOUT_MS);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, SIDECAR_TIMEOUT_MS);
     try {
       const [stdout, stderr, code] = await Promise.all([
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
         child.exited,
       ]);
+      if (timedOut)
+        throw new ToolError(
+          "TIMEOUT",
+          `The forecast model did not finish within ${SIDECAR_TIMEOUT_MS / 1000} seconds.`,
+        );
       if (code === REFUSED) {
-        const { error } = JSON.parse(stdout) as { error: { code: string; message: string } };
-        throw new ToolError(error.code, error.message);
+        const refusal = refusalSchema.safeParse(json(stdout));
+        if (refusal.success) throw new ToolError(refusal.data.error.code, refusal.data.error.message);
       }
       if (code !== 0) {
         const detail = stderr.trim().split("\n").filter(Boolean).at(-1)?.slice(0, MAX_STDERR);
@@ -74,9 +84,31 @@ export function timestralEngine(options: { modelPath: string; threads: number })
           `The forecast model failed${detail ? `: ${detail}` : ""}.`,
         );
       }
-      return JSON.parse(stdout) as EngineResult;
+      return engineResult(stdout, request.horizon, request.holdout);
     } finally {
       clearTimeout(timer);
     }
   };
+}
+
+const refusalSchema = z.object({ error: z.object({ code: z.string().max(64), message: z.string().max(1000) }) });
+
+function json(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
+}
+
+/** The sidecar's answer, checked: a day for each day asked for, finite numbers only. */
+function engineResult(stdout: string, horizon: number, holdout: boolean): EngineResult {
+  const days = z.array(z.number().finite()).length(horizon);
+  const interval = z.object({ p10: days, p50: days, p90: days });
+  const parsed = z
+    .object({ forecast: interval, holdout: interval.optional(), parameters: z.number().int().positive() })
+    .safeParse(json(stdout));
+  if (!parsed.success || (holdout && parsed.data.holdout === undefined))
+    throw new ToolError("ENGINE_FAILED", "The forecast model returned an answer that could not be read.");
+  return parsed.data as EngineResult;
 }

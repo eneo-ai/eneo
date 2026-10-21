@@ -164,12 +164,11 @@ endpoints.push(
 );
 
 // Forecasts run a Python sidecar with torch each, so they queue on their own, one at a time by
-// default. The whole-job deadline covers the sidecar's start-up (torch import, model load).
-const forecastScheduler = new Scheduler(
-  config.forecastConcurrency,
-  config.maxConcurrency,
-  config.maxConcurrency,
-);
+// default. A waiting forecast holds one of the server's slots, so the queue is short: more
+// callers are told the runtime is busy instead of crowding out every other tool.
+// The whole-job deadline covers the sidecar's start-up (torch import, model load).
+const forecastQueue = Math.min(config.maxConcurrency, 2 * config.forecastConcurrency);
+const forecastScheduler = new Scheduler(config.forecastConcurrency, forecastQueue, forecastQueue);
 const forecastJobTimeoutMs = 30_000;
 endpoints.push({
   slug: "forecast",

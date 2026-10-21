@@ -100,7 +100,7 @@ describe("create_forecast", () => {
     const f32 = Math.fround;
     const result = outcome(2);
     result.recent = { from: "2026-03-30", values: [123456789, null] };
-    result.forecast = { ...result.forecast, p10: [f32(1.2345678806304932), f32(1600.5)], p50: [f32(1834.567), f32(1835)], p90: [f32(2100.25), f32(2101)] };
+    result.forecast = { ...result.forecast, p10: [f32(1.2345678806304932), f32(1020.89496)], p50: [f32(1834.567), f32(1835)], p90: [f32(2100.25), f32(2101)] };
     const { tool } = setup(result);
     const exported = await tool.execute({ source, ...columns, horizon: 2, export: true }, ctx);
     expect(exported).toBeInstanceOf(RichResult);
@@ -112,7 +112,8 @@ describe("create_forecast", () => {
         "2026-03-30,123456789,,,\r\n" +
         "2026-03-31,,,,\r\n" +
         "2026-04-01,,1.2345679,1834.567,2100.25\r\n" +
-        "2026-04-02,,1600.5,1835,2101\r\n",
+        // Some single-precision values need nine digits to read back.
+        "2026-04-02,,1020.89496,1835,2101\r\n",
     );
     // Each forecast value reads back as the same single-precision number the model returned.
     expect(f32(1.2345679)).toBe(f32(1.2345678806304932));

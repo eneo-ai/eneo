@@ -31,6 +31,8 @@ export type ForecastDays = { from: string; days: number } & Interval;
 export type ForecastResult = {
   /** The file's days; when longer than the model reads, the window it read starts `used_from`. */
   history: {
+    /** Dates at the end of the file without a value; the forecast starts before them. */
+    empty_end_days?: number;
     from: string;
     to: string;
     days: number;

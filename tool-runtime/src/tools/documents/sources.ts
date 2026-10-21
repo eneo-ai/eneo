@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { ToolError } from "../../errors";
 import { spillDirectory } from "../tabular/engine/duckdb";
-import { convertXlsxToCsvSheets } from "../tabular/engine/xlsx-to-csv";
+import { convertXlsxToCsvSheets, dateText } from "../tabular/engine/xlsx-to-csv";
 import { assertZipWithinBounds } from "../tabular/zip-guard";
 import type {
   Cell,
@@ -122,12 +122,9 @@ function toCell(value: unknown): Cell {
       : value.toString();
   if (typeof value === "number" || typeof value === "boolean" || typeof value === "string")
     return value;
-  // DuckDB hands dates and timestamps over as UTC instants. A date is written as one, the
-  // way XLSX conversion writes a date-only cell, never in the host's locale or time zone.
-  if (value instanceof Date) {
-    const iso = value.toISOString();
-    return iso.endsWith("T00:00:00.000Z") ? iso.slice(0, 10) : iso;
-  }
+  // DuckDB hands dates and timestamps over as UTC instants: written as XLSX conversion writes
+  // them, never in the host's locale or time zone.
+  if (value instanceof Date) return dateText(value);
   // Decimals and other values keep DuckDB's own text form.
   return String(value);
 }

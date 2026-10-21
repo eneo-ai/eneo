@@ -77,6 +77,9 @@ describe("authentication", () => {
     expect(() => loadConfig({ TOOL_RUNTIME_TOKEN: "short" })).toThrow();
     expect(loadConfig({ TOOL_RUNTIME_TOKEN: TOKEN }).port).toBe(3010);
     expect(loadConfig({ TOOL_RUNTIME_TOKEN: TOKEN }).tabular.allowedFileOrigins).toEqual([]);
+    // A Compose default such as FORECAST_MODEL_NAME=${FORECAST_MODEL_NAME:-} is unset, not fatal.
+    const forecast = loadConfig({ TOOL_RUNTIME_TOKEN: TOKEN, FORECAST_MODEL_NAME: "", FORECAST_MODEL_PATH: "" }).forecast;
+    expect(forecast).toMatchObject({ model_path: "/models/forecast", model_name: "Timestral" });
     expect(
       loadConfig({
         TOOL_RUNTIME_TOKEN: TOKEN,
