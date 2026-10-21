@@ -12,7 +12,7 @@ import { useClientTimeText } from "@/components/composites/client-time";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
-import { rescueFocus } from "@/lib/focus-rescue";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
 import {
   SHAREPOINT_APP_KEY,
@@ -211,6 +211,7 @@ function WatchCheck({ watch }: { watch: ReturnType<typeof useWatchHealth> }) {
   const [open, setOpen] = useState(false);
   const panelId = useId();
   const toggleRef = useRef<HTMLButtonElement>(null);
+  const rescue = useFocusRescue();
   const { query, total, expired, failing, active } = watch;
 
   const description = query.isPending
@@ -244,7 +245,7 @@ function WatchCheck({ watch }: { watch: ReturnType<typeof useWatchHealth> }) {
               onClick={() => {
                 if (renewExpired.isPending) return;
                 // Once nothing has expired the button goes; focus moves to its neighbour.
-                renewExpired.mutate(undefined, { onSuccess: () => rescueFocus(toggleRef.current) });
+                renewExpired.mutate(undefined, { onSuccess: () => rescue(toggleRef.current) });
               }}
             />
           ) : null}
