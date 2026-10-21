@@ -287,11 +287,22 @@ describe("Tools capability configuration", () => {
     await expect
       .element(page.getByText(`${m.model()} · Timestral · ${m.mcp_auth_bundled()}`))
       .toBeVisible();
+    // The name opens Admin > Models on the forecast models, where it is governed.
+    await expect
+      .element(page.getByRole("link", { name: "Timestral", exact: true }))
+      .toHaveAttribute("href", "/admin/models?tab=forecast_models");
     expect(page.getByText(m.tools_readiness_model_disabled()).elements()).toHaveLength(0);
 
     // Switched off under Admin > Models: the source says why, like an image source.
     await rendered.rerender({ data: pageData([forecast("model_disabled")], offer) });
     await expect.element(page.getByText(m.tools_readiness_model_disabled())).toBeVisible();
+  });
+
+  it("links an image source's model to the image models under Admin > Models", async () => {
+    show([source()]);
+    await expect
+      .element(page.getByRole("link", { name: "Studio", exact: true }))
+      .toHaveAttribute("href", "/admin/models?tab=image_models");
   });
 
   it("keeps an edit action and allows disabling a blocked active source", async () => {

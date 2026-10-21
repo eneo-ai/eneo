@@ -270,15 +270,17 @@
           </tr>
         {/if}
 
-        <!-- Indicative cost -->
-        <tr>
-          <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
-            >{m.model_pricing_label()}</td
-          >
-          <td class="py-2.5">
-            <ModelCostBadge {model} />
-          </td>
-        </tr>
+        <!-- Indicative cost; a forecast model has none to set, so no row calls it unknown -->
+        {#if type !== "forecastModel"}
+          <tr>
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.model_pricing_label()}</td
+            >
+            <td class="py-2.5">
+              <ModelCostBadge {model} />
+            </td>
+          </tr>
+        {/if}
 
         <!-- Security classification (read-only) -->
         <tr>
@@ -320,7 +322,10 @@
         {/if}
         {#if model.org}
           <tr>
-            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.provider()}</td>
+            <!-- Who made the model; the provider that runs it is the card it is listed under. -->
+            <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap"
+              >{m.model_developed_by()}</td
+            >
             <td class="py-2.5">{model.org}</td>
           </tr>
         {/if}

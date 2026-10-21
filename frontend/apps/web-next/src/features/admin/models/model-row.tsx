@@ -137,13 +137,13 @@ function Price({ model, kind }: { model: AdminModel; kind: ModelKind }) {
   const t = useTranslations();
   const price = modelPrice(model, kind);
 
-  if (price.kind === "unknown") {
+  if (price.kind === "unknown" || price.kind === "none") {
     return (
       <>
         <span aria-hidden="true" className="text-ax-text-secondary">
           –
         </span>
-        <span className="sr-only">{t("model_cost_unknown")}</span>
+        <span className="sr-only">{t(price.kind === "none" ? "none" : "model_cost_unknown")}</span>
       </>
     );
   }

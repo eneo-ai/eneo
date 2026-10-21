@@ -168,7 +168,12 @@
     table.column({
       accessor: (model: M) => model,
       header: m.details(),
-      cell: (item) => Table.renderComponent(ModelStatusIcons, { model: item.value }),
+      // A forecast model has no price to set: no chip that calls it unknown.
+      cell: (item) =>
+        Table.renderComponent(ModelStatusIcons, {
+          model: item.value,
+          showCost: modelType !== "forecastModel"
+        }),
       plugins: {
         sort: { disable: true },
         tableFilter: {

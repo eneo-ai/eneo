@@ -131,6 +131,16 @@ export const KIND_FILTERS: KindFilter[] = [
   "forecast"
 ];
 
+/** The type a `?type=` value names; anything else shows every type. */
+export function kindFilterOf(value: string | undefined): KindFilter {
+  return KIND_FILTERS.find((filter) => filter === value) ?? "all";
+}
+
+/** Admin > Models showing one type's models, for links from other pages. */
+export function modelsHref(kind: ModelKind): string {
+  return `/admin/models?type=${kind}`;
+}
+
 /** Security filter value for models without a classification. */
 export const UNCLASSIFIED = "__unclassified__";
 
@@ -282,15 +292,16 @@ export type ModelPrice =
   | { kind: "tokens"; input: string | null; output: string | null }
   | { kind: "minute"; value: string }
   | { kind: "image"; value: string }
-  | { kind: "unknown" };
+  | { kind: "unknown" }
+  | { kind: "none" };
 
 /**
  * Indicative price: per 1M tokens (in / out), per audio minute for
- * transcription, or per generated image for image models. A forecast model
- * uses no tokens and has none.
+ * transcription, or per generated image for image models; "unknown" when
+ * none is set. A forecast model uses no tokens and has none to set.
  */
 export function modelPrice(model: AdminModel, kind: ModelKind): ModelPrice {
-  if (kind === "forecast") return { kind: "unknown" };
+  if (kind === "forecast") return { kind: "none" };
   if (kind === "image") {
     const value = formatCostPerImage((model as { cost_per_image?: string | null }).cost_per_image);
     return value ? { kind: "image", value } : { kind: "unknown" };

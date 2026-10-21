@@ -348,7 +348,7 @@ describe("lifecycle and attention", () => {
 });
 
 describe("prices", () => {
-  it("formats per 1M tokens, per minute, per image or unknown", () => {
+  it("formats per 1M tokens, per minute, per image, unknown or none", () => {
     expect(
       modelPrice(
         model({ input_cost_per_token: "0.000003", output_cost_per_token: "0.000015" }),
@@ -365,5 +365,7 @@ describe("prices", () => {
     });
     expect(modelPrice(model({}), "image")).toEqual({ kind: "unknown" });
     expect(modelPrice(model({}), "embedding")).toEqual({ kind: "unknown" });
+    // A forecast model uses no tokens: it has no price, not an unknown one.
+    expect(modelPrice(model({}), "forecast")).toEqual({ kind: "none" });
   });
 });

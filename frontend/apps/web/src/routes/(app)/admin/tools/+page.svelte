@@ -9,6 +9,7 @@
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { IconEllipsis } from "@eneo/icons/ellipsis";
   import { invalidate } from "$app/navigation";
+  import { resolve } from "$app/paths";
   import { writable } from "svelte/store";
   import { untrack } from "svelte";
   import {
@@ -427,10 +428,18 @@
                           {#if source !== active}{@render statusChip(source)}{/if}
                         </div>
                         {#if source.http_auth_type === "internal"}
+                          <!-- The model links to its type under Admin > Models, where it is governed. -->
                           <p class="text-secondary mt-1 text-sm break-words">
-                            {m.tools_source_model()} · {source.image_model?.nickname ||
-                              source.image_model?.name ||
-                              m.tools_readiness_model_missing()}
+                            {m.tools_source_model()} ·
+                            {#if source.image_model}
+                              <a
+                                href={resolve("/admin/models?tab=image_models")}
+                                class="text-default font-medium underline underline-offset-2"
+                                >{source.image_model.nickname || source.image_model.name}</a
+                              >
+                            {:else}
+                              {m.tools_readiness_model_missing()}
+                            {/if}
                             {#if source.image_model?.provider_name}
                               · {source.image_model.provider_name}{/if}
                           </p>
@@ -443,8 +452,13 @@
                                service, named in the reader's language (the provider's stored name is English). -->
                           {#if source.forecast_model}
                             <p class="text-secondary mt-1 text-sm break-words">
-                              {m.model()} · {source.forecast_model.nickname ||
-                                source.forecast_model.name} · {m.mcp_auth_bundled()}
+                              {m.model()} ·
+                              <a
+                                href={resolve("/admin/models?tab=forecast_models")}
+                                class="text-default font-medium underline underline-offset-2"
+                                >{source.forecast_model.nickname || source.forecast_model.name}</a
+                              >
+                              · {m.mcp_auth_bundled()}
                             </p>
                           {/if}
                         {:else}

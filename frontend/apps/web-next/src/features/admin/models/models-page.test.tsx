@@ -331,8 +331,8 @@ describe("ModelsPage", () => {
 
     expect(within(tools).getByText("Timestral")).toBeTruthy();
     expect(within(tools).getByRole("cell", { name: "Prognos" })).toBeTruthy();
-    // No tokens, so no price.
-    expect(within(tools).getByText("Pris okänt")).toBeTruthy();
+    // It uses no tokens and has no price: none, not an unknown one.
+    expect(within(tools).queryByText("Pris okänt")).toBeNull();
     // Named after the Function, not the source's stored English name.
     expect(within(tools).getByTitle("Används av Prognos")).toBeTruthy();
 

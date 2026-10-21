@@ -118,12 +118,26 @@ describe("Admin > Models, forecast models", () => {
     expect(tab.getByTitle(m.edit_provider()).elements()).toHaveLength(0);
     expect(tab.getByRole("button", { name: m.add_model() }).elements()).toHaveLength(0);
     expect(tab.getByRole("button", { name: m.add_provider() }).elements()).toHaveLength(0);
+    // No price chip: the model has no price, not an unknown one.
+    expect(tab.getByLabelText(`${m.model_cost_unknown()}: –`).elements()).toHaveLength(0);
     // The row's own menu is the only one: the provider has none.
     expect(tab.getByRole("button", { name: m.actions(), exact: true }).elements()).toHaveLength(1);
     // Named after the Function, not the source's stored English name.
     await expect
       .element(tab.getByText(m.model_used_by_function({ function: m.forecast() }), { exact: true }))
       .toBeVisible();
+  });
+
+  it("says who made the model in its details, apart from the provider that runs it", async () => {
+    show();
+    await openForecastTab();
+    await page.getByRole("button", { name: "Timestral" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect.element(dialog.getByText(m.model_developed_by(), { exact: true })).toBeVisible();
+    await expect.element(dialog.getByText("Mistral AI", { exact: true })).toBeVisible();
+    expect(dialog.getByText(m.provider(), { exact: true }).elements()).toHaveLength(0);
+    // It has no price to set, so no price row that calls one unknown.
+    expect(dialog.getByText(m.model_pricing_label(), { exact: true }).elements()).toHaveLength(0);
   });
 
   it("turns the model off, and renames and classifies it, through the forecast endpoint", async () => {

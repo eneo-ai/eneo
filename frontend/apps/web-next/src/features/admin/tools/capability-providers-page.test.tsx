@@ -300,7 +300,10 @@ describe("admin function sources", () => {
     show();
     expect(await screen.findByRole("heading", { level: 3, name: "forecast" })).toBeTruthy();
     expect(screen.getByText("tools_builtin_forecast_summary")).toBeTruthy();
-    expect(screen.getByText("model · Timestral · mcp_auth_bundled")).toBeTruthy();
+    // The name opens Admin > Models on the forecast models, where it is governed.
+    const modelLink = screen.getByRole("link", { name: "Timestral" });
+    expect(modelLink.getAttribute("href")).toBe("/admin/models?type=forecast");
+    expect(modelLink.closest("p")?.textContent).toBe("model · Timestral · mcp_auth_bundled");
     expect(screen.queryByText("tools_readiness_model_disabled")).toBeNull();
     cleanup();
 
@@ -309,6 +312,27 @@ describe("admin function sources", () => {
     show();
     expect(await screen.findByText("tools_readiness_model_disabled")).toBeTruthy();
     expect(screen.getByText("tools_blocked")).toBeTruthy();
+  });
+
+  it("links an image source's model to the image models under Admin > Models", async () => {
+    const imageSource = {
+      ...source,
+      id: "images",
+      name: "Images",
+      http_auth_type: "internal",
+      purpose: "image_generation",
+      image_model_id: "m1",
+      image_model: { id: "m1", name: "gpt-image", nickname: "Studio", provider_name: "OpenAI" }
+    };
+    get.mockImplementation((path?: string) => {
+      if (path === "/api/v1/mcp-servers/settings/") return ok({ items: [imageSource] });
+      if (path === "/api/v1/mcp-servers/bundled/") return ok(bundled);
+      return ok({ items: [] });
+    });
+    show();
+    const modelLink = await screen.findByRole("link", { name: "Studio" });
+    expect(modelLink.getAttribute("href")).toBe("/admin/models?type=image");
+    expect(modelLink.closest("p")?.textContent).toBe("tools_source_model · Studio · OpenAI");
   });
 
   it("activates an existing source through the capability endpoint", async () => {

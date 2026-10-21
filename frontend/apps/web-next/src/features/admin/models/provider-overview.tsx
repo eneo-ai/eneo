@@ -144,12 +144,15 @@ export function ProviderOverview({
   models,
   classifications,
   securityEnabled,
+  initialKind = "all",
   onAddModel,
   onAddProvider
 }: {
   models: ModelsPresentation;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
+  /** The type filter's first value: a link can open the page on one type. */
+  initialKind?: KindFilter;
   onAddModel: (providerId: string) => void;
   onAddProvider: () => void;
 }) {
@@ -161,7 +164,7 @@ export function ProviderOverview({
   const capabilities = useQuery(providerCapabilitiesQueryOptions(browserApi));
 
   const [search, setSearch] = useState("");
-  const [kind, setKind] = useState<KindFilter>("all");
+  const [kind, setKind] = useState<KindFilter>(initialKind);
   const [securityFilter, setSecurityFilter] = useState("all");
   const security = securityEnabled ? securityFilter : "all";
   const filters: ModelFilters = { search, kind, security };

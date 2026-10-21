@@ -2422,6 +2422,7 @@
   "lookup_defaults": "Lookup defaults",
   "model_details": "Model Details",
   "model_family": "Model Family",
+  "model_developed_by": "Developed by",
   "no_models_in_provider": "No models configured for this provider.",
   "add_model_to_get_started": "Add a model to get started.",
   "no_providers_title": "No providers configured",

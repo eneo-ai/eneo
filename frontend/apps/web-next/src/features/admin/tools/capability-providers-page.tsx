@@ -10,6 +10,8 @@ import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog"
 import { PageHeader } from "@/components/composites/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import type { ModelKind } from "@/features/admin/models/models";
+import { modelsHref } from "@/features/admin/models/provider-sections";
 import {
   CAPABILITIES,
   readinessKey,
@@ -144,6 +146,15 @@ function BundledOffer({
  * The lines under a source's name: the model, what the bundled provider does
  * (and the model it runs, for Prognos), or the address.
  */
+/** A source's model, linked to its type under Admin > Models, where it is governed. */
+function ModelLink({ kind, name }: { kind: ModelKind; name: string }) {
+  return (
+    <Link href={modelsHref(kind)} className="text-ax-text font-medium underline underline-offset-2">
+      {name}
+    </Link>
+  );
+}
+
 function SourceDetail({
   source,
   capability
@@ -157,9 +168,11 @@ function SourceDetail({
     return (
       <p className="text-ax-text-secondary text-sm break-all">
         {t("tools_source_model")} ·{" "}
-        {source.image_model?.nickname ||
-          source.image_model?.name ||
-          t("tools_readiness_model_missing")}
+        {source.image_model ? (
+          <ModelLink kind="image" name={source.image_model.nickname || source.image_model.name} />
+        ) : (
+          t("tools_readiness_model_missing")
+        )}
         {source.image_model?.provider_name ? ` · ${source.image_model.provider_name}` : ""}
       </p>
     );
@@ -177,7 +190,8 @@ function SourceDetail({
         ) : null}
         {model ? (
           <p className="text-ax-text-secondary text-sm break-words">
-            {t("model")} · {model.nickname || model.name} · {t("mcp_auth_bundled")}
+            {t("model")} · <ModelLink kind="forecast" name={model.nickname || model.name} /> ·{" "}
+            {t("mcp_auth_bundled")}
           </p>
         ) : null}
       </>
