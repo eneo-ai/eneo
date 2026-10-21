@@ -241,7 +241,8 @@ reviewed. Saving an edit never rewrites bindings
 (`skill_repo_impl.py:1800`), and the Skill editor never tries the move on its
 own. After saving a Skill that is in the personal chat, the Skill page shows
 "Din personliga chatt använder version 3" with the same explicit action. The
-action also appears on the composer row and in the Skills list. If the new
+action also appears on the composer row; the Skills list only marks the
+Skills the chat uses ("Personlig chatt · Alltid"). If the new
 revision is not admissible, the edit is kept, the chat stays on the earlier
 version, and the action's error says why.
 
