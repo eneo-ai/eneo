@@ -352,10 +352,7 @@ async def test_admin_password_policy_round_trip(
 
     current = await client.get("/api/v1/admin/password-policy", headers=auth)
     assert current.status_code == 200, current.text
-    assert current.json() == {
-        "require_change_after_admin_set": True,
-        "max_age_days": None,
-    }
+    assert current.json() == {"max_age_days": None}
 
     updated = await client.patch(
         "/api/v1/admin/password-policy",
@@ -363,10 +360,7 @@ async def test_admin_password_policy_round_trip(
         headers=auth,
     )
     assert updated.status_code == 200, updated.text
-    assert updated.json() == {
-        "require_change_after_admin_set": True,
-        "max_age_days": 30,
-    }
+    assert updated.json() == {"max_age_days": 30}
 
     unknown_field = await client.patch(
         "/api/v1/admin/password-policy",
@@ -375,26 +369,24 @@ async def test_admin_password_policy_round_trip(
     )
     assert unknown_field.status_code == 422, unknown_field.text
 
-    null_flag = await client.patch(
+    # Admin-set passwords are always one-time; no tenant can switch that off.
+    one_time_rule = await client.patch(
         "/api/v1/admin/password-policy",
-        json={"require_change_after_admin_set": None},
+        json={"require_change_after_admin_set": False},
         headers=auth,
     )
-    assert null_flag.status_code == 422, null_flag.text
+    assert one_time_rule.status_code == 422, one_time_rule.text
     unchanged = await client.get("/api/v1/admin/password-policy", headers=auth)
     assert unchanged.status_code == 200, unchanged.text
     assert unchanged.json() == updated.json()
 
     reset = await client.patch(
         "/api/v1/admin/password-policy",
-        json={"max_age_days": None, "require_change_after_admin_set": False},
+        json={"max_age_days": None},
         headers=auth,
     )
     assert reset.status_code == 200, reset.text
-    assert reset.json() == {
-        "require_change_after_admin_set": False,
-        "max_age_days": None,
-    }
+    assert reset.json() == {"max_age_days": None}
 
     # The expiry shows up on the account once the policy carries a maximum age.
     await client.patch(
@@ -405,9 +397,7 @@ async def test_admin_password_policy_round_trip(
     assert me.json()["password_status"]["expires_at"] is not None
     assert me.json()["password_status"]["change_required"] is False
     await client.patch(
-        "/api/v1/admin/password-policy",
-        json={"max_age_days": None, "require_change_after_admin_set": True},
-        headers=auth,
+        "/api/v1/admin/password-policy", json={"max_age_days": None}, headers=auth
     )
 
 
@@ -418,21 +408,16 @@ async def test_concurrent_disjoint_policy_patches_both_land(
 ):
     """Two admins patching different keys at once must not undo each other.
 
-    Session A writes ``max_age_days`` and keeps its transaction (and the row
-    lock) open while session B writes ``require_change_after_admin_set``. B
-    can only commit after A, so a merge computed from a pre-read snapshot
-    would write A's key back to its old value.
+    Session A writes ``max_expiration_days`` and keeps its transaction (and
+    the row lock) open while session B writes ``rotation_grace_hours``. B can
+    only commit after A, so a merge computed from a pre-read snapshot would
+    write A's key back to its old value. The password policy shares the same
+    merge (``TenantRepository._merge_policy_column``).
     """
     import sqlalchemy as sa
 
     from eneo.database.database import sessionmanager
     from eneo.tenants.tenant_repo import TenantRepository
-
-    login = await _login(
-        client, email="test@example.com", password="IntegrationPass123!"
-    )
-    assert login.status_code == 200, login.text
-    auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
     async with sessionmanager.session() as session, session.begin():
         tenant_id = (
@@ -444,7 +429,7 @@ async def test_concurrent_disjoint_policy_patches_both_land(
 
     async def patch_in_own_session(updates: dict) -> None:
         async with sessionmanager.session() as session, session.begin():
-            await TenantRepository(session).update_password_policy(tenant_id, updates)
+            await TenantRepository(session).update_api_key_policy(tenant_id, updates)
 
     async def wait_until_blocked_on_lock(racer: asyncio.Task) -> None:
         for _ in range(200):
@@ -466,29 +451,23 @@ async def test_concurrent_disjoint_policy_patches_both_land(
             await asyncio.sleep(0.05)
         raise AssertionError("racer never blocked on the tenant row lock")
 
-    try:
-        async with sessionmanager.session() as session_a, session_a.begin():
-            await TenantRepository(session_a).update_password_policy(
-                tenant_id, {"max_age_days": 30}
-            )
-            racer = asyncio.create_task(
-                patch_in_own_session({"require_change_after_admin_set": False})
-            )
-            await wait_until_blocked_on_lock(racer)
-        await asyncio.wait_for(racer, timeout=10)
-
-        current = await client.get("/api/v1/admin/password-policy", headers=auth)
-        assert current.status_code == 200, current.text
-        assert current.json() == {
-            "require_change_after_admin_set": False,
-            "max_age_days": 30,
-        }
-    finally:
-        await client.patch(
-            "/api/v1/admin/password-policy",
-            json={"max_age_days": None, "require_change_after_admin_set": True},
-            headers=auth,
+    async with sessionmanager.session() as session_a, session_a.begin():
+        await TenantRepository(session_a).update_api_key_policy(
+            tenant_id, {"max_expiration_days": 30}
         )
+        racer = asyncio.create_task(patch_in_own_session({"rotation_grace_hours": 12}))
+        await wait_until_blocked_on_lock(racer)
+    await asyncio.wait_for(racer, timeout=10)
+
+    async with sessionmanager.session() as session, session.begin():
+        policy = (
+            await session.execute(
+                sa.text("SELECT api_key_policy FROM tenants WHERE id = :id"),
+                {"id": tenant_id},
+            )
+        ).scalar_one()
+    assert policy["max_expiration_days"] == 30
+    assert policy["rotation_grace_hours"] == 12
 
 
 @pytest.mark.integration

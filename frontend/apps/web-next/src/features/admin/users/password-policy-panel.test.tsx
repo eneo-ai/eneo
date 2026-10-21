@@ -15,28 +15,30 @@ afterEach(() => vi.clearAllMocks());
 
 const ok = (data: unknown) => Promise.resolve({ data, response: new Response("{}") });
 
-async function show(
-  policy: { require_change_after_admin_set: boolean; max_age_days: number | null } = {
-    require_change_after_admin_set: true,
-    max_age_days: null
-  }
-) {
+async function show(policy: { max_age_days: number | null } = { max_age_days: null }) {
   api.GET.mockImplementation((path: string) =>
     path === "/api/v1/admin/password-policy" ? ok(policy) : ok({})
   );
   renderInApp(<PasswordPolicyPanel />);
   const panel = screen.getByRole("region", { name: "Lösenordspolicy" });
-  await within(panel).findByRole("switch");
+  await within(panel).findByLabelText(/Längsta giltighetstid/);
   return panel;
 }
 
-it("saves both rules in one request and reports the saved policy", async () => {
+it("says the one-time rule always applies and offers no switch for it", async () => {
+  const panel = await show();
+  within(panel).getByText(
+    /Ett lösenord som en administratör genererar är alltid ett engångslösenord/
+  );
+  expect(within(panel).queryByRole("switch")).toBeNull();
+});
+
+it("saves the maximum age and reports the saved policy", async () => {
   api.PATCH.mockImplementation((_path: string, init: { body: unknown }) => ok(init.body));
   const panel = await show();
   const save = within(panel).getByRole("button", { name: "Spara" });
   expect(save.hasAttribute("disabled")).toBe(true);
 
-  fireEvent.click(within(panel).getByRole("switch"));
   fireEvent.change(within(panel).getByLabelText(/Längsta giltighetstid/), {
     target: { value: "90" }
   });
@@ -45,7 +47,7 @@ it("saves both rules in one request and reports the saved policy", async () => {
 
   await waitFor(() =>
     expect(api.PATCH).toHaveBeenCalledWith("/api/v1/admin/password-policy", {
-      body: { require_change_after_admin_set: false, max_age_days: 90 }
+      body: { max_age_days: 90 }
     })
   );
   await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Lösenordspolicyn är sparad."));
@@ -57,7 +59,7 @@ it("saves both rules in one request and reports the saved policy", async () => {
 });
 
 it("explains a malformed age at the field and never sends it", async () => {
-  const panel = await show({ require_change_after_admin_set: true, max_age_days: 30 });
+  const panel = await show({ max_age_days: 30 });
   const maxAge = within(panel).getByLabelText(/Längsta giltighetstid/);
   fireEvent.change(maxAge, { target: { value: "ninety" } });
   fireEvent.click(within(panel).getByRole("button", { name: "Spara" }));

@@ -35,15 +35,12 @@ class PasswordLifecyclePolicy(BaseModel):
 
     Stored as ``tenants.password_policy`` (JSONB). Missing keys fall back to
     these defaults, so rows written before a key existed keep working.
+
+    A password someone else set is always one-time and is not a tenant
+    choice; only the sysadmin API and the deployment seed may opt a single
+    account out (``password_change_required``).
     """
 
-    require_change_after_admin_set: bool = Field(
-        default=True,
-        description=(
-            "A password set by an administrator or provisioning is a one-time "
-            "password: the account must choose its own at the next password login."
-        ),
-    )
     max_age_days: Optional[int] = Field(
         default=None,
         ge=1,
@@ -62,8 +59,7 @@ class PasswordLifecyclePolicy(BaseModel):
 
 
 class PasswordLifecyclePolicyUpdate(BaseModel):
-    # PATCH uses exclude_unset=True: omission is allowed, explicit null is not.
-    require_change_after_admin_set: bool = True
+    # PATCH uses exclude_unset=True: an omitted key is left as it is.
     max_age_days: Optional[int] = Field(default=None, ge=1, le=_MAX_AGE_DAYS_LIMIT)
 
     model_config = ConfigDict(extra="forbid")

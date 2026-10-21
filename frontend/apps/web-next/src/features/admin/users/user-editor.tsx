@@ -27,7 +27,7 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { rolesQueryOptions, type Role } from "@/features/admin/roles/roles";
-import { adminPasswordPolicyQueryOptions, type AdminUser } from "./users";
+import type { AdminUser } from "./users";
 
 function RolePicker({
   selected,
@@ -100,11 +100,7 @@ function UserEditorForm({
   const mode = user ? "update" : "create";
   const policyQuery = useQuery(passwordPolicyQueryOptions(browserApi));
   const policy = policyQuery.data ?? null;
-  // Whether the password set here is one-time; unknown (not loaded) says nothing.
-  const oneTimePassword =
-    useQuery(adminPasswordPolicyQueryOptions(browserApi)).data?.require_change_after_admin_set ===
-    true;
-  const oneTimeHint = oneTimePassword ? ` ${t("admin_password_one_time_hint")}` : "";
+  const oneTimeHint = ` ${t("admin_password_one_time_hint")}`;
 
   const [email, setEmail] = useState(user?.email ?? "");
   const [username, setUsername] = useState(user?.username ?? "");
@@ -323,9 +319,6 @@ export function UserEditorDialog({
   const t = useTranslations();
   const queryClient = useQueryClient();
   const [issued, setIssued] = useState<IssuedPassword | null>(null);
-  const oneTimePassword =
-    useQuery(adminPasswordPolicyQueryOptions(browserApi)).data?.require_change_after_admin_set ===
-    true;
 
   return (
     <>
@@ -345,8 +338,7 @@ export function UserEditorDialog({
         secret={issued?.password ?? null}
         warning={
           issued
-            ? t("admin_issued_password_handover", { email: issued.email }) +
-              (oneTimePassword ? ` ${t("admin_password_one_time_hint")}` : "")
+            ? `${t("admin_issued_password_handover", { email: issued.email })} ${t("admin_password_one_time_hint")}`
             : undefined
         }
         copyFailedMessage={t("admin_issued_password_copy_failed")}

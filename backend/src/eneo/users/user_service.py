@@ -78,10 +78,7 @@ from eneo.users.password import (
     PasswordReuseError,
     validate_new_local_password,
 )
-from eneo.users.password_lifecycle import (
-    PASSWORD_AUTH_METHOD,
-    PasswordLifecyclePolicy,
-)
+from eneo.users.password_lifecycle import PASSWORD_AUTH_METHOD
 from eneo.users.user import (
     PropUserInvite,
     UserAdd,
@@ -725,12 +722,9 @@ class UserService:
                 new_user.password
             )
             password_changed_at = datetime.now(timezone.utc)
-            if new_user.password_change_required is None:
-                password_change_required = PasswordLifecyclePolicy.from_tenant(
-                    tenant.password_policy
-                ).require_change_after_admin_set
-            else:
-                password_change_required = new_user.password_change_required
+            # Someone else chose it, so it is one-time unless the sysadmin API
+            # explicitly opted this account out.
+            password_change_required = new_user.password_change_required is not False
         else:
             salt = None
             hashed_pass = None
@@ -2195,7 +2189,7 @@ class UserService:
         Both self-service changes and administrator resets use this path, so
         hashing, password reuse protection, credential-version increments and
         the lifecycle stamp cannot drift apart. A password someone else chose
-        is one-time when the tenant policy says so.
+        is always one-time.
         """
 
         validate_new_local_password(new_password)
@@ -2225,12 +2219,7 @@ class UserService:
         salt, hashed_password = self.auth_service.create_salt_and_hashed_password(
             new_password
         )
-        change_required = (
-            not set_by_account
-            and PasswordLifecyclePolicy.from_tenant(
-                user.tenant.password_policy
-            ).require_change_after_admin_set
-        )
+        change_required = not set_by_account
         updated = await self.repo.update(
             UserUpdate(
                 id=user.id,

@@ -3,7 +3,6 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Text } from "@astryxdesign/core/Text";
-import { Switch } from "@/components/astryx/switch";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
@@ -36,9 +35,6 @@ function parseMaxAge(value: string): number | null | undefined {
 function PolicyForm({ policy }: { policy: PasswordLifecyclePolicy }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
-  const [requireChange, setRequireChange] = useState(
-    policy.require_change_after_admin_set !== false
-  );
   const [maxAgeDays, setMaxAgeDays] = useState(
     policy.max_age_days == null ? "" : String(policy.max_age_days)
   );
@@ -47,12 +43,10 @@ function PolicyForm({ policy }: { policy: PasswordLifecyclePolicy }) {
 
   const parsedMaxAge = parseMaxAge(maxAgeDays);
   const maxAgeError = submitted && parsedMaxAge === undefined;
-  const hasChanges =
-    requireChange !== (policy.require_change_after_admin_set !== false) ||
-    parsedMaxAge !== (policy.max_age_days ?? null);
+  const hasChanges = parsedMaxAge !== (policy.max_age_days ?? null);
 
   const save = useMutation({
-    mutationFn: (body: { require_change_after_admin_set: boolean; max_age_days: number | null }) =>
+    mutationFn: (body: { max_age_days: number | null }) =>
       unwrap(browserApi.PATCH("/api/v1/admin/password-policy", { body })),
     onSuccess: (saved) => {
       // The form re-mounts from the saved policy (see the key on PolicyForm).
@@ -75,17 +69,9 @@ function PolicyForm({ policy }: { policy: PasswordLifecyclePolicy }) {
           maxAgeRef.current?.focus();
           return;
         }
-        save.mutate({ require_change_after_admin_set: requireChange, max_age_days: parsedMaxAge });
+        save.mutate({ max_age_days: parsedMaxAge });
       }}
     >
-      <Switch
-        label={t("admin_password_policy_require_change")}
-        description={t("admin_password_policy_require_change_desc")}
-        labelPosition="start"
-        labelSpacing="spread"
-        value={requireChange}
-        onChange={setRequireChange}
-      />
       <TextInput
         ref={maxAgeRef}
         label={t("admin_password_policy_max_age")}
@@ -116,11 +102,12 @@ function PolicyForm({ policy }: { policy: PasswordLifecyclePolicy }) {
 }
 
 /**
- * The organisation's rules for when a local Eneo password must be replaced:
- * after an administrator sets one, and after a maximum age. Accounts that
- * sign in through an identity provider are never affected. One explicit save
- * for both fields, like the SvelteKit panel; problems show at the field on
- * submit and focus moves there (WCAG 3.3.1).
+ * The organisation's rule for when a local Eneo password must be replaced:
+ * after a maximum age. A password an administrator generates is always
+ * one-time, which the description says; it is not a setting. Accounts that
+ * sign in through an identity provider are never affected. An explicit save,
+ * like the SvelteKit panel; a problem shows at the field on submit and focus
+ * moves there (WCAG 3.3.1).
  */
 export function PasswordPolicyPanel() {
   const t = useTranslations();

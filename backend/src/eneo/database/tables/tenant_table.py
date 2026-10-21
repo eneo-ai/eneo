@@ -58,12 +58,7 @@ class Tenants(BasePublic):
     password_policy: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
-        server_default=sa.text(
-            "jsonb_build_object("
-            "'require_change_after_admin_set', true, "
-            "'max_age_days', NULL"
-            ")"
-        ),
+        server_default=sa.text("jsonb_build_object('max_age_days', NULL)"),
     )
     favorite_providers: Mapped[list[str]] = mapped_column(
         JSONB, nullable=False, server_default="[]"

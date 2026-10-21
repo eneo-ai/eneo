@@ -46,9 +46,6 @@
   const allRoles = $derived(admin.roles);
   const userGroups = $derived(admin.userGroups);
   const capability = $derived(admin.passwordCapability);
-  const oneTimePassword = $derived(
-    admin.passwordLifecyclePolicy?.require_change_after_admin_set === true
-  );
   const id = $props.id();
   const userId = $derived(user.id);
   let username = $state("");
@@ -166,9 +163,7 @@
         </Dialog.Title>
         <Dialog.Description id={`${id}-issued-hint`}>
           {m.admin_issued_password_handover({ email: user.email || email })}
-          {#if oneTimePassword}
-            {m.admin_password_one_time_hint()}
-          {/if}
+          {m.admin_password_one_time_hint()}
         </Dialog.Description>
       </Dialog.Header>
       <Field.Field>
@@ -235,9 +230,7 @@
             {#if mode === "create"}
               <Field.Description>
                 {m.admin_password_generated_hint()}
-                {#if oneTimePassword}
-                  {m.admin_password_one_time_hint()}
-                {/if}
+                {m.admin_password_one_time_hint()}
               </Field.Description>
             {:else}
               <Field.Field orientation="horizontal">
@@ -247,9 +240,7 @@
                   >
                   <Field.Description id={`${id}-replace-password-hint`}>
                     {m.admin_password_replace_desc()}
-                    {#if oneTimePassword}
-                      {m.admin_password_one_time_hint()}
-                    {/if}
+                    {m.admin_password_one_time_hint()}
                   </Field.Description>
                 </Field.Content>
                 <Switch

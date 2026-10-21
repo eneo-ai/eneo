@@ -32,9 +32,6 @@
     },
     get passwordCapability() {
       return data.passwordCapability;
-    },
-    get passwordLifecyclePolicy() {
-      return data.passwordLifecyclePolicy;
     }
   });
 </script>

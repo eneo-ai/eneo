@@ -45,12 +45,10 @@ async function renderEditor(
   api.GET.mockImplementation((path: string) =>
     path === "/api/v1/users/password-policy/"
       ? policyResponse
-      : path === "/api/v1/admin/password-policy"
-        ? ok({ require_change_after_admin_set: true, max_age_days: null })
-        : ok({
-            predefined_roles: { items: [{ id: "role-user", name: "Användare", permissions: [] }] },
-            roles: { items: [] }
-          })
+      : ok({
+          predefined_roles: { items: [{ id: "role-user", name: "Användare", permissions: [] }] },
+          roles: { items: [] }
+        })
   );
   const { queryClient } = renderInApp(<Harness user={user} />);
   const invalidate = vi.spyOn(queryClient, "invalidateQueries");
@@ -203,7 +201,7 @@ describe("UserEditorDialog", () => {
     const { dialog, invalidate } = await renderEditor(existing);
     const toggle = replaceSwitch(dialog);
     expect((toggle as HTMLInputElement).checked).toBe(false);
-    // The one-time sentence follows when the tenant rule is on (mocked on above).
+    // Always one-time: no tenant setting turns the hand-over into a lasting password.
     within(dialog).getByText(
       /^Det nuvarande lösenordet slutar fungera när du sparar\. .* Användaren måste välja ett eget lösenord vid nästa inloggning\.$/
     );

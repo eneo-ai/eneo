@@ -19223,14 +19223,12 @@ export interface components {
      *
      *     Stored as ``tenants.password_policy`` (JSONB). Missing keys fall back to
      *     these defaults, so rows written before a key existed keep working.
+     *
+     *     A password someone else set is always one-time and is not a tenant
+     *     choice; only the sysadmin API and the deployment seed may opt a single
+     *     account out (``password_change_required``).
      */
     PasswordLifecyclePolicy: {
-      /**
-       * Require Change After Admin Set
-       * @description A password set by an administrator or provisioning is a one-time password: the account must choose its own at the next password login.
-       * @default true
-       */
-      require_change_after_admin_set?: boolean;
       /**
        * Max Age Days
        * @description Days a local password stays valid before the account must choose a new one at its next password login. Unset disables rotation.
@@ -19239,11 +19237,6 @@ export interface components {
     };
     /** PasswordLifecyclePolicyUpdate */
     PasswordLifecyclePolicyUpdate: {
-      /**
-       * Require Change After Admin Set
-       * @default true
-       */
-      require_change_after_admin_set?: boolean;
       /** Max Age Days */
       max_age_days?: number | null;
     };

@@ -79,11 +79,9 @@ def password_user(
 
 def test_policy_defaults_apply_to_rows_written_before_a_key_existed():
     assert PasswordLifecyclePolicy.from_tenant(None) == PasswordLifecyclePolicy(
-        require_change_after_admin_set=True, max_age_days=None
+        max_age_days=None
     )
-    partial = PasswordLifecyclePolicy.from_tenant({"max_age_days": 90})
-    assert partial.require_change_after_admin_set is True
-    assert partial.max_age_days == 90
+    assert PasswordLifecyclePolicy.from_tenant({"max_age_days": 90}).max_age_days == 90
 
 
 def test_policy_ignores_unknown_stored_keys_but_updates_forbid_them():
@@ -92,18 +90,18 @@ def test_policy_ignores_unknown_stored_keys_but_updates_forbid_them():
         PasswordLifecyclePolicyUpdate.model_validate({"later_key": 1})
 
 
-def test_policy_patch_distinguishes_omitted_false_and_null():
+def test_the_one_time_rule_is_not_a_tenant_setting():
+    with pytest.raises(ValidationError):
+        PasswordLifecyclePolicyUpdate.model_validate(
+            {"require_change_after_admin_set": False}
+        )
+
+
+def test_policy_patch_distinguishes_omitted_and_null():
     assert PasswordLifecyclePolicyUpdate().model_dump(exclude_unset=True) == {}
-    assert PasswordLifecyclePolicyUpdate(
-        require_change_after_admin_set=False
-    ).model_dump(exclude_unset=True) == {"require_change_after_admin_set": False}
     assert PasswordLifecyclePolicyUpdate(max_age_days=None).model_dump(
         exclude_unset=True
     ) == {"max_age_days": None}
-    with pytest.raises(ValidationError):
-        PasswordLifecyclePolicyUpdate.model_validate(
-            {"require_change_after_admin_set": None}
-        )
 
 
 @pytest.mark.parametrize("days", [0, -1, 3651])
@@ -202,13 +200,9 @@ async def test_self_service_change_clears_the_requirement(service: UserService):
     assert update.password_changed_at.tzinfo is not None
 
 
-@pytest.mark.parametrize(
-    "require_after_admin_set, expected", [(True, True), (False, False)]
-)
-async def test_admin_reset_follows_the_tenant_policy(
-    service: UserService, require_after_admin_set, expected
-):
-    user = password_user(require_change_after_admin_set=require_after_admin_set)
+async def test_an_admin_reset_is_always_one_time(service: UserService):
+    # A tenant row from before the rule was fixed may still say otherwise.
+    user = password_user(require_change_after_admin_set=False)
     service.repo.get_user_by_id_for_update.return_value = user
     service.repo.update.return_value = user
     service.auth_service.verify_password.return_value = False
@@ -222,7 +216,7 @@ async def test_admin_reset_follows_the_tenant_policy(
     )
 
     update = service.repo.update.await_args.args[0]
-    assert update.password_change_required is expected
+    assert update.password_change_required is True
     assert update.password_changed_at is not None
 
 
@@ -259,21 +253,22 @@ async def test_session_invalidation_leaves_the_lifecycle_alone(service: UserServ
 
 
 @pytest.mark.parametrize(
-    "override, policy_requires, expected",
+    "override, expected",
     [
-        (None, True, True),
-        (None, False, False),
-        (False, True, False),
-        (True, False, True),
+        # Only the sysadmin API's explicit opt-out keeps a set password.
+        (None, True),
+        (True, True),
+        (False, False),
     ],
 )
 async def test_registration_with_a_password_stamps_the_lifecycle(
-    service: UserService, override, policy_requires, expected
+    service: UserService, override, expected
 ):
     service.repo.get_user_by_email.return_value = None
     service.repo.get_user_by_username.return_value = None
+    # A tenant row from before the rule was fixed may still say otherwise.
     service.tenant_repo.get.return_value = tenant_with_policy(
-        require_change_after_admin_set=policy_requires
+        require_change_after_admin_set=False
     )
     service.repo.add.return_value = password_user()
     service.auth_service.create_salt_and_hashed_password.return_value = (

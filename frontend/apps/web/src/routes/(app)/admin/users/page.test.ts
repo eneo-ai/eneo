@@ -28,7 +28,7 @@ function eventWithPolicy(policy: unknown) {
   };
 }
 
-const lifecyclePolicy = { require_change_after_admin_set: true, max_age_days: null };
+const lifecyclePolicy = { max_age_days: null };
 
 describe("admin password policy loading", () => {
   test("loads the local policy independently of the administrator's own password provider", async () => {

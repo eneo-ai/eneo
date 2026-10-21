@@ -3,12 +3,10 @@
   import { Button } from "$lib/components/ui/button";
   import * as Field from "$lib/components/ui/field";
   import { Input } from "$lib/components/ui/input";
-  import { Switch } from "$lib/components/ui/switch";
   import { getEneo } from "$lib/core/Eneo";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { m } from "$lib/paraglide/messages";
   import { Check, CircleAlert } from "@lucide/svelte";
-  import { invalidate } from "$app/navigation";
 
   let { policy }: { policy: PasswordLifecyclePolicy } = $props();
 
@@ -19,8 +17,6 @@
   // until saved, so a list refresh never discards what the admin is typing.
   // svelte-ignore state_referenced_locally
   let saved = $state<PasswordLifecyclePolicy>(policy);
-  // svelte-ignore state_referenced_locally
-  let requireChange = $state(policy.require_change_after_admin_set !== false);
   // svelte-ignore state_referenced_locally
   let maxAgeDays = $state(policy.max_age_days == null ? "" : String(policy.max_age_days));
   let saving = $state(false);
@@ -43,10 +39,7 @@
 
   const parsedMaxAge = $derived(parseMaxAge(maxAgeDays));
   const maxAgeError = $derived(submitted && parsedMaxAge === undefined);
-  const hasChanges = $derived(
-    requireChange !== (saved.require_change_after_admin_set !== false) ||
-      parsedMaxAge !== (saved.max_age_days ?? null)
-  );
+  const hasChanges = $derived(parsedMaxAge !== (saved.max_age_days ?? null));
 
   async function save(event: SubmitEvent) {
     event.preventDefault();
@@ -57,23 +50,10 @@
 
     saving = true;
     try {
-      // Only the edited rules travel: PATCH merges them server-side, so an
-      // untouched rule another admin just changed is not overwritten.
-      const updates: Partial<PasswordLifecyclePolicy> = {};
-      if (requireChange !== (saved.require_change_after_admin_set !== false)) {
-        updates.require_change_after_admin_set = requireChange;
-      }
-      if (parsedMaxAge !== (saved.max_age_days ?? null)) {
-        updates.max_age_days = parsedMaxAge;
-      }
-      saved = await eneo.users.updatePasswordLifecyclePolicy(updates);
-      requireChange = saved.require_change_after_admin_set !== false;
+      saved = await eneo.users.updatePasswordLifecyclePolicy({ max_age_days: parsedMaxAge });
       maxAgeDays = saved.max_age_days == null ? "" : String(saved.max_age_days);
       submitted = false;
       successMessage = m.admin_password_policy_updated();
-      // The page context feeds the user editor's one-time-password hint from
-      // the loaded policy, so the load must see the saved rule too.
-      await invalidate("admin:users");
     } catch (error) {
       errorMessage = getErrorMessage(error);
     } finally {
@@ -92,21 +72,6 @@
 
   <form class="mt-5 space-y-5" onsubmit={save} novalidate>
     <Field.Group class="gap-5">
-      <Field.Field orientation="horizontal">
-        <Field.Content>
-          <Field.Label for={`${id}-require-change`}
-            >{m.admin_password_policy_require_change()}</Field.Label
-          >
-          <Field.Description>{m.admin_password_policy_require_change_desc()}</Field.Description>
-        </Field.Content>
-        <Switch
-          id={`${id}-require-change`}
-          checked={requireChange}
-          onCheckedChange={(next) => (requireChange = next)}
-          disabled={saving}
-        />
-      </Field.Field>
-
       <Field.Field data-invalid={maxAgeError || undefined}>
         <Field.Label for={`${id}-max-age`}>{m.admin_password_policy_max_age()}</Field.Label>
         <Field.Description id={`${id}-max-age-hint`}>

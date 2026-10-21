@@ -3,8 +3,8 @@
 ``users.password_changed_at`` and ``users.password_change_required`` carry
 when a local password was last written and whether someone other than the
 account (an administrator, provisioning or the deployment seed) chose it.
-``tenants.password_policy`` holds the tenant's rules for when such a password
-must be replaced (eneo.users.password.PasswordLifecyclePolicy).
+Such a password is always one-time. ``tenants.password_policy`` holds the
+tenant's rotation rule (eneo.users.password_lifecycle.PasswordLifecyclePolicy).
 
 Existing local passwords are stamped with the upgrade time: their real age is
 unknown, so a rotation limit counts from this deployment rather than forcing
@@ -28,9 +28,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-_PASSWORD_POLICY_DEFAULT = (
-    "jsonb_build_object('require_change_after_admin_set', true, 'max_age_days', NULL)"
-)
+_PASSWORD_POLICY_DEFAULT = "jsonb_build_object('max_age_days', NULL)"
 
 
 def upgrade() -> None:

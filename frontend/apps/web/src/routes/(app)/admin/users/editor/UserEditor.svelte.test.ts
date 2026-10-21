@@ -41,7 +41,6 @@ vi.mock("../ctx", () => ({
   getAdminUserCtx: () => ({
     roles: [],
     userGroups: [],
-    passwordLifecyclePolicy: { require_change_after_admin_set: true, max_age_days: null },
     passwordCapability: capability
   })
 }));
@@ -218,7 +217,10 @@ describe("administrator user editor", () => {
     render(UserEditor, { mode: "create" });
     await page.getByRole("button", { name: m.create_user(), exact: true }).click();
     const dialog = page.getByRole("dialog");
-    await expect.element(dialog.getByText(m.admin_password_generated_hint())).toBeVisible();
+    // Always one-time: no tenant setting can turn the hand-over into a lasting password.
+    await expect
+      .element(dialog.getByText(m.admin_password_generated_hint(), { exact: false }))
+      .toHaveTextContent(m.admin_password_one_time_hint());
     await page.getByLabelText(m.username(), { exact: true }).fill("new-person");
     await emailInput().fill("new@example.com");
     await dialog.getByRole("button", { name: m.create_user(), exact: true }).click();

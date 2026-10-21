@@ -1,37 +1,34 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
-import { backendFetch, expectOk, uniqueName } from "./helpers";
+import { expect, test } from "@playwright/test";
+import { uniqueName } from "./helpers";
 
-/** The tests below toggle the tenant rule; each starts from, and leaves, the default. */
-async function setOneTimeRule(page: Page, request: APIRequestContext, enabled: boolean) {
-  const response = await backendFetch(page, request, "/api/v1/admin/password-policy", {
-    method: "PATCH",
-    data: { require_change_after_admin_set: enabled }
-  });
-  await expectOk(response, "setting the one-time password rule");
-}
-
-// A password an administrator hands out is one-time: the account signs in with
-// it, is sent to /password-change, chooses its own, signs in again and lands
-// where it was going. Runs in the admin session for setup, then in a fresh
-// context for the new account. The UI speaks Swedish, the app's base locale.
-test("an admin-set password must be replaced at the first sign-in", async ({
+// An administrator never types a password for someone else: Eneo generates
+// one, shows it once, and it is one-time. The account signs in with it, is
+// sent to /password-change, chooses its own, signs in again and lands where it
+// was going. Runs in the admin session for setup, then in a fresh context for
+// the new account. The UI speaks Swedish, the app's base locale.
+test("a generated admin-set password must be replaced at the first sign-in", async ({
   page,
-  request,
   browser
 }) => {
-  await setOneTimeRule(page, request, true);
-  await page.goto("/admin/users");
-  await expect(page.getByRole("heading", { name: "Lösenordspolicy" })).toBeVisible();
-
   const email = `${uniqueName("e2e-onetime").replace(/\s+/g, "-").toLowerCase()}@example.com`;
-  const oneTimePassword = "OneTimePassword1!";
   const chosenPassword = "ChosenByTheUser2!";
 
-  const created = await backendFetch(page, request, "/api/v1/admin/users/", {
-    method: "POST",
-    data: { email, username: email.split("@")[0], password: oneTimePassword }
-  });
-  await expectOk(created, "creating the one-time password user");
+  await page.goto("/admin/users");
+  await expect(page.getByRole("heading", { name: "Lösenordspolicy" })).toBeVisible();
+  await page.getByRole("button", { name: "Skapa användare" }).click();
+  const editor = page.getByRole("dialog");
+  await editor.getByLabel("Användarnamn").fill(email.split("@")[0]);
+  await editor.getByLabel("E-post").fill(email);
+  await expect(editor.locator('input[type="password"]')).toHaveCount(0);
+  await editor.getByRole("button", { name: "Skapa användare" }).click();
+
+  // Shown once, after the account exists, for the administrator to hand over.
+  await expect(editor.getByText("Kontot har skapats")).toBeVisible();
+  await expect(editor.getByText(`Lämna lösenordet till ${email}.`)).toBeVisible();
+  const oneTimePassword = await editor.getByLabel("Lösenord", { exact: true }).inputValue();
+  expect(oneTimePassword.length).toBeGreaterThanOrEqual(12);
+  await editor.getByRole("button", { name: "Klar" }).click();
+  await expect(editor).toHaveCount(0);
 
   // The admin list marks the account until it has chosen its own password.
   await page.goto(`/admin/users?search=${encodeURIComponent(email)}`);
@@ -82,25 +79,4 @@ test("an admin-set password must be replaced at the first sign-in", async ({
   const settled = page.getByRole("row", { name: new RegExp(email) });
   await expect(settled).toBeVisible();
   await expect(settled.getByText("Engångslösenord", { exact: true })).toHaveCount(0);
-});
-
-test("an administrator can turn the one-time rule off and on", async ({ page, request }) => {
-  await setOneTimeRule(page, request, true);
-  await page.goto("/admin/users");
-  const panel = page.locator('[data-tour="admin-password-policy"]');
-  const ruleName = "Lösenord satta av administratör är engångslösenord";
-  await expect(panel.getByRole("switch", { name: ruleName })).toBeChecked();
-  const save = panel.getByRole("button", { name: "Spara" });
-  await expect(save).toBeDisabled();
-
-  await panel.getByRole("switch", { name: ruleName }).click();
-  await save.click();
-  await expect(panel.getByRole("status")).toContainText("Lösenordspolicyn är sparad");
-  await page.reload();
-  await expect(panel.getByRole("switch", { name: ruleName })).not.toBeChecked();
-
-  await panel.getByRole("switch", { name: ruleName }).click();
-  await panel.getByRole("button", { name: "Spara" }).click();
-  await expect(panel.getByRole("status")).toContainText("Lösenordspolicyn är sparad");
-  await setOneTimeRule(page, request, true);
 });

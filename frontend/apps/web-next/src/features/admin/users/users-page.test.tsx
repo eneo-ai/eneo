@@ -61,7 +61,7 @@ function serve(pages: (query: Record<string, unknown>) => Page) {
         });
       }
       if (path === "/api/v1/admin/password-policy") {
-        return ok({ require_change_after_admin_set: true, max_age_days: null });
+        return ok({ max_age_days: null });
       }
       const query = init?.params?.query ?? {};
       const { items, totalPages = 1, page = Number(query.page) } = pages(query);
