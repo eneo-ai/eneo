@@ -250,27 +250,28 @@ export function ProviderOverview({
     const noForecastModel =
       kind === "forecast" &&
       !sections.some((section) => section.models.some((entry) => entry.kind === "forecast"));
-    content =
-      sections.length === 0 ? (
-        <EmptyState
-          title={t("no_providers_yet")}
-          actions={
-            <Button
-              variant="primary"
-              label={t("add_provider")}
-              icon={<Plus className="size-4" aria-hidden="true" />}
-              onClick={onAddProvider}
-            />
-          }
-        />
-      ) : noForecastModel ? (
-        <EmptyState
-          title={t("forecast_models_empty_title")}
-          description={t("forecast_models_empty_description")}
-        />
-      ) : (
-        <EmptyState title={t("no_providers_match")} />
-      );
+    // A forecast model is never added through a provider, so the Prognos filter
+    // points to the Function even before any provider exists.
+    content = noForecastModel ? (
+      <EmptyState
+        title={t("forecast_models_empty_title")}
+        description={t("forecast_models_empty_description")}
+      />
+    ) : sections.length === 0 ? (
+      <EmptyState
+        title={t("no_providers_yet")}
+        actions={
+          <Button
+            variant="primary"
+            label={t("add_provider")}
+            icon={<Plus className="size-4" aria-hidden="true" />}
+            onClick={onAddProvider}
+          />
+        }
+      />
+    ) : (
+      <EmptyState title={t("no_providers_match")} />
+    );
   } else {
     content = rendered.map(({ section, models: sectionModels }) => (
       <ProviderCard

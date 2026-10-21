@@ -164,10 +164,17 @@ function EditModelForm({
       const security_classification =
         securityEnabled && classificationId !== "__none__" ? { id: classificationId } : null;
       if (kind === "forecast") {
-        // Left out, the class is kept; only an admin who sees the field sets it.
+        // Only the fields the admin changed: a field left out keeps its value, so
+        // a rename never undoes a class another admin set while this dialog was
+        // open, and the reverse.
+        const initialClassificationId = model.security_classification?.id ?? "__none__";
         return updateForecastModel(browserApi, model.id, {
-          display_name: displayName.trim(),
-          ...(securityEnabled ? { security_classification } : {})
+          ...(displayName.trim() !== (model.nickname ?? model.name)
+            ? { display_name: displayName.trim() }
+            : {}),
+          ...(securityEnabled && classificationId !== initialClassificationId
+            ? { security_classification }
+            : {})
         });
       }
       if (kind === "embedding") {

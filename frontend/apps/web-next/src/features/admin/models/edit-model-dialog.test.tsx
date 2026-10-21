@@ -120,7 +120,7 @@ describe("EditModelDialog for a forecast model", () => {
     security_classification: null
   } as unknown as AdminModel;
 
-  it("renames it and sets its class through the forecast endpoint, nothing else", async () => {
+  it("sends only what the admin changed, so a rename keeps a class set meanwhile", async () => {
     api.POST.mockImplementation(() => ok({}));
     const onOpenChange = vi.fn();
     renderInApp(
@@ -152,11 +152,40 @@ describe("EditModelDialog for a forecast model", () => {
     await waitFor(() =>
       expect(api.POST).toHaveBeenCalledWith("/api/v1/forecast-models/{id}/", {
         params: { path: { id: "f1" } },
-        body: { display_name: "Prognosmodellen", security_classification: null }
+        body: { display_name: "Prognosmodellen" }
       })
     );
     expect(api.PUT).not.toHaveBeenCalled();
     expect(toast.success).toHaveBeenCalledWith("Modellen har uppdaterats");
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("sends a class the admin chose or cleared, and not the name it left alone", async () => {
+    const classified = {
+      ...forecastModel,
+      security_classification: { id: "s3", name: "Klass 3", security_level: 3 }
+    } as unknown as AdminModel;
+    api.POST.mockImplementation(() => ok({}));
+    renderInApp(
+      <EditModelDialog
+        model={classified}
+        kind="forecast"
+        classifications={[{ id: "s3", name: "Klass 3", security_level: 3 } as never]}
+        securityEnabled
+        open
+        onOpenChange={vi.fn()}
+      />
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Redigera modell" });
+    fireEvent.click(within(dialog).getByRole("combobox", { name: /Säkerhetsklass/ }));
+    fireEvent.click(await screen.findByRole("option", { name: /Ingen/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/forecast-models/{id}/", {
+        params: { path: { id: "f1" } },
+        body: { security_classification: null }
+      })
+    );
   });
 });

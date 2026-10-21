@@ -20,6 +20,9 @@ vi.mock("@/components/providers/app-context", () => ({
 
 import { ModelsPage } from "./models-page";
 
+const EMPTY_FORECAST = (messages as Record<string, string>).forecast_models_empty_title!;
+const NO_PROVIDERS_YET = (messages as Record<string, string>).no_providers_yet!;
+
 const ok = (data: unknown) =>
   Promise.resolve({ data, response: new Response("{}", { status: 200 }) });
 
@@ -177,16 +180,17 @@ function choose(menu: HTMLElement, submenu: string, option: string) {
   fireEvent.click(within(items).getByRole("menuitemradio", { name: option }));
 }
 
-function renderPage() {
+function renderPage(data: { models?: unknown; providers?: unknown } = {}) {
+  const models = data.models ?? presentation;
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
   });
-  client.setQueryData(MODELS_KEY, presentation);
-  client.setQueryData(PROVIDERS_KEY, providers);
+  client.setQueryData(MODELS_KEY, models);
+  client.setQueryData(PROVIDERS_KEY, data.providers ?? providers);
   client.setQueryData(CAPABILITIES_KEY, capabilities);
   client.setQueryData(SECURITY_CLASSIFICATIONS_KEY, security);
   api.GET.mockImplementation((path: string) => {
-    if (path === "/api/v1/ai-models/") return ok(presentation);
+    if (path === "/api/v1/ai-models/") return ok(models);
     if (path.endsWith("/migration-history")) return ok([]);
     return ok({});
   });
@@ -292,6 +296,23 @@ describe("ModelsPage", () => {
     expect(screen.queryByRole("region", { name: "Anthropic" })).toBeNull();
     expect(screen.getByRole("region", { name: "OpenAI Images" })).toBeTruthy();
     await expectNoAxeViolations(document.body);
+  });
+
+  it("points the empty Prognos filter to the Function, also before any provider exists", async () => {
+    renderPage({
+      models: {
+        completion_models: [],
+        embedding_models: [],
+        transcription_models: [],
+        image_models: [],
+        forecast_models: []
+      },
+      providers: []
+    });
+    const types = screen.getByRole("radiogroup", { name: "Modelltyp" });
+    fireEvent.click(within(types).getByRole("radio", { name: "Prognos (0)" }));
+    expect(screen.getByText(EMPTY_FORECAST)).toBeTruthy();
+    expect(screen.queryByText(NO_PROVIDERS_YET)).toBeNull();
   });
 
   it("lists the forecast model under the provider that comes with the installation", async () => {
