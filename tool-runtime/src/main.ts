@@ -174,7 +174,9 @@ endpoints.push(
 // The whole-job deadline covers reading the file, the sidecar (at most 25 s with its torch
 // import and model load) and drawing the picture.
 const forecastQueue = Math.min(config.maxConcurrency, 2 * config.forecastConcurrency);
-const forecastScheduler = new Scheduler(config.forecastConcurrency, forecastQueue, forecastQueue);
+// One tenant queues at most as many forecasts as can run at once, so it cannot hold every
+// queue place while another tenant's forecast is refused as busy.
+const forecastScheduler = new Scheduler(config.forecastConcurrency, forecastQueue, config.forecastConcurrency);
 const forecastJobTimeoutMs = 40_000;
 endpoints.push({
   slug: "forecast",
