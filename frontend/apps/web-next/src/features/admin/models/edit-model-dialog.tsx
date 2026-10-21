@@ -158,6 +158,9 @@ function EditModelForm({
   const [classificationId, setClassificationId] = useState(
     model.security_classification?.id ?? "__none__"
   );
+  // What the form opened with, kept while it stays open: the model prop follows
+  // refetches, so comparing with it would count a newer value as the admin's edit.
+  const [opened] = useState(() => ({ displayName, classificationId }));
 
   const save = useMutation({
     mutationFn: () => {
@@ -167,12 +170,11 @@ function EditModelForm({
         // Only the fields the admin changed: a field left out keeps its value, so
         // a rename never undoes a class another admin set while this dialog was
         // open, and the reverse.
-        const initialClassificationId = model.security_classification?.id ?? "__none__";
         return updateForecastModel(browserApi, model.id, {
-          ...(displayName.trim() !== (model.nickname ?? model.name)
+          ...(displayName.trim() !== opened.displayName.trim()
             ? { display_name: displayName.trim() }
             : {}),
-          ...(securityEnabled && classificationId !== initialClassificationId
+          ...(securityEnabled && classificationId !== opened.classificationId
             ? { security_classification }
             : {})
         });

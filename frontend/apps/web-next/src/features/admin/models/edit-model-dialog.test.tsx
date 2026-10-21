@@ -188,4 +188,39 @@ describe("EditModelDialog for a forecast model", () => {
       })
     );
   });
+
+  it("keeps what it opened with when the model is refreshed while it is open", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const dialogFor = (model: AdminModel) => (
+      <EditModelDialog
+        model={model}
+        kind="forecast"
+        classifications={[{ id: "s3", name: "Klass 3", security_level: 3 } as never]}
+        securityEnabled
+        open
+        onOpenChange={vi.fn()}
+      />
+    );
+    const { rerender } = renderInApp(dialogFor(forecastModel));
+    const dialog = await screen.findByRole("dialog", { name: "Redigera modell" });
+    // Another admin classifies the model; the refetched model reaches the open form.
+    rerender(
+      dialogFor({
+        ...forecastModel,
+        security_classification: { id: "s3", name: "Klass 3", security_level: 3 }
+      } as unknown as AdminModel)
+    );
+    fireEvent.change(within(dialog).getByLabelText("Visningsnamn"), {
+      target: { value: "Prognosmodellen" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    // Only the rename: the class the other admin set is left as it is.
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/forecast-models/{id}/", {
+        params: { path: { id: "f1" } },
+        body: { display_name: "Prognosmodellen" }
+      })
+    );
+  });
 });
