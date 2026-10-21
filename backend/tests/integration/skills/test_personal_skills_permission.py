@@ -163,3 +163,87 @@ async def test_personal_space_skills_stay_closed_without_personal_skills(
         headers=headers,
     )
     assert created.status_code == 403, created.text
+
+
+async def _published_organisation_skill(container):
+    skills = container.organization_skill_service()
+    skill = await skills.create_organization_skill(
+        slug=f"org-{uuid4().hex[:8]}",
+        display_name="Klarspråk",
+        description="Organisationens skrivregler.",
+        instructions="Skriv klarspråk.",
+    )
+    return (
+        await skills.publish(
+            skill_id=skill.id, expected_revision_id=skill.current_revision.id
+        )
+    ).skill
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_personal_skills_does_not_let_assistants_or_apps_use_organisation_skills(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    admin_user,
+    user_factory,
+    assistant_factory,
+    app_factory,
+):
+    """Attaching an organisation Skill still needs Use Skills. personal_skills
+    opens the user's own personal space, so the binding boundary must check the
+    Skill's source, not only whether the destination space's Skills are
+    readable."""
+    async with db_container() as container:
+        _, token = await _user_with(
+            container.session(),
+            user_factory,
+            admin_user.tenant_id,
+            [
+                Permission.PERSONAL_CHAT,
+                Permission.PERSONAL_SKILLS,
+                Permission.ASSISTANTS,
+                Permission.APPS,
+            ],
+            container,
+        )
+        organisation_skill = await _published_organisation_skill(container)
+    headers = {"Authorization": f"Bearer {token}"}
+    personal = await client.get("/api/v1/spaces/type/personal/", headers=headers)
+    assert personal.status_code == 200, personal.text
+    space_id = personal.json()["id"]
+    model_id = personal.json()["default_assistant"]["completion_model"]["id"]
+
+    async with db_container() as container:
+        session = container.session()
+        assistant = await assistant_factory(
+            session, "Min assistent", model_id, space_id=space_id
+        )
+        app = await app_factory(session, "Min app", model_id, space_id=space_id)
+        assistant_id, app_id = assistant.id, app.id
+
+    binding = {
+        "skill_id": str(organisation_skill.id),
+        "skill_revision_id": str(organisation_skill.current_revision.id),
+    }
+    assistant_update = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={"skill_bindings": [binding]},
+        headers=headers,
+    )
+    assert assistant_update.status_code == 403, assistant_update.text
+
+    app_update = await client.patch(
+        f"/api/v1/apps/{app_id}/",
+        json={"skill_bindings": [binding]},
+        headers=headers,
+    )
+    assert app_update.status_code == 403, app_update.text
+
+    bindings = await client.get(
+        f"/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/",
+        headers=headers,
+    )
+    assert bindings.status_code == 200, bindings.text
+    assert bindings.json() == {"items": []} or bindings.json() == []

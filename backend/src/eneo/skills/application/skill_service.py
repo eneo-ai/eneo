@@ -24,6 +24,7 @@ from eneo.skills.domain.skill import (
     SkillBindingIntent,
     SkillBindingProjection,
     SkillBindingReference,
+    SkillBindingSource,
     SkillCatalogPage,
     SkillComposition,
     SkillExecutionBlock,
@@ -546,6 +547,19 @@ class SkillService:
             for reference in new_references
             if reference not in local_references
         ]
+        # Reading the destination space's Skills is not enough: PERSONAL_SKILLS
+        # opens your own personal space without granting Use Skills, which
+        # alone covers organisation Skills, new or retained.
+        if (
+            catalogue_references
+            or any(
+                binding.source is SkillBindingSource.ORGANIZATION
+                for binding in retained_by_reference.values()
+            )
+        ) and Permission.SKILLS not in self.user.permissions:
+            raise UnauthorizedException(
+                "Using organisation Skills requires the Use Skills permission"
+            )
         published = (
             await self.repo.resolve_published_references_for_binding_update(
                 tenant_id=tenant_id,
