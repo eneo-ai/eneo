@@ -19,6 +19,7 @@ class EmbeddingModelPublic(BaseResponse):
     open_source: bool
     dimensions: Optional[int] = None
     max_input: Optional[int] = None
+    max_batch_size: Optional[int] = None
     hf_link: Optional[str] = None
     stability: Optional[str] = None
     hosting: Optional[str] = None
@@ -60,6 +61,7 @@ class EmbeddingModelPublic(BaseResponse):
             is_deprecated=model.is_effectively_deprecated,
             open_source=model.open_source,
             max_input=model.max_input,
+            max_batch_size=model.max_batch_size,
             hf_link=model.hf_link,
             stability=model.stability,
             hosting=model.hosting,
