@@ -246,6 +246,10 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
   const bundledToAdd = (bundledTools.data?.items ?? []).filter((tool) => !tool.mcp_server_id);
   const bundledProviderFor = (purpose: Capability) =>
     bundledToAdd.find((tool) => tool.purpose === purpose);
+  // What the runtime says now about a bundled source already added, such as a model it lacks.
+  const modelMissing = (sourceId: string) =>
+    bundledTools.data?.items?.find((tool) => tool.mcp_server_id === sourceId)
+      ?.unavailable_reason === "model_missing";
 
   return (
     <div className={cn("flex w-full flex-col gap-6", !embedded && "mx-auto max-w-5xl pb-16")}>
@@ -391,6 +395,11 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
                       {blocked && (
                         <p className="text-warning text-sm">
                           {t(readinessKey(source.readiness_reason))}
+                        </p>
+                      )}
+                      {modelMissing(source.id) && (
+                        <p className="text-warning text-sm">
+                          {t("tools_builtin_model_missing_hint")}
                         </p>
                       )}
                       {!active && activeDefault && source.audience !== "groups" && (

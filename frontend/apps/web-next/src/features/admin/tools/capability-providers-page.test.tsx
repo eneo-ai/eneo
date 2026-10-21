@@ -211,6 +211,54 @@ describe("admin function sources", () => {
     expect(screen.getByRole("button", { name: "deactivate" })).toBeTruthy();
   });
 
+  it("says on an added forecast source when the runtime has lost its model, and only there", async () => {
+    const added = (id: string, purpose: string) => ({
+      ...source,
+      id,
+      mcp_server_id: id,
+      name: `${id} (bundled)`,
+      http_url: `http://runtime:8765/${id}`,
+      http_auth_type: "bundled",
+      purpose,
+      is_enabled: true
+    });
+    const diagnose = (missing: boolean) =>
+      get.mockImplementation((path?: string) => {
+        if (path === "/api/v1/mcp-servers/settings/")
+          return ok({ items: [added("forecast", "forecast"), added("charts", "charts")] });
+        if (path === "/api/v1/mcp-servers/bundled/")
+          return ok({
+            ...bundled,
+            items: bundled.items.map((item) =>
+              item.tool === "forecast"
+                ? {
+                    ...item,
+                    mcp_server_id: "forecast",
+                    ...(missing ? {} : { available: true, unavailable_reason: null })
+                  }
+                : item.tool === "charts"
+                  ? { ...item, mcp_server_id: "charts" }
+                  : item
+            )
+          });
+        return ok({ items: [] });
+      });
+    // The runtime card shows once the runtime's diagnostic has loaded.
+    const loaded = () => screen.findByRole("region", { name: "tools_runtime_title" });
+    diagnose(true);
+    show();
+    await loaded();
+    expect(await screen.findAllByText("tools_builtin_model_missing_hint")).toHaveLength(1);
+    cleanup();
+
+    // Once the model is back, the hint goes.
+    diagnose(false);
+    show();
+    await loaded();
+    expect(await screen.findByRole("heading", { level: 3, name: "forecast" })).toBeTruthy();
+    expect(screen.queryByText("tools_builtin_model_missing_hint")).toBeNull();
+  });
+
   it("activates an existing source through the capability endpoint", async () => {
     get.mockImplementation((path?: string) =>
       path === "/api/v1/mcp-servers/settings/" ? ok({ items: [source] }) : ok({ items: [] })
