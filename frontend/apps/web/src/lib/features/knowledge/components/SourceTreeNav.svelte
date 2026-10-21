@@ -32,7 +32,8 @@
     hint,
     leading,
     trailing,
-    totalLabel
+    totalLabel,
+    emptyLabel
   }: {
     title: string;
     allLabel: string;
@@ -47,6 +48,8 @@
     filterLabel?: string;
     query?: string;
     hint?: string;
+    /** Shown for an empty tree while nothing is filtered; an empty string shows nothing. */
+    emptyLabel?: string;
     leading?: Snippet<[Row]>;
     trailing?: Snippet<[Row]>;
   } = $props();
@@ -148,7 +151,8 @@
         {/if}
       </li>
     {:else}
-      <li class="text-secondary px-2 py-2 text-sm">{m.no_results_found()}</li>
+      {@const empty = query.trim() ? m.no_results_found() : (emptyLabel ?? m.no_results_found())}
+      {#if empty}<li class="text-secondary px-2 py-2 text-sm">{empty}</li>{/if}
     {/each}
   </ul>
   {#if hint}<p class="text-secondary px-2 pt-2 text-xs leading-relaxed">{hint}</p>{/if}

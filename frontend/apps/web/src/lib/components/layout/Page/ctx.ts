@@ -10,7 +10,9 @@ const ctxKey = "content";
 export function selectPageTab(tabs: Writable<string>, tab: string): void {
   tabs.set(tab);
   if (!browser) return;
-  const url = new URL(page.url);
+  // replaceState never updates page.url: the address bar also holds earlier shallow
+  // changes, such as a selected content directory, which a tab switch must keep.
+  const url = new URL(location.href);
   url.searchParams.set("tab", tab);
   // Reset to page 1 when switching tabs to avoid empty results
   url.searchParams.delete("page");

@@ -575,7 +575,7 @@ async def get_info_blob_page(
     reason=_WEBSITE_BLOB_ACCESS_REASON,
 )
 async def get_content_folders(
-    id: UUID,
+    id: Annotated[UUID, Path(description="Unique identifier of the website")],
     container: ContainerDep,
     prefix: Annotated[
         str, Query(max_length=2048, pattern=r"^(https?://[^?#]+/)?$")

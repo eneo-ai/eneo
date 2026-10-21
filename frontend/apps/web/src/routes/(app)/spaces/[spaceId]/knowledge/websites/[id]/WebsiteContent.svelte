@@ -13,29 +13,36 @@
   import CrawlLoadError from "$lib/features/knowledge/CrawlLoadError.svelte";
   import { m } from "$lib/paraglide/messages";
   import WebsiteFolderNav from "./WebsiteFolderNav.svelte";
-  import { readContentFilters, type WebsiteContentFilters } from "./websiteContentFilters";
+  import type { WebsiteContentFilters } from "./websiteContentFilters";
 
   let {
     websiteId,
     initialPage,
-    initialContent = null
+    revision,
+    prefix = $bindable(""),
+    query = $bindable(""),
+    initialContent = $bindable(null)
   }: {
     websiteId: string;
-    /** The whole website's first page; a new crawl snapshot replaces it. */
+    /** The whole website's first page. */
     initialPage: WebsiteInfoBlobPage;
-    /** The page the server already loaded for the filters the URL carries. */
+    /** The crawl whose indexed snapshot is listed; a new snapshot reloads the selection. */
+    revision: string | undefined;
+    /** The selected URL directory. The page owns it, so it outlives a tab switch. */
+    prefix?: string;
+    /** The applied title and URL search. */
+    query?: string;
+    /** The server's page for the URL's filters. Cleared once shown: a later mount fetches its own. */
     initialContent?: (WebsiteContentFilters & { page: WebsiteInfoBlobPage }) | null;
   } = $props();
   const eneo = getEneo();
-  let initialContentShown = false;
   let documents = $state<WebsiteInfoBlobPage | null>(null);
-  let prefix = $state("");
-  let query = $state("");
   let searchText = $state("");
   let loading = $state(false);
   let failed = $state(false);
   let retryCursor: string | null = null;
   let generation = 0;
+  let listedSelection: string | null = null;
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
 
   function hrefFor(path: string | null) {
@@ -82,14 +89,27 @@
     }
   }
 
+  // The website, filters and crawl snapshot decide what is listed. New filters
+  // clear the list; a new snapshot of the same selection keeps it until reloaded.
+  // A reload of the page data within one snapshot changes nothing here.
   $effect(() => {
-    const freshPage = initialPage;
-    void websiteId;
+    const selection = `${websiteId}\n${prefix}\n${query}`;
+    void revision;
     untrack(() => {
+      const sameSelection = selection === listedSelection;
+      listedSelection = selection;
+      if (searchText.trim() !== query) searchText = query;
       generation += 1;
-      if (prefix || query) void load();
-      else {
-        documents = freshPage;
+      if (!sameSelection && initialContent?.prefix === prefix && initialContent.q === query) {
+        documents = initialContent.page;
+        initialContent = null;
+        loading = false;
+        failed = false;
+      } else if (prefix || query) {
+        if (!sameSelection) documents = null;
+        void load();
+      } else {
+        documents = initialPage;
         loading = false;
         failed = false;
       }
@@ -99,38 +119,11 @@
     };
   });
 
-  $effect(() => {
-    const { prefix: nextPrefix, q: nextQuery } = readContentFilters(page.url.searchParams);
-    untrack(() => {
-      if (nextPrefix === prefix && nextQuery === query) return;
-      prefix = nextPrefix;
-      query = nextQuery;
-      searchText = nextQuery;
-      if (
-        !initialContentShown &&
-        initialContent &&
-        initialContent.prefix === nextPrefix &&
-        initialContent.q === nextQuery
-      ) {
-        initialContentShown = true;
-        generation += 1;
-        documents = initialContent.page;
-        loading = false;
-        failed = false;
-        return;
-      }
-      documents = null;
-      void load();
-    });
-  });
-
   function selectPrefix(path: string | null) {
     const next = path ?? "";
     if (next === prefix) return;
     prefix = next;
-    documents = null;
     syncUrl();
-    void load();
   }
 
   function search() {
@@ -139,10 +132,14 @@
       const next = searchText.trim();
       if (next === query) return;
       query = next;
-      documents = null;
       syncUrl();
-      void load();
     }, 300);
+  }
+
+  function contentCount(shown: number, total: number) {
+    return total === 1
+      ? m.website_source_content_count_one({ shown, total })
+      : m.website_source_content_count_other({ shown, total });
   }
 
   $effect(() => () => {
@@ -157,7 +154,7 @@
   >
     <WebsiteFolderNav
       {websiteId}
-      revision={initialPage}
+      {revision}
       total={initialPage.total_count}
       selectedPrefix={prefix}
       {hrefFor}
@@ -229,10 +226,7 @@
     {/if}
     <div role="status" class="text-secondary text-sm">
       {#if loading}{m.loading()}
-      {:else if documents}{m.website_source_content_count({
-          shown: documents.items.length,
-          total: documents.total_count
-        })}{/if}
+      {:else if documents}{contentCount(documents.items.length, documents.total_count)}{/if}
     </div>
     {#if documents?.next_cursor && !failed}
       <div>

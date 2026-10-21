@@ -3,6 +3,8 @@
   import { writable } from "svelte/store";
   import type { CrawlRun } from "@eneo/eneo-js";
   import { Info, LoaderCircle, TriangleAlert } from "@lucide/svelte";
+  import { afterNavigate } from "$app/navigation";
+  import { page } from "$app/state";
   import { Page } from "$lib/components/layout";
   import { selectPageTab } from "$lib/components/layout/Page/ctx";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -26,6 +28,7 @@
   import CrawlLimitations from "./CrawlLimitations.svelte";
   import CrawlRunActivity from "./CrawlRunActivity.svelte";
   import WebsiteContent from "./WebsiteContent.svelte";
+  import { readContentFilters } from "./websiteContentFilters";
   import { mergeLatestCrawlRun, pollWebsiteDetail } from "./websiteDetailPolling";
   import type { PageData } from "./$types";
 
@@ -38,7 +41,9 @@
   const tabs = writable<string>();
 
   let startDialogOpen = $state(false);
-  let selectedProblemRunId = $state<string | null>(null);
+  // null follows the latest completed crawl. A chosen older run is kept as an object:
+  // replacing the history with its first page must not swap the run shown.
+  let selectedProblemRun = $state.raw<CrawlRun | null>(null);
   let problemHeading = $state<HTMLHeadingElement | undefined>();
 
   // Server data seeds the local copies; the effects below follow later server data.
@@ -50,18 +55,33 @@
   let totalCrawlRunCount = $state(data.totalCrawlRunCount);
   // svelte-ignore state_referenced_locally
   let infoBlobPage = $state.raw(data.infoBlobPage);
+  // svelte-ignore state_referenced_locally
+  let initialContent = $state.raw(data.initialContent ?? null);
+  // The crawl whose indexed snapshot Content shows; only a new one reloads it.
+  let contentRunId = $state(
+    untrack(() => data.crawlRuns.find((run) => !isActiveCrawlRun(run))?.id)
+  );
+  // Shallow URL updates never reach page.url, and invalidate() reloads against the
+  // last navigation's URL. The page therefore owns the selection; navigations replace it.
+  let contentFilters = $state(readContentFilters(page.url.searchParams));
+  afterNavigate(({ to }) => {
+    if (to) contentFilters = readContentFilters(to.url.searchParams);
+  });
   let loadingMoreCrawlRuns = $state(false);
   // Request bookkeeping, never rendered.
   let crawlRunPageGeneration = 0;
   let pollingCrawlRuns = false;
   let historyRunId = untrack(() => data.crawlRuns[0]?.id);
-  let contentRunId = untrack(() => data.crawlRuns.find((run) => !isActiveCrawlRun(run))?.id);
+  let problemWebsiteId = untrack(() => data.website.id);
+  let seededContent = untrack(() => data.initialContent ?? null);
 
-  // Server data changes only when the route changes; polling results are kept otherwise.
+  // Server data changes with the route and with invalidate() after starting or
+  // stopping a crawl; polling results are kept otherwise.
   $effect(() => {
     const serverRuns = data.crawlRuns;
     const serverCursor = data.nextCrawlRunCursor;
     const serverTotal = data.totalCrawlRunCount;
+    const websiteId = data.website.id;
     untrack(() => {
       crawlRuns = serverRuns;
       nextCrawlRunCursor = serverCursor;
@@ -69,13 +89,23 @@
       crawlRunPageGeneration += 1;
       loadingMoreCrawlRuns = false;
       historyRunId = serverRuns[0]?.id;
+      if (websiteId !== problemWebsiteId) {
+        problemWebsiteId = websiteId;
+        selectedProblemRun = null;
+      }
     });
   });
   $effect(() => {
     const serverPage = data.infoBlobPage;
+    const serverContent = data.initialContent ?? null;
     const serverRuns = data.crawlRuns;
     untrack(() => {
       infoBlobPage = serverPage;
+      // Content clears it once shown; only a new server load provides another.
+      if (serverContent !== seededContent) {
+        seededContent = serverContent;
+        initialContent = serverContent;
+      }
       contentRunId = serverRuns.find((run) => !isActiveCrawlRun(run))?.id;
     });
   });
@@ -83,7 +113,14 @@
   const completedRuns = $derived(crawlRuns.filter((run) => !isActiveCrawlRun(run)));
   const latestCompletedRun = $derived<CrawlRun | undefined>(completedRuns[0]);
   const problemRun = $derived(
-    completedRuns.find((run) => run.id === selectedProblemRunId) ?? latestCompletedRun
+    selectedProblemRun
+      ? (completedRuns.find((run) => run.id === selectedProblemRun?.id) ?? selectedProblemRun)
+      : latestCompletedRun
+  );
+  const problemRunChoices = $derived(
+    problemRun && !completedRuns.some((run) => run.id === problemRun.id)
+      ? [...completedRuns, problemRun]
+      : completedRuns
   );
   // History may contain an older last-known active state while its refresh fails.
   const latestKnownRun = $derived<CrawlRun | undefined>(crawlRuns[0]);
@@ -98,8 +135,12 @@
       : undefined
   );
 
+  function selectProblemRun(run: CrawlRun | undefined) {
+    selectedProblemRun = !run || run.id === latestCompletedRun?.id ? null : run;
+  }
+
   async function showProblems(run: CrawlRun) {
-    selectedProblemRunId = run.id === latestCompletedRun?.id ? null : run.id;
+    selectProblemRun(run);
     selectPageTab(tabs, "problems");
     await tick();
     problemHeading?.focus();
@@ -134,6 +175,7 @@
             if (!mounted || websiteId !== data.website.id || pageCrawlRuns !== data.crawlRuns)
               return;
             infoBlobPage = refreshedPage;
+            initialContent = null;
             contentRunId = result.latestRun.id;
           } catch {
             // Keep old content and retry, independently of the history refresh.
@@ -258,7 +300,7 @@
                   ? m.website_source_latest_completed()
                   : m.website_source_previous_crawl()}
               </h2>
-              {#if completedRuns.length > 1}
+              {#if problemRunChoices.length > 1}
                 <div class="flex flex-wrap items-center gap-2 text-sm">
                   <label for="problem-crawl">{m.website_source_choose_crawl()}</label>
                   <select
@@ -266,13 +308,11 @@
                     class="border-default bg-primary rounded-md border px-2 py-1.5"
                     value={problemRun.id}
                     onchange={(event) => {
-                      selectedProblemRunId =
-                        event.currentTarget.value === latestCompletedRun?.id
-                          ? null
-                          : event.currentTarget.value;
+                      const id = event.currentTarget.value;
+                      selectProblemRun(problemRunChoices.find((run) => run.id === id));
                     }}
                   >
-                    {#each completedRuns as run (run.id)}
+                    {#each problemRunChoices as run (run.id)}
                       <option value={run.id}>{formatDateTime(run.created_at)}</option>
                     {/each}
                   </select>
@@ -365,7 +405,10 @@
         <WebsiteContent
           websiteId={data.website.id}
           initialPage={infoBlobPage}
-          initialContent={data.initialContent}
+          revision={contentRunId}
+          bind:prefix={contentFilters.prefix}
+          bind:query={contentFilters.q}
+          bind:initialContent
         />
       {/if}
     </Page.Tab>

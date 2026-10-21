@@ -4,7 +4,11 @@
   import { formatDate, formatDuration, formatTime } from "$lib/core/formatting/dateTime";
   import SourceActivityDay from "$lib/features/knowledge/components/SourceActivityDay.svelte";
   import CrawlRunStatus from "$lib/features/knowledge/CrawlRunStatus.svelte";
-  import { hasCrawlIssues, isActiveCrawlRun } from "$lib/features/knowledge/crawlRunState";
+  import {
+    crawlRunFailureMessage,
+    hasCrawlIssues,
+    isActiveCrawlRun
+  } from "$lib/features/knowledge/crawlRunState";
   import { m } from "$lib/paraglide/messages";
   import { getLocale } from "$lib/paraglide/runtime";
 
@@ -62,6 +66,9 @@
                 </Button>
               {/if}
             </div>
+            {#if !isActiveCrawlRun(run) && run.failure_code}
+              <p class="text-secondary text-sm">{crawlRunFailureMessage(run)}</p>
+            {/if}
             <p class="text-sm">
               {m.website_source_run_results({
                 pages: count(run.pages_crawled),

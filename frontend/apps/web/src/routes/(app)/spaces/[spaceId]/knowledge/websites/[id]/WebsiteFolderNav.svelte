@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import type { WebsiteContentFolder, WebsiteInfoBlobPage } from "@eneo/eneo-js";
+  import type { WebsiteContentFolder } from "@eneo/eneo-js";
   import Folder from "@lucide/svelte/icons/folder";
   import { getEneo } from "$lib/core/Eneo";
   import SourceTreeNav, {
@@ -17,8 +17,8 @@
     onselect
   }: {
     websiteId: string;
-    /** A new crawl snapshot invalidates the directory counts. */
-    revision: WebsiteInfoBlobPage;
+    /** The crawl whose indexed snapshot the counts describe; a new snapshot reloads them. */
+    revision: string | undefined;
     total: number;
     selectedPrefix: string;
     hrefFor: (prefix: string | null) => string;
@@ -159,6 +159,12 @@
   }
   let rows = $derived(rowsFor("", 0));
 
+  function resourceCount(count: number) {
+    return count === 1
+      ? m.website_source_resource_count_one({ count })
+      : m.website_source_resource_count_other({ count });
+  }
+
   function toggle(prefix: string) {
     expanded[prefix] = !expanded[prefix];
     if (expanded[prefix] && !branches[prefix]) void load(prefix);
@@ -169,8 +175,9 @@
   title={m.website_source_structure()}
   allLabel={m.website_source_all_content()}
   {total}
-  totalLabel={m.website_source_resource_count({ count: total })}
+  totalLabel={resourceCount(total)}
   {rows}
+  emptyLabel={total === 0 ? m.website_no_indexed_content() : ""}
   selectedId={selectedPrefix || null}
   {hrefFor}
   {onselect}
@@ -182,7 +189,7 @@
       aria-hidden="true"
     />{/snippet}
   {#snippet trailing(row)}
-    <span class="sr-only">, {m.website_source_resource_count({ count: row.count ?? 0 })}</span>
+    <span class="sr-only">, {resourceCount(row.count ?? 0)}</span>
     <span class="text-secondary text-xs tabular-nums" aria-hidden="true">{row.count}</span>
   {/snippet}
 </SourceTreeNav>

@@ -5,10 +5,13 @@ import { render } from "vitest-browser-svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import { formatDateMedium, formatDateTime } from "$lib/core/formatting/dateTime";
+import { crawlRunFailureMessage } from "$lib/features/knowledge/crawlRunState";
+import { addressParams, restoreFrameUrl } from "$lib/test/shallowRouting";
 
 const latestRun = vi.hoisted(() => vi.fn());
 const listRuns = vi.hoisted(() => vi.fn());
 const listBlobs = vi.hoisted(() => vi.fn());
+const listFolders = vi.hoisted(() => vi.fn());
 const createRun = vi.hoisted(() => vi.fn());
 const cancelRun = vi.hoisted(() => vi.fn());
 const listFailures = vi.hoisted(() => vi.fn());
@@ -31,7 +34,7 @@ vi.mock("$lib/core/Eneo", () => ({
         create: createRun,
         failures: listFailures
       },
-      indexedBlobs: { listPage: listBlobs, folders: async () => ({ items: [], next_cursor: null }) }
+      indexedBlobs: { listPage: listBlobs, folders: listFolders }
     }
   })
 }));
@@ -40,21 +43,22 @@ vi.mock("$lib/features/spaces/SpacesManager", () => ({
 }));
 vi.mock("$app/state", () => ({ page: route }));
 vi.mock("$app/stores", () => ({ page: readable(route) }));
-vi.mock("$app/navigation", () => ({
-  afterNavigate: vi.fn(),
-  beforeNavigate: vi.fn(),
-  goto: vi.fn(),
-  invalidate: vi.fn(),
-  invalidateAll: vi.fn(),
-  onNavigate: vi.fn(),
-  preloadCode: vi.fn(),
-  preloadData: vi.fn(),
-  pushState: vi.fn(),
-  replaceState: (url: URL | string, state: { tab?: string }) => {
-    route.url = new URL(url, route.url);
-    route.state = state;
-  }
-}));
+vi.mock("$app/navigation", async () => {
+  const { replaceShallowState } = await import("$lib/test/shallowRouting");
+  return {
+    afterNavigate: vi.fn(),
+    beforeNavigate: vi.fn(),
+    goto: vi.fn(),
+    invalidate: vi.fn(),
+    invalidateAll: vi.fn(),
+    onNavigate: vi.fn(),
+    preloadCode: vi.fn(),
+    preloadData: vi.fn(),
+    pushState: vi.fn(),
+    replaceState: (url: URL | string, state: { tab?: string }) =>
+      replaceShallowState(route, url, state)
+  };
+});
 
 import WebsiteDetailPage from "./+page.svelte";
 
@@ -108,12 +112,16 @@ beforeEach(() => {
   latestRun.mockReset().mockResolvedValue(running);
   listRuns.mockReset().mockResolvedValue({ ...emptyPage, items: [running], total_count: 1 });
   listBlobs.mockReset().mockResolvedValue(emptyPage);
+  listFolders.mockReset().mockResolvedValue({ items: [], next_cursor: null });
   createRun.mockReset().mockResolvedValue({});
   cancelRun.mockReset().mockResolvedValue({});
   listFailures.mockReset();
   showError.mockReset();
 });
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  restoreFrameUrl();
+});
 
 test("opens Content by default without fetching problem details", async () => {
   route.url = new URL("http://localhost/");
@@ -637,13 +645,13 @@ test.each(["processing_failed", "resources_missing"] as const)(
     const rendered = render(WebsiteDetailPage, {
       data: { ...data, crawlRuns: [running, run] } as never
     });
-    await expect.element(page.getByText(notice)).toBeVisible();
+    await expect.element(page.getByRole("heading", { name: notice })).toBeVisible();
     await page.getByRole("button", { name: m.website_source_see_problems() }).click();
     await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
     await expect
       .element(page.getByRole("tab", { name: m.source_tab_problems() }))
       .toHaveAttribute("aria-selected", "true");
-    expect(route.url.searchParams.get("tab")).toBe("problems");
+    expect(addressParams().get("tab")).toBe("problems");
     if (failure_code === "resources_missing") {
       await expect
         .element(
@@ -666,7 +674,7 @@ test.each(["processing_failed", "resources_missing"] as const)(
         crawlRuns: [{ ...terminal, id: "clean-run" }, { ...run }]
       } as never
     });
-    await expect.element(page.getByText(notice)).not.toBeInTheDocument();
+    await expect.element(page.getByRole("heading", { name: notice })).not.toBeInTheDocument();
   }
 );
 
@@ -765,4 +773,142 @@ test("a poll with a fresh copy of the same finished crawl does not reload its pr
   await expect
     .element(panel.getByRole("link", { name: "https://example.test/missing" }))
     .toBeVisible();
+});
+
+const siteOrigin = "https://example.test/";
+const indexed = (title: string) => ({
+  id: title,
+  metadata: {
+    title,
+    url: `${siteOrigin}docs/${title}`,
+    size: 10,
+    embedding_model_id: "model"
+  },
+  original_available: false,
+  created_at: "2026-10-19T09:00:00Z"
+});
+
+test("a selected directory survives a tab switch, on the page and in the address", async () => {
+  route.url = new URL("http://localhost/");
+  route.state = {};
+  listFolders.mockImplementation(async ({ prefix }: { prefix: string }) => ({
+    items: prefix
+      ? [{ path: `${siteOrigin}docs/`, count: 2, has_children: false }]
+      : [{ path: siteOrigin, count: 3, has_children: true }],
+    next_cursor: null
+  }));
+  listBlobs.mockResolvedValue({
+    ...emptyPage,
+    items: [indexed("Guide")],
+    count: 1,
+    total_count: 1
+  });
+  listFailures.mockResolvedValue({ ...emptyPage, run: terminal, details_available: true });
+  render(WebsiteDetailPage, {
+    data: {
+      ...data,
+      crawlRuns: [terminal],
+      infoBlobPage: { ...emptyPage, total_count: 3 }
+    } as never
+  });
+  await page.getByRole("link", { name: /^docs/ }).click();
+  await expect.element(page.getByRole("button", { name: "Guide" })).toBeVisible();
+  expect(addressParams().get("prefix")).toBe(`${siteOrigin}docs/`);
+
+  await page.getByRole("tab", { name: m.source_tab_problems() }).click();
+  await expect
+    .element(page.getByRole("tab", { name: m.source_tab_problems() }))
+    .toHaveAttribute("aria-selected", "true");
+  expect(addressParams().get("tab")).toBe("problems");
+  expect(addressParams().get("prefix")).toBe(`${siteOrigin}docs/`);
+
+  await page.getByRole("tab", { name: m.source_tab_content() }).click();
+  await expect
+    .element(page.getByRole("link", { name: /^docs/ }))
+    .toHaveAttribute("aria-current", "page");
+  await expect.element(page.getByRole("button", { name: "Guide" })).toBeVisible();
+  expect(listBlobs).toHaveBeenLastCalledWith({
+    id: data.website.id,
+    limit: 100,
+    cursor: null,
+    prefix: `${siteOrigin}docs/`
+  });
+});
+
+test("a deep-linked selection is shown from the server once, then fetched afresh", async () => {
+  route.url = new URL(
+    `http://localhost/?tab=blobs&prefix=${encodeURIComponent(siteOrigin + "docs/")}`
+  );
+  route.state = {};
+  listBlobs.mockResolvedValue({
+    ...emptyPage,
+    items: [indexed("Fresh guide")],
+    count: 1,
+    total_count: 1
+  });
+  listFailures.mockResolvedValue({ ...emptyPage, run: terminal, details_available: true });
+  render(WebsiteDetailPage, {
+    data: {
+      ...data,
+      crawlRuns: [terminal],
+      initialContent: {
+        prefix: `${siteOrigin}docs/`,
+        q: "",
+        page: { ...emptyPage, items: [indexed("Server guide")], count: 1, total_count: 1 }
+      }
+    } as never
+  });
+  await expect.element(page.getByRole("button", { name: "Server guide" })).toBeVisible();
+  expect(listBlobs).not.toHaveBeenCalled();
+
+  await page.getByRole("tab", { name: m.source_tab_problems() }).click();
+  await page.getByRole("tab", { name: m.source_tab_content() }).click();
+  await expect.element(page.getByRole("button", { name: "Fresh guide" })).toBeVisible();
+  expect(listBlobs).toHaveBeenCalledExactlyOnceWith({
+    id: data.website.id,
+    limit: 100,
+    cursor: null,
+    prefix: `${siteOrigin}docs/`
+  });
+});
+
+test("an older crawl chosen in Problems stays selected when the history is replaced", async () => {
+  const latest: CrawlRun = { ...terminal, id: "newest", outcome: "partial", pages_failed: 1 };
+  const older: CrawlRun = { ...latest, id: "older", created_at: "2026-09-03T07:00:00Z" };
+  listFailures.mockImplementation(async ({ id }: { id: string }) => ({
+    ...emptyPage,
+    run: id === older.id ? older : latest,
+    details_available: true
+  }));
+  const rendered = render(WebsiteDetailPage, {
+    data: { ...data, crawlRuns: [latest, older] } as never
+  });
+  await page.getByRole("tab", { name: m.source_tab_problems() }).click();
+  const problems = page.getByRole("tabpanel", { name: m.source_tab_problems() });
+  await problems.getByLabelText(m.website_source_choose_crawl()).selectOptions(older.id);
+  await expect
+    .element(problems.getByRole("heading", { name: m.website_source_previous_crawl() }))
+    .toBeVisible();
+
+  const newer: CrawlRun = { ...terminal, id: "newer", created_at: "2026-09-05T07:00:00Z" };
+  await rendered.rerender({ data: { ...data, crawlRuns: [newer, latest] } as never });
+  await expect
+    .element(problems.getByRole("heading", { name: m.website_source_previous_crawl() }))
+    .toBeVisible();
+  await expect
+    .element(problems.getByLabelText(m.website_source_choose_crawl()))
+    .toHaveValue(older.id);
+  expect(listFailures).toHaveBeenLastCalledWith({ id: older.id, limit: 100, cursor: null });
+});
+
+test("activity states why a crawl failed", async () => {
+  const failed: CrawlRun = {
+    ...terminal,
+    id: "failed",
+    outcome: "failed",
+    failure_code: "worker_interrupted"
+  };
+  render(WebsiteDetailPage, { data: { ...data, crawlRuns: [failed] } as never });
+  const activity = page.getByRole("tabpanel", { name: m.source_tab_activity() });
+  await expect.element(activity.getByText(crawlRunFailureMessage(failed))).toBeVisible();
 });

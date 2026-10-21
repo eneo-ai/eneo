@@ -44936,6 +44936,7 @@ export interface operations {
       };
       header?: never;
       path: {
+        /** @description Unique identifier of the website */
         id: string;
       };
       cookie?: never;
