@@ -14,6 +14,7 @@ from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.spaces_table import SpacesUsers
 from eneo.database.tables.users_table import users_roles_table
 from eneo.roles.permissions import Permission
+from eneo.skills.domain.skill import SkillBindingReference
 
 _SKILL = {
     "display_name": "Mina svarspreferenser",
@@ -241,9 +242,77 @@ async def test_personal_skills_does_not_let_assistants_or_apps_use_organisation_
     )
     assert app_update.status_code == 403, app_update.text
 
-    bindings = await client.get(
+    for path in (
         f"/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/",
+        f"/api/v1/spaces/{space_id}/apps/{app_id}/skills/",
+    ):
+        bindings = await client.get(path, headers=headers)
+        assert bindings.status_code == 200, bindings.text
+        assert bindings.json() in ({"items": []}, [])
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_personal_skills_cannot_resubmit_a_retained_organisation_binding(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    admin_user,
+    user_factory,
+    assistant_factory,
+):
+    """An organisation binding that is already attached still needs Use Skills
+    to be submitted again, as it did before personal_skills existed."""
+    async with db_container() as container:
+        user, token = await _user_with(
+            container.session(),
+            user_factory,
+            admin_user.tenant_id,
+            [
+                Permission.PERSONAL_CHAT,
+                Permission.PERSONAL_SKILLS,
+                Permission.ASSISTANTS,
+            ],
+            container,
+        )
+        organisation_skill = await _published_organisation_skill(container)
+    headers = {"Authorization": f"Bearer {token}"}
+    personal = await client.get("/api/v1/spaces/type/personal/", headers=headers)
+    assert personal.status_code == 200, personal.text
+    space_id = personal.json()["id"]
+    model_id = personal.json()["default_assistant"]["completion_model"]["id"]
+    reference = SkillBindingReference(
+        skill_id=organisation_skill.id,
+        skill_revision_id=organisation_skill.current_revision.id,
+    )
+
+    async with db_container() as container:
+        assistant = await assistant_factory(
+            container.session(), "Min assistent", model_id, space_id=space_id
+        )
+        repo = container.skill_repo()
+        resolved = await repo.resolve_published_references_for_binding_update(
+            tenant_id=admin_user.tenant_id, references=[reference]
+        )
+        await repo.replace_assistant_bindings(
+            assistant_id=assistant.id,
+            tenant_id=admin_user.tenant_id,
+            space_id=space_id,
+            bindings=resolved,
+        )
+        assistant_id = assistant.id
+
+    resubmitted = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={
+            "skill_bindings": [
+                {
+                    "skill_id": str(reference.skill_id),
+                    "skill_revision_id": str(reference.skill_revision_id),
+                    "activation_mode": "on_demand",
+                }
+            ]
+        },
         headers=headers,
     )
-    assert bindings.status_code == 200, bindings.text
-    assert bindings.json() == {"items": []} or bindings.json() == []
+    assert resubmitted.status_code == 403, resubmitted.text
