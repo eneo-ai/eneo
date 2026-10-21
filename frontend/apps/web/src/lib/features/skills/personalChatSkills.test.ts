@@ -74,6 +74,12 @@ describe("personal chat Skill bindings", () => {
     ]);
   });
 
+  test("offers no newer revision for a deactivated Skill, which cannot move", () => {
+    const newer = { attachable_revision_id: "a-r2", attachable_revision_number: 2 };
+    expect(personalSkillHasNewerRevision(binding("a", newer))).toBe(true);
+    expect(personalSkillHasNewerRevision(binding("a", { ...newer, is_active: false }))).toBe(false);
+  });
+
   test("moves one Skill to the revision the person reviewed and keeps the rest as saved", () => {
     const newer = binding("a", { attachable_revision_id: "a-r2", attachable_revision_number: 2 });
     const saved = personalSkillBindings([newer, binding("b", { position: 1 })]);

@@ -521,6 +521,20 @@ describe("ChatSkills", () => {
     expect(mocks.list).toHaveBeenCalledTimes(2);
   });
 
+  it("offers no version move for a deactivated Skill in the chat", async () => {
+    server = personalChatServer({
+      bindings: [{ ...ANSWERS, is_active: false, attachable_revision_id: "answers-r2" }, MINUTES]
+    });
+    renderControl();
+    await openControl(3);
+
+    await expect.element(modeGroup("Mina svarspreferenser")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: m.personal_chat_skills_use_latest() }))
+      .not.toBeInTheDocument();
+    expect(server.sent).toEqual([]);
+  });
+
   it("offers the next page when a page holds no Skill that can join the chat", async () => {
     server = personalChatServer({ bindings: [] });
     mocks.list.mockImplementation(async ({ cursor }: { cursor: string | null }) =>

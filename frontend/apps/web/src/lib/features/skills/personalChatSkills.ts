@@ -145,7 +145,12 @@ export function personalSkillHasNewerRevision(
   binding: AssistantSkillBindingSummary,
   pinnedRevisionId = binding.skill_revision_id
 ): boolean {
-  return !!binding.attachable_revision_id && binding.attachable_revision_id !== pinnedRevisionId;
+  // A deactivated Skill keeps running at its pin but cannot move to another revision.
+  return (
+    binding.is_active &&
+    !!binding.attachable_revision_id &&
+    binding.attachable_revision_id !== pinnedRevisionId
+  );
 }
 
 /** "Använd senaste versionen": one Skill moves; the rest stay as saved. */
