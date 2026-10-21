@@ -1,0 +1,189 @@
+"""The personal chat's two Skill layers, and whether the personal one runs.
+
+The organisation layer (the personal chat policy) always runs. The personal
+layer (the person's own Skills) runs exactly as configured, or not at all, and
+may never weaken the organisation layer. One pure assessment decides it for
+saves, preflight, configuration reads and turns alike
+(docs/adr/personal-chat-skill-layers.md, section 5).
+"""
+
+from collections.abc import Iterable, Sequence
+from dataclasses import replace
+from uuid import UUID
+
+from eneo.files.attachment_budget import prompt_and_files_fit_context
+from eneo.files.file_models import File
+from eneo.skills.domain.skill import (
+    PersonalSkillLayerDecision,
+    PersonalSkillLayerReason,
+    PersonalSkillLayerStatus,
+    ResolvedSkillBinding,
+    SkillActivationFallbackReason,
+    SkillActivationMode,
+    SkillActivationRejectionReason,
+    SkillRuntimePolicy,
+    SkillRuntimeResolution,
+    SkillTurnEffectiveMode,
+    SkillTurnPlan,
+)
+
+
+def compose_layers(
+    *, organisation: SkillRuntimeResolution, personal: SkillRuntimeResolution
+) -> SkillRuntimeResolution:
+    """Organisation Skills first, then the person's, with contiguous positions.
+
+    Positions are unique per resource across eligible and blocked bindings,
+    and the two layers come from different resources, so both are renumbered
+    over their union before being split back.
+    """
+    blocked_ids = {
+        binding.skill_id for binding in (*organisation.blocked, *personal.blocked)
+    }
+    ordered = [
+        *_by_position((*organisation.eligible, *organisation.blocked)),
+        *_by_position((*personal.eligible, *personal.blocked)),
+    ]
+    renumbered = [
+        replace(binding, position=position) for position, binding in enumerate(ordered)
+    ]
+    return SkillRuntimeResolution(
+        eligible=tuple(b for b in renumbered if b.skill_id not in blocked_ids),
+        blocked=tuple(b for b in renumbered if b.skill_id in blocked_ids),
+    )
+
+
+def assess_personal_skill_layer(
+    *,
+    base_instructions: str,
+    organisation: SkillRuntimeResolution,
+    personal: SkillRuntimeResolution,
+    policy: SkillRuntimePolicy,
+    holds_permission: bool,
+    model_route: str,
+    max_input_tokens: int,
+    supports_tool_calling: bool,
+    prompt_files: Sequence[File],
+) -> PersonalSkillLayerDecision:
+    """Decide whether the personal layer runs, from the existing calculators.
+
+    Blocked bindings count as they will after release, as save validation
+    does, so lifting a block can never reveal an invalid combination. The
+    checks cover the persistent configuration; turn-time guards for history,
+    uploads and live tool narrowing stay with the turn.
+    """
+    personal_bindings = (*personal.eligible, *personal.blocked)
+    if not personal_bindings:
+        return PersonalSkillLayerDecision(status=PersonalSkillLayerStatus.EMPTY)
+
+    def suspended(
+        reason: PersonalSkillLayerReason,
+        detail: SkillActivationFallbackReason
+        | SkillActivationRejectionReason
+        | None = None,
+    ) -> PersonalSkillLayerDecision:
+        return PersonalSkillLayerDecision(
+            status=PersonalSkillLayerStatus.SUSPENDED,
+            reason=reason,
+            detail=detail,
+            bindings=personal.eligible,
+        )
+
+    if not holds_permission:
+        return suspended(PersonalSkillLayerReason.PERMISSION_MISSING)
+    attached = len(organisation.eligible) + len(organisation.blocked)
+    if attached + len(personal_bindings) > policy.max_attached_skills:
+        return suspended(PersonalSkillLayerReason.ATTACHMENT_LIMIT_EXCEEDED)
+
+    def runtime(resolution: SkillRuntimeResolution):
+        return (
+            SkillTurnPlan.create(
+                base_instructions=base_instructions,
+                resolution=resolution,
+                policy=policy,
+            )
+            .for_full_save_validation()
+            .to_activation_runtime(
+                selected_model_route=model_route,
+                max_input_tokens=max_input_tokens,
+                supports_tool_calling=supports_tool_calling,
+            )
+        )
+
+    baseline = runtime(organisation)
+    combined = runtime(compose_layers(organisation=organisation, personal=personal))
+
+    if not prompt_and_files_fit_context(
+        max_input_tokens=max_input_tokens,
+        model_name=model_route,
+        prompt_text=combined.prompt,
+        files=prompt_files,
+    ):
+        return suspended(PersonalSkillLayerReason.MODEL_CONTEXT_EXCEEDED)
+
+    personal_on_demand = _on_demand_ids(personal_bindings)
+    combined_snapshot = combined.snapshot()
+    if combined_snapshot.effective_mode is not SkillTurnEffectiveMode.SELECTIVE:
+        if personal_on_demand:
+            return suspended(
+                PersonalSkillLayerReason.ON_DEMAND_UNAVAILABLE,
+                combined_snapshot.fallback_reason,
+            )
+        if baseline.snapshot().effective_mode is SkillTurnEffectiveMode.SELECTIVE:
+            return suspended(
+                PersonalSkillLayerReason.ORGANISATION_SKILL_CROWDED_OUT,
+                combined_snapshot.fallback_reason,
+            )
+        return _applied(personal)
+
+    for assessment in combined.assess_on_demand_candidates(personal_on_demand):
+        if assessment.rejection_reason is not None:
+            return suspended(
+                PersonalSkillLayerReason.PERSONAL_SKILL_DOES_NOT_FIT,
+                assessment.rejection_reason,
+            )
+
+    organisation_on_demand = _on_demand_ids(
+        (*organisation.eligible, *organisation.blocked)
+    )
+    admitted_alone = frozenset(
+        assessment.skill_id
+        for assessment in baseline.assess_on_demand_candidates(organisation_on_demand)
+        if assessment.rejection_reason is None
+    )
+    for assessment in combined.assess_on_demand_candidates(admitted_alone):
+        if assessment.rejection_reason is not None:
+            return suspended(
+                PersonalSkillLayerReason.ORGANISATION_SKILL_CROWDED_OUT,
+                assessment.rejection_reason,
+            )
+    return _applied(personal)
+
+
+def _applied(personal: SkillRuntimeResolution) -> PersonalSkillLayerDecision:
+    return PersonalSkillLayerDecision(
+        status=PersonalSkillLayerStatus.APPLIED, bindings=personal.eligible
+    )
+
+
+def _by_position(
+    bindings: Iterable[ResolvedSkillBinding],
+) -> list[ResolvedSkillBinding]:
+    return sorted(bindings, key=lambda binding: binding.position)
+
+
+def _on_demand_ids(bindings: Iterable[ResolvedSkillBinding]) -> frozenset[UUID]:
+    return frozenset(
+        binding.skill_id
+        for binding in bindings
+        if binding.activation_mode is SkillActivationMode.ON_DEMAND
+    )
+
+
+__all__ = [
+    "PersonalSkillLayerDecision",
+    "PersonalSkillLayerReason",
+    "PersonalSkillLayerStatus",
+    "assess_personal_skill_layer",
+    "compose_layers",
+]
