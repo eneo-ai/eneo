@@ -6,6 +6,7 @@ the model through a real FK, follows its enablement and classification, and
 the model is governed (on/off, classification, name) in one audited call.
 """
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -26,6 +27,7 @@ from eneo.forecast_models.application import forecast_model_provisioning
 from eneo.forecast_models.application.forecast_model_provisioning import (
     ensure_default_forecast_model,
 )
+from eneo.main.models import ModelId
 from eneo.mcp_servers.application.capability_resolver import (
     get_active_capability_servers,
 )
@@ -165,6 +167,42 @@ class TestProvisioning:
                 "Eneo tool service (built in)",
                 TOOL_SERVICE,
             )
+
+    async def test_two_first_uses_at_once_give_one_provider_and_one_model(
+        self, db_container, admin_user, monkeypatch
+    ):
+        async def slow_status():
+            # Keeps each transaction open past the other's existence checks.
+            await asyncio.sleep(0.5)
+            return RuntimeStatus(expected_version="test")
+
+        monkeypatch.setattr(forecast_model_provisioning, "runtime_status", slow_status)
+
+        async def provision():
+            async with db_container() as container:
+                return await ensure_default_forecast_model(
+                    container.session(), admin_user.tenant_id
+                )
+
+        first, second = await asyncio.gather(provision(), provision())
+
+        assert first == second
+        async with db_container() as container:
+            session = container.session()
+            providers = await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(ModelProviders)
+                .where(
+                    ModelProviders.tenant_id == admin_user.tenant_id,
+                    ModelProviders.provider_type == TOOL_SERVICE,
+                )
+            )
+            models = await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(ForecastModels)
+                .where(ForecastModels.tenant_id == admin_user.tenant_id)
+            )
+            assert (providers, models) == (1, 1)
 
     async def test_adding_the_bundled_forecast_binds_it_to_the_default_model(
         self, db_container, admin_user, monkeypatch
@@ -346,6 +384,62 @@ class TestAskTimeProjection:
             assert source.readiness_reason == "model_provider_inactive"
 
 
+class TestTheSourcesOwnClassification:
+    async def test_it_survives_an_unrelated_edit_and_wins_over_the_models(
+        self, client, db_container, admin_user, headers
+    ):
+        async with db_container() as container:
+            session = container.session()
+            await session.execute(
+                sa.update(Tenants)
+                .where(Tenants.id == admin_user.tenant_id)
+                .values(security_enabled=True)
+            )
+            models_id = (
+                await _classification(session, admin_user.tenant_id, "Internal", 1)
+            ).id
+            own_id = (
+                await _classification(session, admin_user.tenant_id, "Confidential", 2)
+            ).id
+            model_id = await ensure_default_forecast_model(
+                session, admin_user.tenant_id
+            )
+            await session.execute(
+                sa.update(ForecastModels)
+                .where(ForecastModels.id == model_id)
+                .values(security_classification_id=models_id)
+            )
+            source_id = (
+                await _forecast_source(
+                    session,
+                    admin_user.tenant_id,
+                    model_id,
+                    security_classification_id=own_id,
+                )
+            ).id
+
+        # A fresh read shows the source's own classification, not the model's.
+        shown = await client.get(f"/api/v1/mcp-servers/{source_id}/", headers=headers)
+        assert shown.status_code == 200, shown.text
+        assert shown.json()["security_classification"]["id"] == str(own_id)
+
+        # An edit that does not touch it keeps it.
+        async with db_container() as container:
+            await container.mcp_server_service().update_mcp_server(
+                source_id, name="Prognos"
+            )
+
+        async with db_container() as container:
+            [source] = await get_active_capability_servers(
+                container.session(), admin_user.tenant_id, "forecast"
+            )
+            assert source.name == "Prognos"
+            assert source.security_classification is not None
+            assert source.security_classification.id == own_id
+            effective = source.effective_security_classification
+            assert effective is not None and effective.id == own_id
+
+
 class TestGovernance:
     async def test_an_admin_lists_and_governs_the_model_in_one_audited_call(
         self, client, db_container, admin_user, headers
@@ -494,6 +588,94 @@ class TestGovernance:
         async with db_container() as container:
             model = await container.session().get(ForecastModels, other_model_id)
             assert model is not None and model.is_enabled is True
+
+
+async def _rename_while_another_update_runs(db_container, model_id, other_change):
+    """Rename the model while another admin's update runs in its own session.
+
+    The other update starts between the rename's read and its write. Unless
+    the rename holds the row, it reads, writes and commits in that gap.
+    """
+    other: asyncio.Task[object] | None = None
+
+    async def other_update():
+        async with db_container() as container:
+            await container.forecast_model_crud_service().update_forecast_model(
+                model_id=model_id, **other_change
+            )
+
+    async with db_container() as container:
+        service = container.forecast_model_crud_service()
+        write = service.forecast_model_repo.update
+
+        async def write_after_the_other_update_ran(*args, **kwargs):
+            nonlocal other
+            other = asyncio.create_task(other_update())
+            await asyncio.wait({other}, timeout=1)
+            return await write(*args, **kwargs)
+
+        service.forecast_model_repo.update = write_after_the_other_update_ran
+        await service.update_forecast_model(
+            model_id=model_id, display_name="Timestral (CPU)"
+        )
+
+    assert other is not None
+    await other
+    async with db_container() as container:
+        model = await container.session().get(ForecastModels, model_id)
+        assert model is not None
+        return model.nickname, model.is_enabled, model.security_classification_id
+
+
+class TestConcurrentUpdates:
+    """Two admins changing the model at once: neither undoes the other."""
+
+    async def test_a_rename_keeps_a_concurrent_disable(self, db_container, admin_user):
+        async with db_container() as container:
+            model_id = await ensure_default_forecast_model(
+                container.session(), admin_user.tenant_id
+            )
+
+        with patch(
+            "eneo.audit.application.audit_service.AuditService.log_async",
+            new_callable=AsyncMock,
+        ):
+            nickname, is_enabled, _ = await _rename_while_another_update_runs(
+                db_container, model_id, {"is_org_enabled": False}
+            )
+
+        assert (nickname, is_enabled) == ("Timestral (CPU)", False)
+
+    async def test_a_rename_keeps_a_concurrent_classification(
+        self, db_container, admin_user
+    ):
+        async with db_container() as container:
+            session = container.session()
+            classification_id = (
+                await _classification(session, admin_user.tenant_id)
+            ).id
+            model_id = await ensure_default_forecast_model(
+                session, admin_user.tenant_id
+            )
+
+        with patch(
+            "eneo.audit.application.audit_service.AuditService.log_async",
+            new_callable=AsyncMock,
+        ):
+            (
+                nickname,
+                _,
+                kept_classification_id,
+            ) = await _rename_while_another_update_runs(
+                db_container,
+                model_id,
+                {"security_classification": ModelId(id=classification_id)},
+            )
+
+        assert (nickname, kept_classification_id) == (
+            "Timestral (CPU)",
+            classification_id,
+        )
 
 
 class TestTheToolServiceProvider:

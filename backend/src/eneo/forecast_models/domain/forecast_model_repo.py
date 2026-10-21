@@ -16,6 +16,7 @@ from eneo.forecast_models.domain.forecast_model import (
 from eneo.main.exceptions import NotFoundException
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from uuid import UUID
 
     from eneo.database.database import AsyncSession
@@ -60,8 +61,14 @@ class ForecastModelRepository:
         await self._attach_usage(models)
         return models
 
-    async def one(self, model_id: "UUID") -> ForecastModel:
+    async def one(self, model_id: "UUID", *, for_update: bool = False) -> ForecastModel:
         stmt = self._base_query().where(ForecastModels.id == model_id)
+        if for_update:
+            # Locked until commit and read afresh, so an update builds on the
+            # row as it is now, never on a state a concurrent one replaced.
+            stmt = stmt.with_for_update(of=ForecastModels).execution_options(
+                populate_existing=True
+            )
         row = (await self.session.execute(stmt)).one_or_none()
         if row is None:
             raise NotFoundException()
@@ -99,20 +106,13 @@ class ForecastModelRepository:
                 ForecastModelUsage(id=server_id, name=name, purpose=purpose)
             )
 
-    async def update(self, model: ForecastModel) -> None:
+    async def update(self, model_id: "UUID", values: "Mapping[str, object]") -> None:
+        """Write only the given columns of one of the tenant's models."""
         await self.session.execute(
             sa.update(ForecastModels)
-            .values(
-                is_enabled=model.is_org_enabled,
-                nickname=model.nickname,
-                security_classification_id=(
-                    model.security_classification.id
-                    if model.security_classification
-                    else None
-                ),
-            )
+            .values(dict(values))
             .where(
-                ForecastModels.id == model.id,
+                ForecastModels.id == model_id,
                 ForecastModels.tenant_id == self.user.tenant_id,
             )
         )

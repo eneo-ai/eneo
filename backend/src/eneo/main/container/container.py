@@ -980,6 +980,7 @@ class Container(containers.DeclarativeContainer):
         user=user,
         forecast_model_repo=forecast_model_repo,
         security_classification_repo=security_classification_repo,
+        audit_service=audit_service,
     )
     rerank_service = providers.Factory(
         RerankService,

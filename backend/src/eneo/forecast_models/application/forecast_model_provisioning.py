@@ -38,6 +38,16 @@ async def ensure_default_forecast_model(
     Idempotent. Never loads weights or calls a tool: the display name is the
     one the runtime's (cached) diagnostics report, else "Timestral".
     """
+    # Concurrent first uses run one after the other: a row lock cannot cover
+    # rows that do not exist yet, so the tenant is locked by name until the
+    # transaction ends. The unique constraints stay the backstop.
+    await session.execute(
+        sa.select(
+            sa.func.pg_advisory_xact_lock(
+                sa.func.hashtextextended(f"forecast_model_provisioning:{tenant_id}", 0)
+            )
+        )
+    )
     provider_id = await _tool_service_provider(session, tenant_id)
     model_id = await session.scalar(
         sa.select(ForecastModels.id).where(
