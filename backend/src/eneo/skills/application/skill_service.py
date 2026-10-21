@@ -395,6 +395,10 @@ class SkillService:
             raise BadRequestException(
                 f"A resource cannot use more than {policy.max_attached_skills} Skills"
             )
+        self._validate_reference_uniqueness(references)
+
+    @staticmethod
+    def _validate_reference_uniqueness(references: list[SkillBindingReference]) -> None:
         if len({reference.skill_id for reference in references}) != len(references):
             raise BadRequestException("A Skill can only be attached once")
         if len(set(references)) != len(references):
@@ -530,7 +534,9 @@ class SkillService:
         # The personal chat's own layer takes only the owner's personal-space
         # Skills, and its count is the layer assessment's: organisation plus
         # own Skills together, where removing Skills must always be possible.
-        if not personal_chat_layer:
+        if personal_chat_layer:
+            self._validate_reference_uniqueness(references)
+        else:
             await self._validate_reference_count(
                 tenant_id=tenant_id, references=references
             )
@@ -752,14 +758,21 @@ class SkillService:
             requested_modes=requested_modes,
             personal_chat_layer=personal_chat,
         )
-        existing_identities = {
+        # Compare what is actually stored with what will be, so resubmitting
+        # the same list counts as no change rather than as a removal.
+        existing_identities = [
             (binding.skill_id, binding.skill_revision_id, binding.activation_mode)
-            for binding in existing
-        }
-        removal_only = all(
+            for binding in sorted(existing, key=lambda binding: binding.position)
+        ]
+        resolved_identities = [
             (binding.skill_id, binding.skill_revision_id, binding.activation_mode)
-            in existing_identities
             for binding in resolved
+        ]
+        unchanged = resolved_identities == existing_identities
+        removal_only = (
+            not unchanged
+            and len(resolved_identities) < len(existing_identities)
+            and set(resolved_identities) <= set(existing_identities)
         )
         on_demand_skill_ids_requiring_validation = frozenset(
             binding.skill_id
@@ -783,6 +796,7 @@ class SkillService:
                 on_demand_skill_ids_requiring_validation
             ),
             removal_only=removal_only,
+            unchanged=unchanged,
         )
 
     async def list_app_bindings(

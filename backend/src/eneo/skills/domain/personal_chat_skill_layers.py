@@ -11,6 +11,9 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from uuid import UUID
 
+from eneo.completion_models.domain.skill_activation import (
+    SkillActivationCandidateAssessment,
+)
 from eneo.files.attachment_budget import prompt_and_files_fit_context
 from eneo.files.file_models import File
 from eneo.skills.domain.skill import (
@@ -137,11 +140,26 @@ def assess_personal_skill_layer(
             )
         return _applied(personal)
 
-    for assessment in combined.assess_on_demand_candidates(personal_on_demand):
+    def rejection(
+        assessment: SkillActivationCandidateAssessment,
+    ) -> SkillActivationRejectionReason | None:
+        """Why one activated candidate cannot run: its Skill allowance, or the
+        whole prompt with the persistent files outgrowing the model window."""
         if assessment.rejection_reason is not None:
+            return assessment.rejection_reason
+        if not prompt_and_files_fit_context(
+            max_input_tokens=max_input_tokens,
+            model_name=model_route,
+            prompt_text=assessment.prompt,
+            files=prompt_files,
+        ):
+            return SkillActivationRejectionReason.MODEL_CONTEXT_LIMIT_EXCEEDED
+        return None
+
+    for assessment in combined.assess_on_demand_candidates(personal_on_demand):
+        if (reason := rejection(assessment)) is not None:
             return suspended(
-                PersonalSkillLayerReason.PERSONAL_SKILL_DOES_NOT_FIT,
-                assessment.rejection_reason,
+                PersonalSkillLayerReason.PERSONAL_SKILL_DOES_NOT_FIT, reason
             )
 
     organisation_on_demand = _on_demand_ids(
@@ -150,13 +168,12 @@ def assess_personal_skill_layer(
     admitted_alone = frozenset(
         assessment.skill_id
         for assessment in baseline.assess_on_demand_candidates(organisation_on_demand)
-        if assessment.rejection_reason is None
+        if rejection(assessment) is None
     )
     for assessment in combined.assess_on_demand_candidates(admitted_alone):
-        if assessment.rejection_reason is not None:
+        if (reason := rejection(assessment)) is not None:
             return suspended(
-                PersonalSkillLayerReason.ORGANISATION_SKILL_CROWDED_OUT,
-                assessment.rejection_reason,
+                PersonalSkillLayerReason.ORGANISATION_SKILL_CROWDED_OUT, reason
             )
     return _applied(personal)
 

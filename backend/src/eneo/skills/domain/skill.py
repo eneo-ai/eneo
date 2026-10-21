@@ -941,9 +941,11 @@ class SkillBindingIntent:
 class AssistantSkillBindingReplacement:
     bindings: tuple[ResolvedSkillBinding, ...]
     on_demand_skill_ids_requiring_validation: frozenset[UUID]
-    # True when the new set only drops existing bindings (no addition, mode or
-    # revision change); the personal chat always accepts such a save.
+    # True when the new set only drops existing bindings (no addition, mode,
+    # revision or order change); the personal chat always accepts such a save.
     removal_only: bool = False
+    # True when the submitted list is exactly what is already stored.
+    unchanged: bool = False
 
 
 @dataclass(frozen=True)

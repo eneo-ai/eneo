@@ -1391,11 +1391,14 @@ async def test_personal_chat_configuration_shows_both_layers_and_the_decision():
         ),
         source=SkillBindingSource.ORGANIZATION,
     )
-    own = _resolved_skill(
-        name="Svar", position=0, activation_mode=SkillActivationMode.ALWAYS
-    )
     assistant = _assistant_with_runtime_model()
     assistant.is_default = True
+    own = replace(
+        _resolved_skill(
+            name="Svar", position=0, activation_mode=SkillActivationMode.ALWAYS
+        ),
+        skill_space_id=assistant.space_id,
+    )
     space = MagicMock()
     space.is_personal.return_value = True
     space.get_assistant.return_value = assistant

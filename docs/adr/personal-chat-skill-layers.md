@@ -76,6 +76,10 @@ A new tenant permission, labelled "Egna skills" / "Own skills".
 - **Revocation:** checked on every turn. Without the permission, the personal
   layer is suspended with reason `permission_missing`; the saved choices stay.
   (Product owner, 2026-10-21.)
+- **Enforced prompt.** An enforced personal chat prompt does not suspend the
+  own layer. Own "always" Skills add the person's instructions after it, as
+  the person could in a message. Administrators who want the enforced prompt
+  alone leave `personal_skills` off that role.
 
 Rejected: no new permission, with administrators granting `skills` and
 `skills_management` to User instead. That also grants Skill authoring in shared

@@ -31,8 +31,10 @@ from eneo.sessions.session_service import (
     persist_final_skill_runtime_state,
     persist_partial_question_answer,
 )
+from eneo.skills.domain.personal_chat_skill_layers import plan_personal_chat_turn
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
+    SkillActivationEvidenceV2,
     SkillActivationMode,
     SkillBindingSource,
     SkillRuntimePolicy,
@@ -424,6 +426,97 @@ async def test_frozen_skill_evidence_is_deferred_from_conversation_reads(
     assert after_abort is not None
     assert after_abort.answer == "Partial answer"
     assert after_abort.skill_activation == evidence
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_personal_layer_evidence_round_trips_to_turn_diagnostics(
+    client,
+    db_container,
+    default_user,
+    default_user_token,
+):
+    """Version 2 evidence, written for a personal chat with its own layer,
+    reads back unchanged from the store and through turn diagnostics."""
+    space_id = await _create_space(client, default_user_token)
+    assistant_id = await _create_assistant(client, default_user_token, space_id)
+    own = ResolvedSkillBinding(
+        skill_id=uuid4(),
+        skill_revision_id=uuid4(),
+        current_revision_id=uuid4(),
+        skill_space_id=UUID(space_id),
+        slug="svar",
+        revision_number=1,
+        current_revision_number=1,
+        display_name="Svar",
+        instructions="Svara kort.",
+        content_digest="c" * 64,
+        position=0,
+        source=SkillBindingSource.SPACE,
+    )
+    plan = plan_personal_chat_turn(
+        base_instructions="Base",
+        organisation=SkillRuntimeResolution(eligible=(), blocked=()),
+        personal=SkillRuntimeResolution(eligible=(own,), blocked=()),
+        policy=SkillRuntimePolicy(
+            selective_activation_enabled=False,
+            max_attached_skills=100,
+            context_share_percent=10,
+            max_activations_per_turn=10,
+        ),
+        holds_permission=True,
+        model_route="openai/gpt-4o",
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+        prompt_files=(),
+    )
+    runtime = plan.to_activation_runtime(
+        selected_model_route="openai/gpt-4o",
+        max_input_tokens=128_000,
+        supports_tool_calling=True,
+    )
+    evidence = plan.activation_evidence(
+        selected_model_id=uuid4(),
+        selected_model_route="openai/gpt-4o",
+        snapshot=runtime.snapshot(),
+    )
+    assert isinstance(evidence, SkillActivationEvidenceV2)
+
+    async with db_container() as container:
+        session_service = container.session_service()
+        chat_session = await session_service.create_session(
+            name="personal-layer-evidence-test",
+            assistant_id=UUID(assistant_id),
+        )
+        question_id, _ = await session_service.create_question_placeholder(
+            question="Hur ska du svara?",
+            session=chat_session,
+            files=None,
+            assistant_id=UUID(assistant_id),
+            completion_model=None,
+            skill_activation=evidence,
+        )
+
+    async with db_container() as container:
+        hydrated = await container.question_repo().get_with_skill_activation(
+            id=question_id,
+            tenant_id=default_user.tenant_id,
+        )
+    assert hydrated is not None
+    assert hydrated.skill_activation == evidence
+
+    diagnostics = await client.get(
+        f"/api/v1/conversations/{chat_session.id}/messages/{question_id}/diagnostics/",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert diagnostics.status_code == 200, diagnostics.text
+    stored = diagnostics.json()["skill_activation"]
+    assert stored["version"] == 2
+    assert stored["personal_layer"]["status"] == "applied"
+    assert [
+        reference["skill_id"] for reference in stored["personal_layer"]["references"]
+    ] == [str(own.skill_id)]
+    assert "Svara kort." not in diagnostics.text
 
 
 @pytest.mark.integration

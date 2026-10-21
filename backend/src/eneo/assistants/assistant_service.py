@@ -121,6 +121,7 @@ from eneo.skills.domain.skill import (
     SkillActivationUnavailableException,
     SkillBindingIntent,
     SkillBindingProjection,
+    SkillBindingSource,
     SkillComposition,
     SkillExecutionReference,
     SkillRuntimePolicy,
@@ -715,23 +716,38 @@ class AssistantService:
             if effective_config is not None
             else SkillRuntimeResolution(eligible=(), blocked=())
         )
+        personal = await self._direct_skill_resolution(assistant)
+        # Fail closed if anything stored other than the person's own
+        # personal-space Skills; only those may form the own layer.
+        if any(
+            binding.source is SkillBindingSource.ORGANIZATION
+            or binding.skill_space_id != assistant.space_id
+            for binding in (*personal.eligible, *personal.blocked)
+        ):
+            raise BadRequestException(
+                "Personal default Assistant has invalid direct Skill bindings"
+            )
         if model is None:
             return await self.skill_service.create_turn_plan(
                 base_instructions=base_instructions,
                 resolution=organisation,
             )
+        if prompt_files is None:
+            # Only the own layer's assessment reads attachments, so a turn
+            # without own Skills skips loading them.
+            prompt_files = (
+                await self._persistent_prompt_files(assistant, model)
+                if personal.eligible or personal.blocked
+                else ()
+            )
         return await self.skill_service.create_personal_chat_turn_plan(
             base_instructions=base_instructions,
             organisation=organisation,
-            personal=await self._direct_skill_resolution(assistant),
+            personal=personal,
             model_route=model.get_model_route(),
             max_input_tokens=model.max_input_tokens,
             supports_tool_calling=model.supports_tool_calling,
-            prompt_files=(
-                prompt_files
-                if prompt_files is not None
-                else await self._persistent_prompt_files(assistant, model)
-            ),
+            prompt_files=prompt_files,
         )
 
     async def _personal_layer_decision(
@@ -1195,6 +1211,16 @@ class AssistantService:
             )
         candidate_skill_ids = frozenset(candidate_ids)
         if model is None:
+            # Without a model the personal layer cannot be assessed, so only
+            # removing own Skills (recovery) may proceed.
+            if (
+                personal_layer_save is not None
+                and personal_layer_save.bindings_changed
+                and not personal_layer_save.removal_only
+            ):
+                raise BadRequestException(
+                    "Choose a completion model before choosing your own Skills"
+                )
             if candidate_skill_ids:
                 raise BadRequestException(
                     "Choose a completion model before enabling on-demand Skills"
@@ -2147,6 +2173,7 @@ class AssistantService:
 
         on_demand_skill_ids_requiring_validation: frozenset[UUID] = frozenset()
         removal_only = False
+        bindings_changed = False
         if skill_binding_intents is not None:
             replacement = await self.skill_service.replace_assistant_bindings(
                 space_id=assistant.space_id,
@@ -2157,6 +2184,7 @@ class AssistantService:
                 replacement.on_demand_skill_ids_requiring_validation
             )
             removal_only = replacement.removal_only
+            bindings_changed = not replacement.unchanged
 
         # Validate before persisting (the in-memory assistant already reflects the
         # final model + prompt + attachments from update() above), so a save that
@@ -2189,7 +2217,7 @@ class AssistantService:
                 personal_layer_save=(
                     PersonalSkillLayerSave(
                         before=personal_layer_before,
-                        bindings_changed=skill_binding_intents is not None,
+                        bindings_changed=bindings_changed,
                         removal_only=removal_only,
                     )
                     if is_personal_default

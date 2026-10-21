@@ -316,3 +316,54 @@ def test_save_transitions_that_are_refused(save, after):
         assert_personal_skill_layer_save(save, after)
 
     assert raised.value.details == {"reason": "model_context_exceeded", "detail": None}
+
+
+def test_an_organisation_candidate_that_no_longer_fits_the_window_is_crowded_out():
+    # The share is generous here, so only the model window can decide.
+    organisation = _resolution(
+        _binding(
+            "Organisationens mall",
+            position=0,
+            mode=ON_DEMAND,
+            source=SkillBindingSource.ORGANIZATION,
+            instructions="word " * 2000,
+        )
+    )
+    policy = _policy(context_share_percent=100)
+    alone = _assess(organisation=organisation, policy=policy, max_input_tokens=5000)
+    assert alone.status is PersonalSkillLayerStatus.EMPTY
+
+    decision = _assess(
+        organisation=organisation,
+        personal=_resolution(
+            _binding("Mina svarspreferenser", position=0, instructions="word " * 1500)
+        ),
+        policy=policy,
+        max_input_tokens=5000,
+    )
+
+    assert decision.reason is PersonalSkillLayerReason.ORGANISATION_SKILL_CROWDED_OUT
+    assert (
+        decision.detail == SkillActivationRejectionReason.MODEL_CONTEXT_LIMIT_EXCEEDED
+    )
+
+
+def test_a_personal_candidate_that_would_overflow_the_window_does_not_fit():
+    decision = _assess(
+        personal=_resolution(
+            _binding(
+                "Stor mall",
+                position=0,
+                mode=ON_DEMAND,
+                description="Use for templates",
+                instructions="word " * 3500,
+            )
+        ),
+        policy=_policy(context_share_percent=100),
+        max_input_tokens=5000,
+    )
+
+    assert decision.reason is PersonalSkillLayerReason.PERSONAL_SKILL_DOES_NOT_FIT
+    assert (
+        decision.detail == SkillActivationRejectionReason.MODEL_CONTEXT_LIMIT_EXCEEDED
+    )

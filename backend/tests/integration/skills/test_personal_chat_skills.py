@@ -12,12 +12,17 @@ from uuid import uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.skill_table import SkillRuntimePolicies
 from eneo.database.tables.users_table import users_roles_table
 from eneo.main.exceptions import ErrorCodes
 from eneo.roles.permissions import Permission
-from eneo.skills.domain.skill import SkillBindingIntent, SkillBindingReference
+from eneo.skills.domain.skill import (
+    MAX_SKILL_ATTACHMENT_LIMIT,
+    SkillBindingIntent,
+    SkillBindingReference,
+)
 
 PERSONAL = [Permission.PERSONAL_CHAT, Permission.PERSONAL_SKILLS]
 
@@ -62,6 +67,21 @@ async def _own_skill(client, headers, space_id, name="Mina svarspreferenser"):
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+async def _tool_model(db_container, completion_model_factory) -> str:
+    """A model that can call tools, so Skills can be offered on demand."""
+    async with db_container() as container:
+        model = await completion_model_factory(
+            container.session(),
+            f"gpt-4o-tools-{uuid4().hex[:6]}",
+            litellm_model_name="gpt-4o",
+            max_input_tokens=128_000,
+        )
+        # The factory does not take this flag; set it on the row.
+        model.supports_tool_calling = True
+        await container.session().flush()
+        return str(model.id)
 
 
 def _binding(skill, mode="always"):
@@ -239,7 +259,12 @@ async def test_nobody_else_can_change_your_personal_chat_skills(
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_a_revoked_person_keeps_choices_and_can_still_switch_model(
-    client, db_container, patch_auth_service_jwt, admin_user, user_factory
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    admin_user,
+    user_factory,
+    completion_model_factory,
 ):
     role_id, headers = await _person(
         db_container, user_factory, admin_user.tenant_id, PERSONAL
@@ -258,10 +283,12 @@ async def test_a_revoked_person_keeps_choices_and_can_still_switch_model(
             .values(permissions=[Permission.PERSONAL_CHAT.value])
         )
 
+    other_model_id = await _tool_model(db_container, completion_model_factory)
     switched = await _save(
-        client, headers, default_id, {"completion_model": {"id": model_id}}
+        client, headers, default_id, {"completion_model": {"id": other_model_id}}
     )
     assert switched.status_code == 200, switched.text
+    assert other_model_id != model_id
     assert await _bound_ids(client, headers, space_id, default_id) == [skill["id"]]
 
     edited = await _save(client, headers, default_id, {"skill_bindings": []})
@@ -443,3 +470,122 @@ async def test_a_chat_only_person_sees_the_organisation_skills(
     ]
     assert configuration["bindings"] == []
     assert configuration["personal_layer"]["status"] == "empty"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_model_switch_that_would_pause_running_skills_is_refused(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+):
+    _, headers = await _person(
+        db_container, user_factory, admin_user.tenant_id, PERSONAL
+    )
+    space_id, default_id, plain_model_id = await _personal_chat(client, headers)
+    tools_model_id = await _tool_model(db_container, completion_model_factory)
+    moved = await _save(
+        client, headers, default_id, {"completion_model": {"id": tools_model_id}}
+    )
+    assert moved.status_code == 200, moved.text
+    after_move = await _configuration(client, headers, space_id, default_id)
+    assert after_move["runtime"]["effective_model_id"] == tools_model_id, after_move
+    skill = await _own_skill(client, headers, space_id)
+    on_demand = _binding(skill, mode="on_demand")
+    saved = await _save(client, headers, default_id, {"skill_bindings": [on_demand]})
+    assert saved.status_code == 200, saved.text
+
+    # The plain model cannot call tools, so on-demand Skills would stop working.
+    for payload in (
+        {"completion_model": {"id": plain_model_id}},
+        {"completion_model": {"id": plain_model_id}, "skill_bindings": [on_demand]},
+    ):
+        refused = await _save(client, headers, default_id, payload)
+        assert refused.status_code == 400, refused.text
+        assert refused.json()["details"]["reason"] == "on_demand_unavailable"
+
+    configuration = await _configuration(client, headers, space_id, default_id)
+    assert configuration["personal_layer"]["status"] == "applied"
+    assert configuration["runtime"]["effective_model_id"] == tools_model_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_duplicate_own_skills_are_refused_cleanly(
+    client, db_container, patch_auth_service_jwt, admin_user, user_factory
+):
+    _, headers = await _person(
+        db_container, user_factory, admin_user.tenant_id, PERSONAL
+    )
+    space_id, default_id, _ = await _personal_chat(client, headers)
+    skill = await _own_skill(client, headers, space_id)
+
+    duplicated = await _save(
+        client,
+        headers,
+        default_id,
+        {"skill_bindings": [_binding(skill), _binding(skill, mode="on_demand")]},
+    )
+
+    assert duplicated.status_code == 400, duplicated.text
+    assert await _bound_ids(client, headers, space_id, default_id) == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_an_oversized_skill_list_is_refused_before_any_lookup(
+    client, db_container, patch_auth_service_jwt, admin_user, user_factory
+):
+    _, headers = await _person(
+        db_container, user_factory, admin_user.tenant_id, PERSONAL
+    )
+    space_id, default_id, _ = await _personal_chat(client, headers)
+    oversized = [
+        {"skill_id": str(uuid4()), "skill_revision_id": str(uuid4())}
+        for _ in range(MAX_SKILL_ATTACHMENT_LIMIT + 1)
+    ]
+
+    response = await _save(client, headers, default_id, {"skill_bindings": oversized})
+
+    assert response.status_code == 422, response.text
+    assert await _bound_ids(client, headers, space_id, default_id) == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_without_a_model_own_skills_can_be_removed_but_not_added(
+    client, db_container, patch_auth_service_jwt, admin_user, user_factory
+):
+    _, headers = await _person(
+        db_container, user_factory, admin_user.tenant_id, PERSONAL
+    )
+    space_id, default_id, _ = await _personal_chat(client, headers)
+    first = await _own_skill(client, headers, space_id)
+    second = await _own_skill(client, headers, space_id, name="Mötesanteckningar")
+    saved = await _save(
+        client, headers, default_id, {"skill_bindings": [_binding(first)]}
+    )
+    assert saved.status_code == 200, saved.text
+
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(Assistants)
+            .where(Assistants.id == default_id)
+            .values(completion_model_id=None)
+        )
+
+    added = await _save(
+        client,
+        headers,
+        default_id,
+        {"skill_bindings": [_binding(first), _binding(second)]},
+    )
+    assert added.status_code == 400, added.text
+    assert "completion model" in added.json()["message"]
+
+    removed = await _save(client, headers, default_id, {"skill_bindings": []})
+    assert removed.status_code == 200, removed.text
+    assert await _bound_ids(client, headers, space_id, default_id) == []
