@@ -10,6 +10,7 @@
   import * as InputGroup from "$lib/components/ui/input-group/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
   import { SkillCatalogQuery } from "$lib/features/skills/skillCatalogQuery.svelte";
+  import { activationModeLabel } from "$lib/features/skills/personalChatSkills";
   import { m } from "$lib/paraglide/messages";
   import { LoaderCircle, Plus, Search, Trash2, BookOpenCheck } from "@lucide/svelte";
   import { onDestroy, untrack } from "svelte";
@@ -41,6 +42,14 @@
   );
   const canCreate = $derived(data.currentSpace.skill_permissions.includes(CREATE_SKILL_PERMISSION));
   const canDelete = $derived(data.currentSpace.skill_permissions.includes(DELETE_SKILL_PERMISSION));
+  const personalChatModes = $derived(
+    new Map(
+      data.personalChatSkills?.bindings.map((binding) => [
+        binding.skill_id,
+        binding.activation_mode
+      ]) ?? []
+    )
+  );
 
   function formatUpdatedAt(value: string): string {
     return new Date(value).toLocaleString(intlLocale(), {
@@ -169,6 +178,7 @@
               </Table.Header>
               <Table.Body>
                 {#each skillCatalog.items as skill (skill.id)}
+                  {@const personalChatMode = personalChatModes.get(skill.id)}
                   <Table.Row class="[&>td]:align-top">
                     <Table.Cell class="min-w-0 font-medium @4xl:w-[22%]">
                       <a
@@ -180,6 +190,13 @@
                       <p class="text-muted-foreground mt-0.5 break-all whitespace-normal text-xs">
                         {skill.slug}
                       </p>
+                      {#if personalChatMode}
+                        <Badge variant="outline" class="mt-2">
+                          {m.personal_chat_skills_status_badge({
+                            mode: activationModeLabel(personalChatMode)
+                          })}
+                        </Badge>
+                      {/if}
                       <div class="mt-2 @md:hidden">
                         <Badge variant={skill.is_active ? "secondary" : "outline"}>
                           {skill.is_active

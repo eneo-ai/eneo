@@ -34,6 +34,7 @@ describe("Skill detail loader", () => {
       spaceId: "space-1",
       skillId: "skill-1"
     });
-    expect(result).toEqual({ skill, revisionPage });
+    // Outside the personal space there is no personal chat to describe.
+    expect(result).toEqual({ skill, revisionPage, personalChatSkills: null });
   });
 });

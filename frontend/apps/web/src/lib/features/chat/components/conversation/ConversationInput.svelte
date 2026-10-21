@@ -18,6 +18,7 @@
   import ChatReasoningSelect from "../switcher/ChatReasoningSelect.svelte";
   import ChatKnowledge from "./ChatKnowledge.svelte";
   import ChatMcpServers from "./ChatMcpServers.svelte";
+  import ChatSkills from "./ChatSkills.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getChatService } from "../../ChatService.svelte";
   import { effectiveKnowledgeMode, internalMcpServerNames } from "../../internalMcpAvailability";
@@ -689,6 +690,11 @@
           onSelectionChange={persistMcpServerSelection}
           bind:autoAcceptTools
         />
+      {/if}
+
+      {#if showModelSelect}
+        <!-- Saves to the default assistant through the same SpacesManager as the model picker. -->
+        <ChatSkills />
       {/if}
     </PromptInput.Tools>
 
