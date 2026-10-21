@@ -1452,18 +1452,23 @@ async def test_a_fleet_apply_cannot_close_a_cycle_with_policy_and_assistant_save
                 targets=targets,
             )
         )
-        save = asyncio.create_task(
-            editor.assistant_service().update_assistant(assistant_id, name="Renamed")
-        )
+        save: asyncio.Task | None = None
         confirm: asyncio.Task | None = None
         try:
+            # The editor starts only once the apply holds the Assistant row.
             await _until_done_or_waiting(db_container, pid=fleet_pid, task=apply)
+            save = asyncio.create_task(
+                editor.assistant_service().update_assistant(
+                    assistant_id, name="Renamed"
+                )
+            )
             await _wait_until_database_lock(db_container, pid=editor_pid)
             confirm = asyncio.create_task(
                 policy_save.assistant_service().confirm_personal_default_governance_fit()
             )
             results = await asyncio.wait_for(apply, timeout=10)
             await fleet.session().commit()
+            assert save is not None
             await asyncio.wait_for(save, timeout=10)
             await editor.session().commit()
             await asyncio.wait_for(confirm, timeout=10)
