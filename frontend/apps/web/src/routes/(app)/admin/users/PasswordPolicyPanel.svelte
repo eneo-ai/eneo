@@ -8,6 +8,7 @@
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { m } from "$lib/paraglide/messages";
   import { Check, CircleAlert } from "@lucide/svelte";
+  import { invalidate } from "$app/navigation";
 
   let { policy }: { policy: PasswordLifecyclePolicy } = $props();
 
@@ -64,6 +65,9 @@
       maxAgeDays = saved.max_age_days == null ? "" : String(saved.max_age_days);
       submitted = false;
       successMessage = m.admin_password_policy_updated();
+      // The page context feeds the user editor's one-time-password hint from
+      // the loaded policy, so the load must see the saved rule too.
+      await invalidate("admin:users");
     } catch (error) {
       errorMessage = getErrorMessage(error);
     } finally {

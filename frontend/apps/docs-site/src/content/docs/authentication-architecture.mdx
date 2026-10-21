@@ -144,10 +144,12 @@ own row in **Admin → Users** keeps it, because the account chose it; and the
 deployment administrator's `POST /api/v1/sysadmin/users/{id}/access-token/`
 mints a session without the claim, so support access is never blocked by a
 pending change. Upgrading to this version switches `require_change_after_admin_set`
-on for every tenant: the seeded administrator and every password an
-administrator sets from then on are one-time until a tenant turns the rule
-off. Existing sessions and deployments that still issue tokens without the
-claim keep working during a rolling upgrade.
+on for every tenant: every password an administrator sets from then on is
+one-time until a tenant turns the rule off. Passwords that already exist,
+including an already seeded administrator's, are stamped with the upgrade
+time and stay usable. On a fresh installation the seeded password is
+one-time. Existing sessions and deployments that still issue tokens without
+the claim keep working during a rolling upgrade.
 
 ### Signed State Token
 

@@ -186,22 +186,27 @@ class TenantRepository:
         column: InstrumentedAttribute[dict[str, Any]],
         policy_updates: dict[str, Any],
     ) -> TenantInDB:
-        """Shallow-merge updates into one JSONB policy column."""
-        tenant = await self.get(tenant_id)
-        if tenant is None:
-            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
-        policy = dict(getattr(tenant, column.key) or {})
-        policy.update(policy_updates)
+        """Shallow-merge updates into one JSONB policy column.
 
+        The merge happens inside the UPDATE (``column || updates``) so two
+        admins patching disjoint keys at once both land; a Python-side merge of
+        a pre-read snapshot would let the later writer undo the earlier one.
+        An explicit JSON null in ``policy_updates`` is kept as a null value.
+        """
+        merged = column.op("||", return_type=JSONB)(
+            sa.literal(policy_updates, type_=JSONB)
+        )
         stmt = (
             sa.update(Tenants)
             .where(Tenants.id == tenant_id)
-            .values({column: policy, Tenants.updated_at: datetime.now(timezone.utc)})
+            .values({column: merged, Tenants.updated_at: datetime.now(timezone.utc)})
             .returning(Tenants)
             .options(selectinload(Tenants.modules))
         )
         model = await self.delegate.get_model_from_query(stmt)
-        return cast(TenantInDB, model)
+        if model is None:
+            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
+        return model
 
     async def update_show_model_pricing(
         self,

@@ -385,6 +385,86 @@ async def test_admin_password_policy_round_trip(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_concurrent_disjoint_policy_patches_both_land(
+    client, patch_auth_service_jwt, mock_transcription_models
+):
+    """Two admins patching different keys at once must not undo each other.
+
+    Session A writes ``max_age_days`` and keeps its transaction (and the row
+    lock) open while session B writes ``require_change_after_admin_set``. B
+    can only commit after A, so a merge computed from a pre-read snapshot
+    would write A's key back to its old value.
+    """
+    import sqlalchemy as sa
+
+    from eneo.database.database import sessionmanager
+    from eneo.tenants.tenant_repo import TenantRepository
+
+    login = await _login(
+        client, email="test@example.com", password="IntegrationPass123!"
+    )
+    assert login.status_code == 200, login.text
+    auth = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    async with sessionmanager.session() as session, session.begin():
+        tenant_id = (
+            await session.execute(
+                sa.text("SELECT tenant_id FROM users WHERE email = :email"),
+                {"email": "test@example.com"},
+            )
+        ).scalar_one()
+
+    async def patch_in_own_session(updates: dict) -> None:
+        async with sessionmanager.session() as session, session.begin():
+            await TenantRepository(session).update_password_policy(tenant_id, updates)
+
+    async def wait_until_blocked_on_lock(racer: asyncio.Task) -> None:
+        for _ in range(200):
+            if racer.done():
+                racer.result()
+                raise AssertionError("racer finished before the lock was released")
+            async with sessionmanager.session() as session, session.begin():
+                waiting = (
+                    await session.execute(
+                        sa.text(
+                            "SELECT count(*) FROM pg_stat_activity "
+                            "WHERE datname = current_database() "
+                            "AND wait_event_type = 'Lock'"
+                        )
+                    )
+                ).scalar_one()
+            if waiting:
+                return
+            await asyncio.sleep(0.05)
+        raise AssertionError("racer never blocked on the tenant row lock")
+
+    try:
+        async with sessionmanager.session() as session_a, session_a.begin():
+            await TenantRepository(session_a).update_password_policy(
+                tenant_id, {"max_age_days": 30}
+            )
+            racer = asyncio.create_task(
+                patch_in_own_session({"require_change_after_admin_set": False})
+            )
+            await wait_until_blocked_on_lock(racer)
+        await asyncio.wait_for(racer, timeout=10)
+
+        current = await client.get("/api/v1/admin/password-policy", headers=auth)
+        assert current.status_code == 200, current.text
+        assert current.json() == {
+            "require_change_after_admin_set": False,
+            "max_age_days": 30,
+        }
+    finally:
+        await client.patch(
+            "/api/v1/admin/password-policy",
+            json={"max_age_days": None, "require_change_after_admin_set": True},
+            headers=auth,
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_expired_password_only_admits_its_own_replacement(
     client,
     super_admin_token,
