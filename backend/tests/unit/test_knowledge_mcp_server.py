@@ -14,7 +14,7 @@ import pytest
 
 from eneo.authentication.auth_service import AuthService
 from eneo.info_blobs.info_blob_repo import InfoBlobListing
-from eneo.internal_mcp.foundation import assistant_id_from_token
+from eneo.internal_mcp.foundation import ToolContext, assistant_id_from_token
 from eneo.internal_mcp.knowledge import (
     DESCRIPTION_SOURCES_CAP,
     KNOWLEDGE_SERVER_NAME,
@@ -86,7 +86,7 @@ def _patch_read_source_context(monkeypatch, *, blob=None, repo_error=None):
             assistant_service=lambda: SimpleNamespace(get_assistant=get_assistant),
             info_blob_repo=lambda: SimpleNamespace(get=get_blob),
         )
-        yield container, SimpleNamespace(), assistant_id
+        yield ToolContext(container, SimpleNamespace(), assistant_id)
 
     monkeypatch.setattr(
         "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
@@ -525,7 +525,7 @@ def _patch_search_context(
             ),
             datastore=lambda: SimpleNamespace(semantic_search=semantic_search),
         )
-        yield container, SimpleNamespace(), uuid4()
+        yield ToolContext(container, SimpleNamespace(), uuid4())
 
     monkeypatch.setattr(
         "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
@@ -973,7 +973,7 @@ def _patch_describe_context(monkeypatch, assistant, *, listings=(), excerpts=())
             ),
             info_blob_chunk_repo=lambda: SimpleNamespace(sample_evenly=sample_evenly),
         )
-        yield container, SimpleNamespace(), uuid4()
+        yield ToolContext(container, SimpleNamespace(), uuid4())
 
     monkeypatch.setattr(
         "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
@@ -1112,7 +1112,7 @@ class TestSearchReranking:
             async def get_assistant(_assistant_id):
                 return assistant, []
 
-            yield (
+            yield ToolContext(
                 SimpleNamespace(
                     assistant_service=lambda: SimpleNamespace(
                         get_assistant=get_assistant
