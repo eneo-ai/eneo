@@ -80,7 +80,11 @@ from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import (
     BadRequestException,
     FileTooLargeException,
+    KnowledgeModelUnavailableException,
+    ModelNotAvailableException,
+    NoModelSelectedException,
     NotFoundException,
+    SecurityClassificationMismatchException,
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
@@ -156,6 +160,20 @@ from eneo.users.user_repo import UsersRepository
 from eneo.workflows.step_repo import StepRepository
 
 logger = get_logger(__name__)
+
+# Preparing a specialist can fail for reasons that are that member's problem,
+# not the group's: hidden from the caller, deleted, no model, a model or
+# embedding model not enabled in the space, a classification mismatch, or a
+# configuration the preparation step rejects outright.
+_UNAVAILABLE_CANDIDATE: tuple[type[Exception], ...] = (
+    UnauthorizedException,
+    NotFoundException,
+    NoModelSelectedException,
+    ModelNotAvailableException,
+    KnowledgeModelUnavailableException,
+    SecurityClassificationMismatchException,
+    BadRequestException,
+)
 
 _IMAGE_EXTENSIONS = {
     "image/jpeg": "jpeg",
@@ -2538,6 +2556,9 @@ class AssistantService:
                 stream_output_token_estimate: int | None = None
                 stream_context_output_token_estimate: int | None = None
                 consultations: dict[UUID, ConsultationInfo] = {}
+                # Read once here: the finally below may run in another context
+                # when the stream is finalized by the async-generator GC hook.
+                owning_delegation = current_assistant_delegation()
                 persisted_steps: tuple[object, ...] = ()
                 completed = False
 
@@ -2923,10 +2944,17 @@ class AssistantService:
                 finally:
                     # Close nested generators in the owning task before recording
                     # cancellation, including any MCP connection context scopes.
-                    await cast(
-                        AsyncGenerator[Completion, None], response.completion
-                    ).aclose()
-                    active_delegation = current_assistant_delegation()
+                    # A failure while closing must not skip the persistence below.
+                    try:
+                        await cast(
+                            AsyncGenerator[Completion, None], response.completion
+                        ).aclose()
+                    except Exception:
+                        logger.exception(
+                            "Failed to close the completion stream",
+                            extra={"question_id": str(question_id)},
+                        )
+                    active_delegation = owning_delegation
                     if active_delegation is not None and not completed:
                         active_delegation.budget.stopped = True
                         for item in active_delegation.consultations:
@@ -3809,7 +3837,16 @@ class AssistantService:
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
                     disabled_capabilities=disabled_capabilities,
                 )
-            except (UnauthorizedException, NotFoundException):
+            except _UNAVAILABLE_CANDIDATE as exc:
+                # A member the caller may not use, or one whose own model,
+                # knowledge or classification is not usable right now, is left
+                # out; the orchestrator learns only the count. The root's own
+                # configuration was already validated above.
+                logger.info(
+                    "Specialist left out of orchestration: %s",
+                    type(exc).__name__,
+                    extra={"assistant_id": str(candidate.id)},
+                )
                 unavailable += 1
                 continue
             if child.space.id != plan.space_id:
@@ -4234,6 +4271,35 @@ class AssistantService:
                             error="Access or assistant configuration changed. Start a new turn.",
                             error_code=403,
                             error_reason="assistant_access_changed",
+                            stop=True,
+                        )
+                    except (BadRequestException, NotFoundException) as exc:
+                        # The legacy path raises these before the response
+                        # starts; here the headers are already sent, so the
+                        # refusal travels as the stream's error event.
+                        yield Completion(
+                            response_type=ResponseType.ERROR,
+                            error=str(exc) or "The assistant execution failed.",
+                            error_code=(
+                                404 if isinstance(exc, NotFoundException) else 400
+                            ),
+                            error_reason=getattr(exc, "code", None)
+                            or "assistant_execution_failed",
+                            stop=True,
+                        )
+                    except Exception:
+                        # Anything else (provider setup, MCP connect, a bug)
+                        # must still end the stream with an error event rather
+                        # than a dropped connection without persistence.
+                        logger.exception(
+                            "Orchestrated turn failed before or during execution",
+                            extra={"question_id": str(question_id)},
+                        )
+                        yield Completion(
+                            response_type=ResponseType.ERROR,
+                            error="The assistant execution failed.",
+                            error_code=500,
+                            error_reason="assistant_execution_failed",
                             stop=True,
                         )
 

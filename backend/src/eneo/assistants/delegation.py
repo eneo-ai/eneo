@@ -23,6 +23,7 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.completion_models.domain.execution_budget import (
     ExecutionBudget,
     ExecutionLimitReached,
+    restore_context_value,
 )
 from eneo.main.exceptions import (
     BadRequestException,
@@ -174,8 +175,8 @@ class AssistantDelegation:
             with self.budget.bind():
                 yield
         finally:
-            _CURRENT_AUTHORIZATION.reset(authorization)
-            _CURRENT_DELEGATION.reset(token)
+            restore_context_value(_CURRENT_AUTHORIZATION, authorization)
+            restore_context_value(_CURRENT_DELEGATION, token)
 
     def result_for(self, call_id: str) -> str:
         return self._results[call_id]
@@ -388,8 +389,8 @@ class AssistantDelegation:
                     extra={"consultation_id": str(consultation.id)},
                 )
             finally:
-                _CURRENT_AUTHORIZATION.reset(authorization)
-                _CURRENT_DELEGATION.reset(token)
+                restore_context_value(_CURRENT_AUTHORIZATION, authorization)
+                restore_context_value(_CURRENT_DELEGATION, token)
                 consultation.approval_id = None
                 consultation.awaiting_tool_call_ids = []
                 for step in consultation.tool_calls:

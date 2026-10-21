@@ -17,9 +17,10 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager, contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from time import monotonic
+from typing import TypeVar, cast
 
 from eneo.main.exceptions import OpenAIException
 
@@ -214,7 +215,7 @@ class ExecutionBudget:
         try:
             yield
         finally:
-            _CURRENT_BUDGET.reset(token)
+            restore_context_value(_CURRENT_BUDGET, token)
 
     @contextmanager
     def child_scope(self) -> Generator[None]:
@@ -264,6 +265,25 @@ class ExecutionBudget:
 _CURRENT_BUDGET: ContextVar[ExecutionBudget | None] = ContextVar(
     "assistant_execution_budget", default=None
 )
+
+
+T = TypeVar("T")
+
+
+def restore_context_value(var: ContextVar[T], token: Token[T]) -> None:
+    """Undo a ``set`` even when the generator that made it is finalized elsewhere.
+
+    sse-starlette does not close the body iterator on a client disconnect, so
+    the asyncio async-generator finalizer may run these ``finally`` blocks in a
+    fresh context, where ``Token.reset`` raises ``ValueError``. Restoring by
+    value keeps the owning context clean in the normal case and keeps the
+    cleanup after this call running in the GC case.
+    """
+    try:
+        var.reset(token)
+    except ValueError:
+        previous = token.old_value
+        var.set(cast(T, None) if previous is Token.MISSING else previous)
 
 
 def current_execution_budget() -> ExecutionBudget | None:

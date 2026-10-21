@@ -38,6 +38,7 @@ from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import 
 )
 from eneo.group_chat.domain.entities.group_chat import GroupChat, GroupChatAssistant
 from eneo.main.exceptions import (
+    BadRequestException,
     SecurityClassificationMismatchException,
     UnauthorizedException,
 )
@@ -1302,3 +1303,156 @@ async def test_unreadable_specialists_are_excluded_before_history_writes(
     description = runtime.tool_definition.description
     assert "Hidden legal" not in description
     assert "1 configured specialist(s) are not available" in description
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "ModelNotAvailableException",
+        "NoModelSelectedException",
+        "KnowledgeModelUnavailableException",
+        "SecurityClassificationMismatchException",
+    ],
+)
+async def test_specialists_with_unusable_configuration_are_left_out(
+    turn: TurnFixture, monkeypatch: pytest.MonkeyPatch, failure: str
+):
+    """One member whose model or knowledge is unusable must not refuse the group."""
+    from eneo.main import exceptions
+
+    broken = copy.deepcopy(turn.assistant)
+    broken.id = uuid4()
+    broken.name = "Broken legal"
+    visible = copy.deepcopy(turn.assistant)
+    visible.id = uuid4()
+    visible.name = "IT"
+    plan = group_plan(turn, monkeypatch, visible)
+    turn.space.assistants.append(broken)
+    turn.space.group_chats[0].assistants.append(GroupChatAssistant(broken))
+    plan = AssistantDelegationPlan(
+        plan.group_chat_id,
+        plan.space_id,
+        plan.orchestrator_id,
+        (
+            *plan.candidates,
+            AssistantCandidate(broken.id, broken.name, "Legal"),
+        ),
+    )
+    prepare = turn.service._prepare_turn
+    exc_type = getattr(exceptions, failure)
+
+    async def prepare_or_fail(**kwargs):
+        if kwargs["assistant_id"] == broken.id:
+            raise exc_type("The selected AI model is not available in this space.")
+        return await prepare(**kwargs)
+
+    monkeypatch.setattr(turn.service, "_prepare_turn", prepare_or_fail)
+    created: list[AssistantDelegation] = []
+    create = turn.service._create_delegation
+
+    async def capture(**kwargs):
+        created.append(await create(**kwargs))
+        return created[-1]
+
+    monkeypatch.setattr(turn.service, "_create_delegation", capture)
+
+    async def answer_without_consulting(**kwargs: object):
+        return response("No specialist was needed.", stream=True)
+
+    turn.provider.side_effect = answer_without_consulting
+
+    async with turn.service.repo.session.begin():
+        reply = await turn.service.ask(
+            question="Review",
+            assistant_id=turn.assistant.id,
+            group_chat_id=plan.group_chat_id,
+            delegation_plan=plan,
+            stream=True,
+            version=2,
+        )
+    events = [event async for event in reply.answer]
+    assert not [event for event in events if event.response_type == ResponseType.ERROR]
+    (runtime,) = created
+    assert set(runtime.candidates) == {visible.id}
+    assert runtime.unavailable_candidates == 1
+    assert "Broken legal" not in runtime.tool_definition.description
+
+
+@pytest.mark.parametrize(
+    ("failure", "status", "reason"),
+    [
+        (RuntimeError("provider setup exploded"), 500, "assistant_execution_failed"),
+        (
+            BadRequestException(
+                "Attachments do not fit.", code="attachments_too_large"
+            ),
+            400,
+            "attachments_too_large",
+        ),
+    ],
+)
+async def test_execution_failures_end_the_orchestrated_stream_with_an_error_event(
+    turn: TurnFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+    status: int,
+    reason: str,
+):
+    """Headers are already sent when execution starts: no raw exception may escape."""
+    specialist = copy.deepcopy(turn.assistant)
+    specialist.id = uuid4()
+    specialist.name = "IT"
+    plan = group_plan(turn, monkeypatch, specialist)
+
+    async def explode(*args: object, **kwargs: object):
+        raise failure
+
+    monkeypatch.setattr(turn.service, "_execute_turn", explode)
+
+    async with turn.service.repo.session.begin():
+        reply = await turn.service.ask(
+            question="Review",
+            assistant_id=turn.assistant.id,
+            group_chat_id=plan.group_chat_id,
+            delegation_plan=plan,
+            stream=True,
+            version=2,
+        )
+    events = [event async for event in reply.answer]
+    assert len(events) == 1
+    (error,) = events
+    assert error.response_type == ResponseType.ERROR
+    assert error.error_code == status
+    assert error.error_reason == reason
+    assert error.stop is True
+
+
+async def test_context_bindings_survive_finalization_in_another_context():
+    """sse-starlette leaves the body iterator to the asyncgen GC hook on disconnect."""
+    import contextvars
+
+    budget = ExecutionBudget()
+    runtime = AssistantDelegation(
+        parent_assistant_id=uuid4(),
+        candidates=(AssistantCandidate(uuid4(), "IT", "IT"),),
+        attachment_ids=frozenset(),
+        budget=budget,
+        execute=AsyncMock(),
+        authorize=AsyncMock(),
+    )
+
+    async def stream() -> AsyncGenerator[int, None]:
+        with runtime.bind():
+            yield 1
+            yield 2
+
+    generator = stream()
+    assert await generator.__anext__() == 1
+    # Closing in a fresh context is what the finalizer does; the finally
+    # blocks must run to completion there without a ValueError, and leave
+    # that context clean. (The owning context is the finished request's.)
+    finalizer = contextvars.Context()
+    await asyncio.create_task(generator.aclose(), context=finalizer)
+    assert generator.ag_frame is None
+    assert finalizer.run(current_execution_budget) is None
+    assert finalizer.run(current_assistant_delegation) is None

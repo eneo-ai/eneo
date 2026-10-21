@@ -1173,8 +1173,15 @@ export class ChatService {
           // refresh. Falling through to reloadHistory() (below) syncs the sidebar with
           // the now-persisted state instead of leaving the new session invisible until
           // a manual reload.
-        } else if (ref && error instanceof EneoError && !ref.answer) {
-          // If streaming started but no content arrived yet, remove the empty message
+        } else if (
+          ref &&
+          error instanceof EneoError &&
+          !ref.answer &&
+          (ref.consultations?.length ?? 0) === 0
+        ) {
+          // If streaming started but no content arrived yet, remove the empty
+          // message. Specialist steps count as content: an orchestrated turn
+          // that fails before its synthesis keeps them, with the notice below.
           this.currentConversation.messages.pop();
           this.#clearDiagnosticsPending(ref.id);
           console.error(error);
