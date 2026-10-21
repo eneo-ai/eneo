@@ -3,7 +3,7 @@ import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Collection, Optional, Protocol, Sequence, cast
+from typing import Any, Collection, Mapping, Optional, Protocol, Sequence, cast
 from uuid import UUID
 
 from typing_extensions import override
@@ -52,6 +52,7 @@ logger = logging.getLogger(__name__)
 def _replayable_tool_calls(
     tool_calls: Optional[list[ToolCallInfo]],
     file_reference_urls: Optional[dict[UUID, str]] = None,
+    generated_files: Sequence[File] = (),
 ) -> list[MessageToolCall]:
     """Filter persisted tool calls down to those that can be replayed to the LLM.
 
@@ -69,9 +70,17 @@ def _replayable_tool_calls(
     an authorized reference exists for one, its stable handle is appended
     here so the model can hand the image back
     to an image tool on a later turn.
+
+    `generated_files` are the turn's generated files, among which a reader may
+    have saved versions of a document the call made; the newest such version
+    is named as current so the model revises the reader's text, not its own.
     """
     if not tool_calls:
         return []
+    tool_made = {
+        file_id for tc in tool_calls for file_id in (tc.generated_file_ids or [])
+    }
+    revisions = current_user_revisions(tool_made, generated_files)
     replayable: list[MessageToolCall] = []
     for tc in tool_calls:
         if tc.tool_call_id is None or tc.tool_call_id == "":
@@ -91,23 +100,66 @@ def _replayable_tool_calls(
                     "dict[str, object] | None",
                     model_file_references(tc.arguments, file_reference_urls or {}),
                 ),
-                result=_with_generated_image_references(tc, file_reference_urls),
+                result=_with_generated_image_references(
+                    tc, file_reference_urls, revisions
+                ),
             )
         )
     return replayable
+
+
+def current_user_revisions(
+    tool_generated_ids: Collection[UUID], generated_files: Sequence[File]
+) -> dict[UUID, UUID]:
+    """For each file a tool made this turn, the newest version a reader saved of it.
+
+    A reader's version is a generated file of the turn that revises another
+    and that no tool call produced. Versions chain (a version of a version);
+    the head, revised by no other version, is current. Only files that have a
+    current version other than themselves are returned. Cycles cannot be made
+    through the API but are guarded against anyway.
+    """
+    tool_made = set(tool_generated_ids)
+    next_version: dict[UUID, UUID] = {}
+    created: dict[UUID, Any] = {}
+    for file in generated_files:
+        if file.revises_file_id is None or file.id in tool_made:
+            continue
+        # Two versions of the same base: the later save is the one kept.
+        earlier = next_version.get(file.revises_file_id)
+        if earlier is not None and created[earlier] >= file.created_at:
+            continue
+        next_version[file.revises_file_id] = file.id
+        created[file.id] = file.created_at
+    current: dict[UUID, UUID] = {}
+    for root in tool_made:
+        head = root
+        seen = {root}
+        while (
+            following := next_version.get(head)
+        ) is not None and following not in seen:
+            seen.add(following)
+            head = following
+        if head != root:
+            current[root] = head
+    return current
 
 
 _GENERATED_PLACEHOLDER = re.compile(r"\[(Image|File) (\d+) \(")
 
 
 def _with_generated_image_references(
-    tc: ToolCallInfo, file_reference_urls: Optional[dict[UUID, str]]
+    tc: ToolCallInfo,
+    file_reference_urls: Optional[dict[UUID, str]],
+    revisions: Mapping[UUID, UUID] | None = None,
 ) -> str:
     """The persisted result plus one reference line per generated file.
 
     Labels follow the "[Image N ...]" and "[File N ...]" placeholders the
     result already carries: they appear in the order the files were persisted
-    for this call, so the n-th placeholder names the n-th generated file.
+    for this call, so the n-th placeholder names the n-th generated file. A
+    file a reader has since edited gets a second line naming the current
+    version, so a later revision starts from the reader's text.
     """
     result = model_file_references(tc.result or "", file_reference_urls or {})
     if not tc.generated_file_ids or not file_reference_urls:
@@ -121,11 +173,17 @@ def _with_generated_image_references(
         # only, which the list covers; fall back to the old numbering anyway.
         return labels[position] if position < len(labels) else f"Image {position + 1}"
 
-    lines = [
-        f"File reference for {label(position)}: {file_handle(file_id)}"
-        for position, file_id in enumerate(tc.generated_file_ids)
-        if file_id in file_reference_urls
-    ]
+    lines: list[str] = []
+    for position, file_id in enumerate(tc.generated_file_ids):
+        if file_id not in file_reference_urls:
+            continue
+        lines.append(f"File reference for {label(position)}: {file_handle(file_id)}")
+        current = (revisions or {}).get(file_id)
+        if current is not None and current in file_reference_urls:
+            lines.append(
+                f"User-edited revision of {label(position)} (current version): "
+                f"{file_handle(current)}"
+            )
     if not lines:
         return result
     return "\n".join([result, *lines]) if result else "\n".join(lines)
@@ -811,7 +869,11 @@ class ContextBuilder:
             else:
                 images = []
                 generated_images = []
-            tool_calls = _replayable_tool_calls(message.tool_calls, file_reference_urls)
+            tool_calls = _replayable_tool_calls(
+                message.tool_calls,
+                file_reference_urls,
+                generated_files=message.generated_files,
+            )
 
             message_tokens = _turn_tokens(
                 question=question,

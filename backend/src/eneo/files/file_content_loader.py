@@ -305,6 +305,7 @@ class FileContentLoader:
                 owner_service_id=file.owner_service_id,
                 tenant_id=file.tenant_id,
                 parent_file_id=file.parent_file_id,
+                revises_file_id=file.revises_file_id,
                 original_available=selection.original_available,
             )
         return hydrated

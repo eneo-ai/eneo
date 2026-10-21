@@ -17,10 +17,12 @@
     CompletionModel,
     EmbeddingModel,
     ImageModel,
+    RerankModel,
     TranscriptionModel,
     TenantCompletionModelUpdate,
     TenantEmbeddingModelUpdate,
     TenantImageModelUpdate,
+    TenantRerankModelUpdate,
     TenantTranscriptionModelUpdate
   } from "@eneo/eneo-js";
   import { invalidate } from "$app/navigation";
@@ -52,7 +54,8 @@
     type ModelType
   } from "./AddWizard/models/draft";
 
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
+  type ModelTypeKey =
+    "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
 
   let {
     openController,
@@ -60,7 +63,7 @@
     type
   }: {
     openController: Writable<boolean>;
-    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
     type: ModelTypeKey;
   } = $props();
 
@@ -81,7 +84,9 @@
         ? "embedding"
         : type === "imageModel"
           ? "image"
-          : "transcription"
+          : type === "rerankModel"
+            ? "rerank"
+            : "transcription"
   );
 
   let draft = $state<ModelDraftState>(untrack(() => createEmptyDraft(modelType, "openai")));
@@ -185,6 +190,17 @@
     };
   }
 
+  function buildRerankUpdate(): TenantRerankModelUpdate {
+    return {
+      display_name: draft.displayName.trim(),
+      description: draft.description.trim() || null,
+      hosting: draft.hosting,
+      open_source: openSource,
+      ...(hasDefaultToggle ? { is_default: isDefault } : {}),
+      ...securityClassificationPatch()
+    };
+  }
+
   async function handleSubmit() {
     error = null;
     if (!draft.displayName.trim()) {
@@ -209,6 +225,8 @@
         await eneo.tenantModels.updateEmbedding({ id: model.id }, buildEmbeddingUpdate());
       } else if (type === "imageModel") {
         await eneo.tenantModels.updateImage({ id: model.id }, buildImageUpdate());
+      } else if (type === "rerankModel") {
+        await eneo.tenantModels.updateRerank({ id: model.id }, buildRerankUpdate());
       } else {
         await eneo.tenantModels.updateTranscription({ id: model.id }, buildTranscriptionUpdate());
       }

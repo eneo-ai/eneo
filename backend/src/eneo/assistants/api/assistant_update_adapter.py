@@ -14,7 +14,13 @@ from eneo.skills.presentation.skill_assembler import (
 # made before this mapper runs, as on develop: the request model turns a null
 # completion_model_kwargs into the default settings, which are then stored.
 _STANDALONE_NULL_CLEARS = frozenset(
-    {"description", "metadata_json", "icon_id", "data_retention_days"}
+    {
+        "description",
+        "metadata_json",
+        "icon_id",
+        "data_retention_days",
+        "rerank_model_id",
+    }
 )
 
 
@@ -103,6 +109,8 @@ def _extract_common_update_fields(
         command_fields["metadata_json"] = assistant.metadata_json
     if "icon_id" in payload:
         command_fields["icon_id"] = assistant.icon_id
+    if "rerank_model_id" in payload:
+        command_fields["rerank_model_id"] = assistant.rerank_model_id
     if "data_retention_days" in payload:
         command_fields["data_retention_days"] = assistant.data_retention_days
 

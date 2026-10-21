@@ -635,6 +635,7 @@ class AssistantRepository:
                 data_retention_days=assistant.data_retention_days,
                 metadata_json=assistant.metadata_json,
                 icon_id=assistant.icon_id,
+                rerank_model_id=assistant.rerank_model_id,
             )
             .returning(Assistants.id)
         )

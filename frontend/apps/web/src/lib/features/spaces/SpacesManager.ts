@@ -48,9 +48,14 @@ function SpacesManager(data: SpacesManagerParams) {
   );
 
   // Function definitions --------------------------------------------------------
+  let navigationVersion = 0;
+  let refreshSequence = 0;
+  const refreshVersions = { applications: 0, knowledge: 0 };
+
   /** Will update the current space if a new space is passed in via page data */
   function watchPageData(data: { currentSpace: Space }) {
     if (data.currentSpace.id !== get(currentSpace).id) {
+      navigationVersion += 1;
       currentSpace.set(data.currentSpace);
     }
   }
@@ -69,36 +74,55 @@ function SpacesManager(data: SpacesManagerParams) {
   // Every full-space response replaces the current space, so an older one
   // landing after a newer update would bring back links that update changed.
   // Updates run one at a time (spaceUpdates) and each applied update bumps
-  // this, so a read started before it is dropped instead of installed. A
-  // response is only installed while the space it belongs to is still current.
+  // appliedSpaceUpdates, so a read started before it is dropped instead of
+  // installed. A response is only installed while the space it belongs to is
+  // still current and no navigation happened since the read began.
   let appliedSpaceUpdates = 0;
   let spaceUpdates: Promise<unknown> = Promise.resolve();
 
-  async function refreshCurrentSpace(type?: "applications" | "knowledge") {
-    const startedAfter = appliedSpaceUpdates;
-    let $currentSpace = get(currentSpace);
-    const startedOn = $currentSpace.id;
+  /** Re-reads the current space, or one part of it; false when the request failed. */
+  async function refreshCurrentSpace(type?: "applications" | "knowledge"): Promise<boolean> {
+    const requestedSpace = get(currentSpace);
+    const navigation = navigationVersion;
+    const request = ++refreshSequence;
+    const updates = appliedSpaceUpdates;
+    if (type) refreshVersions[type] = request;
+    else {
+      refreshVersions.applications = request;
+      refreshVersions.knowledge = request;
+    }
+    const isCurrent = () =>
+      navigation === navigationVersion &&
+      requestedSpace.id === get(currentSpace).id &&
+      updates === appliedSpaceUpdates &&
+      (type
+        ? refreshVersions[type] === request
+        : Object.values(refreshVersions).every((version) => version === request));
     try {
       if (type) {
         switch (type) {
           case "applications": {
-            const applications = await eneo.spaces.listApplications($currentSpace);
-            $currentSpace = { ...$currentSpace, applications };
+            const applications = await eneo.spaces.listApplications(requestedSpace);
+            if (!isCurrent()) return false;
+            currentSpace.update((space) => ({ ...space, applications }));
             break;
           }
           case "knowledge": {
-            const knowledge = await eneo.spaces.listKnowledge($currentSpace);
-            $currentSpace = { ...$currentSpace, knowledge };
+            const knowledge = await eneo.spaces.listKnowledge(requestedSpace);
+            if (!isCurrent()) return false;
+            currentSpace.update((space) => ({ ...space, knowledge }));
             break;
           }
         }
       } else {
-        $currentSpace = await eneo.spaces.get($currentSpace);
+        const space = await eneo.spaces.get(requestedSpace);
+        if (!isCurrent()) return false;
+        currentSpace.set(space);
       }
-      if (startedAfter !== appliedSpaceUpdates || get(currentSpace).id !== startedOn) return;
-      currentSpace.set($currentSpace);
+      return true;
     } catch (e) {
       console.error("Error updating current space", e);
+      return false;
     }
   }
 
@@ -110,7 +134,11 @@ function SpacesManager(data: SpacesManagerParams) {
     update: SpaceUpdate | ((current: Space) => SpaceUpdate),
     space?: { id: string } | undefined
   ): Promise<Space | undefined> {
-    const target = { id: (space ?? get(currentSpace)).id, isCurrent: space === undefined };
+    const target = {
+      id: (space ?? get(currentSpace)).id,
+      isCurrent: space === undefined,
+      navigation: navigationVersion
+    };
     const run = () => applySpaceUpdate(update, target);
     const result = spaceUpdates.then(run, run);
     spaceUpdates = result;
@@ -119,7 +147,7 @@ function SpacesManager(data: SpacesManagerParams) {
 
   async function applySpaceUpdate(
     update: SpaceUpdate | ((current: Space) => SpaceUpdate),
-    target: { id: string; isCurrent: boolean }
+    target: { id: string; isCurrent: boolean; navigation: number }
   ): Promise<Space | undefined> {
     const { id } = target;
     try {
@@ -141,9 +169,16 @@ function SpacesManager(data: SpacesManagerParams) {
         }
         return spaces;
       });
-      // Only update current if no other space was given, and only while the
-      // space it belongs to is still the current one.
-      if (target.isCurrent && get(currentSpace).id === id) {
+      // The mutation still updates the list, but only an update of the current
+      // space replaces it, and only while that space is still the current one:
+      // a late response cannot replace the space reached since it began,
+      // including navigation back to this id.
+      if (
+        target.isCurrent &&
+        target.navigation === navigationVersion &&
+        id === get(currentSpace).id
+      ) {
+        // A re-read still in flight began before this and must not put the old space back.
         appliedSpaceUpdates += 1;
         currentSpace.set(updatedSpace);
       }

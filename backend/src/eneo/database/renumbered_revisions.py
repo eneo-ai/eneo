@@ -11,10 +11,13 @@ October develop merge took 202610081000, 202610081100, 202610091000 and
 202610141000 for develop's file capabilities, chart capability, document
 templates and rerank models migrations, so the branch's head merge, Flow upload
 size retirement and the two transcription service check migrations became
-202610081005, 202610081105, 202610091005 and 202610141005. A database stamped
-at one of the old ids by the branch would now be read as develop's migration of
-that id: Alembic would rerun the branch's renamed migrations and skip
-develop's.
+202610081005, 202610081105, 202610091005 and 202610141005. The develop merge
+of October 21 took 202610191000 for develop's What's new marker correction, so
+the branch's transcript speaker names migration became 202610191005; that merge
+also moved the branch's head merge after develop's head, so the repair for that
+stamp applies develop's migrations first. A database stamped at one of the old
+ids by the branch would now be read as develop's migration of that id: Alembic
+would rerun the branch's renamed migrations and skip develop's.
 
 Such a database is recognised by schema the branch had at that stamp, which
 develop's migration of the same id never creates. It is refused with the
@@ -33,6 +36,12 @@ class RenumberedRevision:
     new: str
     table: str
     column: str | None = None
+    # Set when the renumbered migration also moved after develop's migrations:
+    # the old stamp then lacks develop's migrations that the new one implies.
+    repair: str | None = None
+
+    def repair_command(self) -> str:
+        return self.repair or f"alembic stamp --purge {self.new}"
 
 
 RENUMBERED_BRANCH_REVISIONS: tuple[RenumberedRevision, ...] = (
@@ -88,6 +97,17 @@ RENUMBERED_BRANCH_REVISIONS: tuple[RenumberedRevision, ...] = (
         table="transcription_service_connections",
         column="last_check_reason",
     ),
+    RenumberedRevision(
+        old="202610191000",
+        new="202610191005",
+        table="flow_transcript_corrections",
+        column="speaker_names",
+        repair=(
+            "alembic stamp --purge 202610141000 202610142100 && "
+            "alembic upgrade 202610191600 && "
+            "alembic stamp --purge 202610191005"
+        ),
+    ),
 )
 
 
@@ -128,5 +148,5 @@ def check_renumbered_revision_stamp(connection: Connection) -> None:
                 f"branch's old id for the migration now numbered {revision.new}; "
                 f"develop uses {revision.old} for a different migration. Migrating "
                 "it as is would skip develop's migrations. Repair the stamp, then "
-                f"migrate again: alembic stamp --purge {revision.new}"
+                f"migrate again: {revision.repair_command()}"
             )

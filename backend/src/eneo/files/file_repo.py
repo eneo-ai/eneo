@@ -44,6 +44,7 @@ _FILE_METADATA_COLUMNS = (
     Files.owner_service_id,
     Files.tenant_id,
     Files.parent_file_id,
+    Files.revises_file_id,
 )
 
 
@@ -352,6 +353,7 @@ def project_file_info(
         owner_user_id=file.owner_user_id,
         owner_service_id=file.owner_service_id,
         tenant_id=file.tenant_id,
+        revises_file_id=file.revises_file_id,
     )
 
 

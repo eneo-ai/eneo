@@ -3,8 +3,9 @@
 A bearer token or API key sent over plain http can be read and replayed by
 anyone on the network path. RFC 6750 section 5.3 requires TLS for bearer
 tokens, and the MCP security best practices ask clients to require https and
-to accept http only for loopback during development. Here the unattended
-tool decision (server_credential_needs_https) applies the rule.
+to accept http only for loopback during development. Registration, every
+connection the assistant MCP client opens and the unattended tool decision
+(server_credential_needs_https) apply this one rule.
 """
 
 from enum import Enum
@@ -29,6 +30,15 @@ _AUTH_TYPES_WITHOUT_ADMIN_CREDENTIAL = frozenset(
 # a proxy from the environment, so a request to them stays on the machine.
 LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
+# Shown to the admin at registration and when a server saved before this rule
+# is used; it names neither the address nor the credential.
+CREDENTIAL_TRANSPORT_REQUIREMENT = (
+    "Eneo sends an MCP server's credential (a bearer token, an API key, or a "
+    "user name and password in the address) only over https. Change the "
+    "server URL to https://. Plain http is accepted only for localhost, "
+    "127.0.0.1 and [::1]."
+)
+
 
 class CredentialTransportViolation(Enum):
     NOT_HTTPS = "not_https"
@@ -48,7 +58,7 @@ def credential_transport_violation(
         # An address the parser rejects is not proven to be https or loopback.
         return CredentialTransportViolation.NOT_HTTPS
     # A user name or password in the address is a credential whatever the auth
-    # type, because httpx sends it as an Authorization: Basic header.
+    # type: httpx sends it as an Authorization: Basic header.
     carries_userinfo = parts.username is not None or parts.password is not None
     if http_auth_type in _AUTH_TYPES_WITHOUT_ADMIN_CREDENTIAL and not carries_userinfo:
         return None

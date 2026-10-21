@@ -5,10 +5,9 @@ import { useEffect, useState } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { INTEGRATION_CALLBACK_MESSAGE_TYPE } from "@/features/integrations/callback-message";
+import { SHAREPOINT_OAUTH_STATE_KEY } from "@/features/admin/integrations/integrations";
 
 type View = { status: "processing" | "done" | "error"; errorMessage?: string };
-
-const OAUTH_STATE_KEY = "sharepoint_service_account_oauth";
 
 /** Popup OAuth: posts the params to the opener and closes; returns what to render. */
 function runPopupHandoff(): View {
@@ -51,7 +50,7 @@ async function completeServiceAccount(stored: string): Promise<View | null> {
   }
   if (!code || !state || state !== expectedState) return null;
 
-  sessionStorage.removeItem(OAUTH_STATE_KEY);
+  sessionStorage.removeItem(SHAREPOINT_OAUTH_STATE_KEY);
   try {
     await unwrap(
       browserApi.POST("/api/v1/admin/sharepoint/service-account/auth/callback", {
@@ -71,7 +70,7 @@ export function CallbackHandoff() {
 
   useEffect(() => {
     let cancelled = false;
-    const stored = sessionStorage.getItem(OAUTH_STATE_KEY);
+    const stored = sessionStorage.getItem(SHAREPOINT_OAUTH_STATE_KEY);
 
     if (stored) {
       void completeServiceAccount(stored).then((result) => {

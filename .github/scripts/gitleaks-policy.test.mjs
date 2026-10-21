@@ -20,6 +20,15 @@ const examples = [
   ["frontend/apps/web-next/src/lib/api/schema.d.ts", ["inp_", "3f5f2f7f7f...d9a1"]],
   ["frontend/apps/web-next/src/lib/api/schema.d.ts", ["ina_", "6f2c9b3a8f...7b31"]],
   ["backend/tests/integration/test_model_provider_outbound_headers.py", ["sk-test-", "12345678"]],
+  // The content-service tests lived here before they were split; earlier commits are still scanned.
+  ["backend/tests/unittests/integration/test_sharepoint_content_service.py", ["integration_knowledge_id=", "ik.id"]],
+  ["backend/tests/unittests/integration/infrastructure/content_service/test_sharepoint_content_service.py", ["integration_knowledge_id=", "ik.id"]],
+  ["backend/tests/unittests/integration/infrastructure/content_service/test_sharepoint_content_service.py", ["integration_knowledge_id=", "knowledge_id"]],
+  ["backend/tests/unittests/integration/infrastructure/content_service/test_sharepoint_index.py", ["integration_knowledge_id=", "knowledge_id"]],
+  ["backend/tests/unittests/integration/infrastructure/content_service/test_sharepoint_reconciliation.py", ["integration_knowledge_id=", "ik.id"]],
+  ["backend/tests/unittests/integration/test_sharepoint_sync_ledger.py", ["integration_knowledge_id=", "ik.id"]],
+  ["backend/tests/unittests/integration/test_sharepoint_failed_items.py", ["integration_knowledge_id=", "ik.id"]],
+  ["backend/tests/unittests/observability/test_error_text.py", ["v1.eyJhdWQiOiJ4In0.", "c2lnbmF0dXJl"]],
 ].map(([path, parts]) => ({ path, value: parts.join("") }));
 
 function repository(t) {

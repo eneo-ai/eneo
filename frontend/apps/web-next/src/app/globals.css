@@ -423,6 +423,16 @@
 }
 
 /*
+ * Astryx names ScrollableArea's logical axis with the class "inline".
+ * Tailwind interprets that as display:inline, which stops the viewport from
+ * containing overflowing tables/formulas. Restore the component's block
+ * formatting outside the layers so the utility cannot override it.
+ */
+.astryx-scrollable-area[data-axis] {
+  display: block;
+}
+
+/*
  * 10. Forced colours (Windows contrast themes; ACCESSIBILITY.md → manual
  *    protocol, step 6). The mode swaps author colours for the system palette,
  *    so a state drawn only as a tint or a coloured bar disappears: mark what
@@ -519,5 +529,232 @@
   }
   .astryx-tab {
     scroll-snap-align: start;
+  }
+}
+
+/*
+ * 13. The document editor: a generated Markdown document in TipTap, in the
+ *    chat side panel. Answers are styled by Streamdown's own components; the
+ *    editor paints ProseMirror's plain elements, so the document's typography
+ *    lives here. The marks are decorations over the text: a quoted passage,
+ *    what a version changed against the one before it, a selected table cell.
+ *    Code is highlighted with hljs classes, coloured from the categorical
+ *    text tokens so the colours follow the colour mode.
+ */
+@layer components {
+  .document-prose > * + * {
+    margin-block-start: 0.75em;
+  }
+  .document-prose h1,
+  .document-prose h2,
+  .document-prose h3 {
+    font-weight: 700;
+    line-height: 1.25;
+    margin-block-start: 1.25em;
+  }
+  .document-prose h1 {
+    font-size: 1.5em;
+  }
+  .document-prose h2 {
+    font-size: 1.25em;
+  }
+  .document-prose h3 {
+    font-size: 1.1em;
+  }
+  .document-prose ul,
+  .document-prose ol {
+    padding-inline-start: 1.5em;
+  }
+  .document-prose ul {
+    list-style: disc;
+  }
+  .document-prose ol {
+    list-style: decimal;
+  }
+  .document-prose li + li {
+    margin-block-start: 0.25em;
+  }
+  .document-prose li > p + p,
+  .document-prose li > p + ul,
+  .document-prose li > p + ol {
+    margin-block-start: 0.25em;
+  }
+  .document-prose blockquote {
+    border-inline-start: 3px solid var(--color-border-emphasized);
+    padding-inline-start: 1em;
+    color: var(--color-text-secondary);
+  }
+  .document-prose a {
+    color: var(--color-text-accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .document-prose code {
+    font-family: var(--font-mono);
+    font-size: 0.875em;
+    background-color: var(--color-background-muted);
+    border-radius: var(--radius-inner);
+    padding: 0.1em 0.3em;
+  }
+  .document-prose pre {
+    font-family: var(--font-mono);
+    font-size: 0.875em;
+    line-height: 1.6;
+    background-color: var(--color-background-muted);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-container);
+    padding: 1rem;
+    overflow: auto;
+    white-space: pre;
+  }
+  .document-prose pre code {
+    font-size: inherit;
+    background: none;
+    padding: 0;
+  }
+  .document-prose hr {
+    border: 0;
+    border-block-start: 1px solid var(--color-border);
+    margin-block: 1.5em;
+  }
+  .document-prose table {
+    border-collapse: collapse;
+    inline-size: 100%;
+    font-size: 0.9em;
+  }
+  .document-prose th,
+  .document-prose td {
+    border: 1px solid var(--color-border);
+    padding: 0.5em 0.75em;
+    text-align: start;
+    vertical-align: top;
+  }
+  .document-prose th {
+    background-color: var(--color-background-muted);
+    font-weight: 600;
+  }
+  .document-prose td > p,
+  .document-prose th > p {
+    margin: 0;
+  }
+  .document-prose img {
+    max-inline-size: 100%;
+    block-size: auto;
+  }
+  .document-prose .passage-highlight {
+    background-color: var(--color-warning-muted);
+  }
+  /* The muted tokens are too faint for a mark inside running text; the
+     default tones mixed down read in both themes. Added text is also
+     underlined, so the change shows without its colour. */
+  .document-prose .change-added {
+    background-color: color-mix(in oklab, var(--color-success) 28%, transparent);
+    border-radius: 0.15em;
+    text-decoration: underline;
+    text-decoration-color: var(--color-success);
+    text-decoration-thickness: 2px;
+    text-underline-offset: 0.15em;
+  }
+  /* Not part of the text: a selection over it must not seem to take it. */
+  .document-prose .change-removed {
+    user-select: none;
+    background-color: color-mix(in oklab, var(--color-error) 22%, transparent);
+    border-radius: 0.15em;
+    color: var(--color-text-secondary);
+    text-decoration: line-through;
+  }
+  .document-prose .selectedCell {
+    background-color: var(--color-accent-muted);
+  }
+  .document-prose .ProseMirror-selectednode {
+    outline: 2px solid var(--color-accent);
+  }
+  /* The tools' page break: a rule with its name on it. */
+  .document-prose .page-break {
+    position: relative;
+    margin-block: 1.5rem;
+    border-block-start: 1px dashed var(--color-border);
+    text-align: center;
+  }
+  .document-prose .page-break::after {
+    content: attr(aria-label);
+    position: relative;
+    top: -0.75em;
+    padding-inline: 0.5em;
+    background-color: var(--color-background-surface);
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+  }
+  /* A task list: the box on the first line of its text. */
+  .document-prose ul[data-type="taskList"] {
+    padding-inline-start: 0;
+    list-style: none;
+  }
+  .document-prose ul[data-type="taskList"] > li {
+    display: flex;
+    gap: 0.5em;
+    align-items: flex-start;
+  }
+  .document-prose ul[data-type="taskList"] > li > label {
+    display: flex;
+    flex: none;
+    align-items: center;
+    block-size: 1lh;
+  }
+  .document-prose ul[data-type="taskList"] > li > div {
+    flex: 1;
+    margin: 0;
+  }
+  /* An image of the conversation with its caption under it. */
+  .document-prose .eneo-figure {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .document-prose .eneo-figure img {
+    margin: 0;
+  }
+  .document-prose .eneo-figure-caption {
+    color: var(--color-text-secondary);
+    font-size: 0.875em;
+    font-style: italic;
+    text-align: center;
+  }
+  .document-prose .hljs-comment,
+  .document-prose .hljs-quote {
+    color: var(--color-text-secondary);
+    font-style: italic;
+  }
+  .document-prose .hljs-keyword,
+  .document-prose .hljs-selector-tag,
+  .document-prose .hljs-built_in,
+  .document-prose .hljs-doctag,
+  .document-prose .hljs-meta {
+    color: var(--color-text-purple);
+  }
+  .document-prose .hljs-string,
+  .document-prose .hljs-regexp,
+  .document-prose .hljs-addition {
+    color: var(--color-text-green);
+  }
+  .document-prose .hljs-number,
+  .document-prose .hljs-literal,
+  .document-prose .hljs-symbol,
+  .document-prose .hljs-deletion {
+    color: var(--color-text-orange);
+  }
+  .document-prose .hljs-title,
+  .document-prose .hljs-function,
+  .document-prose .hljs-section,
+  .document-prose .hljs-name {
+    color: var(--color-text-blue);
+  }
+  .document-prose .hljs-attr,
+  .document-prose .hljs-attribute,
+  .document-prose .hljs-variable,
+  .document-prose .hljs-template-variable,
+  .document-prose .hljs-type {
+    color: var(--color-text-teal);
   }
 }

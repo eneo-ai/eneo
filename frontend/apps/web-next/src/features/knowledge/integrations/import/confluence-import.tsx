@@ -85,8 +85,8 @@ export function ConfluenceImportDialog({
         })
       );
     },
-    onSuccess: () => {
-      trackJob();
+    onSuccess: (job) => {
+      trackJob(job);
       void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
       setSelected(null);
       setSubmitted(false);

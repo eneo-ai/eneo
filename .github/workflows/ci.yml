@@ -331,7 +331,7 @@ jobs:
         run: |
           node .github/scripts/ensure-project-fields.mjs --self-test
           node .github/scripts/project-intake.mjs --self-test
-          node --test --test-concurrency=1 .github/scripts/label-policy.test.mjs .github/scripts/project-intake.test.mjs
+          node --test --test-concurrency=1 .github/scripts/label-policy.test.mjs .github/scripts/project-intake.test.mjs .github/scripts/evaluate-backend-audit.test.mjs
           node .github/scripts/ci-change-scope.mjs --self-test
           node .github/scripts/check-user-facing.mjs --self-test
           node scripts/collect_user_facing.mjs --self-test
@@ -430,6 +430,7 @@ jobs:
           FORCE_COLOR=1 bun run --filter '@eneo/eslint-plugin' test
           FORCE_COLOR=1 bun run --filter '@eneo/eneo-js' test
           FORCE_COLOR=1 bun run --filter '@eneo/whats-new' test
+          FORCE_COLOR=1 bun run --filter '@eneo/markdown-math' test
 
       # Use the installed runner so browser revisions track the lockfile.
       - name: Install Playwright Chromium

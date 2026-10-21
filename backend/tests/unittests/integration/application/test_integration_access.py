@@ -1,8 +1,9 @@
 """Connection authorization and import rights, using the real space policy."""
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
+import aiohttp
 import pytest
 
 from eneo.integration.application.integration_knowledge_service import (
@@ -13,6 +14,9 @@ from eneo.integration.application.integration_preview_service import (
 )
 from eneo.integration.domain.entities.oauth_token import OauthToken
 from eneo.integration.domain.value_objects import IntegrationType
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    CREDENTIALS_INVALID_MESSAGE,
+)
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -225,6 +229,7 @@ async def test_new_import_cannot_bypass_connection_owner(integration_access):
         sharepoint_subscription_service=AsyncMock(),
         tenant_sharepoint_app_repo=case.app_repo,
         tenant_app_auth_service=AsyncMock(),
+        org_token_provider=AsyncMock(),
     )
     with pytest.raises(NotFoundException):
         await service.create_space_integration_knowledge(
@@ -260,3 +265,59 @@ async def test_owned_confluence_preview_still_works(integration_access):
     )
     assert await service.get_preview_data(case.integration.id) == []
     confluence.get_preview_info.assert_awaited_once_with(token=tokens.one.return_value)
+
+
+def _graph_refusal(status: int) -> aiohttp.ClientResponseError:
+    return aiohttp.ClientResponseError(
+        request_info=MagicMock(), history=(), status=status, message="refused"
+    )
+
+
+async def test_confluence_preview_refusal_keeps_its_original_error(
+    integration_access,
+):
+    case = integration_access
+    case.integration.tenant_integration.integration.integration_type = "confluence"
+    tokens = AsyncMock()
+    tokens.one.return_value = OauthToken(
+        access_token="confluence-token",
+        refresh_token="refresh",
+        token_type=IntegrationType.Confluence,
+        user_integration=case.integration,
+    )
+    confluence = AsyncMock()
+    confluence.get_preview_info.side_effect = _graph_refusal(401)
+    service = IntegrationPreviewService(
+        oauth_token_repo=tokens,
+        user_integration_service=case.service,
+        confluence_preview_service=confluence,
+        sharepoint_preview_service=AsyncMock(),
+    )
+    with pytest.raises(aiohttp.ClientResponseError) as exc_info:
+        await service.get_preview_data(case.integration.id)
+    assert exc_info.value.status == 401
+
+
+async def test_sharepoint_preview_refusal_becomes_a_credential_message(
+    integration_access,
+):
+    case = integration_access
+    tokens = AsyncMock()
+    tokens.one.return_value = OauthToken(
+        access_token="sharepoint-token",
+        refresh_token="refresh",
+        token_type=IntegrationType.Sharepoint,
+        user_integration=case.integration,
+    )
+    sharepoint = AsyncMock()
+    sharepoint.get_preview_info.side_effect = _graph_refusal(401)
+    service = IntegrationPreviewService(
+        oauth_token_repo=tokens,
+        user_integration_service=case.service,
+        confluence_preview_service=AsyncMock(),
+        sharepoint_preview_service=sharepoint,
+    )
+    with pytest.raises(BadRequestException, match=CREDENTIALS_INVALID_MESSAGE) as error:
+        await service.get_preview_data(case.integration.id)
+    # The same code an import or a sync answers with.
+    assert getattr(error.value, "code", None) == "sharepoint_credentials_invalid"

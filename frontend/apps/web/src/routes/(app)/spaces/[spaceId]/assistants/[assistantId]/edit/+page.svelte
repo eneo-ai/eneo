@@ -421,6 +421,7 @@
           <AssistantSettingsMaterialHandling
             fileReferencesEnabled={data.settings.file_references_enabled === true}
             modelSupportsTools={materialModel?.supports_tool_calling === true}
+            rerankModels={data.rerankModels}
           />
         </Settings.Row>
       </Settings.Group>

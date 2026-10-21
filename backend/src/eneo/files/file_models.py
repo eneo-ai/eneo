@@ -152,6 +152,7 @@ class FileInfo(InDB, FileBase):
     owner_user_id: UUID | None = None
     owner_service_id: UUID | None = None
     tenant_id: UUID
+    revises_file_id: Optional[UUID] = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,6 +200,7 @@ class FileMetadataCreate(BaseModel):
     owner_service_id: UUID | None = None
     tenant_id: UUID
     parent_file_id: Optional[UUID] = None
+    revises_file_id: Optional[UUID] = None
 
     @model_validator(mode="after")
     def validate_owner_identity(self) -> "FileMetadataCreate":
@@ -221,6 +223,9 @@ class File(InDB, FileBaseWithContent):
     owner_service_id: UUID | None = None
     tenant_id: UUID
     parent_file_id: Optional[UUID] = None
+    # The earlier version of a conversation document this file was saved
+    # from, when a user edited it in Eneo.
+    revises_file_id: Optional[UUID] = None
     # True when a signed original-download URL can serve this file: the exact
     # original upload is durably stored, or (for images) the generated artifact
     # that is the file's only original. False for rows predating durable
@@ -247,6 +252,9 @@ class FilePublic(InDB):
     # conversation attachment can actually be represented by a signed URL
     # (a TEXT file whose exact original is durably stored).
     has_download_reference: bool = False
+    # The earlier version of a conversation document this file was saved
+    # from; clients chain a document's versions by it.
+    revises_file_id: Optional[UUID] = None
 
 
 class AcceptedFileType(BaseModel):

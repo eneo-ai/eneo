@@ -366,6 +366,31 @@ def settings_singleton_restored(override_settings_for_session):
         )
 
 
+@pytest.fixture
+def sharepoint_webhook_configured():
+    """Webhook address and clientState as a deployment sets them.
+
+    Test settings carry neither; without them the subscription service skips
+    every subscription, which a local ``backend/.env`` would otherwise hide.
+    """
+    from eneo.main.config import get_settings
+
+    original = get_settings()
+    set_settings(
+        original.model_copy(
+            update={
+                "sharepoint_webhook_notification_url": (
+                    "https://eneo.example/api/v1/integrations/sharepoint/webhook/"
+                ),
+                "sharepoint_webhook_lifecycle_notification_url": None,
+                "sharepoint_webhook_client_state": "integration-test-client-state-0123456789",
+            }
+        )
+    )
+    yield
+    set_settings(original)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def override_settings_for_session(test_settings: Settings):
     """

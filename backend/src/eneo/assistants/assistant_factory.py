@@ -194,6 +194,7 @@ class AssistantFactory:
                 assistant_in_db.origin or AssistantOrigin.USER.value
             ),
             managing_flow_id=assistant_in_db.managing_flow_id,
+            rerank_model_id=assistant_in_db.rerank_model_id,
         )
 
     def create_space_assistant_from_db(
@@ -324,4 +325,5 @@ class AssistantFactory:
                 assistant_in_db.origin or AssistantOrigin.USER.value
             ),
             managing_flow_id=assistant_in_db.managing_flow_id,
+            rerank_model_id=assistant_in_db.rerank_model_id,
         )

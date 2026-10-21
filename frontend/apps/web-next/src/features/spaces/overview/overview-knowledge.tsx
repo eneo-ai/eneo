@@ -12,7 +12,14 @@ import { AREA_HUES } from "@/components/composites/icon-tile";
 import { StatusLabel } from "@/components/composites/status-label";
 import { CollectionActions, CreateCollectionButton } from "@/features/knowledge/collections";
 import { IntegrationActions, WrapperActions } from "@/features/knowledge/integrations/actions";
-import type { Collection } from "@/features/knowledge/knowledge";
+import {
+  isSyncActive,
+  summarizeSource,
+  type QueuedIds
+} from "@/features/knowledge/integrations/sources";
+import type { ProgressById } from "@/features/knowledge/integrations/sync-progress";
+import { useSyncProgress } from "@/features/knowledge/integrations/use-sync-progress";
+import type { Collection, IntegrationKnowledge } from "@/features/knowledge/knowledge";
 import { KnowledgeNameCell } from "@/features/knowledge/table-controls-ui";
 import { UploadBlobsDialog } from "@/features/knowledge/upload-dialog";
 import { WebsiteActions } from "@/features/knowledge/websites";
@@ -89,24 +96,30 @@ function UploadMenu() {
   );
 }
 
-function RowActions({ row }: { row: KnowledgeRow }) {
+/** Like the sources table, a source with a sync queued or running offers no second one. */
+type SyncState = { progress: ProgressById; queued: QueuedIds };
+
+function RowActions({ row, sync }: { row: KnowledgeRow; sync: SyncState }) {
   const { source } = row;
+  const syncActive = (items: readonly IntegrationKnowledge[]) =>
+    isSyncActive(summarizeSource(items, sync.progress, sync.queued));
   switch (source.kind) {
     case "collection":
       return <CollectionActions collection={source.collection} />;
     case "website":
       return <WebsiteActions website={source.website} />;
     case "integration":
-      return <IntegrationActions item={source.item} />;
+      return <IntegrationActions item={source.item} syncActive={syncActive([source.item])} />;
     case "wrapper": {
       const permissions = source.items[0]?.permissions ?? [];
       return (
         <WrapperActions
           wrapperId={source.wrapperId}
           wrapperName={source.wrapperName}
-          itemCount={source.items.length}
+          items={source.items}
           canEdit={permissions.includes("edit")}
           canDelete={permissions.includes("delete")}
+          syncActive={syncActive(source.items)}
         />
       );
     }
@@ -116,6 +129,7 @@ function RowActions({ row }: { row: KnowledgeRow }) {
 /** A short overview list; the full knowledge page owns the sortable table. */
 function KnowledgeList({ rows }: { rows: KnowledgeRow[] }) {
   const t = useTranslations();
+  const sync = useSyncProgress();
 
   return (
     <ul className="border-ax-border bg-ax-card rounded-ax-container divide-ax-border divide-y overflow-hidden border">
@@ -156,7 +170,7 @@ function KnowledgeList({ rows }: { rows: KnowledgeRow[] }) {
                 </Link>
               ) : null}
             </span>
-            <RowActions row={row} />
+            <RowActions row={row} sync={sync} />
           </div>
         </li>
       ))}

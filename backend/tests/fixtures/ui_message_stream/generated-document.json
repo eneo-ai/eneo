@@ -194,6 +194,7 @@
           "transcription": null,
           "token_count": null,
           "has_download_reference": false,
+          "revises_file_id": null,
           "tool_call_id": "call-doc"
         }
       }
@@ -411,6 +412,7 @@
               "transcription": null,
               "token_count": null,
               "has_download_reference": false,
+              "revises_file_id": null,
               "tool_call_id": "call-doc"
             }
           }

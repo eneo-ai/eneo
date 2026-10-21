@@ -240,9 +240,7 @@ describe("AdminUsersPage paging", () => {
       document.body.focus();
       document.body.removeAttribute("tabindex");
     });
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
-      timeout: 1500
-    });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
   });
 
   it("shows the last page instead of an empty one when the page runs past the end", async () => {
@@ -305,9 +303,7 @@ describe("AdminUsersPage row actions", () => {
     expect(toast.success).toHaveBeenCalledWith("anna.lind@kommun.se avaktiverades");
     await waitFor(() => expect(screen.queryByText("anna.lind@kommun.se")).toBeNull());
     // The focused row is gone: focus moves to the list's panel, not <body>.
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
-      timeout: 1500
-    });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
   });
 
   it("does not let admins deactivate or delete themselves", async () => {
@@ -366,8 +362,6 @@ describe("AdminUsersPage row actions", () => {
     );
     expect(toast.success).toHaveBeenCalledWith("per.berg@kommun.se raderades");
     await waitFor(() => expect(screen.queryByText("per.berg@kommun.se")).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
-      timeout: 1500
-    });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
   });
 });

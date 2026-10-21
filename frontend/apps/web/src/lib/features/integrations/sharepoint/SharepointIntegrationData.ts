@@ -1,6 +1,7 @@
 import type { IntegrationData } from "../IntegrationData";
 import sharepointImgUrl from "./sharepoint.png";
 import SharepointImportDialog from "./SharepointImportDialog.svelte";
+import { m } from "$lib/paraglide/messages";
 
 export const SharepointIntegrationData: IntegrationData = {
   logo: sharepointImgUrl,
@@ -8,5 +9,5 @@ export const SharepointIntegrationData: IntegrationData = {
   displayName: "SharePoint",
   importHint: "Import a site from SharePoint",
   ImportDialog: SharepointImportDialog,
-  previewLinkLabel: "open_in_sharepoint"
+  previewLinkLabel: m.open_in_sharepoint
 };

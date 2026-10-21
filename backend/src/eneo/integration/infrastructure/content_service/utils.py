@@ -1,394 +1,336 @@
-"""
-Utility functions for processing different file types in integration services.
+"""Text extraction for files downloaded from SharePoint.
+
+Office and PDF bytes go through the same sandboxed extractor as uploads and
+crawls: a disposable child process with memory, CPU, archive, output and
+deadline limits (``eneo.files.bounded_extraction``). Skip reasons and their
+codes are owned by ``eneo.integration.domain.skip_reasons``.
 """
 
-import io
-import re
-import zipfile
+import tempfile
+from dataclasses import dataclass
 from logging import getLogger
+from pathlib import Path
 from typing import Any, Optional
 
-import pandas as pd
-
+from eneo.files.bounded_extraction import extract_in_process
+from eneo.files.extraction_limits import (
+    FileExtractionLimits,
+    get_file_extraction_limits,
+)
+from eneo.files.text import (
+    CorruptFileError,
+    EncryptedFileError,
+    ExtractionError,
+    ExtractionLimitError,
+    PdfPageLimitError,
+    TextSanitizer,
+    UnsupportedFormatError,
+)
+from eneo.integration.domain.skip_reasons import (
+    CORRUPT_FILE_REASON,
+    EMPTY_CONTENT_REASON,
+    NO_TEXT_LAYER_REASON,
+    NO_TEXT_REASONS,
+    PASSWORD_PROTECTED_REASON,
+    error_reason,
+    extraction_limit_reason,
+    file_too_large_reason,
+    unsupported_type_reason,
+)
 from eneo.integration.infrastructure.content_service.types import SharePointItem
 
 logger = getLogger(__name__)
 
-# Sentinel strings the extractors return when they cannot pull real text. These
-# must never be stored/embedded as if they were document content.
-UNEXTRACTABLE_SENTINELS: frozenset[str] = frozenset(
-    {
-        "[No readable text found]",
-        "[Could not extract text from PowerPoint presentation]",
-        "[Could not extract text from Excel spreadsheet]",
-    }
-)
+# The skip reasons (user-facing, matched in tests) are defined with their
+# codes in eneo.integration.domain.skip_reasons and re-exported here.
+__all__ = [
+    "CORRUPT_FILE_REASON",
+    "EMPTY_CONTENT_REASON",
+    "NO_TEXT_LAYER_REASON",
+    "NO_TEXT_REASONS",
+    "PASSWORD_PROTECTED_REASON",
+    "ExtractionResult",
+    "error_reason",
+    "extraction_limit_reason",
+    "file_too_large_reason",
+    "unsupported_file_reason",
+    "unsupported_package_reason",
+    "unsupported_type_reason",
+]
+
+
+@dataclass(frozen=True)
+class ExtractionResult:
+    """Outcome of turning downloaded bytes into text.
+
+    Exactly one of ``text`` (non-empty) and ``skip_reason`` is set. ``failed``
+    marks parser failures, corrupt or encrypted files and truncated downloads:
+    nothing may be concluded about the file, so callers must not delete.
+    """
+
+    text: Optional[str] = None
+    skip_reason: Optional[str] = None
+    failed: bool = False
+    content_type: str = ""
+
+    def __post_init__(self) -> None:
+        if (self.text is None) == (self.skip_reason is None):
+            raise ValueError("ExtractionResult needs exactly one of text/skip_reason")
+        if self.text is not None and not self.text.strip():
+            raise ValueError("ExtractionResult.text must not be empty")
+        if self.failed and self.text is not None:
+            raise ValueError("A failed ExtractionResult cannot carry text")
+
+    @property
+    def is_no_text(self) -> bool:
+        return self.skip_reason in NO_TEXT_REASONS
+
+    @classmethod
+    def ok(cls, text: str, content_type: str = "") -> "ExtractionResult":
+        return cls(text=text, content_type=content_type)
+
+    @classmethod
+    def no_text(cls, reason: str, content_type: str = "") -> "ExtractionResult":
+        if reason not in NO_TEXT_REASONS:
+            raise ValueError(f"Not a no-text reason: {reason}")
+        return cls(skip_reason=reason, content_type=content_type)
+
+    @classmethod
+    def skipped(cls, reason: str, content_type: str = "") -> "ExtractionResult":
+        return cls(skip_reason=reason, content_type=content_type)
+
+    @classmethod
+    def error(cls, detail: str, content_type: str = "") -> "ExtractionResult":
+        return cls(
+            skip_reason=error_reason(detail), failed=True, content_type=content_type
+        )
 
 
 def is_unextractable_content(text: Optional[str]) -> bool:
-    """True when extraction produced no usable text (empty or a sentinel)."""
-    if not text or not text.strip():
-        return True
-    return text.strip() in UNEXTRACTABLE_SENTINELS
+    """True when extraction produced no usable text."""
+    return not text or not text.strip()
 
 
-def binary_to_text(binary_data: bytes) -> str:
-    """
-    Extract readable text from binary data, properly handling Office documents.
-    For Office documents (docx, xlsx, pptx), attempts to identify and extract
-    the text content without the binary parts.
+# ---------------------------------------------------------------------------
+# Format detection
+# ---------------------------------------------------------------------------
 
-    Args:
-        binary_data: The binary data to extract text from
+PDF_KIND = "pdf"
+DOCX_KIND = "docx"
+XLSX_KIND = "xlsx"
+PPTX_KIND = "pptx"
+TEXT_KIND = "text"
+UNSUPPORTED_KIND = "unsupported"
+UNKNOWN_KIND = "unknown"
 
-    Returns:
-        String containing the readable text portions
-    """
-    # Check if this looks like a ZIP file (Office documents are ZIP archives)
-    if binary_data.startswith(b"PK\x03\x04"):
-        try:
-            import io
-            import re
-            import zipfile
+_KIND_BY_EXTENSION: dict[str, str] = {
+    ".pdf": PDF_KIND,
+    ".docx": DOCX_KIND,
+    ".docm": DOCX_KIND,
+    ".xlsx": XLSX_KIND,
+    ".xlsm": XLSX_KIND,
+    # Legacy BIFF workbooks are read by calamine, the same engine uploads use.
+    ".xls": XLSX_KIND,
+    ".pptx": PPTX_KIND,
+    ".pptm": PPTX_KIND,
+    ".txt": TEXT_KIND,
+    ".md": TEXT_KIND,
+    ".markdown": TEXT_KIND,
+    ".csv": TEXT_KIND,
+    ".tsv": TEXT_KIND,
+    ".json": TEXT_KIND,
+    ".xml": TEXT_KIND,
+    ".html": TEXT_KIND,
+    ".htm": TEXT_KIND,
+    ".log": TEXT_KIND,
+    ".rst": TEXT_KIND,
+    ".yaml": TEXT_KIND,
+    ".yml": TEXT_KIND,
+}
 
-            # Office documents are ZIP files with XML content
-            with zipfile.ZipFile(io.BytesIO(binary_data)) as zip_file:
-                # Check which type of Office document this is
-                if "word/document.xml" in zip_file.namelist():
-                    return extract_text_from_docx(binary_data, zip_file)
-                elif any(
-                    name.startswith("ppt/slides/slide") for name in zip_file.namelist()
-                ):
-                    return extract_text_from_pptx(binary_data, zip_file)
+_KIND_BY_CONTENT_TYPE: dict[str, str] = {
+    "application/pdf": PDF_KIND,
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": DOCX_KIND,
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": XLSX_KIND,
+    "application/vnd.ms-excel": XLSX_KIND,
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": PPTX_KIND,
+    "application/json": TEXT_KIND,
+    "application/xml": TEXT_KIND,
+    "application/csv": TEXT_KIND,
+    "application/x-yaml": TEXT_KIND,
+}
 
-                # Generic XML extraction as a fallback for unknown Office formats
-                all_text: list[str] = []
-                for filename in zip_file.namelist():
-                    if filename.endswith(".xml"):
-                        try:
-                            with zip_file.open(filename) as xml_file:
-                                content = xml_file.read()
-                                # Extract text between XML tags
-                                text_content = re.findall(b">([^<]+)</", content)
-                                for text in text_content:
-                                    try:
-                                        decoded = text.decode("utf-8", errors="replace")
-                                        if (
-                                            len(decoded.strip()) > 5
-                                        ):  # Only keep if not too short
-                                            all_text.append(decoded.strip())
-                                    except Exception:
-                                        pass
-                        except Exception:
-                            continue
+_IMAGE_LABEL = "image"
+_VIDEO_LABEL = "video"
+_AUDIO_LABEL = "audio"
+_LEGACY_WORD_LABEL = "legacy Word .doc, save as .docx"
+_LEGACY_POWERPOINT_LABEL = "legacy PowerPoint .ppt, save as .pptx"
+_ONENOTE_LABEL = "OneNote"
+_OUTLOOK_LABEL = "Outlook .msg"
+_RTF_LABEL = "rich text .rtf"
+_OPENDOCUMENT_LABEL = "OpenDocument"
 
-                if all_text:
-                    return "\n".join(all_text)
-
-        except Exception as e:
-            logger.warning(f"Failed to extract text from Office document: {e}")
-            # Fall back to the standard method if ZIP extraction fails
-
-    # Standard method for non-Office documents or if Office parsing failed
-    result: list[str] = []
-    current_text = ""
-
-    # Filter out null bytes (cause PostgreSQL UTF-8 encoding errors)
-    filtered_data = bytes(b for b in binary_data if b != 0)
-
-    try:
-        # Try to decode the filtered data as UTF-8
-        decoded = filtered_data.decode("utf-8", errors="replace")
-
-        # Process decoded text character by character
-        for char in decoded:
-            if char.isprintable() or char.isspace():
-                current_text += char
-            else:
-                if len(current_text) > 20:
-                    result.append(current_text.strip())
-                current_text = ""
-
-        # Add the last text chunk if substantial
-        if len(current_text) > 20:
-            result.append(current_text.strip())
-
-        return "\n\n".join(result) if result else "[No readable text found]"
-
-    except Exception:
-        # Fallback to ASCII-only extraction
-        for byte in filtered_data:
-            if 32 <= byte <= 126:  # ASCII printable range
-                current_text += chr(byte)
-            else:
-                if len(current_text) > 20:
-                    result.append(current_text)
-                current_text = ""
-
-        if current_text and len(current_text) > 20:
-            result.append(current_text)
-
-        return "\n".join(result) if result else "[No readable text found]"
-
-
-def extract_text_from_docx(
-    binary_data: bytes, zip_file: Optional[zipfile.ZipFile] = None
-) -> str:
-    """
-    Extract text from a Word document (DOCX format).
-
-    Args:
-        binary_data: Binary data of the DOCX file
-        zip_file: Optional already opened ZipFile object
-
-    Returns:
-        Extracted text content
-    """
-    # If zip_file wasn't provided, create one
-    if zip_file is None:
-        zip_file = zipfile.ZipFile(io.BytesIO(binary_data))
-        close_zip = True
-    else:
-        close_zip = False
-
-    try:
-        with zip_file.open("word/document.xml") as docx_file:
-            xml_content = docx_file.read()
-
-            # Look for text between <w:t> tags
-            text_matches = re.findall(b"<w:t[^>]*>(.*?)</w:t>", xml_content, re.DOTALL)
-            if text_matches:
-                clean_text: list[str] = []
-                for match in text_matches:
-                    try:
-                        decoded = match.decode("utf-8", errors="replace")
-                        if decoded.strip():
-                            clean_text.append(decoded)
-                    except Exception:
-                        pass
-
-                if clean_text:
-                    return " ".join(clean_text)
-    except Exception as e:
-        logger.warning(f"Error extracting DOCX content: {e}")
-
-    finally:
-        if close_zip:
-            zip_file.close()
-
-    # Empty content
-    return ""
-
-
-def extract_text_from_pptx(
-    binary_data: bytes, zip_file: Optional[zipfile.ZipFile] = None
-) -> str:
-    """
-    Extract text from a PowerPoint presentation (PPTX format).
-
-    Args:
-        binary_data: Binary data of the PPTX file
-        zip_file: Optional already opened ZipFile object
-
-    Returns:
-        Extracted text content
-    """
-    # If zip_file wasn't provided, create one
-    if zip_file is None:
-        zip_file = zipfile.ZipFile(io.BytesIO(binary_data))
-        close_zip = True
-    else:
-        close_zip = False
-
-    try:
-        # Try using python-pptx if available
-        try:
-            from pptx import Presentation
-
-            # Create a temporary file for the presentation
-            with io.BytesIO(binary_data) as temp_pptx:
-                # Load the presentation
-                presentation = Presentation(temp_pptx)
-
-                # Extract text from each slide
-                slide_texts: list[str] = []
-
-                for slide_num, slide in enumerate(presentation.slides, 1):
-                    # Extract text from all shapes on the slide
-                    slide_content: list[str] = []
-
-                    # Process each shape
-                    for shape in slide.shapes:
-                        # Extract text from text frames
-                        if hasattr(shape, "text") and shape.text.strip():  # type: ignore[attr-defined]
-                            # Skip template placeholders
-                            text: str = str(shape.text).strip()  # type: ignore[attr-defined]
-
-                            # Skip common placeholders and formatting text
-                            skip_phrases = [
-                                "Click to edit",
-                                "Double click",
-                                "Click icon",
-                                "Master",
-                                "Title style",
-                                "level",
-                                "office theme",
-                                "Microsoft Office",
-                            ]
-
-                            if any(phrase in text for phrase in skip_phrases):
-                                continue
-
-                            # Add the text with context
-                            slide_content.append(text)
-
-                    # Add the slide content if it's not empty
-                    if slide_content:
-                        # Mark the slide number
-                        slide_text = f"Slide {slide_num}:\n" + "\n".join(slide_content)
-                        slide_texts.append(slide_text)
-
-                # Join all slide texts with clear separation
-                if slide_texts:
-                    return "\n\n".join(slide_texts)
-
-        except ImportError:
-            logger.warning(
-                "python-pptx not available, falling back to basic extraction"
-            )
-        except Exception as e:
-            logger.warning(f"Error extracting PPTX with python-pptx: {e}")
-
-        # If python-pptx extraction failed, try a simpler approach
-        slide_texts: list[str] = []
-        slide_files = sorted(
-            [
-                name
-                for name in zip_file.namelist()
-                if name.startswith("ppt/slides/slide")
-            ]
+# Extensions that never produce usable text. Checked before download so the
+# bytes are not fetched, and again after download for content-type matches.
+_UNSUPPORTED_EXTENSIONS: dict[str, str] = {
+    **{
+        ext: _IMAGE_LABEL
+        for ext in (
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".gif",
+            ".bmp",
+            ".svg",
+            ".ico",
+            ".webp",
+            ".tiff",
+            ".tif",
+            ".heic",
+            ".heif",
+            ".raw",
+            ".cr2",
+            ".nef",
+            ".arw",
+            ".psd",
         )
+    },
+    **{
+        ext: _VIDEO_LABEL
+        for ext in (".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv", ".m4v")
+    },
+    **{
+        ext: _AUDIO_LABEL
+        for ext in (".mp3", ".wav", ".ogg", ".flac", ".aac", ".wma", ".m4a")
+    },
+    **{
+        ext: ext
+        for ext in (
+            # Archives
+            ".zip",
+            ".rar",
+            ".7z",
+            ".tar",
+            ".gz",
+            ".bz2",
+            # Executables / binaries
+            ".exe",
+            ".dll",
+            ".msi",
+            ".bin",
+            ".iso",
+            # Fonts
+            ".ttf",
+            ".otf",
+            ".woff",
+            ".woff2",
+            # Other Office family formats without a parser in the platform
+            ".xlsb",
+            ".vsd",
+            ".vsdx",
+            ".pub",
+            ".mpp",
+            ".pages",
+            ".numbers",
+            ".key",
+        )
+    },
+    ".doc": _LEGACY_WORD_LABEL,
+    ".dot": _LEGACY_WORD_LABEL,
+    ".ppt": _LEGACY_POWERPOINT_LABEL,
+    ".pps": _LEGACY_POWERPOINT_LABEL,
+    ".pot": _LEGACY_POWERPOINT_LABEL,
+    ".one": _ONENOTE_LABEL,
+    ".onetoc2": _ONENOTE_LABEL,
+    ".onepkg": _ONENOTE_LABEL,
+    ".msg": _OUTLOOK_LABEL,
+    ".rtf": _RTF_LABEL,
+    ".odt": f"{_OPENDOCUMENT_LABEL} .odt",
+    ".ods": f"{_OPENDOCUMENT_LABEL} .ods",
+    ".odp": f"{_OPENDOCUMENT_LABEL} .odp",
+}
 
-        for i, slide_file in enumerate(slide_files, 1):
-            try:
-                with zip_file.open(slide_file) as f:
-                    slide_bytes: bytes = f.read()
+_UNSUPPORTED_CONTENT_TYPES: dict[str, str] = {
+    "application/msword": _LEGACY_WORD_LABEL,
+    "application/vnd.ms-powerpoint": _LEGACY_POWERPOINT_LABEL,
+    "application/onenote": _ONENOTE_LABEL,
+    "application/msonenote": _ONENOTE_LABEL,
+    "application/vnd.ms-outlook": _OUTLOOK_LABEL,
+    "application/rtf": _RTF_LABEL,
+    "text/rtf": _RTF_LABEL,
+    "application/vnd.oasis.opendocument.text": f"{_OPENDOCUMENT_LABEL} .odt",
+    "application/vnd.oasis.opendocument.spreadsheet": f"{_OPENDOCUMENT_LABEL} .ods",
+    "application/vnd.oasis.opendocument.presentation": f"{_OPENDOCUMENT_LABEL} .odp",
+}
 
-                    # Extract paragraph text using more precise targeting
-                    # This focuses on actual content and avoids placeholders
-                    paragraphs: list[str] = []
-
-                    # Extract actual slide content from more specific XML paths
-                    # 1. Extract text from title placeholders
-                    title_matches: list[bytes] = re.findall(
-                        b"<p:title[^>]*>.*?<a:t[^>]*>(.*?)</a:t>",
-                        slide_bytes,
-                        re.DOTALL,
-                    )
-                    for match in title_matches:
-                        try:
-                            text = match.decode("utf-8", errors="replace").strip()
-                            if text and not text.startswith("Click"):
-                                paragraphs.append(text)
-                        except Exception:
-                            pass
-
-                    # 2. Extract text from actual content placeholders
-                    body_matches: list[bytes] = re.findall(
-                        b"<p:bodyPr[^>]*>.*?<a:t[^>]*>(.*?)</a:t>",
-                        slide_bytes,
-                        re.DOTALL,
-                    )
-                    for match in body_matches:
-                        try:
-                            text = match.decode("utf-8", errors="replace").strip()
-                            if text and not text.startswith("Click"):
-                                paragraphs.append(text)
-                        except Exception:
-                            pass
-
-                    # If we found content for this slide, add it with the slide number
-                    if paragraphs:
-                        slide_text = f"Slide {i}:\n" + "\n".join(paragraphs)
-                        slide_texts.append(slide_text)
-            except Exception:
-                continue
-
-        # Return organized slide content
-        if slide_texts:
-            return "\n\n".join(slide_texts)
-
-    finally:
-        if close_zip:
-            zip_file.close()
-
-    return "[Could not extract text from PowerPoint presentation]"
+_UNSUPPORTED_CONTENT_TYPE_PREFIXES: dict[str, str] = {
+    "image/": _IMAGE_LABEL,
+    "video/": _VIDEO_LABEL,
+    "audio/": _AUDIO_LABEL,
+}
 
 
-def extract_text_from_xlsx(binary_data: bytes) -> str:
-    try:
-        excel_file = io.BytesIO(binary_data)
-        xls = pd.ExcelFile(excel_file)
-        csv_data: list[str] = []
-        for sheet_name in xls.sheet_names:
-            df: pd.DataFrame = pd.read_excel(xls, sheet_name=sheet_name)  # type: ignore[assignment]  # pandas stubs return broad type
-            csv_text = df.to_csv(index=False, sep="|")  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs incomplete
-            csv_data.append(f"### {sheet_name} ###\n{csv_text}")
-        return "Excel sheet data: " + "\n\n".join(csv_data)
-    except Exception as e:
-        logger.error(f"Error extracting data from Excel: {e}")
-        return "[Could not extract text from Excel spreadsheet]"
+def _extension(filename: str) -> str:
+    return Path(filename.lower()).suffix
 
 
-def extract_text_from_pdf(binary_data: bytes) -> str:
+def _base_mime(content_type: str) -> str:
+    return content_type.split(";")[0].strip().lower()
+
+
+def unsupported_file_reason(filename: str) -> Optional[str]:
+    """Skip reason for a file type that can never yield text, else None."""
+    label = _UNSUPPORTED_EXTENSIONS.get(_extension(filename))
+    return unsupported_type_reason(label) if label else None
+
+
+def unsupported_package_reason(item: SharePointItem) -> Optional[str]:
+    """Skip reason for a package (a OneNote notebook): a folder Graph serves
+    without a folder facet and without a download."""
+    package = item.get("package")
+    if not isinstance(package, dict):
+        return None
+    label = _ONENOTE_LABEL if package.get("type") == "oneNote" else "package"
+    return unsupported_type_reason(label)
+
+
+def _unsupported_content_type_label(mime: str) -> Optional[str]:
+    label = _UNSUPPORTED_CONTENT_TYPES.get(mime)
+    if label:
+        return label
+    for prefix, prefix_label in _UNSUPPORTED_CONTENT_TYPE_PREFIXES.items():
+        if mime.startswith(prefix):
+            return prefix_label
+    return None
+
+
+def detect_content_type(content_type: str, filename: str) -> str:
+    """Pick the parser for a download.
+
+    A known extension wins over the Content-Type header: SharePoint derives
+    the header from the name anyway, and an HTML error page served for a .pdf
+    must fail in the PDF parser rather than be indexed as text. The header
+    decides only for unknown or missing extensions, and generic types such as
+    application/octet-stream never decide.
     """
-    Extract text from a PDF file using pdfplumber.
+    ext = _extension(filename)
+    mime = _base_mime(content_type)
 
-    Args:
-        binary_data: The binary data of the PDF file
-
-    Returns:
-        Extracted text from the PDF
-    """
-    import pdfplumber
-
-    try:
-        page_texts: list[str] = []
-        with pdfplumber.open(io.BytesIO(binary_data)) as pdf:
-            for page in pdf.pages:
-                try:
-                    page_texts.append(page.extract_text() or "")
-                finally:
-                    # Release the parsed page; pdfplumber otherwise keeps every
-                    # page's objects in memory until the document closes.
-                    page.close()
-        extracted_text = " ".join(page_texts)
-
-        # Remove null bytes (cause PostgreSQL UTF-8 encoding errors)
-        sanitized = extracted_text.replace("\x00", "")
-
-        if not sanitized.strip():
-            logger.warning(
-                "No text extracted from PDF - file may be image-only or scanned"
-            )
-
-        return sanitized
-
-    except Exception as e:
-        logger.warning(f"Error extracting text from PDF: {e}")
-        return binary_to_text(binary_data)
+    if ext in _UNSUPPORTED_EXTENSIONS:
+        return UNSUPPORTED_KIND
+    if ext in _KIND_BY_EXTENSION:
+        return _KIND_BY_EXTENSION[ext]
+    if _unsupported_content_type_label(mime):
+        return UNSUPPORTED_KIND
+    if mime in _KIND_BY_CONTENT_TYPE:
+        return _KIND_BY_CONTENT_TYPE[mime]
+    if mime.startswith("text/") or mime.endswith("+xml") or mime.endswith("+json"):
+        return TEXT_KIND
+    return UNKNOWN_KIND
 
 
 def file_extension_to_type(filename: str) -> str:
-    """
-    Determine file type based on file extension.
-
-    Args:
-        filename: Name of the file including extension
-
-    Returns:
-        String representing the type of the file
-    """
+    """Coarse item category used for SharePoint item metadata."""
     name = filename.lower()
     if name.endswith((".docx", ".doc")):
         return "document"
@@ -406,108 +348,138 @@ def file_extension_to_type(filename: str) -> str:
         return "file"
 
 
-def detect_content_type(content_type: str, filename: str) -> str:
-    """
-    Detect the appropriate content type based on content_type header and filename.
+# ---------------------------------------------------------------------------
+# Extraction
+# ---------------------------------------------------------------------------
 
-    Args:
-        content_type: The content type header from HTTP response
-        filename: Name of the file
-
-    Returns:
-        Normalized content type string
-    """
-    content_type = content_type.lower()
-
-    # Direct matches for common types
-    if "application/json" in content_type:
-        return "json"
-    elif "text/" in content_type:
-        return "text"
-    elif "application/xml" in content_type or content_type.endswith("+xml"):
-        return "xml"
-    elif "application/pdf" in content_type:
-        return "pdf"
-    elif "image/" in content_type:
-        return "image"
-
-    # Office document types
-    if "application/vnd.openxmlformats-officedocument.wordprocessingml" in content_type:
-        return "docx"
-    elif "application/vnd.openxmlformats-officedocument.spreadsheetml" in content_type:
-        return "xlsx"
-    elif "application/vnd.openxmlformats-officedocument.presentationml" in content_type:
-        return "pptx"
-    elif "application/msword" in content_type:
-        return "doc"
-    elif "application/vnd.ms-excel" in content_type:
-        return "xls"
-    elif "application/vnd.ms-powerpoint" in content_type:
-        return "ppt"
-
-    # Fallback to file extension
-    return file_extension_to_type(filename)
+_UTF16_BOMS = (b"\xff\xfe", b"\xfe\xff")
 
 
-def process_sharepoint_response(
-    response_content: bytes, content_type: str, filename: str
-) -> tuple[str, str]:
-    """
-    Process a SharePoint API response based on content type.
+def _looks_binary(payload: bytes) -> bool:
+    # A NUL byte in the leading chunk marks binary content; UTF-8/cp1252 text
+    # never contains one. UTF-16 is the exception and is decoded by its BOM.
+    return b"\x00" in payload[:8192] and not payload.startswith(_UTF16_BOMS)
 
-    Args:
-        response_content: Binary content from response
-        content_type: Content type header from the response
-        filename: Name of the file
 
-    Returns:
-        Tuple of (extracted text, detected content type)
-    """
-    detected_type = detect_content_type(content_type, filename)
-
-    if detected_type == "json":
+def _decode_text(payload: bytes, charset: Optional[str]) -> str:
+    if payload.startswith(_UTF16_BOMS):
+        return payload.decode("utf-16", errors="replace")
+    candidates = [charset] if charset else []
+    candidates += ["utf-8", "cp1252"]
+    for encoding in candidates:
         try:
-            import json
+            return payload.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+    return payload.decode("utf-8", errors="replace")
 
-            data: Any = json.loads(response_content.decode("utf-8"))
-            return json.dumps(data, indent=2), "application/json"
-        except Exception as e:
-            logger.warning(f"Failed to parse JSON: {e}")
-            return binary_to_text(response_content), content_type
 
-    elif detected_type in ["text", "xml"]:
-        try:
-            return response_content.decode("utf-8", errors="replace"), content_type
-        except Exception:
-            return binary_to_text(response_content), content_type
+# The sandboxed worker picks its parser by mimetype. The kind decided here
+# (extension first) wins over the Content-Type header, so the worker is given
+# the canonical type for the kind rather than what SharePoint announced.
+_MIME_BY_KIND: dict[str, str] = {
+    PDF_KIND: "application/pdf",
+    DOCX_KIND: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    XLSX_KIND: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    PPTX_KIND: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
 
-    elif detected_type == "pdf":
-        return extract_text_from_pdf(response_content), content_type
 
-    elif detected_type in [
-        "docx",
-        "xlsx",
-        "pptx",
-        "doc",
-        "xls",
-        "ppt",
-        "document",
-        "spreadsheet",
-        "presentation",
-    ]:
-        # Handle Office documents using the existing functions
-        if detected_type in ["docx", "document"]:
-            return extract_text_from_docx(response_content), content_type
-        elif detected_type in ["xlsx", "spreadsheet"]:
-            return extract_text_from_xlsx(response_content), content_type
-        elif detected_type in ["pptx", "presentation"]:
-            return extract_text_from_pptx(response_content), content_type
-        else:
-            return binary_to_text(response_content), content_type
+async def _parse_in_sandbox(
+    kind: str, payload: bytes, filename: str, limits: FileExtractionLimits
+) -> str:
+    with tempfile.TemporaryDirectory(prefix="sharepoint-extract-") as tmp:
+        # Keep the extension so parsers see the same name shape as uploads.
+        path = Path(tmp) / f"download{_extension(filename)}"
+        path.write_bytes(payload)
+        text = await extract_in_process(
+            path, _MIME_BY_KIND[kind], filename, limits=limits
+        )
+    if kind == XLSX_KIND and text.strip() == f"File: {filename}":
+        # The upload extractor always leads with the file name; a workbook
+        # with nothing else in it must still count as empty.
+        return ""
+    return text
 
+
+async def extract_sharepoint_content(
+    payload: bytes,
+    content_type: str,
+    filename: str,
+    *,
+    charset: Optional[str] = None,
+    limits: Optional[FileExtractionLimits] = None,
+) -> ExtractionResult:
+    """Turn a complete download into text, a skip reason or a failure.
+
+    ``charset`` is the one announced by the HTTP response, used for text
+    formats only.
+    """
+    limits = limits or get_file_extraction_limits()
+    mime = _base_mime(content_type)
+
+    reason = unsupported_file_reason(filename)
+    if reason:
+        return ExtractionResult.skipped(reason, content_type)
+
+    kind = detect_content_type(content_type, filename)
+    if kind == UNSUPPORTED_KIND:
+        label = _unsupported_content_type_label(mime) or _extension(filename) or mime
+        return ExtractionResult.skipped(unsupported_type_reason(label), content_type)
+
+    if not payload:
+        return ExtractionResult.no_text(EMPTY_CONTENT_REASON, content_type)
+
+    if kind in (TEXT_KIND, UNKNOWN_KIND):
+        if _looks_binary(payload):
+            label = _extension(filename) or mime or "binary"
+            return ExtractionResult.skipped(
+                unsupported_type_reason(label), content_type
+            )
+        text = _decode_text(payload, charset)
+        if len(text.encode("utf-8")) > limits.max_output_bytes:
+            return ExtractionResult.skipped(
+                extraction_limit_reason(f"{limits.max_output_bytes} bytes of text"),
+                content_type,
+            )
     else:
-        # For any other file type, attempt to extract text
-        return binary_to_text(response_content), content_type
+        try:
+            text = await _parse_in_sandbox(kind, payload, filename, limits)
+        except PdfPageLimitError:
+            return ExtractionResult.skipped(
+                extraction_limit_reason(f"{limits.max_pdf_pages} PDF pages"),
+                content_type,
+            )
+        except ExtractionLimitError as e:
+            # The child exits with one status for memory, CPU, archive and
+            # output caps alike, so the reason names the sandbox's limit.
+            return ExtractionResult.skipped(
+                extraction_limit_reason(e.limit), content_type
+            )
+        except EncryptedFileError:
+            return ExtractionResult.error(PASSWORD_PROTECTED_REASON, content_type)
+        except CorruptFileError:
+            return ExtractionResult.error(CORRUPT_FILE_REASON, content_type)
+        except UnsupportedFormatError:
+            label = _extension(filename) or mime or "binary"
+            return ExtractionResult.skipped(
+                unsupported_type_reason(label), content_type
+            )
+        except ExtractionError as e:
+            return ExtractionResult.error(e.message, content_type)
+        except Exception as e:
+            logger.error(f"Unexpected extraction error for '{filename}': {e}")
+            return ExtractionResult.error(
+                f"{type(e).__name__} while extracting {kind}", content_type
+            )
+
+    text = TextSanitizer.sanitize(text).strip()
+    if not text:
+        # A PDF whose pages carry no characters is the scanned-document case;
+        # other formats with nothing in them are simply empty.
+        reason = NO_TEXT_LAYER_REASON if kind == PDF_KIND else EMPTY_CONTENT_REASON
+        return ExtractionResult.no_text(reason, content_type)
+    return ExtractionResult.ok(text, content_type)
 
 
 def get_metadata_from_sharepoint_item(item: SharePointItem) -> dict[str, Any]:

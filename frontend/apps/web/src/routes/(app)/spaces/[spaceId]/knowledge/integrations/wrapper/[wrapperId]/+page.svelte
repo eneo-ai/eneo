@@ -1,16 +1,9 @@
 <script lang="ts">
-  import { Page } from "$lib/components/layout";
-  import * as Table from "$lib/components/resource-table/index.js";
-  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
-  import { derived } from "svelte/store";
+  import { goto } from "$app/navigation";
   import type { IntegrationKnowledge } from "@eneo/eneo-js";
-  import IntegrationNameCell from "../../IntegrationNameCell.svelte";
-  import IntegrationSyncStatusCell from "../../IntegrationSyncStatusCell.svelte";
-  import IntegrationActions from "../../IntegrationActions.svelte";
-  import SharePointWrapperActions from "../../SharePointWrapperActions.svelte";
-  import SyncHistoryDialog from "../../SyncHistoryDialog.svelte";
-  import { integrationData } from "$lib/features/integrations/IntegrationData";
-  import { m } from "$lib/paraglide/messages";
+  import { groupIntegrationSources } from "$lib/features/integrations/sources";
+  import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import SourcePage from "../../source/SourcePage.svelte";
 
   let { data } = $props();
 
@@ -18,135 +11,33 @@
     state: { currentSpace }
   } = getSpacesManager();
 
-  // Re-derive items from currentSpace to stay reactive after renames/deletes/syncs
-  const wrapperItems = derived(currentSpace, ($currentSpace) =>
+  // Re-read the items from the space so renames, syncs and deletions show without a reload.
+  // The space store can still predate a fresh import; the loaded items stand in until then.
+  let inSpace = $derived(
     $currentSpace.knowledge.integrationKnowledge.filter(
-      (k) => k.wrapper_id === data.wrapperId && k.space_id === $currentSpace.id
+      (item: IntegrationKnowledge) =>
+        item.wrapper_id === data.wrapperId && item.space_id === $currentSpace.id
     )
   );
+  let items = $derived(inSpace.length > 0 ? inSpace : (data.items as IntegrationKnowledge[]));
+  let source = $derived(items.length > 0 ? groupIntegrationSources(items)[0] : null);
 
-  const wrapperName = derived(wrapperItems, ($wrapperItems) => {
-    if ($wrapperItems.length > 0) {
-      const first = $wrapperItems[0];
-      if (typeof first.wrapper_name === "string" && first.wrapper_name.trim().length > 0) {
-        return first.wrapper_name;
-      }
-      return first.name;
-    }
-    return data.wrapperName;
-  });
-
-  // Wrapper permissions
-  const wrapperPermissions = derived(wrapperItems, ($wrapperItems) => {
-    if ($wrapperItems.length === 0) return { canEdit: false, canDelete: false };
-    const permissions = $wrapperItems[0].permissions ?? [];
-    return {
-      canEdit: permissions.includes("edit"),
-      canDelete: permissions.includes("delete")
-    };
-  });
-
-  // Sync history state
-  let selectedIntegrationForSyncHistory: IntegrationKnowledge | null = $state(null);
-  let showSyncHistoryDialog = $state(false);
-
-  function handleSelectIntegration(integration: IntegrationKnowledge) {
-    selectedIntegrationForSyncHistory = integration;
-    showSyncHistoryDialog = true;
-  }
-
+  // The wrapper was deleted from its actions menu: this page has nothing left to show.
+  // Only a disappearance counts, never a store that has not seen the wrapper yet.
+  let seenWrapperId: string | null = null;
   $effect(() => {
-    if (!showSyncHistoryDialog) {
-      selectedIntegrationForSyncHistory = null;
+    if (inSpace.length > 0) {
+      seenWrapperId = data.wrapperId;
+    } else if (seenWrapperId === data.wrapperId && $currentSpace.id === data.currentSpace.id) {
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic space route
+      void goto(`/spaces/${$currentSpace.routeId}/knowledge?tab=integrations`);
     }
   });
-
-  // Table setup
-  const table = Table.createWithStore(wrapperItems);
-
-  const viewModel = table.createViewModel([
-    table.column({
-      header: m.name(),
-      accessor: (item) => item,
-      cell: (item) => {
-        return Table.renderComponent(IntegrationNameCell, {
-          knowledge: item.value
-        });
-      }
-    }),
-
-    table.column({
-      header: m.status(),
-      accessor: (item) => item,
-      cell: (item) => {
-        return Table.renderComponent(IntegrationSyncStatusCell, {
-          knowledge: item.value,
-          onShowSyncHistory: () => handleSelectIntegration(item.value)
-        });
-      }
-    }),
-
-    table.column({
-      accessor: (item) => item,
-      header: m.link(),
-      cell: (item) => {
-        const labelKey = integrationData[item.value.integration_type].previewLinkLabel;
-        const translatedLabel =
-          (m as Record<string, ((...args: unknown[]) => string) | undefined>)[labelKey]?.() ??
-          labelKey;
-        return Table.renderComponent(Table.ButtonCell, {
-          link: item.value.url ?? "",
-          label: translatedLabel,
-          linkIsExternal: true
-        });
-      }
-    }),
-
-    table.columnActions({
-      cell: (item) => {
-        return Table.renderComponent(IntegrationActions, {
-          knowledgeItem: item.value
-        });
-      }
-    })
-  ]);
 </script>
 
-<svelte:head>
-  <title>
-    Eneo.ai – {data.currentSpace.personal ? m.personal() : data.currentSpace.name} – {$wrapperName}
-  </title>
-</svelte:head>
-
-<Page.Root>
-  <Page.Header>
-    <Page.Title
-      parent={{
-        title: m.integrations(),
-        href: `/spaces/${$currentSpace.routeId}/knowledge?tab=integrations`
-      }}
-      title={$wrapperName}
-    ></Page.Title>
-    <div class="flex-grow"></div>
-    <Page.Flex>
-      {#if $wrapperPermissions.canEdit || $wrapperPermissions.canDelete}
-        <SharePointWrapperActions
-          wrapperId={data.wrapperId}
-          wrapperName={$wrapperName}
-          itemCount={$wrapperItems.length}
-          canEdit={$wrapperPermissions.canEdit}
-          canDelete={$wrapperPermissions.canDelete}
-        />
-      {/if}
-    </Page.Flex>
-  </Page.Header>
-  <Page.Main>
-    <Table.Root {viewModel} resourceName="integration">
-      <Table.Group></Table.Group>
-    </Table.Root>
-    <SyncHistoryDialog
-      knowledge={selectedIntegrationForSyncHistory}
-      bind:open={showSyncHistoryDialog}
-    ></SyncHistoryDialog>
-  </Page.Main>
-</Page.Root>
+{#if source}
+  <!-- Another wrapper is another source: start its page fresh. -->
+  {#key data.wrapperId}
+    <SourcePage {source} />
+  {/key}
+{/if}

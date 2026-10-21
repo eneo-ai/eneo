@@ -30,6 +30,10 @@ vi.mock("$lib/paraglide/messages", () => ({
     provider_failure_rejected_request: () => "The provider rejected the request.",
     job_failure_tenant_quota_exceeded: () => "The organization's quota is full.",
     job_failure_user_quota_exceeded: () => "Your quota is full.",
+    integration_error_credentials_invalid: () => "The organization's sign-in was refused.",
+    integration_error_oauth_code_rejected: () => "Start the sign-in again.",
+    integration_error_oauth_client_rejected: () => "Check the app's secret.",
+    integration_error_syncing: () => "Try again after the sync.",
     request_failed: () => "Request failed."
   }
 }));
@@ -115,6 +119,35 @@ describe("getErrorMessage", () => {
       "This name is already in use. Choose a different one."
     );
     expect(sv[`eneo_error_${NAME_COLLISION}`]).toBe("Namnet används redan. Välj ett annat namn.");
+  });
+
+  it("names an integration refusal in the viewer's language, keeping Microsoft's code", () => {
+    const refusal = (code: string, message: string, status = 400) =>
+      new EneoError(
+        message,
+        "RESPONSE",
+        status,
+        9007,
+        { eneo_error_code: 9007, code, message },
+        { endpoint: "" }
+      );
+
+    expect(
+      getErrorMessage(
+        refusal("sharepoint_credentials_invalid", "SharePoint credentials are invalid")
+      )
+    ).toBe("The organization's sign-in was refused.");
+    expect(
+      getErrorMessage(
+        refusal("oauth_code_rejected", "Microsoft did not accept the code (AADSTS70008).")
+      )
+    ).toBe("Start the sign-in again. (AADSTS70008)");
+    expect(getErrorMessage(refusal("oauth_client_rejected", "Refused (AADSTS7000215)."))).toBe(
+      "Check the app's secret. (AADSTS7000215)"
+    );
+    expect(getErrorMessage(refusal("integration_knowledge_syncing", "Syncing", 409))).toBe(
+      "Try again after the sync."
+    );
   });
 
   it("tells the user on whose side an answer failed", () => {

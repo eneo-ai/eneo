@@ -1134,7 +1134,7 @@ async def test_history_migration_preserves_current_correction_revision(
 
         migration = load("202609151040_add_review_change_history.py")
         # A later migration adds a column to the history table: it goes first.
-        speaker_names = load("202610191000_add_transcript_speaker_names.py")
+        speaker_names = load("202610191005_add_transcript_speaker_names.py")
 
         def cycle(connection):
             with Operations.context(MigrationContext.configure(connection)):

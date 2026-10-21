@@ -609,3 +609,49 @@ async def test_sync_log_repo_hides_logs_from_other_tenants(db_container):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_failed_log_insert_does_not_roll_back_completed_sync(db_container):
+    """A real PostgreSQL constraint error must not abort the sync transaction."""
+    from sqlalchemy import update
+
+    from eneo.integration.infrastructure.content_service.sync_state import (
+        SyncStateRecorder,
+    )
+
+    async with db_container() as container:
+        knowledge_id = await create_integration_knowledge_record(container)
+        await container.session().execute(
+            update(IntegrationKnowledgeDB)
+            .where(IntegrationKnowledgeDB.id == knowledge_id)
+            .values(last_sync_status="success", delta_token="committed-sync-token")
+        )
+        recorder = SyncStateRecorder(
+            container.integration_knowledge_repo(), container.sync_log_repo()
+        )
+        # An invalid FK raises in PostgreSQL, rather than a mocked Python call.
+        await recorder.add_log(
+            SyncLog(
+                integration_knowledge_id=uuid4(),
+                sync_type="full",
+                status="success",
+                started_at=datetime.now(timezone.utc),
+            )
+        )
+        # The session must remain writable before its outer transaction commits.
+        valid_log = await container.sync_log_repo().add(
+            SyncLog(
+                integration_knowledge_id=knowledge_id,
+                sync_type="full",
+                status="success",
+                started_at=datetime.now(timezone.utc),
+            )
+        )
+
+    async with db_container() as container:
+        knowledge = await container.integration_knowledge_repo().one(id=knowledge_id)
+        assert knowledge.last_sync_status == "success"
+        assert knowledge.delta_token == "committed-sync-token"
+        assert await container.sync_log_repo().get_by_id(valid_log.id) is not None

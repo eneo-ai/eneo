@@ -1,12 +1,12 @@
 "use client";
 
-import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Link } from "@astryxdesign/core/Link";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
+import { QuietBanner } from "@/components/astryx/banner";
 import { TextInput } from "@/components/astryx/text-input";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
@@ -95,9 +95,7 @@ function AttentionBanner({
   }
 
   return (
-    <Banner
-      // Astryx makes a warning or error banner an alert; see above.
-      role={undefined}
+    <QuietBanner
       status={
         rows.some((row) => row.notices.some((notice) => notice.tone === "error"))
           ? "error"
@@ -134,7 +132,7 @@ function AttentionBanner({
           <Text type="supporting">{t("provider_status_attention_hint")}</Text>
         </div>
       ) : null}
-    </Banner>
+    </QuietBanner>
   );
 }
 

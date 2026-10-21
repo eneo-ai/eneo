@@ -11,6 +11,7 @@
     CompletionModel,
     EmbeddingModel,
     ImageModel,
+    RerankModel,
     TranscriptionModel
   } from "@eneo/eneo-js";
   import { writable, type Writable } from "svelte/store";
@@ -36,8 +37,9 @@
     completionModels = []
   }: {
     openController: Writable<boolean>;
-    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
-    type: "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
+    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
+    type:
+      "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
     completionModels?: CompletionModel[];
   } = $props();
 

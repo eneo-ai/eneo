@@ -12,6 +12,9 @@ from eneo.integration.domain.entities.tenant_sharepoint_app import (
     TenantSharePointApp,
 )
 from eneo.integration.domain.value_objects import IntegrationType
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    OrgTokenProvider,
+)
 from eneo.integration.infrastructure.preview_service import (
     sharepoint_preview_service as preview_module,
 )
@@ -32,8 +35,11 @@ def _make_service(
 ) -> SharePointPreviewService:
     return SharePointPreviewService(
         oauth_token_service=MagicMock(),
-        tenant_app_auth_service=tenant_app_auth_service,
-        service_account_auth_service=service_account_auth_service,
+        org_token_provider=OrgTokenProvider(
+            tenant_app_repo=AsyncMock(),
+            tenant_app_auth_service=tenant_app_auth_service or AsyncMock(),
+            service_account_auth_service=service_account_auth_service or AsyncMock(),
+        ),
     )
 
 

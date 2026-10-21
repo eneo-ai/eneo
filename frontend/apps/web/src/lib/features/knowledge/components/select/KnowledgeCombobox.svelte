@@ -10,6 +10,12 @@
   import { m } from "$lib/paraglide/messages";
   import { formatWebsiteName } from "$lib/core/formatting/formatWebsiteName";
   import IntegrationVendorIcon from "$lib/features/integrations/components/IntegrationVendorIcon.svelte";
+  import {
+    aggregateIntegrationSync,
+    isIntegrationSyncUnhealthy,
+    summarizeIntegrationSync,
+    type IntegrationSyncSummary
+  } from "$lib/features/integrations/syncStatus";
   import { getAvailableKnowledge } from "../../getAvailableKnowledge";
   import { partitionByOrigin, type KnowledgeOrigin } from "./knowledgeOrigin";
   import {
@@ -127,6 +133,12 @@
     }[origin]
   );
 
+  function integrationHealth(option: IntegrationEntry): IntegrationSyncSummary {
+    return option.type === "wrapper"
+      ? aggregateIntegrationSync(option.wrapper.items)
+      : summarizeIntegrationSync(option.knowledge);
+  }
+
   function selectAndClose(action: () => void) {
     action();
     open = false;
@@ -214,9 +226,17 @@
                 {/each}
 
                 {#each section.integrationOptions as option (option.key)}
+                  {@const health = integrationHealth(option)}
+                  {@const unhealthy = isIntegrationSyncUnhealthy(health)}
+                  {@const failed = health.state === "error"}
                   <Command.Item
                     value={option.key}
                     onSelect={() => selectAndClose(() => onAddIntegration(option))}
+                    class={!unhealthy
+                      ? undefined
+                      : failed
+                        ? "border-negative-default bg-negative-default/10 border-l-4"
+                        : "border-warning-default bg-warning-default/10 border-l-4"}
                   >
                     {#if option.type === "wrapper"}
                       <IntegrationVendorIcon size="sm" type={option.wrapper.integration_type} />
@@ -225,6 +245,18 @@
                     {:else}
                       <IntegrationVendorIcon size="sm" type={option.knowledge.integration_type} />
                       <span class="flex-grow truncate">{option.knowledge.name}</span>
+                    {/if}
+                    {#if unhealthy}
+                      <Badge
+                        variant="outline"
+                        class={failed
+                          ? "border-negative-default/30 text-negative-stronger"
+                          : "border-warning-default/30 text-warning-stronger"}
+                      >
+                        {failed
+                          ? m.integration_sync_status_error()
+                          : m.integration_sync_status_empty()}
+                      </Badge>
                     {/if}
                   </Command.Item>
                 {/each}

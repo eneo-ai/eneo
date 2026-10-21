@@ -9,7 +9,7 @@
     "check": "bun x --package typescript@5.9.3 tsc --noEmit -p tsconfig.type-smoke.json",
     "lint": "prettier --check . && eslint .",
     "format": "prettier --write .",
-    "test": "bun test update.test.js src/endpoints/*.test.js",
+    "test": "bun test update.test.js src/endpoints/*.test.js src/integrations/*.test.js",
     "update": "node update.js"
   },
   "devDependencies": {
@@ -22,7 +22,9 @@
     "prettier": "^3.9.4"
   },
   "exports": {
-    ".": "./index.js"
+    ".": "./index.js",
+    "./integrations/sync-details": "./src/integrations/sync-details.js",
+    "./integrations/sync-announcements": "./src/integrations/sync-announcements.js"
   },
   "sideEffects": false
 }

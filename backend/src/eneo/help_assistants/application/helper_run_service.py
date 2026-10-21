@@ -79,6 +79,8 @@ if TYPE_CHECKING:
     from eneo.help_assistants.application.org_space_assistant_role_service import (
         OrgSpaceAssistantRoleService,
     )
+    from eneo.rerank_models.application.rerank_service import RerankService
+    from eneo.spaces.space_repo import SpaceRepository
 
 
 logger = get_logger(__name__)
@@ -117,6 +119,8 @@ class HelperRunService:
         references_service: ReferencesService,
         factory: HelperAssistantsFactory,
         audit_service: "AuditService",
+        space_repo: "SpaceRepository | None" = None,
+        rerank_service: "RerankService | None" = None,
     ) -> None:
         self.user = user
         self.helper_run_repo = helper_run_repo
@@ -128,6 +132,26 @@ class HelperRunService:
         self.references_service = references_service
         self.factory = factory
         self.audit_service = audit_service
+        self.space_repo = space_repo
+        self.rerank_service = rerank_service
+
+    async def _rerank_for(self, helper_assistant: "Assistant", question: str):
+        """The helper assistant's reranker as a spec, or ``None``."""
+        if (
+            self.rerank_service is None
+            or self.space_repo is None
+            or helper_assistant.rerank_model_id is None
+        ):
+            return None
+        # Tenant-scoped read without the membership check: the helper lives in
+        # the org space, which non-admin callers are not members of (see
+        # _load_helper_assistant).
+        space = await self.space_repo.one(helper_assistant.space_id)
+        return await self.rerank_service.spec_for_model(
+            helper_assistant.rerank_model_id,
+            query=question,
+            security_classification=space.security_classification,
+        )
 
     async def run(
         self,
@@ -192,6 +216,7 @@ class HelperRunService:
             integration_knowledge_list=list(
                 helper_assistant.integration_knowledge_list
             ),
+            rerank=await self._rerank_for(helper_assistant, question),
         )
 
         assert helper_assistant.completion_model is not None
@@ -294,6 +319,7 @@ class HelperRunService:
             integration_knowledge_list=list(
                 helper_assistant.integration_knowledge_list
             ),
+            rerank=await self._rerank_for(helper_assistant, question),
         )
 
         assert helper_assistant.completion_model is not None

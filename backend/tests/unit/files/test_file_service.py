@@ -231,3 +231,20 @@ async def test_download_reference_follows_original_readability(
         object_store_configured=object_store_configured,
     )
     assert public.has_download_reference is expected
+
+
+async def test_generated_document_records_the_version_it_was_edited_from():
+    service, _ = _service_with_explicit_transactions()
+    service.user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    service.repo.add_metadata = AsyncMock(side_effect=lambda create: create)
+    captured = SimpleNamespace(
+        prepared=SimpleNamespace(
+            name="Plan.md", file_type=FileType.TEXT, display_media_type="text/markdown"
+        )
+    )
+    base = uuid4()
+
+    created = await service._add_metadata(captured, revises_file_id=base)
+
+    assert created.revises_file_id == base
+    assert created.parent_file_id is None

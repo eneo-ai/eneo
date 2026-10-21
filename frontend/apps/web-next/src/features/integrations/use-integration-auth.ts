@@ -135,9 +135,12 @@ export function useIntegrationAuth(onConnected: (result: ConnectResult) => void)
             }
           })
         );
+        // The address comes from the backend; only an https sign-in page is followed.
+        const url = URL.canParse(auth_url) ? new URL(auth_url) : null;
+        if (url?.protocol !== "https:") throw new Error(t("sharepoint_sign_in_url_invalid"));
         const request = requestsRef.current.get(tenantIntegrationId);
         if (request) request.state = state;
-        popup.location.href = auth_url;
+        popup.location.href = url.href;
       } catch (error) {
         finishRequest(tenantIntegrationId);
         onConnectedRef.current({

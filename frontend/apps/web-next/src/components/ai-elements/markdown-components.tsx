@@ -23,6 +23,30 @@ type MarkdownProps<Tag extends keyof React.JSX.IntrinsicElements> = ComponentPro
   node?: unknown;
 };
 
+function MarkdownSpan({ children, className, node: _node, ...props }: MarkdownProps<"span">) {
+  const content = (
+    <span className={className} {...props}>
+      {children}
+    </span>
+  );
+  if (!className?.split(" ").includes("katex-display")) return content;
+  return <MarkdownFormula>{content}</MarkdownFormula>;
+}
+
+function MarkdownFormula({ children }: { children: React.ReactNode }) {
+  const t = useTranslations();
+  return (
+    <ScrollableArea
+      axis="inline"
+      role="region"
+      label={t("chat_md_formula_label")}
+      className="bg-ax-muted focus-visible:outline-ring rounded-ax-container my-5 max-w-full px-4 py-5 focus-visible:outline-2 focus-visible:outline-offset-2"
+    >
+      {children}
+    </ScrollableArea>
+  );
+}
+
 function MarkdownTable({ children, className, node: _node, ...props }: MarkdownProps<"table">) {
   const t = useTranslations();
   return (
@@ -30,10 +54,13 @@ function MarkdownTable({ children, className, node: _node, ...props }: MarkdownP
       axis="inline"
       role="region"
       label={t("chat_md_table_label")}
-      className="border-ax-border focus-visible:outline-ring rounded-ax-container my-4 border font-sans focus-visible:outline-2 focus-visible:outline-offset-2"
+      className="border-ax-border focus-visible:outline-ring rounded-ax-container my-5 max-w-full border font-sans focus-visible:outline-2 focus-visible:outline-offset-2"
     >
       <table
-        className={cn("w-full border-collapse text-left text-[13.5px] leading-snug", className)}
+        className={cn(
+          "w-full border-collapse text-left text-sm leading-relaxed tabular-nums",
+          className
+        )}
         {...props}
       >
         {children}
@@ -62,10 +89,7 @@ function MarkdownTh({ children, className, node: _node, ...props }: MarkdownProp
   return (
     <th
       scope="col"
-      className={cn(
-        "text-ax-text-secondary px-3.5 py-2 align-bottom text-[12.5px] font-semibold",
-        className
-      )}
+      className={cn("text-ax-text px-4 py-3 align-bottom text-sm font-semibold", className)}
       {...props}
     >
       {children}
@@ -75,7 +99,7 @@ function MarkdownTh({ children, className, node: _node, ...props }: MarkdownProp
 
 function MarkdownTd({ children, className, node: _node, ...props }: MarkdownProps<"td">) {
   return (
-    <td className={cn("px-3.5 py-2 align-top", className)} {...props}>
+    <td className={cn("px-4 py-3 align-top", className)} {...props}>
       {children}
     </td>
   );
@@ -112,10 +136,10 @@ export function answerHeadingLevel(depth: number): 3 | 4 | 5 | 6 {
 }
 
 const HEADING_CLASS: Record<3 | 4 | 5 | 6, string> = {
-  3: "mt-5 mb-2 font-sans text-[15px] leading-snug font-bold",
-  4: "mt-4 mb-1.5 font-sans text-[14px] leading-snug font-semibold",
-  5: "mt-3 mb-1 font-sans text-[13.5px] leading-snug font-semibold",
-  6: "mt-3 mb-1 font-sans text-[13px] leading-snug font-semibold"
+  3: "mt-8 mb-3 font-sans text-xl leading-snug font-semibold tracking-tight",
+  4: "mt-6 mb-2 font-sans text-lg leading-snug font-semibold",
+  5: "mt-5 mb-2 font-sans text-base leading-snug font-semibold",
+  6: "mt-4 mb-2 font-sans text-base leading-snug font-semibold"
 };
 
 function heading(depth: number) {
@@ -133,6 +157,7 @@ function heading(depth: number) {
 }
 
 export const markdownComponents = {
+  span: MarkdownSpan,
   table: MarkdownTable,
   thead: MarkdownThead,
   tr: MarkdownTr,
@@ -214,9 +239,9 @@ export function useStreamdownTranslations(): Partial<StreamdownTranslations> {
       downloadFile: t("chat_md_download_file"),
       downloadImage: t("chat_md_download_image"),
       downloadDiagram: t("chat_md_download_diagram"),
-      downloadDiagramAsSvg: t("chat_md_download_diagram"),
-      downloadDiagramAsPng: t("chat_md_download_diagram"),
-      downloadDiagramAsMmd: t("chat_md_download_diagram"),
+      downloadDiagramAsSvg: t("chat_md_download_diagram_format", { format: "SVG" }),
+      downloadDiagramAsPng: t("chat_md_download_diagram_format", { format: "PNG" }),
+      downloadDiagramAsMmd: t("chat_md_download_diagram_format", { format: "Mermaid" }),
       imageNotAvailable: t("chat_md_image_unavailable"),
       viewFullscreen: t("chat_md_fullscreen"),
       exitFullscreen: t("chat_md_exit_fullscreen"),

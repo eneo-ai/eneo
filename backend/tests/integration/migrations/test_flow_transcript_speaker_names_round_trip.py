@@ -1,4 +1,4 @@
-"""Round trip for 202610191000: speaker names beside transcript corrections.
+"""Round trip for 202610191005: speaker names beside transcript corrections.
 
     pytest -m migration_isolation \
         tests/integration/migrations/test_flow_transcript_speaker_names_round_trip.py
@@ -17,7 +17,7 @@ from alembic.config import Config
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 PRE_REVISION = "202610151000"
-REVISION = "202610191000"
+REVISION = "202610191005"
 TABLES = ("flow_transcript_corrections", "flow_transcript_correction_revisions")
 STEP_ID = "5a1e0000-0000-4000-8000-000000000001"
 
