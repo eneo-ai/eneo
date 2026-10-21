@@ -72,6 +72,7 @@ export type EmbeddingModel = components["schemas"]["EmbeddingModelPublic"];
 export type TranscriptionModel = components["schemas"]["TranscriptionModelPublic"];
 export type ImageModel = components["schemas"]["ImageModelPublic"];
 export type RerankModel = components["schemas"]["RerankModelPublic"];
+export type ForecastModel = components["schemas"]["ForecastModelPublic"];
 export type MCPServerBackingModel = components["schemas"]["MCPServerBackingModelPublic"];
 export type SecurityClassification = components["schemas"]["SecurityClassificationPublic"];
 export type Job = components["schemas"]["JobPublic"];
