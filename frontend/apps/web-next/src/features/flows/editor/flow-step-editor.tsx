@@ -90,7 +90,7 @@ export function FlowStepEditor(props: EditorProps): React.JSX.Element {
     // The knowledge picker and the model list read the flow's space.
     <SpaceProvider routeId={props.flow.space_id}>
       <Suspense fallback={<LoadingState label={t("flow_step_editor_loading")} rows={6} />}>
-        <StepEditorSession key={props.stepId} {...props} />
+        <StepEditorSession key={`${props.flow.id}:${props.stepId}`} {...props} />
       </Suspense>
     </SpaceProvider>
   );

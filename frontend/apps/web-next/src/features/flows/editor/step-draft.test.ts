@@ -69,7 +69,14 @@ describe("assistantChanges", () => {
   );
   const models = [
     { id: "model-1", supported_model_kwargs: { temperature: { supported: true } } },
-    { id: "model-2", supported_model_kwargs: { reasoning_effort: { supported: true } } }
+    { id: "model-2", supported_model_kwargs: { reasoning_effort: { supported: true } } },
+    {
+      id: "model-3",
+      supported_model_kwargs: {
+        temperature: { supported: true },
+        reasoning_effort: { supported: true }
+      }
+    }
   ] as never;
 
   it("sends the prompt alone when only the instruction changed, keeping its description", () => {
@@ -91,6 +98,10 @@ describe("assistantChanges", () => {
     expect(assistantChanges(saved, draft, { models })).toEqual({
       completion_model: { id: "model-2" },
       completion_model_kwargs: { reasoning_effort: "high" }
+    });
+    const keeps = draftAssistant(saved, { completion_model_id: "model-3" });
+    expect(assistantChanges(saved, keeps, { models })).toEqual({
+      completion_model: { id: "model-3" }
     });
   });
 });

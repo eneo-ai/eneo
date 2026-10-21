@@ -51,9 +51,10 @@ export function stepChanges(saved: StepConfig, draft: StepConfig): StepPatch | n
 }
 
 /**
- * The sparse assistant update. Model settings are sent as the whole object
- * the chosen model supports (the core keeps only those), and a model change
- * sends them too, filtered for the new model.
+ * The sparse assistant update. Model settings are one field: when the user
+ * changed them, or chose a model that supports fewer of them, the whole
+ * object the chosen model supports is sent (the core keeps only those);
+ * settings the user did not touch are not sent for a model that keeps them.
  */
 export function assistantChanges(
   saved: AssistantConfig,
@@ -76,9 +77,7 @@ export function assistantChanges(
     const kwargs = model
       ? filterSupportedKwargs(draft.completion_model_kwargs, model)
       : draft.completion_model_kwargs;
-    if (modelChanged || !sameJson(saved.completion_model_kwargs, kwargs)) {
-      changes.completion_model_kwargs = kwargs;
-    }
+    if (!sameJson(saved.completion_model_kwargs, kwargs)) changes.completion_model_kwargs = kwargs;
   }
   for (const field of [
     "groups",
