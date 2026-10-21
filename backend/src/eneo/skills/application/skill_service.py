@@ -695,7 +695,7 @@ class SkillService:
             raise UnauthorizedException(
                 "You do not have permission to edit this Assistant"
             )
-        if not actor.can_read_skills():
+        if not actor.can_use_skills():
             raise UnauthorizedException(
                 "You do not have permission to attach Skills in this Space"
             )
@@ -791,7 +791,7 @@ class SkillService:
         actor = self.actor_manager.get_space_actor_from_space(space)
         if not actor.can_edit_apps():
             raise UnauthorizedException("You do not have permission to edit this App")
-        if not actor.can_read_skills():
+        if not actor.can_use_skills():
             raise UnauthorizedException(
                 "You do not have permission to attach Skills in this Space"
             )

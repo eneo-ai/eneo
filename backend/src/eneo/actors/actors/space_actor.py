@@ -998,6 +998,16 @@ class SpaceActor:
             resource_type=SpaceResourceType.SKILL,
         )
 
+    def can_use_skills(self):
+        """Use Skills: attach Skills to Assistants and Apps in this space.
+
+        PERSONAL_SKILLS opens the personal-space library and the personal chat
+        only, so attaching needs SKILLS as it did before that permission.
+        """
+        return self.can_read_skills() and (
+            self._is_service_api_key() or Permission.SKILLS in self.user.permissions
+        )
+
     def can_create_skills(self):
         return self.can_perform_action(
             action=SpaceAction.CREATE,

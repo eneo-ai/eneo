@@ -29,6 +29,7 @@ import { EditorHeader, useCreatedAnnouncement } from "@/features/spaces/editor-h
 import { useJustCreated } from "@/features/spaces/just-created";
 import { useSpace } from "@/features/spaces/use-space";
 import { SkillBindingsSection } from "@/features/skills/skill-bindings-section";
+import { useCanAttachSkills } from "@/features/skills/use-can-attach-skills";
 import { chatPartnerHref } from "../assistants";
 import { AiSection } from "./ai-section";
 import { GeneralSection } from "./general-section";
@@ -51,7 +52,8 @@ import { assistantQueryOptions, type Assistant, useUpdateAssistant } from "./use
  */
 export function AssistantEditor({ assistantId }: { assistantId: string }) {
   const t = useTranslations();
-  const { space, routeId, can } = useSpace();
+  const { space, routeId } = useSpace();
+  const canAttachSkills = useCanAttachSkills();
   const { data: assistant } = useSuspenseQuery(assistantQueryOptions(browserApi, assistantId));
   const update = useUpdateAssistant(assistantId);
   const created = useJustCreated("assistant", assistantId);
@@ -83,7 +85,7 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
       icon: BookOpen,
       node: <KnowledgeSection assistant={assistant} />
     },
-    ...(can("read", "skill") && (!space.personal || space.default_assistant?.id !== assistant.id)
+    ...(canAttachSkills && (!space.personal || space.default_assistant?.id !== assistant.id)
       ? [
           {
             id: "skills",

@@ -316,3 +316,77 @@ async def test_personal_skills_cannot_resubmit_a_retained_organisation_binding(
         headers=headers,
     )
     assert resubmitted.status_code == 403, resubmitted.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_personal_skills_does_not_attach_own_skills_to_assistants_or_apps(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    admin_user,
+    user_factory,
+    assistant_factory,
+    app_factory,
+):
+    """Attaching Skills to Assistants and Apps is Use Skills. personal_skills
+    covers the personal-space library and the personal chat, not other
+    Assistants and Apps in the same space."""
+    async with db_container() as container:
+        _, token = await _user_with(
+            container.session(),
+            user_factory,
+            admin_user.tenant_id,
+            [
+                Permission.PERSONAL_CHAT,
+                Permission.PERSONAL_SKILLS,
+                Permission.ASSISTANTS,
+                Permission.APPS,
+            ],
+            container,
+        )
+    headers = {"Authorization": f"Bearer {token}"}
+    personal = await client.get("/api/v1/spaces/type/personal/", headers=headers)
+    assert personal.status_code == 200, personal.text
+    space_id = personal.json()["id"]
+    model_id = personal.json()["default_assistant"]["completion_model"]["id"]
+    created = await client.post(
+        f"/api/v1/spaces/{space_id}/skills/",
+        json={"slug": f"svar-{uuid4().hex[:8]}", **_SKILL},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    binding = {
+        "skill_id": created.json()["id"],
+        "skill_revision_id": created.json()["current_revision"]["id"],
+    }
+
+    async with db_container() as container:
+        session = container.session()
+        assistant = await assistant_factory(
+            session, "Min assistent", model_id, space_id=space_id
+        )
+        app = await app_factory(session, "Min app", model_id, space_id=space_id)
+        assistant_id, app_id = assistant.id, app.id
+
+    assistant_update = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={"skill_bindings": [binding]},
+        headers=headers,
+    )
+    assert assistant_update.status_code == 403, assistant_update.text
+
+    app_update = await client.patch(
+        f"/api/v1/apps/{app_id}/",
+        json={"skill_bindings": [binding]},
+        headers=headers,
+    )
+    assert app_update.status_code == 403, app_update.text
+
+    for path in (
+        f"/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/",
+        f"/api/v1/spaces/{space_id}/apps/{app_id}/skills/",
+    ):
+        bindings = await client.get(path, headers=headers)
+        assert bindings.status_code == 200, bindings.text
+        assert bindings.json() in ({"items": []}, [])

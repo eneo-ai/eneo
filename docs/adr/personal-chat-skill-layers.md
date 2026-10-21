@@ -62,6 +62,9 @@ A new tenant permission, labelled "Egna skills" / "Own skills".
   constraints still apply. Shared spaces, organisation spaces and the
   organisation catalogue are unchanged.
 - **Personal layer writes** need `personal_chat` and `personal_skills`.
+- **Attaching Skills** to Assistants and Apps stays Use Skills (`skills`,
+  `SpaceActor.can_use_skills`). Library access through `personal_skills`
+  does not open the Skill picker on the person's other Assistants and Apps.
 - **Personal chat reads** use the existing personal-default read exception
   (`_authorize_read_assistant`, `assistant_service.py:2107`), not
   `can_read_assistant`. Today `list_assistant_bindings` needs `assistants`

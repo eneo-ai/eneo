@@ -1532,6 +1532,25 @@ def test_personal_skills_permits_every_skill_action_in_own_personal_space():
 
 
 @pytest.mark.parametrize(
+    ("permissions", "can_use"),
+    [
+        ({Permission.PERSONAL_CHAT, Permission.PERSONAL_SKILLS}, False),
+        ({Permission.PERSONAL_SKILLS, Permission.SKILLS}, True),
+    ],
+)
+def test_attaching_skills_in_own_personal_space_needs_use_skills(
+    permissions: set[Permission], can_use: bool
+):
+    user = MockUser(id=76, role="owner", permissions=permissions)
+    space = MockSpace(user_id=user.id, personal=True, id="personal-attach-skills")
+
+    actor = _actor(user, space)
+
+    assert actor.can_read_skills()
+    assert actor.can_use_skills() is can_use
+
+
+@pytest.mark.parametrize(
     ("space_kind", "role"),
     [
         ("shared", MockSpaceRole.EDITOR),
