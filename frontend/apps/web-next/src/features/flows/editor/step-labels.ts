@@ -1,0 +1,84 @@
+import type { ReviewChoice } from "./step-configs";
+import type { ChainIssue, OutputModeIssue } from "./step-rules";
+import type { InputSource, InputType, OutputMode, OutputType } from "./step-types";
+
+/**
+ * Reader-facing names for the core's step values. The enum names reuse the
+ * reference editor's wording (apps/web catalog), so a step reads the same in
+ * both apps; what is web-next's own carries the `flow_step_editor_` prefix.
+ */
+
+type T = (key: string, values?: Record<string, string | number>) => string;
+
+export function inputSourceLabel(source: InputSource, t: T): string {
+  return t(`flow_input_source_${source}`);
+}
+
+export function inputTypeLabel(type: InputType, t: T): string {
+  return t(`flow_type_${type}`);
+}
+
+export function outputModeLabel(mode: OutputMode, t: T): string {
+  return t(`flow_output_mode_${mode}`);
+}
+
+export function outputTypeLabel(type: OutputType, t: T): string {
+  return t(`flow_output_type_${type}`);
+}
+
+export function reviewChoiceLabel(choice: ReviewChoice, t: T): string {
+  return t(`flow_step_review_policy_${choice}`);
+}
+
+/** The reference wording for a stored value that is no longer a valid choice here. */
+export function invalidOptionLabel(label: string, t: T): string {
+  return t("flow_step_option_invalid", { label });
+}
+
+export function outputModeIssueText(issue: OutputModeIssue, t: T): string {
+  switch (issue) {
+    case "copy_input_requires_json":
+      return t("flow_output_mode_invalid_copy_input");
+    case "compose_text_requires_text":
+      return t("flow_output_mode_invalid_compose_text");
+    case "render_verbatim_requires_text_document":
+      return t("flow_output_mode_invalid_render_verbatim");
+    case "template_fill_requires_docx":
+      return t("flow_output_mode_invalid_template_fill");
+    case "transcribe_only_requires_audio_text":
+      return t("flow_output_mode_invalid_transcribe_only");
+    case "speaker_mapping_requires_text_json":
+      return t("flow_output_mode_invalid_speaker_mapping");
+    case "text_document_requires_render_verbatim":
+      return t("flow_output_mode_invalid_text_document");
+    case "http_post_must_be_last":
+      return t("flow_step_editor_http_post_must_be_last");
+  }
+}
+
+export function chainIssueText(issue: ChainIssue, t: T): string {
+  switch (issue) {
+    case "flow_input_not_first":
+      return t("flow_step_editor_chain_flow_input_not_first");
+    case "previous_on_first":
+      return t("flow_step_editor_chain_previous_on_first");
+    case "file_type_needs_flow_input":
+      return t("flow_step_editor_chain_file_type_needs_flow_input");
+    case "json_from_all_previous":
+      return t("flow_step_editor_chain_json_from_all_previous");
+    case "outside_source_with_underlag":
+      return t("flow_step_editor_chain_outside_source_with_underlag");
+    case "incompatible_previous":
+      return t("flow_step_editor_chain_incompatible_previous");
+    case "image_unsupported":
+      return t("flow_step_editor_chain_image_unsupported");
+  }
+}
+
+/** "Steg 2 · Sammanfatta", or "Steg 2" for an unnamed step. */
+export function stepLabel(order: number, name: string | null | undefined, t: T): string {
+  const trimmed = name?.trim();
+  return trimmed
+    ? t("flow_step_editor_step_named", { order, name: trimmed })
+    : t("flow_step_editor_step_number", { order });
+}
