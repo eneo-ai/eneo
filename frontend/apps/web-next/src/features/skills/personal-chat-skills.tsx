@@ -299,7 +299,13 @@ export function usePersonalChatSkills({
         `${summary.display_name} ${summary.description}`.toLocaleLowerCase().includes(term)
       )
       .map((summary) =>
-        row(summary.skill_id, summary.display_name, summary.description, summary.skill_revision_id)
+        // Re-added after Av, it joins at the newest version, not the old pin.
+        row(
+          summary.skill_id,
+          summary.display_name,
+          summary.description,
+          summary.attachable_revision_id ?? summary.skill_revision_id
+        )
       )
   ];
 

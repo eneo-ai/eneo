@@ -550,6 +550,63 @@ describe("ChatSkills", () => {
     );
   });
 
+  it("offers the next page when a page holds no skill that can join the chat", async () => {
+    configuration = { ...configuration, bindings: [] };
+    skills = [
+      ...Array.from({ length: 25 }, (_, index) => ({
+        ...librarySkill(`old-${index}`, `Gammal ${index + 1}`, "Avstängd"),
+        is_active: false
+      })),
+      library[1]!
+    ];
+    renderSkills();
+    const popover = await openSkills("Skills i din personliga chatt: 1");
+
+    expect(within(popover).queryByText(/Du har inga egna skills än/)).toBeNull();
+    fireEvent.click(within(popover).getByRole("button", { name: "Ladda mer" }));
+    expect(
+      await within(popover).findByRole("radiogroup", { name: "Läge för Mötesanteckningar" })
+    ).toBeTruthy();
+  });
+
+  it("re-adds a skill no loaded page shows at its newest version, and keeps its version on a mode change", async () => {
+    // In the chat at version 1; version 2 is the newest. Its library page isn't loaded.
+    configuration = {
+      ...configuration,
+      bindings: [{ ...answers, skill_revision_id: "answers-r1", revision_number: 1 }]
+    };
+    skills = [];
+    renderSkills();
+    const popover = await openSkills();
+    const sent = () =>
+      api.POST.mock.calls.map(([, init]) => (init as Request).body?.skill_bindings);
+    const choose = (label: string) =>
+      fireEvent.click(
+        within(
+          within(popover).getByRole("radiogroup", { name: "Läge för Mina svarspreferenser" })
+        ).getByRole("radio", { name: label })
+      );
+
+    choose("Vid behov");
+    await waitFor(() =>
+      expect(sent()).toEqual([
+        [{ skill_id: "answers", skill_revision_id: "answers-r1", activation_mode: "on_demand" }]
+      ])
+    );
+
+    api.POST.mockImplementationOnce(holdSave());
+    choose("Av");
+    choose("Alltid");
+    await waitFor(() => expect(releaseSave).not.toBeNull());
+    releaseSave!();
+    await waitFor(() =>
+      expect(sent().slice(1)).toEqual([
+        [],
+        [{ skill_id: "answers", skill_revision_id: "answers-r2", activation_mode: "always" }]
+      ])
+    );
+  });
+
   it("builds each save from what is saved when its turn comes, not from what was last shown", async () => {
     renderSkills();
     const popover = await openSkills();

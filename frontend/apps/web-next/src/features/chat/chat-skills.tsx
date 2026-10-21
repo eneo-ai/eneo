@@ -225,7 +225,8 @@ function OwnSkills({
           onRetry={() => void library.refetch()}
         />
       )}
-      {settled && rows.length === 0 && (
+      {/* With more pages to come, nothing found yet is not "none". */}
+      {settled && rows.length === 0 && !library.hasNextPage && (
         <p className="text-ax-text-secondary py-2 text-sm">
           {t(search.query ? "personal_chat_skills_search_empty" : "personal_chat_skills_empty")}
         </p>
