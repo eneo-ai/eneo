@@ -44,11 +44,28 @@ export const flowKeys = {
   artifacts: (flowId: string) => ["flows", flowId, "artifacts"] as const,
   authoringAssistant: (spaceId: string) => ["flows", "authoring-assistant", spaceId] as const,
   flow: (flowId: string) => ["flows", flowId] as const,
+  contract: (flowId: string, version: number | null | undefined) =>
+    ["flows", flowId, "contract", version] as const,
   runs: (flowId: string) => ["flows", flowId, "runs"] as const,
   run: (flowId: string, runId: string) => ["flows", flowId, "runs", runId] as const,
+  transcript: (flowId: string, runId: string, stepId: string) =>
+    ["flows", flowId, "runs", runId, "transcript", stepId] as const,
   revisions: (flowId: string) => ["flows", flowId, "revisions"] as const,
   revision: (flowId: string, revision: number) => ["flows", flowId, "revisions", revision] as const
 };
+
+export function flowTranscriptQueryOptions(flowId: string, runId: string, stepId: string) {
+  return queryOptions({
+    queryKey: flowKeys.transcript(flowId, runId, stepId),
+    queryFn: ({ signal }) =>
+      unwrap(
+        flowsApi.GET("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript/", {
+          params: { path: { id: flowId, run_id: runId, step_id: stepId } },
+          signal
+        })
+      )
+  });
+}
 
 export function flowsListQueryOptions(spaceId: string) {
   return queryOptions({
@@ -79,6 +96,37 @@ export function flowQueryOptions(flowId: string) {
     queryFn: ({ signal }) =>
       unwrap(flowsApi.GET("/api/v1/flows/{id}/", { params: { path: { id: flowId } }, signal }))
   });
+}
+
+export function flowRunContractQueryOptions(flowId: string, version: number | null | undefined) {
+  return queryOptions({
+    queryKey: flowKeys.contract(flowId, version),
+    queryFn: ({ signal }) =>
+      unwrap(
+        flowsApi.GET("/api/v1/flows/{id}/run-contract/", {
+          params: { path: { id: flowId } },
+          signal
+        })
+      )
+  });
+}
+
+export function publishFlow(flow: FlowPublic): Promise<FlowPublic> {
+  return unwrap(
+    flowsApi.POST("/api/v1/flows/{id}/publish/", {
+      params: { path: { id: flow.id } },
+      body: { expected_revision: flow.revision ?? 1 }
+    })
+  );
+}
+
+export function unpublishFlow(flow: FlowPublic): Promise<FlowPublic> {
+  return unwrap(
+    flowsApi.POST("/api/v1/flows/{id}/unpublish/", {
+      params: { path: { id: flow.id } },
+      body: { expected_revision: flow.revision ?? 1 }
+    })
+  );
 }
 
 /** Files the flow's runs produced, newest first (a result is found here after its run). */
@@ -168,10 +216,15 @@ export function flowRevisionQueryOptions(flowId: string, revision: number) {
 }
 
 /** Makes the revision the draft again; the restore is a new revision. */
-export function restoreFlowRevision(flowId: string, revision: number): Promise<FlowPublic> {
+export function restoreFlowRevision(
+  flowId: string,
+  revision: number,
+  expectedRevision: number
+): Promise<FlowPublic> {
   return unwrap(
     flowsApi.POST("/api/v1/flows/{id}/revisions/{revision}/restore/", {
-      params: { path: { id: flowId, revision } }
+      params: { path: { id: flowId, revision } },
+      body: { expected_revision: expectedRevision }
     })
   );
 }
@@ -192,6 +245,7 @@ export function cancelFlowRun(flowId: string, runId: string): Promise<FlowRunPub
 
 /** What the panel's editor sends: only the fields given change; the note goes to the history. */
 export type FlowUpdate = {
+  expected_revision: number;
   name?: string;
   description?: string;
   definition?: FlowDefinition;

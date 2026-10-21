@@ -102,3 +102,49 @@ def test_a_list_of_values_renders_as_bullet_lines():
     )
     assert render_template("{{steps.klassa.json.nested}}", context).startswith("[")
     assert render_template("{{steps.klassa.json.empty}}", context) == "[]"
+
+
+def test_function_arguments_preserve_json_types_and_interpolated_text():
+    from eneo.flows.definition import FunctionStep
+    from eneo.flows.step_runners import render_arguments
+    from eneo.flows.templating import StepOutput, TemplateContext
+
+    step = FunctionStep(key="call", name="Call", purpose="compute", tool="calculate")
+    context = TemplateContext(
+        form={"count": 4},
+        steps={
+            "extract": StepOutput(
+                value={
+                    "n": 3,
+                    "active": True,
+                    "items": [1, 2],
+                    "config": {"a": 1},
+                    "empty": None,
+                }
+            )
+        },
+    )
+    result = render_arguments(
+        step,
+        {
+            "n": "{{steps.extract.json.n}}",
+            "active": "{{steps.extract.json.active}}",
+            "items": "{{steps.extract.json.items}}",
+            "config": "{{steps.extract.json.config}}",
+            "empty": "{{steps.extract.json.empty}}",
+            "count": "{{form.count}}",
+            "label": "Count: {{form.count}}",
+            "nested": ["{{steps.extract.json.n}}"],
+        },
+        context,
+    )
+    assert result == {
+        "n": 3,
+        "active": True,
+        "items": [1, 2],
+        "config": {"a": 1},
+        "empty": None,
+        "count": 4,
+        "label": "Count: 4",
+        "nested": [3],
+    }

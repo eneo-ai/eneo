@@ -103,6 +103,7 @@ class ErrorCodes(int, Enum):
     FLOW_DEFINITION_PROBLEMS = 9072
     # A flow change asked for while the caller is in view mode.
     FLOW_NOT_IN_EDIT_MODE = 9073
+    FLOW_REVISION_CONFLICT = 9074
 
 
 class NotFoundException(Exception):
@@ -441,6 +442,15 @@ class FlowNotEditingException(Exception):
         )
 
 
+class FlowRevisionConflictException(Exception):
+    code = "flow_revision_conflict"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The flow changed since it was read. Reload it before saving or publishing."
+        )
+
+
 class SkillRevisionConflictException(Exception):
     pass
 
@@ -610,6 +620,7 @@ EXCEPTION_MAP = {
         ErrorCodes.FLOW_DEFINITION_PROBLEMS,
     ),
     FlowNotEditingException: (409, None, ErrorCodes.FLOW_NOT_IN_EDIT_MODE),
+    FlowRevisionConflictException: (409, None, ErrorCodes.FLOW_REVISION_CONFLICT),
     ProvisioningNotAllowed: (403, None, ErrorCodes.PROVISIONING_NOT_ENABLED),
     UserInactiveException: (403, None, ErrorCodes.USER_INACTIVE),
     NoModelSelectedException: (400, None, ErrorCodes.NO_MODEL_SELECTED),

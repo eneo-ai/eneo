@@ -2,7 +2,7 @@
 
 import base64
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID
 
 import pytest
 
@@ -10,7 +10,7 @@ from eneo.assistants.assistant_service import AssistantService
 from eneo.database.tables.capabilities_table import SpaceCapabilities
 from eneo.flows.definition import ComposeStep, FlowDefinition, FunctionStep
 from eneo.flows.flow_models import FlowRunStatus
-from eneo.flows.step_runners import STEP_FUNCTION_FAILED, STEP_FUNCTION_UNAVAILABLE
+from eneo.flows.step_runners import STEP_FUNCTION_FAILED
 from eneo.main.exceptions import BadRequestException
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
     MCPProxySessionFactory,
@@ -80,7 +80,10 @@ def providers(monkeypatch):
         if tool is None:
             return None
         return SimpleNamespace(
-            id=uuid4(), name=f"{purpose} provider", purpose=purpose, tools=[tool]
+            id=UUID(int=1 if purpose == "image_generation" else 2),
+            name=f"{purpose} provider",
+            purpose=purpose,
+            tools=[tool],
         )
 
     def _create(self, servers, identity_headers=None, **_kwargs):
@@ -207,14 +210,10 @@ async def test_function_steps_need_the_function_enabled_and_a_known_tool(
                 )
             ],
         )
-        flow = await publish_flow(container, enabled, definition)
-        run_service = container.flow_run_service()
-        run = await run_service.create_run(flow.id, values={"topic": "x"}, files={})
-        await run_service.execute_run(run.id)
-        finished = await run_service.get_run(run.id, flow_id=flow.id)
-        assert finished.status == FlowRunStatus.FAILED
-        assert finished.error.code == STEP_FUNCTION_UNAVAILABLE
-        assert "it offers: search" in finished.error.message
+        with pytest.raises(
+            BadRequestException, match="tool the provider no longer offers"
+        ):
+            await publish_flow(container, enabled, definition)
 
 
 async def test_arguments_the_tool_rejects_fail_before_the_call(

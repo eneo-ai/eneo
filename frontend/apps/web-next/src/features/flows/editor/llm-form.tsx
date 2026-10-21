@@ -1,6 +1,7 @@
 "use client";
 
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
+import { Selector } from "@astryxdesign/core/Selector";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useTranslations } from "next-intl";
 import { KnowledgePicker } from "@/features/knowledge/select/knowledge-picker";
@@ -85,59 +86,129 @@ export function LlmForm({
         onChange={(files_from) => draft.update({ files_from })}
         problem={problems.files_from}
       />
-      <div className="flex flex-col gap-1.5">
-        <span className="text-sm font-medium">{t("knowledge")}</span>
-        <KnowledgePicker
-          origin={space.personal ? "personal" : "organization"}
-          selections={{ collections, websites, integrationKnowledge: [] }}
-          onChange={(next) =>
+      <Selector
+        label={t("flow_processing_label")}
+        description={t("flow_processing_hint")}
+        value={step.processing?.mode ?? "single"}
+        options={[
+          { value: "single", label: t("flow_processing_single") },
+          { value: "per_source", label: t("flow_processing_per_source") },
+          { value: "sections", label: t("flow_processing_sections") },
+          { value: "summarize", label: t("flow_processing_summarize") }
+        ]}
+        status={problemStatus(problems.processing)}
+        onChange={(mode) => {
+          if (mode === "single") draft.update({ processing: null });
+          else if (mode === "per_source" || mode === "sections" || mode === "summarize") {
             draft.update({
-              knowledge: {
-                collection_ids: next.collections.map((item) => item.id),
-                website_ids: next.websites.map((item) => item.id)
-              }
-            })
+              processing: {
+                ...step.processing,
+                mode,
+                section_tokens: step.processing?.section_tokens ?? 4000
+              },
+              output: { type: "text" },
+              knowledge: {}
+            });
           }
-          resourceKinds={{ integrationKnowledge: false }}
+        }}
+      />
+      {step.processing && step.processing.mode !== "per_source" && (
+        <Selector
+          label={t("flow_processing_size")}
+          value={String(step.processing.section_tokens ?? 4000)}
+          options={[
+            ...new Set([
+              1000,
+              2000,
+              4000,
+              8000,
+              16000,
+              32000,
+              step.processing.section_tokens ?? 4000
+            ])
+          ]
+            .sort((a, b) => a - b)
+            .map((value) => ({
+              value: String(value),
+              label: t("flow_processing_tokens", { count: value })
+            }))}
+          onChange={(value) => {
+            if (step.processing && value)
+              draft.update({ processing: { ...step.processing, section_tokens: Number(value) } });
+          }}
         />
-      </div>
-      <RadioList
-        label={t("output")}
-        value={step.output?.type ?? "text"}
-        onChange={(type) =>
-          draft.update({
-            output:
-              type === "json"
-                ? {
-                    type: "json",
-                    schema:
-                      step.output?.type === "json"
-                        ? step.output.schema
-                        : { type: "object", properties: {} }
+      )}
+      {step.processing?.mode === "summarize" && (
+        <TextArea
+          label={t("flow_processing_summary_prompt")}
+          status={problemStatus(problems.processing)}
+          description={t("flow_processing_summary_hint")}
+          value={step.processing.summary_prompt ?? ""}
+          rows={4}
+          isRequired
+          onChange={(summary_prompt) => {
+            if (step.processing)
+              draft.update({ processing: { ...step.processing, summary_prompt } });
+          }}
+        />
+      )}
+      {!step.processing && (
+        <>
+          <div className="flex flex-col gap-1.5">
+            <span className="text-sm font-medium">{t("knowledge")}</span>
+            <KnowledgePicker
+              origin={space.personal ? "personal" : "organization"}
+              selections={{ collections, websites, integrationKnowledge: [] }}
+              onChange={(next) =>
+                draft.update({
+                  knowledge: {
+                    collection_ids: next.collections.map((item) => item.id),
+                    website_ids: next.websites.map((item) => item.id)
                   }
-                : { type: "text" }
-          })
-        }
-      >
-        <RadioListItem
-          value="text"
-          label={t("flow_produces_text")}
-          description={t("flow_produces_text_detail")}
-        />
-        <RadioListItem
-          value="json"
-          label={t("flow_produces_json")}
-          description={t("flow_editor_output_json_detail")}
-        />
-      </RadioList>
-      {step.output?.type === "json" && (
-        <JsonTextField
-          label={t("flow_editor_schema")}
-          description={t("flow_editor_schema_hint")}
-          json={draft.draft.json.output}
-          onChange={(text) => draft.setJson("output", text)}
-          problem={problems.output}
-        />
+                })
+              }
+              resourceKinds={{ integrationKnowledge: false }}
+            />
+          </div>
+          <RadioList
+            label={t("output")}
+            value={step.output?.type ?? "text"}
+            onChange={(type) =>
+              draft.update({
+                output:
+                  type === "json"
+                    ? {
+                        type: "json",
+                        schema:
+                          step.output?.type === "json"
+                            ? step.output.schema
+                            : { type: "object", properties: {} }
+                      }
+                    : { type: "text" }
+              })
+            }
+          >
+            <RadioListItem
+              value="text"
+              label={t("flow_produces_text")}
+              description={t("flow_produces_text_detail")}
+            />
+            <RadioListItem
+              value="json"
+              label={t("flow_produces_json")}
+              description={t("flow_editor_output_json_detail")}
+            />
+          </RadioList>
+          {step.output?.type === "json" && (
+            <JsonTextField
+              label={t("flow_editor_schema")}
+              description={t("flow_editor_schema_hint")}
+              json={draft.draft.json.output}
+              onChange={(text) => draft.setJson("output", text)}
+              problem={problems.output}
+            />
+          )}
+        </>
       )}
     </>
   );

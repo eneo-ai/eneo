@@ -85,6 +85,7 @@ class FlowVersions(BasePublic):
     version: Mapped[int] = mapped_column()
     # Immutable snapshot a run executes; the draft is never read by a run.
     definition: Mapped[dict[str, object]] = mapped_column(JSONB)
+    runtime_bindings: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     # The flow_revisions.revision this version froze; NULL for versions
     # published before revisions were kept.
     revision: Mapped[Optional[int]] = mapped_column()
@@ -172,6 +173,7 @@ class FlowFiles(BasePublic):
 class FlowRuns(BasePublic):
     # The published version the run executes; NULL for a test run of the draft.
     flow_version: Mapped[Optional[int]] = mapped_column()
+    runtime_bindings: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     # The definition the run executes, frozen when it was started.
     definition: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
     # A test run of the draft: started by an editor without publishing.
@@ -220,8 +222,25 @@ class FlowRuns(BasePublic):
             "heartbeat_at",
             postgresql_where=sa_text("status = 'running'"),
         ),
-        UniqueConstraint(
-            "flow_id", "idempotency_key", name="uq_flow_runs_flow_idempotency_key"
+        Index(
+            "uq_flow_runs_user_idempotency",
+            "flow_id",
+            "principal_user_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=sa_text(
+                "principal_user_id IS NOT NULL AND idempotency_key IS NOT NULL"
+            ),
+        ),
+        Index(
+            "uq_flow_runs_service_idempotency",
+            "flow_id",
+            "principal_service_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=sa_text(
+                "principal_service_id IS NOT NULL AND idempotency_key IS NOT NULL"
+            ),
         ),
     )
 

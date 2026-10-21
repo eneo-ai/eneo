@@ -47,7 +47,7 @@ class Reference:
 
     @property
     def wants_json(self) -> bool:
-        return self.source == "steps" and bool(self.json_path)
+        return self.source == "steps" and self.raw.split(".")[2:3] == ["json"]
 
 
 class TemplateError(ValueError):
@@ -66,7 +66,7 @@ def parse_reference(raw: str) -> Reference:
         return Reference(raw=raw, source="files", key=parts[1], wants_file=True)
     if len(parts) == 3 and parts[0] == "steps" and parts[2] == "file":
         return Reference(raw=raw, source="steps", key=parts[1], wants_file=True)
-    if len(parts) >= 4 and parts[0] == "steps" and parts[2] == "json":
+    if len(parts) >= 3 and parts[0] == "steps" and parts[2] == "json":
         return Reference(
             raw=raw, source="steps", key=parts[1], json_path=tuple(parts[3:])
         )
@@ -96,7 +96,7 @@ class StepOutput:
 
 @dataclass
 class TemplateContext:
-    form: dict[str, str] = field(default_factory=dict[str, str])
+    form: dict[str, Any] = field(default_factory=dict[str, Any])
     steps: dict[str, StepOutput] = field(default_factory=dict[str, StepOutput])
     previous: str = ""
     # Signed links to the files of each file form field, in upload order.
@@ -161,7 +161,7 @@ def resolve_reference(reference: Reference, context: TemplateContext) -> str:
         assert reference.key is not None
         if reference.key not in context.form:
             raise TemplateError(f"Form field '{reference.key}' has no value.")
-        return context.form[reference.key]
+        return _as_text(context.form[reference.key])
     assert reference.key is not None
     output = context.steps.get(reference.key)
     if output is None:
@@ -187,3 +187,17 @@ def render_template(template: str, context: TemplateContext) -> str:
         return resolve_reference(parse_reference(match.group(1)), context)
 
     return REFERENCE_PATTERN.sub(_substitute, template)
+
+
+def render_argument(template: str, context: TemplateContext) -> Any:
+    """A whole JSON/form reference keeps its type; composed text stays text."""
+    match = REFERENCE_PATTERN.fullmatch(template)
+    if match is not None:
+        reference = parse_reference(match.group(1))
+        if reference.source == "form" and reference.key in context.form:
+            return context.form[reference.key]
+        if reference.wants_json:
+            output = context.steps.get(reference.key or "")
+            if output is not None:
+                return _json_lookup(output.value, reference.json_path, reference.raw)
+    return render_template(template, context)

@@ -86,7 +86,7 @@ class FakeRepo:
             )
 
     # reads
-    async def get_run(self, run_id, tenant_id):
+    async def get_run(self, run_id, tenant_id, *, for_update=False):
         return self.run if run_id == self.run.id else None
 
     async def get_version(self, flow_id, version):
@@ -157,6 +157,11 @@ class FakeRepo:
                 attempt.error = error
                 return True
         return False
+
+    async def cancel_pending_step_results(self, run_id):
+        for result in self.results.values():
+            if result.status in ("pending", "awaiting_review"):
+                result.status = "cancelled"
 
     async def mark_started_attempts_outcome_unknown(self, run_id):
         for attempt in self.attempts:
@@ -356,7 +361,7 @@ async def test_step_left_running_by_a_dead_worker_fails_without_repeating_the_ca
     assert repo.run.error_json["code"] == OUTCOME_UNKNOWN
     assert repo.attempts[0].status == "outcome_unknown"
     assert repo.results[first.id].status == StepResultStatus.FAILED.value
-    assert repo.results[repo.definition.steps[1].id].status == "pending"
+    assert repo.results[repo.definition.steps[1].id].status == "cancelled"
 
 
 async def test_review_step_parks_the_run_and_redelivery_leaves_it_parked():
@@ -465,7 +470,22 @@ async def test_cancellation_is_honoured_at_the_next_step_boundary():
 
     assert repo.run.status == FlowRunStatus.CANCELLED.value
     statuses = [repo.results[s.id].status for s in repo.definition.steps]
-    assert statuses == ["completed", "pending", "pending"]
+    # A late provider response cannot write a completed result after cancellation.
+    assert statuses == ["running", "pending", "pending"]
+
+
+async def test_late_provider_error_does_not_rewrite_a_cancelled_run():
+    repo = FakeRepo(_three_steps())
+
+    class CancelledThenFailed(FakeRunners):
+        async def invoke(self, step, prepared):
+            repo.run.status = FlowRunStatus.CANCELLED.value
+            raise FlowStepError("provider_failed", "Late failure")
+
+    await _executor(repo, CancelledThenFailed()).execute_run(repo.run.id, TENANT)
+    assert repo.run.status == FlowRunStatus.CANCELLED.value
+    assert repo.run.error_json is None
+    assert repo.results[repo.definition.steps[0].id].status == "running"
 
 
 async def test_finished_runs_are_not_executed_again():

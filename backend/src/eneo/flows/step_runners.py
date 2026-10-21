@@ -19,11 +19,10 @@ import base64
 import binascii
 import json
 import re
-from dataclasses import dataclass, field
+from copy import copy
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Optional, cast
 from uuid import UUID
-
-import jsonschema
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.references import EmbedMethod
@@ -31,6 +30,7 @@ from eneo.authentication.signed_urls import (
     build_signed_original_download_url,
     redact_reference_tokens,
 )
+from eneo.completion_models.application.map_reduce import Usage
 from eneo.document_templates.service import resolve_document_template
 from eneo.files.file_models import FileOriginalNotFoundError
 from eneo.files.file_reference import file_reference_base_url
@@ -48,6 +48,14 @@ from eneo.flows.definition import (
     TranscribeStep,
 )
 from eneo.flows.flow_repo import RunFileRow
+from eneo.flows.long_input import (
+    LongInputError,
+    LongPlan,
+    Source,
+    prepare_long_input,
+    process_long_input,
+)
+from eneo.flows.schema_validation import validate_value
 from eneo.flows.speaker_labels import (
     SpeakerMappingInvalid,
     build_opening_excerpt,
@@ -173,6 +181,7 @@ class RunContext:
     principal_user_id: Optional[UUID]
     form_values: dict[str, Any]
     input_files: list[RunFileRow]
+    runtime_bindings: dict[str, Any] = field(default_factory=dict[str, Any])
 
     def file_ids_for(self, field_key: str) -> list[UUID]:
         return [
@@ -255,6 +264,8 @@ class PreparedStep:
     files: list[File] = field(default_factory=_no_files)
     chunks: list[InfoBlobChunkInDBWithScore] = field(default_factory=_no_chunks)
     json_schema: Optional[dict[str, Any]] = None
+    long_plan: LongPlan | None = None
+    run_context: RunContext | None = None
     document: Optional[DocumentCall] = None
     transcribe: Optional[TranscribeCall] = None
     # Whether ``invoke`` resolves anything from the database (a completion
@@ -282,18 +293,13 @@ def _strip_fences(text: str) -> str:
     return _FENCE.sub("", text).strip()
 
 
-def parse_json_output(text: str, schema: dict[str, Any]) -> Any:
+async def parse_json_output(text: str, schema: dict[str, Any]) -> Any:
     """Parse and schema-check a model's JSON answer; ValueError on failure."""
     try:
         value = json.loads(_strip_fences(text))
     except json.JSONDecodeError as exc:
         raise ValueError(f"invalid JSON: {exc.msg}") from exc
-    try:
-        jsonschema.validate(value, schema)
-    except jsonschema.ValidationError as exc:
-        raise ValueError(f"schema violation: {exc.message}") from exc
-    except jsonschema.SchemaError as exc:
-        raise ValueError(f"invalid schema: {exc.message}") from exc
+    await validate_value(value, schema)
     return value
 
 
@@ -440,6 +446,27 @@ class StepRunners:
     async def prepare(
         self, step: Step, ctx: RunContext, template_context: TemplateContext
     ) -> PreparedStep:
+        if ctx.runtime_bindings:
+            from eneo.flows.definition import FlowDefinition
+            from eneo.flows.execution_bindings import bind_execution
+
+            self._space = await self.space_repo.one(ctx.space_id)
+            expected: dict[str, Any] = {"version": 1, "steps": {}}
+            binding = ctx.runtime_bindings.get("steps", {}).get(step.key)
+            if binding is not None:
+                expected["steps"][step.key] = binding
+            try:
+                await bind_execution(
+                    FlowDefinition(steps=[step]),
+                    self._space,
+                    self.assistant_service,
+                    expected,
+                )
+            except Exception as exc:
+                raise FlowStepError(
+                    "flow_execution_dependency_changed",
+                    "The published execution dependency is unavailable or changed; review and republish the flow.",
+                ) from exc
         if isinstance(step, ComposeStep):
             return self._prepare_compose(step, template_context)
         if isinstance(step, LlmStep):
@@ -552,9 +579,11 @@ class StepRunners:
         text_input = self._render(f"step '{step.key}' input", step.input, context)
         prompt = self._render(f"step '{step.key}' prompt", step.prompt, context)
 
-        if step.model_id is not None:
+        pinned = ctx.runtime_bindings.get("steps", {}).get(step.key, {}).get("model_id")
+        model_id = UUID(pinned) if pinned else step.model_id
+        if model_id is not None:
             try:
-                model = space.get_completion_model(step.model_id)
+                model = space.get_completion_model(model_id)
             except NotFoundException as exc:
                 raise FlowStepError(
                     STEP_MODEL_UNAVAILABLE,
@@ -608,6 +637,78 @@ class StepRunners:
             json_schema = step.output.schema_
             prompt = prompt + JSON_INSTRUCTION.format(
                 schema=json.dumps(json_schema, ensure_ascii=False)
+            )
+
+        if step.processing:
+            if any(
+                file.mimetype
+                in {
+                    "text/csv",
+                    "text/tab-separated-values",
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    "application/vnd.ms-excel",
+                }
+                or file.name.lower().endswith(
+                    (".csv", ".tsv", ".xlsx", ".xls", ".ods", ".parquet")
+                )
+                for file in files
+            ):
+                raise FlowStepError(
+                    STEP_INPUT_TOO_LARGE,
+                    "Tables must be read with a file-analysis function step, not summarized from extracted text.",
+                )
+            context_text = text_input if files else ""
+            sources = (
+                [
+                    Source(
+                        f"D{index + 1}", file.name, file.inline_text or "", str(file.id)
+                    )
+                    for index, file in enumerate(files)
+                ]
+                if files
+                else [Source("D1", "Input", text_input)]
+            )
+            summary_prompt = (
+                self._render(
+                    f"step '{step.key}' processing.summary_prompt",
+                    step.processing.summary_prompt,
+                    context,
+                )
+                if step.processing.mode == "summarize"
+                and step.processing.summary_prompt
+                else None
+            )
+            try:
+                plan = prepare_long_input(
+                    sources,
+                    mode=step.processing.mode,
+                    section_tokens=step.processing.section_tokens,
+                    window=model.token_limit,
+                    output_tokens=model.max_output_tokens,
+                    tokens=lambda text: count_tokens(text, model.name),
+                    prompt=prompt,
+                    context=context_text,
+                    summary_prompt=summary_prompt,
+                )
+            except LongInputError as exc:
+                raise FlowStepError(STEP_INPUT_TOO_LARGE, str(exc)) from exc
+            return PreparedStep(
+                input_payload={
+                    "text": text_input,
+                    "prompt": prompt,
+                    "model_id": str(model.id),
+                    "file_ids": [str(file.id) for file in files],
+                    "processing": step.processing.model_dump(),
+                    "sections": sum(group.total_segments for group in plan.plans),
+                },
+                prompt=prompt,
+                text_input=context_text,
+                model=model,
+                model_kwargs=ModelKwargs.model_validate(step.model_kwargs)
+                if step.model_kwargs is not None
+                else None,
+                long_plan=plan,
+                run_context=ctx,
             )
 
         packaged = prompt + text_input
@@ -706,6 +807,8 @@ class StepRunners:
         if prepared.transcribe is not None and isinstance(step, TranscribeStep):
             return await self._invoke_transcribe(step, prepared.transcribe)
         assert isinstance(step, LlmStep) and prepared.model is not None
+        if prepared.long_plan is not None:
+            return await self._invoke_long_input(prepared)
         text, tokens_in, tokens_out = await self._complete(
             prepared, prepared.text_input
         )
@@ -716,7 +819,7 @@ class StepRunners:
                 num_tokens_output=tokens_out,
             )
         try:
-            value = parse_json_output(text, prepared.json_schema)
+            value = await parse_json_output(text, prepared.json_schema)
         except ValueError as first_error:
             retry_input = JSON_RETRY_INPUT.format(
                 input=prepared.text_input, error=first_error
@@ -725,7 +828,7 @@ class StepRunners:
             tokens_in = (tokens_in or 0) + (more_in or 0)
             tokens_out = (tokens_out or 0) + (more_out or 0)
             try:
-                value = parse_json_output(text, prepared.json_schema)
+                value = await parse_json_output(text, prepared.json_schema)
             except ValueError as exc:
                 raise FlowStepError(
                     STEP_OUTPUT_INVALID_JSON,
@@ -738,9 +841,62 @@ class StepRunners:
             num_tokens_output=tokens_out,
         )
 
+    async def _invoke_long_input(self, prepared: PreparedStep) -> StepOutcome:
+        assert prepared.model is not None and prepared.run_context is not None
+        assert prepared.long_plan is not None
+        ctx = prepared.run_context
+        model = prepared.model
+
+        async def should_stop() -> bool:
+            return not await self.flow_repo.run_can_continue(ctx.run_id, ctx.tenant_id)
+
+        async def complete(
+            prompt: str, text: str, max_tokens: int, final: bool
+        ) -> tuple[str, Usage]:
+            if count_tokens(prompt + text, model.name) + max_tokens > model.token_limit:
+                raise LongInputError(
+                    "A digest call exceeds the pinned model's context window."
+                )
+            kwargs = prepared.model_kwargs or ModelKwargs()
+            changes: dict[str, Any] = {"response_format": None}
+            if not final and model.get_supported_model_kwargs().temperature.accepts(
+                0.0
+            ):
+                changes["temperature"] = 0.0
+            call_model = copy(model)
+            call_model.max_output_tokens = min(model.max_output_tokens, max_tokens)
+            call = replace(
+                prepared,
+                prompt=prompt,
+                model=call_model,
+                model_kwargs=kwargs.model_copy(update=changes),
+            )
+            return await self._complete_with_usage(call, text)
+
+        try:
+            payload, incoming, outgoing = await process_long_input(
+                prepared.long_plan,
+                complete=complete,
+                should_stop=should_stop,
+                tokens=lambda text: count_tokens(text, model.name),
+            )
+        except LongInputError as exc:
+            raise FlowStepError(STEP_INPUT_TOO_LARGE, str(exc)) from exc
+        return StepOutcome(
+            output_payload=payload,
+            num_tokens_input=incoming,
+            num_tokens_output=outgoing,
+        )
+
     async def _complete(
         self, prepared: PreparedStep, text_input: str
     ) -> tuple[str, Optional[int], Optional[int]]:
+        text, usage = await self._complete_with_usage(prepared, text_input)
+        return text, usage.input_tokens, usage.output_tokens
+
+    async def _complete_with_usage(
+        self, prepared: PreparedStep, text_input: str
+    ) -> tuple[str, Usage]:
         assert prepared.model is not None
         response = await self.completion_service.get_response(
             # The completion service takes the domain model at run time (the
@@ -759,6 +915,10 @@ class StepRunners:
         # (the app-run path reads it the same way); a plain string is also
         # accepted so a fake service in tests can return one.
         completion = response.completion
+        if getattr(completion, "error", None):
+            raise FlowStepError(
+                STEP_FAILED, "The completion provider could not finish the call."
+            )
         if isinstance(completion, str):
             text = completion
         else:
@@ -766,7 +926,11 @@ class StepRunners:
         usage = response.usage
         tokens_in = usage.prompt_tokens if usage else response.total_token_count
         tokens_out = usage.completion_tokens if usage else None
-        return text, tokens_in, tokens_out
+        return text, Usage(
+            tokens_in or 0,
+            tokens_out or 0,
+            length_stopped=getattr(completion, "stop", True) is False,
+        )
 
     async def _invoke_document(
         self, step: DocumentStep, call: DocumentCall
@@ -855,15 +1019,15 @@ class StepRunners:
         schema = getattr(tool, "input_schema", None)
         if isinstance(schema, dict):
             try:
-                jsonschema.validate(arguments, cast(dict[str, Any], schema))
-            except jsonschema.ValidationError as exc:
+                await validate_value(
+                    arguments, cast(dict[str, Any], schema), authored=False
+                )
+            except ValueError as exc:
                 raise FlowStepError(
                     STEP_FUNCTION_FAILED,
                     f"Step '{step.name}' has arguments '{step.tool}' does not "
-                    f"accept: {exc.message}",
+                    f"accept: {exc}",
                 ) from exc
-            except jsonschema.SchemaError:
-                pass
         return PreparedStep(
             input_payload={
                 "tool": step.tool,
@@ -914,9 +1078,11 @@ class StepRunners:
     ) -> PreparedStep:
         space = await self._space_for(ctx)
         model: Optional[TranscriptionModel]
-        if step.transcription_model_id is not None:
+        pinned = ctx.runtime_bindings.get("steps", {}).get(step.key, {}).get("model_id")
+        model_id = UUID(pinned) if pinned else step.transcription_model_id
+        if model_id is not None:
             try:
-                model = space.get_transcription_model(step.transcription_model_id)
+                model = space.get_transcription_model(model_id)
             except NotFoundException:
                 model = None
         else:
@@ -978,9 +1144,18 @@ class StepRunners:
                 )
             infer_names = mapping.infer_names
             if participants or infer_names:
+                pinned_mapping = (
+                    ctx.runtime_bindings.get("steps", {})
+                    .get(step.key, {})
+                    .get("speaker_model", {})
+                    .get("model_id")
+                )
+                mapping_id = (
+                    UUID(pinned_mapping) if pinned_mapping else mapping.model_id
+                )
                 mapping_model = (
-                    space.get_completion_model(mapping.model_id)
-                    if mapping.model_id is not None
+                    space.get_completion_model(mapping_id)
+                    if mapping_id is not None
                     else space.get_default_completion_model()
                 )
                 if mapping_model is None or not mapping_model.can_access:
@@ -1148,7 +1323,14 @@ def signed_links_for(tenant_id: Optional[UUID], file_ids: list[UUID]) -> list[st
 def render_arguments(step: FunctionStep, value: Any, context: TemplateContext) -> Any:
     """``value`` with every string inside rendered as a template (pure)."""
     if isinstance(value, str):
-        return _render_or_error(f"step '{step.key}' arguments", value, context)
+        from eneo.flows.templating import render_argument
+
+        try:
+            return render_argument(value, context)
+        except TemplateError as exc:
+            raise FlowStepError(
+                STEP_TEMPLATE_ERROR, f"step '{step.key}' arguments: {exc}"
+            ) from exc
     if isinstance(value, dict):
         return {
             key: render_arguments(step, item, context)

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.flows.flow_models import FlowRunStatus
 from eneo.flows.flow_run_executor import OUTCOME_UNKNOWN
+from eneo.flows.lifecycle import finish_run
 from eneo.jobs.task_models import FlowRunParams
 from eneo.main.container.container import Container
 from eneo.main.container.container_overrides import override_user
@@ -144,8 +145,11 @@ async def reconcile_stale_flow_runs(container: Container) -> None:
                 error_message="The worker stopped before the step's outcome was "
                 "recorded; the call is not repeated.",
             )
-            await repo.update_run_status(
+            await finish_run(
+                repo,
+                container.audit_service(),
                 run.id,
+                run.tenant_id,
                 FlowRunStatus.FAILED,
                 error={
                     "code": RUN_INTERRUPTED,
@@ -159,3 +163,28 @@ async def reconcile_stale_flow_runs(container: Container) -> None:
                     run.job_id, "flow run reconciled after worker loss"
                 )
             logger.info("Reconciled stale flow run", extra={"run_id": str(run.id)})
+
+
+@worker.cron_job(manages_own_session=True, second=0)
+async def maintain_flow_run_lifecycle(container: Container) -> None:
+    """Retire unfinished runs of deleted flows and expire parked reviews."""
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        repo = container.flow_repo()
+        for run_id, tenant_id, code in await repo.runs_needing_maintenance():
+            await finish_run(
+                repo,
+                container.audit_service(),
+                run_id,
+                tenant_id,
+                FlowRunStatus.CANCELLED
+                if code == "flow_deleted"
+                else FlowRunStatus.FAILED,
+                error={
+                    "code": code,
+                    "message": "The flow was deleted."
+                    if code == "flow_deleted"
+                    else "The review deadline passed.",
+                },
+                expired=code == "flow_review_expired",
+            )

@@ -41,7 +41,7 @@ function stringLeaves(value: unknown): string[] {
 export function templatesOf(step: FlowStep): string[] {
   switch (step.kind) {
     case "llm":
-      return [step.input ?? "{{previous}}", step.prompt];
+      return [step.input ?? "{{previous}}", step.prompt, step.processing?.summary_prompt ?? ""];
     case "compose":
       return [step.template];
     case "document":

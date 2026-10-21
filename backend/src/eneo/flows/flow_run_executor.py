@@ -55,6 +55,7 @@ from eneo.main.exceptions import NotFoundException
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
+    from eneo.audit.application.audit_service import AuditService
     from eneo.flows.flow_repo import FlowRepository
     from eneo.flows.step_runners import StepRunners
 
@@ -77,11 +78,41 @@ class FlowRunExecutor:
         runners: StepRunners,
         *,
         step_timeout_seconds: float = 900,
+        audit_service: AuditService | None = None,
     ):
         self.repo = repo
         self.runners = runners
         self.step_timeout_seconds = step_timeout_seconds
+        self.audit_service = audit_service
         self._tenant_id: Optional[UUID] = None
+
+    async def _finish(
+        self,
+        ctx: RunContext,
+        status: FlowRunStatus,
+        *,
+        error: dict[str, Any] | None = None,
+        output: dict[str, Any] | None = None,
+        expected_statuses: tuple[FlowRunStatus, ...] = (
+            FlowRunStatus.QUEUED,
+            FlowRunStatus.RUNNING,
+            FlowRunStatus.AWAITING_REVIEW,
+        ),
+        expired: bool = False,
+    ) -> bool:
+        from eneo.flows.lifecycle import finish_run
+
+        return await finish_run(
+            self.repo,
+            self.audit_service,
+            ctx.run_id,
+            ctx.tenant_id,
+            status,
+            error=error,
+            output=output,
+            expected_statuses=expected_statuses,
+            expired=expired,
+        )
 
     def _scope(self) -> AbstractAsyncContextManager[object]:
         """Short-transaction boundary.
@@ -126,7 +157,15 @@ class FlowRunExecutor:
                 principal_user_id=run.principal_user_id,
                 form_values=dict(run.input_payload_json or {}),
                 input_files=files,
+                runtime_bindings=dict(getattr(run, "runtime_bindings", None) or {}),
             )
+            if getattr(flow, "deleted_at", None) is not None:
+                await self._finish(
+                    ctx,
+                    FlowRunStatus.CANCELLED,
+                    error={"code": "flow_deleted", "message": "The flow was deleted."},
+                )
+                return
             await self.repo.update_run_status(
                 run.id,
                 FlowRunStatus.RUNNING,
@@ -143,6 +182,19 @@ class FlowRunExecutor:
                 run = await self.repo.get_run(ctx.run_id, ctx.tenant_id)
                 if run is None or run.status != FlowRunStatus.RUNNING.value:
                     # Cancelled (or reconciled) while we worked: stop here.
+                    return
+                flow = await self.repo.get_flow(
+                    ctx.flow_id, ctx.tenant_id, include_deleted=True
+                )
+                if flow is None or getattr(flow, "deleted_at", None) is not None:
+                    await self._finish(
+                        ctx,
+                        FlowRunStatus.CANCELLED,
+                        error={
+                            "code": "flow_deleted",
+                            "message": "The flow was deleted.",
+                        },
+                    )
                     return
                 claimed = await self.repo.claim_step_result(ctx.run_id, step.id)
                 attempt_no = 0
@@ -251,6 +303,11 @@ class FlowRunExecutor:
 
             try:
                 async with self._scope():
+                    current = await self.repo.get_run(
+                        ctx.run_id, ctx.tenant_id, for_update=True
+                    )
+                    if current is None or current.status != FlowRunStatus.RUNNING.value:
+                        return
                     if outcome.output_file_ids:
                         await self.repo.add_run_files(
                             ctx.run_id,
@@ -285,10 +342,10 @@ class FlowRunExecutor:
             last_output = outcome.output_payload
 
         async with self._scope():
-            await self.repo.update_run_status(
-                ctx.run_id,
+            await self._finish(
+                ctx,
                 FlowRunStatus.COMPLETED,
-                output_payload_json=last_output or {},
+                output=last_output or {},
                 expected_statuses=(FlowRunStatus.RUNNING,),
             )
 
@@ -307,7 +364,7 @@ class FlowRunExecutor:
     def _initial_context(
         ctx: RunContext, definition: FlowDefinition
     ) -> TemplateContext:
-        form: dict[str, str] = {}
+        form: dict[str, Any] = {}
         for field in definition.form_fields:
             value = ctx.form_values.get(field.key)
             if field.type.value in ("file", "audio"):
@@ -318,9 +375,9 @@ class FlowRunExecutor:
                 ]
                 form[field.key] = ", ".join(names)
             elif value is None:
-                form[field.key] = ""
+                form[field.key] = None
             else:
-                form[field.key] = str(value)
+                form[field.key] = value
         return TemplateContext(form=form)
 
     def _remember(
@@ -372,6 +429,9 @@ class FlowRunExecutor:
         assert step.id is not None
         target_key = review_target_key(definition, step)
         async with self._scope():
+            run = await self.repo.get_run(ctx.run_id, ctx.tenant_id, for_update=True)
+            if run is None or run.status != FlowRunStatus.RUNNING.value:
+                return
             payload: Optional[dict[str, Any]] = None
             target = definition.step_by_key(target_key) if target_key else None
             if target is not None and target.id is not None:
@@ -414,7 +474,25 @@ class FlowRunExecutor:
         """
         assert step.id is not None
         async with self._scope():
+            run = await self.repo.get_run(ctx.run_id, ctx.tenant_id, for_update=True)
+            if run is None or run.status != FlowRunStatus.RUNNING.value:
+                return None
             checkpoint = await self.repo.get_active_checkpoint(ctx.run_id)
+            if (
+                checkpoint is not None
+                and checkpoint.expires_at is not None
+                and checkpoint.expires_at <= datetime.now(UTC)
+            ):
+                await self._finish(
+                    ctx,
+                    FlowRunStatus.FAILED,
+                    error={
+                        "code": "flow_review_expired",
+                        "message": "The review deadline passed.",
+                    },
+                    expired=True,
+                )
+                return None
             if (
                 checkpoint is None
                 or checkpoint.step_id != step.id
@@ -463,6 +541,9 @@ class FlowRunExecutor:
                 extra={"run_id": str(ctx.run_id), "step_id": str(step.id)},
             )
         async with self._scope():
+            run = await self.repo.get_run(ctx.run_id, ctx.tenant_id, for_update=True)
+            if run is None or run.status != FlowRunStatus.RUNNING.value:
+                return
             await self.repo.finish_attempt(
                 ctx.run_id,
                 step.id,
@@ -477,8 +558,8 @@ class FlowRunExecutor:
                 error_message=message,
                 input_payload_json=input_payload,
             )
-            await self.repo.update_run_status(
-                ctx.run_id,
+            await self._finish(
+                ctx,
                 FlowRunStatus.FAILED,
                 error={
                     "code": code,
@@ -493,12 +574,15 @@ class FlowRunExecutor:
             "outcome; the call is not repeated."
         )
         async with self._scope():
+            run = await self.repo.get_run(ctx.run_id, ctx.tenant_id, for_update=True)
+            if run is None or run.status != FlowRunStatus.RUNNING.value:
+                return
             await self.repo.mark_started_attempts_outcome_unknown(ctx.run_id)
             await self.repo.fail_running_step_results(
                 ctx.run_id, error_code=OUTCOME_UNKNOWN, error_message=message
             )
-            await self.repo.update_run_status(
-                ctx.run_id,
+            await self._finish(
+                ctx,
                 FlowRunStatus.FAILED,
                 error={"code": OUTCOME_UNKNOWN, "message": message},
                 expected_statuses=(FlowRunStatus.RUNNING,),

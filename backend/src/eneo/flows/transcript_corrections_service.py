@@ -173,6 +173,10 @@ class FlowTranscriptCorrectionsService:
             step_id=step_id,
             segments_hash=segments_hash,
             segments=corrected,
+            original_segments=segments,
+            corrections=self._public(row, stale=row.segments_hash != segments_hash)
+            if row is not None
+            else None,
             speaker_names=names,
             text=render_corrected_transcript(segments, occurrences, edits, names),
             corrections_revision=revision,
@@ -194,7 +198,7 @@ class FlowTranscriptCorrectionsService:
         speaker_names: Optional[Mapping[str, Optional[str]]],
         channel: str = "api",
     ) -> FlowTranscriptCorrectionsPublic:
-        run = await self.run_service._require_run(run_id, flow_id=flow_id)  # pyright: ignore[reportPrivateUsage]
+        run = await self.run_service._require_run(run_id, flow_id=flow_id, mutate=True)  # pyright: ignore[reportPrivateUsage]
         if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
             raise BadRequestException(f"Unsupported schema_version {schema_version}.")
         segments, _ = await self._transcript_segments(run, step_id)

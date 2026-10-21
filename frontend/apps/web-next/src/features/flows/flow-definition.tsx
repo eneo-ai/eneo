@@ -464,7 +464,7 @@ export function FlowDefinition({
   /** Edit mode: moves a step one place up or down (saved at once). */
   onMoveStep?: (key: string, direction: -1 | 1) => void;
   /** Edit mode: saves the run inputs as the dialog hands them back; the dialog closes when it resolves. */
-  onSaveInputs?: (fields: FormField[]) => Promise<unknown>;
+  onSaveInputs?: (fields: FormField[], expectedRevision: number) => Promise<unknown>;
   /** View mode: enters edit mode (offered where there are no steps yet). */
   onEdit?: () => void;
   /** An overview save (a move, the inputs) is on its way. */
@@ -478,6 +478,7 @@ export function FlowDefinition({
   const steps = stepsOf(definition);
   const editing = mode === "edit";
   const [inputsOpen, setInputsOpen] = useState(false);
+  const [inputsBase, setInputsBase] = useState(flow);
 
   return (
     <div className="flex flex-col gap-5 p-4">
@@ -514,7 +515,10 @@ export function FlowDefinition({
               variant="ghost"
               size="sm"
               icon={<Pencil className="size-4" />}
-              onClick={() => setInputsOpen(true)}
+              onClick={() => {
+                setInputsBase(flow);
+                setInputsOpen(true);
+              }}
             />
           )}
         </div>
@@ -623,10 +627,10 @@ export function FlowDefinition({
       </section>
       {editing && onSaveInputs && inputsOpen && (
         <FlowInputsEditor
-          definition={definition}
+          definition={inputsBase.definition}
           open={inputsOpen}
           onOpenChange={setInputsOpen}
-          onSave={onSaveInputs}
+          onSave={(fields) => onSaveInputs(fields, inputsBase.revision ?? 1)}
           saving={saving}
         />
       )}

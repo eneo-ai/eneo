@@ -36,6 +36,7 @@ from eneo.flows.flow_models import (
     FlowFunctionPublic,
     FlowPublic,
     FlowRevisionPublic,
+    FlowRevisionRequest,
     FlowRevisionSummaryPublic,
     FlowRunContractPublic,
     FlowRunCreateRequest,
@@ -239,6 +240,7 @@ async def update_flow(
         definition=request.definition,
         channel="api",
         note=request.note,
+        expected_revision=request.expected_revision,
     )
 
 
@@ -438,7 +440,7 @@ async def get_revision(
     "/{id}/revisions/{revision}/restore/",
     description="Make an earlier revision the draft again; the restore is a new revision.",
     response_model=FlowPublic,
-    responses=responses.get_responses([400, 403, 404, 422]),
+    responses=responses.get_responses([400, 403, 404, 409, 422]),
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -446,10 +448,48 @@ async def get_revision(
     reason="FlowService enforces flow edit permission in the space.",
 )
 async def restore_revision(
-    id: UUID, revision: int, container: _Container
+    id: UUID, revision: int, request: FlowRevisionRequest, container: _Container
 ) -> FlowPublic:
     """Make the revision the draft again; the restore is a new revision."""
-    return await container.flow_service().restore_revision(id, revision)
+    return await container.flow_service().restore_revision(
+        id, revision, expected_revision=request.expected_revision
+    )
+
+
+@router.post(
+    "/{id}/publish/",
+    response_model=FlowPublic,
+    responses=responses.get_responses([400, 403, 404, 409, 422]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="FlowService enforces human publish permission and the expected draft revision.",
+)
+async def publish_flow(
+    id: UUID, request: FlowRevisionRequest, container: _Container
+) -> FlowPublic:
+    return await container.flow_service().publish_flow(
+        id, expected_revision=request.expected_revision
+    )
+
+
+@router.post(
+    "/{id}/unpublish/",
+    response_model=FlowPublic,
+    responses=responses.get_responses([400, 403, 404, 409]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="FlowService enforces human publish permission and the expected draft revision.",
+)
+async def unpublish_flow(
+    id: UUID, request: FlowRevisionRequest, container: _Container
+) -> FlowPublic:
+    return await container.flow_service().unpublish_flow(
+        id, expected_revision=request.expected_revision
+    )
 
 
 # --- Runs ---

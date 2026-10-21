@@ -38,6 +38,8 @@ curl -H "X-API-Key: $KEY" -F "upload_file=@recording.wav" \
 The 201 answer is the file; keep its `id`. An upload no run has used can be
 deleted (`DELETE …/runtime-files/{file_id}/`, admin-level keys); once a run
 took it, the delete answers 409.
+Upload and start the run with the same principal. Another service key's
+upload cannot be attached by knowing its id.
 
 ## 3. Start a run
 
@@ -55,7 +57,8 @@ curl -H "X-API-Key: $KEY" -H "Idempotency-Key: order-4711" \
 file and audio fields as lists of file ids. `expected_flow_version` makes
 the call fail with 400 when the flow was republished since you read the
 contract. The same `Idempotency-Key` replays the same run instead of
-creating another.
+creating another, scoped to the flow and the user or service key that
+started it. Different principals can safely use the same key.
 
 The 201 answer is the run: `id`, `status` (`queued`), `flow_version`, the
 step list with every step `pending`, and your inputs.
@@ -89,6 +92,9 @@ It carries `revision`, `review_mode` (`view` or `edit`), `output_type`
 (`text` or `json`), `original_payload_json` and `current_payload_json`.
 Send `expected_checkpoint_revision` with every decision; it must match the
 revision you read.
+Once `expires_at` has passed, the checkpoint refuses changes and decisions;
+the worker closes the run as failed. Deleting the flow closes active runs
+as cancelled. Neither case starts another provider call.
 
 - `PATCH …/review-checkpoints/{id}/` with `current_payload_json`
   (`{"text": …}` or `{"value": …}`) replaces the reviewed output (edit
@@ -132,6 +138,16 @@ Send the full lists each time; `expected_revision` is null to create and
 the stored revision to replace. `GET …/runs/{run_id}/transcript-corrections/`
 lists what is stored; an entry flagged `stale` anchors to a transcript
 that has since changed.
+
+The transcript response also includes `original_segments` and `corrections`
+from the same read. An editor can anchor a replacement to the original text
+while displaying corrected text, without racing two independent reads.
+Character offsets count Unicode code points, not UTF-16 code units.
+
+For a model step using long-material processing, its output adds `sources`
+(source keys, names and file ids), `coverage`, `processing_calls`,
+`words_read` and `words_answered`. A completed step has complete coverage;
+consumers can retain these fields alongside the answer as its source account.
 
 ## 7. Cancel
 

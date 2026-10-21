@@ -167,6 +167,19 @@ class StepKnowledge(BaseModel):
         return not self.collection_ids and not self.website_ids
 
 
+class LlmProcessing(BaseModel):
+    """Explicit, bounded multi-call processing using the same model and prompt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["per_source", "sections", "summarize"]
+    section_tokens: int = Field(default=4000, ge=256, le=32768)
+    summary_prompt: TextStr | None = Field(
+        default=None,
+        description="Fixed synthesis instructions; required for summarize.",
+    )
+
+
 class LlmStep(_StepBase):
     """One completion with a fixed prompt. Produces text or schema-checked JSON."""
 
@@ -191,6 +204,10 @@ class LlmStep(_StepBase):
     )
     knowledge: StepKnowledge = Field(default_factory=StepKnowledge)
     output: LlmOutput = Field(default_factory=TextOutput)
+    processing: LlmProcessing | None = Field(
+        default=None,
+        description="Null is one completion. Otherwise read each source or section; summarize also synthesizes the results. Text output only.",
+    )
 
 
 class ComposeStep(_StepBase):
@@ -357,7 +374,12 @@ class FlowDefinitionError(ValueError):
 def _templates_of(step: Step) -> list[tuple[str, str]]:
     """(label, template text) pairs a step reads at run time."""
     if isinstance(step, LlmStep):
-        return [("input", step.input), ("prompt", step.prompt)]
+        templates = [("input", step.input), ("prompt", step.prompt)]
+        if step.processing and step.processing.summary_prompt:
+            templates.append(
+                ("processing.summary_prompt", step.processing.summary_prompt)
+            )
+        return templates
     if isinstance(step, ComposeStep):
         return [("template", step.template)]
     if isinstance(step, DocumentStep):
@@ -477,6 +499,20 @@ def validate_definition(definition: FlowDefinition) -> None:
                     errors.append(f"{where} {label}: {problem}")
 
         if isinstance(step, LlmStep):
+            if step.processing:
+                if step.output.type != "text":
+                    errors.append(f"{where} processing requires text output")
+                if not step.knowledge.is_empty():
+                    errors.append(
+                        f"{where} processing reads explicit inputs; use a separate step for knowledge retrieval"
+                    )
+                if (
+                    step.processing.mode == "summarize"
+                    and not (step.processing.summary_prompt or "").strip()
+                ):
+                    errors.append(
+                        f"{where} processing.summary_prompt is required for summarize"
+                    )
             for key in step.files_from:
                 field = form_by_key.get(key)
                 if field is None:
@@ -485,6 +521,13 @@ def validate_definition(definition: FlowDefinition) -> None:
                     errors.append(f"{where} files_from '{key}' is not a file field")
             if step.output.type == "json" and not step.output.schema_:
                 errors.append(f"{where} json output needs a schema object")
+            elif step.output.type == "json":
+                from eneo.flows.schema_validation import check_schema
+
+                try:
+                    check_schema(step.output.schema_)
+                except ValueError as exc:
+                    errors.append(f"{where} output.schema: {exc}")
         elif isinstance(step, FunctionStep):
             for key in step.files_from:
                 field = form_by_key.get(key)

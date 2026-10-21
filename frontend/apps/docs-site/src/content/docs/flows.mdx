@@ -7,10 +7,12 @@ once someone starts it with its run inputs. Nothing is decided while it
 runs: the step kind decides what executes, the prompts and arguments are
 fixed when the flow is written, and the same inputs run the same steps.
 
-Flows are not edited by hand. A flow is written in a conversation with the
-space's flows assistant, which authors it through Eneo's own tools, and the
-panel beside the conversation shows every parameter, every run and the
-flow's history. API consumers run published flows through the REST API.
+In the React frontend, write a flow with the space's flows assistant or
+edit its inputs and steps directly in the panel beside the conversation.
+The panel shows every parameter, run and revision. Publish and unpublish
+from the panel; API consumers run the published version through REST.
+Saves, restores and publication actions carry `expected_revision`; a stale
+request returns 409 so another author's changes are preserved.
 
 <Callout type="info">
   Building an application on flows? Continue with the [consumer
@@ -29,6 +31,14 @@ A draft can be tried without publishing: a **test run** executes the draft
 as it is and is marked as such. A test run never changes what API
 consumers run.
 
+Publication also records the resolved models, tool provider and tool
+schemas. A later change to a default model does not switch an existing
+version to that model. Removed or changed dependencies stop execution
+before the next provider call; review and republish to accept the change.
+Versions published before execution bindings were introduced must be
+republished before starting new runs. Unpublishing stops new published
+runs and leaves existing runs available; version numbers are never reused.
+
 ## Steps
 
 | Kind         | What it does                                                                                                                                                                                                                 |
@@ -43,17 +53,25 @@ consumers run.
 Templates read `{{form.<key>}}`, `{{steps.<key>}}`,
 `{{steps.<key>.json.<path>}}`, `{{steps.<key>.file}}`, `{{files.<key>}}`
 and `{{previous}}`; a step only reads what comes before it.
+In function arguments, a whole form or JSON reference retains its native
+type, including numbers, objects and arrays. References combined with
+other text produce strings. Authored JSON schemas use JSON Schema 2020-12
+and local references; validation has size, complexity and execution limits.
 
 ## Who may do what
 
 | Space role       | Flows                                                  |
 | ---------------- | ------------------------------------------------------ |
-| Viewer           | Read published flows, start and review runs            |
+| Viewer           | Read published flows, start and review their own runs  |
 | Editor and above | Also create, edit, publish, delete and test-run drafts |
+
+Human space owners and administrators can operate other users' runs.
+Other roles see and operate only the runs they started, including run
+summaries and file links.
 
 A service API key is an automation principal: in its scope it reads
 published flows, starts runs, reviews, uploads files for runs and reads the
-runs it started. It never authors, and it does not see drafts or other
+own uploads and runs it started. It never authors, and it does not see drafts or other
 principals' runs. The job and the files of a service key's run belong to the
 flow's author.
 
@@ -66,8 +84,15 @@ repeated. A review step parks the run as `awaiting_review`; approving
 resumes it with the same run id. A run can be cancelled while it is
 queued, running or waiting for review.
 
+An expired review can no longer be edited, approved or resumed. The
+existing worker checks expired reviews and deleted flows every minute,
+closes their active runs and records the terminal audit event in the same
+transaction. Deleting a flow also prevents a subsequent step from starting.
+Completion, failure and cancellation are audited once for each terminal
+transition. This lifecycle handling does not introduce a retention policy.
+
 Everything a run touches is a file in Eneo: inputs, templates, produced
-documents and images. Readers of the flow open them through signed links
+documents and images. Readers authorized for the run open them through signed links
 minted for the run.
 
 ## Transcripts
@@ -76,6 +101,44 @@ A transcribe step keeps its segments with the step result. A reviewer
 corrects a transcript without rewriting it: corrections, speaker edits and
 speaker names are an overlay anchored to the segments by a hash, applied
 when the transcript is read, so the original stays auditable.
+
+In React, expand a transcribe step and choose **Rätta transkript**. Edit
+segment text, reassign a segment's speaker, or rename speakers. Saving
+checks the original segment hash and correction revision; a conflict keeps
+your unsaved text so you can reopen the latest version. Existing span-level
+speaker edits are preserved: those segments remain read-only in this editor,
+while their speaker names can still be changed. Corrections do not rewrite
+earlier outputs or the text of an already-created review checkpoint.
+
+## Long material
+
+A model step can explicitly process long text and uploaded documents:
+
+| Processing mode              | Result                                                                                       |
+| ---------------------------- | -------------------------------------------------------------------------------------------- |
+| Default (`processing: null`) | One completion over all inputs, as before                                                    |
+| `per_source`                 | One answer per file; long files are read in segments and merged                              |
+| `sections`                   | One answer per segment, kept in source order                                                 |
+| `summarize`                  | Segment notes and hierarchical merges produce one answer using the authored `summary_prompt` |
+
+These modes use the platform's shared digest core, the step's pinned model
+and text output. Select explicit files or input text; knowledge retrieval
+and JSON extraction belong in a separate step. The editor explains that
+switching to separate processing clears its knowledge and JSON selections.
+`section_tokens` controls the reading size (default 4,000); the planner also
+reserves context for the stage instructions and answer.
+
+Each run result records source keys, file ids, per-source coverage, model
+calls and compression counts. The React result shows coverage and the key
+for each source, such as `[D1]`. All planned segments must be processed;
+partial coverage, truncated model answers and provider failures fail the
+step instead of passing an incomplete result downstream. A source judged
+irrelevant is explicitly recorded in the coverage metadata.
+
+Processing admits at most 32 sources, 8 MiB of extracted text and 120
+segments, under one five-minute deadline and 256-call ceiling. Cancelled or
+deleted runs admit no further digest calls. Tables such as CSV and Excel
+must use a file-analysis function step rather than document summarization.
 
 ## Settings
 

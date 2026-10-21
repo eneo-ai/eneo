@@ -35,7 +35,8 @@ import {
 } from "./flow-labels";
 import { FlowReviewActions } from "./flow-review-actions";
 import { FlowRunFiles } from "./flow-run-files";
-import { FlowTranscript, type StepTranscription } from "./flow-transcript";
+import { type StepTranscription } from "./flow-transcript";
+import { FlowRunTranscript } from "./flow-transcript-editor";
 import {
   cancelFlowRun,
   flowKeys,
@@ -97,7 +98,18 @@ function Payload({ payload }: { payload: Record<string, unknown> }) {
   const markdown =
     payload.value == null &&
     typeof payload.text === "string" &&
-    Object.keys(payload).every((key) => key === "text" || key === "value" || key === "file_ids");
+    Object.keys(payload).every((key) =>
+      [
+        "text",
+        "value",
+        "file_ids",
+        "sources",
+        "coverage",
+        "processing_calls",
+        "words_read",
+        "words_answered"
+      ].includes(key)
+    );
   return (
     <div className="bg-ax-sunken rounded-ax-inner max-h-56 overflow-auto px-2.5 py-2">
       {markdown ? (
@@ -245,7 +257,7 @@ function RunStep({
         {transcription ? (
           <Disclosure label={t("flow_step_show_transcript")} preview={outputPreview}>
             <div className="bg-ax-sunken rounded-ax-inner max-h-96 overflow-auto px-2.5 py-2">
-              <FlowTranscript transcription={transcription} />
+              <FlowRunTranscript flowId={flowId} runId={run.id} stepId={step.step_id} />
             </div>
           </Disclosure>
         ) : (
@@ -255,6 +267,25 @@ function RunStep({
               <Payload payload={output} />
             </Disclosure>
           )
+        )}
+        {output && Array.isArray(output.sources) && (
+          <div className="text-ax-text-secondary flex flex-col gap-1 text-xs">
+            <p className="m-0">
+              {t("flow_processing_coverage", {
+                sources: output.sources.length,
+                calls: Number(output.processing_calls ?? 0),
+                read: Number(output.words_read ?? 0),
+                answered: Number(output.words_answered ?? 0)
+              })}
+            </p>
+            <ul className="m-0 list-disc ps-4">
+              {output.sources.filter(isRecord).map((source, index) => (
+                <li key={index}>
+                  [{String(source.source_id)}] {String(source.name)}
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
     </li>

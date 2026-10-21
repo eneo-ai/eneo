@@ -405,6 +405,40 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/{id}/publish/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Publish Flow */
+    post: operations["publish_flow_api_v1_flows__id__publish__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/unpublish/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Unpublish Flow */
+    post: operations["unpublish_flow_api_v1_flows__id__unpublish__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/artifacts/": {
     parameters: {
       query?: never;
@@ -10079,8 +10113,13 @@ export interface components {
       | "flow_created"
       | "flow_updated"
       | "flow_published"
+      | "flow_unpublished"
       | "flow_deleted"
       | "flow_run_created"
+      | "flow_run_completed"
+      | "flow_run_failed"
+      | "flow_run_review_edited"
+      | "flow_run_review_resumed"
       | "flow_run_cancelled"
       | "flow_run_reviewed"
       | "flow_run_transcript_corrections_edited"
@@ -15071,7 +15110,8 @@ export interface components {
       | 9070
       | 9071
       | 9072
-      | 9073;
+      | 9073
+      | 9074;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -15688,6 +15728,11 @@ export interface components {
       description?: string | null;
       definition: components["schemas"]["FlowDefinition"];
     };
+    /** FlowRevisionRequest */
+    FlowRevisionRequest: {
+      /** Expected Revision */
+      expected_revision: number;
+    };
     /**
      * FlowRevisionSummaryPublic
      * @description A row in a flow's history: every save, newest first.
@@ -16272,6 +16317,11 @@ export interface components {
       segments: {
         [key: string]: unknown;
       }[];
+      /** Original Segments */
+      original_segments?: {
+        [key: string]: unknown;
+      }[];
+      corrections?: components["schemas"]["FlowTranscriptCorrectionsPublic"] | null;
       /** Speaker Names */
       speaker_names: {
         [key: string]: string | null;
@@ -16286,6 +16336,8 @@ export interface components {
      * @description Change the draft from the panel; only the fields given change.
      */
     FlowUpdateRequest: {
+      /** Expected Revision */
+      expected_revision: number;
       /** Name */
       name?: string | null;
       /** Description */
@@ -17374,6 +17426,27 @@ export interface components {
       attachments: components["schemas"]["AttachmentLimits"];
     };
     /**
+     * LlmProcessing
+     * @description Explicit, bounded multi-call processing using the same model and prompt.
+     */
+    LlmProcessing: {
+      /**
+       * Mode
+       * @enum {string}
+       */
+      mode: "per_source" | "sections" | "summarize";
+      /**
+       * Section Tokens
+       * @default 4000
+       */
+      section_tokens?: number;
+      /**
+       * Summary Prompt
+       * @description Fixed synthesis instructions; required for summarize.
+       */
+      summary_prompt?: string | null;
+    };
+    /**
      * LlmStep
      * @description One completion with a fixed prompt. Produces text or schema-checked JSON.
      */
@@ -17428,6 +17501,8 @@ export interface components {
       knowledge?: components["schemas"]["StepKnowledge"];
       /** Output */
       output?: components["schemas"]["TextOutput"] | components["schemas"]["JsonOutput"];
+      /** @description Null is one completion. Otherwise read each source or section; summarize also synthesizes the results. Text output only. */
+      processing?: components["schemas"]["LlmProcessing"] | null;
     };
     /** LocalPasswordPolicy */
     LocalPasswordPolicy: {
@@ -28109,7 +28184,11 @@ export interface operations {
       };
       cookie?: never;
     };
-    requestBody?: never;
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRevisionRequest"];
+      };
+    };
     responses: {
       /** @description Successful Response */
       200: {
@@ -28147,6 +28226,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Unprocessable Entity */
       422: {
         headers: {
@@ -28154,6 +28242,148 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  publish_flow_api_v1_flows__id__publish__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRevisionRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  unpublish_flow_api_v1_flows__id__unpublish__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRevisionRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

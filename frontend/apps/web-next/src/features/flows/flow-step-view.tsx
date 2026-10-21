@@ -741,6 +741,19 @@ function StepSections({
           <Section id="flow-step-prompt" title={t("flow_section_prompt")}>
             <Prose template={step.prompt} definition={definition} />
           </Section>
+          {step.processing && (
+            <Section id="flow-step-processing" title={t("flow_processing_label")}>
+              <p className="m-0 text-sm">{t(`flow_processing_${step.processing.mode}`)}</p>
+              {step.processing.mode !== "per_source" && (
+                <p className="text-ax-text-secondary m-0 text-sm">
+                  {t("flow_processing_tokens", { count: step.processing.section_tokens ?? 4000 })}
+                </p>
+              )}
+              {step.processing.summary_prompt && (
+                <Prose template={step.processing.summary_prompt} definition={definition} />
+              )}
+            </Section>
+          )}
           <div className={row}>
             {produces}
             {usedBy}

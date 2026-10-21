@@ -269,6 +269,7 @@ class FakeFlowService:
         channel,
         conversation_id=None,
         note=None,
+        expected_revision=None,
     ):
         self.calls.append(("update_flow", channel, name, description, definition, note))
         self._raise()
@@ -300,7 +301,9 @@ class FakeFlowService:
         summaries = [FlowRevisionSummaryPublic(**row.model_dump()) for row in rows]
         return summaries[offset : offset + limit], len(summaries)
 
-    async def restore_revision(self, flow_id, revision, *, channel):
+    async def restore_revision(
+        self, flow_id, revision, *, channel, expected_revision=None
+    ):
         self.calls.append(("restore_revision", flow_id, revision, channel))
         self._raise()
         rows = self.revisions.get(flow_id, [])
@@ -335,7 +338,7 @@ class FakeFlowService:
             if flow.space_id == space_id
         ]
 
-    async def publish_flow(self, flow_id, channel):
+    async def publish_flow(self, flow_id, channel, *, expected_revision=None):
         self.calls.append(("publish_flow", channel))
         self._raise()
         flow = self.flows[flow_id]
@@ -591,6 +594,7 @@ class TestChatFlow:
                     },
                 ],
                 "note": "First steps",
+                "expected_revision": 1,
             },
         )
 
@@ -670,6 +674,7 @@ class TestChatFlow:
         )
 
         result = await update_flow(
+            expected_revision=1,
             steps=[LlmStep(key="draft", name="Draft", prompt="{{form.title}}")],
             ctx=CTX,
         )
@@ -689,7 +694,7 @@ class TestChatFlow:
             FormField(key=f"f{i}", label=str(i), type="text") for i in range(40)
         ]
 
-        result = await update_flow(form_fields=too_many, ctx=CTX)
+        result = await update_flow(expected_revision=1, form_fields=too_many, ctx=CTX)
 
         assert _text(result).startswith("Could not update flow: form_fields:")
 
@@ -697,7 +702,7 @@ class TestChatFlow:
         service = FakeFlowService()
         _patch_context(monkeypatch, flow_service=service, purpose=None)
 
-        result = await update_flow(name="Brief", ctx=CTX)
+        result = await update_flow(expected_revision=1, name="Brief", ctx=CTX)
 
         assert _text(result) == (
             f"Could not update flow: {NOT_AUTHORING_ASSISTANT_MESSAGE}"
@@ -733,7 +738,9 @@ class TestEditModeGate:
     ):
         mine, service = self._rig(monkeypatch)
 
-        result = await update_flow(name="Daily brief", note="Renamed", ctx=CTX)
+        result = await update_flow(
+            expected_revision=1, name="Daily brief", note="Renamed", ctx=CTX
+        )
 
         assert _text(result) == f"Could not update flow: {VIEW_MODE_MESSAGE}"
         assert result.isError is False
@@ -822,6 +829,7 @@ class TestUpdatePublishDelete:
         _patch_context(monkeypatch, flow_service=service, space_id=space_id)
 
         result = await update_flow(
+            expected_revision=1,
             flow_id=flow.id,
             steps=[
                 ComposeStep(key="wrap", name="Only wrap", template="{{form.topic}}")
@@ -846,7 +854,7 @@ class TestUpdatePublishDelete:
         service = FakeFlowService([flow])
         _patch_context(monkeypatch, flow_service=service, space_id=space_id)
 
-        result = await update_flow(flow_id=flow.id, ctx=CTX)
+        result = await update_flow(expected_revision=1, flow_id=flow.id, ctx=CTX)
 
         assert _text(result).startswith("Could not update flow: Nothing to change")
         assert service.calls == []
@@ -888,6 +896,7 @@ class TestRevisions:
         _patch_context(monkeypatch, flow_service=service, space_id=space_id)
 
         result = await update_flow(
+            expected_revision=1,
             flow_id=flow.id,
             name="Daily brief",
             note="Renamed at the user's request",
@@ -916,7 +925,13 @@ class TestRevisions:
         flow = _flow(space_id=space_id)
         service = FakeFlowService([flow])
         _patch_context(monkeypatch, flow_service=service, space_id=space_id)
-        await update_flow(flow_id=flow.id, name="Daily brief", note="Renamed", ctx=CTX)
+        await update_flow(
+            expected_revision=1,
+            flow_id=flow.id,
+            name="Daily brief",
+            note="Renamed",
+            ctx=CTX,
+        )
         service.revisions[flow.id][0] = service.revisions[flow.id][0].model_copy(
             update={"published_version": 1}
         )
@@ -961,7 +976,9 @@ class TestRevisions:
         flow = _flow(space_id=space_id)
         service = FakeFlowService([flow])
         _patch_context(monkeypatch, flow_service=service, space_id=space_id)
-        await update_flow(flow_id=flow.id, name="Daily brief", ctx=CTX)
+        await update_flow(
+            expected_revision=1, flow_id=flow.id, name="Daily brief", ctx=CTX
+        )
 
         result = await restore_revision(flow_id=flow.id, revision=1, ctx=CTX)
 

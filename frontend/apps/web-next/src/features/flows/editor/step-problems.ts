@@ -15,6 +15,7 @@ const FIELDS = new Set<string>([
   "model_kwargs",
   "files_from",
   "knowledge",
+  "processing",
   "output",
   "template",
   "template_file_id",

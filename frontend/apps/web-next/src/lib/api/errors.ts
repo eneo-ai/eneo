@@ -149,6 +149,7 @@ export async function unwrap<T>(
 const ERROR_MESSAGE_KEYS: Record<number, string> = {
   // Authorization & authentication
   9001: "eneo_error_9001", // UNAUTHORIZED
+  9074: "eneo_error_9074", // FLOW_REVISION_CONFLICT
   9005: "eneo_error_9005", // AUTHENTICATION_ERROR
   9019: "eneo_error_9019", // USER_INACTIVE
   9025: "eneo_error_9025", // TENANT_SUSPENDED

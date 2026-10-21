@@ -1,9 +1,7 @@
 """Runs of a published flow: start, inspect, cancel, review.
 
-Read access follows ``can_read_flows`` on the flow's space; starting a run
-and reviewing need read; cancelling needs read plus ownership of the run or
-edit rights. A run's files (inputs it was given, documents it produced) are
-readable by every reader of the flow through signed links minted here.
+Readers start and operate their own runs. Human space owners/admins may
+also inspect and operate other principals' runs. Files follow run access.
 Execution itself lives in :class:`FlowRunExecutor`; this service only
 queues the durable job and exposes state.
 
@@ -16,10 +14,9 @@ it started and runs published versions only.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
-
-import jsonschema
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
@@ -57,6 +54,8 @@ from eneo.flows.flow_models import (
 )
 from eneo.flows.flow_repo import RunFileEntry
 from eneo.flows.flow_run_executor import REVIEW_REJECTED
+from eneo.flows.lifecycle import finish_run
+from eneo.flows.schema_validation import validate_value
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_service import JobService
 from eneo.jobs.task_models import FlowRunParams
@@ -156,7 +155,7 @@ class FlowRunService:
     # --- Lookups and authorization ---
 
     async def _require_run(
-        self, run_id: UUID, *, flow_id: Optional[UUID] = None
+        self, run_id: UUID, *, flow_id: Optional[UUID] = None, mutate: bool = False
     ) -> FlowRuns:
         run = await self.repo.get_run(run_id, self.user.tenant_id)
         # A run is only addressable through its own flow: a valid run id
@@ -173,12 +172,26 @@ class FlowRunService:
         if flow is None:
             raise NotFoundException("Flow run not found")
         await self.flow_service.authorize_space(flow.space_id, "read")
+        if not self._owns(run) and not await self.flow_service.can_operate_runs(
+            flow.space_id
+        ):
+            raise NotFoundException("Flow run not found")
+        if mutate:
+            flow = await self.repo.get_flow(
+                flow.id, self.user.tenant_id, for_update=True
+            )
+            if flow is None:
+                raise NotFoundException("Flow not found")
+            run = await self.repo.get_run(run_id, self.user.tenant_id, for_update=True)
+            assert run is not None
         return run
 
     async def _definition_for(self, run: FlowRuns) -> FlowDefinition:
         return await run_definition(self.repo, run)
 
     def _owns(self, run: FlowRuns) -> bool:
+        if self.service_key_id is not None:
+            return run.principal_service_id == self.service_key_id
         return run.principal_user_id == self.user.id
 
     async def _audit_run(
@@ -213,15 +226,30 @@ class FlowRunService:
 
     async def _usable_file_ids(self, flow_id: UUID, ids: list[UUID]) -> set[UUID]:
         """Files a run may be given: the caller's own, or runtime uploads of
-        the flow (an API consumer's uploads, whoever starts the run)."""
+        the caller uploaded for this flow. An id is never upload authority."""
         usable: set[UUID] = set()
-        for info in await self.file_service.get_file_infos(ids):
-            if info.user_id == self.user.id:
-                usable.add(info.id)
-            elif await self.repo.get_flow_file(
-                flow_id, info.id, role=RUNTIME_UPLOAD_ROLE
+        for file_id in ids:
+            row = await self.repo.get_flow_file(
+                flow_id, file_id, role=RUNTIME_UPLOAD_ROLE
+            )
+            if row is not None and (
+                (
+                    self.service_key_id is not None
+                    and row.principal_service_id == self.service_key_id
+                )
+                or (
+                    self.service_key_id is None
+                    and row.principal_user_id == self.user.id
+                )
             ):
-                usable.add(info.id)
+                usable.add(file_id)
+        # Service uploads are stored as the flow author's files. The scoped
+        # association above is their authority; generic file ownership is not.
+        remaining = [file_id for file_id in ids if file_id not in usable]
+        if self.service_key_id is None and remaining:
+            for info in await self.file_service.get_file_infos(remaining):
+                if info.user_id == self.user.id:
+                    usable.add(info.id)
         return usable
 
     async def _validate_run_input(
@@ -324,6 +352,10 @@ class FlowRunService:
         of the draft as it is now (editors only; nothing is published)."""
         version: int | None
         service_id = self.service_key_id
+        # Serialize creation/idempotent replay with publication and retirement.
+        flow = await self.repo.get_flow(flow_id, self.user.tenant_id, for_update=True)
+        if flow is None:
+            raise NotFoundException("Flow not found")
         if draft and service_id is not None:
             raise UnauthorizedException("Service API keys run published versions only.")
         if draft:
@@ -345,7 +377,11 @@ class FlowRunService:
                 )
         if idempotency_key:
             existing = await self.repo.get_run_by_idempotency_key(
-                flow_id, idempotency_key
+                flow_id,
+                idempotency_key,
+                tenant_id=self.user.tenant_id,
+                principal_user_id=self._principal_user_id,
+                principal_service_id=service_id,
             )
             if existing is not None:
                 return await self._run_public(existing)
@@ -354,10 +390,26 @@ class FlowRunService:
         normalized = await self._validate_run_input(
             flow_id, definition, values=values, files=files
         )
+        space = await self.flow_service.authorize_space(flow.space_id)
+        published = (
+            await self.repo.get_version(flow_id, version)
+            if version is not None
+            else None
+        )
+        if published is not None and published.runtime_bindings is None:
+            raise BadRequestException(
+                "Republish this flow to pin its execution dependencies before running it."
+            )
+        bindings = await self.flow_service.execution_bindings(
+            definition,
+            space,
+            published.runtime_bindings if published is not None else None,
+        )
         run = await self.repo.add_run(
             flow_id=flow_id,
             flow_version=version,
             definition=definition_to_json(definition),
+            runtime_bindings=bindings,
             is_test=draft,
             tenant_id=self.user.tenant_id,
             principal_type=(
@@ -445,12 +497,16 @@ class FlowRunService:
         if flow is None:
             raise NotFoundException("Flow not found")
         await self.flow_service.authorize_space(flow.space_id, "read")
+        operator = await self.flow_service.can_operate_runs(flow.space_id)
         runs, total = await self.repo.list_runs(
             flow_id,
             self.user.tenant_id,
             limit=limit,
             offset=offset,
             principal_service_id=self.service_key_id,
+            principal_user_id=self.user.id
+            if not operator and self.service_key_id is None
+            else None,
             statuses=statuses,
         )
         return [run_summary_public(run) for run in runs], total
@@ -473,11 +529,15 @@ class FlowRunService:
         if flow is None:
             raise NotFoundException("Flow not found")
         await self.flow_service.authorize_space(flow.space_id, "read")
+        operator = await self.flow_service.can_operate_runs(flow.space_id)
         rows = await self.repo.list_flow_artifacts(
             flow.id,
             self.user.tenant_id,
             limit=limit,
             principal_service_id=self.service_key_id,
+            principal_user_id=self.user.id
+            if not operator and self.service_key_id is None
+            else None,
         )
         return [
             FlowArtifactPublic(
@@ -536,7 +596,7 @@ class FlowRunService:
     async def cancel_run(
         self, run_id: UUID, *, flow_id: UUID | None = None, channel: str = "api"
     ) -> FlowRunPublic:
-        run = await self._require_run(run_id, flow_id=flow_id)
+        run = await self._require_run(run_id, flow_id=flow_id, mutate=True)
         if not self._owns(run):
             flow = await self.repo.get_flow(
                 run.flow_id, self.user.tenant_id, include_deleted=True
@@ -549,31 +609,16 @@ class FlowRunService:
                     "Only the person who started the run or a flow editor can "
                     "cancel it."
                 ) from exc
-        moved = await self.repo.update_run_status(
+        moved = await finish_run(
+            self.repo,
+            self.audit_service,
             run.id,
+            run.tenant_id,
             FlowRunStatus.CANCELLED,
-            expected_statuses=ACTIVE_RUN_STATUSES,
+            user=self.user,
         )
         if not moved:
             raise BadRequestException("Run is already finished.")
-        checkpoint = await self.repo.get_active_checkpoint(run.id)
-        if checkpoint is not None:
-            await self.repo.decide_checkpoint(
-                checkpoint.id,
-                state=ReviewCheckpointState.CANCELLED,
-                from_states=(
-                    ReviewCheckpointState.AWAITING_REVIEW,
-                    ReviewCheckpointState.EDITED,
-                    ReviewCheckpointState.APPROVED,
-                ),
-                decided_by_principal_type=self._principal_type.value,
-                decided_by_user_id=self._principal_user_id,
-                decided_by_service_id=self.service_key_id,
-            )
-        await self.repo.cancel_pending_step_results(run.id)
-        await self._audit_run(
-            ActionType.FLOW_RUN_CANCELLED, run, "Cancelled flow run", channel=channel
-        )
         refreshed = await self.repo.get_run(run.id, self.user.tenant_id)
         assert refreshed is not None
         return await self._run_public(refreshed)
@@ -593,6 +638,10 @@ class FlowRunService:
         checkpoint = await self.repo.get_checkpoint(checkpoint_id, run.id)
         if checkpoint is None:
             raise NotFoundException("Review checkpoint not found")
+        if checkpoint.expires_at is not None and checkpoint.expires_at <= datetime.now(
+            UTC
+        ):
+            raise BadRequestException("The review checkpoint has expired.")
         return checkpoint
 
     @staticmethod
@@ -631,10 +680,10 @@ class FlowRunService:
                 target = definition.step_by_key(target_key) if target_key else None
             if isinstance(target, LlmStep) and target.output.type == "json":
                 try:
-                    jsonschema.validate(payload["value"], target.output.schema_)
-                except jsonschema.ValidationError as exc:
+                    await validate_value(payload["value"], target.output.schema_)
+                except ValueError as exc:
                     raise BadRequestException(
-                        f"Edited value does not satisfy the step schema: {exc.message}"
+                        f"Edited value does not satisfy the step schema: {exc}"
                     ) from exc
             text = payload.get("text")
             return {
@@ -655,7 +704,7 @@ class FlowRunService:
         current_payload_json: dict[str, Any],
         flow_id: UUID | None = None,
     ) -> FlowRunReviewCheckpointPublic:
-        run = await self._require_run(run_id, flow_id=flow_id)
+        run = await self._require_run(run_id, flow_id=flow_id, mutate=True)
         checkpoint = await self._require_checkpoint(run, checkpoint_id)
         self._require_open(checkpoint)
         self._require_revision(checkpoint, expected_revision)
@@ -673,6 +722,13 @@ class FlowRunService:
         )
         if not moved:
             raise BadRequestException("Review checkpoint changed since it was read.")
+        await self._audit_run(
+            ActionType.FLOW_RUN_REVIEW_EDITED,
+            run,
+            "Edited flow run review",
+            channel="api",
+            extra={"checkpoint_id": str(checkpoint.id)},
+        )
         refreshed = await self._require_checkpoint(run, checkpoint_id)
         return checkpoint_public(refreshed)
 
@@ -709,7 +765,7 @@ class FlowRunService:
         resume: bool = True,
         channel: str = "api",
     ) -> FlowRunReviewCheckpointResumeResponse:
-        run = await self._require_run(run_id, flow_id=flow_id)
+        run = await self._require_run(run_id, flow_id=flow_id, mutate=True)
         if run.status != FlowRunStatus.AWAITING_REVIEW.value:
             raise BadRequestException("Run is not awaiting review.")
         checkpoint = await self._require_checkpoint(run, checkpoint_id)
@@ -749,11 +805,18 @@ class FlowRunService:
         flow_id: UUID | None = None,
         channel: str = "api",
     ) -> FlowRunReviewCheckpointResumeResponse:
-        run = await self._require_run(run_id, flow_id=flow_id)
+        run = await self._require_run(run_id, flow_id=flow_id, mutate=True)
         checkpoint = await self._require_checkpoint(run, checkpoint_id)
         if checkpoint.state != ReviewCheckpointState.APPROVED.value:
             raise BadRequestException("Review checkpoint is not approved.")
         self._require_revision(checkpoint, expected_revision)
+        await self._audit_run(
+            ActionType.FLOW_RUN_REVIEW_RESUMED,
+            run,
+            "Resumed flow run review",
+            channel=channel,
+            extra={"checkpoint_id": str(checkpoint.id)},
+        )
         return await self._resume(run, checkpoint)
 
     async def reject_checkpoint(
@@ -766,7 +829,7 @@ class FlowRunService:
         flow_id: UUID | None = None,
         channel: str = "api",
     ) -> FlowRunReviewCheckpointPublic:
-        run = await self._require_run(run_id, flow_id=flow_id)
+        run = await self._require_run(run_id, flow_id=flow_id, mutate=True)
         if run.status != FlowRunStatus.AWAITING_REVIEW.value:
             raise BadRequestException("Run is not awaiting review.")
         checkpoint = await self._require_checkpoint(run, checkpoint_id)
@@ -791,12 +854,15 @@ class FlowRunService:
             error_code=REVIEW_REJECTED,
             error_message=message,
         )
-        await self.repo.cancel_pending_step_results(run.id)
-        await self.repo.update_run_status(
+        await finish_run(
+            self.repo,
+            self.audit_service,
             run.id,
+            run.tenant_id,
             FlowRunStatus.FAILED,
             error={"code": REVIEW_REJECTED, "message": message},
             expected_statuses=(FlowRunStatus.AWAITING_REVIEW,),
+            user=self.user,
         )
         await self._audit_run(
             ActionType.FLOW_RUN_REVIEWED,

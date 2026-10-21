@@ -18,6 +18,7 @@ import { toastApiError } from "@/lib/api/toast";
 import { FlowDefinition } from "./flow-definition";
 import { flowFunctionsQueryOptions } from "./flow-functions";
 import { FlowHistory } from "./flow-history";
+import { FlowPublication } from "./flow-publication";
 import { isFlowPanelTab } from "./flow-panel-store";
 import { FlowRunDetail } from "./flow-run-detail";
 import { FlowRunDialog } from "./flow-run-dialog";
@@ -140,8 +141,20 @@ export function FlowPanel({ switcher, maximise, primary, headingLevel }: Occupan
   });
   // Changes made on the overview (moving a step, the run inputs) save the whole definition.
   const saveDefinition = useMutation({
-    mutationFn: ({ definition: next, note }: { definition: Definition; note: string }) =>
-      updateFlow(flowId!, { definition: next, note }),
+    mutationFn: ({
+      definition: next,
+      note,
+      expectedRevision
+    }: {
+      definition: Definition;
+      note: string;
+      expectedRevision?: number;
+    }) =>
+      updateFlow(flowId!, {
+        definition: next,
+        note,
+        expected_revision: expectedRevision ?? flow.data!.revision ?? 1
+      }),
     onSuccess: (updated) => {
       setOverviewProblems([]);
       setFlow(updated);
@@ -234,6 +247,7 @@ export function FlowPanel({ switcher, maximise, primary, headingLevel }: Occupan
           }}
         />
       )}
+      {can("publish", "flow") && <FlowPublication flow={flow.data} onSaved={setFlow} />}
     </>
   );
 
@@ -350,10 +364,11 @@ export function FlowPanel({ switcher, maximise, primary, headingLevel }: Occupan
                           }
                         : undefined
                     }
-                    onSaveInputs={(fields) =>
+                    onSaveInputs={(fields, expectedRevision) =>
                       saveDefinition.mutateAsync({
                         definition: { ...data.definition, form_fields: fields },
-                        note: t("flow_inputs_note")
+                        note: t("flow_inputs_note"),
+                        expectedRevision
                       })
                     }
                     saving={saveDefinition.isPending}

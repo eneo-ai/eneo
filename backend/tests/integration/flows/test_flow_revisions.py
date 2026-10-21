@@ -5,7 +5,7 @@ import pytest
 from eneo.database.tables.sessions_table import Sessions
 from eneo.flows.definition import ComposeStep, FlowDefinition, LlmStep
 from eneo.main.exceptions import BadRequestException, NotFoundException
-from tests.integration.flows.conftest import topic_field
+from tests.integration.flows.conftest import patch_flow, topic_field
 
 
 def _two_steps(model_id) -> FlowDefinition:
@@ -206,13 +206,16 @@ async def test_a_flow_starts_empty_and_its_chat_fills_it_in(
         monkeypatch.setattr(flows_mcp, "internal_tool_context", tool_context)
 
         # The chat's write tools wait for the person to enter edit mode.
-        refused = await flows_mcp.update_flow(ctx=object(), name="Brief")
+        refused = await flows_mcp.update_flow(
+            ctx=object(), name="Brief", expected_revision=1
+        )
         assert refused.content[0].text.startswith(
             "Could not update flow: The flow is shown in view mode."
         )
         assert (await flow_service.enter_edit_mode(draft.id)).editing is True
 
         result = await flows_mcp.update_flow(
+            expected_revision=1,
             ctx=object(),
             name="Brief",
             form_fields=[topic_field()],
@@ -274,7 +277,8 @@ async def test_the_panel_saves_through_patch_as_api_revisions_keeping_step_ids(
 
     definition = (await client.get(url, headers=bearer)).json()["definition"]
     definition["steps"][0]["prompt"] = "draft carefully"
-    saved = await client.patch(
+    saved = await patch_flow(
+        client,
         url,
         json={"definition": definition, "note": "Sharper draft prompt"},
         headers=bearer,
@@ -294,11 +298,13 @@ async def test_the_panel_saves_through_patch_as_api_revisions_keeping_step_ids(
     assert history[0]["changes"]["steps_changed"] == ["Draft"]
 
     # Name and description alone are a revision too; a no-op save is not.
-    renamed = await client.patch(url, json={"name": "Weekly brief"}, headers=bearer)
+    renamed = await patch_flow(
+        client, url, json={"name": "Weekly brief"}, headers=bearer
+    )
     assert renamed.status_code == 200 and renamed.json()["revision"] == 3
-    same = await client.patch(url, json={"name": "Weekly brief"}, headers=bearer)
+    same = await patch_flow(client, url, json={"name": "Weekly brief"}, headers=bearer)
     assert same.status_code == 200 and same.json()["revision"] == 3
-    unknown = await client.patch(url, json={"colour": "blue"}, headers=bearer)
+    unknown = await patch_flow(client, url, json={"colour": "blue"}, headers=bearer)
     assert unknown.status_code == 422
 
 
@@ -311,7 +317,9 @@ async def test_a_definition_with_problems_is_refused_with_the_problems_listed(
     definition = (await client.get(url, headers=bearer)).json()["definition"]
     definition["steps"][1]["template"] = "Done: {{steps.nope}}"
 
-    refused = await client.patch(url, json={"definition": definition}, headers=bearer)
+    refused = await patch_flow(
+        client, url, json={"definition": definition}, headers=bearer
+    )
 
     assert refused.status_code == 422, refused.text
     body = refused.json()
@@ -353,7 +361,9 @@ async def test_step_origins_tell_which_steps_the_panel_changed_since_the_chat(
     await client.post(f"{url}edit-mode/", headers=bearer)
     definition = (await client.get(url, headers=bearer)).json()["definition"]
     definition["steps"][0]["prompt"] = "draft, panel style"
-    saved = await client.patch(url, json={"definition": definition}, headers=bearer)
+    saved = await patch_flow(
+        client, url, json={"definition": definition}, headers=bearer
+    )
     assert saved.status_code == 200, saved.text
 
     origins = {o["key"]: o for o in saved.json()["step_origins"]}
@@ -367,7 +377,11 @@ async def test_step_origins_tell_which_steps_the_panel_changed_since_the_chat(
 
     # Restoring the chat's version is an api save (the origin); the chat's
     # older, different version is what remains to go back to.
-    restored = await client.post(f"{url}revisions/2/restore/", headers=bearer)
+    restored = await client.post(
+        f"{url}revisions/2/restore/",
+        json={"expected_revision": saved.json()["revision"]},
+        headers=bearer,
+    )
     assert restored.status_code == 200, restored.text
     origins = {o["key"]: o for o in restored.json()["step_origins"]}
     assert (origins["draft"]["revision"], origins["draft"]["channel"]) == (4, "api")

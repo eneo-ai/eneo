@@ -137,7 +137,13 @@ class FlowPublic(BaseModel):
     step_origins: list[StepOriginPublic] = Field(default_factory=list[StepOriginPublic])
 
 
-class FlowUpdateRequest(BaseModel):
+class FlowRevisionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=1)
+
+
+class FlowUpdateRequest(FlowRevisionRequest):
     """Change the draft from the panel; only the fields given change."""
 
     model_config = ConfigDict(extra="forbid")
@@ -487,6 +493,10 @@ class FlowTranscriptPublic(BaseModel):
     step_id: UUID
     segments_hash: str
     segments: list[dict[str, Any]]
+    original_segments: list[dict[str, Any]] = Field(
+        default_factory=list[dict[str, Any]]
+    )
+    corrections: FlowTranscriptCorrectionsPublic | None = None
     speaker_names: dict[str, Optional[str]]
     text: str
     corrections_revision: Optional[int] = None

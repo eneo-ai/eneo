@@ -59,6 +59,7 @@ from eneo.main.exceptions import (
     FlowConversationConflictException,
     FlowDefinitionProblemsException,
     FlowNotEditingException,
+    FlowRevisionConflictException,
     FlowRuntimeFileInUseException,
     NotFoundException,
     UnauthorizedException,
@@ -68,6 +69,7 @@ if TYPE_CHECKING:
     from fastapi import UploadFile
 
     from eneo.actors.actor_manager import ActorManager
+    from eneo.assistants.assistant_service import AssistantService
     from eneo.audit.application.audit_service import AuditService
     from eneo.completion_models.application.completion_model_crud_service import (
         CompletionModelCRUDService,
@@ -108,6 +110,7 @@ class FlowService:
         audit_service: AuditService,
         file_service: FileService,
         user_repo: UsersRepository,
+        assistant_service: AssistantService,
     ):
         self.user = user
         self.repo = repo
@@ -117,6 +120,7 @@ class FlowService:
         self.audit_service = audit_service
         self.file_service = file_service
         self.user_repo = user_repo
+        self.assistant_service = assistant_service
 
     # --- Principals ---
 
@@ -187,6 +191,23 @@ class FlowService:
             self.service_key_id is not None and flow.published_version is None
         ):
             raise NotFoundException("Flow not found")
+        return flow
+
+    async def can_operate_runs(self, space_id: UUID) -> bool:
+        space = await self.authorize_space(space_id)
+        actor = self.actor_manager.get_space_actor_from_space(space=space)
+        return actor.can_operate_flow_runs()
+
+    async def _lock_revision(
+        self, flow_id: UUID, expected_revision: int | None
+    ) -> Flows:
+        flow = await self.repo.get_flow(flow_id, self.user.tenant_id, for_update=True)
+        if flow is None:
+            raise NotFoundException("Flow not found")
+        if expected_revision is not None and (
+            await self.repo.latest_revision_number(flow_id) != expected_revision
+        ):
+            raise FlowRevisionConflictException()
         return flow
 
     # --- Validation ---
@@ -417,6 +438,16 @@ class FlowService:
         version = await self.repo.get_version(flow.id, flow.published_version)
         return version is None or version.definition != flow.definition
 
+    async def execution_bindings(
+        self,
+        definition: FlowDefinition,
+        space: Space,
+        expected: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from eneo.flows.execution_bindings import bind_execution
+
+        return await bind_execution(definition, space, self.assistant_service, expected)
+
     async def _to_public(self, flow: Flows) -> FlowPublic:
         revisions = await self.repo.recent_revisions(flow.id, limit=STEP_ORIGIN_WINDOW)
         sessions = await self.repo.edit_sessions(flow.id)
@@ -532,7 +563,12 @@ class FlowService:
         return flow_revision_public(row, previous, published.get(row.revision))
 
     async def restore_revision(
-        self, flow_id: UUID, revision: int, *, channel: str = "api"
+        self,
+        flow_id: UUID,
+        revision: int,
+        *,
+        channel: str = "api",
+        expected_revision: int | None = None,
     ) -> FlowPublic:
         """Make an older revision the draft again, as a new revision.
 
@@ -553,6 +589,7 @@ class FlowService:
             channel=channel,
             note=f"Restored revision {revision}",
             restored_from=revision,
+            expected_revision=expected_revision,
         )
 
     async def create_flow(
@@ -648,6 +685,7 @@ class FlowService:
         channel: str = "api",
         note: str | None = None,
         restored_from: int | None = None,
+        expected_revision: int | None = None,
     ) -> FlowPublic:
         """Replace name, description and/or definition.
 
@@ -660,6 +698,7 @@ class FlowService:
         """
         flow = await self._require_flow(flow_id)
         space = await self.authorize_space(flow.space_id, "edit")
+        flow = await self._lock_revision(flow_id, expected_revision)
         if conversation_id is not None and flow.conversation_id is None:
             await self.repo.set_conversation_id(flow.id, conversation_id)
         definition_json: Optional[dict[str, Any]] = None
@@ -720,26 +759,47 @@ class FlowService:
 
     async def list_flows(self, space_id: UUID) -> list[FlowSparsePublic]:
         await self.authorize_space(space_id)
-        rows = await self.repo.list_flows(space_id, self.user.tenant_id)
+        operator = await self.can_operate_runs(space_id)
+        rows = await self.repo.list_flows(
+            space_id,
+            self.user.tenant_id,
+            principal_service_id=self.service_key_id,
+            principal_user_id=self.user.id
+            if not operator and self.service_key_id is None
+            else None,
+        )
         if self.service_key_id is not None:
             rows = [row for row in rows if row.flow.published_version is not None]
         return [flow_sparse_public(row.flow, row.last_run) for row in rows]
 
-    async def publish_flow(self, flow_id: UUID, channel: str = "api") -> FlowPublic:
+    async def publish_flow(
+        self,
+        flow_id: UUID,
+        channel: str = "api",
+        *,
+        expected_revision: int | None = None,
+    ) -> FlowPublic:
         """Freeze the draft as the next version; runs execute that snapshot."""
         flow = await self._require_flow(flow_id)
         space = await self.authorize_space(flow.space_id, "publish")
+        flow = await self._lock_revision(flow_id, expected_revision)
         definition = definition_from_json(flow.definition)
         await self._require_runnable(flow, definition, space, action="published")
+        bindings = await self.execution_bindings(definition, space)
         if flow.published_version is not None:
             current = await self.repo.get_version(flow.id, flow.published_version)
-            if current is not None and current.definition == flow.definition:
+            if (
+                current is not None
+                and current.definition == flow.definition
+                and current.runtime_bindings == bindings
+            ):
                 return await self._to_public(flow)
-        version = (flow.published_version or 0) + 1
+        version = await self.repo.next_version_number(flow.id)
         await self.repo.add_version(
             flow_id=flow.id,
             version=version,
             definition=flow.definition,
+            runtime_bindings=bindings,
             published_by_user_id=self.user.id,
             revision=await self.repo.latest_revision_number(flow.id) or None,
         )
@@ -752,6 +812,19 @@ class FlowService:
             extra={"version": version},
         )
         return await self._to_public(refreshed)
+
+    async def unpublish_flow(
+        self, flow_id: UUID, *, expected_revision: int
+    ) -> FlowPublic:
+        flow = await self._require_flow(flow_id)
+        await self.authorize_space(flow.space_id, "publish")
+        flow = await self._lock_revision(flow_id, expected_revision)
+        if flow.published_version is not None:
+            await self.repo.unpublish_flow(flow.id, self.user.tenant_id)
+            await self._audit(
+                ActionType.FLOW_UNPUBLISHED, flow, "Unpublished flow", channel="api"
+            )
+        return await self._to_public(await self._require_flow(flow.id))
 
     async def _require_runnable(
         self, flow: Flows, definition: FlowDefinition, space: Space, *, action: str
@@ -789,6 +862,7 @@ class FlowService:
     async def delete_flow(self, flow_id: UUID, channel: str = "api") -> None:
         flow = await self._require_flow(flow_id)
         await self.authorize_space(flow.space_id, "delete")
+        await self._lock_revision(flow_id, None)
         await self.repo.soft_delete_flow(flow.id)
         await self._audit(
             ActionType.FLOW_DELETED, flow, "Deleted flow", channel=channel

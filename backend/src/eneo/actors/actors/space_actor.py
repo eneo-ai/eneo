@@ -1021,6 +1021,14 @@ class SpaceActor:
             resource_type=SpaceResourceType.FLOW,
         )
 
+    def can_operate_flow_runs(self) -> bool:
+        """Only human space owners/admins may operate other principals' runs."""
+        return (
+            not self._is_service_api_key()
+            and self.can_read_flows()
+            and self._get_role() in (SpaceRole.OWNER, SpaceRole.ADMIN)
+        )
+
     def can_create_flows(self):
         return self.can_perform_action(
             action=SpaceAction.CREATE,

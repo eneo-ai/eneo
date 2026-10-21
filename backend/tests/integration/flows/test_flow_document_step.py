@@ -19,7 +19,6 @@ from eneo.assistants.assistant_service import AssistantService
 from eneo.database.tables.capabilities_table import SpaceCapabilities
 from eneo.flows.definition import DocumentStep, FlowDefinition, LlmStep
 from eneo.flows.flow_models import FlowRunStatus, StepResultStatus
-from eneo.flows.step_runners import STEP_DOCUMENT_UNAVAILABLE
 from eneo.main.exceptions import BadRequestException
 from eneo.mcp_servers.domain.entities.mcp_server import DOCX_MIME_TYPE
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
@@ -317,7 +316,6 @@ async def test_a_run_fails_cleanly_when_no_document_provider_serves_the_space(
     provider,
     runtime,
 ):
-    runtime.server = None
     async with db_container() as container:
         model, space, _ = await _document_space(
             container, member_space, completion_model_factory, "noprov"
@@ -327,11 +325,12 @@ async def test_a_run_fails_cleanly_when_no_document_provider_serves_the_space(
         run = await run_service.create_run(
             flow.id, values={"topic": "hamnar"}, files={}
         )
+        runtime.server = None
         await run_service.execute_run(run.id)
 
         finished = await run_service.get_run(run.id, flow_id=flow.id)
         assert finished.status == FlowRunStatus.FAILED
-        assert finished.error.code == STEP_DOCUMENT_UNAVAILABLE
+        assert finished.error.code == "flow_execution_dependency_changed"
         assert finished.steps[0].status == StepResultStatus.COMPLETED
         assert finished.steps[1].status == StepResultStatus.FAILED
         assert finished.result_files == []

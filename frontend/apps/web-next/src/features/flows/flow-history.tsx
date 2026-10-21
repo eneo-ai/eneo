@@ -196,7 +196,7 @@ function RevisionDetail({
   const [confirming, setConfirming] = useState(false);
   const isCurrent = flow.revision === revision;
   const restore = useMutation({
-    mutationFn: () => restoreFlowRevision(flow.id, revision),
+    mutationFn: () => restoreFlowRevision(flow.id, revision, flow.revision ?? 1),
     onSuccess: () => {
       void invalidateFlow(queryClient, flow.id);
       setConfirming(false);

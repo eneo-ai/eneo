@@ -77,7 +77,7 @@ export function FunctionForm({
   return (
     <>
       <NameFields step={step} onChange={draft.update} problems={problems} />
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid gap-4 sm:grid-cols-2 sm:items-end">
         <Selector
           label={t("flow_param_function")}
           options={PURPOSES.map((purpose) => {

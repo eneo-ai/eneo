@@ -65,6 +65,7 @@ const FIELD_LABEL_KEYS: Record<DraftField, string> = {
   model_kwargs: "flow_model_settings",
   files_from: "flow_param_files",
   knowledge: "knowledge",
+  processing: "flow_processing_label",
   output: "output",
   template: "flow_param_template",
   template_file_id: "flow_param_template_file",
@@ -116,6 +117,12 @@ function localProblems(step: FlowStep, t: Translate): FieldProblems {
   const problems: FieldProblems = {};
   if (!step.name.trim()) problems.name = t("flow_editor_required");
   if (step.kind === "llm" && !step.prompt.trim()) problems.prompt = t("flow_editor_required");
+  if (
+    step.kind === "llm" &&
+    step.processing?.mode === "summarize" &&
+    !step.processing.summary_prompt?.trim()
+  )
+    problems.processing = t("flow_editor_required");
   if (step.kind === "compose" && !step.template.trim()) {
     problems.template = t("flow_editor_required");
   }
@@ -381,18 +388,22 @@ export function FlowStepEditor({
   const t = useTranslations();
   const queryClient = useQueryClient();
   const formId = useId();
-  const { definition } = flow;
+  const [base] = useState(() => ({ flow, target }));
+  const { definition } = base.flow;
   const steps = stepsOf(definition);
-  const isNew = !("step" in target);
-  const index = isNew ? target.index : steps.findIndex((step) => step.key === target.step.key);
+  const editTarget = base.target;
+  const isNew = !("step" in editTarget);
+  const index = isNew
+    ? editTarget.index
+    : steps.findIndex((step) => step.key === editTarget.step.key);
   const saved = useMemo<FlowStep>(
     () =>
-      "step" in target
-        ? target.step
-        : emptyStep(target.kind, index > 0 ? (steps[index - 1]?.key ?? null) : null),
+      "step" in editTarget
+        ? editTarget.step
+        : emptyStep(editTarget.kind, index > 0 ? (steps[index - 1]?.key ?? null) : null),
     // A new step's blank form is made once; the flow's steps may refetch meanwhile.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [target, index]
+    [editTarget, index]
   );
   const draft = useStepDraft(saved);
   const [note, setNote] = useState("");
@@ -420,7 +431,11 @@ export function FlowStepEditor({
 
   const save = useMutation({
     mutationFn: (next: FlowStep) =>
-      updateFlow(flow.id, { definition: withStep(next), note: note.trim() || null }),
+      updateFlow(flow.id, {
+        definition: withStep(next),
+        note: note.trim() || null,
+        expected_revision: base.flow.revision ?? 1
+      }),
     onSuccess: (updated, next) => {
       queryClient.setQueryData(flowKeys.flow(flow.id), updated);
       void invalidateFlow(queryClient, flow.id);
@@ -437,6 +452,7 @@ export function FlowStepEditor({
   const remove = useMutation({
     mutationFn: () =>
       updateFlow(flow.id, {
+        expected_revision: base.flow.revision ?? 1,
         definition: withStep(null),
         note: t("flow_editor_delete_note", { name: step.name })
       }),

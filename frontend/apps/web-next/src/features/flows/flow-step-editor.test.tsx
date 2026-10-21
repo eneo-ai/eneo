@@ -80,6 +80,33 @@ afterEach(() => {
 });
 
 describe("FlowStepEditor", () => {
+  it("keeps the revision and definition the editor opened even when the flow refetches", async () => {
+    api.PATCH.mockResolvedValue({ data: { ...flow, revision: 5 }, response: new Response("{}") });
+    const props = {
+      flow,
+      target: { step: intro },
+      wide: false,
+      onSaved: vi.fn(),
+      onCancel: vi.fn(),
+      onOpenRun: vi.fn(),
+      onDeleted: vi.fn()
+    };
+    const { rerender } = renderInApp(<FlowStepEditor {...props} />);
+    fireEvent.change(screen.getByLabelText(/Textmall/), { target: { value: "My unsaved text" } });
+    rerender(
+      <FlowStepEditor
+        {...props}
+        flow={{ ...flow, revision: 9, definition: { ...flow.definition, steps: [] } }}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Spara som utkast" }));
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+    const body = api.PATCH.mock.calls[0]![1].body;
+    expect(body.expected_revision).toBe(flow.revision);
+    expect(body.definition.steps).toHaveLength(steps.length);
+    expect(body.definition.steps[3].template).toBe("My unsaved text");
+  });
+
   it("counts changed fields, saves the whole definition with the step replaced, and reports", async () => {
     api.PATCH.mockResolvedValue({ data: { ...flow, revision: 5 }, response: new Response("{}") });
     const { onSaved } = editor({ step: intro });

@@ -5,15 +5,16 @@ import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Selector } from "@astryxdesign/core/Selector";
 import { TextArea } from "@astryxdesign/core/TextArea";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { useAppContext } from "@/components/providers/app-context";
 import { FileChip } from "@/features/apps/run/upload-input";
 import { useFileUploads, type FileUpload } from "@/features/files/use-file-uploads";
 import { toastApiError } from "@/lib/api/toast";
-import { createFlowRun, flowKeys } from "./flows";
+import { createFlowRun, flowKeys, flowRunContractQueryOptions } from "./flows";
 import { formFieldsOf, type FlowPublic, type FormField, type FlowRunPublic } from "./types";
 
 const FILE_TYPES = new Set(["file", "audio"]);
@@ -124,7 +125,12 @@ export function FlowRunDialog({
     published && !flow.has_unpublished_changes ? "published" : "draft"
   );
   const draft = !published || (canChoose && target === "draft");
-  const fields = formFieldsOf(flow.definition);
+  const contract = useQuery({
+    ...flowRunContractQueryOptions(flow.id, flow.published_version),
+    enabled: open && !draft
+  });
+  const fields = draft ? formFieldsOf(flow.definition) : (contract.data?.form_fields ?? []);
+  const contractUnavailable = !draft && !contract.isSuccess;
   const accept = limits.attachments.formats.map((format) => format.mimetype).join(",") || undefined;
 
   const register = useCallback((key: string, handle: FileFieldHandle | null) => {
@@ -134,6 +140,7 @@ export function FlowRunDialog({
 
   const start = useMutation({
     mutationFn: async () => {
+      if (contractUnavailable) throw new Error(t("flow_run_contract_unavailable"));
       const files: Record<string, string[]> = {};
       for (const [key, handle] of fileFields.current) {
         const picked = handle.files();
@@ -154,7 +161,7 @@ export function FlowRunDialog({
         values: payload,
         files,
         run_label: label.trim() || null,
-        expected_flow_version: draft ? null : flow.published_version,
+        expected_flow_version: draft ? null : contract.data!.published_flow_version,
         draft
       });
       // The run owns the files now; the fields must not delete them.
@@ -187,7 +194,7 @@ export function FlowRunDialog({
 
   function submit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (start.isPending) return;
+    if (start.isPending || contractUnavailable) return;
     const found: Record<string, string> = {};
     for (const field of fields) {
       const value = values[field.key] ?? "";
@@ -244,6 +251,11 @@ export function FlowRunDialog({
                     {t("flow_run_draft_hint")}
                   </p>
                 )}
+                {!draft && (
+                  <QueryStateBoundary query={contract} rows={2}>
+                    {() => null}
+                  </QueryStateBoundary>
+                )}
                 {fields.map((field) => {
                   const common = {
                     label: field.label,
@@ -254,7 +266,7 @@ export function FlowRunDialog({
                   if (FILE_TYPES.has(field.type)) {
                     return (
                       <FileField
-                        key={field.key}
+                        key={`${draft ? "draft" : flow.published_version}:${field.key}`}
                         field={field}
                         accept={accept}
                         problem={problems[field.key] ?? null}
@@ -328,6 +340,7 @@ export function FlowRunDialog({
                   variant="primary"
                   label={draft ? t("flow_run_test") : t("flow_run_start")}
                   isLoading={start.isPending}
+                  isDisabled={contractUnavailable}
                   isInterruptible
                 />
               </div>

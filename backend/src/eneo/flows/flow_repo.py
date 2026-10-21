@@ -146,11 +146,18 @@ class FlowRepository:
         return (await self.session.execute(stmt)).scalar_one()
 
     async def get_flow(
-        self, flow_id: UUID, tenant_id: UUID, *, include_deleted: bool = False
+        self,
+        flow_id: UUID,
+        tenant_id: UUID,
+        *,
+        include_deleted: bool = False,
+        for_update: bool = False,
     ) -> Optional[Flows]:
         stmt = sa.select(Flows).where(Flows.id == flow_id, Flows.tenant_id == tenant_id)
         if not include_deleted:
             stmt = stmt.where(Flows.deleted_at.is_(None))
+        if for_update:
+            stmt = stmt.with_for_update().execution_options(populate_existing=True)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
     async def get_flow_by_conversation(
@@ -169,10 +176,26 @@ class FlowRepository:
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
-    async def list_flows(self, space_id: UUID, tenant_id: UUID) -> list[FlowListRow]:
+    async def list_flows(
+        self,
+        space_id: UUID,
+        tenant_id: UUID,
+        *,
+        principal_user_id: Optional[UUID] = None,
+        principal_service_id: Optional[UUID] = None,
+    ) -> list[FlowListRow]:
+        visibility: list[Any] = []
+        if principal_service_id is not None:
+            visibility.append(FlowRuns.principal_service_id == principal_service_id)
+        elif principal_user_id is not None:
+            visibility.append(FlowRuns.principal_user_id == principal_user_id)
         last_run_id = (
             sa.select(FlowRuns.id)
-            .where(FlowRuns.flow_id == Flows.id)
+            .where(
+                FlowRuns.flow_id == Flows.id,
+                FlowRuns.tenant_id == tenant_id,
+                *visibility,
+            )
             .order_by(FlowRuns.created_at.desc(), FlowRuns.id.desc())
             .limit(1)
             .correlate(Flows)
@@ -262,12 +285,28 @@ class FlowRepository:
 
     # --- Versions ---
 
+    async def next_version_number(self, flow_id: UUID) -> int:
+        value = await self.session.scalar(
+            sa.select(sa.func.max(FlowVersions.version)).where(
+                FlowVersions.flow_id == flow_id
+            )
+        )
+        return (value or 0) + 1
+
+    async def unpublish_flow(self, flow_id: UUID, tenant_id: UUID) -> None:
+        await self.session.execute(
+            sa.update(Flows)
+            .where(Flows.id == flow_id, Flows.tenant_id == tenant_id)
+            .values(published_version=None, updated_at=_now())
+        )
+
     async def add_version(
         self,
         *,
         flow_id: UUID,
         version: int,
         definition: dict[str, Any],
+        runtime_bindings: Optional[dict[str, Any]] = None,
         published_by_user_id: Optional[UUID],
         revision: Optional[int] = None,
     ) -> FlowVersions:
@@ -278,6 +317,7 @@ class FlowRepository:
                     flow_id=flow_id,
                     version=version,
                     definition=definition,
+                    runtime_bindings=runtime_bindings,
                     published_by_user_id=published_by_user_id,
                     revision=revision,
                 )
@@ -444,6 +484,7 @@ class FlowRepository:
         flow_id: UUID,
         flow_version: Optional[int],
         definition: dict[str, Any],
+        runtime_bindings: Optional[dict[str, Any]] = None,
         tenant_id: UUID,
         principal_type: str,
         is_test: bool = False,
@@ -460,6 +501,7 @@ class FlowRepository:
                 flow_id=flow_id,
                 flow_version=flow_version,
                 definition=definition,
+                runtime_bindings=runtime_bindings,
                 is_test=is_test,
                 tenant_id=tenant_id,
                 principal_type=principal_type,
@@ -483,20 +525,75 @@ class FlowRepository:
             selectinload(FlowRuns.step_results), selectinload(FlowRuns.files)
         )
 
-    async def get_run(self, run_id: UUID, tenant_id: UUID) -> Optional[FlowRuns]:
+    async def get_run(
+        self, run_id: UUID, tenant_id: UUID, *, for_update: bool = False
+    ) -> Optional[FlowRuns]:
         stmt = (
             self._run_query()
             .where(FlowRuns.id == run_id, FlowRuns.tenant_id == tenant_id)
             .execution_options(populate_existing=True)
         )
+        if for_update:
+            stmt = stmt.with_for_update(of=FlowRuns)
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
+    async def run_can_continue(self, run_id: UUID, tenant_id: UUID) -> bool:
+        """Fresh scalar read between provider calls; no identity-map or row lock."""
+        return bool(
+            await self.session.scalar(
+                sa.select(
+                    sa.exists().where(
+                        FlowRuns.id == run_id,
+                        FlowRuns.tenant_id == tenant_id,
+                        FlowRuns.status == FlowRunStatus.RUNNING.value,
+                        Flows.id == FlowRuns.flow_id,
+                        Flows.tenant_id == tenant_id,
+                        Flows.deleted_at.is_(None),
+                    )
+                )
+            )
+        )
+
+    async def runs_needing_maintenance(
+        self, *, limit: int = 20
+    ) -> list[tuple[UUID, UUID, str]]:
+        """The system worker spans tenants; each mutation below is tenant scoped."""
+        expired = sa.exists().where(
+            FlowRunReviewCheckpoints.flow_run_id == FlowRuns.id,
+            FlowRunReviewCheckpoints.state.in_(FLOW_REVIEW_CHECKPOINT_ACTIVE_STATES),
+            FlowRunReviewCheckpoints.expires_at <= _now(),
+        )
+        stmt = (
+            sa.select(FlowRuns.id, FlowRuns.tenant_id, Flows.deleted_at)
+            .join(Flows, Flows.id == FlowRuns.flow_id)
+            .where(
+                FlowRuns.status.in_(["queued", "running", "awaiting_review"]),
+                sa.or_(Flows.deleted_at.is_not(None), expired),
+            )
+            .order_by(FlowRuns.created_at, FlowRuns.id)
+            .limit(limit)
+            .with_for_update(of=FlowRuns, skip_locked=True)
+        )
+        return [
+            (run_id, tenant_id, "flow_deleted" if deleted else "flow_review_expired")
+            for run_id, tenant_id, deleted in (await self.session.execute(stmt)).all()
+        ]
+
     async def get_run_by_idempotency_key(
-        self, flow_id: UUID, idempotency_key: str
+        self,
+        flow_id: UUID,
+        idempotency_key: str,
+        *,
+        tenant_id: UUID,
+        principal_user_id: Optional[UUID] = None,
+        principal_service_id: Optional[UUID] = None,
     ) -> Optional[FlowRuns]:
         stmt = self._run_query().where(
             FlowRuns.flow_id == flow_id,
             FlowRuns.idempotency_key == idempotency_key,
+            FlowRuns.tenant_id == tenant_id,
+            FlowRuns.principal_user_id == principal_user_id,
+            FlowRuns.principal_service_id == principal_service_id,
         )
         return (await self.session.execute(stmt)).scalar_one_or_none()
 
@@ -508,6 +605,7 @@ class FlowRepository:
         limit: int = 20,
         offset: int = 0,
         principal_service_id: Optional[UUID] = None,
+        principal_user_id: Optional[UUID] = None,
         statuses: Optional[tuple[FlowRunStatus, ...]] = None,
     ) -> tuple[list[FlowRuns], int]:
         """The flow's runs, newest first; a service principal sees only its own."""
@@ -517,6 +615,8 @@ class FlowRepository:
         )
         if principal_service_id is not None:
             where = (*where, FlowRuns.principal_service_id == principal_service_id)
+        elif principal_user_id is not None:
+            where = (*where, FlowRuns.principal_user_id == principal_user_id)
         if statuses:
             where = (*where, FlowRuns.status.in_([s.value for s in statuses]))
         total = (
@@ -652,6 +752,7 @@ class FlowRepository:
         *,
         limit: int = 50,
         principal_service_id: Optional[UUID] = None,
+        principal_user_id: Optional[UUID] = None,
     ) -> list[FlowArtifactRow]:
         """Files the flow's runs produced, newest first (a service principal's own runs)."""
         stmt = (
@@ -677,6 +778,8 @@ class FlowRepository:
         )
         if principal_service_id is not None:
             stmt = stmt.where(FlowRuns.principal_service_id == principal_service_id)
+        elif principal_user_id is not None:
+            stmt = stmt.where(FlowRuns.principal_user_id == principal_user_id)
         rows = (await self.session.execute(stmt)).all()
         return [
             FlowArtifactRow(
@@ -867,7 +970,7 @@ class FlowRepository:
         output_payload_json: dict[str, Any],
         num_tokens_input: Optional[int] = None,
         num_tokens_output: Optional[int] = None,
-    ) -> None:
+    ) -> bool:
         values: dict[str, Any] = {
             "status": StepResultStatus.COMPLETED.value,
             "output_payload_json": output_payload_json,
@@ -879,14 +982,25 @@ class FlowRepository:
         }
         if input_payload_json is not None:
             values["input_payload_json"] = input_payload_json
-        await self.session.execute(
+        result = await self.session.execute(
             sa.update(FlowStepResults)
             .where(
                 FlowStepResults.flow_run_id == run_id,
                 FlowStepResults.step_id == step_id,
+                FlowStepResults.status.in_(
+                    [
+                        StepResultStatus.RUNNING.value,
+                        StepResultStatus.AWAITING_REVIEW.value,
+                    ]
+                ),
+                sa.exists().where(
+                    FlowRuns.id == run_id,
+                    FlowRuns.status == FlowRunStatus.RUNNING.value,
+                ),
             )
             .values(**values)
         )
+        return _rowcount(result) == 1
 
     async def fail_step_result(
         self,

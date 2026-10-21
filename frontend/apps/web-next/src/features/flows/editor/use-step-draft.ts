@@ -11,6 +11,7 @@ export type DraftField =
   | "model_kwargs"
   | "files_from"
   | "knowledge"
+  | "processing"
   | "output"
   | "template"
   | "template_file_id"
@@ -43,6 +44,7 @@ export const KIND_FIELDS: Record<FlowStep["kind"], DraftField[]> = {
     "model_kwargs",
     "files_from",
     "knowledge",
+    "processing",
     "output"
   ],
   compose: ["name", "description", "template"],

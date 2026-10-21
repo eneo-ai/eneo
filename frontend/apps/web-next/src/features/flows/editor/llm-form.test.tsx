@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
+import { expectNoAxeViolations } from "@/test/axe";
 import { flowFixture } from "../flow-fixtures";
 import { FlowStepEditor } from "../flow-step-editor";
 import type { FlowPublic, LlmStep } from "../types";
@@ -53,6 +54,42 @@ afterEach(() => {
 });
 
 describe("LlmForm", () => {
+  it("authors long-material processing with an explicit synthesis prompt", async () => {
+    api.GET.mockResolvedValue({ data: { items: [] }, response: new Response("{}") });
+    api.PATCH.mockResolvedValue({ data: { ...flow, revision: 5 }, response: new Response("{}") });
+    const { container } = renderInApp(
+      <FlowStepEditor
+        flow={flow}
+        target={{ step: summary }}
+        wide={false}
+        onSaved={() => {}}
+        onCancel={() => {}}
+        onOpenRun={() => {}}
+        onDeleted={() => {}}
+      />
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: "Bearbeta material" }));
+    fireEvent.click(
+      await screen.findByRole("option", { name: "Sammanfatta avsnitt till ett resultat" })
+    );
+    expect(screen.queryByLabelText(/JSON-schema/)).toBeNull();
+    expect(screen.queryByTestId("knowledge")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Spara som utkast" }));
+    expect(api.PATCH).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText(/Instruktion för sammanställningen/), {
+      target: { value: "Lista besluten med källreferenser." }
+    });
+    await expectNoAxeViolations(container);
+    fireEvent.click(screen.getByRole("button", { name: "Spara som utkast" }));
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+    const sent = api.PATCH.mock.calls[0]![1].body.definition.steps[2];
+    expect(sent.processing).toMatchObject({
+      mode: "summarize",
+      summary_prompt: "Lista besluten med källreferenser."
+    });
+    expect(sent.output).toEqual({ type: "text" });
+  });
+
   it("edits the prompt, model settings and the JSON schema, refusing an invalid schema", async () => {
     api.GET.mockResolvedValue({ data: { items: [] }, response: new Response("{}") });
     api.PATCH.mockResolvedValue({ data: { ...flow, revision: 5 }, response: new Response("{}") });

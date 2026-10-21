@@ -67,6 +67,7 @@ from eneo.internal_mcp.foundation import (
 from eneo.main.exceptions import (
     BadRequestException,
     FlowNotEditingException,
+    FlowRevisionConflictException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -179,6 +180,7 @@ class _ToolRefused(Exception):
 _REPAIRABLE = (
     BadRequestException,
     FlowNotEditingException,
+    FlowRevisionConflictException,
     NotFoundException,
     UnauthorizedException,
     FileReferenceRejected,
@@ -580,6 +582,7 @@ async def update_flow(
     form_fields: list[FormField] | None = None,
     steps: list[Step] | None = None,
     note: str | None = None,
+    expected_revision: int | None = None,
 ) -> CallToolResult:
     """Change a flow's name, description, run inputs or steps.
 
@@ -636,6 +639,8 @@ async def update_flow(
     problems come back as text starting with "Could not update flow": fix
     them and call again.
 
+    Read get_flow first and send its revision as expected_revision. A stale
+    revision is refused; read again and reapply the requested changes.
     Every save is kept as a revision the user can read and restore later,
     so changing a flow never loses anything. note is one line on what
     changed and why ("Shortened the summary prompt at the user's request");
@@ -647,6 +652,10 @@ async def update_flow(
             current = await _resolve_flow(tool_ctx, flow_id, space_id)
             flow_id = current.id
             await tool_ctx.container.flow_service().require_editing(current.id)
+            if expected_revision is None:
+                raise _ToolRefused(
+                    "Read get_flow and send its revision as expected_revision."
+                )
             if (
                 name is None
                 and description is None
@@ -672,6 +681,7 @@ async def update_flow(
                 conversation_id=tool_ctx.session_id,
                 channel=CHANNEL,
                 note=note,
+                expected_revision=expected_revision,
             )
     except _REPAIRABLE as exc:
         return _failure("update flow", exc, flow_id=flow_id)
@@ -732,7 +742,10 @@ async def restore_revision(
             flow_service = tool_ctx.container.flow_service()
             await flow_service.require_editing(current.id)
             flow = await flow_service.restore_revision(
-                current.id, revision, channel=CHANNEL
+                current.id,
+                revision,
+                channel=CHANNEL,
+                expected_revision=current.revision,
             )
     except _REPAIRABLE as exc:
         return _failure("restore revision", exc, flow_id=flow_id)
@@ -764,7 +777,9 @@ async def publish_flow(ctx: Context, flow_id: UUID | None = None) -> CallToolRes
             flow_id = current.id
             flow_service = tool_ctx.container.flow_service()
             await flow_service.require_editing(current.id)
-            flow = await flow_service.publish_flow(current.id, channel=CHANNEL)
+            flow = await flow_service.publish_flow(
+                current.id, channel=CHANNEL, expected_revision=current.revision
+            )
             contract = await flow_service.get_run_contract(current.id)
     except _REPAIRABLE as exc:
         return _failure("publish flow", exc, flow_id=flow_id)

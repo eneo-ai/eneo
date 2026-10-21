@@ -6,6 +6,7 @@ repository, schema, version pinning, step claiming) is real.
 """
 
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -16,7 +17,7 @@ from eneo.completion_models.infrastructure.completion_service import (
     CompletionService,
 )
 from eneo.database.tables.spaces_table import SpacesUsers
-from eneo.flows.definition import FlowDefinition, FormField
+from eneo.flows.definition import FlowDefinition, FormField, LlmStep
 from eneo.jobs.job_manager import job_manager
 
 
@@ -41,6 +42,7 @@ def provider(monkeypatch) -> ProviderLog:
         prompt = kwargs.get("prompt", "")
         log.calls.append(
             {
+                "model_id": model.id,
                 "prompt": prompt,
                 "text_input": text_input,
                 "file_names": [f.name for f in kwargs.get("files") or []],
@@ -88,6 +90,15 @@ def topic_field() -> FormField:
     return FormField(key="topic", label="Topic", type="text", required=True)
 
 
+async def patch_flow(client, url, *, json, headers):
+    """An ordinary editor reads the revision before submitting its change."""
+    current = await client.get(url, headers=headers)
+    revision = current.json().get("revision", 1)
+    return await client.patch(
+        url, json={"expected_revision": revision, **json}, headers=headers
+    )
+
+
 FLOWS_FLAG = "flows_core"
 
 
@@ -109,3 +120,67 @@ async def bearer(db_container, patch_auth_service_jwt, admin_user):
     async with db_container() as container:
         token = container.auth_service().create_access_token_for_user(admin_user)
     return {"Authorization": f"Bearer {token}"}
+
+
+def _definition(model_id) -> FlowDefinition:
+    return FlowDefinition(
+        form_fields=[topic_field()],
+        steps=[
+            LlmStep(
+                key="draft",
+                name="Draft",
+                prompt="p",
+                input="{{form.topic}}",
+                model_id=model_id,
+            )
+        ],
+    )
+
+
+@pytest.fixture
+async def published(
+    db_container, member_space, completion_model_factory, publish_flow, provider
+):
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "authz-model")
+        space = await member_space(session, "Authz Space", [model.id])
+        other = await member_space(session, "Other Space", [model.id])
+        flow = await publish_flow(container, space, _definition(model.id))
+        draft = await container.flow_service().create_flow(
+            space_id=space.id,
+            name="Draft",
+            description=None,
+            definition=_definition(model.id),
+        )
+        # Read inside the session: the rows detach when it closes.
+        ids = {"space_id": space.id, "other_space_id": other.id}
+    return {"flow": flow, "draft": draft, **ids}
+
+
+@pytest.fixture
+async def second_editor(db_container, admin_user, published, patch_auth_service_jwt):
+    """Another member of the flow's space who may edit flows, as a bearer.
+
+    The tenant roles come from the admin user (flows need the tenant-level
+    flows permission); the space role is editor."""
+    from eneo.database.tables.spaces_table import SpacesUsers
+    from eneo.main.models import ModelId
+    from eneo.users.user import UserAdd, UserState
+
+    async with db_container() as container:
+        user = await container.user_repo().add(
+            UserAdd(
+                email=f"editor-{uuid4().hex[:6]}@example.com",
+                username=f"editor-{uuid4().hex[:6]}",
+                tenant_id=admin_user.tenant_id,
+                state=UserState.ACTIVE,
+                roles=[ModelId(id=role.id) for role in admin_user.roles],
+            )
+        )
+        container.session().add(
+            SpacesUsers(space_id=published["space_id"], user_id=user.id, role="editor")
+        )
+        await container.session().flush()
+        token = container.auth_service().create_access_token_for_user(user)
+    return {"user": user, "bearer": {"Authorization": f"Bearer {token}"}}

@@ -10,6 +10,7 @@ export type TranscriptSegment = {
   end: number;
   speaker?: string | null;
   text: string;
+  speaker_runs?: { char_start: number; char_end: number; speaker: string | null }[];
 };
 
 /** The transcription a transcribe step records with its input. */
@@ -43,6 +44,18 @@ export function transcriptTurns(segments: readonly TranscriptSegment[]): Transcr
   const turns: TranscriptTurn[] = [];
   let fileIndex: number | undefined;
   for (const segment of segments) {
+    if (segment.speaker_runs?.length) {
+      const characters = Array.from(segment.text);
+      const pieces = segment.speaker_runs.map((run) => ({
+        ...segment,
+        speaker_runs: undefined,
+        speaker: run.speaker,
+        text: characters.slice(run.char_start, run.char_end).join("")
+      }));
+      turns.push(...transcriptTurns(pieces));
+      fileIndex = undefined;
+      continue;
+    }
     const speaker = segment.speaker ?? null;
     const last = turns[turns.length - 1];
     if (last && last.speaker === speaker && fileIndex === (segment.file_index ?? 0)) {

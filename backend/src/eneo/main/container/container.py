@@ -1740,6 +1740,7 @@ class Container(containers.DeclarativeContainer):
         audit_service=audit_service,
         file_service=file_service,
         user_repo=user_repo,
+        assistant_service=assistant_service,
     )
     flow_step_runners = providers.Factory(
         StepRunners,
@@ -1757,6 +1758,7 @@ class Container(containers.DeclarativeContainer):
         FlowRunExecutor,
         repo=flow_repo,
         runners=flow_step_runners,
+        audit_service=audit_service,
         step_timeout_seconds=providers.Callable(
             lambda: get_settings().flow_step_timeout_seconds
         ),

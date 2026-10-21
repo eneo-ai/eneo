@@ -42,7 +42,7 @@ export function NameFields({
 }) {
   const t = useTranslations();
   return (
-    <div className="grid gap-4 sm:grid-cols-2">
+    <div className="grid gap-4 sm:grid-cols-2 sm:items-end">
       <TextInput
         label={t("name")}
         value={step.name}
