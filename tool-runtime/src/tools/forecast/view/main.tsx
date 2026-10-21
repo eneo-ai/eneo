@@ -67,6 +67,7 @@ const payloadSchema = z.object({
     missing: z.number().int().nonnegative(),
     used_from: day.optional(),
     used_days: z.number().int().nonnegative().optional(),
+    empty_end_days: z.number().int().nonnegative().optional(),
   }),
   forecast: z.object({ from: day, days: z.number().int().min(1).max(400), p10: numbers, p50: numbers, p90: numbers }),
   recent: z.object({ from: day, values: z.array(z.number().finite().nullable()).max(1000) }),
@@ -118,6 +119,8 @@ const TEXTS = {
       `${file}${sheet ? `, blad ${sheet}` : ""}, kolumnerna ${date} och ${value}`,
     history: (range: string, days: number, used: number | undefined, shown: number) =>
       `${range}, ${days} dagar.${used ? ` Modellen läste de senaste ${used}.` : ""} Diagrammet visar de senaste ${shown}.`,
+    emptyEnd: (n: number) =>
+      `De sista ${n === 1 ? "dagen" : `${n} dagarna`} i filen saknar värde och ingår inte. Prognosen börjar dagen efter det sista värdet.`,
     missing: (n: number) =>
       n === 0 ? "Inga" : `${n} ${n === 1 ? "dag" : "dagar"} utan värde. De räknades som okända, inte som noll.`,
     check: (range: string, inside: number, scored: number, mae: string, baseline: string) =>
@@ -168,6 +171,8 @@ const TEXTS = {
       `${file}${sheet ? `, sheet ${sheet}` : ""}, columns ${date} and ${value}`,
     history: (range: string, days: number, used: number | undefined, shown: number) =>
       `${range}, ${days} days.${used ? ` The model read the last ${used}.` : ""} The chart shows the last ${shown}.`,
+    emptyEnd: (n: number) =>
+      `The last ${n === 1 ? "day" : `${n} days`} in the file ${n === 1 ? "has" : "have"} no value and ${n === 1 ? "is" : "are"} left out. The forecast starts the day after the last value.`,
     missing: (n: number) =>
       n === 0 ? "None" : `${n} ${n === 1 ? "day" : "days"} without a value, read as unknown, not as zero.`,
     check: (range: string, inside: number, scored: number, mae: string, baseline: string) =>
@@ -431,6 +436,7 @@ function ForecastView() {
                       data.history.used_days,
                       data.recent.values.length,
                     )}
+                    {data.history.empty_end_days ? ` ${text.emptyEnd(data.history.empty_end_days)}` : ""}
                   </MetadataListItem>
                   <MetadataListItem label={text.rows.missing}>{text.missing(data.history.missing)}</MetadataListItem>
                   <MetadataListItem label={text.rows.check}>
