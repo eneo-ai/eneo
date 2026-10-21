@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import dataclasses
 import json
 from collections.abc import AsyncGenerator
 from functools import partial
@@ -1456,3 +1457,204 @@ async def test_context_bindings_survive_finalization_in_another_context():
     assert generator.ag_frame is None
     assert finalizer.run(current_execution_budget) is None
     assert finalizer.run(current_assistant_delegation) is None
+
+
+async def test_refused_consultation_costs_no_budget():
+    parent, child = uuid4(), uuid4()
+
+    async def execute(request: ConsultationRequest) -> AsyncGenerator[Completion, None]:
+        raise AssertionError("a refused specialist never executes")
+        yield  # pragma: no cover
+
+    async def authorize(assistant_id: UUID) -> None:
+        if assistant_id == child:
+            raise UnauthorizedException()
+
+    budget = ExecutionBudget()
+    runtime = AssistantDelegation(
+        parent_assistant_id=parent,
+        candidates=(AssistantCandidate(child, "IT", "IT requirements"),),
+        attachment_ids=frozenset(),
+        budget=budget,
+        execute=execute,
+        authorize=authorize,
+    )
+    with runtime.bind():
+        events = [
+            event
+            async for event in runtime.call(
+                call_id="one", arguments=_consultation_arguments(child)
+            )
+        ]
+    assert events == []
+    assert json.loads(runtime.result_for("one")) == {"outcome": "denied"}
+    assert (budget.consultations, budget.tool_calls) == (0, 0)
+
+
+async def test_specialist_answering_after_an_approval_timeout_completes():
+    parent, child = uuid4(), uuid4()
+
+    async def execute(request: ConsultationRequest) -> AsyncGenerator[Completion, None]:
+        step = ToolCallMetadata(
+            server_name="inventory",
+            tool_name="lookup",
+            tool_call_id="external",
+            result_status="pending",
+            is_internal=False,
+        )
+        yield Completion(
+            response_type=ResponseType.TOOL_APPROVAL_REQUIRED,
+            tool_calls_metadata=[step],
+            approval_id="approval-1",
+        )
+        yield Completion(
+            response_type=ResponseType.TOOL_APPROVAL_TIMEOUT,
+            tool_calls_metadata=[dataclasses.replace(step, result_status="timeout")],
+        )
+        yield Completion(
+            text="Without the lookup: 25 days.", response_type=ResponseType.TEXT
+        )
+
+    runtime = AssistantDelegation(
+        parent_assistant_id=parent,
+        candidates=(AssistantCandidate(child, "HR", "HR"),),
+        attachment_ids=frozenset(),
+        budget=ExecutionBudget(),
+        execute=execute,
+        authorize=AsyncMock(),
+    )
+    with runtime.bind():
+        events = [
+            event
+            async for event in runtime.call(
+                call_id="one", arguments=_consultation_arguments(child)
+            )
+        ]
+    final = events[-1].consultations[0]
+    assert final.status == "complete"
+    assert final.answer == "Without the lookup: 25 days."
+    assert final.approval_id is None
+    assert json.loads(runtime.result_for("one"))["outcome"] == "complete"
+
+
+async def test_child_deadline_expiring_while_the_parent_is_busy_times_out_the_consultation():
+    """The parent consumes slowly (persisting, writing the response); the child
+    deadline must still end only the consultation, as a timeout, not the turn."""
+    parent, child = uuid4(), uuid4()
+    cleaned = asyncio.Event()
+
+    async def execute(request: ConsultationRequest) -> AsyncGenerator[Completion, None]:
+        try:
+            yield Completion(text="Partial ", response_type=ResponseType.TEXT)
+            await asyncio.sleep(10)
+            yield Completion(text="never", response_type=ResponseType.TEXT)
+        finally:
+            cleaned.set()
+
+    budget = ExecutionBudget(
+        ExecutionLimits(
+            duration_seconds=5, consultation_seconds=0.05, reserved_seconds=0
+        )
+    )
+    runtime = AssistantDelegation(
+        parent_assistant_id=parent,
+        candidates=(AssistantCandidate(child, "IT", "IT requirements"),),
+        attachment_ids=frozenset(),
+        budget=budget,
+        execute=execute,
+        authorize=AsyncMock(),
+    )
+    with runtime.bind():
+        events = []
+        async for event in runtime.call(
+            call_id="one", arguments=_consultation_arguments(child)
+        ):
+            events.append(event)
+            # Away from the generator for longer than the child deadline.
+            await asyncio.sleep(0.2)
+    final = events[-1].consultations[0]
+    assert final.status == "timeout"
+    assert final.answer == "Partial "
+    assert cleaned.is_set()
+    assert json.loads(runtime.result_for("one"))["outcome"] == "timeout"
+    assert budget.remaining_seconds > 1
+
+
+async def test_nested_pauses_account_the_waited_time_once():
+    budget = ExecutionBudget(
+        ExecutionLimits(duration_seconds=5, consultation_seconds=1, reserved_seconds=0)
+    )
+    async with asyncio.timeout(budget.child_seconds) as deadline:
+        with budget.deadline(deadline):
+            before = deadline.when()
+            assert before is not None
+            async with budget.pause():
+                async with budget.pause():
+                    await asyncio.sleep(0.1)
+                # Still suspended: only the outermost pause resumes the clock.
+                assert deadline.when() is None
+                await asyncio.sleep(0.05)
+            after = deadline.when()
+            assert after is not None
+            assert 0.15 <= after - before < 0.3
+    assert 0.15 <= budget.paused_seconds < 0.3
+
+
+async def test_turn_deadline_is_suspended_while_the_response_writer_holds_control(
+    turn: TurnFixture, monkeypatch: pytest.MonkeyPatch
+):
+    """Time spent by the consumer between chunks is not the turn's execution time."""
+    specialist = copy.deepcopy(turn.assistant)
+    specialist.id = uuid4()
+    specialist.name = "IT"
+    plan = group_plan(turn, monkeypatch, specialist)
+    monkeypatch.setattr(
+        "eneo.assistants.assistant_service.ExecutionBudget",
+        lambda: ExecutionBudget(
+            ExecutionLimits(duration_seconds=0.3, reserved_seconds=0)
+        ),
+    )
+
+    def streamed(*parts: str):
+        async def chunks():
+            for index, part in enumerate(parts):
+                await asyncio.sleep(0.01)
+                yield SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            delta=SimpleNamespace(
+                                content=part, reasoning_content=None, tool_calls=None
+                            ),
+                            finish_reason="stop" if index == len(parts) - 1 else None,
+                        )
+                    ],
+                    usage=litellm.Usage(
+                        prompt_tokens=20, completion_tokens=7, total_tokens=27
+                    ),
+                )
+
+        return chunks()
+
+    async def answer_in_parts(**kwargs: object):
+        return streamed("One ", "two ", "three.")
+
+    turn.provider.side_effect = answer_in_parts
+
+    async with turn.service.repo.session.begin():
+        reply = await turn.service.ask(
+            question="Count",
+            assistant_id=turn.assistant.id,
+            group_chat_id=plan.group_chat_id,
+            delegation_plan=plan,
+            stream=True,
+            version=2,
+        )
+    texts: list[str] = []
+    async for event in reply.answer:
+        assert event.response_type != ResponseType.ERROR, event.error_reason
+        if event.text:
+            texts.append(event.text)
+        # Slow writer: three waits exceed the whole 0.3 s turn deadline.
+        await asyncio.sleep(0.2)
+    assert "".join(texts) == "One two three."
+    turn.history.complete_question_with_answer.assert_awaited_once()

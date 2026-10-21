@@ -113,9 +113,13 @@
             onValueChange={(id) => ($update.orchestrator_assistant_id = id === "none" ? null : id)}
           >
             <Select.Trigger aria-label={m.group_orchestrator()} class="w-full">
-              {$currentSpace.applications.assistants.find(
-                (assistant) => assistant.id === $update.orchestrator_assistant_id
-              )?.name ?? m.group_orchestrator_unconfigured()}
+              {#if !$update.orchestrator_assistant_id}
+                {m.group_orchestrator_unconfigured()}
+              {:else}
+                {$currentSpace.applications.assistants.find(
+                  (assistant) => assistant.id === $update.orchestrator_assistant_id
+                )?.name ?? m.group_orchestrator_unavailable()}
+              {/if}
             </Select.Trigger>
             <Select.Content>
               <Select.Item value="none" label={m.group_orchestrator_unconfigured()}

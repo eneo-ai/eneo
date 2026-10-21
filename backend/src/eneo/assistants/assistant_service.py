@@ -4215,6 +4215,11 @@ class AssistantService:
                     try:
                         # Registered so a pause for a user's tool approval
                         # pushes the turn deadline back by the waited time.
+                        # Every yield below runs under a pause too: the
+                        # deadline must expire inside this execution's own
+                        # awaits, where it becomes TimeoutError, never while
+                        # the response writer holds control, where it would
+                        # only cancel the request.
                         async with asyncio.timeout(
                             delegation.budget.remaining_seconds
                         ) as deadline:
@@ -4251,7 +4256,8 @@ class AssistantService:
                                     )
                                 async with aclosing(handled):
                                     async for chunk in handled:
-                                        yield chunk
+                                        async with delegation.budget.pause():
+                                            yield chunk
                     except (TimeoutError, ExecutionLimitReached) as exc:
                         limit = (
                             exc.limit

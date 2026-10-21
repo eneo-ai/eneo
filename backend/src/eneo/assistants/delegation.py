@@ -256,7 +256,10 @@ class AssistantDelegation:
                 if step.tool_call_id is not None
             ]
         elif chunk.response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
-            consultation.status = "incomplete"
+            # The round's calls are denied by the adapter; the specialist
+            # continues and may still answer, so the outcome is decided by
+            # its reply, not pinned here.
+            consultation.status = "running"
             consultation.approval_id = None
             consultation.awaiting_tool_call_ids = []
         elif consultation.status == "awaiting_approval":
@@ -301,10 +304,11 @@ class AssistantDelegation:
                 # A specialist may not start on the parent's reserve; the
                 # refusal tells the model to synthesize with what it has.
                 self.budget.ensure_child_capacity()
+                # Recheck before emitting even the specialist name or question,
+                # and before a refused consultation could cost a slot.
+                await self.authorize(request.assistant_id)
                 self.budget.reserve_consultation()
                 self.budget.reserve_tool_call()
-                # Recheck before emitting even the specialist name or question.
-                await self.authorize(request.assistant_id)
             except _ACCESS_DENIED:
                 self._results[call_id] = json.dumps({"outcome": "denied"})
                 return
@@ -329,7 +333,11 @@ class AssistantDelegation:
             )
             try:
                 # The deadline is registered so a pause for a user's approval
-                # pushes it back; the parent's reserves apply meanwhile.
+                # pushes it back; the parent's reserves apply meanwhile. Each
+                # yield hands control to the parent (its bookkeeping, the
+                # response writer) under a pause as well, so the deadline can
+                # only expire inside the specialist's own awaits, where it
+                # becomes TimeoutError here rather than a cancelled turn.
                 async with asyncio.timeout(self.budget.child_seconds) as deadline:
                     with self.budget.child_scope(), self.budget.deadline(deadline):
                         async with aclosing(self.execute(request)) as child_stream:
@@ -340,7 +348,8 @@ class AssistantDelegation:
                                     # service resumes afterwards and mints its
                                     # same-turn URL from generated_file.
                                     chunk.consultation_id = consultation.id
-                                    yield chunk
+                                    async with self.budget.pause():
+                                        yield chunk
                                     if (
                                         chunk.generated_file is not None
                                         and chunk.image is not None
@@ -358,7 +367,8 @@ class AssistantDelegation:
                                     self.budget.record_output(chunk.text)
                                     consultation.answer += chunk.text
                                 if self._observe(consultation, chunk, files_by_call):
-                                    yield self._event(consultation)
+                                    async with self.budget.pause():
+                                        yield self._event(consultation)
                         if consultation.status == "running":
                             consultation.status = (
                                 "complete"

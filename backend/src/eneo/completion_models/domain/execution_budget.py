@@ -111,6 +111,7 @@ class ExecutionBudget:
     specialist_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     reference_prefixes: set[str] = field(default_factory=set[str])
     _deadlines: list[asyncio.Timeout] = field(default_factory=list[asyncio.Timeout])
+    _pause_depth: int = 0
 
     @property
     def elapsed_seconds(self) -> float:
@@ -238,12 +239,24 @@ class ExecutionBudget:
 
     @asynccontextmanager
     async def pause(self) -> AsyncGenerator[None]:
-        """Exclude a wait on the user, such as a tool approval, from the deadlines.
+        """Exclude time outside this execution from the deadlines.
 
-        The registered deadlines are suspended while waiting and resume with
-        the waited time added, so neither the turn nor the consultation can
-        expire because a person took time to decide.
+        Used around a wait on the user (a tool approval) and around every
+        yield that hands control to the consumer of an execution (the
+        parent's bookkeeping, the response writer). The registered deadlines
+        are suspended meanwhile and resume with the waited time added, so a
+        deadline can only expire inside the execution's own awaits, where
+        ``asyncio.timeout`` converts it to ``TimeoutError``. Pauses nest; only
+        the outermost one accounts the time.
         """
+        if self._pause_depth:
+            self._pause_depth += 1
+            try:
+                yield
+            finally:
+                self._pause_depth -= 1
+            return
+        self._pause_depth = 1
         started = monotonic()
         suspended = [
             (timeout, timeout.when())
@@ -255,6 +268,7 @@ class ExecutionBudget:
         try:
             yield
         finally:
+            self._pause_depth = 0
             waited = monotonic() - started
             self.paused_seconds += waited
             for timeout, when in suspended:
