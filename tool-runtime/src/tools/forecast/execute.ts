@@ -89,9 +89,17 @@ export async function executeForecast(
   };
   if (!job.image) return result;
   // The chart the view opens on, from the unrounded figures; the renderer loads only here.
-  const { renderChart } = await import("../charts/engine/render");
+  const [{ renderChart }, { chartFailure }] = await Promise.all([
+    import("../charts/engine/render"),
+    import("../charts/execute"),
+  ]);
   const { image } = job;
-  const drawn = renderChart(forecastPlot(focused(result), PLOT_TEXTS[image.language], image.title), image.chart);
+  let drawn;
+  try {
+    drawn = renderChart(forecastPlot(focused(result), PLOT_TEXTS[image.language], image.title), image.chart);
+  } catch (error) {
+    throw chartFailure(error);
+  }
   return { ...result, image: { png_base64: drawn.png_base64, width: drawn.width, height: drawn.height } };
 }
 

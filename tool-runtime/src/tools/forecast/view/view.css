@@ -3,11 +3,9 @@
    chart arrives. Motion uses the theme's tokens and stays out of the reader's way. */
 @import "../../charts/view/view.css";
 
-:root {
-  --acc-expand: var(--duration-fast);
-  --acc-collapse: var(--duration-fast);
-  --acc-chevron: var(--duration-fast);
-  --acc-ease: var(--ease-standard);
+/* Fullscreen gives the table the room the plot leaves, as it does a chart's. */
+:root[data-mode="fullscreen"] [data-view="forecast"] .eneo-rows {
+  max-height: none;
 }
 
 /* An interval is an area, so its swatch is a filled square in the area's colour. */
@@ -38,11 +36,11 @@
 .eneo-method-panel {
   display: grid;
   grid-template-rows: 0fr;
-  transition: grid-template-rows var(--acc-collapse) var(--acc-ease);
+  transition: grid-template-rows var(--duration-fast) var(--ease-standard);
 }
 .eneo-method[data-open="true"] .eneo-method-panel {
   grid-template-rows: 1fr;
-  transition: grid-template-rows var(--acc-expand) var(--acc-ease);
+  transition: grid-template-rows var(--duration-fast) var(--ease-standard);
 }
 .eneo-method-inner {
   overflow: hidden;
@@ -50,15 +48,15 @@
   opacity: 0;
   filter: blur(2px);
   transition:
-    opacity var(--acc-collapse) var(--acc-ease),
-    filter var(--acc-collapse) var(--acc-ease);
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard);
 }
 .eneo-method[data-open="true"] .eneo-method-inner {
   opacity: 1;
   filter: blur(0);
   transition:
-    opacity var(--acc-expand) var(--acc-ease),
-    filter var(--acc-expand) var(--acc-ease);
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard);
 }
 .eneo-method-body {
   display: flex;
@@ -71,7 +69,7 @@
   display: inline-flex;
   transform: scaleY(1);
   transform-origin: center;
-  transition: transform var(--acc-chevron) var(--acc-ease);
+  transition: transform var(--duration-fast) var(--ease-standard);
 }
 .eneo-chevron path {
   vector-effect: non-scaling-stroke;

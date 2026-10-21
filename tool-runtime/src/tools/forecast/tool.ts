@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { exportFilename, toCsv } from "../files/csv";
 import { fetchReference, fileReference, type ReferenceAccess } from "../files/reference";
-import { chartConfigSchema } from "../charts/config";
+import type { ChartConfig } from "../charts/config";
 import { RichResult, type EmbeddedFile, type ToolDefinition, type ToolView } from "../types";
 import type { ForecastConfig } from "./config";
 import { HOLDOUT_REASONS } from "./evaluate";
@@ -16,14 +16,14 @@ export type ForecastRunner = (job: ForecastJob) => Promise<ForecastResult>;
 
 const SHOWN =
   "The user sees an interactive chart of the recent history and the forecast with its interval, a table of each day, and the method with the check against the last days. Briefly explain what the forecast says and its limitations; do not repeat every value or draw a separate chart of it. For a report, call create_forecast again with the same arguments and display=none: the same forecast, as this chart in an image for create_document.";
-// One image size and number format for every forecast, as Charts draws them by default.
-const IMAGE = chartConfigSchema.parse({});
 
 const INTERVAL_NOTE =
   "P10-P90 is the model's interval for each day on its own: about 8 outcomes in 10 fall inside it when the model fits the data. Never add P10 or P90 across days; the sum of P50 is an approximate total without an interval.";
 
 export function forecastTools(
   config: ForecastConfig,
+  /** How Charts draws pictures; a forecast's picture is drawn the same way. */
+  chart: ChartConfig,
   run: ForecastRunner,
   access: ReferenceAccess,
   resultView?: ToolView,
@@ -125,8 +125,8 @@ export function forecastTools(
               ? {}
               : {
                   image: {
-                    chart: IMAGE,
-                    language: IMAGE.number_locale.startsWith("sv") ? "sv" : "en",
+                    chart,
+                    language: chart.number_locale.startsWith("sv") ? "sv" : "en",
                     ...(args.title ? { title: args.title } : {}),
                   },
                 }),

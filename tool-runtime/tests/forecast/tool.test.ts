@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import { createHandler } from "../../src/server";
+import { chartConfigSchema } from "../../src/tools/charts/config";
 import { forecastConfigSchema } from "../../src/tools/forecast/config";
 import type { ForecastJob, ForecastResult } from "../../src/tools/forecast/ports";
 import { forecastTools } from "../../src/tools/forecast/tool";
@@ -35,7 +36,7 @@ function setup(result: ForecastResult, withView = false) {
   const run = mock(async (job: ForecastJob) => (job.image ? { ...result, image: PNG } : result));
   const download = mock(async () => ({ bytes: Buffer.from("Datum,kWh\n"), contentType: "text/csv", name: "el" }));
   const access = { allowedFileOrigins: [], maxBytes: 1_000_000, timeoutMs: 1000, download: download as never };
-  const tool = forecastTools(config, run, access, withView ? view : undefined)[0]!;
+  const tool = forecastTools(config, chartConfigSchema.parse({ number_locale: "en-GB" }), run, access, withView ? view : undefined)[0]!;
   return { tool, run, download };
 }
 
@@ -109,7 +110,8 @@ describe("create_forecast", () => {
   ])("gives %s a picture of the same chart", async (_case, host, args) => {
     const { tool, run } = setup(outcome(3), true);
     const result = await tool.execute({ source, ...columns, horizon: 3, ...args }, { ...ctx, ...host });
-    expect(run.mock.calls[0]![0].image).toMatchObject({ language: "sv", chart: { width: 1200 } });
+    // Drawn as Charts draws, in the language of its number format.
+    expect(run.mock.calls[0]![0].image).toMatchObject({ language: "en", chart: { width: 1200, number_locale: "en-GB" } });
     expect(result).toBeInstanceOf(RichResult);
     const rich = result as RichResult;
     expect(rich.images).toEqual([{ data: PNG.png_base64, mimeType: "image/png" }]);

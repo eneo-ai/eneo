@@ -176,23 +176,27 @@ function isolatedSpans(lower: readonly (number | null)[], upper: readonly (numbe
     : {};
 }
 
-/** Markers as dashed lines across the plot, carried by the first series. */
-function markerLine(spec: PlotSpec, style: ChartStyle) {
-  if (!spec.markers?.length) return {};
-  return {
-    markLine: {
+/**
+ * Markers as dashed lines across the plot, each with its own label. They ride on a series of
+ * their own without data, so hiding a series in the legend never hides a marker.
+ */
+function markerSeries(spec: PlotSpec, style: ChartStyle) {
+  if (!spec.markers?.length) return [];
+  return [
+    {
+      id: "markers",
+      type: "line",
+      data: [],
       silent: true,
-      symbol: "none",
-      lineStyle: { color: style.inkSecondary, type: "dashed", width: 1 },
-      label: {
-        formatter: spec.markers.map((marker) => clean(marker.label))[0],
-        color: style.inkSecondary,
-        fontSize: style.textSize,
-        position: "end",
+      markLine: {
+        silent: true,
+        symbol: "none",
+        lineStyle: { color: style.inkSecondary, type: "dashed", width: 1 },
+        label: { color: style.inkSecondary, fontSize: style.textSize, position: "end" },
+        data: spec.markers.map((marker) => ({ xAxis: marker.at, label: { formatter: clean(marker.label) } })),
       },
-      data: spec.markers.map((marker) => ({ xAxis: marker.at })),
     },
-  };
+  ];
 }
 
 type TooltipPoint = { seriesId?: string; seriesName?: string; dataIndex: number; value: unknown; marker?: unknown; axisValue?: unknown };
@@ -379,9 +383,9 @@ export function chartOptions(
         symbolSize: 7,
         // A day-by-day series is read as a line; its points show under the pointer.
         ...(spec.dates ? { showSymbol: false, ...isolatedDots(spec.series[index]!.values, 7) } : {}),
-        ...(index === 0 ? markerLine(spec, style) : {}),
       })),
       ...intervalSeries(spec, style),
+      ...markerSeries(spec, style),
     ],
   };
 }
@@ -479,8 +483,10 @@ export function imageOptions(
 
   const drawn = seriesData(spec);
   const points = spec.series.reduce((sum, series) => sum + series.values.length, 0);
-  // Two to four lines are named at their last point as well.
-  const direct = spec.type === "line" && spec.series.length > 1 && spec.series.length <= 4;
+  const symbols = !spec.dates && points <= 60;
+  // Two to four lines are named at their last point as well. Not beside an interval: its
+  // lines end mid-plot, and the legend already names every part.
+  const direct = spec.type === "line" && !spec.bands?.length && spec.series.length > 1 && spec.series.length <= 4;
   const directRoom = direct
     ? Math.min(160 * scale, Math.max(...names.map((name) => textWidth(name, text)))) + 12 * scale
     : 0;
@@ -523,11 +529,11 @@ export function imageOptions(
     if (spec.type === "line")
       return {
         ...entry,
-        ...(index === 0 ? markerLine(spec, style) : {}),
         symbol: "circle",
         symbolSize: Math.round(8 * scale),
-        showSymbol: points <= 60,
-        ...(points > 60 || spec.dates ? isolatedDots(spec.series[index]!.values, Math.round(8 * scale)) : {}),
+        // Few points are drawn as points; a day-by-day series is a line, its lone days dots.
+        showSymbol: symbols,
+        ...(symbols ? {} : isolatedDots(spec.series[index]!.values, Math.round(8 * scale))),
         lineStyle: { width: 2 * scale },
         itemStyle: { borderColor: style.surface, borderWidth: Math.round(2 * scale) },
         ...(direct
@@ -549,7 +555,7 @@ export function imageOptions(
       itemStyle: { opacity: 1, borderColor: style.surface, borderWidth: Math.round(2 * scale) },
     };
   });
-  series.push(...intervalSeries(spec, style));
+  series.push(...intervalSeries(spec, style), ...markerSeries(spec, style));
   if (spec.stacked && valueLabels) {
     // The sum of each stack, written above it by an unseen bar as tall as what rises from zero.
     const totals = spec.labels.map((_, i) =>

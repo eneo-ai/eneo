@@ -1,6 +1,7 @@
 // A forecast as a chart, drawn by Charts: read by the view in the browser and by the image
 // renderer in a sandbox child, so an exported picture is the chart the reader looked at.
 import type { PlotSpec } from "../charts/options";
+import { DAY_MS, isoDay } from "./series";
 
 export type ForecastPlotTexts = { history: string; median: string; interval: string; start: string };
 
@@ -14,8 +15,6 @@ export type ForecastSeries = {
   recent: { from: string; values: (number | null)[] };
   forecast: { from: string; days: number; p10: number[]; p50: number[]; p90: number[] };
 };
-
-const DAY_MS = 86_400_000;
 
 /** The days before the forecast a reader sees first: eight weeks, or twice a longer horizon. */
 export function openingDays(horizon: number): number {
@@ -38,7 +37,7 @@ export function focused<T extends ForecastSeries>(data: T): T {
   const values = data.recent.values;
   const drop = values.length - openingDays(data.forecast.days);
   if (drop <= 0) return data;
-  const from = new Date(Date.parse(`${data.recent.from}T00:00:00Z`) + drop * DAY_MS).toISOString().slice(0, 10);
+  const from = isoDay(Date.parse(`${data.recent.from}T00:00:00Z`) + drop * DAY_MS);
   return { ...data, recent: { from, values: values.slice(drop) } };
 }
 
@@ -50,9 +49,7 @@ export function forecastPlot(data: ForecastSeries, texts: ForecastPlotTexts, tit
   const recent = data.recent.values;
   const ahead = data.forecast.days;
   const start = Date.parse(`${data.recent.from}T00:00:00Z`);
-  const labels = Array.from({ length: recent.length + ahead }, (_, day) =>
-    new Date(start + day * DAY_MS).toISOString().slice(0, 10),
-  );
+  const labels = Array.from({ length: recent.length + ahead }, (_, day) => isoDay(start + day * DAY_MS));
   const empty = (days: number) => Array<null>(Math.max(0, days)).fill(null);
   const last = recent.at(-1) ?? null;
   const fromLast = (values: number[]) => [...empty(recent.length - 1), ...(recent.length ? [last] : []), ...values];

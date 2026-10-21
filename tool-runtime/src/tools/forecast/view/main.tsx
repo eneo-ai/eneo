@@ -23,19 +23,11 @@ import {
   ViewFrame,
   chevronDownIcon,
   columnWidth,
+  infoIcon,
   numberFormatter,
   pick,
   useHost,
 } from "../../../views/kit";
-
-// Lucide's info glyph, like the kit's other icons: sized to the text, hidden from readers.
-const infoIcon = (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="12" cy="12" r="10" />
-    <path d="M12 16v-4" />
-    <path d="M12 8h.01" />
-  </svg>
-);
 import { init, type EChartsType } from "../../charts/echarts";
 import { PALETTE, chartOptions, type ChartStyle } from "../../charts/options";
 import { PLOT_TEXTS, forecastPlot, openingZoom } from "../plot";
@@ -54,7 +46,8 @@ const focus = (data: Payload) => openingZoom(data);
 
 const numbers = z.array(z.number().finite()).max(400);
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const unavailable = z.enum(["SHORT_HISTORY", "TOO_MANY_MISSING", "NO_OUTCOME", "NO_BASELINE"]);
+// A code this view has no words for (from a newer runtime) still shows, in general words.
+const unavailable = z.string().max(40);
 const payloadSchema = z.object({
   presentation: z.literal("interactive"),
   title: z.string().max(120).optional(),
@@ -134,7 +127,8 @@ const TEXTS = {
       TOO_MANY_MISSING: "Gick inte att göra: för många dagar före de sista dagarna saknar värde.",
       NO_OUTCOME: "Gick inte att göra: de sista dagarna saknar värden att jämföra med.",
       NO_BASELINE: "Gick inte att göra: några veckodagar saknar värde de fyra veckorna före.",
-    },
+    } as Record<string, string>,
+    unavailableOther: "Gick inte att göra för den här historiken.",
     interval: "P10–P90 gäller varje dag för sig. Summera inte gränserna över flera dagar.",
     ignores: "Väder, lov, helgdagar och planerade förändringar",
     model: (name: string, millions: string) => `${name}, ${millions} miljoner parametrar. Körs i er egen miljö.`,
@@ -183,7 +177,8 @@ const TEXTS = {
       TOO_MANY_MISSING: "Not possible: too many days before the last days lack a value.",
       NO_OUTCOME: "Not possible: the last days have no values to compare with.",
       NO_BASELINE: "Not possible: some weekdays lack a value in the four weeks before.",
-    },
+    } as Record<string, string>,
+    unavailableOther: "Not possible for this history.",
     interval: "P10–P90 holds for each day on its own. Do not add the bounds across days.",
     ignores: "Weather, school breaks, holidays and planned changes",
     model: (name: string, millions: string) => `${name}, ${millions} million parameters. Runs in your own environment.`,
@@ -447,7 +442,7 @@ function ForecastView() {
                           error.format(data.holdout.mae),
                           error.format(data.holdout.baseline_mae),
                         )
-                      : text.unavailable[data.holdout.unavailable]}
+                      : (text.unavailable[data.holdout.unavailable] ?? text.unavailableOther)}
                   </MetadataListItem>
                   <MetadataListItem label={text.rows.interval}>{text.interval}</MetadataListItem>
                   <MetadataListItem label={text.rows.ignores}>{text.ignores}</MetadataListItem>
@@ -494,7 +489,7 @@ function ForecastView() {
       {/* What the forecast cannot know, said once beside it rather than as an alert. */}
       {data && (
         <p className="eneo-note">
-          <span aria-hidden="true">{infoIcon}</span>
+          {infoIcon}
           <Text type="supporting" color="secondary">
             {text.note}
           </Text>

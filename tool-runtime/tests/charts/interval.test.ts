@@ -61,8 +61,27 @@ describe("intervals around a line", () => {
       xAxis: { axisLabel: { formatter: (label: string) => string } };
     };
     expect(option.xAxis.axisLabel.formatter("2026-10-20")).toBe("20 okt.");
-    const marked = option.series.find((s) => s.markLine);
-    expect(marked!.markLine).toMatchObject({ data: [{ xAxis: 3 }], label: { formatter: "Prognos" } });
+    // On a series of its own without a name, so hiding a line in the legend keeps the marker.
+    const marked = option.series.find((s) => s.id === "markers")!;
+    expect(marked.name).toBeUndefined();
+    expect(marked.markLine).toMatchObject({ data: [{ xAxis: 3, label: { formatter: "Prognos" } }] });
+  });
+
+  test("give each marker its own label", () => {
+    const two = { ...plot, markers: [{ at: 1, label: "Lov" }, { at: 3, label: "Prognos" }] };
+    const marked = (chartOptions(two, style, view) as { series: Series[] }).series.find((s) => s.id === "markers")!;
+    expect(marked.markLine).toMatchObject({
+      data: [{ xAxis: 1, label: { formatter: "Lov" } }, { xAxis: 3, label: { formatter: "Prognos" } }],
+    });
+  });
+
+  test("draw an image's short day-by-day lines without a point on every day or a name at their end", () => {
+    const option = imageOptions(plot, style, { width: 1200, height: 675 }) as { series: Record<string, unknown>[] };
+    const [history, median] = option.series;
+    expect(history!.showSymbol).toBe(false);
+    // The legend names the lines; a name where the history ends would sit on the forecast.
+    expect(history!.endLabel).toBeUndefined();
+    expect(median!.endLabel).toBeUndefined();
   });
 
   test("speak a chart's own description instead of the generated one", () => {
