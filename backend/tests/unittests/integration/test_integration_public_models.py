@@ -6,8 +6,8 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.ai_models.embedding_models.embedding_model import (
-    EmbeddingModelPublicLegacy,
+from eneo.embedding_models.presentation.embedding_model_models import (
+    EmbeddingModelPublic,
 )
 from eneo.integration.domain.skip_reasons import classify_skip_reason
 from eneo.integration.domain.sync_progress import IntegrationSyncProgress
@@ -214,7 +214,7 @@ def _public(url: str | None) -> IntegrationKnowledgePublic:
         tenant_id=uuid4(),
         space_id=uuid4(),
         user_integration_id=uuid4(),
-        embedding_model=EmbeddingModelPublicLegacy(
+        embedding_model=EmbeddingModelPublic(
             id=uuid4(), name="model", is_deprecated=False, open_source=False
         ),
         metadata=IntegrationKnowledgeMetaData(size=0),

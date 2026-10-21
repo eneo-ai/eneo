@@ -17,6 +17,7 @@
     toggleVisibleWebsiteSelection,
     visibleWebsiteIdsFromTableRows
   } from "../bulkWebsiteActions";
+  import { embeddingModelGroupTitle } from "$lib/features/ai-models/modelLabels";
 
   const {
     state: { currentSpace }
@@ -48,9 +49,6 @@
       (curr, idx, models) => idx === models.findIndex((other) => other.id === curr.id)
     );
     return models;
-  });
-  const disabledModelInUse = derived(embeddingModels, ($embeddingModels) => {
-    return [...$embeddingModels].findIndex((model) => model.inSpace === false) > -1;
   });
 
   // Toggle individual website selection
@@ -208,18 +206,12 @@
 </script>
 
 <Table.Root {viewModel} resourceName="website">
-  {#if $embeddingModels.length > 1 || $currentSpace.embedding_models.length > 1 || $disabledModelInUse}
-    {#each $embeddingModels as embeddingModel (embeddingModel.id)}
-      <Table.Group
-        title={embeddingModel.inSpace
-          ? embeddingModel.name
-          : embeddingModel.name + ` (${m.disabled()})`}
-        filterFn={createModelFilter(embeddingModel)}
-      ></Table.Group>
-    {/each}
-  {:else}
-    <Table.Group></Table.Group>
-  {/if}
+  {#each $embeddingModels as embeddingModel (embeddingModel.id)}
+    <Table.Group
+      title={embeddingModelGroupTitle(embeddingModel, embeddingModel.inSpace)}
+      filterFn={createModelFilter(embeddingModel)}
+    ></Table.Group>
+  {/each}
 </Table.Root>
 
 {#if selectedRun}
