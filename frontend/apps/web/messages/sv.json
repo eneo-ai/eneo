@@ -5007,7 +5007,7 @@
   "tool_forecast": "Tar fram prognos",
   "tool_forecast_done": "Tog fram prognos",
   "tools_builtin_forecast_description": "Prognos för kommande dagar från en daglig tidsserie i en CSV- eller Excelfil: ett mittvärde (P50), ett spann (P10–P90) och ett test mot de senaste dagarna. Modellen körs i er egen miljö, och resultatet kan exporteras som CSV.",
-  "tools_builtin_forecast_summary": "Prognoser från dagliga tidsserier, med spann och CSV-export.",
+  "tools_builtin_forecast_summary": "Prognoser med Timestral på CPU i Eneos verktygstjänst, med spann och CSV-export.",
   "tools_runtime_title": "Eneos verktygstjänst",
   "tools_runtime_ready": "Verktygstjänsten är tillgänglig. Du väljer vilka funktioner som ska aktiveras.",
   "tools_runtime_not_configured": "Verktygstjänsten är inte konfigurerad. Be driftansvarig att slutföra installationen.",

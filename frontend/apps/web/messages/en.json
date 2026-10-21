@@ -5007,7 +5007,7 @@
   "tool_forecast": "Forecasting",
   "tool_forecast_done": "Forecast made",
   "tools_builtin_forecast_description": "Forecasts the coming days of a daily series in a CSV or Excel file: a median (P50), an interval (P10–P90) and a check against the last days. The model runs in your own environment, and the result can be exported as CSV.",
-  "tools_builtin_forecast_summary": "Forecasts from daily series, with an interval and CSV export.",
+  "tools_builtin_forecast_summary": "Forecasts with Timestral on CPU in Eneo's tool service, with an interval and CSV export.",
   "tools_runtime_title": "Eneo tool service",
   "tools_runtime_ready": "The tool service is available. You choose which capabilities to enable.",
   "tools_runtime_not_configured": "The tool service is not configured. Ask your operator to run the deployment setup.",
