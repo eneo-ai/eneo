@@ -458,6 +458,7 @@ async def restore_revision(
 
 @router.post(
     "/{id}/publish/",
+    description="Publish the expected draft revision with its validated execution bindings.",
     response_model=FlowPublic,
     responses=responses.get_responses([400, 403, 404, 409, 422]),
 )
@@ -476,6 +477,7 @@ async def publish_flow(
 
 @router.post(
     "/{id}/unpublish/",
+    description="Withdraw the published version after checking the expected draft revision.",
     response_model=FlowPublic,
     responses=responses.get_responses([400, 403, 404, 409]),
 )

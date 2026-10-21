@@ -414,7 +414,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Publish Flow */
+    /**
+     * Publish Flow
+     * @description Publish the expected draft revision with its validated execution bindings.
+     */
     post: operations["publish_flow_api_v1_flows__id__publish__post"];
     delete?: never;
     options?: never;
@@ -431,7 +434,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Unpublish Flow */
+    /**
+     * Unpublish Flow
+     * @description Withdraw the published version after checking the expected draft revision.
+     */
     post: operations["unpublish_flow_api_v1_flows__id__unpublish__post"];
     delete?: never;
     options?: never;
