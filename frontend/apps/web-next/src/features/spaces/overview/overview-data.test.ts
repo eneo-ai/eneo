@@ -104,10 +104,10 @@ describe("overviewKnowledgeRows", () => {
     });
     expect(integration).toMatchObject({
       kind: "integration",
-      href: "/spaces/space-1/knowledge?tab=integrations",
-      content: null,
+      href: "/spaces/space-1/knowledge/integrations/i1",
+      content: { key: "space_documents_count", values: { count: 0 } },
       updatedAt: null,
-      status: { tone: "neutral", labelKey: "space_status_not_synced" }
+      status: { tone: "neutral", labelKey: "integration_source_state_never" }
     });
   });
 });

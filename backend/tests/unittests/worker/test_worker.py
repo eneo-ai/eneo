@@ -237,3 +237,112 @@ def test_job_id_from_ctx_parses_uuid_strings():
 
 def test_job_id_from_ctx_returns_none_for_invalid_ids():
     assert _job_id_from_ctx({"job_id": "arq:cron:job"}) is None
+
+
+class _AsyncContext:
+    def __init__(self, value: Any = None, exit_error: Exception | None = None):
+        self.value = value
+        self.exit_error = exit_error
+
+    async def __aenter__(self) -> Any:
+        return self.value
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        if exc_type is None and self.exit_error is not None:
+            raise self.exit_error
+
+
+async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
+    monkeypatch,
+) -> None:
+    """A guard raised at commit time must not leave the job pending."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from eneo.worker import worker as worker_module
+    from eneo.worker.task_manager import TaskManager
+
+    job_id = uuid4()
+    sessions: list[_AsyncContext] = [
+        _AsyncContext(exit_error=RuntimeError("storage quota exceeded")),
+        _AsyncContext(),
+    ]
+
+    def session() -> _AsyncContext:
+        db = MagicMock()
+        db.begin.return_value = sessions.pop(0)
+        return _AsyncContext(db)
+
+    monkeypatch.setattr(
+        worker_module, "sessionmanager", SimpleNamespace(session=session)
+    )
+
+    task_job_service = AsyncMock()
+    task_manager = TaskManager(
+        user=MagicMock(), job_id=job_id, job_service=task_job_service
+    )
+    task_container = MagicMock()
+    task_container.task_manager.return_value = task_manager
+    recovery_container = MagicMock()
+    recovery_container.job_service.return_value = AsyncMock()
+    containers = [task_container, recovery_container]
+
+    async def create_container(session, user_id=None):
+        return containers.pop(0)
+
+    worker = worker_module.Worker()
+    monkeypatch.setattr(worker, "_create_container", create_container)
+
+    async def body(params, container):
+        return "done"
+
+    wrapper = worker.task()(body)
+    params = SimpleNamespace(user_id=uuid4(), id=uuid4())
+
+    with pytest.raises(RuntimeError, match="storage quota exceeded"):
+        await wrapper({"job_id": str(job_id)}, params)
+
+    # The task body succeeded inside the transaction that was then lost...
+    task_job_service.complete_job.assert_awaited_once_with(job_id, "done")
+    # ...so the failure is written where it survives.
+    recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
+        job_id, "storage quota exceeded"
+    )
+
+
+async def test_commit_failure_is_recorded_without_the_statement(monkeypatch) -> None:
+    """The recorded text is served to users as the failure message of an
+    integration task, so a database error must not carry its SQL."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from sqlalchemy.exc import IntegrityError
+
+    from eneo.worker import worker as worker_module
+
+    db = MagicMock()
+    db.begin.return_value = _AsyncContext()
+    monkeypatch.setattr(
+        worker_module,
+        "sessionmanager",
+        SimpleNamespace(session=lambda: _AsyncContext(db)),
+    )
+    container = MagicMock()
+    container.job_service.return_value = AsyncMock()
+    worker = worker_module.Worker()
+
+    async def create_container(session, user_id=None):
+        return container
+
+    monkeypatch.setattr(worker, "_create_container", create_container)
+    error = IntegrityError(
+        "INSERT INTO info_blobs (title) VALUES (%(title)s)",
+        {"title": "Lönelista 2026"},
+        Exception("duplicate key"),
+    )
+
+    await worker._fail_job_after_commit_error(uuid4(), None, error)
+
+    container.job_service.return_value.fail_job.assert_awaited_once()
+    message = container.job_service.return_value.fail_job.await_args.args[1]
+    assert message == "Database error"

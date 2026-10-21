@@ -277,3 +277,50 @@ async def test_authorized_preview_and_tree_still_work(
         browsing_api.app_tokens.get_access_token.assert_not_awaited()
     else:
         browsing_api.service_tokens.refresh_access_token.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "params, expected",
+    [
+        pytest.param(
+            {"drive_id": "drive-1", "folder_path": "/a/../b"}, 400, id="dotdot"
+        ),
+        pytest.param({"drive_id": "drive-1", "folder_path": "a/b"}, 422, id="relative"),
+        pytest.param({"drive_id": "b!ok/../x"}, 422, id="drive-id-slash"),
+        pytest.param({"site_id": "x" * 513}, 422, id="site-id-too-long"),
+        pytest.param(
+            {"drive_id": "drive-1", "folder_id": "01A?x=1"}, 422, id="folder-id-query"
+        ),
+    ],
+)
+async def test_tree_rejects_malformed_graph_identifiers_before_browsing(
+    integration_access, browsing_api, params, expected
+):
+    case = integration_access
+    async with AsyncClient(
+        transport=ASGITransport(app=browsing_api.app), base_url="http://test"
+    ) as client:
+        response = await client.get(
+            f"/integrations/{case.integration.id}/sharepoint/tree/",
+            params={"space_id": str(case.space.id), **params},
+        )
+    assert response.status_code == expected, response.text
+    browsing_api.tree.assert_not_called()
+
+
+async def test_tree_accepts_graph_shaped_identifiers(integration_access, browsing_api):
+    case = integration_access
+    async with AsyncClient(
+        transport=ASGITransport(app=browsing_api.app), base_url="http://test"
+    ) as client:
+        response = await client.get(
+            f"/integrations/{case.integration.id}/sharepoint/tree/",
+            params={
+                "space_id": str(case.space.id),
+                "site_id": "contoso.sharepoint.com,8f2e1c3a-1111-2222-3333-444455556666,c5a1",
+                "folder_id": "01ABCDEF2GHIJKLMNOPQRSTUVWXYZ=",
+                "folder_path": "/Shared Documents/Policies (2024)",
+            },
+        )
+    assert response.status_code == 200, response.text
+    browsing_api.tree.assert_called_once()

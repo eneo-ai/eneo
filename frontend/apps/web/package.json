@@ -61,6 +61,7 @@
     "@vitest/browser": "4.1.11",
     "@vitest/browser-playwright": "4.1.11",
     "@vitest/coverage-v8": "4.1.11",
+    "axe-core": "4.13.0",
     "bits-ui": "^2.18.1",
     "clsx": "^2.1.1",
     "docx-preview": "^0.4.1",
@@ -88,14 +89,16 @@
     "tailwindcss": "^4.3.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.62.1",
-    "vite": "^6.4.3",
+    "vite": "^6.4.4",
     "vitest": "4.1.11",
     "vitest-browser-svelte": "^1.1.0"
   },
   "dependencies": {
+    "@eneo/markdown-math": "workspace:*",
     "@eneo/ui": "workspace:*",
     "@eneo/whats-new": "workspace:*",
     "@inlang/paraglide-js": "^2.20.2",
+    "katex": "^0.18.11",
     "paneforge": "^1.0.2"
   }
 }

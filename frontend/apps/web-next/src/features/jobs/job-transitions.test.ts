@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { diffJobs, EMPTY_LEDGER, rememberActiveJob } from "./job-transitions";
+import { diffJobs, EMPTY_LEDGER, isJobOver, rememberActiveJob } from "./job-transitions";
 import type { Job } from "./jobs";
 
 const job = (id: string, status: Job["status"], extra: Partial<Job> = {}): Job =>
@@ -69,5 +69,36 @@ describe("diffJobs", () => {
   it("leaves an active job alone when seeded again", () => {
     const first = diffJobs(EMPTY_LEDGER, [job("a", "in progress")]);
     expect(rememberActiveJob(first.ledger, job("a", "in progress"))).toBe(first.ledger);
+  });
+});
+
+describe("isJobOver", () => {
+  it("is over once listed with an outcome, or once gone from the list", () => {
+    const listed = diffJobs(EMPTY_LEDGER, [job("a", "in progress"), job("b", "failed")]);
+    expect(isJobOver("a", [job("a", "in progress")], listed.ledger, true)).toBe(false);
+    expect(isJobOver("b", [job("b", "failed")], listed.ledger, true)).toBe(true);
+
+    const gone = diffJobs(listed.ledger, []);
+    expect(isJobOver("a", [], gone.ledger, true)).toBe(true);
+    // From an earlier page load: never seen here, and not listed now.
+    expect(isJobOver("old", [], gone.ledger, true)).toBe(true);
+  });
+
+  it("takes a job for gone only once a list from the server has arrived", () => {
+    // A pushed update for another job filled the cache before the first list.
+    const pushed = diffJobs(EMPTY_LEDGER, [job("other", "in progress")]);
+    expect(isJobOver("old", [job("other", "in progress")], pushed.ledger, false)).toBe(false);
+    // A pushed outcome is news all the same.
+    expect(isJobOver("other", [job("other", "failed")], pushed.ledger, false)).toBe(true);
+  });
+
+  it("waits for a job the client started until a list shows it", () => {
+    // A poll that left before the call returned does not list it yet.
+    const seeded = rememberActiveJob(EMPTY_LEDGER, job("new", "queued"));
+    const stale = diffJobs(seeded, []);
+    expect(isJobOver("new", [], stale.ledger, true)).toBe(false);
+
+    const shown = diffJobs(stale.ledger, [job("new", "complete")]);
+    expect(isJobOver("new", [job("new", "complete")], shown.ledger, true)).toBe(true);
   });
 });

@@ -56,6 +56,12 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 
 ## Knowledge, retrieval, MCP and skills
 
+React beta answer presentation and copying
+(`frontend/apps/web-next/src/components/ai-elements/**`,
+`frontend/apps/web-next/src/features/chat/copy-assistant-answer.ts`,
+`frontend/packages/markdown-math/**`) are documented in
+`guides/capabilities.mdx#formatted-answers-in-the-react-beta`.
+
 The cross-feature responsibility map, the three execution tiers (loopback,
 bundled runtime, external), the design rationale and the state boundaries live
 in `docs/tool-architecture.mdx`. Keep that overview aligned when changing
@@ -79,7 +85,7 @@ result guards.
 | `tool-runtime/src/{server,sandbox,child,scheduler,cache}.ts`, `tool-runtime/src/tools/files/**`, `tool-runtime/src/tools/tabular/{download,zip-guard}.ts`, engine limits under `tool-runtime/src/tools/*/config.ts`, `tool-runtime/Dockerfile`, the `tool-runtime` service in `docs/deployment/docker-compose.yml` | `docs/tool-runtime-security.mdx`, `docs/deployment/TOOL_RUNTIME.md` (root, isolation checklist and configuration)                     |
 | `frontend/apps/web/src/lib/features/file-preview/**`, `frontend/apps/web/src/lib/features/chat/documentVersions.ts`, `backend/src/eneo/conversations/document_export.py`                                                                                                                                           | `guides/capabilities.mdx` (native document workspace, versions, previews and exports)                                                 |
 | `backend/src/eneo/skills/**`, skill permissions in `roles/**`, `frontend/apps/web/src/routes/(app)/admin/skills/**`                                                                                                                                                                                                | `guides/skills.mdx`                                                                                                                   |
-| `backend/src/eneo/integration/**` (SharePoint) , `frontend/apps/web/src/routes/(app)/admin/integrations/**`                                                                                                                                                                                                        | `guides/sharepoint-integration.mdx`                                                                                                   |
+| `backend/src/eneo/integration/**` (SharePoint) , `frontend/apps/web/src/routes/(app)/admin/integrations/**`, `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/knowledge/integrations/**`                                                                                                                       | `guides/sharepoint-integration.mdx`                                                                                                   |
 
 ## Storage, workers and operations
 

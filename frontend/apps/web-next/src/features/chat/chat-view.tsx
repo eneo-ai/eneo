@@ -28,7 +28,7 @@ import { displayPartnerName } from "@/lib/chat/partner-name";
 import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport";
 import type { AnswerRating, ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
-import { rescueFocus } from "@/lib/focus-rescue";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { conversationFiles, deriveActivity } from "./activity";
 import { ActivityPanelBody, type ActivityTab } from "./activity-panel";
@@ -278,9 +278,10 @@ function ConversationView({
   const dockTextareaRef = useRef<HTMLTextAreaElement>(null);
   const startTextareaRef = useRef<HTMLTextAreaElement>(null);
   const refocusComposer = useRef(false);
+  const rescue = useFocusRescue();
   useEffect(() => {
-    if (focusComposerIfLost) rescueFocus(startTextareaRef.current);
-  }, [focusComposerIfLost]);
+    if (focusComposerIfLost) rescue(startTextareaRef.current);
+  }, [focusComposerIfLost, rescue]);
 
   const transport = useMemo(() => createChatTransport(), []);
   const { messages, sendMessage, setMessages, status, stop, error, clearError } =

@@ -1,9 +1,9 @@
 import logging
 import zipfile
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import magic
 import pdfplumber
@@ -46,6 +46,7 @@ class NoExtractableTextError(ExtractionError):
 
 class ExtractionLimitError(ExtractionError):
     def __init__(self, filename: str, limit: str):
+        self.limit = limit
         super().__init__(f"File '{filename}' exceeded the {limit}", "EXTRACTION_LIMIT")
 
 
@@ -375,16 +376,34 @@ class TextExtractor:
                         xls, sheet_name=sheet_name, engine="calamine"
                     )
 
-                    if df.empty:  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
-                        continue
-
-                    # Handle merged cells - forward fill values
-                    df = df.ffill()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs are incomplete
-
                     # Clean column names (ensure strings, remove newlines)
                     df.columns = (  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
                         df.columns.astype(str).str.replace("\n", " ")  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
                     )
+
+                    if df.empty:  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
+                        # The first row is the header; a sheet holding only
+                        # that row (a list of names, say) is still text.
+                        column_names = [
+                            str(name)
+                            for name in cast(
+                                Iterable[object],
+                                df.columns,  # pyright: ignore[reportUnknownMemberType]  # pandas stubs are incomplete
+                            )
+                        ]
+                        headers = [
+                            name
+                            for name in column_names
+                            if not name.startswith("Unnamed: ")
+                        ]
+                        if headers:
+                            parts.append(
+                                f"Sheet: {sheet_name} | headers: " + " | ".join(headers)
+                            )
+                        continue
+
+                    # Handle merged cells - forward fill values
+                    df = df.ffill()  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]  # pandas stubs are incomplete
 
                     # Serialize each row as self-contained key-value pairs
                     # This ensures every chunk has full context, even if split

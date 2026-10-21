@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,7 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { toast } from "@/lib/toast";
 import {
   SHAREPOINT_SUBSCRIPTIONS_KEY,
@@ -26,18 +27,11 @@ import {
   sharepointSubscriptionsQueryOptions
 } from "./integrations";
 
-export function SharePointSubscriptions() {
+/** Renews every expired subscription and toasts the outcome; the list refetches either way. */
+export function useRenewExpiredSubscriptions() {
   const t = useTranslations();
   const queryClient = useQueryClient();
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: SHAREPOINT_SUBSCRIPTIONS_KEY });
-
-  const { data: subscriptions, isPending } = useQuery(
-    sharepointSubscriptionsQueryOptions(browserApi)
-  );
-  const [renewingId, setRenewingId] = useState<string | null>(null);
-
-  const renewAll = useMutation({
+  return useMutation({
     mutationFn: () =>
       unwrap(browserApi.POST("/api/v1/admin/sharepoint/subscriptions/renew-expired")),
     onSuccess: (result) => {
@@ -50,13 +44,29 @@ export function SharePointSubscriptions() {
         );
       } else {
         toast.success(
-          t("sharepoint_subscriptions_renewed_success", { count: result.recreated ?? 0 })
+          result.recreated === 1
+            ? t("sharepoint_subscriptions_renewed_success_one")
+            : t("sharepoint_subscriptions_renewed_success", { count: result.recreated ?? 0 })
         );
       }
-      void invalidate();
     },
-    onError: (error) => toastApiError(error, t)
+    onError: (error) => toastApiError(error, t),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: SHAREPOINT_SUBSCRIPTIONS_KEY })
   });
+}
+
+export function SharePointSubscriptions() {
+  const t = useTranslations();
+  const queryClient = useQueryClient();
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: SHAREPOINT_SUBSCRIPTIONS_KEY });
+
+  const { data: subscriptions, isPending } = useQuery(
+    sharepointSubscriptionsQueryOptions(browserApi)
+  );
+  const [renewingId, setRenewingId] = useState<string | null>(null);
+
+  const renewAll = useRenewExpiredSubscriptions();
 
   const recreate = useMutation({
     mutationFn: (id: string) => {
@@ -76,6 +86,8 @@ export function SharePointSubscriptions() {
   });
 
   const titleId = useId();
+  const titleRef = useRef<HTMLSpanElement>(null);
+  const rescue = useFocusRescue();
   const items = subscriptions ?? [];
   const expiredCount = items.filter((sub) => sub.is_expired).length;
   const activeCount = items.length - expiredCount;
@@ -84,7 +96,12 @@ export function SharePointSubscriptions() {
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <div className="flex flex-col">
-          <span id={titleId} className="text-sm font-medium">
+          <span
+            ref={titleRef}
+            id={titleId}
+            tabIndex={-1}
+            className="focus-visible:outline-ring rounded-sm text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
             {t("sharepoint_subscriptions_title")}
           </span>
           {items.length > 0 && (
@@ -105,7 +122,9 @@ export function SharePointSubscriptions() {
             size="sm"
             aria-busy={renewAll.isPending || undefined}
             onClick={() => {
-              if (!renewAll.isPending) renewAll.mutate();
+              if (renewAll.isPending) return;
+              // Once nothing has expired the button goes; focus moves to the title.
+              renewAll.mutate(undefined, { onSuccess: () => rescue(titleRef.current) });
             }}
           >
             {!renewAll.isPending && <RefreshCw className="size-4" />}
@@ -213,15 +232,14 @@ function HealthBadge({
     return (
       <div className="flex flex-col gap-0.5">
         <Badge variant="destructive">
-          {t("sharepoint_subscription_health_failing", {
-            count: sub.consecutive_renewal_failures
-          })}
+          {sub.consecutive_renewal_failures === 1
+            ? t("sharepoint_subscription_health_failing_one")
+            : t("sharepoint_subscription_health_failing", {
+                count: sub.consecutive_renewal_failures
+              })}
         </Badge>
         {sub.last_renewal_error && (
-          <span
-            className="text-muted-foreground max-w-48 truncate text-xs"
-            title={sub.last_renewal_error}
-          >
+          <span className="text-muted-foreground max-w-64 text-xs break-words whitespace-normal">
             {sub.last_renewal_error}
           </span>
         )}

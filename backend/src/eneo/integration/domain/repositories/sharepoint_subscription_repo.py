@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from contextlib import AbstractAsyncContextManager
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 from uuid import UUID
@@ -7,6 +8,18 @@ if TYPE_CHECKING:
     from eneo.integration.domain.entities.sharepoint_subscription import (
         SharePointSubscription,
     )
+
+
+class SharePointSubscriptionExists(Exception):
+    """A subscription for this (user integration, site) was stored concurrently."""
+
+    def __init__(self, user_integration_id: UUID, site_id: str) -> None:
+        super().__init__(
+            f"Subscription already exists for user integration {user_integration_id} "
+            f"and site {site_id}"
+        )
+        self.user_integration_id = user_integration_id
+        self.site_id = site_id
 
 
 class SharePointSubscriptionRepository(ABC):
@@ -43,6 +56,18 @@ class SharePointSubscriptionRepository(ABC):
         """Get subscription for a specific user+site combination.
 
         Returns None if no subscription exists for this combination.
+        """
+        ...
+
+    @abstractmethod
+    async def lock_user_site(
+        self, user_integration_id: UUID, site_id: str
+    ) -> "Optional[SharePointSubscription]":
+        """Serialize work on one user+site subscription for the transaction.
+
+        Waits until no other transaction holds the same user+site, holds it
+        until this transaction ends, and returns the subscription as committed
+        by the previous holder (None if there is none yet).
         """
         ...
 
@@ -91,4 +116,25 @@ class SharePointSubscriptionRepository(ABC):
 
         Used to determine if subscription can be safely deleted (0 references).
         """
+        ...
+
+    @abstractmethod
+    async def link_unreferenced_knowledge(
+        self, subscription: "SharePointSubscription"
+    ) -> int:
+        """Point knowledge rows for the subscription's resource at it.
+
+        Rows of the same user integration and site (or OneDrive drive) whose
+        link is still NULL get it; returns how many rows were linked. A row
+        another transaction holds (a running sync) is skipped, not waited
+        for; that sync links it itself.
+        """
+        ...
+
+    @abstractmethod
+    def own_transaction(
+        self,
+    ) -> "AbstractAsyncContextManager[SharePointSubscriptionRepository]":
+        """A repository on a session and transaction of its own, committed when
+        the block ends."""
         ...
