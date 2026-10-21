@@ -25,6 +25,20 @@ export default defineConfig({
     }
   },
   plugins: [
+    {
+      name: "eneo-release-metadata",
+      apply: "build",
+      generateBundle() {
+        this.emitFile({
+          type: "asset",
+          fileName: "eneo-release.json",
+          source: JSON.stringify({
+            version: process.env.APP_VERSION || pkg.version,
+            revision: process.env.APP_REVISION || "unknown"
+          })
+        });
+      }
+    },
     paraglideVitePlugin({
       project: "./project.inlang",
       outdir: "./src/lib/paraglide",
@@ -59,6 +73,10 @@ export default defineConfig({
     projects: [
       {
         extends: "./vite.config.ts",
+        optimizeDeps: {
+          // Pre-bundled up front so the first axe test does not trigger a Vite reload mid-run.
+          include: ["axe-core"]
+        },
         test: {
           name: "client",
           // No `environment`: browser mode runs in a real Chromium, so Vitest
@@ -100,13 +118,16 @@ export default defineConfig({
     }
   },
   define: {
-    __FRONTEND_VERSION__: JSON.stringify(pkg.version),
+    __FRONTEND_VERSION__: JSON.stringify(process.env.APP_VERSION || pkg.version),
     __IS_PREVIEW__: process.env.CF_PAGES_BRANCH ? true : process.env.VERCEL_ENV === "preview",
     __GIT_BRANCH__: process.env.CF_PAGES_BRANCH
       ? `"${process.env.CF_PAGES_BRANCH}"`
       : `"${process.env.VERCEL_GIT_COMMIT_REF}"`,
-    __GIT_COMMIT_SHA__: process.env.CF_PAGES_COMMIT_SHA
-      ? `"${process.env.CF_PAGES_COMMIT_SHA}"`
-      : `"${process.env.VERCEL_GIT_COMMIT_SHA}"`
+    __GIT_COMMIT_SHA__: JSON.stringify(
+      process.env.APP_REVISION ||
+        process.env.CF_PAGES_COMMIT_SHA ||
+        process.env.VERCEL_GIT_COMMIT_SHA ||
+        "unknown"
+    )
   }
 });

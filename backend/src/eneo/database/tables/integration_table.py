@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 from uuid import UUID
 
 from sqlalchemy import (
@@ -124,8 +124,23 @@ class IntegrationKnowledge(BasePublic):
     last_synced_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    last_sync_summary: Mapped[Optional[Dict[str, int]]] = mapped_column(
+    last_sync_summary: Mapped[Optional[Dict[str, Any]]] = mapped_column(
         JSONB, nullable=True
+    )
+    # Items syncs could not finish and retry by id; sharepoint_sync_ledger.
+    sync_failed_items: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    # Outcome of the most recent sync attempt: 'never' | 'success' | 'error'.
+    # last_synced_at is the last *successful* completion; last_sync_attempted_at
+    # moves on every attempt so a failing integration is distinguishable from
+    # one that simply had nothing to do.
+    last_sync_status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="never"
+    )
+    last_sync_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_sync_attempted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
     site_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     sharepoint_subscription_id: Mapped[Optional[UUID]] = mapped_column(

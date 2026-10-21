@@ -33,7 +33,9 @@ function initAssistantEditor(data: {
       // legacy retrieve-and-inject behavior for existing assistants.
       knowledge_mode: "inject" as Assistant["knowledge_mode"],
       enabled_capabilities: [],
-      mcp_tools: []
+      document_template: { mode: "default", template_id: null } as Assistant["document_template"],
+      mcp_tools: [],
+      rerank_model_id: null as string | null
     },
     updateResource: async (resource, changes) => {
       const assistantUpdate = changes as AssistantUpdate;
@@ -57,11 +59,13 @@ function initAssistantEditor(data: {
       groups: ["id"],
       integration_knowledge_list: ["id"],
       enabled_capabilities: true,
+      document_template: { mode: true, template_id: true },
       mcp_servers: ["id"],
       mcp_tools: ["tool_id", "is_enabled"] as unknown as true,
       skill_bindings: ["skill_id", "skill_revision_id", "activation_mode"],
       attachments: ["id", "inline_text"],
-      data_retention_days: true
+      data_retention_days: true,
+      rerank_model_id: true
     } as Record<string, unknown>,
     manageAttachements: "attachments"
   });

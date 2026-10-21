@@ -167,8 +167,9 @@ export function getSelectedIntegrationDisplay(
 
   for (const [wrapperId, selectedGroupItems] of selectedWrapperGroups.entries()) {
     const allGroupItems = allWrapperGroups.get(wrapperId) ?? [];
+    const selectedIds = new Set(selectedGroupItems.map((item) => item.id));
     const isFullySelected =
-      allGroupItems.length > 0 && selectedGroupItems.length >= allGroupItems.length;
+      allGroupItems.length > 0 && allGroupItems.every((item) => selectedIds.has(item.id));
 
     if (!isFullySelected) {
       for (const item of selectedGroupItems) {
@@ -184,7 +185,7 @@ export function getSelectedIntegrationDisplay(
       wrapper: {
         id: wrapperId,
         name: getWrapperName(first),
-        items: allGroupItems,
+        items: selectedGroupItems,
         integration_type: first.integration_type
       }
     });

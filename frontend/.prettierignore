@@ -1,0 +1,9 @@
+# Read by the pre-commit frontend-format hook, which runs prettier from here.
+# Each package's own .prettierignore applies to `bun run lint`; mirror the
+# generated files that must stay byte-identical to their generator.
+apps/web-next/src/theme/eneo.css
+apps/web-next/src/theme/eneo.js
+apps/web-next/src/theme/eneo.d.ts
+apps/web-next/src/theme/eneo.variants.d.ts
+apps/web-next/src/lib/i18n/messages
+apps/web-next/eslint-suppressions.json

@@ -227,6 +227,58 @@ class ImageModels(BasePublic):
     )
 
 
+class RerankModels(BasePublic):
+    """Rerank models: the second retrieval step that scores the question
+    against each candidate chunk.
+
+    Same catalog shape as the other model types (tenant/provider ownership,
+    enablement, default, classification, soft delete). `name` is the model
+    identifier sent to the provider, `nickname` the display name. Referenced
+    by `assistants.rerank_model_id` (SET NULL); the retrieval step that reads
+    it and the editor that writes it follow in later tasks (#1035).
+    """
+
+    name: Mapped[str] = mapped_column()
+    nickname: Mapped[str] = mapped_column()
+    open_source: Mapped[Optional[bool]] = mapped_column()
+    is_deprecated: Mapped[bool] = mapped_column(server_default="False")
+    hf_link: Mapped[Optional[str]] = mapped_column()
+    family: Mapped[str] = mapped_column()
+    stability: Mapped[str] = mapped_column()
+    hosting: Mapped[str] = mapped_column()
+    description: Mapped[Optional[str]] = mapped_column()
+    org: Mapped[Optional[str]] = mapped_column()
+
+    # Tenant model support: NULL = global model, NOT NULL = tenant-specific model
+    tenant_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=True, index=True
+    )
+    provider_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("model_providers.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    provider: Mapped[Optional[ModelProviders]] = relationship()
+
+    is_enabled: Mapped[bool] = mapped_column(server_default="True")
+    is_default: Mapped[bool] = mapped_column(server_default="False")
+    security_classification_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(SecurityClassificationsTable.id, ondelete="SET NULL"), nullable=True
+    )
+    security_classification: Mapped[Optional["SecurityClassificationsTable"]] = (
+        relationship(back_populates="rerank_models")
+    )
+
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "(tenant_id IS NULL AND provider_id IS NULL) OR (tenant_id IS NOT NULL AND provider_id IS NOT NULL)",
+            name="ck_rerank_models_tenant_provider",
+        ),
+    )
+
+
 class EmbeddingModels(BasePublic):
     name: Mapped[str] = mapped_column()
     nickname: Mapped[Optional[str]] = mapped_column()

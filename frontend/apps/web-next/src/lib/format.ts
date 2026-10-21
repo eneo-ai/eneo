@@ -1,0 +1,68 @@
+/** Shared display formatting for sizes, file names, dates and durations. */
+
+/**
+ * The extension of a file name in upper case, as shown beside a file: "PDF",
+ * "DOCX". A name without one (including a dotfile or a trailing dot) gives "".
+ */
+export function fileExtension(name: string): string {
+  const dot = name.lastIndexOf(".");
+  if (dot <= 0 || dot === name.length - 1) return "";
+  return name.slice(dot + 1).toUpperCase();
+}
+
+const BYTE_UNITS = ["byte", "kilobyte", "megabyte", "gigabyte", "terabyte"] as const;
+
+/**
+ * A file or storage size in the given locale: "184 kB" and "1,2 MB" in
+ * Swedish, "1.2 MB" in English. Steps of 1024, at most `maximumFractionDigits`
+ * decimals above bytes (trailing zeros dropped).
+ */
+export function formatBytes(bytes: number, locale: string, maximumFractionDigits = 1): string {
+  let value = Number.isFinite(bytes) && bytes > 0 ? bytes : 0;
+  let exponent =
+    value > 0 ? Math.min(Math.floor(Math.log(value) / Math.log(1024)), BYTE_UNITS.length - 1) : 0;
+  value /= 1024 ** exponent;
+  const digits = exponent === 0 ? 0 : maximumFractionDigits;
+  // 1023.96 kB would round to "1 024 kB": show "1 MB" instead.
+  if (exponent < BYTE_UNITS.length - 1 && Number(value.toFixed(digits)) >= 1024) {
+    value /= 1024;
+    exponent += 1;
+  }
+  return new Intl.NumberFormat(locale, {
+    style: "unit",
+    unit: BYTE_UNITS[exponent],
+    unitDisplay: "short",
+    maximumFractionDigits: exponent === 0 ? 0 : maximumFractionDigits
+  }).format(value);
+}
+
+/**
+ * "2026-09-25 10:30" in the browser's time zone, for text that is saved, such
+ * as a prompt version's description. On screen, show dates with ClientTime
+ * (src/components/composites/client-time.tsx).
+ */
+export function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+/** Whole days elapsed since the given instant. */
+export function daysSince(value: string | Date): number {
+  const target = typeof value === "string" ? new Date(value) : value;
+  return (Date.now() - target.getTime()) / (1000 * 60 * 60 * 24);
+}
+
+/** Duration between two instants, in the largest sensible unit. */
+export function formatDuration(start: string, end: string): string {
+  const ms = Math.max(0, new Date(end).getTime() - new Date(start).getTime());
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.floor((ms % 60_000) / 1000);
+  if (minutes >= 60) {
+    const hours = Math.floor(minutes / 60);
+    return `${hours} h ${minutes % 60} min`;
+  }
+  if (minutes > 0) return `${minutes} min ${seconds} s`;
+  return `${seconds} s`;
+}

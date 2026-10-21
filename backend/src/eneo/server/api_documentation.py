@@ -37,10 +37,11 @@ request answers `400` in the envelope above with the code
 `disallowed_cors_origin`. A failed CORS preflight answers `400` in plain text,
 which a browser never exposes to the page.
 
-A server-side caller should not forward the browser `Origin` header. A browser
-caller needs its origin allowed for the tenant; the allowed origins of the
-active public API key it sends count only while the tenant policy does not
-require a tenant origin.
+A request authenticated with an active secret API key is not subject to this
+check. Any other server-side caller should not forward the browser `Origin`
+header. A browser caller needs its origin allowed for the tenant; the allowed
+origins of the active public API key it sends count only while the tenant
+policy does not require a tenant origin.
 """
 
 TAGS_METADATA = [

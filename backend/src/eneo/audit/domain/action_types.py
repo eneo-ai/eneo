@@ -80,6 +80,8 @@ class ActionType(str, Enum):
     FILE_ORIGINAL_DOWNLOAD_LINK_CREATED = "file_original_download_link_created"
     FILE_ORIGINAL_DOWNLOADED = "file_original_downloaded"
     FILE_SIGNED_URL_MINTED = "file_signed_url_minted"
+    DOCUMENT_EXPORTED = "document_exported"
+    DOCUMENT_VERSION_SAVED = "document_version_saved"
     INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED = (
         "info_blob_original_download_link_created"
     )
@@ -116,6 +118,9 @@ class ActionType(str, Enum):
     IMAGE_MODEL_CREATED = "image_model_created"
     IMAGE_MODEL_UPDATED = "image_model_updated"
     IMAGE_MODEL_DELETED = "image_model_deleted"
+    RERANK_MODEL_CREATED = "rerank_model_created"
+    RERANK_MODEL_UPDATED = "rerank_model_updated"
+    RERANK_MODEL_DELETED = "rerank_model_deleted"
     TEMPLATE_CREATED = "template_created"
     TEMPLATE_UPDATED = "template_updated"
     TEMPLATE_DELETED = "template_deleted"
@@ -136,6 +141,19 @@ class ActionType(str, Enum):
     MCP_SERVER_DISABLED = "mcp_server_disabled"
     MCP_SERVER_TOOL_ENABLED = "mcp_server_tool_enabled"
     MCP_SERVER_TOOL_DISABLED = "mcp_server_tool_disabled"
+    MCP_APP_VIEW_LINK_CREATED = "mcp_app_view_link_created"
+
+    # Document Template Actions
+    DOCUMENT_TEMPLATE_CREATED = "document_template_created"
+    DOCUMENT_TEMPLATE_UPDATED = "document_template_updated"
+    DOCUMENT_TEMPLATE_DELETED = "document_template_deleted"
+    DOCUMENT_TEMPLATE_DEFAULT_SET = "document_template_default_set"
+    MCP_APP_TOOL_CALLED = "mcp_app_tool_called"
+
+    # Model Provider Outbound Header Actions
+    MODEL_PROVIDER_HEADERS_UPDATED = "model_provider_headers_updated"
+    MODEL_PROVIDER_DESTINATION_CHANGED = "model_provider_destination_changed"
+    MODEL_PROVIDER_HEADERS_PREVIEWED = "model_provider_headers_previewed"
 
     # Help Assistant Actions
     HELP_ASSISTANT_ROLE_ASSIGNED = "help_assistant_role_assigned"

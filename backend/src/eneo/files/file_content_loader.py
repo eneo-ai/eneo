@@ -57,6 +57,9 @@ class _FileContentSelection:
     blob_reference: FileContentReferenceRecord | LegacyFileContentRecord | None
     transcription_reference: FileContentReferenceRecord | LegacyFileContentRecord | None
     original_available: bool
+    # The stored original behind ``original_available``; carries the size a
+    # download delivers, which is also how a picked file is recognised.
+    original_reference: FileContentReferenceRecord | None = None
 
     @property
     def readable_references(self) -> tuple[FileContentReferenceRecord, ...]:
@@ -199,23 +202,22 @@ class FileContentLoader:
                 if include_transcription
                 else None
             )
+            # A stored original is advertised only while its bytes can be
+            # served: inline content always, object-store content only
+            # with a connected store. Legacy originals live in PostgreSQL.
+            original_reference = readable_original_reference(
+                file.file_type,
+                file_references,
+                object_store_configured=(self._object_content.object_store_configured),
+            )
             selection = _FileContentSelection(
                 hydrated_reference=hydrated_reference,
                 text_reference=text_reference,
                 blob_reference=blob_reference,
                 transcription_reference=transcription_reference,
-                # A stored original is advertised only while its bytes can be
-                # served: inline content always, object-store content only
-                # with a connected store. Legacy originals live in PostgreSQL.
-                original_available=readable_original_reference(
-                    file.file_type,
-                    file_references,
-                    object_store_configured=(
-                        self._object_content.object_store_configured
-                    ),
-                )
-                is not None
+                original_available=original_reference is not None
                 or self._legacy_original_available(legacy_info_by_file.get(file.id)),
+                original_reference=original_reference,
             )
             selections[file.id] = selection
         return selections
@@ -266,6 +268,11 @@ class FileContentLoader:
                 name=file.name,
                 checksum=selection.hydrated_reference.sha256.hex(),
                 size=selection.hydrated_reference.size_bytes,
+                original_size=(
+                    selection.original_reference.size_bytes
+                    if selection.original_reference is not None
+                    else None
+                ),
                 mimetype=project_file_media_type(
                     file,
                     selection.hydrated_reference,
@@ -277,6 +284,7 @@ class FileContentLoader:
                 user_id=file.user_id,
                 tenant_id=file.tenant_id,
                 parent_file_id=file.parent_file_id,
+                revises_file_id=file.revises_file_id,
                 original_available=selection.original_available,
             )
         return hydrated

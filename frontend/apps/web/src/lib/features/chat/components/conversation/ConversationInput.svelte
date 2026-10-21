@@ -1,10 +1,16 @@
 <script lang="ts">
+  import { tableLocationLabel } from "$lib/features/file-preview/tableReference";
+  import { AUTO_ACCEPT_TOOLS_STORAGE_KEY } from "../../toolApprovalPreference";
   import { onMount, untrack } from "svelte";
   import { browser } from "$app/environment";
   import AttachmentUploadIconButton from "$lib/features/attachments/components/AttachmentUploadIconButton.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as PromptInput from "$lib/components/ai-elements/prompt-input/index.js";
-  import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
+  import {
+    getAttachmentManager,
+    UploadsNotReadyError
+  } from "$lib/features/attachments/AttachmentManager";
+  import { derived } from "svelte/store";
   import MentionInput from "../mentions/MentionInput.svelte";
   import { initMentionInput } from "../mentions/MentionInput";
   import MentionButton from "../mentions/MentionButton.svelte";
@@ -26,12 +32,16 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { SvelteSet } from "svelte/reactivity";
-  import { TriangleAlert, X } from "@lucide/svelte";
+  import { TextQuote, TriangleAlert, X } from "@lucide/svelte";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { modelSupportsToolCalling } from "$lib/features/mcp/readiness";
+  import { getPartnerKnowledgeSources, hasKnowledgeSources } from "../../knowledgeSources";
   import { chatCapabilities } from "../../chatCapabilities";
   import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
+  import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
+  import { getMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
+  import { composeQuotedQuestion, tableQuoteSummary } from "../../questionQuote";
 
   type McpServerSummary = {
     id: string;
@@ -49,15 +59,17 @@
   const { tenant, user } = getAppContext();
 
   const {
-    state: { attachments, isUploading, uploadError },
+    state: { attachments, uploadError },
     queueValidUploads,
-    clearUploads,
-    clearUploadError
+    clearUploadError,
+    removeUploads,
+    awaitUploads
   } = getAttachmentManager();
 
   const {
     states: { mentions, question },
     resetMentionInput,
+    setQuestionText,
     snapshotMentionInput,
     restoreMentionInput,
     isMentionInputEmpty,
@@ -72,8 +84,39 @@
 
   const { scrollToBottom, onNewConversation }: Props = $props();
 
+  // An interactive tool view may offer the reader a message. It is put after
+  // whatever is already written and is never sent by itself.
+  $effect(() => {
+    const suggestion = chat.composerSuggestion;
+    if (suggestion === null) return;
+    untrack(() => {
+      chat.composerSuggestion = null;
+      setQuestionText($question ? `${$question}\n${suggestion}` : suggestion);
+      focusMentionInput();
+    });
+  });
+
+  // Text the user selected in a file preview or an interactive view; it is
+  // sent as a quote at the head of the next question.
+  const filePreview = getFilePreview();
+  const appPane = getMcpAppPane();
+  const quote = $derived(filePreview?.quote ?? null);
+  // A quoted view is shown again beside the conversation when it can be.
+  const quotedView = $derived(
+    quote?.viewCallId && appPane?.offered.has(quote.viewCallId) ? quote.viewCallId : null
+  );
+  const quotedFile = $derived(
+    chat.currentConversation.messages
+      ?.flatMap((message) => [...(message.files ?? []), ...(message.generated_files ?? [])])
+      .find((file) => file.id === quote?.fileId)
+  );
+
+  // Quoting is followed by typing what to do with the passage.
+  $effect(() => {
+    if (quote) focusMentionInput();
+  });
+
   let abortController: AbortController | undefined;
-  const AUTO_ACCEPT_TOOLS_STORAGE_KEY = "autoAcceptToolsEnabled";
   let autoAcceptTools = $state(true);
   let hasHydratedToolApprovalPreference = $state(false);
 
@@ -139,6 +182,9 @@
 
   function queueUploadsFromClipboard(event: ClipboardEvent) {
     if (!event.clipboardData?.files || event.clipboardData.files.length === 0) return;
+    // A message in flight owns the attachment list; files pasted now would be
+    // dropped with the sent batch.
+    if (chat.askQuestion.isLoading || sendPending) return;
     // Validation errors surface inline via the manager's uploadError store.
     queueValidUploads([...event.clipboardData.files]);
   }
@@ -165,8 +211,26 @@
     if (isAskingDisabled) return;
     sendPending = true;
     inputError = null;
-    const files = $attachments.map((file) => file?.fileRef).filter((file) => file !== undefined);
-    abortController = new AbortController();
+    // The controller is kept locally too: by the time the catch below runs a
+    // later send may have replaced the shared one.
+    const controller = new AbortController();
+    abortController = controller;
+    // Attachments still uploading do not hold the message back. It leaves the
+    // composer at once and waits in the conversation, mirroring their
+    // progress, until all of them are on the server.
+    const sentIds = $attachments.map((attachment) => attachment.id);
+    const allUploaded = $attachments.every(
+      (attachment) => attachment.status === "completed" && attachment.fileRef
+    );
+    const files = allUploaded
+      ? $attachments.map((attachment) => attachment.fileRef).filter((file) => file !== undefined)
+      : {
+          ids: sentIds,
+          subscribe: derived(attachments, (list) =>
+            list.filter((attachment) => sentIds.includes(attachment.id))
+          ).subscribe,
+          ready: () => awaitUploads(sentIds, controller.signal)
+        };
     const tools =
       $mentions.length > 0
         ? {
@@ -183,8 +247,10 @@
     // behind a spinner until the answer finishes. The full draft (mention
     // chips included) is restored on error below.
     const draft = snapshotMentionInput();
-    const questionText = draft.question;
+    const sentQuote = quote;
+    const questionText = composeQuotedQuestion(sentQuote, draft.question);
     resetMentionInput();
+    if (filePreview) filePreview.quote = null;
     scrollToBottom();
 
     try {
@@ -197,14 +263,18 @@
         files,
         tools,
         toolApprovalEnabled,
-        abortController,
+        controller,
         disabledMcpServerIds.size > 0 ? Array.from(disabledMcpServerIds) : undefined
       );
-      clearUploads();
+      removeUploads(sentIds);
     } catch (error: unknown) {
       // Put the draft back unless the user has already started a new one
       // while the request was pending; that newer input wins.
       if (isMentionInputEmpty()) restoreMentionInput(draft);
+      if (filePreview && !filePreview.quote) filePreview.quote = sentQuote;
+      // A cancelled send is not an error, and a failed upload has already
+      // been reported by the attachment manager next to its list.
+      if (controller.signal.aborted || error instanceof UploadsNotReadyError) return;
       const contextError = getContextErrorInfo(error);
       if (contextError) {
         if (contextError.used !== undefined && contextError.limit !== undefined) {
@@ -275,7 +345,7 @@
             })
           }
         : undefined;
-    chat.requestPreflight($question, fileIds, tools);
+    chat.requestPreflight(composeQuotedQuestion(quote, $question), fileIds, tools);
   });
 
   const shouldShowMentionButton = $derived.by(() => {
@@ -400,28 +470,8 @@
 
   // Knowledge sources attached to the partner (read-only indicator; knowledge
   // cannot be toggled per conversation the way MCP servers can).
-  type NamedSource = { id: string; name: string };
-  const knowledgeSources = $derived.by(() => {
-    const partner = chat.partner as Record<string, unknown> | null;
-    const named = (value: unknown, fallbackKey?: string): NamedSource[] =>
-      Array.isArray(value)
-        ? value.map((source) => ({
-            id: String(source.id),
-            name: String(source.name ?? (fallbackKey ? (source[fallbackKey] ?? "") : ""))
-          }))
-        : [];
-    return {
-      collections: named(partner?.groups),
-      websites: named(partner?.websites, "url"),
-      integrations: named(partner?.integration_knowledge_list)
-    };
-  });
-  const hasKnowledge = $derived(
-    knowledgeSources.collections.length +
-      knowledgeSources.websites.length +
-      knowledgeSources.integrations.length >
-      0
-  );
+  const knowledgeSources = $derived(getPartnerKnowledgeSources(chat.partner));
+  const hasKnowledge = $derived(hasKnowledgeSources(knowledgeSources));
   const partnerKnowledgeMode = $derived.by(() => {
     const partner = chat.partner as Record<string, unknown> | null;
     return typeof partner?.knowledge_mode === "string" ? partner.knowledge_mode : undefined;
@@ -480,7 +530,6 @@
     isConversationSubmitDisabled({
       isLoading: chat.askQuestion.isLoading,
       sendPending,
-      isUploading: $isUploading,
       hasContent: $question !== "" || $attachments.length > 0,
       hasCompletionModel: chat.hasCompletionModel,
       estimatedExceedsContext: chat.willExceedContext
@@ -492,8 +541,59 @@
   status={chat.askQuestion.isLoading || sendPending ? "streaming" : "ready"}
   onSubmit={ask}
   onStop={() => abortController?.abort("User cancelled")}
-  class="max-w-[74ch] md:w-full"
+  class="min-w-0"
 >
+  {#if quote && filePreview}
+    {@const location = tableLocationLabel(quote.locator, (row) => m.table_reference_row({ row }))}
+    <!-- A quotation, not a disabled surface: the accent tint and rule mark it as part of
+         what is about to be sent. -->
+    <div
+      class="bg-accent-dimmer border-accent-default mx-1.5 mt-1.5 flex items-start gap-2.5 rounded-lg border-l-[3px] py-2 pr-2 pl-3"
+    >
+      <TextQuote class="text-accent-stronger mt-0.5 size-4 flex-shrink-0" aria-hidden="true" />
+      <button
+        type="button"
+        class="focus-visible:ring-ring min-w-0 flex-1 rounded text-left focus-visible:ring-2 focus-visible:outline-none"
+        disabled={!quotedFile && !quotedView}
+        aria-label={m.file_quote_show({ name: quote.fileName })}
+        onclick={(event) => {
+          if (quotedView) appPane?.open(quotedView);
+          else if (quotedFile) filePreview.showPassage(quotedFile, quote, event.currentTarget);
+        }}
+      >
+        <span class="text-accent-stronger block truncate text-xs font-medium"
+          >{m.file_quote_from({ name: quote.fileName })}</span
+        >
+        {#if location}<span class="text-secondary block text-xs">{location}</span>{/if}
+        {#if tableQuoteSummary(quote.text)}
+          {@const table = tableQuoteSummary(quote.text)!}
+          <!-- No room for the table itself here: its columns and size stand in. -->
+          <span class="text-default block truncate text-sm">{table.columns.join(" · ")}</span>
+          <span class="text-secondary block text-xs">
+            {table.rows === 1
+              ? m.file_quote_table_row()
+              : m.file_quote_table_rows({ count: table.rows })}
+          </span>
+        {:else}
+          <span class="text-default line-clamp-2 text-sm break-words whitespace-pre-line"
+            >{quote.text}</span
+          >
+        {/if}
+        {#if quote.fileId && !quotedFile}<span class="text-secondary block text-xs"
+            >{m.table_reference_unavailable()}</span
+          >{/if}
+      </button>
+      <button
+        type="button"
+        onclick={() => (filePreview.quote = null)}
+        class="text-secondary hover:bg-background hover:text-default focus-visible:ring-ring rounded p-0.5 transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        aria-label={m.file_quote_remove()}
+      >
+        <X class="size-4" />
+      </button>
+    </div>
+  {/if}
+
   <PromptInput.Body>
     {#if !chat.hasCompletionModel}
       <!-- Cover only the text field: the footer stays usable so the user can
@@ -558,9 +658,12 @@
     </div>
   {/if}
 
-  <PromptInput.Footer>
+  <PromptInput.Footer class="flex-wrap gap-1 px-1.5 @[36rem]/composer:gap-2 @[36rem]/composer:px-2">
     <PromptInput.Tools
-      class={chat.askQuestion.isLoading ? "pointer-events-none opacity-40" : undefined}
+      class={[
+        "shrink-0 gap-0.5 @[36rem]/composer:gap-1",
+        chat.askQuestion.isLoading && "pointer-events-none opacity-40"
+      ]}
     >
       <AttachmentUploadIconButton label={m.upload_documents_to_conversation()} />
       {#if shouldShowMentionButton}
@@ -590,13 +693,15 @@
     </PromptInput.Tools>
 
     <!-- Right cluster: model + send/stop -->
-    <div class="flex items-center gap-2">
+    <div
+      class="flex min-w-[7rem] flex-1 items-center justify-end gap-0.5 @[26rem]/composer:min-w-0 @[36rem]/composer:gap-2"
+    >
       {#if showModelSelect}
         <ChatModelSelect />
         <ChatReasoningSelect />
       {/if}
 
-      <PromptInput.Submit disabled={isAskingDisabled} name="ask" />
+      <PromptInput.Submit class="shrink-0" disabled={isAskingDisabled} name="ask" />
     </div>
   </PromptInput.Footer>
 </PromptInput.Root>

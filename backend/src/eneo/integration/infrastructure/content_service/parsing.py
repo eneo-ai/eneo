@@ -10,6 +10,18 @@ from typing import Any, Optional, cast
 from html2text import html2text
 
 from eneo.integration.infrastructure.content_service.types import SharePointItem
+from eneo.integration.infrastructure.content_service.utils import (
+    unsupported_file_reason,
+)
+
+__all__ = [
+    "extract_text_from_canvas_layout",
+    "has_graph_facet",
+    "require_text",
+    "safe_int",
+    "sanitize_text_for_db",
+    "unsupported_file_reason",
+]
 
 
 def extract_text_from_canvas_layout(content: dict[str, Any]) -> str:
@@ -83,98 +95,3 @@ def require_text(value: Optional[str], field_name: str) -> str:
     if not value:
         raise ValueError(f"{field_name} is required")
     return value
-
-
-# File extensions that cannot produce useful text content.
-# These are skipped before download to save bandwidth and avoid database pollution.
-_UNSUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
-    {
-        # Images
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".gif",
-        ".bmp",
-        ".svg",
-        ".ico",
-        ".webp",
-        ".tiff",
-        ".tif",
-        ".heic",
-        ".heif",
-        ".raw",
-        ".cr2",
-        ".nef",
-        ".arw",
-        ".psd",
-        # Video
-        ".mp4",
-        ".avi",
-        ".mov",
-        ".wmv",
-        ".mkv",
-        ".webm",
-        ".flv",
-        ".m4v",
-        # Audio
-        ".mp3",
-        ".wav",
-        ".ogg",
-        ".flac",
-        ".aac",
-        ".wma",
-        ".m4a",
-        # Archives
-        ".zip",
-        ".rar",
-        ".7z",
-        ".tar",
-        ".gz",
-        ".bz2",
-        # Executables / binaries
-        ".exe",
-        ".dll",
-        ".msi",
-        ".bin",
-        ".iso",
-        # Other non-text
-        ".ttf",
-        ".otf",
-        ".woff",
-        ".woff2",
-    }
-)
-
-
-def unsupported_file_reason(filename: str) -> Optional[str]:
-    """Return a skip reason if the file type is unsupported, or None if OK."""
-    name = filename.lower()
-    for ext in _UNSUPPORTED_EXTENSIONS:
-        if name.endswith(ext):
-            # Determine a human-readable category
-            if ext in {
-                ".jpg",
-                ".jpeg",
-                ".png",
-                ".gif",
-                ".bmp",
-                ".svg",
-                ".ico",
-                ".webp",
-                ".tiff",
-                ".tif",
-                ".heic",
-                ".heif",
-                ".raw",
-                ".cr2",
-                ".nef",
-                ".arw",
-                ".psd",
-            }:
-                return "Unsupported file type (image)"
-            if ext in {".mp4", ".avi", ".mov", ".wmv", ".mkv", ".webm", ".flv", ".m4v"}:
-                return "Unsupported file type (video)"
-            if ext in {".mp3", ".wav", ".ogg", ".flac", ".aac", ".wma", ".m4a"}:
-                return "Unsupported file type (audio)"
-            return f"Unsupported file type ({ext})"
-    return None

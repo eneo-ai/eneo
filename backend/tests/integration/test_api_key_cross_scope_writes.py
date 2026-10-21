@@ -312,7 +312,7 @@ async def test_transfer_assistant_to_other_space_denied_for_space_scoped_key(
 
     resp = await client.post(
         f"/api/v1/assistants/{asst}/transfer/",
-        json={"target_space_id": space_b, "move_resources": False},
+        json={"target_space_id": space_b},
         headers={"X-API-Key": key_a},
     )
     assert resp.status_code in (403, 422), (

@@ -537,6 +537,8 @@ async def test_original_download_audits_the_redemption(monkeypatch):
         "content_disposition": "attachment",
         "ranged": False,
         "content_length": 5,
+        "cache_revalidated": False,
+        "transferred_bytes": 5,
     }
 
 

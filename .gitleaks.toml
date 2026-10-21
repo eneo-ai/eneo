@@ -1,0 +1,87 @@
+title = "Eneo secret scanning"
+
+[extend]
+useDefault = true
+
+# Reviewed public test/example values only. Both the exact path and extracted
+# value must match, so squash commits and line moves do not invalidate reviews.
+# Keep these scoped to generic-api-key; all other built-in rules still apply.
+[[rules]]
+id = "generic-api-key"
+
+[[rules.allowlists]]
+description = "Public Fernet key for the isolated E2E stack's dummy credentials"
+condition = "AND"
+paths = ['''^docker-compose\.e2e(\.ci)?\.yml$''']
+regexTarget = "secret"
+regexes = ['''^yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=$''']
+
+[[rules.allowlists]]
+description = "Dummy provider key used by connection-check tests"
+condition = "AND"
+paths = [
+  '''^backend/tests/unittests/model_providers/test_provider_connection_probe\.py$''',
+  '''^backend/tests/unittests/model_providers/test_provider_connection_check\.py$''',
+  '''^backend/tests/integration/model_providers/test_provider_connection_check\.py$''',
+]
+regexTarget = "secret"
+regexes = ['''^sk-live-secret-1234$''']
+
+[[rules.allowlists]]
+description = "Dummy provider key whose suffix is asserted by the masking test"
+condition = "AND"
+paths = ['''^backend/tests/unittests/model_providers/test_model_provider_masked_api_key\.py$''']
+regexTarget = "secret"
+regexes = ['''^sk-live-0123456789abcd$''']
+
+[[rules.allowlists]]
+description = "Generated OpenAPI documentation examples, including earlier PR revisions"
+condition = "AND"
+paths = ['''^frontend/apps/web-next/src/lib/api/schema\.d\.ts$''']
+regexTarget = "secret"
+regexes = [
+  '''^sk-proj-abc123xyz$''',
+  '''^sk-proj-abc123\.\.\.$''',
+  '''^inp_3f5f2f7f7f\.\.\.d9a1$''',
+  '''^ina_6f2c9b3a8f\.\.\.7b31$''',
+]
+
+[[rules.allowlists]]
+description = "Dummy credential in an outbound-headers request rejected before use"
+condition = "AND"
+paths = ['''^backend/tests/integration/test_model_provider_outbound_headers\.py$''']
+regexTarget = "secret"
+regexes = ['''^sk-test-12345678$''']
+
+[[rules.allowlists]]
+description = "Keyword-argument pair in SharePoint sync tests that the generic rule reads as a token"
+condition = "AND"
+paths = [
+  '''^backend/tests/unittests/integration/test_sharepoint_content_service\.py$''',
+  '''^backend/tests/unittests/integration/infrastructure/content_service/test_sharepoint_(?:content_service|index|reconciliation)\.py$''',
+  '''^backend/tests/unittests/integration/test_sharepoint_sync_ledger\.py$''',
+  '''^backend/tests/unittests/integration/test_sharepoint_failed_items\.py$''',
+]
+regexTarget = "secret"
+regexes = ['''^integration_knowledge_id=(?:ik\.id|knowledge_id)$''']
+
+[[rules.allowlists]]
+description = "Fake pre-authenticated download token the error-text tests must redact"
+condition = "AND"
+paths = ['''^backend/tests/unittests/observability/test_error_text\.py$''']
+regexTarget = "secret"
+regexes = ['''^v1\.eyJhdWQiOiJ4In0\.c2lnbmF0dXJl$''']
+
+[[rules.allowlists]]
+description = "The same fake download token in the SharePoint sync, job and route tests that assert it never reaches users"
+condition = "AND"
+paths = [
+  '''^backend/tests/unittests/integration/application/test_sync_log_access\.py$''',
+  '''^backend/tests/unittests/integration/test_integration_public_models\.py$''',
+  '''^backend/tests/unittests/integration/test_integration_task\.py$''',
+  '''^backend/tests/unittests/integration/test_sharepoint_content_client\.py$''',
+  '''^backend/tests/unittests/jobs/test_job_failure_codes\.py$''',
+  '''^backend/tests/unittests/spaces/api/test_integration_documents_routes\.py$''',
+]
+regexTarget = "secret"
+regexes = ['''^v1\.eyJ(?:hdWQiOiJ4In0|zaWduZWQiOiJ0b2tlbiJ9)\.c2ln(?:bmF0dXJl)?$''']

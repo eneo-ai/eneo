@@ -294,6 +294,11 @@ effective limit lower.
 
 ## Set up your choice
 
+Compose needs the release bundle for every command here: pass
+`--env-file .env --env-file release.env`, or run
+`export COMPOSE_ENV_FILES=.env,release.env` once in the shell (Docker Compose
+2.24 or later).
+
 <Tabs items={["PostgreSQL only", "Bundled SeaweedFS", "External / MinIO"]}>
   <Tabs.Tab>
 

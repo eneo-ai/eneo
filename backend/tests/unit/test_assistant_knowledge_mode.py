@@ -93,6 +93,7 @@ class TestKnowledgeModeGating:
             integration_knowledge_list=assistant.integration_knowledge_list,
             context_window_tokens=100_000,
             version=1,
+            rerank=None,
         )
         kwargs = completion_service.get_response.await_args.kwargs
         assert kwargs["info_blob_chunks"] == [chunk]
@@ -356,4 +357,8 @@ class TestKnowledgeServerCollisionDefense:
             if t["function"]["name"] == f"{prefix}__search_knowledge"
         ]
         assert len(surviving) == 1
-        assert surviving[0]["function"]["description"] == "Built-in knowledge search"
+        from eneo.files.model_file_references import FILE_HANDLE_INSTRUCTION
+
+        assert surviving[0]["function"]["description"] == (
+            FILE_HANDLE_INSTRUCTION + "\n\nBuilt-in knowledge search"
+        )

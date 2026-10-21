@@ -144,7 +144,7 @@
                 <Command.List>
                   {#if loadPreview.isLoading}
                     <div class="flex gap-2 px-2 py-1.5 text-sm">
-                      <IconLoadingSpinner class="animate-spin"></IconLoadingSpinner>
+                      <IconLoadingSpinner class="motion-safe:animate-spin"></IconLoadingSpinner>
                       {m.loading_available_spaces()}
                     </div>
                   {:else}

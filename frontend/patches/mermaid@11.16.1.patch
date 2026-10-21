@@ -1,0 +1,45 @@
+diff --git a/dist/mermaid.core.mjs b/dist/mermaid.core.mjs
+--- a/dist/mermaid.core.mjs
++++ b/dist/mermaid.core.mjs
+@@ -1319,6 +1319,9 @@
+   const diagramClassDefs = diag.renderer.getClasses?.(text, diag);
+   const rules = createUserStyles(config, diagramType, diagramClassDefs, idSelector);
+   const style1 = document.createElement("style");
++  // Eneo: use the request nonce before inserting the measurement SVG.
++  const styleNonce = globalThis.__webpack_nonce__;
++  if (styleNonce) style1.setAttribute("nonce", styleNonce);
+   style1.innerHTML = rules;
+   svg.insertBefore(style1, firstChild);
+   try {
+@@ -1336,6 +1339,16 @@
+   const a11yDescr = diag.db.getAccDescription?.();
+   addA11yInfo(diagramType, svgNode, a11yTitle, a11yDescr);
+   root.select(`[id="${id39}"]`).selectAll("foreignobject > *").attr("xmlns", XMLNS_XHTML_STD);
++  // Eneo: live SVG serialization hides nonces. Restore only the renderer's
++  // own style on inert markup before DOMPurify parses it, and on its output.
++  const withStyleNonce = (markup) => {
++    if (!styleNonce) return markup;
++    const template = document.createElement("template");
++    template.innerHTML = markup;
++    const style = template.content.firstElementChild?.querySelector(":scope > style");
++    if (style) style.setAttribute("nonce", styleNonce);
++    return template.innerHTML;
++  };
+   let svgCode = root.select(enclosingDivID_selector).node().innerHTML;
+   log.debug("config.arrowMarkerAbsolute", config.arrowMarkerAbsolute);
+   svgCode = cleanUpSvgCode(svgCode, isSandboxed, evaluate(config.arrowMarkerAbsolute));
+@@ -1343,12 +1356,13 @@
+     const svgEl = root.select(enclosingDivID_selector + " svg").node();
+     svgCode = putIntoIFrame(svgCode, svgEl);
+   } else if (!isLooseSecurityLevel) {
+-    svgCode = DOMPurify.sanitize(svgCode, {
++    svgCode = DOMPurify.sanitize(withStyleNonce(svgCode), {
+       ADD_TAGS: DOMPURIFY_TAGS,
+       ADD_ATTR: DOMPURIFY_ATTR,
+       HTML_INTEGRATION_POINTS: { foreignobject: true }
+     });
+   }
++  if (!isSandboxed) svgCode = withStyleNonce(svgCode);
+   attachFunctions();
+   if (parseEncounteredException) {
+     throw parseEncounteredException;

@@ -906,26 +906,6 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  "/api/v1/groups/{id}/transfer/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Transfer Group To Space
-     * @description Transfer a collection (legacy group) to another space.
-     */
-    post: operations["transfer_group_to_space_api_v1_groups__id__transfer__post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
   "/api/v1/settings/": {
     parameters: {
       query?: never;
@@ -1421,6 +1401,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/assistants/{id}/prompts/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Prompts
+     * @description List the prompt history for an assistant.
+     */
+    get: operations["get_prompts_api_v1_assistants__id__prompts__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/assistants/{id}/publish/": {
     parameters: {
       query?: never;
@@ -1600,6 +1600,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/recent/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Recent Conversations
+     * @description List the caller's own latest conversations across the personal assistant, space assistants and group chats they can still open, latest activity first.
+     */
+    get: operations["list_recent_conversations_api_v1_conversations_recent__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/": {
     parameters: {
       query?: never;
@@ -1644,6 +1664,70 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/app-calls/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Call Tool From App View
+     * @description Call an approved tool on the originating server for an authorized interactive view.
+     */
+    post: operations["call_tool_from_app_view_api_v1_conversations__session_id__tool_calls__tool_call_id__app_calls__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/conversations/{session_id}/documents/{file_id}/export/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Document Export Availability
+     * @description Check which formats the current provider can export for this conversation document.
+     */
+    get: operations["get_document_export_availability_api_v1_conversations__session_id__documents__file_id__export__get"];
+    put?: never;
+    /**
+     * Export Conversation Document
+     * @description Export an authorized conversation document as Word or PDF without another model response.
+     */
+    post: operations["export_conversation_document_api_v1_conversations__session_id__documents__file_id__export__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/conversations/{session_id}/documents/{file_id}/versions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Save Conversation Document Version
+     * @description Save the reader's edited Markdown of a conversation document as its next version.
+     */
+    post: operations["save_conversation_document_version_api_v1_conversations__session_id__documents__file_id__versions__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/conversations/{session_id}/feedback/": {
     parameters: {
       query?: never;
@@ -1659,6 +1743,30 @@ export interface paths {
      */
     post: operations["leave_feedback_api_v1_conversations__session_id__feedback__post"];
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/conversations/{session_id}/messages/{message_id}/feedback/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Set Message Feedback
+     * @description Rate one answer in a conversation, with an optional comment. Replaces the answer's earlier rating.
+     */
+    put: operations["set_message_feedback_api_v1_conversations__session_id__messages__message_id__feedback__put"];
+    post?: never;
+    /**
+     * Delete Message Feedback
+     * @description Remove the rating of one answer in a conversation.
+     */
+    delete: operations["delete_message_feedback_api_v1_conversations__session_id__messages__message_id__feedback__delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -1950,6 +2058,26 @@ export interface paths {
      * @description Get paginated question history for an assistant.
      */
     get: operations["get_most_recent_questions_paginated_api_v1_analysis_assistants__assistant_id__questions__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/analysis/assistants/{assistant_id}/feedback/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Assistant Feedback Counts
+     * @description Count the good and bad ratings of an assistant's answers within a time range.
+     */
+    get: operations["get_assistant_feedback_counts_api_v1_analysis_assistants__assistant_id__feedback__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -3290,6 +3418,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/jobs/events/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Job Events
+     * @description Stream the current user's job updates as server-sent events. Each `job` event carries the job as GET /jobs/ returns it, sent whenever its status changes; the connection stays open until the client closes it.
+     */
+    get: operations["job_events_api_v1_jobs_events__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/jobs/{id}/": {
     parameters: {
       query?: never;
@@ -3867,6 +4015,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/rerank-models/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Rerank Models
+     * @description List all rerank models for the tenant.
+     */
+    get: operations["get_rerank_models_api_v1_rerank_models__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/rerank-models/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Update Rerank Model
+     * @description Update org settings for a rerank model.
+     */
+    post: operations["update_rerank_model_api_v1_rerank_models__id___post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/model-providers/": {
     parameters: {
       query?: never;
@@ -3955,6 +4143,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/model-providers/outbound-headers/options/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Outbound Header Options
+     * @description Metadata for the outbound header editor: the dynamic values a header value may use, and the provider types that support outbound headers.
+     */
+    get: operations["get_outbound_header_options_api_v1_admin_model_providers_outbound_headers_options__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/model-providers/{provider_id}/": {
     parameters: {
       query?: never;
@@ -3983,6 +4191,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/model-providers/{provider_id}/outbound-headers/preview/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview Outbound Headers
+     * @description Resolve the provider's outbound headers for a user in this tenant, without sending anything. A secret header returns its state only.
+     */
+    post: operations["preview_outbound_headers_api_v1_admin_model_providers__provider_id__outbound_headers_preview__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/model-providers/{provider_id}/models/": {
     parameters: {
       query?: never;
@@ -4003,6 +4231,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/model-providers/{provider_id}/connection-check/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Check a model provider's connection
+     * @description Call the provider with its stored credentials the cheap way (its model list, 10 second timeout) and store the result on the provider as `connection_check`. The response never contains the key, the provider's headers or its response body. Returns 400 when `connection_check_supported` is false. Requires admin.
+     */
+    post: operations["check_provider_connection_api_v1_admin_model_providers__provider_id__connection_check__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/model-providers/{provider_id}/test/": {
     parameters: {
       query?: never;
@@ -4014,7 +4262,8 @@ export interface paths {
     put?: never;
     /**
      * Test Provider
-     * @description Test connectivity to a model provider.
+     * @deprecated
+     * @description Deprecated: use POST /{provider_id}/connection-check/. Runs the same check, stores its result, and answers in the older `{success, message | error}` shape. Requires admin.
      */
     post: operations["test_provider_api_v1_admin_model_providers__provider_id__test__post"];
     delete?: never;
@@ -4214,6 +4463,50 @@ export interface paths {
      * @description Delete a tenant-specific image model.
      */
     delete: operations["delete_tenant_image_model_api_v1_admin_tenant_models_image__model_id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/tenant-models/rerank/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Tenant Rerank Model
+     * @description Create a new tenant-specific rerank model.
+     */
+    post: operations["create_tenant_rerank_model_api_v1_admin_tenant_models_rerank__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/tenant-models/rerank/{model_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    /**
+     * Update Tenant Rerank Model
+     * @description Update a tenant-specific rerank model.
+     */
+    put: operations["update_tenant_rerank_model_api_v1_admin_tenant_models_rerank__model_id___put"];
+    post?: never;
+    /**
+     * Delete Tenant Rerank Model
+     * @description Delete a tenant-specific rerank model.
+     */
+    delete: operations["delete_tenant_rerank_model_api_v1_admin_tenant_models_rerank__model_id___delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -4705,7 +4998,7 @@ export interface paths {
     put?: never;
     /**
      * Create Space Integration Knowledge Batch
-     * @description Add multiple integration knowledge items to a space in a single batch.
+     * @description Add multiple integration knowledge items to a space in a single batch. Access, the connection and its token are checked first: when they fail, the request fails and nothing is written. Otherwise each item is created or reported failed on its own.
      */
     post: operations["create_space_integration_knowledge_batch_api_v1_spaces__id__knowledge_integrations_add__user_integration_id__batch__post"];
     delete?: never;
@@ -4758,6 +5051,46 @@ export interface paths {
     patch: operations["update_integration_knowledge_wrapper_api_v1_spaces__id__knowledge_integrations_wrappers__wrapper_id___patch"];
     trace?: never;
   };
+  "/api/v1/spaces/{id}/knowledge/integrations/sync-progress/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Integration Knowledge Sync Progress
+     * @description Live progress of the integration knowledge syncs running in a space. Items that are not syncing are absent.
+     */
+    get: operations["get_integration_knowledge_sync_progress_api_v1_spaces__id__knowledge_integrations_sync_progress__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{id}/knowledge/integrations/sync-details/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Get Integration Sync Details
+     * @description Read bounded sync history windows and latest skipped files for several imports.
+     */
+    post: operations["get_integration_sync_details_api_v1_spaces__id__knowledge_integrations_sync_details__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/": {
     parameters: {
       query?: never;
@@ -4776,6 +5109,46 @@ export interface paths {
      * @description Rename integration knowledge in a space.
      */
     patch: operations["update_integration_knowledge_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id___patch"];
+    trace?: never;
+  };
+  "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Integration Knowledge Documents
+     * @description List the indexed documents of an integration knowledge item, with their folder relative to the imported item. `q` matches the title, the path or a property value.
+     */
+    get: operations["get_integration_knowledge_documents_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__documents__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/skipped/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Integration Knowledge Skipped Documents
+     * @description Files the latest sync of an integration knowledge item skipped, with the reason for each.
+     */
+    get: operations["get_integration_knowledge_skipped_documents_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__documents_skipped__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/sync/": {
@@ -5185,26 +5558,6 @@ export interface paths {
     get: operations["get_latest_crawl_run_api_v1_websites__id__runs_latest__get"];
     put?: never;
     post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/websites/{id}/transfer/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Transfer Website To Space
-     * @description Transfer a website to another space by id.
-     */
-    post: operations["transfer_website_to_space_api_v1_websites__id__transfer__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -6206,6 +6559,46 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/mcp-servers/bundled/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Bundled Tools
+     * @description List the bundled tool runtime's servers and whether they are added.
+     */
+    get: operations["get_bundled_tools_api_v1_mcp_servers_bundled__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/bundled/{tool}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Create Bundled Mcp Server
+     * @description Add a server of the bundled tool runtime to this tenant (admin only). Its URL and credential come from the deployment; its tools are then reviewed and enabled like any other server's.
+     */
+    post: operations["create_bundled_mcp_server_api_v1_mcp_servers_bundled__tool___post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/mcp-servers/{id}/": {
     parameters: {
       query?: never;
@@ -6286,6 +6679,28 @@ export interface paths {
      * @description Get all tools for an MCP server with tenant-level settings applied.
      */
     get: operations["get_mcp_server_tools_api_v1_mcp_servers__id__tools__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-servers/{id}/tools/{tool_id}/view/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Mcp Tool View
+     * @description What a tool's interactive view may do: its size, the hosts it may reach
+     *     and the permissions it asks for. Describes the view awaiting approval when
+     *     there is one, otherwise the approved view.
+     */
+    get: operations["get_mcp_tool_view_api_v1_mcp_servers__id__tools__tool_id__view__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -6407,6 +6822,173 @@ export interface paths {
      * @description Update global default enabled status for a tool (admin only).
      */
     put: operations["update_tool_default_enabled_api_v1_mcp_servers__id__tools__tool_id___put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/document-templates/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List Document Templates */
+    get: operations["list_document_templates_api_v1_document_templates__get"];
+    put?: never;
+    /**
+     * Upload Document Template
+     * @description Upload a Word (.docx) template. The tool runtime reads its fields and styles; the result is stored with the template.
+     */
+    post: operations["upload_document_template_api_v1_document_templates__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/document-templates/available/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Available Document Templates
+     * @description The organisation's templates by name, for choosing one on an assistant.
+     */
+    get: operations["list_available_document_templates_api_v1_document_templates_available__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/document-templates/builtin/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Download Builtin Document Template
+     * @description Eneo's built-in document template, to adapt in Word.
+     */
+    get: operations["download_builtin_document_template_api_v1_document_templates_builtin__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/document-templates/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Document Template */
+    get: operations["get_document_template_api_v1_document_templates__id___get"];
+    put?: never;
+    post?: never;
+    /**
+     * Delete Document Template
+     * @description Remove a template. Assistants that selected it fall back to the organisation's default.
+     */
+    delete: operations["delete_document_template_api_v1_document_templates__id___delete"];
+    options?: never;
+    head?: never;
+    /**
+     * Update Document Template
+     * @description Rename a template or make it the organisation's default.
+     */
+    patch: operations["update_document_template_api_v1_document_templates__id___patch"];
+    trace?: never;
+  };
+  "/api/v1/document-templates/{id}/content/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Download Document Template
+     * @description Download the template's Word file.
+     */
+    get: operations["download_document_template_api_v1_document_templates__id__content__get"];
+    /**
+     * Replace Document Template Content
+     * @description Replace the template's Word file; the template keeps its id.
+     */
+    put: operations["replace_document_template_content_api_v1_document_templates__id__content__put"];
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/document-templates/{id}/original/download/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Download a document template through a signed link */
+    get: operations["download_document_template_signed_api_v1_document_templates__id__original_download__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-apps/views/{view_id}/token/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Get approved MCP App HTML and a signed sandbox URL
+     * @description Checks the view belongs to the caller's tenant, then returns approved HTML and a short-lived sandbox URL on the content origin. 424 when no content origin is configured.
+     */
+    post: operations["mint_app_view_token_api_v1_mcp_apps_views__view_id__token__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/mcp-apps/views/{view_id}/content": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Serve the trusted MCP App sandbox (signed-token authorized)
+     * @description Serve the isolated MCP App sandbox for an approved view authorized by a signed token.
+     */
+    get: operations["serve_app_view_content_api_v1_mcp_apps_views__view_id__content_get"];
+    put?: never;
     post?: never;
     delete?: never;
     options?: never;
@@ -7304,16 +7886,12 @@ export interface paths {
     post: operations["configure_sharepoint_app_api_v1_admin_sharepoint_app_post"];
     /**
      * Permanently delete SharePoint app
-     * @description Permanently delete the tenant's SharePoint app configuration and all associated data. WARNING: This action CANNOT be undone. This will cascade delete:
-     *     - All user_integrations using this tenant app (both org and personal)
-     *     - All integration_knowledge (imported SharePoint content)
-     *     - All info_blobs and embeddings (document data and vectors)
-     *     - All sharepoint_subscriptions (webhooks)
-     *     - All oauth_tokens for personal SharePoint integrations
-     *     - All sync_logs
+     * @description Permanently delete the tenant's SharePoint app configuration and the organization-wide SharePoint connection that uses it (app or service account). WARNING: This action CANNOT be undone. In one request it deletes:
+     *     - the organization-wide connections of this app
+     *     - the SharePoint knowledge imported through them, with its documents, embeddings and sync history
+     *     - Eneo's records of their change-notification subscriptions
      *
-     *     Assistants linked to this knowledge will lose their connections.
-     *     Requires admin role.
+     *     Personal SharePoint connections and their imports are kept, but they sign in through this app and stop syncing until an app is configured again. Subscriptions registered at Microsoft are not removed there; they expire on their own. Assistants lose the deleted knowledge. Requires admin role.
      */
     delete: operations["delete_sharepoint_app_api_v1_admin_sharepoint_app_delete"];
     options?: never;
@@ -7332,7 +7910,7 @@ export interface paths {
     put?: never;
     /**
      * Test SharePoint app credentials
-     * @description Test if the provided SharePoint app credentials are valid by attempting to acquire an access token. This does not save the credentials. Requires admin role.
+     * @description With a body: test the given tenant-app credentials by acquiring an access token, without saving them. Without a body: do a full token round trip with the stored app (client credentials for tenant apps, the refresh token for service accounts) and record the outcome as the app's credential health. Requires admin role.
      */
     post: operations["test_sharepoint_app_credentials_api_v1_admin_sharepoint_app_test_post"];
     delete?: never;
@@ -7381,6 +7959,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/sharepoint/subscriptions/recreate-all": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Recreate every SharePoint subscription of the tenant
+     * @description Recreate all of the tenant's SharePoint webhook subscriptions in place, whether expired or not, so Graph posts to the currently configured notification URL. Use it after the public origin changed. Preserves all integration relationships. Requires admin role.
+     */
+    post: operations["recreate_all_subscriptions_api_v1_admin_sharepoint_subscriptions_recreate_all_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/admin/sharepoint/subscriptions/{subscription_id}/recreate": {
     parameters: {
       query?: never;
@@ -7415,6 +8013,26 @@ export interface paths {
      * @description Start the OAuth flow for configuring a service account. Returns an authorization URL that the admin should be redirected to. The admin will log in with the service account credentials at Microsoft. Requires admin role.
      */
     post: operations["start_service_account_auth_api_v1_admin_sharepoint_service_account_auth_start_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/sharepoint/service-account/auth/reauth": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Restart the service account sign-in with the stored app credentials
+     * @description Start a new Microsoft sign-in for the already configured service account, reusing the stored client ID, secret and tenant domain. Use it when the refresh token has expired or been revoked, or when the service account password changed. Imported knowledge is kept. Requires admin role.
+     */
+    post: operations["restart_service_account_auth_api_v1_admin_sharepoint_service_account_auth_reauth_post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -7680,6 +8298,46 @@ export interface paths {
      * @description Complete the OAuth2 callback for an integration in the current tenant.
      */
     post: operations["on_auth_callback_api_v1_integrations_auth_callback_token__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/model-configurations/{kind}/invalid/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Inspect a page of persisted model configurations without loading applications
+     * @description Scan up to 200 stored configurations in one tenant, including resources hidden by validation failures. Return invalid field paths, error codes and source fingerprints without exposing raw configuration values. Use next_after to continue scanning; inspection never modifies data.
+     */
+    get: operations["inspect_model_configurations_api_v1_sysadmin_tenants__tenant_id__model_configurations__kind__invalid__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/sysadmin/tenants/{tenant_id}/model-configurations/{kind}/{resource_id}/repair/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Preview or apply an explicit repair of invalid stored model options
+     * @description Repair one invalid configuration in the specified tenant using explicit, validated replacement options. Defaults to dry-run. The source fingerprint must match the inspected value, unless the requested replacement is already stored. Reject changed or valid configurations; return 404 when the resource does not belong to the tenant.
+     */
+    post: operations["repair_model_configuration_api_v1_sysadmin_tenants__tenant_id__model_configurations__kind___resource_id__repair__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -8960,6 +9618,8 @@ export interface components {
       | "file_original_download_link_created"
       | "file_original_downloaded"
       | "file_signed_url_minted"
+      | "document_exported"
+      | "document_version_saved"
       | "info_blob_original_download_link_created"
       | "website_created"
       | "website_updated"
@@ -8994,6 +9654,9 @@ export interface components {
       | "image_model_created"
       | "image_model_updated"
       | "image_model_deleted"
+      | "rerank_model_created"
+      | "rerank_model_updated"
+      | "rerank_model_deleted"
       | "template_created"
       | "template_updated"
       | "template_deleted"
@@ -9010,6 +9673,15 @@ export interface components {
       | "mcp_server_disabled"
       | "mcp_server_tool_enabled"
       | "mcp_server_tool_disabled"
+      | "mcp_app_view_link_created"
+      | "document_template_created"
+      | "document_template_updated"
+      | "document_template_deleted"
+      | "document_template_default_set"
+      | "mcp_app_tool_called"
+      | "model_provider_headers_updated"
+      | "model_provider_destination_changed"
+      | "model_provider_headers_previewed"
       | "help_assistant_role_assigned"
       | "help_assistant_role_unassigned"
       | "help_assistant_role_toggled_enabled"
@@ -10289,7 +10961,9 @@ export interface components {
     /** AskAssistant */
     AskAssistant: {
       /** Disabled Capabilities */
-      disabled_capabilities?: ("web_search" | "image_generation")[];
+      disabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+      )[];
       /** Disabled Mcp Server Ids */
       disabled_mcp_server_ids?: string[];
       /** Question */
@@ -10382,6 +11056,8 @@ export interface components {
       mimetype: string;
       /** Size */
       size: number;
+      /** Original Size */
+      original_size?: number | null;
       /** Transcription */
       transcription?: string | null;
       /** Token Count */
@@ -10391,6 +11067,8 @@ export interface components {
        * @default false
        */
       has_download_reference?: boolean;
+      /** Revises File Id */
+      revises_file_id?: string | null;
       /**
        * Inline Text
        * @default true
@@ -10413,7 +11091,16 @@ export interface components {
        */
       logging_enabled?: boolean | null;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?:
+        | (
+            | "web_search"
+            | "image_generation"
+            | "file_analysis"
+            | "file_creation"
+            | "charts"
+            | "compute"
+          )[]
+        | null;
       /**
        * Space Id
        * Format: uuid
@@ -10544,6 +11231,8 @@ export interface components {
        * Format: uuid
        */
       session_id: string;
+      /** @description The conversation owner's rating of the answer; null when unrated. */
+      feedback?: components["schemas"]["MessageFeedback"] | null;
     };
     /** AssistantMetadata */
     AssistantMetadata: {
@@ -10595,7 +11284,10 @@ export interface components {
        */
       id: string;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+      )[];
+      document_template?: components["schemas"]["DocumentTemplateChoicePublic"];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Name */
@@ -10643,6 +11335,11 @@ export interface components {
        * @description Icon ID referencing an uploaded icon
        */
       icon_id?: string | null;
+      /**
+       * Rerank Model Id
+       * @description ID of the rerank model, or None for vector order only
+       */
+      rerank_model_id?: string | null;
       /**
        * Insight Enabled
        * @description Whether insights are enabled for this assistant. If enabled, users with appropriate permissions can see all sessions for this assistant.
@@ -11214,6 +11911,23 @@ export interface components {
       /** File */
       file: string;
     };
+    /** Body_replace_document_template_content_api_v1_document_templates__id__content__put */
+    Body_replace_document_template_content_api_v1_document_templates__id__content__put: {
+      /** File */
+      file: string;
+    };
+    /** Body_upload_document_template_api_v1_document_templates__post */
+    Body_upload_document_template_api_v1_document_templates__post: {
+      /** File */
+      file: string;
+      /** Name */
+      name: string;
+      /**
+       * Is Default
+       * @default false
+       */
+      is_default?: boolean;
+    };
     /** Body_upload_file_api_v1_files__post */
     Body_upload_file_api_v1_files__post: {
       /** Upload File */
@@ -11282,6 +11996,36 @@ export interface components {
       /** Errors */
       errors: components["schemas"]["WebsiteBulkActionError"][];
     };
+    /** BundledServerCreate */
+    BundledServerCreate: {
+      /**
+       * Activate
+       * @default false
+       */
+      activate?: boolean;
+    };
+    /** BundledToolList */
+    BundledToolList: {
+      /** Items */
+      items: components["schemas"]["BundledToolPublic"][];
+      runtime?: components["schemas"]["RuntimeStatus"] | null;
+      /** Count */
+      readonly count: number;
+    };
+    /**
+     * BundledToolPublic
+     * @description A server the bundled tool runtime offers to this tenant.
+     */
+    BundledToolPublic: {
+      /** Tool */
+      tool: string;
+      /** Purpose */
+      purpose: string;
+      /** Available */
+      available: boolean;
+      /** Mcp Server Id */
+      mcp_server_id?: string | null;
+    };
     /**
      * CallbackRequest
      * @description OIDC callback with authorization code.
@@ -11316,7 +12060,13 @@ export interface components {
        * Purpose
        * @enum {string}
        */
-      purpose: "web_search" | "image_generation";
+      purpose:
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute";
       /** Available */
       available: boolean;
       /** Reason */
@@ -11404,6 +12154,16 @@ export interface components {
        * @description New enabled state
        */
       enabled: boolean;
+    };
+    /** ChangedDetail */
+    ChangedDetail: {
+      /** File */
+      file: string;
+      /**
+       * Change
+       * @enum {string}
+       */
+      change: "added" | "updated" | "deleted";
     };
     /**
      * ChatTurnDiagnostics
@@ -11886,6 +12646,94 @@ export interface components {
       /** Security Classification */
       security_classification?: components["schemas"]["ModelId"] | null;
     };
+    /** ConfigurationError */
+    ConfigurationError: {
+      /** Field */
+      field: string;
+      /** Code */
+      code: string;
+    };
+    /** ConfigurationInspection */
+    ConfigurationInspection: {
+      /**
+       * Tenant Id
+       * Format: uuid
+       */
+      tenant_id: string;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "assistant" | "app" | "service";
+      /** Scanned */
+      scanned: number;
+      /** Invalid */
+      invalid: components["schemas"]["InvalidConfiguration"][];
+      /** Next After */
+      next_after: string | null;
+    };
+    /** ConfigurationRepair */
+    ConfigurationRepair: {
+      /** Expected Fingerprint */
+      expected_fingerprint: string;
+      replacement: components["schemas"]["ModelKwargs"];
+      /**
+       * Dry Run
+       * @default true
+       */
+      dry_run?: boolean;
+    };
+    /** ConfigurationRepairResult */
+    ConfigurationRepairResult: {
+      /**
+       * Resource Id
+       * Format: uuid
+       */
+      resource_id: string;
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "would_repair" | "repaired" | "unchanged";
+      /** Fingerprint */
+      fingerprint: string;
+    };
+    /**
+     * ConnectionCheckError
+     * @description Why a connection check failed: a fixed category, never provider text.
+     *
+     *     Upstream bodies and headers can echo the key or internal details, so only
+     *     the category is stored and returned; the UI turns it into a sentence.
+     * @enum {string}
+     */
+    ConnectionCheckError:
+      | "authentication_failed"
+      | "missing_credentials"
+      | "not_found"
+      | "rate_limited"
+      | "rejected"
+      | "provider_error"
+      | "timeout"
+      | "unreachable";
+    /**
+     * ConnectionCheckPublic
+     * @description The latest connection check: an authenticated call to the provider.
+     */
+    ConnectionCheckPublic: {
+      status: components["schemas"]["ConnectionCheckStatus"];
+      /**
+       * Checked At
+       * Format: date-time
+       */
+      checked_at: string;
+      /** @description Why the check failed; set only when status is failed. A fixed category, never text from the provider's response. */
+      error?: components["schemas"]["ConnectionCheckError"] | null;
+    };
+    /**
+     * ConnectionCheckStatus
+     * @enum {string}
+     */
+    ConnectionCheckStatus: "ok" | "failed";
     /**
      * ConstrainingSource
      * @enum {string}
@@ -11941,6 +12789,8 @@ export interface components {
       total_conversations: number;
       /** Total Questions */
       total_questions: number;
+      /** @description Ratings on the answers in these conversations. Conversation-level feedback is not included. */
+      feedback: components["schemas"]["MessageFeedbackCounts"];
     };
     /** ConversationRenameRequest */
     ConversationRenameRequest: {
@@ -11990,7 +12840,9 @@ export interface components {
        */
       disabled_mcp_server_ids?: string[];
       /** Disabled Capabilities */
-      disabled_capabilities?: ("web_search" | "image_generation")[];
+      disabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+      )[];
     };
     /** Counts */
     Counts: {
@@ -12406,7 +13258,16 @@ export interface components {
       /** Name */
       name: string;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?:
+        | (
+            | "web_search"
+            | "image_generation"
+            | "file_analysis"
+            | "file_creation"
+            | "charts"
+            | "compute"
+          )[]
+        | null;
       from_template?: components["schemas"]["TemplateCreate"] | null;
     };
     /** CreateSpaceGroupsRequest */
@@ -12417,31 +13278,27 @@ export interface components {
     };
     /** CreateSpaceIntegrationKnowledge */
     CreateSpaceIntegrationKnowledge: {
+      /** Key */
+      key?: string | null;
+      /** Folder Id */
+      folder_id?: string | null;
+      /** Folder Path */
+      folder_path?: string | null;
+      /** Selected Item Type */
+      selected_item_type?: string | null;
+      /**
+       * Resource Type
+       * @default site
+       */
+      resource_type?: ("site" | "onedrive") | null;
       /** Name */
       name: string;
       embedding_model: components["schemas"]["ModelId"];
       /** Url */
       url: string;
-      /** Key */
-      key?: string | null;
-      /** Folder Id */
-      folder_id?: string | null;
-      /** Folder Path */
-      folder_path?: string | null;
-      /** Selected Item Type */
-      selected_item_type?: string | null;
-      /**
-       * Resource Type
-       * @default site
-       */
-      resource_type?: string | null;
     };
     /** CreateSpaceIntegrationKnowledgeBatchItem */
     CreateSpaceIntegrationKnowledgeBatchItem: {
-      /** Name */
-      name: string;
-      /** Url */
-      url: string;
       /** Key */
       key?: string | null;
       /** Folder Id */
@@ -12454,7 +13311,14 @@ export interface components {
        * Resource Type
        * @default site
        */
-      resource_type?: string | null;
+      resource_type?: ("site" | "onedrive") | null;
+      /**
+       * Name
+       * @description Stored without surrounding whitespace; an item whose name is then empty or longer than 255 characters fails on its own
+       */
+      name: string;
+      /** Url */
+      url: string;
     };
     /** CreateSpaceIntegrationKnowledgeBatchRequest */
     CreateSpaceIntegrationKnowledgeBatchRequest: {
@@ -12726,7 +13590,10 @@ export interface components {
        */
       id: string;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+      )[];
+      document_template?: components["schemas"]["DocumentTemplateChoicePublic"];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Name */
@@ -12774,6 +13641,11 @@ export interface components {
        * @description Icon ID referencing an uploaded icon
        */
       icon_id?: string | null;
+      /**
+       * Rerank Model Id
+       * @description ID of the rerank model, or None for vector order only
+       */
+      rerank_model_id?: string | null;
       /**
        * Insight Enabled
        * @default false
@@ -12932,14 +13804,204 @@ export interface components {
       /** Transcription Audio Limit Bytes */
       transcription_audio_limit_bytes: number;
     };
+    /** DocumentExportAvailability */
+    DocumentExportAvailability: {
+      docx: components["schemas"]["DocumentExportFormatAvailability"];
+      pdf: components["schemas"]["DocumentExportFormatAvailability"];
+      template?: components["schemas"]["DocumentTemplateReferencePublic"] | null;
+    };
+    /** DocumentExportFormatAvailability */
+    DocumentExportFormatAvailability: {
+      /** Available */
+      available: boolean;
+      /** Reason */
+      reason?:
+        | (
+            | "provider_unavailable"
+            | "tool_unavailable"
+            | "incompatible_tool"
+            | "format_unsupported"
+            | "document_unsupported"
+          )
+        | null;
+    };
+    /**
+     * DocumentExportRequest
+     * @description A Markdown document of the conversation, asked for in another format.
+     */
+    DocumentExportRequest: {
+      /**
+       * Format
+       * @description The format to export to.
+       * @enum {string}
+       */
+      format: "docx" | "pdf";
+    };
+    /**
+     * DocumentTemplateChoicePublic
+     * @description An assistant's choice for its file-creation capability.
+     */
+    DocumentTemplateChoicePublic: {
+      /**
+       * Mode
+       * @default default
+       * @enum {string}
+       */
+      mode?: "default" | "selected" | "builtin";
+      /** Template Id */
+      template_id?: string | null;
+    };
+    /** DocumentTemplateList */
+    DocumentTemplateList: {
+      /** Items */
+      items: components["schemas"]["DocumentTemplatePublic"][];
+      /**
+       * Runtime Configured
+       * @description Whether uploads are inspected by the tool runtime.
+       */
+      runtime_configured: boolean;
+    };
+    /**
+     * DocumentTemplateOptionPublic
+     * @description A template as an assistant editor picks it: name and default only.
+     */
+    DocumentTemplateOptionPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Is Default */
+      is_default: boolean;
+    };
+    /** DocumentTemplateOptions */
+    DocumentTemplateOptions: {
+      /** Items */
+      items: components["schemas"]["DocumentTemplateOptionPublic"][];
+    };
+    /** DocumentTemplatePublic */
+    DocumentTemplatePublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Filename */
+      filename: string;
+      /** Sha256 */
+      sha256: string;
+      /** Size Bytes */
+      size_bytes: number;
+      /**
+       * Syntax
+       * @enum {string}
+       */
+      syntax: "controls" | "braces" | "mixed" | "none" | "unknown";
+      /** Placeholders */
+      placeholders: components["schemas"]["TemplatePlaceholderPublic"][];
+      /** Checks */
+      checks: {
+        [key: string]: components["schemas"]["TemplateCheckPublic"];
+      };
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "ready" | "invalid" | "unchecked";
+      /** Is Default */
+      is_default: boolean;
+      /**
+       * Selected By
+       * @description How many assistants select this template explicitly.
+       */
+      selected_by: number;
+      /** Created By */
+      created_by?: string | null;
+      /** Updated By */
+      updated_by?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * DocumentTemplateReferencePublic
+     * @description Which template applies, for display next to an export.
+     */
+    DocumentTemplateReferencePublic: {
+      /** Name */
+      name: string;
+      /**
+       * Source
+       * @enum {string}
+       */
+      source: "tenant" | "assistant" | "builtin";
+      /** Template Id */
+      template_id?: string | null;
+    };
+    /** DocumentTemplateUpdate */
+    DocumentTemplateUpdate: {
+      /** Name */
+      name?: string | null;
+      /** Is Default */
+      is_default?: boolean | null;
+    };
+    /**
+     * DocumentVersionCreate
+     * @description A reader's edited Markdown of a conversation document, saved as its next version.
+     */
+    DocumentVersionCreate: {
+      /**
+       * Content
+       * @description The whole document as Markdown, as the reader left it.
+       */
+      content: string;
+    };
+    /** DynamicValuePublic */
+    DynamicValuePublic: {
+      /**
+       * Token
+       * @description Used in a header value as {{token}}
+       */
+      token: string;
+      /**
+       * Source
+       * @enum {string}
+       */
+      source: "scim_enterprise" | "external_id";
+      /**
+       * Attribute
+       * @description The provisioned attribute the token reads
+       */
+      attribute: string;
+      /**
+       * Classification
+       * @enum {string}
+       */
+      classification: "identifying" | "organisational";
+    };
     /** EffectiveConfigPublic */
     EffectiveConfigPublic: {
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+      )[];
       /** Default Disabled Capabilities */
-      default_disabled_capabilities?: ("web_search" | "image_generation")[];
+      default_disabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+      )[];
       /** Models Enforced */
       models_enforced: boolean;
       /** Available Models */
@@ -13347,10 +14409,13 @@ export interface components {
       | "embedding_model"
       | "transcription_model"
       | "image_model"
+      | "rerank_model"
       | "audit_log"
       | "session"
       | "mcp_server"
+      | "model_provider"
       | "mcp_server_tool"
+      | "document_template"
       | "user_group";
     /**
      * ErrorCodes
@@ -13421,7 +14486,8 @@ export interface components {
       | 9061
       | 9062
       | 9063
-      | 9064;
+      | 9064
+      | 9069;
     /**
      * ExpiringKeySummaryItem
      * @description Lightweight summary of a single expiring API key.
@@ -13713,6 +14779,8 @@ export interface components {
       mimetype: string;
       /** Size */
       size: number;
+      /** Original Size */
+      original_size?: number | null;
       /** Transcription */
       transcription?: string | null;
       /** Token Count */
@@ -13722,6 +14790,8 @@ export interface components {
        * @default false
        */
       has_download_reference?: boolean;
+      /** Revises File Id */
+      revises_file_id?: string | null;
     };
     /** FileRestrictions */
     FileRestrictions: {
@@ -14490,16 +15560,90 @@ export interface components {
       description: string;
       integration_type: components["schemas"]["IntegrationType"];
     };
+    /** IntegrationDocumentItem */
+    IntegrationDocumentItem: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Title */
+      title: string;
+      /**
+       * Relative Path
+       * @description Folders between the imported item and the document, URL-decoded and without the file name; empty for the item itself.
+       */
+      relative_path: string;
+      /**
+       * Url
+       * @description Web URL of the source document; null unless an absolute https URL
+       */
+      url?: string | null;
+      /** Size */
+      size: number;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Source Metadata
+       * @default []
+       */
+      source_metadata?: components["schemas"]["SourceMetadataEntry"][];
+    };
+    /** IntegrationDocumentsPage */
+    IntegrationDocumentsPage: {
+      /** Items */
+      items: components["schemas"]["IntegrationDocumentItem"][];
+      /**
+       * Total Count
+       * @description Documents matching the query
+       */
+      total_count: number;
+      /** Limit */
+      limit: number;
+      /** Offset */
+      offset: number;
+      /**
+       * Total Size
+       * @description Summed size of the matching documents
+       */
+      total_size: number;
+    };
     /** IntegrationKnowledgeMetaData */
     IntegrationKnowledgeMetaData: {
       /** Size */
       size: number;
+      /**
+       * Document Count
+       * @description Number of documents currently indexed for this knowledge
+       * @default 0
+       */
+      document_count?: number;
       /** Last Sync Summary */
       last_sync_summary?: {
         [key: string]: unknown;
       } | null;
-      /** Last Synced At */
+      /**
+       * Last Synced At
+       * @description When the last successful sync completed
+       */
       last_synced_at?: string | null;
+      /**
+       * Last Sync Status
+       * @description Outcome of the most recent sync attempt
+       * @default never
+       * @enum {string}
+       */
+      last_sync_status?: "never" | "success" | "error";
+      /**
+       * Last Sync Error
+       * @description Error message from the most recent failed sync
+       */
+      last_sync_error?: string | null;
+      /**
+       * Last Sync Attempted At
+       * @description When the most recent sync attempt started
+       */
+      last_sync_attempted_at?: string | null;
       /**
        * Sharepoint Subscription Expires At
        * @description When the SharePoint webhook subscription expires (only for SharePoint integrations)
@@ -14517,8 +15661,11 @@ export interface components {
       name: string;
       /** Original Name */
       original_name?: string | null;
-      /** Url */
-      url: string;
+      /**
+       * Url
+       * @description Web URL of the item in its source; null unless an absolute https URL
+       */
+      url: string | null;
       /**
        * Tenant Id
        * Format: uuid
@@ -14561,47 +15708,7 @@ export interface components {
        * @enum {string}
        */
       integration_type: "confluence" | "sharepoint";
-      /**
-       * Enum
-       * @description Create a collection of name/value pairs.
-       *
-       *     Example enumeration:
-       *
-       *     >>> class Color(Enum):
-       *     ...     RED = 1
-       *     ...     BLUE = 2
-       *     ...     GREEN = 3
-       *
-       *     Access them by:
-       *
-       *     - attribute access::
-       *
-       *     >>> Color.RED
-       *     <Color.RED: 1>
-       *
-       *     - value lookup:
-       *
-       *     >>> Color(1)
-       *     <Color.RED: 1>
-       *
-       *     - name lookup:
-       *
-       *     >>> Color['RED']
-       *     <Color.RED: 1>
-       *
-       *     Enumerations can be iterated over, and know how many members they have:
-       *
-       *     >>> len(Color)
-       *     3
-       *
-       *     >>> list(Color)
-       *     [<Color.RED: 1>, <Color.BLUE: 2>, <Color.GREEN: 3>]
-       *
-       *     Methods can be added to enumerations, and members can have their own
-       *     attributes -- see the documentation for details.
-       * @enum {unknown}
-       */
-      task: never;
+      task: components["schemas"]["Task"];
     };
     /** IntegrationList */
     IntegrationList: {
@@ -14630,11 +15737,268 @@ export interface components {
       /** Count */
       readonly count: number;
     };
+    /** IntegrationSkippedDocument */
+    IntegrationSkippedDocument: {
+      /** File */
+      file: string;
+      /**
+       * Reason
+       * @description The reason as text, for logs and older clients
+       */
+      reason: string;
+      /**
+       * Code
+       * @description Why the file was skipped
+       * @enum {string}
+       */
+      code:
+        | "unsupported_type"
+        | "no_text_layer"
+        | "empty_content"
+        | "file_too_large"
+        | "extraction_limit"
+        | "incomplete_download"
+        | "password_protected"
+        | "corrupt_file"
+        | "http_error"
+        | "removal_failed"
+        | "listing_failed"
+        | "scope_path_unavailable"
+        | "missing_item_id"
+        | "unchanged"
+        | "set_aside"
+        | "error";
+      /**
+       * Params
+       * @description What the code refers to: a file type, a limit, an HTTP status
+       */
+      params?: {
+        [key: string]: string | number;
+      };
+      /**
+       * Retry
+       * @description The pass could not finish the file; the next sync tries again
+       * @default false
+       */
+      retry?: boolean;
+    };
+    /**
+     * IntegrationSkippedDocuments
+     * @description Files the latest sync of an item did not index.
+     */
+    IntegrationSkippedDocuments: {
+      /** Items */
+      items: components["schemas"]["IntegrationSkippedDocument"][];
+      /**
+       * Total
+       * @description Skipped files, including those not listed
+       */
+      total: number;
+      /**
+       * Truncated
+       * @description True when the stored list was capped
+       */
+      truncated: boolean;
+      /**
+       * Synced At
+       * @description When the sync the list comes from finished or started
+       */
+      synced_at?: string | null;
+    };
+    /** IntegrationSyncDetails */
+    IntegrationSyncDetails: {
+      /**
+       * Integration Knowledge Id
+       * Format: uuid
+       */
+      integration_knowledge_id: string;
+      history: components["schemas"]["PaginatedSyncLogList"];
+      /** @description Latest skipped files on the first page; null on older history pages */
+      skipped: components["schemas"]["IntegrationSkippedDocuments"] | null;
+    };
+    /** IntegrationSyncDetailsList */
+    IntegrationSyncDetailsList: {
+      /** Items */
+      items: components["schemas"]["IntegrationSyncDetails"][];
+    };
+    /** IntegrationSyncDetailsRequest */
+    IntegrationSyncDetailsRequest: {
+      /** Items */
+      items: components["schemas"]["IntegrationSyncWindowRequest"][];
+      /**
+       * Limit
+       * @default 10
+       */
+      limit?: number;
+    };
+    /**
+     * IntegrationSyncProgress
+     * @description Live progress of a SharePoint sync that is running now.
+     *
+     *     `total` counts the files and site pages the sync has listed so far. A full
+     *     sync lists each folder when it reaches it, so `total` is null until the
+     *     first listing returns and then grows as subfolders are found; it never
+     *     drops below `done`. A delta sync cannot cheaply tell which of its changes
+     *     are files in scope, so its `total` stays null.
+     */
+    IntegrationSyncProgress: {
+      /**
+       * Integration Knowledge Id
+       * Format: uuid
+       */
+      integration_knowledge_id: string;
+      /**
+       * Sync Type
+       * @enum {string}
+       */
+      sync_type: "full" | "delta";
+      /**
+       * Phase
+       * @description discovering: resolving scope and listing changes before files are handled; processing: handling files; finishing: orphan cleanup, delta token and summary
+       * @enum {string}
+       */
+      phase: "discovering" | "processing" | "finishing";
+      /**
+       * Started At
+       * Format: date-time
+       */
+      started_at: string;
+      /**
+       * Updated At
+       * Format: date-time
+       * @description When this progress was last written
+       */
+      updated_at: string;
+      /**
+       * Total
+       * @description Files and pages listed so far; null while unknown
+       */
+      total: number | null;
+      /**
+       * Done
+       * @description Files finished: indexed + unchanged + skipped
+       */
+      done: number;
+      /**
+       * Indexed
+       * @description Files and pages embedded in this sync
+       */
+      indexed: number;
+      /** Unchanged */
+      unchanged: number;
+      /** Skipped */
+      skipped: number;
+      /**
+       * Deleted
+       * @description Local documents removed in this sync
+       */
+      deleted: number;
+      /**
+       * Current
+       * @description Name of the file or page being handled now; never a folder
+       */
+      current?: string | null;
+      /**
+       * Recent
+       * @description Files and pages finished most recently, newest first, at most 8
+       */
+      recent?: components["schemas"]["IntegrationSyncProgressFile"][];
+    };
+    /**
+     * IntegrationSyncProgressFile
+     * @description A file or page a running sync has finished with.
+     */
+    IntegrationSyncProgressFile: {
+      /** Name */
+      name: string;
+      /**
+       * Outcome
+       * @enum {string}
+       */
+      outcome: "indexed" | "unchanged" | "skipped";
+      /**
+       * Reason
+       * @description Why a skipped file was skipped, when known
+       */
+      reason?: string | null;
+      /**
+       * Code
+       * @description The skip reason's code, when known
+       */
+      code?:
+        | (
+            | "unsupported_type"
+            | "no_text_layer"
+            | "empty_content"
+            | "file_too_large"
+            | "extraction_limit"
+            | "incomplete_download"
+            | "password_protected"
+            | "corrupt_file"
+            | "http_error"
+            | "removal_failed"
+            | "listing_failed"
+            | "scope_path_unavailable"
+            | "missing_item_id"
+            | "unchanged"
+            | "set_aside"
+            | "error"
+          )
+        | null;
+      /** Params */
+      params?: {
+        [key: string]: string | number;
+      };
+      /**
+       * Retry
+       * @description The next sync tries the file again
+       * @default false
+       */
+      retry?: boolean;
+    };
+    /**
+     * IntegrationSyncProgressList
+     * @description Running syncs of a space's integration knowledge; idle items are absent.
+     */
+    IntegrationSyncProgressList: {
+      /** Items */
+      items: components["schemas"]["IntegrationSyncProgress"][];
+    };
+    /** IntegrationSyncWindowRequest */
+    IntegrationSyncWindowRequest: {
+      /**
+       * Integration Knowledge Id
+       * Format: uuid
+       */
+      integration_knowledge_id: string;
+      /**
+       * Offset
+       * @default 0
+       */
+      offset?: number;
+    };
     /**
      * IntegrationType
      * @enum {string}
      */
     IntegrationType: "confluence" | "sharepoint";
+    /** InvalidConfiguration */
+    InvalidConfiguration: {
+      /**
+       * Resource Id
+       * Format: uuid
+       */
+      resource_id: string;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Fingerprint */
+      fingerprint: string;
+      /** Errors */
+      errors: components["schemas"]["ConfigurationError"][];
+    };
     /** InventoryPublic */
     InventoryPublic: {
       owner: components["schemas"]["ContentOwner"];
@@ -14837,7 +16201,14 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation";
+      purpose?:
+        | "general"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute";
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -14921,7 +16292,14 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation";
+      purpose?:
+        | "general"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
@@ -15044,7 +16422,14 @@ export interface components {
        * @default general
        * @enum {string}
        */
-      purpose?: "general" | "web_search" | "image_generation";
+      purpose?:
+        | "general"
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute";
       /** Image Model Id */
       image_model_id?: string | null;
       image_model?: components["schemas"]["MCPServerBackingModelPublic"] | null;
@@ -15171,6 +16556,15 @@ export interface components {
       input_schema: {
         [key: string]: unknown;
       } | null;
+      /** Meta */
+      meta?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Ui Resource Sha256
+       * @description Hash of the approved interactive view (MCP App), if any.
+       */
+      ui_resource_sha256?: string | null;
       /** Is Enabled By Default */
       is_enabled_by_default: boolean;
       /** Pending Description */
@@ -15179,6 +16573,15 @@ export interface components {
       pending_input_schema?: {
         [key: string]: unknown;
       } | null;
+      /** Pending Meta */
+      pending_meta?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Pending Ui Resource Sha256
+       * @description Hash of the interactive view awaiting approval, if any.
+       */
+      pending_ui_resource_sha256?: string | null;
       /**
        * Requires Approval
        * @default false
@@ -15249,7 +16652,17 @@ export interface components {
       /** Http Auth Type */
       http_auth_type?: ("none" | "bearer" | "api_key_header" | "internal") | null;
       /** Purpose */
-      purpose?: ("general" | "web_search" | "image_generation") | null;
+      purpose?:
+        | (
+            | "general"
+            | "web_search"
+            | "image_generation"
+            | "file_analysis"
+            | "file_creation"
+            | "charts"
+            | "compute"
+          )
+        | null;
       /** Description */
       description?: string | null;
       /** Http Auth Config Schema */
@@ -15293,6 +16706,53 @@ export interface components {
       tool_id: string;
       /** Is Enabled */
       is_enabled: boolean;
+    };
+    /**
+     * MCPToolViewPublic
+     * @description What a tool's interactive view (MCP App) may do, for review.
+     */
+    MCPToolViewPublic: {
+      /** Uri */
+      uri: string;
+      /**
+       * Pending
+       * @description The view awaits approval; otherwise it is the approved one.
+       */
+      pending: boolean;
+      /** Size Bytes */
+      size_bytes: number;
+      /**
+       * Connect Domains
+       * @description Hosts the view may send requests to.
+       */
+      connect_domains: string[];
+      /**
+       * Resource Domains
+       * @description Hosts the view may load scripts, styles, images and fonts from.
+       */
+      resource_domains: string[];
+      /**
+       * Frame Domains
+       * @description Hosts the view may embed.
+       */
+      frame_domains: string[];
+      /**
+       * Permissions
+       * @description Browser permissions the view asks for. Only clipboardWrite is granted.
+       */
+      permissions: string[];
+    };
+    /**
+     * McpAppViewTokenResponse
+     * @description Approved HTML and a signed URL for its trusted sandbox proxy.
+     */
+    McpAppViewTokenResponse: {
+      /** Url */
+      url: string;
+      /** Expires At */
+      expires_at: number;
+      /** Html */
+      html: string;
     };
     /** McpRestrictionInput */
     McpRestrictionInput: {
@@ -15393,6 +16853,8 @@ export interface components {
       skill_provenance?: components["schemas"]["SkillExecutionReference"][] | null;
       /** Reasoning */
       reasoning?: string | null;
+      /** @description The conversation owner's rating of this answer; null when it is not rated. Separate from the conversation-level feedback. */
+      feedback?: components["schemas"]["MessageFeedback"] | null;
       /**
        * Num Tokens Question
        * @description Cumulative prompt tokens across all provider requests in the turn. Use context_prompt_tokens for context-window headroom.
@@ -15420,6 +16882,38 @@ export interface components {
        * @description Model-aware Skill-owned subset of context_prompt_tokens. Already included; do not add it to context usage again. Null for legacy rows.
        */
       skill_context_tokens?: number | null;
+    };
+    /**
+     * MessageFeedback
+     * @description A rating of one answer: 1 (good) or -1 (bad), with an optional comment.
+     */
+    MessageFeedback: {
+      /**
+       * Value
+       * @enum {integer}
+       */
+      value: -1 | 1;
+      /**
+       * Text
+       * @description Optional comment on the answer. Blank text is stored as null.
+       */
+      text?: string | null;
+    };
+    /**
+     * MessageFeedbackCounts
+     * @description How many answers their conversation owners rated good and bad.
+     */
+    MessageFeedbackCounts: {
+      /**
+       * Positive
+       * @description Answers rated good (1).
+       */
+      positive: number;
+      /**
+       * Negative
+       * @description Answers rated bad (-1).
+       */
+      negative: number;
     };
     /** MessageLogging */
     MessageLogging: {
@@ -15455,6 +16949,8 @@ export interface components {
       skill_provenance?: components["schemas"]["SkillExecutionReference"][] | null;
       /** Reasoning */
       reasoning?: string | null;
+      /** @description The conversation owner's rating of this answer; null when it is not rated. Separate from the conversation-level feedback. */
+      feedback?: components["schemas"]["MessageFeedback"] | null;
       /**
        * Num Tokens Question
        * @description Cumulative prompt tokens across all provider requests in the turn. Use context_prompt_tokens for context-window headroom.
@@ -15726,6 +17222,16 @@ export interface components {
        * @default true
        */
       is_active?: boolean;
+      /**
+       * Key Expires On
+       * @description Date the API key stops working, entered by an admin so the key can be renewed in time. Few providers report key expiry through their API, so Eneo stores this date as given and does not verify it.
+       */
+      key_expires_on?: string | null;
+      /**
+       * Outbound Headers
+       * @description Outbound HTTP headers to configure
+       */
+      outbound_headers?: components["schemas"]["OutboundHeaderInput"][];
     };
     /**
      * ModelProviderPublic
@@ -15754,6 +17260,24 @@ export interface components {
       is_active: boolean;
       /** Masked Api Key */
       masked_api_key?: string | null;
+      /**
+       * Key Expires On
+       * @description Date the API key stops working, entered by an admin so the key can be renewed in time. Few providers report key expiry through their API, so Eneo stores this date as given and does not verify it.
+       */
+      key_expires_on?: string | null;
+      /** @description Result of the latest connection check; null until one runs and again after the credentials or endpoint change. */
+      connection_check?: components["schemas"]["ConnectionCheckPublic"] | null;
+      /**
+       * Connection Check Supported
+       * @description Whether POST /{provider_id}/connection-check/ can check this provider: Eneo knows a cheap authenticated call for its type, or it has an OpenAI-compatible endpoint.
+       * @default false
+       */
+      connection_check_supported?: boolean;
+      /**
+       * Outbound Headers
+       * @default []
+       */
+      outbound_headers?: components["schemas"]["OutboundHeaderPublic"][];
       /**
        * Created At
        * Format: date-time
@@ -15794,6 +17318,16 @@ export interface components {
        * @description Whether the provider is active
        */
       is_active?: boolean | null;
+      /**
+       * Key Expires On
+       * @description Date the API key stops working, entered by an admin so the key can be renewed in time. Few providers report key expiry through their API, so Eneo stores this date as given and does not verify it. Send null to remove the date; leave the field out to keep it.
+       */
+      key_expires_on?: string | null;
+      /**
+       * Outbound Headers
+       * @description Replaces the configured outbound headers; omit to leave them unchanged
+       */
+      outbound_headers?: components["schemas"]["OutboundHeaderInput"][] | null;
     };
     /** ModelUsage */
     ModelUsage: {
@@ -15941,6 +17475,11 @@ export interface components {
       transcription_models: components["schemas"]["TranscriptionModelSecurityStatus"][];
       /** Image Models */
       image_models: components["schemas"]["ImageModelSecurityStatus"][];
+      /**
+       * Rerank Models
+       * @default []
+       */
+      rerank_models?: components["schemas"]["RerankModelSecurityStatus"][];
     };
     /** ModelsRestrictionInput */
     ModelsRestrictionInput: {
@@ -16449,6 +17988,167 @@ export interface components {
       content_disposition?: components["schemas"]["ContentDisposition"];
     };
     /**
+     * OutboundHeaderInput
+     * @description One outbound header in a create or update.
+     *
+     *     Write convention (the list replaces the stored one):
+     *     an entry with an `id` and no `value` keeps the stored value; with a `value`,
+     *     replaces it; an entry without an `id` is new and must supply `value`; a
+     *     stored header whose `id` is absent is deleted. `fallback` follows the same
+     *     rule, and `null` clears it.
+     */
+    OutboundHeaderInput: {
+      /**
+       * Id
+       * @description Server-assigned id; omit for a new header
+       */
+      id?: string | null;
+      /**
+       * Name
+       * @description HTTP header name (RFC 9110 token)
+       */
+      name: string;
+      /**
+       * Value
+       * @description Literal text and {{token}} dynamic values. Omit to keep the stored value.
+       */
+      value?: string | null;
+      /**
+       * Encoding
+       * @description percent: percent-encode the resolved value (receiver unquotes); none: send byte-exact (printable ASCII only)
+       * @default percent
+       * @enum {string}
+       */
+      encoding?: "percent" | "none";
+      /**
+       * Secret
+       * @description Encrypt at rest and never return the value
+       * @default false
+       */
+      secret?: boolean;
+      /**
+       * On Missing
+       * @description What to do when a dynamic value has no value for the user
+       * @default omit
+       * @enum {string}
+       */
+      on_missing?: "omit" | "fallback" | "fail";
+      /**
+       * Fallback
+       * @description Literal sent when on_missing is 'fallback'. Omit to keep the stored one.
+       */
+      fallback?: string | null;
+    };
+    /**
+     * OutboundHeaderOptions
+     * @description Server-owned metadata for the outbound header editor.
+     */
+    OutboundHeaderOptions: {
+      /** Dynamic Values */
+      dynamic_values: components["schemas"]["DynamicValuePublic"][];
+      /** Supported Provider Types */
+      supported_provider_types: string[];
+      /** Max Headers */
+      max_headers: number;
+    };
+    /** OutboundHeaderPreview */
+    OutboundHeaderPreview: {
+      /**
+       * User Id
+       * Format: uuid
+       */
+      user_id: string;
+      /** Headers */
+      headers: components["schemas"]["OutboundHeaderPreviewItem"][];
+      /**
+       * Destination Problem
+       * @description Why requests to this provider's endpoint would be blocked
+       */
+      destination_problem?: string | null;
+      /**
+       * Blocked
+       * @description Whether this user's requests would be blocked
+       */
+      blocked: boolean;
+      /**
+       * Blocked Reason
+       * @description Why the headers block this user's requests, e.g. 'missing_required_value', 'total_size_exceeded' or 'decryption_failed' (a stored secret cannot be read)
+       */
+      blocked_reason?: string | null;
+    };
+    /** OutboundHeaderPreviewItem */
+    OutboundHeaderPreviewItem: {
+      /** Name */
+      name: string;
+      /** Secret */
+      secret: boolean;
+      /**
+       * State
+       * @enum {string}
+       */
+      state: "resolved" | "missing" | "invalid";
+      /**
+       * Value
+       * @description The value as it would be sent. Never returned for a secret header.
+       */
+      value?: string | null;
+      /**
+       * Policy
+       * @description The missing-value policy applied, when state is 'missing'
+       */
+      policy?: ("omit" | "fallback" | "fail") | null;
+      /**
+       * Reason
+       * @description Why the value is invalid
+       */
+      reason?: string | null;
+      /**
+       * Missing Dynamic Values
+       * @default []
+       */
+      missing_dynamic_values?: string[];
+    };
+    /** OutboundHeaderPreviewRequest */
+    OutboundHeaderPreviewRequest: {
+      /**
+       * User Id
+       * Format: uuid
+       * @description The tenant user to resolve the headers for
+       */
+      user_id: string;
+    };
+    /**
+     * OutboundHeaderPublic
+     * @description A configured header. A secret header's value and fallback are masked.
+     */
+    OutboundHeaderPublic: {
+      /** Id */
+      id: string;
+      /** Name */
+      name: string;
+      /** Value */
+      value: string;
+      /**
+       * Encoding
+       * @enum {string}
+       */
+      encoding: "percent" | "none";
+      /** Secret */
+      secret: boolean;
+      /**
+       * On Missing
+       * @enum {string}
+       */
+      on_missing: "omit" | "fallback" | "fail";
+      /** Fallback */
+      fallback?: string | null;
+      /**
+       * Classification
+       * @description The most sensitive kind of dynamic value the header sends; known for a secret header although its value is masked
+       */
+      classification?: ("identifying" | "organisational") | null;
+    };
+    /**
      * Outcome
      * @description Indicate success or failure of audited action
      * @enum {string}
@@ -16905,6 +18605,32 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[RecentConversation] */
+    PaginatedResponse_RecentConversation_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["RecentConversation"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** PaginatedResponse[RerankModelPublic] */
+    PaginatedResponse_RerankModelPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["RerankModelPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[RoleAssignmentPublic] */
     PaginatedResponse_RoleAssignmentPublic_: {
       /**
@@ -17206,7 +18932,16 @@ export interface components {
        */
       logging_enabled?: boolean | null;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?:
+        | (
+            | "web_search"
+            | "image_generation"
+            | "file_analysis"
+            | "file_creation"
+            | "charts"
+            | "compute"
+          )[]
+        | null;
       /** Space Id */
       space_id?: string | null;
       prompt?: components["schemas"]["PromptCreate"] | null;
@@ -17228,6 +18963,8 @@ export interface components {
        * @description This field is deprecated and will be ignored
        */
       completion_model?: components["schemas"]["ModelId"] | null;
+      /** @description Which document template the file-creation capability renders with: the organisation's default, a selected template, or Eneo's built-in. */
+      document_template?: components["schemas"]["DocumentTemplateChoicePublic"] | null;
       /** Attachments */
       attachments?: components["schemas"]["AssistantAttachmentInput"][] | null;
       /** Mcp Tools */
@@ -17267,6 +19004,11 @@ export interface components {
        * @description Icon ID referencing an uploaded icon. Set to null to remove.
        */
       icon_id?: string | null;
+      /**
+       * Rerank Model Id
+       * @description Rerank model that re-scores retrieved knowledge before it reaches the model. Must be enabled and meet the space's security classification. Set to null to search in vector order only.
+       */
+      rerank_model_id?: string | null;
       /** Skill Bindings */
       skill_bindings?: components["schemas"]["AssistantSkillBindingInput"][] | null;
     };
@@ -17378,7 +19120,16 @@ export interface components {
     /** PartialUpdateSpaceRequest */
     PartialUpdateSpaceRequest: {
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[] | null;
+      enabled_capabilities?:
+        | (
+            | "web_search"
+            | "image_generation"
+            | "file_analysis"
+            | "file_creation"
+            | "charts"
+            | "compute"
+          )[]
+        | null;
       /** Name */
       name?: string | null;
       /** Description */
@@ -17529,7 +19280,11 @@ export interface components {
       | "modules"
       | "assistant_debug"
       | "web_search"
-      | "image_generation";
+      | "image_generation"
+      | "file_analysis"
+      | "file_creation"
+      | "charts"
+      | "compute";
     /** PermissionPublic */
     PermissionPublic: {
       name: components["schemas"]["Permission"];
@@ -17574,7 +19329,13 @@ export interface components {
        * Purpose
        * @enum {string}
        */
-      purpose: "web_search" | "image_generation";
+      purpose:
+        | "web_search"
+        | "image_generation"
+        | "file_analysis"
+        | "file_creation"
+        | "charts"
+        | "compute";
       /**
        * Is Default Enabled
        * @default true
@@ -18124,6 +19885,206 @@ export interface components {
       allow_user_override: boolean;
     };
     /**
+     * RecentConversation
+     * @description One of the caller's own conversations, with what it takes to show and open it.
+     */
+    RecentConversation: {
+      /**
+       * Id
+       * Format: uuid
+       * @description The conversation (session) id.
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Last Activity At
+       * Format: date-time
+       * @description When the latest question was asked; the creation time for a conversation without questions.
+       */
+      last_activity_at: string;
+      partner: components["schemas"]["RecentConversationPartner"];
+      space: components["schemas"]["RecentConversationSpace"];
+    };
+    /**
+     * RecentConversationPartner
+     * @description The assistant or group chat a recent conversation is held with.
+     */
+    RecentConversationPartner: {
+      /**
+       * Type
+       * @description `default-assistant` is the space's own assistant; in the personal space that is the personal chat.
+       * @enum {string}
+       */
+      type: "assistant" | "default-assistant" | "group-chat";
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+    };
+    /**
+     * RecentConversationSpace
+     * @description The space the conversation's assistant or group chat belongs to.
+     */
+    RecentConversationSpace: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Personal */
+      personal: boolean;
+      /** Organization */
+      organization: boolean;
+    };
+    /** RerankModelPublic */
+    RerankModelPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      /** Family */
+      family?: string | null;
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      /** Org */
+      org?: string | null;
+      /**
+       * Can Access
+       * @default false
+       */
+      can_access?: boolean;
+      /**
+       * Is Locked
+       * @default true
+       */
+      is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
+      /**
+       * Is Org Enabled
+       * @default false
+       */
+      is_org_enabled?: boolean;
+      /**
+       * Is Org Default
+       * @default false
+       */
+      is_org_default?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
+      security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
+    };
+    /** RerankModelSecurityStatus */
+    RerankModelSecurityStatus: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Nickname */
+      nickname: string;
+      /** Family */
+      family?: string | null;
+      /** Is Deprecated */
+      is_deprecated: boolean;
+      /** Stability */
+      stability?: string | null;
+      /** Hosting */
+      hosting?: string | null;
+      /** Open Source */
+      open_source?: boolean | null;
+      /** Description */
+      description?: string | null;
+      /** Hf Link */
+      hf_link?: string | null;
+      /** Org */
+      org?: string | null;
+      /**
+       * Can Access
+       * @default false
+       */
+      can_access?: boolean;
+      /**
+       * Is Locked
+       * @default true
+       */
+      is_locked?: boolean;
+      /** Lock Reason */
+      lock_reason?: string | null;
+      /**
+       * Is Org Enabled
+       * @default false
+       */
+      is_org_enabled?: boolean;
+      /**
+       * Is Org Default
+       * @default false
+       */
+      is_org_default?: boolean;
+      /** Credential Provider */
+      credential_provider?: string | null;
+      security_classification?: components["schemas"]["SecurityClassificationPublic"] | null;
+      /** Tenant Id */
+      tenant_id?: string | null;
+      /** Provider Id */
+      provider_id?: string | null;
+      /** Provider Name */
+      provider_name?: string | null;
+      /** Provider Type */
+      provider_type?: string | null;
+      /** Deprecation Date */
+      deprecation_date?: string | null;
+      /** Meets Security Classification */
+      meets_security_classification?: boolean | null;
+    };
+    /** RerankModelUpdate */
+    RerankModelUpdate: {
+      /** Is Org Enabled */
+      is_org_enabled?: boolean | null;
+      /** Is Org Default */
+      is_org_default?: boolean | null;
+      /** Security Classification */
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /**
      * ResourcePermission
      * @enum {string}
      */
@@ -18317,6 +20278,61 @@ export interface components {
        */
       files?: components["schemas"]["ModelId"][];
     };
+    /** RuntimeStatus */
+    RuntimeStatus: {
+      /**
+       * Configured
+       * @default false
+       */
+      configured?: boolean;
+      /**
+       * State
+       * @default not_configured
+       * @enum {string}
+       */
+      state?: "not_configured" | "ready" | "unreachable" | "unauthorized" | "unverified";
+      /** Expected Version */
+      expected_version: string;
+      /**
+       * Expected Revision
+       * @default unknown
+       */
+      expected_revision?: string;
+      /** Version */
+      version?: string | null;
+      /** Revision */
+      revision?: string | null;
+      /** Warnings */
+      warnings?: (
+        | "version_mismatch"
+        | "revision_mismatch"
+        | "unverified"
+        | "confinement_unavailable"
+        | "file_origin_unreachable"
+        | "file_origin_not_allowed"
+        | "file_origin_unknown"
+      )[];
+      /** Files Confined */
+      files_confined?: boolean | null;
+      /** Tcp Confined */
+      tcp_confined?: boolean | null;
+      /**
+       * File Origin
+       * @default unknown
+       * @enum {string}
+       */
+      file_origin?: "reachable" | "unreachable" | "not_allowed" | "unknown";
+      /**
+       * Active
+       * @default 0
+       */
+      active?: number;
+      /**
+       * Queued
+       * @default 0
+       */
+      queued?: number;
+    };
     /**
      * ScheduleState
      * @enum {string}
@@ -18463,6 +20479,12 @@ export interface components {
        * @description Experimental feature that tries to limit the amount of chunks to only the relevant ones, based on the score. Set to null (or omit completely) to not use this feature
        */
       autocut_cutoff?: number | null;
+      /**
+       * Rerank
+       * @description Rerank the candidates with the installation's default rerank model. Reranked results carry the reranker's scores and autocut_cutoff is ignored; without a usable rerank model the search runs as without this flag.
+       * @default false
+       */
+      rerank?: boolean;
     };
     /** SemanticSearchResponse */
     SemanticSearchResponse: {
@@ -18513,6 +20535,11 @@ export interface components {
      */
     ServiceAccountAuthStart: {
       /**
+       * Redirect Uri
+       * @description An exact operator-registered OAuth callback URL.
+       */
+      redirect_uri?: string | null;
+      /**
        * Client Id
        * @description Microsoft Entra ID Application (Client) ID
        * @example 12345678-1234-1234-1234-123456789012
@@ -18546,6 +20573,17 @@ export interface components {
        * @description OAuth state parameter for CSRF protection
        */
       state: string;
+    };
+    /**
+     * ServiceAccountReauthStart
+     * @description Request model to restart the service account sign-in with stored credentials.
+     */
+    ServiceAccountReauthStart: {
+      /**
+       * Redirect Uri
+       * @description An exact operator-registered OAuth callback URL.
+       */
+      redirect_uri?: string | null;
     };
     /** ServiceCreatePublic */
     ServiceCreatePublic: {
@@ -18928,6 +20966,11 @@ export interface components {
     SharePointFixtureTreeResponse: {
       /** Items */
       items: components["schemas"]["SharePointTreeItem"][];
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated?: boolean;
       /** Current Path */
       current_path: string;
       /** Parent Id */
@@ -19066,6 +21109,11 @@ export interface components {
     SharePointTreeResponse: {
       /** Items */
       items: components["schemas"]["SharePointTreeItem"][];
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated?: boolean;
       /** Current Path */
       current_path: string;
       /** Parent Id */
@@ -19796,6 +21844,33 @@ export interface components {
       file: string;
       /** Reason */
       reason: string;
+      /**
+       * Code
+       * @enum {string}
+       */
+      code?:
+        | "unsupported_type"
+        | "no_text_layer"
+        | "empty_content"
+        | "file_too_large"
+        | "extraction_limit"
+        | "incomplete_download"
+        | "password_protected"
+        | "corrupt_file"
+        | "http_error"
+        | "removal_failed"
+        | "listing_failed"
+        | "scope_path_unavailable"
+        | "missing_item_id"
+        | "unchanged"
+        | "set_aside"
+        | "error";
+      /** Params */
+      params?: {
+        [key: string]: string | number;
+      };
+      /** Retry */
+      retry?: boolean;
     };
     /**
      * SortField
@@ -19939,8 +22014,15 @@ export interface components {
       default_assistant?: components["schemas"]["DefaultAssistant"] | null;
       /** Data Retention Days */
       data_retention_days?: number | null;
+      /**
+       * Organization Space Id
+       * @description Organization space identity, independent of the caller's membership.
+       */
+      organization_space_id: string | null;
       /** Enabled Capabilities */
-      enabled_capabilities?: ("web_search" | "image_generation")[];
+      enabled_capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+      )[];
       /** Available Capabilities */
       available_capabilities?: components["schemas"]["CapabilityAvailability"][];
       /** Embedding Models */
@@ -20240,10 +22322,26 @@ export interface components {
       pages_processed?: number;
       /** Folders Processed */
       folders_processed?: number;
+      /** Unchanged Items */
+      unchanged_items?: number;
       /** Skipped Items */
       skipped_items?: number;
+      /** Skipped Total */
+      skipped_total?: number;
+      /** Skipped Truncated */
+      skipped_truncated?: boolean;
       /** Skipped Details */
       skipped_details?: components["schemas"]["SkippedDetail"][];
+      /** Changed Total */
+      changed_total?: number;
+      /** Changed Truncated */
+      changed_truncated?: boolean;
+      /** Changed Details */
+      changed_details?: components["schemas"]["ChangedDetail"][];
+      /** Failed Items */
+      failed_items?: number;
+      /** Reconcile Warning */
+      reconcile_warning?: string;
       /** Trigger */
       trigger?: string;
       /** Recovery */
@@ -20269,6 +22367,13 @@ export interface components {
       | "analyze_conversation_insights"
       | "export_audit_logs"
       | "log_audit_event";
+    /** TemplateCheckPublic */
+    TemplateCheckPublic: {
+      /** Ok */
+      ok: boolean;
+      /** Detail */
+      detail: string;
+    };
     /** TemplateCreate */
     TemplateCreate: {
       /**
@@ -20288,6 +22393,34 @@ export interface components {
       )[];
       /** Count */
       readonly count: number;
+    };
+    /** TemplatePlaceholderPublic */
+    TemplatePlaceholderPublic: {
+      /** Name */
+      name: string;
+      /**
+       * Syntax
+       * @enum {string}
+       */
+      syntax: "control" | "braces";
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "rich" | "text";
+      /** Label */
+      label?: string | null;
+      /** Hint */
+      hint?: string | null;
+      /**
+       * Location
+       * @enum {string}
+       */
+      location: "body" | "header" | "footer";
+      /** Supported */
+      supported: boolean;
+      /** Reason */
+      reason?: string | null;
     };
     /** TemplateWizard */
     TemplateWizard: {
@@ -20807,6 +22940,90 @@ export interface components {
       /** Default Role Id */
       default_role_id?: string | null;
     };
+    /** TenantRerankModelCreate */
+    TenantRerankModelCreate: {
+      /**
+       * Provider Id
+       * Format: uuid
+       * @description Model provider ID
+       */
+      provider_id: string;
+      /**
+       * Name
+       * @description Model identifier as served by the provider (e.g. 'rerank-v3.5', 'jina-reranker-v2-base-multilingual', or the name a TEI endpoint serves)
+       */
+      name: string;
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name: string;
+      /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       * @default swe
+       */
+      hosting?: string;
+      /**
+       * Family
+       * @description Model family; defaults to the provider type (e.g. 'cohere')
+       */
+      family?: string | null;
+      /**
+       * Is Active
+       * @description Enable in organization
+       * @default true
+       */
+      is_active?: boolean;
+      /**
+       * Is Default
+       * @description Set as default model
+       * @default false
+       */
+      is_default?: boolean;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /** @description Security classification */
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
+    /** TenantRerankModelUpdate */
+    TenantRerankModelUpdate: {
+      /**
+       * Display Name
+       * @description User-friendly display name
+       */
+      display_name?: string | null;
+      /**
+       * Description
+       * @description Model description
+       */
+      description?: string | null;
+      /**
+       * Hosting
+       * @description Hosting location (swe, eu, usa)
+       */
+      hosting?: string | null;
+      /**
+       * Open Source
+       * @description Is the model open source
+       */
+      open_source?: boolean | null;
+      /**
+       * Stability
+       * @description Model stability (stable, experimental)
+       */
+      stability?: string | null;
+      /**
+       * Is Default
+       * @description Set as tenant default
+       */
+      is_default?: boolean | null;
+      /** @description Security classification reference (null clears it) */
+      security_classification?: components["schemas"]["ModelId"] | null;
+    };
     /**
      * TenantSharePointAppCreate
      * @description Request model for creating/updating tenant SharePoint app credentials.
@@ -20876,6 +23093,22 @@ export interface components {
       service_account_email?: string | null;
       /** Certificate Path */
       certificate_path: string | null;
+      /**
+       * Auth Status
+       * @description Credential health: 'error' when the latest token acquisition or refresh failed, 'ok' after a success, 'unknown' before either.
+       * @default unknown
+       * @enum {string}
+       */
+      auth_status?: "ok" | "error" | "unknown";
+      /**
+       * Last Auth Error
+       * @description Message from the most recent credential failure
+       */
+      last_auth_error?: string | null;
+      /** Last Auth Error At */
+      last_auth_error_at?: string | null;
+      /** Last Auth Success At */
+      last_auth_success_at?: string | null;
       /** Created By */
       created_by: string | null;
       /**
@@ -21198,12 +23431,22 @@ export interface components {
       purpose?: string | null;
       /** Is Internal */
       is_internal?: boolean | null;
+      /** Is Bundled */
+      is_bundled?: boolean | null;
       /** Meta */
       meta?: {
         [key: string]: unknown;
       } | null;
       /** Generated File Ids */
       generated_file_ids?: string[] | null;
+      /** Structured Content */
+      structured_content?: {
+        [key: string]: unknown;
+      } | null;
+      /** App View */
+      app_view?: {
+        [key: string]: unknown;
+      } | null;
     };
     /**
      * ToolCallResultPublic
@@ -21219,6 +23462,15 @@ export interface components {
       result?: string | null;
       /** Mcp Tool Name */
       mcp_tool_name?: string | null;
+      /** Structured Content */
+      structured_content?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Is Error
+       * @default false
+       */
+      is_error?: boolean;
     };
     /**
      * ToolChangePublic
@@ -21234,12 +23486,24 @@ export interface components {
       current_input_schema?: {
         [key: string]: unknown;
       } | null;
+      /** Current Meta */
+      current_meta?: {
+        [key: string]: unknown;
+      } | null;
+      /** Current Ui Resource Sha256 */
+      current_ui_resource_sha256?: string | null;
       /** Pending Description */
       pending_description?: string | null;
       /** Pending Input Schema */
       pending_input_schema?: {
         [key: string]: unknown;
       } | null;
+      /** Pending Meta */
+      pending_meta?: {
+        [key: string]: unknown;
+      } | null;
+      /** Pending Ui Resource Sha256 */
+      pending_ui_resource_sha256?: string | null;
     };
     /**
      * ToolReviewRequest
@@ -21480,19 +23744,6 @@ export interface components {
       /** Owner Name */
       owner_name?: string | null;
     };
-    /** TransferApplicationRequest */
-    TransferApplicationRequest: {
-      /**
-       * Target Space Id
-       * Format: uuid
-       */
-      target_space_id: string;
-      /**
-       * Move Resources
-       * @default false
-       */
-      move_resources?: boolean;
-    };
     /** TransferRequest */
     TransferRequest: {
       /**
@@ -21522,7 +23773,9 @@ export interface components {
     /** UpdateSpaceDryRunResponse */
     UpdateSpaceDryRunResponse: {
       /** Capabilities */
-      capabilities?: ("web_search" | "image_generation")[];
+      capabilities?: (
+        "web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute"
+      )[];
       /** Assistants */
       assistants: components["schemas"]["AssistantSparse"][];
       /** Group Chats */
@@ -22196,7 +24449,7 @@ export interface components {
       model_name: string;
       /**
        * Model Type
-       * @description Model type: completion, embedding, transcription, or image
+       * @description Model type: completion, embedding, transcription, image, or rerank
        * @default completion
        */
       model_type?: string;
@@ -22235,6 +24488,58 @@ export interface components {
        * @default false
        */
       user_confirmed?: boolean;
+    };
+    /**
+     * ViewToolCallRequest
+     * @description A tool call made by the interactive view (MCP App) of an earlier call.
+     */
+    ViewToolCallRequest: {
+      /**
+       * View Id
+       * Format: uuid
+       * @description The view shown for the tool call.
+       */
+      view_id: string;
+      /**
+       * Name
+       * @description The tool to call, by its name on the view's own server.
+       */
+      name: string;
+      /** Arguments */
+      arguments?: {
+        [key: string]: unknown;
+      };
+    };
+    /**
+     * ViewToolCallResultPublic
+     * @description The tool's result, for the view that asked.
+     */
+    ViewToolCallResultPublic: {
+      /**
+       * Content
+       * @default []
+       */
+      content?: components["schemas"]["ViewToolCallText"][];
+      /** Structured Content */
+      structured_content?: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Is Error
+       * @default false
+       */
+      is_error?: boolean;
+    };
+    /** ViewToolCallText */
+    ViewToolCallText: {
+      /**
+       * Type
+       * @default text
+       * @constant
+       */
+      type?: "text";
+      /** Text */
+      text: string;
     };
     /**
      * WebsiteBulkActionError
@@ -22713,12 +25018,7 @@ export interface components {
       set_at: string;
     };
     /** @enum {string} */
-    EneoEventType:
-      | "generating_image"
-      | "tool_call"
-      | "tool_approval_required"
-      | "tool_approval_timeout"
-      | "token_usage";
+    EneoEventType: "tool_call" | "tool_approval_required" | "tool_approval_timeout" | "token_usage";
     /** SSEText */
     SSEText: {
       /**
@@ -22744,15 +25044,6 @@ export interface components {
       /** Reasoning */
       reasoning: string;
     };
-    /** SSEEneoEvent */
-    SSEEneoEvent: {
-      /**
-       * Session Id
-       * Format: uuid
-       */
-      session_id: string;
-      eneo_event_type: components["schemas"]["EneoEventType"];
-    };
     /**
      * SSEToolCall
      * @description Event emitted when MCP tools are being executed.
@@ -22772,6 +25063,25 @@ export interface components {
        * @default []
        */
       mcp_tool_references?: components["schemas"]["McpToolReferencePublic"][];
+    };
+    /**
+     * SSEToolCallDelta
+     * @description The next piece of a pending tool call's arguments, as raw JSON text.
+     *
+     *     Sent while the model writes the call, so a client can show what it will
+     *     do (the text of a document) before it runs. Signed reference tokens are
+     *     redacted. The complete arguments follow in the call's `tool_call` event.
+     */
+    SSEToolCallDelta: {
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /** Tool Call Id */
+      tool_call_id: string;
+      /** Arguments Delta */
+      arguments_delta: string;
     };
     /**
      * SSEToolApprovalRequired
@@ -22860,6 +25170,11 @@ export interface components {
       session_id: string;
       /** Generated Files */
       generated_files: components["schemas"]["FilePublic"][];
+      /**
+       * Tool Call Id
+       * @default null
+       */
+      tool_call_id?: string | null;
     };
     /** SSEFirstChunk */
     SSEFirstChunk: {
@@ -22916,6 +25231,11 @@ export interface components {
        * @default null
        */
       error_code?: number | null;
+      /**
+       * Code
+       * @default null
+       */
+      code?: string | null;
     };
   };
   responses: never;
@@ -26448,66 +28768,6 @@ export interface operations {
       };
     };
   };
-  transfer_group_to_space_api_v1_groups__id__transfer__post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["TransferRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
   get_settings_api_v1_settings__get: {
     parameters: {
       query?: never;
@@ -27629,6 +29889,8 @@ export interface operations {
                 mimetype: string;
                 /** Size */
                 size: number;
+                /** Original Size */
+                original_size?: number | null;
                 /** Transcription */
                 transcription?: string | null;
                 /** Token Count */
@@ -27638,6 +29900,8 @@ export interface operations {
                  * @default false
                  */
                 has_download_reference?: boolean;
+                /** Revises File Id */
+                revises_file_id?: string | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -28073,6 +30337,8 @@ export interface operations {
                 mimetype: string;
                 /** Size */
                 size: number;
+                /** Original Size */
+                original_size?: number | null;
                 /** Transcription */
                 transcription?: string | null;
                 /** Token Count */
@@ -28082,6 +30348,8 @@ export interface operations {
                  * @default false
                  */
                 has_download_reference?: boolean;
+                /** Revises File Id */
+                revises_file_id?: string | null;
               };
               /** InfoBlobAskAssistantPublic */
               InfoBlobAskAssistantPublic: {
@@ -28422,7 +30690,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["TransferApplicationRequest"];
+        "application/json": components["schemas"]["TransferRequest"];
       };
     };
     responses: {
@@ -28440,6 +30708,46 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_prompts_api_v1_assistants__id__prompts__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_PromptSparse_"];
         };
       };
       /** @description Not Found */
@@ -29047,19 +31355,8 @@ export interface operations {
                  * Format: uuid
                  */
                 session_id: string;
-                eneo_event_type: components["schemas"]["EneoEventType"];
-                $defs: {
-                  /**
-                   * EneoEventType
-                   * @enum {string}
-                   */
-                  EneoEventType:
-                    | "generating_image"
-                    | "tool_call"
-                    | "tool_approval_required"
-                    | "tool_approval_timeout"
-                    | "token_usage";
-                };
+                /** Reasoning */
+                reasoning: string;
               }
             | {
                 /**
@@ -29082,7 +31379,6 @@ export interface operations {
                    * @enum {string}
                    */
                   EneoEventType:
-                    | "generating_image"
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
@@ -29153,14 +31449,35 @@ export interface operations {
                     purpose?: string | null;
                     /** Is Internal */
                     is_internal?: boolean | null;
+                    /** Is Bundled */
+                    is_bundled?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Structured Content */
+                    structured_content?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** App View */
+                    app_view?: {
+                      [key: string]: unknown;
+                    } | null;
                   };
                 };
+              }
+            | {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** Tool Call Id */
+                tool_call_id: string;
+                /** Arguments Delta */
+                arguments_delta: string;
               }
             | {
                 /**
@@ -29180,7 +31497,6 @@ export interface operations {
                    * @enum {string}
                    */
                   EneoEventType:
-                    | "generating_image"
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
@@ -29214,12 +31530,22 @@ export interface operations {
                     purpose?: string | null;
                     /** Is Internal */
                     is_internal?: boolean | null;
+                    /** Is Bundled */
+                    is_bundled?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Structured Content */
+                    structured_content?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** App View */
+                    app_view?: {
+                      [key: string]: unknown;
+                    } | null;
                   };
                 };
               }
@@ -29241,7 +31567,6 @@ export interface operations {
                    * @enum {string}
                    */
                   EneoEventType:
-                    | "generating_image"
                     | "tool_call"
                     | "tool_approval_required"
                     | "tool_approval_timeout"
@@ -29275,12 +31600,22 @@ export interface operations {
                     purpose?: string | null;
                     /** Is Internal */
                     is_internal?: boolean | null;
+                    /** Is Bundled */
+                    is_bundled?: boolean | null;
                     /** Meta */
                     meta?: {
                       [key: string]: unknown;
                     } | null;
                     /** Generated File Ids */
                     generated_file_ids?: string[] | null;
+                    /** Structured Content */
+                    structured_content?: {
+                      [key: string]: unknown;
+                    } | null;
+                    /** App View */
+                    app_view?: {
+                      [key: string]: unknown;
+                    } | null;
                   };
                 };
               }
@@ -29292,6 +31627,8 @@ export interface operations {
                 session_id: string;
                 /** Generated Files */
                 generated_files: components["schemas"]["FilePublic"][];
+                /** Tool Call Id */
+                tool_call_id?: string | null;
                 $defs: {
                   /** FilePublic */
                   FilePublic: {
@@ -29310,6 +31647,8 @@ export interface operations {
                     mimetype: string;
                     /** Size */
                     size: number;
+                    /** Original Size */
+                    original_size?: number | null;
                     /** Transcription */
                     transcription?: string | null;
                     /** Token Count */
@@ -29319,6 +31658,62 @@ export interface operations {
                      * @default false
                      */
                     has_download_reference?: boolean;
+                    /** Revises File Id */
+                    revises_file_id?: string | null;
+                  };
+                };
+              }
+            | {
+                /**
+                 * Session Id
+                 * Format: uuid
+                 */
+                session_id: string;
+                /** @default token_usage */
+                eneo_event_type?: components["schemas"]["EneoEventType"];
+                usage: components["schemas"]["TokenUsageEvent"];
+                $defs: {
+                  /**
+                   * EneoEventType
+                   * @enum {string}
+                   */
+                  EneoEventType:
+                    | "tool_call"
+                    | "tool_approval_required"
+                    | "tool_approval_timeout"
+                    | "token_usage";
+                  /** TokenUsageEvent */
+                  TokenUsageEvent: {
+                    /**
+                     * Prompt Tokens
+                     * @description Cumulative prompt tokens across every provider request in this logical turn. Use context_prompt_tokens for context-window headroom.
+                     */
+                    prompt_tokens: number;
+                    /**
+                     * Completion Tokens
+                     * @description Cumulative completion tokens across every provider response in this logical turn. Use context_completion_tokens for context-window headroom.
+                     */
+                    completion_tokens: number;
+                    /**
+                     * Turn Tokens
+                     * @description Cumulative prompt_tokens plus completion_tokens for this turn.
+                     */
+                    turn_tokens: number;
+                    /**
+                     * Context Prompt Tokens
+                     * @description Prompt tokens for the final provider request only.
+                     */
+                    context_prompt_tokens: number;
+                    /**
+                     * Context Completion Tokens
+                     * @description Completion tokens for the final provider response only.
+                     */
+                    context_completion_tokens: number;
+                    /**
+                     * Skill Context Tokens
+                     * @description Model-aware Skill-owned subset of context_prompt_tokens. Already included; do not add it to context usage again.
+                     */
+                    skill_context_tokens: number;
                   };
                 };
               }
@@ -29466,6 +31861,8 @@ export interface operations {
                     mimetype: string;
                     /** Size */
                     size: number;
+                    /** Original Size */
+                    original_size?: number | null;
                     /** Transcription */
                     transcription?: string | null;
                     /** Token Count */
@@ -29475,6 +31872,8 @@ export interface operations {
                      * @default false
                      */
                     has_download_reference?: boolean;
+                    /** Revises File Id */
+                    revises_file_id?: string | null;
                   };
                   /** InfoBlobAskAssistantPublic */
                   InfoBlobAskAssistantPublic: {
@@ -29652,6 +32051,8 @@ export interface operations {
                 error: string;
                 /** Error Code */
                 error_code?: number | null;
+                /** Code */
+                code?: string | null;
               };
         };
       };
@@ -29808,6 +32209,47 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_recent_conversations_api_v1_conversations_recent__get: {
+    parameters: {
+      query?: {
+        /** @description How many conversations to return. */
+        limit?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_RecentConversation_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };
@@ -29989,6 +32431,315 @@ export interface operations {
       };
     };
   };
+  call_tool_from_app_view_api_v1_conversations__session_id__tool_calls__tool_call_id__app_calls__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description The tool call whose interactive view makes the call */
+        tool_call_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ViewToolCallRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ViewToolCallResultPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_document_export_availability_api_v1_conversations__session_id__documents__file_id__export__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentExportAvailability"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  export_conversation_document_api_v1_conversations__session_id__documents__file_id__export__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description A Markdown document the assistant created in it */
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DocumentExportRequest"];
+      };
+    };
+    responses: {
+      /** @description The document in the format asked for, as a download. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document": unknown;
+          "application/pdf": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Bad Gateway */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  save_conversation_document_version_api_v1_conversations__session_id__documents__file_id__versions__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description The version of a Markdown document the edit was made from */
+        file_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DocumentVersionCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FilePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   leave_feedback_api_v1_conversations__session_id__feedback__post: {
     parameters: {
       query?: never;
@@ -30013,6 +32764,130 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["SessionPublic"];
         };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  set_message_feedback_api_v1_conversations__session_id__messages__message_id__feedback__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description The UUID of the message (a question and its answer) */
+        message_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MessageFeedback"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageFeedback"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_message_feedback_api_v1_conversations__session_id__messages__message_id__feedback__delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description The UUID of the conversation/session */
+        session_id: string;
+        /** @description The UUID of the message (a question and its answer) */
+        message_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Bad Request */
       400: {
@@ -30625,7 +33500,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["TransferApplicationRequest"];
+        "application/json": components["schemas"]["TransferRequest"];
       };
     };
     responses: {
@@ -31040,6 +33915,69 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["CursorPaginatedResponse_AssistantInsightQuestion_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_assistant_feedback_counts_api_v1_analysis_assistants__assistant_id__feedback__get: {
+    parameters: {
+      query?: {
+        days_since?: number;
+        from_date?: string | null;
+        to_date?: string | null;
+        include_followups?: boolean;
+      };
+      header?: never;
+      path: {
+        assistant_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MessageFeedbackCounts"];
         };
       };
       /** @description Bad Request */
@@ -35216,6 +38154,102 @@ export interface operations {
       };
     };
   };
+  job_events_api_v1_jobs_events__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+          "text/event-stream": {
+            /** Created At */
+            created_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name?: string | null;
+            status: components["schemas"]["Status"];
+            task: components["schemas"]["Task"];
+            /** Result Location */
+            result_location?: string | null;
+            /** Finished At */
+            finished_at?: string | null;
+            failure_code?: components["schemas"]["JobFailureCode"] | null;
+            $defs: {
+              /**
+               * JobFailureCode
+               * @enum {string}
+               */
+              JobFailureCode:
+                | "extraction_failed"
+                | "no_extractable_text"
+                | "encrypted"
+                | "corrupt"
+                | "unsupported_format"
+                | "processing_failed"
+                | "cancelled"
+                | "processing_interrupted"
+                | "invalid_job_payload"
+                | "quota_exceeded"
+                | "tenant_quota_exceeded"
+                | "user_quota_exceeded"
+                | "storage_limit_exceeded"
+                | "storage_unavailable"
+                | "storage_verification_failed"
+                | "knowledge_source_conflict"
+                | "dispatch_failed"
+                | "invalid_dispatch"
+                | "worker_interrupted"
+                | "lease_expired"
+                | "remote_unreachable"
+                | "remote_blocked"
+                | "timed_out"
+                | "resources_missing"
+                | "page_limit_reached"
+                | "content_skipped";
+              /**
+               * Status
+               * @enum {string}
+               */
+              Status: "in progress" | "queued" | "complete" | "failed" | "not found";
+              /**
+               * Task
+               * @enum {string}
+               */
+              Task:
+                | "upload_info_blob"
+                | "transcription"
+                | "crawl"
+                | "embed_group"
+                | "crawl_all_websites"
+                | "run_app"
+                | "pull_confluence_content"
+                | "pull_sharepoint_content"
+                | "sync_sharepoint_delta"
+                | "update_model_usage_stats"
+                | "analyze_conversation_insights"
+                | "export_audit_logs"
+                | "log_audit_event";
+            };
+          };
+        };
+      };
+    };
+  };
   get_job_api_v1_jobs__id___get: {
     parameters: {
       query?: never;
@@ -36726,6 +39760,88 @@ export interface operations {
       };
     };
   };
+  get_rerank_models_api_v1_rerank_models__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_RerankModelPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_rerank_model_api_v1_rerank_models__id___post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RerankModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RerankModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   list_providers_api_v1_admin_model_providers__get: {
     parameters: {
       query?: never;
@@ -36956,6 +40072,35 @@ export interface operations {
       };
     };
   };
+  get_outbound_header_options_api_v1_admin_model_providers_outbound_headers_options__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OutboundHeaderOptions"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_provider_api_v1_admin_model_providers__provider_id___get: {
     parameters: {
       query?: never;
@@ -37163,11 +40308,73 @@ export interface operations {
       };
     };
   };
+  preview_outbound_headers_api_v1_admin_model_providers__provider_id__outbound_headers_preview__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        provider_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["OutboundHeaderPreviewRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["OutboundHeaderPreview"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   list_provider_models_api_v1_admin_model_providers__provider_id__models__get: {
     parameters: {
       query?: {
         /** @description Filter response to a single mode. */
-        mode?: ("completion" | "embedding" | "transcription" | "image") | null;
+        mode?: ("completion" | "embedding" | "transcription" | "image" | "rerank") | null;
       };
       header?: never;
       path: {
@@ -37186,6 +40393,73 @@ export interface operations {
           "application/json": {
             [key: string]: unknown;
           }[];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  check_provider_connection_api_v1_admin_model_providers__provider_id__connection_check__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        provider_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ModelProviderPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */
@@ -38097,6 +41371,195 @@ export interface operations {
       };
     };
   };
+  create_tenant_rerank_model_api_v1_admin_tenant_models_rerank__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantRerankModelCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RerankModelPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_tenant_rerank_model_api_v1_admin_tenant_models_rerank__model_id___put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TenantRerankModelUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["RerankModelPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_tenant_rerank_model_api_v1_admin_tenant_models_rerank__model_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        model_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   get_files_api_v1_files__get: {
     parameters: {
       query?: never;
@@ -38548,6 +42011,7 @@ export interface operations {
       };
       header?: {
         range?: string | null;
+        "if-none-match"?: string | null;
       };
       path: {
         id: string;
@@ -38565,6 +42029,13 @@ export interface operations {
       };
       /** @description Successfully downloaded part of the original audio */
       206: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Access revalidated; original content is unchanged */
+      304: {
         headers: {
           [name: string]: unknown;
         };
@@ -39579,7 +43050,7 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
-      /** @description Bad Request */
+      /** @description Bad request; `code` is `sharepoint_credentials_invalid` when Microsoft refuses the organization's SharePoint credentials, which an administrator must reconnect. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -39642,7 +43113,7 @@ export interface operations {
           "application/json": components["schemas"]["CreateSpaceIntegrationKnowledgeBatchResponse"];
         };
       };
-      /** @description Bad Request */
+      /** @description Bad request; `code` is `sharepoint_credentials_invalid` when Microsoft refuses the organization's SharePoint credentials, which an administrator must reconnect. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -39717,6 +43188,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description `code` is `integration_knowledge_syncing`: a sync holds the source; try again when it has finished. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -39758,6 +43238,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description `code` is `integration_knowledge_syncing`: a sync holds the source; try again when it has finished. */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -39808,6 +43297,117 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description `code` is `integration_knowledge_syncing`: a sync holds the source; try again when it has finished. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_integration_knowledge_sync_progress_api_v1_spaces__id__knowledge_integrations_sync_progress__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IntegrationSyncProgressList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_integration_sync_details_api_v1_spaces__id__knowledge_integrations_sync_details__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["IntegrationSyncDetailsRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IntegrationSyncDetailsList"];
         };
       };
       /** @description Forbidden */
@@ -39891,6 +43491,122 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description `code` is `integration_knowledge_syncing`: a sync holds the source; try again when it has finished. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_integration_knowledge_documents_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__documents__get: {
+    parameters: {
+      query?: {
+        /** @description Matches the title, the path or a property value */
+        q?: string | null;
+        sort?: "name" | "path" | "size" | "updated_at";
+        order?: "asc" | "desc";
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path: {
+        id: string;
+        integration_knowledge_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IntegrationDocumentsPage"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_integration_knowledge_skipped_documents_api_v1_spaces__id__knowledge_integrations__integration_knowledge_id__documents_skipped__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        integration_knowledge_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["IntegrationSkippedDocuments"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -39923,7 +43639,7 @@ export interface operations {
           "application/json": components["schemas"]["JobPublic"];
         };
       };
-      /** @description Bad Request */
+      /** @description Bad request; `code` is `sharepoint_credentials_invalid` when Microsoft refuses the organization's SharePoint credentials, which an administrator must reconnect. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -41026,58 +44742,6 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["CrawlRunPublic"] | null;
         };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  transfer_website_to_space_api_v1_websites__id__transfer__post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        /** @description Unique identifier of the website to transfer */
-        id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["TransferRequest"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      204: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content?: never;
       };
       /** @description Forbidden */
       403: {
@@ -43559,7 +47223,17 @@ export interface operations {
     parameters: {
       query?: {
         tags?: string[] | null;
-        purpose?: ("general" | "web_search" | "image_generation") | null;
+        purpose?:
+          | (
+              | "general"
+              | "web_search"
+              | "image_generation"
+              | "file_analysis"
+              | "file_creation"
+              | "charts"
+              | "compute"
+            )
+          | null;
       };
       header?: never;
       path?: never;
@@ -43659,7 +47333,17 @@ export interface operations {
   get_tenant_mcp_settings_api_v1_mcp_servers_settings__get: {
     parameters: {
       query?: {
-        purpose?: ("general" | "web_search" | "image_generation") | null;
+        purpose?:
+          | (
+              | "general"
+              | "web_search"
+              | "image_generation"
+              | "file_analysis"
+              | "file_creation"
+              | "charts"
+              | "compute"
+            )
+          | null;
       };
       header?: never;
       path?: never;
@@ -43902,6 +47586,106 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_bundled_tools_api_v1_mcp_servers_bundled__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["BundledToolList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  create_bundled_mcp_server_api_v1_mcp_servers_bundled__tool___post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tool: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["BundledServerCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPServerCreateResponse"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -44212,6 +47996,56 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MCPServerToolList"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_mcp_tool_view_api_v1_mcp_servers__id__tools__tool_id__view__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+        tool_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["MCPToolViewPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Not Found */
@@ -44578,6 +48412,616 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_document_templates_api_v1_document_templates__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentTemplateList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  upload_document_template_api_v1_document_templates__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_document_template_api_v1_document_templates__post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentTemplatePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  list_available_document_templates_api_v1_document_templates_available__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentTemplateOptions"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  download_builtin_document_template_api_v1_document_templates_builtin__get: {
+    parameters: {
+      query?: {
+        language?: "sv" | "en";
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_document_template_api_v1_document_templates__id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentTemplatePublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  delete_document_template_api_v1_document_templates__id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  update_document_template_api_v1_document_templates__id___patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DocumentTemplateUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentTemplatePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  download_document_template_api_v1_document_templates__id__content__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  replace_document_template_content_api_v1_document_templates__id__content__put: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_replace_document_template_content_api_v1_document_templates__id__content__put"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DocumentTemplatePublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  download_document_template_signed_api_v1_document_templates__id__original_download__get: {
+    parameters: {
+      query: {
+        /** @description The signed template-download token */
+        token: string;
+      };
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  mint_app_view_token_api_v1_mcp_apps_views__view_id__token__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        view_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["McpAppViewTokenResponse"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+      /** @description Failed Dependency */
+      424: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  serve_app_view_content_api_v1_mcp_apps_views__view_id__content_get: {
+    parameters: {
+      query: {
+        /** @description The signed app-view token */
+        token: string;
+      };
+      header?: never;
+      path: {
+        view_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": string;
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "text/html": components["schemas"]["GeneralError"];
         };
       };
       /** @description Validation Error */
@@ -47628,6 +52072,17 @@ export interface operations {
           };
         };
       };
+      /** @description Body is not a JSON notification object or exceeds 256 KB. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": {
+            detail: string;
+          };
+        };
+      };
       /** @description Validation Error */
       422: {
         headers: {
@@ -47777,9 +52232,9 @@ export interface operations {
       path?: never;
       cookie?: never;
     };
-    requestBody: {
+    requestBody?: {
       content: {
-        "application/json": components["schemas"]["TenantSharePointAppCreate"];
+        "application/json": components["schemas"]["TenantSharePointAppCreate"] | null;
       };
     };
     responses: {
@@ -47791,6 +52246,13 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["TenantAppTestResult"];
         };
+      };
+      /** @description No SharePoint app is configured to test */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Authentication required */
       401: {
@@ -47868,6 +52330,47 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["SubscriptionRenewalResult"];
         };
+      };
+      /** @description Authentication required */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+    };
+  };
+  recreate_all_subscriptions_api_v1_admin_sharepoint_subscriptions_recreate_all_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Recreation completed (check result for details) */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SubscriptionRenewalResult"];
+        };
+      };
+      /** @description SharePoint webhooks are not configured */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
       };
       /** @description Authentication required */
       401: {
@@ -47998,6 +52501,60 @@ export interface operations {
       };
     };
   };
+  restart_service_account_auth_api_v1_admin_sharepoint_service_account_auth_reauth_post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["ServiceAccountReauthStart"] | null;
+      };
+    };
+    responses: {
+      /** @description OAuth authorization URL generated */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ServiceAccountAuthStartResponse"];
+        };
+      };
+      /** @description No service account is configured */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Authentication required */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Admin permissions required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
   service_account_auth_callback_api_v1_admin_sharepoint_service_account_auth_callback_post: {
     parameters: {
       query?: never;
@@ -48020,7 +52577,7 @@ export interface operations {
           "application/json": components["schemas"]["TenantSharePointAppPublic"];
         };
       };
-      /** @description Invalid state or auth code */
+      /** @description Invalid state or auth code; `code` is `oauth_code_rejected` when Microsoft refuses the code (start the sign-in again) and `oauth_client_rejected` when it refuses the app's client ID or secret */
       400: {
         headers: {
           [name: string]: unknown;
@@ -48878,7 +53435,10 @@ export interface operations {
   };
   gen_url_api_v1_integrations_auth__tenant_integration_id__url__get: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description An exact operator-registered OAuth callback URL. */
+        redirect_uri?: string | null;
+      };
       header?: never;
       path: {
         tenant_integration_id: string;
@@ -48947,8 +53507,125 @@ export interface operations {
           "application/json": components["schemas"]["UserIntegration"];
         };
       };
+      /** @description Bad request; `code` is `oauth_code_rejected` when the identity provider refuses the code (expired, already used or issued for another redirect URI; the state is spent, start the sign-in again) and `oauth_client_rejected` when it refuses the app's client ID or secret, which an administrator must fix. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  inspect_model_configurations_api_v1_sysadmin_tenants__tenant_id__model_configurations__kind__invalid__get: {
+    parameters: {
+      query?: {
+        after?: string | null;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        tenant_id: string;
+        kind: "assistant" | "app" | "service";
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ConfigurationInspection"];
+        };
+      };
       /** @description Bad Request */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  repair_model_configuration_api_v1_sysadmin_tenants__tenant_id__model_configurations__kind___resource_id__repair__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        tenant_id: string;
+        kind: "assistant" | "app" | "service";
+        resource_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConfigurationRepair"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ConfigurationRepairResult"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
         headers: {
           [name: string]: unknown;
         };

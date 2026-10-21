@@ -18,6 +18,9 @@ from eneo.integration.infrastructure.sharepoint_subscription_worker import (
 from eneo.integration.tasks.integration_task import worker as integration_worker
 from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, DEFAULT_QUEUE_NAME
 from eneo.main.logging import get_logger
+from eneo.rerank_models.infrastructure.rerank_model_cleanup_worker import (
+    worker as rerank_model_cleanup_worker,
+)
 from eneo.transcription_models.infrastructure.transcription_model_cleanup_worker import (  # noqa: E501
     worker as transcription_model_cleanup_worker,
 )
@@ -37,6 +40,7 @@ worker.include_subworker(model_cleanup_worker)
 worker.include_subworker(transcription_model_cleanup_worker)
 worker.include_subworker(embedding_model_cleanup_worker)
 worker.include_subworker(image_model_cleanup_worker)
+worker.include_subworker(rerank_model_cleanup_worker)
 
 
 def _arq_settings(runtime: Worker, *, queue_name: str) -> dict[str, object]:

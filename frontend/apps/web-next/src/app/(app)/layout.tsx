@@ -1,0 +1,87 @@
+import type { Metadata } from "next";
+import { cookies } from "next/headers";
+import { AppContextProvider, type AppContextData } from "@/components/providers/app-context";
+import { AppShellFrame } from "@/components/shell/app-shell";
+import {
+  isSideNavCollapsed,
+  SIDE_NAV_COLLAPSED_COOKIE
+} from "@/components/shell/side-nav-preference";
+import { unwrap } from "@/lib/api/errors";
+import { backendVersionFrom } from "@/lib/api/version";
+import { eneoApi } from "@/lib/api/server";
+import { env } from "@/lib/env";
+import { JobsProvider } from "@/features/jobs/use-jobs";
+import { WhatsNewProvider } from "@/features/whats-new/whats-new-provider";
+import { TourProvider } from "@/features/whats-new/tour-provider";
+import packageJson from "../../../package.json";
+
+/** Every app page can be added to the home screen (public/manifest.json). */
+export const metadata: Metadata = {
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    title: "Eneo"
+  },
+  other: {
+    "mobile-web-app-capable": "yes"
+  }
+};
+
+export default async function AppLayout({
+  children
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
+  const api = eneoApi();
+  const sideNavCollapsed = isSideNavCollapsed(
+    (await cookies()).get(SIDE_NAV_COLLAPSED_COOKIE)?.value
+  );
+  const [user, tenant, settings, federationStatus, limits, backendVersion, whatsNewState] =
+    await Promise.all([
+      unwrap(api.GET("/api/v1/users/me/")),
+      unwrap(api.GET("/api/v1/users/tenant/")),
+      unwrap(api.GET("/api/v1/settings/")),
+      unwrap(api.GET("/api/v1/auth/federation-status")),
+      unwrap(api.GET("/api/v1/limits/")),
+      unwrap(api.GET("/version")).then(backendVersionFrom),
+      // Optional during rolling deployments; an unavailable marker must not look like "never seen".
+      unwrap(api.GET("/api/v1/whats-new/state/")).catch(() => null)
+    ]);
+
+  const value: AppContextData = {
+    user,
+    tenant,
+    settings,
+    federationStatus,
+    limits,
+    featureFlags: {
+      showWebSearch: env.SHOW_WEB_SEARCH
+    },
+    links: {
+      legacyApp: env.LEGACY_APP_URL ?? null,
+      accessibilityStatement: env.ACCESSIBILITY_STATEMENT_URL ?? null,
+      helpCenter: env.SHOW_HELP_CENTER ? (env.HELP_CENTER_URL ?? null) : null
+    },
+    versions: { frontend: packageJson.version, backend: backendVersion }
+  };
+
+  return (
+    <AppContextProvider value={value}>
+      <WhatsNewProvider
+        key={`${settings.whats_new_enabled !== false}:${whatsNewState?.seen_version ?? "unknown"}:${whatsNewState?.announced_version ?? "unknown"}`}
+        enabled={settings.whats_new_enabled !== false}
+        initialSeen={whatsNewState?.seen_version}
+        initialAnnounced={whatsNewState?.announced_version}
+      >
+        <TourProvider>
+          <JobsProvider>
+            {/* Viewport-locked shell: pages scroll inside the page panel
+                (main#main-content), so full-height surfaces (chat) can pin
+                their input to the bottom. */}
+            <AppShellFrame sideNavCollapsed={sideNavCollapsed}>{children}</AppShellFrame>
+          </JobsProvider>
+        </TourProvider>
+      </WhatsNewProvider>
+    </AppContextProvider>
+  );
+}

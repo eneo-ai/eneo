@@ -16,6 +16,7 @@
   let {
     open,
     toolName,
+    identity = null,
     args,
     toolCallId,
     onLoadResult,
@@ -25,6 +26,11 @@
     open: boolean;
     /** Display name used in the "Response from {toolName}" heading. */
     toolName: string;
+    /**
+     * The call as the model made it, "server · tool", for a step whose labels
+     * are Eneo's own words rather than the tool's name.
+     */
+    identity?: string | null;
     args?: Record<string, unknown>;
     toolCallId?: string;
     onLoadResult?: () => Promise<string | null>;
@@ -80,6 +86,9 @@
 
 {#if open}
   <div class={containerClass}>
+    {#if identity}
+      <div class="text-muted mb-2 font-mono text-[11px] leading-tight">{identity}</div>
+    {/if}
     {#if hasArgs}
       <div class="text-muted mb-1.5 flex items-center gap-1.5 text-xs font-semibold">
         <Wrench class="h-3 w-3 shrink-0" />

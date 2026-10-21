@@ -1,7 +1,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 # Audit logging - module level imports for consistency
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -18,6 +18,7 @@ from eneo.integration.presentation.models import (
     UserIntegration,
 )
 from eneo.main.container.container import Container
+from eneo.main.models import GeneralError
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
@@ -39,12 +40,18 @@ router = APIRouter()
 async def gen_url(
     tenant_integration_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    redirect_uri: Annotated[
+        str | None,
+        Query(description="An exact operator-registered OAuth callback URL."),
+    ] = None,
 ):
     # The backend generates and stores its own single-use CSRF state (see
     # oauth2_service.start_auth); callers no longer pass one in.
     oauth2_service = container.oauth2_service()
 
-    return await oauth2_service.start_auth(tenant_integration_id=tenant_integration_id)
+    return await oauth2_service.start_auth(
+        tenant_integration_id=tenant_integration_id, redirect_uri=redirect_uri
+    )
 
 
 @router.post(
@@ -52,7 +59,17 @@ async def gen_url(
     status_code=200,
     response_model=UserIntegration,
     description="Complete the OAuth2 callback for an integration in the current tenant.",
-    responses=responses.get_responses([400, 404]),
+    responses={
+        **responses.get_responses([400, 404]),
+        400: {
+            "model": GeneralError,
+            "description": "Bad request; `code` is `oauth_code_rejected` when the "
+            "identity provider refuses the code (expired, already used or issued "
+            "for another redirect URI; the state is spent, start the sign-in "
+            "again) and `oauth_client_rejected` when it refuses the app's client "
+            "ID or secret, which an administrator must fix.",
+        },
+    },
 )
 @endpoint_access(
     authentication=Authentication.USER,

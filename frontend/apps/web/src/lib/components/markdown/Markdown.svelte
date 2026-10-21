@@ -25,6 +25,8 @@
     showTokenOutput?: boolean;
     /** Language for fenced code without a tag, e.g. "plaintext"; unset auto-detects. */
     defaultCodeLanguage?: string;
+    /** Names of the conversation's files; a mention of one renders with `customRenderers.file`. */
+    fileNames?: string[];
     class?: ClassValue;
   };
 
@@ -34,14 +36,20 @@
     showTokenOutput = false,
     references = [],
     defaultCodeLanguage,
+    fileNames = [],
     class: cls
   }: Props = $props();
 
-  const lexer = eneoMarkdownLexer();
+  // Keyed on the names themselves: the list is rebuilt far more often than it changes.
+  const fileNamesKey = $derived(fileNames.join("\n"));
+  const lexer = $derived(
+    eneoMarkdownLexer({ fileNames: fileNamesKey ? fileNamesKey.split("\n") : [] })
+  );
 
   initReferenceContext({
     references: () => references,
-    renderer: () => customRenderers.inref
+    renderer: () => customRenderers.inref,
+    fileRenderer: () => customRenderers.file
   });
   setDefaultCodeLanguage(() => defaultCodeLanguage);
 

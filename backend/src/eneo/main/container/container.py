@@ -70,12 +70,17 @@ from eneo.completion_models.infrastructure.completion_service import CompletionS
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.completion_models.presentation import CompletionModelAssembler
 from eneo.conversations.application.conversation_service import ConversationService
+from eneo.conversations.application.recent_conversations_service import (
+    RecentConversationsService,
+)
 from eneo.crawler.destination_policy import DestinationPolicy
 from eneo.crawler.python_engine import PythonCrawlEngine
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
 from eneo.database.database import AsyncSession
+from eneo.document_templates.repo import DocumentTemplateRepository
+from eneo.document_templates.service import DocumentTemplateService
 from eneo.embedding_models.application.embedding_model_crud_service import (
     EmbeddingModelCRUDService,
 )
@@ -108,6 +113,7 @@ from eneo.governance_policy.presentation.governance_policy_assembler import (
     GovernancePolicyAssembler,
 )
 from eneo.group_chat.application.group_chat_service import GroupChatService
+from eneo.group_chat.infrastructure.group_chat_repo import GroupChatRepository
 from eneo.group_chat.presentation.assemblers.group_chat_assembler import (
     GroupChatAssembler,
 )
@@ -156,6 +162,9 @@ from eneo.integration.application.user_integration_service import (
 )
 from eneo.integration.infrastructure.auth_service.confluence_auth_service import (
     ConfluenceAuthService,
+)
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    OrgTokenProvider,
 )
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
@@ -230,6 +239,9 @@ from eneo.integration.infrastructure.sharepoint_subscription_repo_impl import (
 from eneo.integration.infrastructure.sharepoint_subscription_service import (
     SharePointSubscriptionService,
 )
+from eneo.integration.infrastructure.sharepoint_sync_progress import (
+    SharePointSyncProgressStore,
+)
 from eneo.integration.infrastructure.sharepoint_webhook_service import (
     SharepointWebhookService,
 )
@@ -258,6 +270,9 @@ from eneo.limits.limit_service import LimitService
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
+    McpAppViewRepo,
+)
 from eneo.mcp_servers.application.mcp_server_service import MCPServerService
 from eneo.mcp_servers.application.mcp_server_settings_service import (
     MCPServerSettingsService,
@@ -305,6 +320,9 @@ from eneo.prompts.prompt_repo import PromptRepository
 from eneo.prompts.prompt_service import PromptService
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.redis.connection import build_redis_pool_kwargs
+from eneo.rerank_models.application import RerankModelCRUDService
+from eneo.rerank_models.application.rerank_service import RerankService
+from eneo.rerank_models.domain import RerankModelRepository
 from eneo.roles.roles_repo import RolesRepository
 from eneo.roles.roles_service import RolesService
 from eneo.scim.repositories.token_repository import ScimTokenRepository
@@ -397,6 +415,7 @@ from eneo.websites.infrastructure.update_website_size_service import (
     UpdateWebsiteSizeService,
 )
 from eneo.websites.infrastructure.website_cleaner_service import WebsiteCleanerService
+from eneo.websites.infrastructure.website_repo import WebsiteRepository
 from eneo.whats_new.whats_new_repo import WhatsNewRepository
 from eneo.whats_new.whats_new_service import WhatsNewService
 from eneo.worker.task_manager import TaskManager
@@ -701,6 +720,9 @@ class Container(containers.DeclarativeContainer):
     image_model_repo = providers.Factory(
         ImageModelRepository, session=session, user=user
     )
+    rerank_model_repo = providers.Factory(
+        RerankModelRepository, session=session, user=user
+    )
     embedding_model_repo = providers.Factory(
         AdminEmbeddingModelsService, session=session
     )
@@ -741,6 +763,7 @@ class Container(containers.DeclarativeContainer):
     mcp_server_tool_repo = providers.Factory(
         MCPServerToolRepoImpl, session=session, mapper=mcp_server_tool_mapper
     )
+    mcp_app_view_repo = providers.Factory(McpAppViewRepo, session=session)
 
     sync_log_repo = providers.Factory(
         SyncLogRepoImpl, session=session, mapper=sync_log_mapper
@@ -816,13 +839,18 @@ class Container(containers.DeclarativeContainer):
         factory=space_factory,
         file_content_loader=file_content_loader,
         session=session,
-        app_repo=app_repo,
-        assistant_repo=assistant_repo,
         completion_model_repo=completion_model_repo2,
         transcription_model_repo=transcription_model_repo,
         embedding_model_repo=embedding_model_repo2,
         http_auth_encryption=http_auth_encryption_service,
     )
+    group_chat_repo = providers.Factory(GroupChatRepository, session=session)
+    website_repo = providers.Factory(
+        WebsiteRepository,
+        session=session,
+        http_auth_encryption=http_auth_encryption_service,
+    )
+
     app_template_repo = providers.Factory(
         AppTemplateRepository, factory=app_template_factory, session=session
     )
@@ -837,6 +865,9 @@ class Container(containers.DeclarativeContainer):
         SecurityClassificationRepoImpl,
         session=session,
         user=user,
+    )
+    document_template_repo = providers.Factory(
+        DocumentTemplateRepository, session=session
     )
 
     # Audit logging
@@ -886,6 +917,7 @@ class Container(containers.DeclarativeContainer):
     create_embeddings_service = providers.Factory(
         CreateEmbeddingsService,
         tenant=tenant,
+        user=user,
         config=config,
         encryption_service=encryption_service,
         session=session,
@@ -929,6 +961,19 @@ class Container(containers.DeclarativeContainer):
         user=user,
         image_model_repo=image_model_repo,
         security_classification_repo=security_classification_repo,
+    )
+    rerank_model_crud_service = providers.Factory(
+        RerankModelCRUDService,
+        user=user,
+        rerank_model_repo=rerank_model_repo,
+        security_classification_repo=security_classification_repo,
+    )
+    rerank_service = providers.Factory(
+        RerankService,
+        session=session,
+        user=user,
+        rerank_model_repo=rerank_model_repo,
+        encryption_service=encryption_service,
     )
     embedding_model_crud_service = providers.Factory(
         EmbeddingModelCRUDService,
@@ -992,6 +1037,9 @@ class Container(containers.DeclarativeContainer):
         user=user,
         repo=security_classification_repo,
         tenant_service=tenant_service,
+    )
+    document_template_service = providers.Factory(
+        DocumentTemplateService, user=user, repo=document_template_repo
     )
     api_key_scope_revoker = providers.Factory(
         ApiKeyScopeRevoker,
@@ -1104,7 +1152,6 @@ class Container(containers.DeclarativeContainer):
         CollectionCRUDService,
         user=user,
         space_service=space_service,
-        space_repo=space_repo,
         actor_manager=actor_manager,
         group_service=group_service,
     )
@@ -1151,6 +1198,7 @@ class Container(containers.DeclarativeContainer):
         WebsiteCRUDService,
         user=user,
         space_service=space_service,
+        website_repo=website_repo,
         space_repo=space_repo,
         crawl_run_repo=crawl_run_repo,
         actor_manager=actor_manager,
@@ -1218,8 +1266,8 @@ class Container(containers.DeclarativeContainer):
         space_repo=space_repo,
         space_service=space_service,
         actor_manager=actor_manager,
-        group_service=group_service,
         skill_repo=skill_repo,
+        assistant_repo=assistant_repo,
     )
     # Personal assistant governance services are declared before assistant_service
     # because runtime enforcement injects effective_config_service into
@@ -1275,6 +1323,7 @@ class Container(containers.DeclarativeContainer):
         api_key_scope_revoker=api_key_scope_revoker,
         effective_config_service=effective_config_service,
         skill_service=skill_service,
+        rerank_service=rerank_service,
     )
     org_space_assistant_role_service = providers.Factory(
         OrgSpaceAssistantRoleService,
@@ -1302,12 +1351,15 @@ class Container(containers.DeclarativeContainer):
         references_service=references_service,
         factory=helper_assistants_factory,
         audit_service=audit_service,
+        space_repo=space_repo,
+        rerank_service=rerank_service,
     )
     group_chat_service = providers.Factory(
         GroupChatService,
         user=user,
         space_service=space_service,
         space_repo=space_repo,
+        group_chat_repo=group_chat_repo,
         actor_manager=actor_manager,
         assistant_service=assistant_service,
         session_service=session_service,
@@ -1410,6 +1462,7 @@ class Container(containers.DeclarativeContainer):
         encryption_service=encryption_service,
         user_groups_repo=user_groups_repo,
         image_model_repo=image_model_repo,
+        app_view_repo=mcp_app_view_repo,
     )
     tenant_integration_service = providers.Factory(
         TenantIntegrationService,
@@ -1424,6 +1477,7 @@ class Container(containers.DeclarativeContainer):
     tenant_sharepoint_app_service = providers.Factory(
         TenantSharePointAppService,
         tenant_app_repo=tenant_sharepoint_app_repo,
+        tenant_app_auth_service=tenant_app_auth_service,
     )
 
     # SharePoint auth service with tenant app support
@@ -1433,8 +1487,14 @@ class Container(containers.DeclarativeContainer):
     )
 
     # Service account auth service for delegated permissions via service account
-    service_account_auth_service = providers.Factory(
-        ServiceAccountAuthService,
+    # Singleton: it holds the per-process access-token cache.
+    service_account_auth_service = providers.Singleton(ServiceAccountAuthService)
+    org_token_provider = providers.Factory(
+        OrgTokenProvider,
+        tenant_app_repo=tenant_sharepoint_app_repo,
+        tenant_app_auth_service=tenant_app_auth_service,
+        service_account_auth_service=service_account_auth_service,
+        encryption_service=encryption_service,
     )
 
     oauth2_service = providers.Factory(
@@ -1453,21 +1513,20 @@ class Container(containers.DeclarativeContainer):
         oauth_token_repo=oauth_token_repo,
         confluence_auth_service=confluence_auth_service,
         sharepoint_auth_service=sharepoint_auth_service,
+        redis_client=redis_client,
+        token_mapper=confluence_token_mapper,
     )
 
     # SharePoint auth router (after oauth_token_service)
     sharepoint_auth_router = providers.Factory(
         SharePointAuthRouter,
-        tenant_app_service=tenant_sharepoint_app_service,
-        tenant_app_auth_service=tenant_app_auth_service,
         oauth_token_service=oauth_token_service,
-        service_account_auth_service=service_account_auth_service,
+        org_token_provider=org_token_provider,
     )
 
     sharepoint_subscription_service = providers.Factory(
         SharePointSubscriptionService,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
-        oauth_token_service=oauth_token_service,
     )
 
     user_integration_service = providers.Factory(
@@ -1495,6 +1554,7 @@ class Container(containers.DeclarativeContainer):
         tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
         tenant_app_auth_service=tenant_app_auth_service,
         service_account_auth_service=service_account_auth_service,
+        org_token_provider=org_token_provider,
     )
 
     confluence_content_service = providers.Factory(
@@ -1511,21 +1571,23 @@ class Container(containers.DeclarativeContainer):
         OfficeChangeKeyService,
         redis_client=redis_client,
     )
+    sharepoint_sync_progress_store = providers.Factory(
+        SharePointSyncProgressStore,
+        redis_client=redis_client,
+    )
     sharepoint_content_service = providers.Factory(
         SharePointContentService,
         oauth_token_repo=oauth_token_repo,
-        job_service=job_service,
-        user_integration_repo=user_integration_repo,
         user=user,
         oauth_token_service=oauth_token_service,
         info_blob_service=info_blob_service,
         integration_knowledge_repo=integration_knowledge_repo,
         session=session,
         tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
-        tenant_app_auth_service=tenant_app_auth_service,
-        service_account_auth_service=service_account_auth_service,
         sync_log_repo=sync_log_repo,
         change_key_service=office_change_key_service,
+        org_token_provider=org_token_provider,
+        sync_progress_store=sharepoint_sync_progress_store,
     )
     sharepoint_webhook_service = providers.Factory(
         SharepointWebhookService,
@@ -1535,6 +1597,7 @@ class Container(containers.DeclarativeContainer):
         user_repo=user_repo,
         change_key_service=office_change_key_service,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
+        redis_client=redis_client,
     )
     confluence_preview_service = providers.Factory(
         ConfluencePreviewService,
@@ -1543,9 +1606,7 @@ class Container(containers.DeclarativeContainer):
     sharepoint_preview_service = providers.Factory(
         SharePointPreviewService,
         oauth_token_service=oauth_token_service,
-        tenant_app_auth_service=tenant_app_auth_service,
-        service_account_auth_service=service_account_auth_service,
-        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+        org_token_provider=org_token_provider,
     )
     integration_preview_service = providers.Factory(
         IntegrationPreviewService,
@@ -1591,6 +1652,12 @@ class Container(containers.DeclarativeContainer):
         space_service=space_service,
         file_service=file_service,
     )
+    recent_conversations_service = providers.Factory(
+        RecentConversationsService,
+        user=user,
+        session_repo=session_repo,
+        actor_manager=actor_manager,
+    )
 
     # Token Usage
     token_usage_analyzer = providers.Factory(
@@ -1624,6 +1691,7 @@ class Container(containers.DeclarativeContainer):
         Transcriber,
         file_service=file_service,
         tenant=tenant,
+        user=user,
         config=config,
         encryption_service=encryption_service,
         session=session,

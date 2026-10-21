@@ -35,7 +35,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.stubGlobal(
     "window",
-    Object.assign(new EventTarget(), { location: { href: "https://eneo.test/whats-new" } })
+    Object.assign(new EventTarget(), { location: { href: "https://eneo.test/news" } })
   );
   tour = createWhatsNewTour();
   preloadData.mockResolvedValue({ type: "loaded", status: 200, data: {} });

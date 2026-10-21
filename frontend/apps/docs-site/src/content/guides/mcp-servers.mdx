@@ -5,14 +5,15 @@ Model Context Protocol (MCP) servers give assistants access to external tools an
 import { Callout } from 'nextra/components'
 
 <Callout type="info">
-  This guide covers administrator setup for external MCP servers. For the
-  deeper architecture—including knowledge retrieval modes, Eneo's built-in
-  loopback MCP servers, and how internal and external tools interoperate—see
-  [Knowledge Retrieval and MCP
-  Interoperability](/docs/knowledge-retrieval-and-mcp). Servers that act as
-  the organisation's search engine or image generator are managed as
-  functions instead; see [Web Search & Image
-  Generation](/guides/capabilities).
+  This guide covers administrator setup for external MCP servers. For the map
+  of where tools run and why, see [Tools and MCP
+  Architecture](/docs/tool-architecture); for the deeper mechanics, including
+  knowledge retrieval modes, Eneo's built-in loopback MCP servers, and how
+  internal and external tools interoperate, see [Knowledge Retrieval and MCP
+  Interoperability](/docs/knowledge-retrieval-and-mcp). Servers that provide
+  a function (web search, image generation, ask a file, create a file or
+  charts) are managed as functions instead; see
+  [Functions](/guides/capabilities).
 </Callout>
 
 ## Overview
@@ -47,7 +48,7 @@ allowed to call. A tool must pass both checks.
 
 MCP servers are managed on the **MCP servers** tab of **Admin → Tools** (`/admin/tools`; the former `/admin/mcp-servers` URL redirects there). Only admins can add, edit, or remove servers.
 
-The server form has a **Function** selection. Leave it at **General tools** for a server whose tools attach directly to assistants. Choose **Web search** or **Image generation** to register the server as a source for that function; it is then managed on the **Functions** tab and covered by [Web Search & Image Generation](/guides/capabilities).
+The server form has a **Function** selection. Leave it at **General tools** for a server whose tools attach directly to assistants. Choose a function (**Web search**, **Image generation**, **Ask a file**, **Create a file** or **Charts**) to register the server as a source for it; it is then managed on the **Functions** tab and covered by [Functions](/guides/capabilities).
 
 ### Steps
 
@@ -76,6 +77,50 @@ If the MCP server requires authentication, select **Bearer Token** and enter the
 
 When editing a server, leave the token field empty to keep the existing token.
 
+#### Credentials need https
+
+Eneo sends a bearer token or API key only over https. A server whose
+authentication sends one must have a **Server URL** that starts with
+`https://`; plain `http://` is accepted only for `localhost`, `127.0.0.1` and
+`[::1]`, which Eneo connects to directly, never through a proxy set in
+`HTTP_PROXY` or `ALL_PROXY`. The form explains this before you save, and Eneo
+refuses to add or save such a server. A user name and password in the
+**Server URL** (`https://user:password@...`) are a credential as well, sent as
+Basic authentication, so the same rule applies to them whatever the
+authentication setting. Servers without authentication and without a user
+name or password in the URL are not affected.
+
+A server saved with a plain `http://` address and a credential before this
+rule existed is no longer contacted: saving it and syncing its tools fail with
+a message asking you to change the address to https. In chat, a tool call to
+such a server reports that an administrator must do so; a server with identity
+forwarding instead has its tools left out of the request, as when its
+identity-scoped discovery fails. Edit the server and change its **Server URL**
+to the server's https address.
+
+#### MCP servers behind an internal certificate authority
+
+Eneo verifies the server's TLS certificate, and has no setting that turns the
+verification off. It trusts the public certificate authorities bundled with
+the backend. For a server whose certificate comes from your organisation's own
+CA, point `SSL_CERT_FILE` at a file that holds both the public roots and your
+CA (`SSL_CERT_DIR`, a directory prepared with `openssl rehash`, is read only
+when `SSL_CERT_FILE` is unset):
+
+```bash
+# In a container of the backend image: the bundled public roots plus your CA.
+cat "$(python -m certifi)" internal-ca.pem > eneo-ca-bundle.pem
+```
+
+Mount the file and set `SSL_CERT_FILE=/path/to/eneo-ca-bundle.pem` on the
+`backend` service, which makes the MCP calls for chats, connection tests and
+syncs. The HTTP client Eneo uses for MCP (httpx) then loads that file instead
+of its bundled roots, not in addition to them, so a file with only your CA
+breaks connections to MCP servers with public certificates. Other HTTP clients
+in the backend read the variable too, which is another reason to keep the
+public roots in it. A self-signed certificate is trusted only when that
+certificate itself is in the file.
+
 ### Forwarding user identity
 
 Identity forwarding is off by default. Enable it only when the MCP server is
@@ -89,7 +134,8 @@ Eneo sends the available values in these headers:
 - `X-Eneo-Role`
 
 Empty values are omitted. Text values are stripped of control characters and
-percent-encoded as UTF-8; the receiving server must decode them before display
+invisible formatting characters (such as zero-width spaces) and percent-encoded
+as UTF-8; the receiving server must decode them before display
 or matching. Headers are sent during connection checks, tool discovery, and
 tool calls.
 
@@ -121,6 +167,62 @@ Eneo validates the complete live catalog before saving or exposing anything.
 If either limit is exceeded, that server contributes no tools to the current
 request and Eneo writes no partial catalog. Increase a limit only after checking
 that the larger catalog is intentional.
+
+---
+
+## Tool attempts in chat
+
+An assistant may adjust its input and try again after a tool call fails. If a
+later call to the same tool on the same server succeeds within the reply, the
+earlier failed call appears as a muted **Previous attempt** (**Tidigare försök**)
+in the activity list. It no longer adds a red failure icon to the grouped
+summary. Expand the attempt to inspect its original parameters and error.
+
+This describes the sequence of calls, not a guarantee that every requested
+operation succeeded. Failures without a later success, interrupted calls and
+rejected approvals keep their failure or rejection indicators. The same
+presentation applies when reopening chat history.
+
+## Interactive tool views
+
+When MCP Apps are enabled, a tool can show an interactive table, chart or form
+under its answer. An administrator approves the view's HTML and requested
+network policy with the tool. Updated or removed view metadata takes effect
+when the pending change is approved.
+
+Views run in an isolated browser frame and use the official MCP Apps SDK to
+communicate with Eneo. An external view asks for permission for each tool call,
+showing the tool name and arguments. The model's automatic-tool setting does
+not grant external views ongoing permission. Every call also rechecks the
+originating tool's current approval and the exact view version.
+
+With the built-in **Ask a file** capability, users can ask "Show me the rows
+in this file" or "Show orders from last month". The assistant's tool descriptions
+make in-chat results the default for browsing; users do not need to name a
+tool or request an interactive table. Asking for a downloadable CSV or Excel
+file still uses file generation.
+
+Users can expand a view beside the conversation and return it inline without
+losing filters or loaded rows. Views cannot navigate to another page or embed
+nested frames; opening a link requires the user's confirmation. Self-contained
+views are preferred: scripts loaded from an approved external resource origin
+can change independently of the stored HTML.
+
+Built-in app views ship as Eneo code. Their catalog and view definitions are
+kept current automatically, and their tool calls follow the user's
+automatic-tool preference. External apps require administrator approval and
+individual consent for each app-initiated tool call.
+
+Apps share the side panel with Eneo's native document workspace and file
+previews. The native workspace handles drafts, assistant-driven edits,
+versions and exports independently of the app feature flag. See
+[Tools, files and views](/guides/capabilities#tools-files-and-views) for the
+complete spreadsheet-to-report workflow and current editing limitations.
+
+Deployment requires `MCP_APPS_ENABLED=true`, a separate
+`MCP_APP_CONTENT_BASE_URL`, and `PUBLIC_ORIGIN`. For configuration and supported
+extension features, see the repository's
+[interactive tool view deployment guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/MCP_APPS.md).
 
 ---
 
@@ -287,6 +389,7 @@ that the model should reuse the handle from earlier results.
 | User cannot see an approved tool | Omit it from this request |
 | Identity-scoped discovery fails or times out | Omit that server's tools from this request |
 | Catalog exceeds an admin limit | Reject the entire catalog for this request; save nothing |
+| Server with a credential has a plain-http address | Do not connect. Without identity forwarding, the tool call reports that an administrator must switch the address to https; with it, omit that server's tools from this request |
 | Admin cannot see a user-only tool during sync | Keep the existing tool; absence is not deletion evidence |
 
 ### Checklist for MCP server operators
@@ -308,7 +411,7 @@ that the model should reuse the handle from earlier results.
 **Solutions:**
 - Verify the URL is correct and the server is running
 - Check that the URL is reachable from the Eneo backend (firewall, DNS)
-- If using authentication, verify the token is correct
+- If using authentication, verify the token is correct and that the URL starts with `https://` (see [Credentials need https](#credentials-need-https))
 - The server must support **Streamable HTTP** transport
 
 ### Sync Shows No Tools
