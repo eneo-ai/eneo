@@ -8,10 +8,18 @@ import { Popover } from "@astryxdesign/core/Popover";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { BookOpenCheck, Lock, Plus, RefreshCw, Search, Settings, X } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject
+} from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { TextInput } from "@/components/astryx/text-input";
-import { QueryStateBoundary } from "@/components/composites/query-state";
+import { LoadingState } from "@/components/composites/loading-state";
+import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import {
   FailureText,
   layerReasonText,
@@ -26,9 +34,10 @@ import { cn } from "@/lib/utils";
 import { COMPOSER_PILL_CLASS, COMPOSER_PILL_COUNT_CLASS } from "./mcp-controls";
 
 type PersonalChatSkills = ReturnType<typeof usePersonalChatSkills>;
+/** The library search: as typed, and the query the rows follow after a pause. */
+type SearchField = { value: string; onChange: (value: string) => void; query: string };
 
-/** Beyond this many own Skills the list gets a search field. */
-const SEARCH_FROM = 8;
+const SEARCH_DEBOUNCE_MS = 250;
 
 /**
  * What Astryx's Popover adds around its content, above the trigger: the 4 px
@@ -101,7 +110,7 @@ function OwnRow({
   const t = useTranslations();
   const group = useRef<HTMLDivElement>(null);
   const rescue = useFocusRescue();
-  const failure = skills.failure?.skillId === row.skillId ? skills.failure.message : null;
+  const failure = skills.failures[row.skillId] ?? null;
   const latest = skills.canEdit && !row.blocked ? row.latest : null;
 
   return (
@@ -165,29 +174,35 @@ function OwnRow({
   );
 }
 
-/** The person's own Skills: search beyond seven, the rows, or the empty state. */
-function OwnSkills({ skills, stacked }: { skills: PersonalChatSkills; stacked: boolean }) {
+/**
+ * The person's own Skills: the search, the rows, then the library's state.
+ * The Skills in the chat are rows from the start, so they can be changed
+ * while the library loads, and when a page of it fails.
+ */
+function OwnSkills({
+  skills,
+  stacked,
+  search
+}: {
+  skills: PersonalChatSkills;
+  stacked: boolean;
+  search: SearchField;
+}) {
   const t = useTranslations();
-  const [query, setQuery] = useState("");
-  const needle = query.trim().toLocaleLowerCase();
-  const shown = needle
-    ? skills.rows.filter((row) =>
-        `${row.name} ${row.description}`.toLocaleLowerCase().includes(needle)
-      )
-    : skills.rows;
+  const { library, rows } = skills;
+  const firstPageFailed = library.isError && !library.data;
+  const settled = !library.isLoading && !firstPageFailed;
 
-  if (skills.rows.length === 0)
-    return <p className="text-ax-text-secondary py-2 text-sm">{t("personal_chat_skills_empty")}</p>;
   return (
     <>
-      {skills.rows.length >= SEARCH_FROM && (
+      {skills.searchable && (
         <div className="py-1">
           <TextInput
             label={t("personal_chat_skills_search")}
             isLabelHidden
             placeholder={t("personal_chat_skills_search")}
-            value={query}
-            onChange={setQuery}
+            value={search.value}
+            onChange={search.onChange}
             startIcon={Search}
             hasClear
             size="sm"
@@ -195,16 +210,47 @@ function OwnSkills({ skills, stacked }: { skills: PersonalChatSkills; stacked: b
           />
         </div>
       )}
-      {shown.length === 0 ? (
-        <p className="text-ax-text-secondary py-2 text-sm">
-          {t("personal_chat_skills_search_empty")}
-        </p>
-      ) : (
+      {rows.length > 0 && (
         <ul aria-label={t("personal_chat_skills_own_heading")} className="flex flex-col">
-          {shown.map((row) => (
+          {rows.map((row) => (
             <OwnRow key={row.skillId} row={row} skills={skills} stacked={stacked} />
           ))}
         </ul>
+      )}
+      {library.isLoading && <LoadingState rows={2} />}
+      {firstPageFailed && (
+        <ListError
+          error={library.error}
+          isRetrying={library.isFetching}
+          onRetry={() => void library.refetch()}
+        />
+      )}
+      {settled && rows.length === 0 && (
+        <p className="text-ax-text-secondary py-2 text-sm">
+          {t(search.query ? "personal_chat_skills_search_empty" : "personal_chat_skills_empty")}
+        </p>
+      )}
+      {library.isFetchNextPageError ? (
+        <ListError
+          error={library.error}
+          isRetrying={library.isFetchingNextPage}
+          onRetry={() => void library.fetchNextPage()}
+        />
+      ) : (
+        library.hasNextPage && (
+          <Button
+            label={library.isFetchingNextPage ? t("loading") : t("load_more")}
+            variant="ghost"
+            size="sm"
+            // Loading, it stays enabled so it keeps focus; a second press is ignored.
+            isLoading={library.isFetchingNextPage}
+            isInterruptible
+            onClick={() => {
+              if (!library.isFetchingNextPage) void library.fetchNextPage();
+            }}
+            className="self-start"
+          />
+        )
       )}
     </>
   );
@@ -242,11 +288,13 @@ function useFitAbove(anchor?: RefObject<HTMLElement | null>) {
 function SkillsPanel({
   skills,
   stacked,
+  search,
   anchor,
   onClose
 }: {
   skills: PersonalChatSkills;
   stacked: boolean;
+  search: SearchField;
   /** The popover's trigger: the panel fits in the room above it. */
   anchor?: RefObject<HTMLElement | null>;
   /** The sheet's visible close button; the popover has its own. */
@@ -283,10 +331,7 @@ function SkillsPanel({
         )}
       </div>
 
-      <QueryStateBoundary
-        queries={canEdit ? [skills.configuration, skills.library] : [skills.configuration]}
-        rows={3}
-      >
+      <QueryStateBoundary query={skills.configuration} rows={3}>
         {() => (
           <div
             className={cn(
@@ -312,7 +357,7 @@ function SkillsPanel({
             )}
             {(canEdit || skills.rows.length > 0) && (
               <Group title={t("personal_chat_skills_own_heading")}>
-                <OwnSkills skills={skills} stacked={stacked} />
+                <OwnSkills skills={skills} stacked={stacked} search={search} />
               </Group>
             )}
           </div>
@@ -359,14 +404,25 @@ export function ChatSkills() {
   const pillRef = useRef<HTMLButtonElement>(null);
   // The composer's toolbar goes icon-only below 40rem (max-sm); so does this.
   const wide = useMediaQuery("(min-width: 40rem)");
-  const skills = usePersonalChatSkills({ withLibrary: open });
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  useEffect(() => {
+    const timer = window.setTimeout(() => setSearch(searchInput.trim()), SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [searchInput]);
+  const skills = usePersonalChatSkills({ withLibrary: open, search });
   if (!skills.visible) return null;
 
-  // A refusal belongs to the visit that made it: closing forgets it.
+  // Refusals and the search belong to the visit that made them: closing forgets them.
   const changeOpen = (next: boolean) => {
-    if (!next) skills.dismissFailure();
+    if (!next) {
+      skills.dismissFailures();
+      setSearchInput("");
+      setSearch("");
+    }
     setOpen(next);
   };
+  const searchField = { value: searchInput, onChange: setSearchInput, query: search };
 
   const label = skills.running
     ? t("personal_chat_skills_button_label", { count: skills.running.total })
@@ -402,7 +458,11 @@ export function ChatSkills() {
         label={t("personal_chat_skills_button")}
         closeButtonLabel={t("close")}
         // Mounted only while open, so a closed popover holds no radios.
-        content={open ? <SkillsPanel skills={skills} stacked={false} anchor={pillRef} /> : null}
+        content={
+          open ? (
+            <SkillsPanel skills={skills} stacked={false} search={searchField} anchor={pillRef} />
+          ) : null
+        }
       >
         {pill({})}
       </Popover>
@@ -416,9 +476,14 @@ export function ChatSkills() {
         onOpenChange={changeOpen}
         label={t("personal_chat_skills_button")}
         // A search field brings up the keyboard: only a tall sheet makes room for it.
-        height={skills.rows.length >= SEARCH_FROM ? "tall" : "80dvh"}
+        height={skills.searchable ? "tall" : "80dvh"}
       >
-        <SkillsPanel skills={skills} stacked onClose={() => changeOpen(false)} />
+        <SkillsPanel
+          skills={skills}
+          stacked
+          search={searchField}
+          onClose={() => changeOpen(false)}
+        />
       </BottomSheet>
     </>
   );

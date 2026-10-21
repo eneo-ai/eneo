@@ -5,6 +5,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import {
   keepPreviousData,
+  useInfiniteQuery,
   useMutation,
   useMutationState,
   useQuery,
@@ -12,7 +13,7 @@ import {
 } from "@tanstack/react-query";
 import { CircleAlert, RefreshCw } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useState, type RefObject } from "react";
+import { useRef, useState, type RefObject } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { useAppContext } from "@/components/providers/app-context";
 import { queuePartnerUpdate } from "@/features/chat/partner-updates";
@@ -66,8 +67,10 @@ export type PersonalSkillRow = {
 
 /** ErrorCodes.PERSONAL_SKILLS_REJECTED: the save would not run as configured. */
 const PERSONAL_SKILLS_REJECTED = 9080;
-/** The library endpoint's largest page. */
-const LIBRARY_PAGE = 100;
+/** Own Skills per library page, as on the Skills page. */
+const LIBRARY_PAGE = 25;
+/** Beyond this many own Skills the list gets a search field. */
+const SEARCH_AFTER = 7;
 
 const REASON_KEYS: Record<Reason, string> = {
   permission_missing: "personal_chat_skills_reason_permission_missing",
@@ -127,12 +130,21 @@ function applyChange(bindings: Binding[], change: PersonalSkillChange): Binding[
  * what is saved; a change shows at once as a pending mutation laid over it,
  * so a refused one rolls back by itself. Each change is saved through the
  * composer's partner update queue (a question sent right after waits for it)
- * and applied to what is saved when its turn comes, so a refused earlier
- * change never travels along with a later one. Every key sits under the
+ * and applied to what the server has saved when its turn comes, read then:
+ * never to the cache, which can miss an earlier change. The library is read a
+ * page at a time and searched on the server; the Skills in the chat are
+ * listed whether or not their page has loaded. Every key sits under the
  * space's Skills key: an edit, a new version or a deletion there refreshes
  * the chat's view too.
  */
-export function usePersonalChatSkills({ withLibrary = false }: { withLibrary?: boolean } = {}) {
+export function usePersonalChatSkills({
+  withLibrary = false,
+  search = ""
+}: {
+  withLibrary?: boolean;
+  /** The library search (debounced by the caller). */
+  search?: string;
+} = {}) {
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
@@ -142,67 +154,85 @@ export function usePersonalChatSkills({ withLibrary = false }: { withLibrary?: b
   const assistantId = assistant?.id ?? null;
   const canEdit = can({ allOf: ["personal_chat", "personal_skills"] });
   const spaceSkillsKey = skillQueryKey({ type: "space", spaceId: space.id });
-  // A model switch can pause or resume the layer, so the model is part of the key.
+  // A model switch can pause or resume the layer, so the model is part of the
+  // key; the scope (without it) covers the configuration under every model.
+  const configurationScope = [...spaceSkillsKey, { personalChat: assistantId }];
   const configurationKey = [
     ...spaceSkillsKey,
     { personalChat: assistantId, model: assistant?.completion_model?.id ?? null }
   ];
   const mutationKey = ["personal-chat-skills", assistantId];
+  const readSaved = (): Promise<Configuration> =>
+    unwrap(
+      browserApi.GET("/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/", {
+        params: { path: { space_id: space.id, assistant_id: assistantId! } }
+      })
+    );
 
   const configuration = useQuery({
     queryKey: configurationKey,
     enabled: assistantId !== null,
     placeholderData: keepPreviousData,
-    queryFn: (): Promise<Configuration> =>
-      unwrap(
-        browserApi.GET(
-          "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/",
-          { params: { path: { space_id: space.id, assistant_id: assistantId! } } }
-        )
-      )
+    queryFn: readSaved
   });
 
-  // Every Skill in the personal space, page by page.
-  const library = useQuery({
-    queryKey: [...spaceSkillsKey, { personalChatLibrary: true }],
+  const library = useInfiniteQuery({
+    queryKey: [...spaceSkillsKey, { personalChatLibrary: search }],
     enabled: withLibrary && canEdit && assistantId !== null,
-    queryFn: async () => {
-      const items: Schema<"SkillSparse">[] = [];
-      let cursor: string | null = null;
-      do {
-        const page: Schema<"CursorPaginatedResponse_SkillSparse_"> = await unwrap(
-          browserApi.GET("/api/v1/spaces/{space_id}/skills/", {
-            params: { path: { space_id: space.id }, query: { limit: LIBRARY_PAGE, cursor } }
-          })
-        );
-        items.push(...page.items);
-        cursor = page.next_cursor ?? null;
-      } while (cursor);
-      return items;
-    }
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam, signal }) =>
+      unwrap(
+        browserApi.GET("/api/v1/spaces/{space_id}/skills/", {
+          params: {
+            path: { space_id: space.id },
+            query: { limit: LIBRARY_PAGE, cursor: pageParam, q: search || undefined }
+          },
+          signal
+        })
+      ),
+    getNextPageParam: (page) => page.next_cursor ?? undefined,
+    // While a search runs, the earlier results stay instead of a skeleton.
+    placeholderData: keepPreviousData
   });
 
-  const [failure, setFailure] = useState<{ skillId: string; message: string } | null>(null);
+  // A refusal belongs to one attempt: a later choice for the same Skill
+  // (pending or saved) retires it, and other rows keep theirs.
+  const attempts = useRef(0);
+  const newestAttempt = useRef(new Map<string, number>());
+  const [failures, setFailures] = useState<Record<string, string>>({});
   const save = useMutation({
     mutationKey,
     mutationFn: (change: PersonalSkillChange) =>
       queuePartnerUpdate(async () => {
-        const saved = queryClient.getQueryData<Configuration>(configurationKey);
-        // Never send a list built from nothing: it would remove every Skill.
-        if (!saved) throw new Error("The personal chat's Skills have not loaded");
+        // Read when this change's turn comes. The cache may miss an earlier
+        // change (its refresh failed, or nothing on screen reads it any more),
+        // and a list built from it would undo that change. Unread, nothing is sent.
+        const saved = await readSaved().catch(() => {
+          throw new Error("The personal chat's saved Skills could not be read");
+        });
         await unwrap(
           browserApi.POST("/api/v1/assistants/{id}/", {
             params: { path: { id: assistantId! } },
             body: { skill_bindings: applyChange(bindingsFromSummaries(saved.bindings), change) }
           })
         );
-        // The next change in the queue, the count and the layer's state read the saved result.
-        await queryClient.invalidateQueries({ queryKey: configurationKey });
       }),
-    onMutate: () => setFailure(null),
-    onError: (error, change) => {
+    onMutate: (change) => {
+      attempts.current += 1;
+      newestAttempt.current.set(change.skillId, attempts.current);
+      setFailures((current) => {
+        const next = { ...current };
+        delete next[change.skillId];
+        return next;
+      });
+      return attempts.current;
+    },
+    // Still pending until the view shows the saved result, so no choice flickers back.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: configurationScope }),
+    onError: (error, change, attempt) => {
+      if (newestAttempt.current.get(change.skillId) !== attempt) return;
       const message = saveFailureText(error, t);
-      setFailure({ skillId: change.skillId, message });
+      setFailures((current) => ({ ...current, [change.skillId]: message }));
       announce(message);
     }
   });
@@ -248,17 +278,26 @@ export function usePersonalChatSkills({ withLibrary = false }: { withLibrary?: b
   }
 
   // The library's order, so a row never moves when its mode changes. An
-  // inactive Skill can't be added, so only a bound one stays listed.
+  // inactive Skill can't be added, so only a bound one stays listed. The
+  // Skills in the chat follow, wherever their library page is (not loaded,
+  // failed, or not yet reached), as far as they match the search.
+  const pages = library.data?.pages ?? [];
   const listed = canEdit
-    ? (library.data ?? []).filter((skill) => skill.is_active || summaries.has(skill.id))
+    ? pages
+        .flatMap((page) => page.items)
+        .filter((skill) => skill.is_active || summaries.has(skill.id))
     : [];
   const listedIds = new Set(listed.map((skill) => skill.id));
+  const term = search.toLocaleLowerCase();
   const rows: PersonalSkillRow[] = [
     ...listed.map((skill) =>
       row(skill.id, skill.display_name, skill.description, skill.current_revision_id)
     ),
     ...(data?.bindings ?? [])
       .filter((summary) => !listedIds.has(summary.skill_id))
+      .filter((summary) =>
+        `${summary.display_name} ${summary.description}`.toLocaleLowerCase().includes(term)
+      )
       .map((summary) =>
         row(summary.skill_id, summary.display_name, summary.description, summary.skill_revision_id)
       )
@@ -294,9 +333,15 @@ export function usePersonalChatSkills({ withLibrary = false }: { withLibrary?: b
     visible:
       assistantId !== null &&
       (canEdit || organisation.length > 0 || (data?.bindings.length ?? 0) > 0),
-    failure,
-    /** Forgets the last refusal (the control closed: it belongs to that visit). */
-    dismissFailure: () => setFailure(null),
+    /** The search field is offered beyond seven own Skills, or when there are more pages. */
+    searchable:
+      search !== "" ||
+      library.hasNextPage ||
+      (library.data?.pages[0]?.items.length ?? 0) > SEARCH_AFTER,
+    /** The refusal shown at each Skill, by Skill id. */
+    failures,
+    /** Forgets every refusal (the control closed: they belong to that visit). */
+    dismissFailures: () => setFailures({}),
     change: (change: PersonalSkillChange) => save.mutate(change)
   };
 }
@@ -328,10 +373,10 @@ export function PersonalChatVersionNotice({
   rescueTarget: RefObject<HTMLElement | null>;
 }) {
   const t = useTranslations();
-  const { rows, canEdit, change, failure } = usePersonalChatSkills();
+  const { rows, canEdit, change, failures } = usePersonalChatSkills();
   const rescue = useFocusRescue();
   const row = rows.find((candidate) => candidate.skillId === skillId);
-  const error = failure?.skillId === skillId ? failure.message : null;
+  const error = failures[skillId] ?? null;
   if (!row?.latest || row.pinnedNumber === null) {
     return error ? <FailureText message={error} /> : null;
   }

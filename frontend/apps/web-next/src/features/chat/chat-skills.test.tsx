@@ -82,10 +82,44 @@ const library = [
   librarySkill("notes", "Mötesanteckningar", "Strukturerar anteckningar till protokoll")
 ];
 
+/** What the server has saved for the personal chat. */
 let configuration: Configuration;
+/** The personal space's Skills, served page by page and searched by `q`. */
 let skills: ReturnType<typeof librarySkill>[];
+/** The library page (by cursor) that fails, if any. */
+let failingPage: string | null = null;
 /** Lets a save a test held back go, so the shared queue never stays blocked. */
 let releaseSave: (() => void) | null = null;
+
+type SentBinding = { skill_id: string; skill_revision_id: string; activation_mode?: string };
+type Request = {
+  params?: { query?: { limit?: number; cursor?: string | null; q?: string } };
+  body?: { skill_bindings?: SentBinding[] };
+};
+
+/** Saves the sent list as the server does: it becomes the personal chat's bindings. */
+function saveOnServer(init?: Request) {
+  const sent = init?.body?.skill_bindings ?? [];
+  configuration = {
+    ...configuration,
+    bindings: sent.map((binding, position) => ({
+      ...(configuration.bindings.find((saved) => saved.skill_id === binding.skill_id) ??
+        summary({ skill_id: binding.skill_id, display_name: binding.skill_id })),
+      skill_revision_id: binding.skill_revision_id,
+      activation_mode: binding.activation_mode === "on_demand" ? "on_demand" : "always",
+      position
+    }))
+  };
+  return ok({});
+}
+
+/** A save held until the test lets it go: saved (or refused) then. */
+function holdSave(outcome: (init?: Request) => ReturnType<typeof ok> = saveOnServer) {
+  return (_path: string, init?: Request) =>
+    new Promise((resolve) => {
+      releaseSave = () => resolve(outcome(init));
+    });
+}
 
 beforeEach(() => {
   configuration = {
@@ -95,14 +129,29 @@ beforeEach(() => {
     runtime: null
   };
   skills = library;
-  api.GET.mockImplementation((path: string) => {
+  failingPage = null;
+  api.GET.mockImplementation((path: string, init?: Request) => {
     if (path === "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/")
       return ok(configuration);
-    if (path === "/api/v1/spaces/{space_id}/skills/")
-      return ok({ items: skills, total_count: skills.length, next_cursor: null });
+    if (path === "/api/v1/spaces/{space_id}/skills/") {
+      const { limit = 25, cursor = null, q } = init?.params?.query ?? {};
+      if (failingPage !== null && cursor === failingPage) return refused(500, { message: "Boom" });
+      const matching = q
+        ? skills.filter((skill) =>
+            `${skill.display_name} ${skill.description}`.toLowerCase().includes(q.toLowerCase())
+          )
+        : skills;
+      const start = cursor ? Number(cursor) : 0;
+      const end = start + limit;
+      return ok({
+        items: matching.slice(start, end),
+        total_count: matching.length,
+        next_cursor: end < matching.length ? String(end) : null
+      });
+    }
     throw new Error(`Unexpected GET ${path}`);
   });
-  api.POST.mockImplementation(() => ok({}));
+  api.POST.mockImplementation((_path: string, init?: Request) => saveOnServer(init));
 });
 
 afterEach(async () => {
@@ -172,12 +221,7 @@ describe("ChatSkills", () => {
   });
 
   it("saves a choice at once and makes a question sent right after wait for it", async () => {
-    api.POST.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          releaseSave = () => resolve({ data: {}, response: new Response("{}") });
-        })
-    );
+    api.POST.mockImplementationOnce(holdSave());
     renderSkills();
     const popover = await openSkills();
     const notesMode = within(popover).getByRole("radiogroup", {
@@ -204,18 +248,6 @@ describe("ChatSkills", () => {
       }
     });
 
-    configuration = {
-      ...configuration,
-      bindings: [
-        answers,
-        summary({
-          skill_id: "notes",
-          display_name: "Mötesanteckningar",
-          activation_mode: "on_demand",
-          position: 1
-        })
-      ]
-    };
     await act(async () => {
       releaseSave?.();
       await awaitPartnerUpdates();
@@ -448,7 +480,7 @@ describe("ChatSkills", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Skills" })).toBeNull());
   });
 
-  it("filters the person's skills by name when there are more than seven", async () => {
+  it("searches the person's skills on the server when there are more than seven", async () => {
     skills = [
       ...library,
       ...Array.from({ length: 6 }, (_, index) =>
@@ -460,13 +492,182 @@ describe("ChatSkills", () => {
     const search = within(popover).getByRole("textbox", { name: "Sök bland dina skills" });
 
     fireEvent.change(search, { target: { value: "möte" } });
+    await waitFor(() =>
+      expect(api.GET).toHaveBeenCalledWith("/api/v1/spaces/{space_id}/skills/", {
+        params: {
+          path: { space_id: "personal-space" },
+          query: { limit: 25, cursor: null, q: "möte" }
+        },
+        signal: expect.any(AbortSignal)
+      })
+    );
     const own = within(popover).getByRole("list", { name: "Dina skills" });
-    expect(within(own).getAllByRole("radiogroup")).toHaveLength(1);
+    await waitFor(() => expect(within(own).getAllByRole("radiogroup")).toHaveLength(1));
     expect(
       within(own).getByRole("radiogroup", { name: "Läge för Mötesanteckningar" })
     ).toBeTruthy();
 
     fireEvent.change(search, { target: { value: "inget sådant" } });
-    expect(within(popover).getByText("Inga skills matchar sökningen.")).toBeTruthy();
+    expect(await within(popover).findByText("Inga skills matchar sökningen.")).toBeTruthy();
+  });
+
+  it("loads one page at a time and keeps bound skills usable when a later page fails", async () => {
+    // "Mina svarspreferenser" is in the chat but on the second page, which fails.
+    skills = [
+      ...Array.from({ length: 25 }, (_, index) =>
+        librarySkill(`template-${index}`, `Mall ${index + 1}`, "Färdig struktur")
+      ),
+      library[0]!
+    ];
+    failingPage = "25";
+    renderSkills();
+    const popover = await openSkills();
+
+    expect(
+      api.GET.mock.calls.filter(([path]) => path === "/api/v1/spaces/{space_id}/skills/")
+    ).toHaveLength(1);
+    // More pages exist: the search field is there for the rest.
+    expect(within(popover).getByRole("textbox", { name: "Sök bland dina skills" })).toBeTruthy();
+    const answersMode = within(popover).getByRole("radiogroup", {
+      name: "Läge för Mina svarspreferenser"
+    });
+    expect(within(answersMode).getByRole("radio", { name: "Alltid", checked: true })).toBeTruthy();
+
+    fireEvent.click(within(popover).getByRole("button", { name: "Ladda mer" }));
+    expect(await within(popover).findByRole("button", { name: "Försök igen" })).toBeTruthy();
+
+    // The skill in the chat can still be changed.
+    fireEvent.click(
+      within(
+        within(popover).getByRole("radiogroup", { name: "Läge för Mina svarspreferenser" })
+      ).getByRole("radio", { name: "Av" })
+    );
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
+        params: { path: { id: "assistant-1" } },
+        body: { skill_bindings: [] }
+      })
+    );
+  });
+
+  it("builds each save from what is saved when its turn comes, not from what was last shown", async () => {
+    renderSkills();
+    const popover = await openSkills();
+    // Saved meanwhile, elsewhere: the chat now also has "Mötesanteckningar".
+    saveOnServer({
+      body: {
+        skill_bindings: [
+          { skill_id: "answers", skill_revision_id: "answers-r2", activation_mode: "always" },
+          { skill_id: "notes", skill_revision_id: "notes-r2", activation_mode: "on_demand" }
+        ]
+      }
+    });
+
+    fireEvent.click(
+      within(
+        within(popover).getByRole("radiogroup", { name: "Läge för Mina svarspreferenser" })
+      ).getByRole("radio", { name: "Av" })
+    );
+
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
+        params: { path: { id: "assistant-1" } },
+        body: {
+          skill_bindings: [
+            { skill_id: "notes", skill_revision_id: "notes-r2", activation_mode: "on_demand" }
+          ]
+        }
+      })
+    );
+  });
+
+  it("keeps an accepted change when the chat is left before the next one is saved", async () => {
+    api.POST.mockImplementationOnce(holdSave());
+    const { unmount } = renderSkills();
+    const popover = await openSkills();
+    fireEvent.click(
+      within(
+        within(popover).getByRole("radiogroup", { name: "Läge för Mötesanteckningar" })
+      ).getByRole("radio", { name: "Alltid" })
+    );
+    fireEvent.click(
+      within(
+        within(popover).getByRole("radiogroup", { name: "Läge för Mina svarspreferenser" })
+      ).getByRole("radio", { name: "Av" })
+    );
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+
+    // The person leaves the chat; nothing on screen reads the saved state any more.
+    unmount();
+    await act(async () => {
+      releaseSave?.();
+      await awaitPartnerUpdates();
+    });
+
+    expect(api.POST).toHaveBeenCalledTimes(2);
+    expect(api.POST).toHaveBeenLastCalledWith("/api/v1/assistants/{id}/", {
+      params: { path: { id: "assistant-1" } },
+      body: {
+        skill_bindings: [
+          { skill_id: "notes", skill_revision_id: "notes-r2", activation_mode: "always" }
+        ]
+      }
+    });
+  });
+
+  it("sends nothing when what is saved cannot be read, and says the change was not saved", async () => {
+    renderSkills();
+    const popover = await openSkills();
+    api.GET.mockImplementation(() => refused(500, { message: "Boom" }));
+    const answersMode = within(popover).getByRole("radiogroup", {
+      name: "Läge för Mina svarspreferenser"
+    });
+
+    fireEvent.click(within(answersMode).getByRole("radio", { name: "Av" }));
+
+    expect(
+      await within(rowOf(answersMode)).findByText("Ändringen sparades inte. Försök igen.")
+    ).toBeTruthy();
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+
+  it("shows a refusal only while it is the newest choice for that skill", async () => {
+    const refusal = {
+      message: "On-demand Skills are unavailable",
+      eneo_error_code: 9080,
+      details: { reason: "on_demand_unavailable", detail: "model_lacks_tool_calling" }
+    };
+    const reason = "Modellen kan inte använda skills vid behov. Välj Alltid eller en annan modell.";
+    api.POST.mockImplementationOnce(() => refused(400, refusal))
+      .mockImplementationOnce(holdSave(() => refused(400, refusal)))
+      .mockImplementation((_path: string, init?: Request) => saveOnServer(init));
+    renderSkills();
+    const popover = await openSkills();
+    const answersMode = within(popover).getByRole("radiogroup", {
+      name: "Läge för Mina svarspreferenser"
+    });
+    const notesMode = within(popover).getByRole("radiogroup", {
+      name: "Läge för Mötesanteckningar"
+    });
+
+    // Another row's refusal stays where it is.
+    fireEvent.click(within(answersMode).getByRole("radio", { name: "Vid behov" }));
+    expect(await within(rowOf(answersMode)).findByText(reason)).toBeTruthy();
+
+    // "Vid behov" is still on its way (and will be refused) when "Alltid" is chosen.
+    fireEvent.click(within(notesMode).getByRole("radio", { name: "Vid behov" }));
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
+    fireEvent.click(within(notesMode).getByRole("radio", { name: "Alltid" }));
+    await act(async () => {
+      releaseSave?.();
+      await awaitPartnerUpdates();
+    });
+
+    expect(api.POST).toHaveBeenCalledTimes(3);
+    await waitFor(() =>
+      expect(within(notesMode).getByRole("radio", { name: "Alltid", checked: true })).toBeTruthy()
+    );
+    expect(within(rowOf(notesMode)).queryByText(reason)).toBeNull();
+    expect(within(rowOf(answersMode)).getByText(reason)).toBeTruthy();
   });
 });
