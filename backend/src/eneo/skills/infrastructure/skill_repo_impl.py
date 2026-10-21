@@ -1257,7 +1257,11 @@ class SkillRepoImpl:
         Every writer that needs both sides locks Assistant rows before Skill
         rows. Binding saves take their parent Assistant lock before Skills FOR
         SHARE, and concurrent fleet chunks take the same ascending-parent then
-        Skill order. Personal Chat writes share only the Skill lock. A binding
+        Skill order. The apply only reads the Skill, so it holds it FOR SHARE:
+        a personal chat policy save holds the same Skill FOR SHARE while it
+        waits for the exclusive fit token, and an exclusive wait here would
+        close a cycle through an Assistant save that holds the shared token
+        and waits for one of these parents. A binding
         SET change also rewrites the already-locked parent row in its save
         transaction, so the captured xmin rejects that whole concurrent edit.
         The runtime-policy FOR SHARE boundary rejects a policy changed after
@@ -1285,6 +1289,7 @@ class SkillRepoImpl:
         skill_row = await self._lock_organization_skill(
             tenant_id=tenant_id,
             skill_id=skill_id,
+            shared=True,
         )
         if skill_row is None or skill_row.published_revision_number is None:
             raise SkillNotPublishedForBindingError
@@ -1869,7 +1874,13 @@ class SkillRepoImpl:
         *,
         tenant_id: UUID,
         skill_id: UUID,
+        shared: bool = False,
     ) -> Skills | None:
+        """Lock an organisation Skill row; ``shared`` for writers that only read it.
+
+        FOR SHARE still excludes publication, withdrawal and blocking, which
+        take the row FOR UPDATE, so it stabilises everything a reader rechecks.
+        """
         return await self.session.scalar(
             sa.select(Skills)
             .join(Spaces, Spaces.id == Skills.space_id)
@@ -1877,7 +1888,7 @@ class SkillRepoImpl:
                 Skills.id == skill_id,
                 *self._organization_scope(tenant_id),
             )
-            .with_for_update(of=Skills)
+            .with_for_update(of=Skills, read=shared)
         )
 
     _POLICY_ROW_VERSION = sa.cast(

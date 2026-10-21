@@ -182,6 +182,12 @@ rows and the runtime-policy row, so in practice:
 - Skill rows are locked `FOR UPDATE` only after the token. Pin confirmation
   took its Skill lock first, which deadlocked with an Assistant save that holds
   the token and then resolves Skills `FOR SHARE`; it now takes the token first.
+- Writers that only read a Skill hold it `FOR SHARE`. The Assistant fleet apply
+  took it `FOR UPDATE` after locking Assistant rows, so a governance save
+  (Skill `FOR SHARE`, waiting for the token), an Assistant save (token, waiting
+  for its row) and the apply (that row, waiting for the Skill) formed a cycle of
+  three, although every pair was compatible. Publication, withdrawal and
+  blocking still exclude the apply, since they take the Skill `FOR UPDATE`.
 
 A governance save keeps its existing policy row lock
 (`governance_policy_router.py:199`). It then works like pin confirmation:
@@ -215,6 +221,8 @@ Real-transaction tests cover:
 - a tenant without a runtime-policy row (no deadlock);
 - governance save in flight against pin confirmation (refused at once);
 - pin confirmation against an Assistant binding save (no deadlock);
+- governance save, Assistant fleet apply and Assistant save together (no
+  deadlock);
 - runtime-policy update against pin confirmation (existing).
 
 ### 7. Revisions
