@@ -69,13 +69,10 @@
     const assistant = { id: assistantId };
     return new PersonalChatSkills(
       {
-        async readConfiguration() {
-          // After queued model and Skill saves, so it describes the next turn.
-          await awaitDefaultAssistantUpdates();
-          return eneo.skills.getAssistantConfiguration({ spaceId, assistantId });
-        },
+        readConfiguration: () => eneo.skills.getAssistantConfiguration({ spaceId, assistantId }),
         readLibrary: () => listPersonalSpaceSkills(eneo, spaceId),
-        save: (bindings) => updateDefaultAssistantSkills(assistant, bindings)
+        save: (bindings) => updateDefaultAssistantSkills(assistant, bindings),
+        settled: awaitDefaultAssistantUpdates
       },
       // Saving the personal chat's own Skills takes both.
       user.hasPermission({ allOf: ["personal_chat", "personal_skills"] })
@@ -134,8 +131,20 @@
         sheetOpen = true;
         return;
       }
+    } else {
+      closed();
     }
     popoverOpen = open;
+  }
+
+  function setSheetOpen(open: boolean) {
+    if (!open) closed();
+    sheetOpen = open;
+  }
+
+  // A refusal explains the change just made; it is old news next time.
+  function closed() {
+    skills?.saveErrors.clear();
   }
 
   function canChange(owner: PersonalChatSkills, row: OwnSkillRow) {
@@ -189,7 +198,7 @@
 
 {#snippet ownSkill(owner: PersonalChatSkills, row: OwnSkillRow, sheet: boolean)}
   {@const id = `${sheet ? "sheet" : "popover"}-skill-${row.id}`}
-  {@const saveError = owner.saveError?.skillId === row.id ? owner.saveError.message : null}
+  {@const saveError = owner.saveErrors.get(row.id)}
   <li class={sheet ? "px-4 py-3" : "px-3 py-2"}>
     <div class={sheet ? "flex flex-col gap-2" : "flex items-center gap-3"}>
       <div class="min-w-0 flex-1">
@@ -446,7 +455,7 @@
     </Popover.Content>
   </Popover.Root>
 
-  <Sheet.Root bind:open={sheetOpen}>
+  <Sheet.Root bind:open={() => sheetOpen, setSheetOpen}>
     <Sheet.Content
       side="bottom"
       showCloseButton={false}

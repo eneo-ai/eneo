@@ -1,6 +1,7 @@
 import "../../../../../app.css";
 import {
   EneoError,
+  type AssistantSkillBindingInput,
   type AssistantSkillBindingSummary,
   type AssistantSkillConfiguration,
   type SkillSparse
@@ -102,6 +103,7 @@ const MINUTES = binding("minutes", "Mötesanteckningar", {
   position: 1,
   activation_mode: "on_demand"
 });
+const TRANSLATE = binding("translate", "Engelsk översättning");
 const LIBRARY = [
   librarySkill("answers", "Mina svarspreferenser"),
   librarySkill("minutes", "Mötesanteckningar"),
@@ -118,6 +120,53 @@ function configuration(
     personal_layer: { status: "applied", reason: null, detail: null },
     ...overrides
   };
+}
+
+/**
+ * The personal chat as the backend holds it, behind the default-assistant
+ * queue: each save builds its list when its turn comes and replaces the saved
+ * Skills unless `refuse` turns it down. `hold` keeps the save in flight.
+ */
+function personalChatServer(overrides: Partial<AssistantSkillConfiguration> = {}) {
+  let saved = configuration(overrides).bindings;
+  let queue = Promise.resolve();
+  const server = {
+    sent: [] as AssistantSkillBindingInput[][],
+    hold: null as Promise<void> | null,
+    refuse: (_bindings: AssistantSkillBindingInput[]): unknown => null
+  };
+  mocks.getAssistantConfiguration.mockImplementation(async () =>
+    configuration({ ...overrides, bindings: saved })
+  );
+  mocks.updateDefaultAssistantSkills.mockImplementation(
+    (_assistant: unknown, build: () => Promise<AssistantSkillBindingInput[]>) => {
+      const run = async () => {
+        const bindings = await build();
+        server.sent.push(bindings);
+        if (server.hold) await server.hold;
+        const refused = server.refuse(bindings);
+        if (refused) throw refused;
+        saved = bindings.map((input, position) => ({
+          ...(saved.find((b) => b.skill_id === input.skill_id) ??
+            [ANSWERS, MINUTES, TRANSLATE].find((b) => b.skill_id === input.skill_id)!),
+          skill_revision_id: input.skill_revision_id,
+          activation_mode: input.activation_mode ?? "always",
+          position
+        }));
+      };
+      const result = queue.then(run, run);
+      queue = result.catch(() => {});
+      return result;
+    }
+  );
+  return server;
+}
+
+function refusal(reason: string, detail: string | null = null) {
+  return new EneoError("Refused", "RESPONSE", 400, 9080, {
+    eneo_error_code: 9080,
+    details: { reason, detail }
+  });
 }
 
 function libraryPage(items: SkillSparse[]) {
@@ -137,6 +186,10 @@ function modeGroup(name: string) {
   return page.getByRole("radiogroup", { name: m.personal_chat_skills_mode_group_label({ name }) });
 }
 
+function mode(name: string, label: string) {
+  return modeGroup(name).getByRole("radio", { name: label });
+}
+
 function ownSkillRow(name: string) {
   return page.getByRole("listitem").filter({ hasText: name });
 }
@@ -146,12 +199,13 @@ async function openControl(count: number) {
 }
 
 describe("ChatSkills", () => {
+  let server: ReturnType<typeof personalChatServer>;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.permissions = new Set(["personal_chat", "personal_skills"]);
-    mocks.getAssistantConfiguration.mockResolvedValue(configuration());
     mocks.list.mockResolvedValue(libraryPage(LIBRARY));
-    mocks.updateDefaultAssistantSkills.mockResolvedValue(undefined);
+    server = personalChatServer();
   });
 
   it("is named Skills until it knows how many run", async () => {
@@ -178,11 +232,7 @@ describe("ChatSkills", () => {
     // The organisation's Skills are not a choice.
     expect(modeGroup("Klarspråk").elements()).toHaveLength(0);
     await expect
-      .element(
-        modeGroup("Engelsk översättning").getByRole("radio", {
-          name: m.personal_chat_skills_mode_off()
-        })
-      )
+      .element(mode("Engelsk översättning", m.personal_chat_skills_mode_off()))
       .toBeChecked();
     await expect
       .element(page.getByRole("link", { name: m.personal_chat_skills_manage() }))
@@ -191,30 +241,29 @@ describe("ChatSkills", () => {
   });
 
   it("shows a choice at once and saves the full ordered list of the person's own Skills", async () => {
-    let finishSave!: () => void;
-    mocks.updateDefaultAssistantSkills.mockReturnValue(
-      new Promise<void>((resolve) => (finishSave = resolve))
-    );
+    let release!: () => void;
+    server.hold = new Promise((resolve) => (release = resolve));
     renderControl();
     await openControl(3);
 
-    const always = modeGroup("Engelsk översättning").getByRole("radio", {
-      name: m.skills_activation_mode_always()
-    });
+    const always = mode("Engelsk översättning", m.skills_activation_mode_always());
     await always.click();
 
     await expect.element(always).toBeChecked();
-    expect(mocks.updateDefaultAssistantSkills).toHaveBeenCalledWith({ id: "default-assistant" }, [
-      { skill_id: "answers", skill_revision_id: "answers-r1", activation_mode: "always" },
-      { skill_id: "minutes", skill_revision_id: "minutes-r1", activation_mode: "on_demand" },
-      { skill_id: "translate", skill_revision_id: "translate-r1", activation_mode: "always" }
-    ]);
-    mocks.getAssistantConfiguration.mockResolvedValue(
-      configuration({
-        bindings: [ANSWERS, MINUTES, binding("translate", "Engelsk översättning", { position: 2 })]
-      })
+    await vi.waitFor(() =>
+      expect(server.sent).toEqual([
+        [
+          { skill_id: "answers", skill_revision_id: "answers-r1", activation_mode: "always" },
+          { skill_id: "minutes", skill_revision_id: "minutes-r1", activation_mode: "on_demand" },
+          { skill_id: "translate", skill_revision_id: "translate-r1", activation_mode: "always" }
+        ]
+      ])
     );
-    finishSave();
+    expect(mocks.updateDefaultAssistantSkills).toHaveBeenCalledWith(
+      { id: "default-assistant" },
+      expect.any(Function)
+    );
+    release();
     await expect
       .element(page.getByText(m.personal_chat_skills_counts({ always: 3, on_demand: 1 })))
       .toBeVisible();
@@ -225,60 +274,89 @@ describe("ChatSkills", () => {
     renderControl();
     await openControl(3);
 
-    const onDemand = modeGroup("Mötesanteckningar").getByRole("radio", {
-      name: m.skills_activation_mode_on_demand()
-    });
-    await onDemand.click();
+    await mode("Mötesanteckningar", m.skills_activation_mode_on_demand()).click();
     expect(mocks.updateDefaultAssistantSkills).not.toHaveBeenCalled();
     await userEvent.keyboard("{ArrowRight}");
 
     await expect
-      .element(
-        modeGroup("Mötesanteckningar").getByRole("radio", {
-          name: m.skills_activation_mode_always()
-        })
-      )
+      .element(mode("Mötesanteckningar", m.skills_activation_mode_always()))
       .toHaveFocus();
-    expect(mocks.updateDefaultAssistantSkills).toHaveBeenCalledWith({ id: "default-assistant" }, [
-      { skill_id: "answers", skill_revision_id: "answers-r1", activation_mode: "always" },
-      { skill_id: "minutes", skill_revision_id: "minutes-r1", activation_mode: "always" }
-    ]);
+    await vi.waitFor(() =>
+      expect(server.sent).toEqual([
+        [
+          { skill_id: "answers", skill_revision_id: "answers-r1", activation_mode: "always" },
+          { skill_id: "minutes", skill_revision_id: "minutes-r1", activation_mode: "always" }
+        ]
+      ])
+    );
   });
 
-  it("rolls a refused change back and says why next to the Skill", async () => {
-    mocks.updateDefaultAssistantSkills.mockRejectedValue(
-      new EneoError("Refused", "RESPONSE", 400, 9080, {
-        eneo_error_code: 9080,
-        details: { reason: "on_demand_unavailable", detail: "selective_activation_disabled" }
-      })
-    );
+  it("rolls a refused change back, says why next to the Skill, and forgets it on close", async () => {
+    server.refuse = (bindings) =>
+      bindings.some((b) => b.skill_id === "translate") &&
+      refusal("on_demand_unavailable", "selective_activation_disabled");
     renderControl();
     await openControl(3);
 
-    await modeGroup("Engelsk översättning")
-      .getByRole("radio", { name: m.skills_activation_mode_on_demand() })
-      .click();
+    await mode("Engelsk översättning", m.skills_activation_mode_on_demand()).click();
 
     await expect
-      .element(
-        page.getByRole("alert").getByText(m.personal_chat_skills_reason_on_demand_disabled())
-      )
-      .toBeVisible();
+      .element(ownSkillRow("Engelsk översättning").getByRole("alert"))
+      .toHaveTextContent(m.personal_chat_skills_reason_on_demand_disabled());
     await expect
-      .element(
-        modeGroup("Engelsk översättning").getByRole("radio", {
-          name: m.personal_chat_skills_mode_off()
-        })
-      )
+      .element(mode("Engelsk översättning", m.personal_chat_skills_mode_off()))
       .toBeChecked();
+
+    await userEvent.keyboard("{Escape}");
+    await openControl(3);
+    await expect.element(modeGroup("Engelsk översättning")).toBeVisible();
+    expect(page.getByRole("alert").elements()).toHaveLength(0);
+  });
+
+  it("saves each change on its own, so a refused one neither travels with a later one nor blames it", async () => {
+    let release!: () => void;
+    server.hold = new Promise((resolve) => (release = resolve));
+    server.refuse = (bindings) =>
+      bindings.some((b) => b.skill_id === "translate") && refusal("attachment_limit_exceeded");
+    renderControl();
+    await openControl(3);
+
+    // A: one Skill too many; B: switch another off while A is still saving.
+    await mode("Engelsk översättning", m.skills_activation_mode_always()).click();
+    await mode("Mötesanteckningar", m.personal_chat_skills_mode_off()).click();
+    await expect
+      .element(mode("Engelsk översättning", m.skills_activation_mode_always()))
+      .toBeChecked();
+    await expect
+      .element(mode("Mötesanteckningar", m.personal_chat_skills_mode_off()))
+      .toBeChecked();
+    server.hold = null;
+    release();
+
+    await expect
+      .element(ownSkillRow("Engelsk översättning").getByRole("alert"))
+      .toHaveTextContent(m.personal_chat_skills_reason_attachment_limit_exceeded());
+    await expect
+      .element(mode("Engelsk översättning", m.personal_chat_skills_mode_off()))
+      .toBeChecked();
+    await expect
+      .element(mode("Mötesanteckningar", m.personal_chat_skills_mode_off()))
+      .toBeChecked();
+    expect(ownSkillRow("Mötesanteckningar").getByRole("alert").elements()).toHaveLength(0);
+    expect(server.sent).toEqual([
+      [
+        { skill_id: "answers", skill_revision_id: "answers-r1", activation_mode: "always" },
+        { skill_id: "minutes", skill_revision_id: "minutes-r1", activation_mode: "on_demand" },
+        { skill_id: "translate", skill_revision_id: "translate-r1", activation_mode: "always" }
+      ],
+      [{ skill_id: "answers", skill_revision_id: "answers-r1", activation_mode: "always" }]
+    ]);
   });
 
   it("explains paused own Skills and counts only the organisation's", async () => {
-    mocks.getAssistantConfiguration.mockResolvedValue(
-      configuration({
-        personal_layer: { status: "suspended", reason: "model_context_exceeded", detail: null }
-      })
-    );
+    server = personalChatServer({
+      personal_layer: { status: "suspended", reason: "model_context_exceeded", detail: null }
+    });
     renderControl();
     await openControl(1);
 
@@ -287,21 +365,19 @@ describe("ChatSkills", () => {
       .element(page.getByText(m.personal_chat_skills_reason_model_context_exceeded()))
       .toBeVisible();
     // Switching off stays possible while paused: it is the way out.
-    await modeGroup("Mötesanteckningar")
-      .getByRole("radio", { name: m.personal_chat_skills_mode_off() })
-      .click();
-    expect(mocks.updateDefaultAssistantSkills).toHaveBeenCalledWith({ id: "default-assistant" }, [
-      { skill_id: "answers", skill_revision_id: "answers-r1", activation_mode: "always" }
-    ]);
+    await mode("Mötesanteckningar", m.personal_chat_skills_mode_off()).click();
+    await vi.waitFor(() =>
+      expect(server.sent).toEqual([
+        [{ skill_id: "answers", skill_revision_id: "answers-r1", activation_mode: "always" }]
+      ])
+    );
   });
 
   it("offers to create a first Skill when the person has none", async () => {
-    mocks.getAssistantConfiguration.mockResolvedValue(
-      configuration({
-        bindings: [],
-        personal_layer: { status: "empty", reason: null, detail: null }
-      })
-    );
+    server = personalChatServer({
+      bindings: [],
+      personal_layer: { status: "empty", reason: null, detail: null }
+    });
     mocks.list.mockResolvedValue(libraryPage([]));
     renderControl();
     await openControl(1);
@@ -314,12 +390,10 @@ describe("ChatSkills", () => {
 
   it("shows retained own Skills read-only, with no library, when the role no longer allows them", async () => {
     mocks.permissions = new Set(["personal_chat"]);
-    mocks.getAssistantConfiguration.mockResolvedValue(
-      configuration({
-        bindings: [ANSWERS],
-        personal_layer: { status: "suspended", reason: "permission_missing", detail: null }
-      })
-    );
+    server = personalChatServer({
+      bindings: [ANSWERS],
+      personal_layer: { status: "suspended", reason: "permission_missing", detail: null }
+    });
     renderControl();
     await openControl(1);
 
@@ -343,9 +417,7 @@ describe("ChatSkills", () => {
 
   it("stays out of the toolbar when there is nothing to show or choose", async () => {
     mocks.permissions = new Set();
-    mocks.getAssistantConfiguration.mockResolvedValue(
-      configuration({ bindings: [], organisation_bindings: [], personal_layer: null })
-    );
+    server = personalChatServer({ bindings: [], organisation_bindings: [], personal_layer: null });
     renderControl();
 
     await vi.waitFor(() => expect(mocks.getAssistantConfiguration).toHaveBeenCalled());
@@ -355,30 +427,33 @@ describe("ChatSkills", () => {
   });
 
   it("moves a Skill to its latest version when the person chooses it", async () => {
-    mocks.getAssistantConfiguration.mockResolvedValue(
-      configuration({
-        bindings: [
-          { ...ANSWERS, attachable_revision_id: "answers-r2", attachable_revision_number: 2 },
-          MINUTES
-        ]
-      })
-    );
+    server = personalChatServer({
+      bindings: [
+        { ...ANSWERS, attachable_revision_id: "answers-r2", attachable_revision_number: 2 },
+        MINUTES
+      ]
+    });
     renderControl();
     await openControl(3);
 
     await expect.element(page.getByText(m.personal_chat_skills_update_available())).toBeVisible();
     await page.getByRole("button", { name: m.personal_chat_skills_use_latest() }).click();
 
-    expect(mocks.updateDefaultAssistantSkills).toHaveBeenCalledWith({ id: "default-assistant" }, [
-      { skill_id: "answers", skill_revision_id: "answers-r2", activation_mode: "always" },
-      { skill_id: "minutes", skill_revision_id: "minutes-r1", activation_mode: "on_demand" }
-    ]);
+    await vi.waitFor(() =>
+      expect(server.sent).toEqual([
+        [
+          { skill_id: "answers", skill_revision_id: "answers-r2", activation_mode: "always" },
+          { skill_id: "minutes", skill_revision_id: "minutes-r1", activation_mode: "on_demand" }
+        ]
+      ])
+    );
+    await expect
+      .element(page.getByText(m.personal_chat_skills_update_available()))
+      .not.toBeInTheDocument();
   });
 
   it("keeps a Skill blocked by an administrator out of reach", async () => {
-    mocks.getAssistantConfiguration.mockResolvedValue(
-      configuration({ bindings: [ANSWERS, { ...MINUTES, execution_blocked: true }] })
-    );
+    server = personalChatServer({ bindings: [ANSWERS, { ...MINUTES, execution_blocked: true }] });
     renderControl();
     await openControl(2);
 
@@ -395,7 +470,7 @@ describe("ChatSkills", () => {
         Array.from({ length: 8 }, (_, index) => librarySkill(`skill-${index}`, `Skill ${index}`))
       )
     );
-    mocks.getAssistantConfiguration.mockResolvedValue(configuration({ bindings: [] }));
+    server = personalChatServer({ bindings: [] });
     renderControl();
     await openControl(1);
 

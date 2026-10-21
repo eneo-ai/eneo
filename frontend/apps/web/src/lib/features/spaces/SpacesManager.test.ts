@@ -120,13 +120,16 @@ describe("SpacesManager.updateDefaultAssistantSkills", () => {
       calls.push({ args, done });
       return done.promise;
     });
+    const buildBindings = vi.fn(async () => skillBindings);
 
     void m.updateDefaultAssistant({ completionModel: { id: "model-b" } });
-    const saved = m.updateDefaultAssistantSkills({ id: "assistant-1" }, skillBindings);
+    const saved = m.updateDefaultAssistantSkills({ id: "assistant-1" }, buildBindings);
     let settled = false;
     void m.awaitDefaultAssistantUpdates().then(() => (settled = true));
     await Promise.resolve();
     expect(calls).toHaveLength(1);
+    // The list is built when its turn comes, from what is saved by then.
+    expect(buildBindings).not.toHaveBeenCalled();
 
     calls[0].done.resolve({ id: "assistant-1", completion_model: modelB });
     await vi.waitFor(() => expect(calls).toHaveLength(2));
@@ -146,7 +149,7 @@ describe("SpacesManager.updateDefaultAssistantSkills", () => {
     const m = manager(() => Promise.reject(new Error("refused")));
 
     await expect(
-      m.updateDefaultAssistantSkills({ id: "assistant-1" }, skillBindings)
+      m.updateDefaultAssistantSkills({ id: "assistant-1" }, async () => skillBindings)
     ).rejects.toThrow("refused");
     await m.awaitDefaultAssistantUpdates();
   });

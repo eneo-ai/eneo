@@ -11,7 +11,9 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 
 const invalidate = vi.hoisted(() => vi.fn(async () => {}));
-const updateDefaultAssistantSkills = vi.hoisted(() => vi.fn(async () => {}));
+const updateDefaultAssistantSkills = vi.hoisted(() =>
+  vi.fn(async (_assistant: { id: string }, _bindings: () => Promise<unknown>) => {})
+);
 
 vi.mock("$lib/features/spaces/SpacesManager", () => ({
   getSpacesManager: () => ({ updateDefaultAssistantSkills })
@@ -155,7 +157,9 @@ describe("Skill detail page", () => {
     expect(updateDefaultAssistantSkills).not.toHaveBeenCalled();
     await page.getByRole("button", { name: m.personal_chat_skills_use_latest() }).click();
 
-    expect(updateDefaultAssistantSkills).toHaveBeenCalledWith({ id: "default-assistant" }, [
+    const [assistant, bindings] = updateDefaultAssistantSkills.mock.calls[0];
+    expect(assistant).toEqual({ id: "default-assistant" });
+    await expect(bindings()).resolves.toEqual([
       { skill_id: "skill-1", skill_revision_id: "revision-2", activation_mode: "on_demand" }
     ]);
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("space:skills"));

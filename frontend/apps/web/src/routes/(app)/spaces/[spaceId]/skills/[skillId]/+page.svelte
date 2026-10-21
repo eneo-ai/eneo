@@ -60,16 +60,13 @@
   async function usePersonalChatLatestVersion() {
     const configuration = data.personalChatSkills;
     const assistant = data.currentSpace.default_assistant;
-    if (!spaces || !assistant || !configuration || !personalChatOnOlderVersion) return;
+    const binding = personalChatOnOlderVersion;
+    if (!spaces || !assistant || !configuration || !binding) return;
     personalChatSaving = true;
     personalChatError = null;
     try {
-      await spaces.updateDefaultAssistantSkills(
-        { id: assistant.id },
-        withLatestPersonalSkillRevision(
-          personalSkillBindings(configuration.bindings),
-          personalChatOnOlderVersion
-        )
+      await spaces.updateDefaultAssistantSkills({ id: assistant.id }, async () =>
+        withLatestPersonalSkillRevision(personalSkillBindings(configuration.bindings), binding)
       );
       await invalidate("space:skills");
     } catch (error) {
