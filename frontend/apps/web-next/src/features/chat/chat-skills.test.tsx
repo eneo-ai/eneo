@@ -1,0 +1,431 @@
+// @vitest-environment jsdom
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Schema } from "@/lib/api/models";
+import { expectNoAxeViolations } from "@/test/axe";
+import { renderInApp, testAppContext } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
+import { ChatSkills } from "./chat-skills";
+import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
+
+type Configuration = Schema<"AssistantSkillConfigurationPublic">;
+type Summary = Schema<"AssistantSkillBindingSummary">;
+
+const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn() }));
+vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+vi.mock("@/features/spaces/use-space", () => ({
+  useSpace: () => ({
+    space: {
+      id: "personal-space",
+      personal: true,
+      default_assistant: { id: "assistant-1", completion_model: { id: "model-1" } }
+    },
+    routeId: "personal",
+    can: () => true
+  })
+}));
+
+const ok = (data: unknown) => Promise.resolve({ data, response: new Response("{}") });
+const refused = (status: number, body: unknown) =>
+  Promise.resolve({ data: undefined, error: body, response: new Response(null, { status }) });
+
+function summary(
+  overrides: Partial<Summary> & Pick<Summary, "skill_id" | "display_name">
+): Summary {
+  return {
+    skill_revision_id: `${overrides.skill_id}-r2`,
+    attachable_revision_id: `${overrides.skill_id}-r2`,
+    slug: overrides.skill_id,
+    revision_number: 2,
+    attachable_revision_number: 2,
+    description: "",
+    content_digest: "digest",
+    position: 0,
+    is_active: true,
+    source: "space",
+    execution_blocked: false,
+    activation_mode: "always",
+    ...overrides
+  };
+}
+
+function librarySkill(id: string, name: string, description: string) {
+  return {
+    id,
+    space_id: "personal-space",
+    slug: id,
+    is_active: true,
+    current_revision_id: `${id}-r2`,
+    current_revision_number: 2,
+    display_name: name,
+    description,
+    content_digest: "digest",
+    created_by_user_id: "user-1",
+    created_at: "2026-10-01T08:00:00Z",
+    updated_at: "2026-10-01T08:00:00Z"
+  };
+}
+
+const klarsprak = summary({
+  skill_id: "klarsprak",
+  display_name: "Klarspråk",
+  description: "Skriver enkelt och tydligt",
+  source: "organization"
+});
+const answers = summary({
+  skill_id: "answers",
+  display_name: "Mina svarspreferenser",
+  description: "Korta svar, punktlistor, du-tilltal"
+});
+const library = [
+  librarySkill("answers", "Mina svarspreferenser", "Korta svar, punktlistor, du-tilltal"),
+  librarySkill("notes", "Mötesanteckningar", "Strukturerar anteckningar till protokoll")
+];
+
+let configuration: Configuration;
+let skills: ReturnType<typeof librarySkill>[];
+/** Lets a save a test held back go, so the shared queue never stays blocked. */
+let releaseSave: (() => void) | null = null;
+
+beforeEach(() => {
+  configuration = {
+    bindings: [answers],
+    organisation_bindings: [klarsprak],
+    personal_layer: { status: "applied", reason: null, detail: null },
+    runtime: null
+  };
+  skills = library;
+  api.GET.mockImplementation((path: string) => {
+    if (path === "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/")
+      return ok(configuration);
+    if (path === "/api/v1/spaces/{space_id}/skills/")
+      return ok({ items: skills, total_count: skills.length, next_cursor: null });
+    throw new Error(`Unexpected GET ${path}`);
+  });
+  api.POST.mockImplementation(() => ok({}));
+});
+
+afterEach(async () => {
+  cleanup();
+  releaseSave?.();
+  releaseSave = null;
+  await awaitPartnerUpdates();
+  vi.clearAllMocks();
+  setViewport("desktop");
+});
+
+const OWN_AND_CHAT = ["personal_chat", "personal_skills"] as const;
+
+function renderSkills(permissions: readonly string[] = OWN_AND_CHAT) {
+  return renderInApp(<ChatSkills />, {
+    appContext: testAppContext({ permissions: [...permissions] as never })
+  });
+}
+
+/** Opens the popover (or sheet) and waits until the person's skills have loaded into it. */
+async function openSkills(name = "Skills i din personliga chatt: 2") {
+  fireEvent.click(await screen.findByRole("button", { name }));
+  const dialog = await screen.findByRole("dialog", { name: "Skills" });
+  await waitFor(() => expect(dialog.querySelector('[aria-busy="true"]')).toBeNull());
+  return dialog;
+}
+
+/** The row of an own skill: its mode group and what is said about it. */
+function rowOf(group: HTMLElement) {
+  return group.closest("li")!;
+}
+
+describe("ChatSkills", () => {
+  it("names the control with the count of skills that run and lists both layers", async () => {
+    renderSkills();
+    const popover = await openSkills();
+
+    expect(within(popover).getByText("Gäller alla dina personliga chattar")).toBeTruthy();
+    expect(within(popover).getByText("2 alltid · 0 vid behov")).toBeTruthy();
+
+    const organisation = within(popover).getByRole("list", { name: "Från organisationen" });
+    expect(within(organisation).getByText("Klarspråk")).toBeTruthy();
+    expect(within(organisation).getByText("Vald av administratör")).toBeTruthy();
+    expect(within(organisation).getByText("Alltid")).toBeTruthy();
+    expect(within(organisation).queryByRole("radiogroup")).toBeNull();
+
+    const own = within(popover).getByRole("list", { name: "Dina skills" });
+    const answersMode = within(own).getByRole("radiogroup", {
+      name: "Läge för Mina svarspreferenser"
+    });
+    expect(within(answersMode).getByRole("radio", { name: "Alltid", checked: true })).toBeTruthy();
+    const notesMode = within(own).getByRole("radiogroup", { name: "Läge för Mötesanteckningar" });
+    expect(within(notesMode).getByRole("radio", { name: "Av", checked: true })).toBeTruthy();
+    expect(
+      within(notesMode)
+        .getAllByRole("radio")
+        .map((radio) => radio.textContent)
+    ).toEqual(["Av", "Vid behov", "Alltid"]);
+
+    expect(within(popover).getByRole("link", { name: "Hantera skills" }).getAttribute("href")).toBe(
+      "/spaces/personal/skills"
+    );
+    expect(within(popover).getByRole("link", { name: "Skapa skill" }).getAttribute("href")).toBe(
+      "/spaces/personal/skills/new"
+    );
+    await expectNoAxeViolations(popover);
+  });
+
+  it("saves a choice at once and makes a question sent right after wait for it", async () => {
+    api.POST.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          releaseSave = () => resolve({ data: {}, response: new Response("{}") });
+        })
+    );
+    renderSkills();
+    const popover = await openSkills();
+    const notesMode = within(popover).getByRole("radiogroup", {
+      name: "Läge för Mötesanteckningar"
+    });
+
+    fireEvent.click(within(notesMode).getByRole("radio", { name: "Vid behov" }));
+
+    // Shown at once, while the save is still on its way.
+    expect(
+      await within(notesMode).findByRole("radio", { name: "Vid behov", checked: true })
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Skills i din personliga chatt: 3" })).toBeTruthy();
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    expect(hasPendingPartnerUpdates()).toBe(true);
+    // The person's whole ordered list; the organisation's skills are never sent.
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
+      params: { path: { id: "assistant-1" } },
+      body: {
+        skill_bindings: [
+          { skill_id: "answers", skill_revision_id: "answers-r2", activation_mode: "always" },
+          { skill_id: "notes", skill_revision_id: "notes-r2", activation_mode: "on_demand" }
+        ]
+      }
+    });
+
+    configuration = {
+      ...configuration,
+      bindings: [
+        answers,
+        summary({
+          skill_id: "notes",
+          display_name: "Mötesanteckningar",
+          activation_mode: "on_demand",
+          position: 1
+        })
+      ]
+    };
+    await act(async () => {
+      releaseSave?.();
+      await awaitPartnerUpdates();
+    });
+    expect(hasPendingPartnerUpdates()).toBe(false);
+    expect(within(notesMode).getByRole("radio", { name: "Vid behov", checked: true })).toBeTruthy();
+    expect(within(popover).getByText("2 alltid · 1 vid behov")).toBeTruthy();
+  });
+
+  it("leaves a skill out of the list when it is turned off", async () => {
+    renderSkills();
+    const popover = await openSkills();
+    const answersMode = within(popover).getByRole("radiogroup", {
+      name: "Läge för Mina svarspreferenser"
+    });
+    fireEvent.click(within(answersMode).getByRole("radio", { name: "Av" }));
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
+        params: { path: { id: "assistant-1" } },
+        body: { skill_bindings: [] }
+      })
+    );
+  });
+
+  it("rolls a refused choice back and says why next to it", async () => {
+    api.POST.mockImplementation(() =>
+      refused(400, {
+        message: "On-demand Skills are unavailable",
+        eneo_error_code: 9080,
+        details: { reason: "on_demand_unavailable", detail: "selective_activation_disabled" }
+      })
+    );
+    renderSkills();
+    const popover = await openSkills();
+    const notesMode = within(popover).getByRole("radiogroup", {
+      name: "Läge för Mötesanteckningar"
+    });
+
+    fireEvent.click(within(notesMode).getByRole("radio", { name: "Vid behov" }));
+
+    const reason = "Din organisation har stängt av skills vid behov. Välj Alltid.";
+    expect(await within(rowOf(notesMode)).findByText(reason)).toBeTruthy();
+    expect(within(notesMode).getByRole("radio", { name: "Av", checked: true })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Skills i din personliga chatt: 2" })).toBeTruthy();
+  });
+
+  it("says the change was not saved when the save fails for another reason", async () => {
+    api.POST.mockImplementation(() => refused(500, { message: "Boom" }));
+    renderSkills();
+    const popover = await openSkills();
+    const answersMode = within(popover).getByRole("radiogroup", {
+      name: "Läge för Mina svarspreferenser"
+    });
+
+    fireEvent.click(within(answersMode).getByRole("radio", { name: "Vid behov" }));
+
+    expect(
+      await within(rowOf(answersMode)).findByText("Ändringen sparades inte. Försök igen.")
+    ).toBeTruthy();
+    expect(within(answersMode).getByRole("radio", { name: "Alltid", checked: true })).toBeTruthy();
+  });
+
+  it("explains a paused layer and counts only the organisation's skills", async () => {
+    configuration = {
+      ...configuration,
+      personal_layer: { status: "suspended", reason: "attachment_limit_exceeded", detail: null }
+    };
+    renderSkills();
+    const popover = await openSkills("Skills i din personliga chatt: 1");
+
+    expect(within(popover).getByText("Dina skills är pausade")).toBeTruthy();
+    expect(
+      within(popover).getByText(
+        "Tillsammans med organisationens skills blir det fler än tillåtet. Stäng av några av dina skills."
+      )
+    ).toBeTruthy();
+    expect(within(popover).getByText("1 alltid · 0 vid behov")).toBeTruthy();
+    // Turning a skill off stays possible: it is how the person recovers.
+    expect(
+      within(popover).getByRole("radiogroup", { name: "Läge för Mina svarspreferenser" })
+    ).toBeTruthy();
+    await expectNoAxeViolations(popover);
+  });
+
+  it("offers to create a skill when the person has none", async () => {
+    configuration = { ...configuration, bindings: [] };
+    skills = [];
+    renderSkills();
+    const popover = await openSkills("Skills i din personliga chatt: 1");
+
+    expect(
+      within(popover).getByText(
+        "Du har inga egna skills än. Skapa en skill för att styra hur din personliga chatt svarar."
+      )
+    ).toBeTruthy();
+    expect(within(popover).getByRole("link", { name: "Skapa skill" })).toBeTruthy();
+    expect(within(popover).queryByRole("radiogroup")).toBeNull();
+  });
+
+  it("shows choices read-only and paused when the role no longer allows own skills", async () => {
+    configuration = {
+      ...configuration,
+      personal_layer: { status: "suspended", reason: "permission_missing", detail: null }
+    };
+    renderSkills(["personal_chat"]);
+    const popover = await openSkills("Skills i din personliga chatt: 1");
+
+    expect(
+      within(popover).getByText(
+        "Din roll tillåter inte längre egna skills. Dina val finns kvar om behörigheten kommer tillbaka."
+      )
+    ).toBeTruthy();
+    const own = within(popover).getByRole("list", { name: "Dina skills" });
+    expect(within(own).getByText("Mina svarspreferenser")).toBeTruthy();
+    expect(within(own).getByText("Alltid")).toBeTruthy();
+    expect(within(popover).queryByRole("radiogroup")).toBeNull();
+    expect(within(popover).queryByRole("link")).toBeNull();
+    expect(api.GET).not.toHaveBeenCalledWith(
+      "/api/v1/spaces/{space_id}/skills/",
+      expect.anything()
+    );
+  });
+
+  it("is not shown without the permission when no skill is in the chat", async () => {
+    configuration = { ...configuration, bindings: [], organisation_bindings: [] };
+    renderSkills(["personal_chat"]);
+    await waitFor(() => expect(api.GET).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.queryByRole("button", { name: /^Skills/ })).toBeNull();
+  });
+
+  it("moves a skill to its latest version on request", async () => {
+    configuration = {
+      ...configuration,
+      bindings: [
+        {
+          ...answers,
+          skill_revision_id: "answers-r1",
+          revision_number: 1,
+          attachable_revision_id: "answers-r3",
+          attachable_revision_number: 3
+        }
+      ]
+    };
+    renderSkills();
+    const popover = await openSkills();
+    const row = rowOf(
+      within(popover).getByRole("radiogroup", { name: "Läge för Mina svarspreferenser" })
+    );
+
+    expect(within(row).getByText("Ny version finns")).toBeTruthy();
+    fireEvent.click(within(row).getByRole("button", { name: "Använd senaste versionen" }));
+
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
+        params: { path: { id: "assistant-1" } },
+        body: {
+          skill_bindings: [
+            { skill_id: "answers", skill_revision_id: "answers-r3", activation_mode: "always" }
+          ]
+        }
+      })
+    );
+  });
+
+  it("keeps a skill an administrator blocked as it is", async () => {
+    configuration = { ...configuration, bindings: [{ ...answers, execution_blocked: true }] };
+    renderSkills();
+    // A blocked skill does not run, so it is not counted.
+    const popover = await openSkills("Skills i din personliga chatt: 1");
+    const answersMode = within(popover).getByRole("radiogroup", {
+      name: "Läge för Mina svarspreferenser"
+    });
+
+    expect(answersMode.getAttribute("aria-disabled")).toBe("true");
+    expect(within(rowOf(answersMode)).getByText("Spärrad av administratör")).toBeTruthy();
+  });
+
+  it("opens the same choices in a bottom sheet on a phone, with search only beyond seven skills", async () => {
+    setViewport("phone");
+    renderSkills();
+    const sheet = await openSkills();
+    expect(sheet.tagName).toBe("DIALOG");
+    expect(
+      within(sheet).getByRole("radiogroup", { name: "Läge för Mötesanteckningar" })
+    ).toBeTruthy();
+    expect(within(sheet).queryByRole("textbox")).toBeNull();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Stäng" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Skills" })).toBeNull());
+  });
+
+  it("filters the person's skills by name when there are more than seven", async () => {
+    skills = [
+      ...library,
+      ...Array.from({ length: 6 }, (_, index) =>
+        librarySkill(`extra-${index}`, `Mall ${index + 1}`, "Färdig struktur")
+      )
+    ];
+    renderSkills();
+    const popover = await openSkills();
+    const search = within(popover).getByRole("textbox", { name: "Sök bland dina skills" });
+
+    fireEvent.change(search, { target: { value: "möte" } });
+    const own = within(popover).getByRole("list", { name: "Dina skills" });
+    expect(within(own).getAllByRole("radiogroup")).toHaveLength(1);
+    expect(
+      within(own).getByRole("radiogroup", { name: "Läge för Mötesanteckningar" })
+    ).toBeTruthy();
+
+    fireEvent.change(search, { target: { value: "inget sådant" } });
+    expect(within(popover).getByText("Inga skills matchar sökningen.")).toBeTruthy();
+  });
+});

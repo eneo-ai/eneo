@@ -32,6 +32,7 @@ import { ClientTime } from "@/components/composites/client-time";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
+import { PersonalChatSkillStatus } from "./personal-chat-skills";
 import { skillQueryKey } from "./skill-revisions";
 
 type Skill = Schema<"SkillSparse">;
@@ -123,10 +124,14 @@ export function SpaceSkillsPage() {
       header: t("status"),
       width: proportional(1),
       renderCell: (skill) => (
-        <StatusLabel
-          status={skill.is_active ? "success" : "neutral"}
-          label={t(skill.is_active ? "skills_available_status" : "skills_unavailable_status")}
-        />
+        <span className="flex flex-col items-start gap-1.5">
+          <StatusLabel
+            status={skill.is_active ? "success" : "neutral"}
+            label={t(skill.is_active ? "skills_available_status" : "skills_unavailable_status")}
+          />
+          {/* In the personal space: whether the person's personal chat uses it. */}
+          {space.personal && <PersonalChatSkillStatus skillId={skill.id} />}
+        </span>
       )
     },
     {

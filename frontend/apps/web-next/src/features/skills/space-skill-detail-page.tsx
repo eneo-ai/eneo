@@ -3,7 +3,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { useSpace } from "@/features/spaces/use-space";
 import { browserApi } from "@/lib/api/browser";
 import { getErrorMessage, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { PersonalChatVersionNotice } from "./personal-chat-skills";
 import { SkillForm } from "./skill-form";
 import { SkillRevisionHistory } from "./skill-revision-history";
 import { skillQueryKey } from "./skill-revisions";
@@ -25,6 +26,7 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
   const queryClient = useQueryClient();
   const [dirty, setDirty] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const key = skillQueryKey({ type: "space", spaceId: space.id });
   const base = `/spaces/${routeId}/skills`;
   const skill = useQuery({
@@ -78,10 +80,11 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 pb-16">
-      <PageHeader title={value.display_name} />
+      <PageHeader title={value.display_name} headingRef={headingRef} />
       <Button asChild variant="link" className="w-fit px-0">
         <Link href={base}>{t("skills")}</Link>
       </Button>
+      {space.personal && <PersonalChatVersionNotice skillId={skillId} rescueTarget={headingRef} />}
       <section className="grid gap-7 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="space-y-5">
           <div>
