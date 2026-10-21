@@ -449,6 +449,43 @@ class TestMethodPermissionOverrideWiring:
         }
 
 
+_STASHED_API_KEY_GUARDS = frozenset(
+    {"_resource_permission_dep", "_scope_check_dep", "_api_key_permission_dep"}
+)
+
+
+def _resolution_order(dependant) -> list[str]:
+    """Dependency names in the order FastAPI resolves them: each one's own
+    dependencies first."""
+    names: list[str] = []
+    for sub in dependant.dependencies:
+        names.extend(_resolution_order(sub))
+        names.append(getattr(sub.call, "__name__", ""))
+    return names
+
+
+class TestFlowFeatureGateOrdering:
+    """The flows_core gate authenticates before the route does, and that pass
+    authorizes the key against the guards stashed on the request so far. Ahead
+    of them it falls back to the basic method check, which refuses a write
+    key the runtime-file delete override allows."""
+
+    def test_the_flow_gate_follows_every_api_key_guard_of_its_route(self):
+        gated_routes = 0
+        for route in runtime_router_routes():
+            names = _resolution_order(route.dependant)
+            if "require_flow_feature" not in names:
+                continue
+            gated_routes += 1
+            gate = names.index("require_flow_feature")
+            late_guards = [
+                name for name in names[gate + 1 :] if name in _STASHED_API_KEY_GUARDS
+            ]
+            assert not late_guards, (route.methods, route.path, late_guards)
+
+        assert gated_routes, "No route carries the flows_core gate."
+
+
 # ---------------------------------------------------------------------------
 # Tenant-admin API key guard consistency
 # ---------------------------------------------------------------------------

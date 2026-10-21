@@ -305,9 +305,9 @@ router.include_router(
     prefix="/settings",
     tags=["settings"],
     dependencies=[
-        Depends(require_flow_feature),
         Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
         Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
+        Depends(require_flow_feature),
     ],
 )
 router.include_router(
@@ -522,7 +522,6 @@ router.include_router(
     prefix=FLOW_ROOT_PATH,
     tags=["flows"],
     dependencies=[
-        Depends(require_flow_feature),
         Depends(
             require_resource_permission_for_method(
                 "flows",
@@ -530,6 +529,7 @@ router.include_router(
             )
         ),
         Depends(require_api_key_scope_check(resource_type="flow", path_param="id")),
+        Depends(require_flow_feature),
     ],
 )
 router.include_router(
@@ -537,9 +537,9 @@ router.include_router(
     prefix="/flows/{id}",
     tags=["flow-packages"],
     dependencies=[
-        Depends(require_flow_feature),
         Depends(require_resource_permission_for_method("flows")),
         Depends(require_api_key_scope_check(resource_type="flow", path_param="id")),
+        Depends(require_flow_feature),
     ],
 )
 router.include_router(
@@ -547,9 +547,9 @@ router.include_router(
     prefix="/flow-packages",
     tags=["flow-packages"],
     dependencies=[
-        Depends(require_flow_feature),
         Depends(require_resource_permission_for_method("flows")),
         Depends(require_api_key_scope_check(resource_type="admin", path_param=None)),
+        Depends(require_flow_feature),
     ],
 )
 router.include_router(icons_router, prefix="/icons", tags=["icons"])
@@ -568,9 +568,9 @@ router.include_router(
     prefix="/spaces/{id}/flow-packages",
     tags=["flow-packages"],
     dependencies=[
-        Depends(require_flow_feature),
         Depends(require_resource_permission_for_method("flows")),
         Depends(require_api_key_scope_check(resource_type="space", path_param="id")),
+        Depends(require_flow_feature),
     ],
 )
 router.include_router(
@@ -665,7 +665,7 @@ router.include_router(
     flow_tool_usage_router,
     prefix="/mcp-servers",
     tags=["mcp-servers"],
-    dependencies=[Depends(require_flow_feature), *TENANT_ADMIN_API_KEY_GUARDS],
+    dependencies=[*TENANT_ADMIN_API_KEY_GUARDS, Depends(require_flow_feature)],
 )
 router.include_router(
     document_template_router,
