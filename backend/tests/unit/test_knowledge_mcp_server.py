@@ -424,6 +424,8 @@ class TestReadSourceErrors:
 
 def _assistant_with_sources(collections=(), websites=(), integrations=()):
     return SimpleNamespace(
+        space_id=uuid4(),
+        rerank_model_id=None,
         collections=[
             SimpleNamespace(id=i, name=n, embedding_model=MagicMock())
             for i, n in collections
@@ -1078,3 +1080,70 @@ class TestPickEmbeddingModel:
             collections=[], websites=[], integration_knowledge_list=[]
         )
         assert _pick_embedding_model(assistant) is None
+
+
+class TestSearchReranking:
+    async def test_the_assistants_reranker_is_handed_to_the_search(self, monkeypatch):
+        """The assistant chose a reranker: the tool resolves it against the
+        assistant's space and the datastore gets the spec with the model's own
+        search query."""
+        cid = uuid4()
+        assistant = _assistant_with_sources(collections=[(cid, "Waste FAQ")])
+        assistant.rerank_model_id = uuid4()
+        space = SimpleNamespace(security_classification=object())
+        spec = object()
+        seen: dict = {}
+
+        async def semantic_search(query, **kwargs):
+            seen["rerank"] = kwargs.get("rerank")
+            return []
+
+        async def get_space(space_id):
+            seen["space_id"] = space_id
+            return space
+
+        async def spec_for_model(model_id, *, query, security_classification):
+            seen["model_id"], seen["query"] = model_id, query
+            seen["classification"] = security_classification
+            return spec
+
+        @asynccontextmanager
+        async def fake_context(_ctx):
+            async def get_assistant(_assistant_id):
+                return assistant, []
+
+            yield (
+                SimpleNamespace(
+                    assistant_service=lambda: SimpleNamespace(
+                        get_assistant=get_assistant
+                    ),
+                    datastore=lambda: SimpleNamespace(semantic_search=semantic_search),
+                    space_service=lambda: SimpleNamespace(get_space=get_space),
+                    rerank_service=lambda: SimpleNamespace(
+                        spec_for_model=spec_for_model
+                    ),
+                ),
+                SimpleNamespace(),
+                uuid4(),
+            )
+
+        monkeypatch.setattr(
+            "eneo.internal_mcp.knowledge.internal_tool_context", fake_context
+        )
+
+        await search_knowledge("garden waste", ctx=None)
+
+        assert seen["rerank"] is spec
+        assert seen["model_id"] == assistant.rerank_model_id
+        assert seen["query"] == "garden waste"
+        assert seen["space_id"] == assistant.space_id
+        assert seen["classification"] is space.security_classification
+
+    async def test_no_choice_means_no_spec_and_no_space_lookup(self, monkeypatch):
+        cid = uuid4()
+        assistant = _assistant_with_sources(collections=[(cid, "Waste FAQ")])
+        calls = _patch_search_context(monkeypatch, assistant, chunks=[])
+
+        await search_knowledge("garden waste", ctx=None)
+
+        assert calls[0]["rerank"] is None

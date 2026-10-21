@@ -136,6 +136,28 @@ export function getAnswerFailureMessage(error: unknown): string | undefined {
 }
 
 /**
+ * An integration refusal names its cause in the payload's `code`. A Microsoft
+ * error code (AADSTS…) in the backend's message is kept: an administrator looks
+ * it up.
+ */
+const INTEGRATION_FAILURE_MESSAGES: Record<string, () => string> = {
+  sharepoint_credentials_invalid: () => m.integration_error_credentials_invalid(),
+  oauth_code_rejected: () => m.integration_error_oauth_code_rejected(),
+  oauth_client_rejected: () => m.integration_error_oauth_client_rejected(),
+  integration_knowledge_syncing: () => m.integration_error_syncing()
+};
+const AADSTS_CODE = /\bAADSTS\d+\b/;
+
+function getIntegrationFailureMessage(error: EneoError): string | undefined {
+  const reason = error.response?.code;
+  if (typeof reason !== "string") return undefined;
+  const message = INTEGRATION_FAILURE_MESSAGES[reason]?.();
+  if (!message) return undefined;
+  const microsoft = AADSTS_CODE.exec(error.getReadableMessage() ?? "")?.[0];
+  return microsoft ? `${message} (${microsoft})` : message;
+}
+
+/**
  * Get a localized, user-facing error message from any error.
  *
  * Resolution order:
@@ -155,6 +177,7 @@ export function getErrorMessage(error: unknown, fallback?: string): string {
     const mapped =
       getQuotaReasonMessage(error) ??
       getAnswerFailureMessage(error) ??
+      getIntegrationFailureMessage(error) ??
       getErrorCodeMessage(error.code);
     if (mapped) {
       return mapped;

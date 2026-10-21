@@ -55,6 +55,13 @@
           "description": "Stable kebab-case id, unique within the release. Used for deep links.",
           "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$"
         },
+        "aliases": {
+          "type": "array",
+          "description": "Published ids merged into this entry. Kept as anchors, unique across all ids and aliases within the release.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/entry/properties/id" }
+        },
         "type": { "enum": ["new", "improved", "fixed"] },
         "area": {
           "enum": [

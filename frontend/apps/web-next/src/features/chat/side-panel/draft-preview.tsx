@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { useEffect, useRef } from "react";
-import { ANSWER_TEXT_CLASS, MessageResponse } from "@/components/ai-elements/message";
+import { DocumentEditor } from "@/features/workspace/preview/document-editor";
 import type { DocumentDraft } from "./document-draft";
 
 /** The document so far; it grows while the assistant writes. */
@@ -12,10 +12,13 @@ export function DraftPreview({ draft }: { draft: DocumentDraft }) {
   // The view keeps to the newest text until the reader scrolls up to read.
   const following = useRef(true);
 
-  useEffect(() => {
+  function follow() {
     const element = scroller.current;
     if (following.current && element) element.scrollTop = element.scrollHeight;
-  }, [draft]);
+  }
+
+  // Sheets are laid out with the draft; the editor says when its text is.
+  useEffect(follow, [draft]);
 
   return (
     <div
@@ -81,9 +84,7 @@ export function DraftPreview({ draft }: { draft: DocumentDraft }) {
           ))}
         </div>
       ) : draft.text ? (
-        <div className="mx-auto max-w-[72ch] p-6">
-          <MessageResponse className={ANSWER_TEXT_CLASS}>{draft.text}</MessageResponse>
-        </div>
+        <DocumentEditor markdown={draft.text} onRender={follow} />
       ) : (
         <p className="text-ax-text-secondary p-6 text-sm">{t("file_preview_preparing")}</p>
       )}

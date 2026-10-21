@@ -9,9 +9,10 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 
 ## Release announcements
 
-| Code                                                                 | Pages                                                                                                     |
-| -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| `frontend/packages/whats-new/**` (on branches containing What's new) | `about/release-notes.mdx` renders the shared release data; edit `releases.json`, not a duplicate MDX list |
+| Code                                                                                          | Pages                                                                                                     |
+| --------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| `frontend/packages/whats-new/**` (on branches containing What's new)                          | `about/release-notes.mdx` renders the shared release data; edit `releases.json`, not a duplicate MDX list |
+| `frontend/apps/web/src/lib/features/account/**`, `frontend/apps/web/src/routes/(app)/news/**` | `about/release-notes.mdx` describes access through the shared account sidebar                             |
 
 ## Deployment and configuration
 
@@ -56,6 +57,12 @@ Page paths are relative to `frontend/apps/docs-site/src/content/`. Code paths ar
 
 ## Knowledge, retrieval, MCP and skills
 
+React beta answer presentation and copying
+(`frontend/apps/web-next/src/components/ai-elements/**`,
+`frontend/apps/web-next/src/features/chat/copy-assistant-answer.ts`,
+`frontend/packages/markdown-math/**`) are documented in
+`guides/capabilities.mdx#formatted-answers-in-the-react-beta`.
+
 The cross-feature responsibility map, the three execution tiers (loopback,
 bundled runtime, external), the design rationale and the state boundaries live
 in `docs/tool-architecture.mdx`. Keep that overview aligned when changing
@@ -79,7 +86,7 @@ result guards.
 | `tool-runtime/src/{server,sandbox,child,scheduler,cache}.ts`, `tool-runtime/src/tools/files/**`, `tool-runtime/src/tools/tabular/{download,zip-guard}.ts`, engine limits under `tool-runtime/src/tools/*/config.ts`, `tool-runtime/Dockerfile`, the `tool-runtime` service in `docs/deployment/docker-compose.yml` | `docs/tool-runtime-security.mdx`, `docs/deployment/TOOL_RUNTIME.md` (root, isolation checklist and configuration)                     |
 | `frontend/apps/web/src/lib/features/file-preview/**`, `frontend/apps/web/src/lib/features/chat/documentVersions.ts`, `backend/src/eneo/conversations/document_export.py`                                                                                                                                           | `guides/capabilities.mdx` (native document workspace, versions, previews and exports)                                                 |
 | `backend/src/eneo/skills/**`, skill permissions in `roles/**`, `frontend/apps/web/src/routes/(app)/admin/skills/**`                                                                                                                                                                                                | `guides/skills.mdx`                                                                                                                   |
-| `backend/src/eneo/integration/**` (SharePoint) , `frontend/apps/web/src/routes/(app)/admin/integrations/**`                                                                                                                                                                                                        | `guides/sharepoint-integration.mdx`                                                                                                   |
+| `backend/src/eneo/integration/**` (SharePoint) , `frontend/apps/web/src/routes/(app)/admin/integrations/**`, `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/knowledge/integrations/**`                                                                                                                       | `guides/sharepoint-integration.mdx`                                                                                                   |
 
 ## Storage, workers and operations
 
@@ -89,6 +96,7 @@ result guards.
 | `backend/src/eneo/worker/**`, `jobs/**`                                                                                                                                            | `docs/architecture.mdx`, `guides/object-content-storage.mdx` (drain procedure)                                          |
 | `backend/src/eneo/audit/**`, `api/audit/**`, `data_retention/**`, `actors/actors/space_actor.py`, `frontend/apps/web/src/routes/(app)/admin/audit-logs/**`                         | `docs/audit-logging.mdx`, `guides/audit-logging.mdx`                                                                    |
 | `backend/src/eneo/conversations/**`, `spaces/**`, `assistants/**`, `analysis/**` (public API and insight access)                                                                   | `docs/api.mdx`                                                                                                          |
+| `backend/src/eneo/assistants/assistant_service.py` (preparation/execution ownership and proposed delegation), `backend/scripts/probe_loopback_cancellation.py`                     | `docs/adr/assistant-delegation-execution-boundary.md` (root repository; planned behavior, not a user guide)             |
 | `.github/workflows/release_sbom.yml`, `.github/workflows/build_and_push_images.yml`, `.github/workflows/application_image.yml`, `scripts/release_bundle.py`, `docker/seaweedfs/**` | `docs/release-sboms.mdx`, `docs/object-content-architecture.mdx`                                                        |
 
 ## Project and contributing

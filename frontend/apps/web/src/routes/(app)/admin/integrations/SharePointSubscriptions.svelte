@@ -1,12 +1,14 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
-  import { LoaderCircle } from "@lucide/svelte";
+  import { LoaderCircle, RefreshCw } from "@lucide/svelte";
   import type { Eneo, components } from "@eneo/eneo-js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import * as Table from "$lib/components/ui/table/index.js";
-  import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
+  import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { formatDateTime } from "$lib/features/integrations/sharepoint/format";
+  import type { SharePointSubscriptionList } from "$lib/features/integrations/sharepoint/SharePointSubscriptionList.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
   import { toastError } from "$lib/core/errors";
@@ -16,26 +18,26 @@
 
   interface Props {
     eneo: Eneo;
+    /** Shared with the connection health, so a renewal here updates its counts too. */
+    subscriptionList: SharePointSubscriptionList;
   }
 
-  const { eneo }: Props = $props();
+  const { eneo, subscriptionList }: Props = $props();
 
-  let subscriptions = $state<SharePointSubscription[]>([]);
+  let subscriptions = $derived(subscriptionList.items ?? []);
   let renewingAll = $state(false);
   const renewingSubscriptionIds = new SvelteSet<string>();
 
-  const loadSubscriptions = createAsyncState(async () => {
+  async function loadSubscriptions() {
     try {
-      const response = await eneo.integrations.admin.sharepoint.listSubscriptions();
-      subscriptions = Array.isArray(response) ? response : [];
+      await subscriptionList.load();
     } catch (error) {
       toastError(error, m.sharepoint_subscriptions_load_error());
-      subscriptions = [];
     }
-  });
+  }
 
-  $effect(() => {
-    loadSubscriptions();
+  onMount(() => {
+    void loadSubscriptions();
   });
 
   async function renewAllExpired() {
@@ -45,7 +47,11 @@
         await eneo.integrations.admin.sharepoint.renewExpiredSubscriptions();
 
       if ((result.recreated ?? 0) > 0 && (result.failed ?? 0) === 0) {
-        toast.success(m.sharepoint_subscriptions_renewed_success({ count: result.recreated ?? 0 }));
+        toast.success(
+          result.recreated === 1
+            ? m.sharepoint_subscriptions_renewed_success_one()
+            : m.sharepoint_subscriptions_renewed_success({ count: result.recreated ?? 0 })
+        );
       } else if ((result.failed ?? 0) > 0) {
         toast.error(
           m.sharepoint_subscriptions_renewed_partial({
@@ -63,6 +69,32 @@
     } finally {
       renewingAll = false;
     }
+  }
+
+  async function recreateAll() {
+    const result = await eneo.integrations.admin.sharepoint.recreateAllSubscriptions();
+    const recreated = result.recreated ?? 0;
+    const failed = result.failed ?? 0;
+
+    if (result.total_subscriptions === 0) {
+      toast.info(m.sharepoint_subscriptions_none_to_recreate());
+    } else if (failed > 0) {
+      toast.error(
+        m.sharepoint_subscriptions_recreated_partial({
+          recreated,
+          failed,
+          errors: (result.errors ?? []).join(", ")
+        })
+      );
+    } else {
+      toast.success(
+        recreated === 1
+          ? m.sharepoint_subscriptions_recreated_success_one()
+          : m.sharepoint_subscriptions_recreated_success({ count: recreated })
+      );
+    }
+
+    await loadSubscriptions();
   }
 
   async function renewSubscription(subscription: SharePointSubscription) {
@@ -107,9 +139,10 @@
 
   function getHealthLabel(subscription: SharePointSubscription): string {
     if (hasRenewalFailures(subscription)) {
-      return m.sharepoint_subscription_health_failing({
-        count: getRenewalFailureCount(subscription)
-      });
+      const count = getRenewalFailureCount(subscription);
+      return count === 1
+        ? m.sharepoint_subscription_health_failing_one()
+        : m.sharepoint_subscription_health_failing({ count });
     }
     if (!subscription.last_webhook_received_at) return m.sharepoint_subscription_health_waiting();
     return m.sharepoint_subscription_health_ok();
@@ -146,28 +179,51 @@
       {m.sharepoint_subscriptions_title()}
     </h3>
 
-    {#if expiredCount > 0}
-      <Button onclick={renewAllExpired} disabled={renewingAll || loadSubscriptions.isLoading}>
-        {#if renewingAll}
-          <LoaderCircle class="animate-spin" aria-hidden="true" />
-        {/if}
-        {renewingAll
-          ? m.sharepoint_subscriptions_renewing()
-          : m.sharepoint_subscriptions_renew_all_expired({ count: expiredCount })}
-      </Button>
-    {/if}
+    <div class="flex flex-wrap items-center gap-2">
+      <ConfirmDialog
+        title={m.sharepoint_subscriptions_recreate_all_title()}
+        description={m.sharepoint_subscriptions_recreate_all_description()}
+        confirmLabel={m.sharepoint_subscriptions_recreate_all()}
+        pendingLabel={m.sharepoint_subscriptions_recreating()}
+        variant="default"
+        errorContext={m.sharepoint_subscriptions_recreate_error()}
+        onConfirm={recreateAll}
+      >
+        {#snippet trigger({ props: triggerProps })}
+          <Button
+            {...triggerProps}
+            variant="outline"
+            disabled={renewingAll || subscriptionList.loading}
+          >
+            <RefreshCw aria-hidden="true" />
+            {m.sharepoint_subscriptions_recreate_all()}
+          </Button>
+        {/snippet}
+      </ConfirmDialog>
+
+      {#if expiredCount > 0}
+        <Button onclick={renewAllExpired} disabled={renewingAll || subscriptionList.loading}>
+          {#if renewingAll}
+            <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
+          {/if}
+          {renewingAll
+            ? m.sharepoint_subscriptions_renewing()
+            : m.sharepoint_subscriptions_renew_all_expired({ count: expiredCount })}
+        </Button>
+      {/if}
+    </div>
   </div>
 
   <p class="text-muted-foreground text-sm">
     {m.sharepoint_subscriptions_description()}
   </p>
 
-  {#if loadSubscriptions.isLoading && subscriptions.length === 0}
+  {#if subscriptionList.loading && subscriptions.length === 0}
     <div
       class="border-border text-muted-foreground flex items-center justify-center gap-2 rounded-lg border p-8 text-sm"
       role="status"
     >
-      <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+      <LoaderCircle class="size-4 motion-safe:animate-spin" aria-hidden="true" />
       {m.loading()}
     </div>
   {:else if subscriptions.length === 0}
@@ -263,7 +319,7 @@
                   disabled={renewingSubscriptionIds.has(subscription.id) || renewingAll}
                 >
                   {#if renewingSubscriptionIds.has(subscription.id)}
-                    <LoaderCircle class="animate-spin" aria-hidden="true" />
+                    <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
                   {/if}
                   {renewingSubscriptionIds.has(subscription.id)
                     ? m.sharepoint_subscription_renewing()

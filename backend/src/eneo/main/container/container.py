@@ -163,6 +163,9 @@ from eneo.integration.application.user_integration_service import (
 from eneo.integration.infrastructure.auth_service.confluence_auth_service import (
     ConfluenceAuthService,
 )
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    OrgTokenProvider,
+)
 from eneo.integration.infrastructure.auth_service.service_account_auth_service import (
     ServiceAccountAuthService,
 )
@@ -235,6 +238,9 @@ from eneo.integration.infrastructure.sharepoint_subscription_repo_impl import (
 )
 from eneo.integration.infrastructure.sharepoint_subscription_service import (
     SharePointSubscriptionService,
+)
+from eneo.integration.infrastructure.sharepoint_sync_progress import (
+    SharePointSyncProgressStore,
 )
 from eneo.integration.infrastructure.sharepoint_webhook_service import (
     SharepointWebhookService,
@@ -1317,6 +1323,7 @@ class Container(containers.DeclarativeContainer):
         api_key_scope_revoker=api_key_scope_revoker,
         effective_config_service=effective_config_service,
         skill_service=skill_service,
+        rerank_service=rerank_service,
     )
     org_space_assistant_role_service = providers.Factory(
         OrgSpaceAssistantRoleService,
@@ -1344,6 +1351,8 @@ class Container(containers.DeclarativeContainer):
         references_service=references_service,
         factory=helper_assistants_factory,
         audit_service=audit_service,
+        space_repo=space_repo,
+        rerank_service=rerank_service,
     )
     group_chat_service = providers.Factory(
         GroupChatService,
@@ -1468,6 +1477,7 @@ class Container(containers.DeclarativeContainer):
     tenant_sharepoint_app_service = providers.Factory(
         TenantSharePointAppService,
         tenant_app_repo=tenant_sharepoint_app_repo,
+        tenant_app_auth_service=tenant_app_auth_service,
     )
 
     # SharePoint auth service with tenant app support
@@ -1477,8 +1487,14 @@ class Container(containers.DeclarativeContainer):
     )
 
     # Service account auth service for delegated permissions via service account
-    service_account_auth_service = providers.Factory(
-        ServiceAccountAuthService,
+    # Singleton: it holds the per-process access-token cache.
+    service_account_auth_service = providers.Singleton(ServiceAccountAuthService)
+    org_token_provider = providers.Factory(
+        OrgTokenProvider,
+        tenant_app_repo=tenant_sharepoint_app_repo,
+        tenant_app_auth_service=tenant_app_auth_service,
+        service_account_auth_service=service_account_auth_service,
+        encryption_service=encryption_service,
     )
 
     oauth2_service = providers.Factory(
@@ -1497,21 +1513,20 @@ class Container(containers.DeclarativeContainer):
         oauth_token_repo=oauth_token_repo,
         confluence_auth_service=confluence_auth_service,
         sharepoint_auth_service=sharepoint_auth_service,
+        redis_client=redis_client,
+        token_mapper=confluence_token_mapper,
     )
 
     # SharePoint auth router (after oauth_token_service)
     sharepoint_auth_router = providers.Factory(
         SharePointAuthRouter,
-        tenant_app_service=tenant_sharepoint_app_service,
-        tenant_app_auth_service=tenant_app_auth_service,
         oauth_token_service=oauth_token_service,
-        service_account_auth_service=service_account_auth_service,
+        org_token_provider=org_token_provider,
     )
 
     sharepoint_subscription_service = providers.Factory(
         SharePointSubscriptionService,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
-        oauth_token_service=oauth_token_service,
     )
 
     user_integration_service = providers.Factory(
@@ -1539,6 +1554,7 @@ class Container(containers.DeclarativeContainer):
         tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
         tenant_app_auth_service=tenant_app_auth_service,
         service_account_auth_service=service_account_auth_service,
+        org_token_provider=org_token_provider,
     )
 
     confluence_content_service = providers.Factory(
@@ -1555,21 +1571,23 @@ class Container(containers.DeclarativeContainer):
         OfficeChangeKeyService,
         redis_client=redis_client,
     )
+    sharepoint_sync_progress_store = providers.Factory(
+        SharePointSyncProgressStore,
+        redis_client=redis_client,
+    )
     sharepoint_content_service = providers.Factory(
         SharePointContentService,
         oauth_token_repo=oauth_token_repo,
-        job_service=job_service,
-        user_integration_repo=user_integration_repo,
         user=user,
         oauth_token_service=oauth_token_service,
         info_blob_service=info_blob_service,
         integration_knowledge_repo=integration_knowledge_repo,
         session=session,
         tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
-        tenant_app_auth_service=tenant_app_auth_service,
-        service_account_auth_service=service_account_auth_service,
         sync_log_repo=sync_log_repo,
         change_key_service=office_change_key_service,
+        org_token_provider=org_token_provider,
+        sync_progress_store=sharepoint_sync_progress_store,
     )
     sharepoint_webhook_service = providers.Factory(
         SharepointWebhookService,
@@ -1579,6 +1597,7 @@ class Container(containers.DeclarativeContainer):
         user_repo=user_repo,
         change_key_service=office_change_key_service,
         sharepoint_subscription_repo=sharepoint_subscription_repo,
+        redis_client=redis_client,
     )
     confluence_preview_service = providers.Factory(
         ConfluencePreviewService,
@@ -1587,9 +1606,7 @@ class Container(containers.DeclarativeContainer):
     sharepoint_preview_service = providers.Factory(
         SharePointPreviewService,
         oauth_token_service=oauth_token_service,
-        tenant_app_auth_service=tenant_app_auth_service,
-        service_account_auth_service=service_account_auth_service,
-        tenant_sharepoint_app_repo=tenant_sharepoint_app_repo,
+        org_token_provider=org_token_provider,
     )
     integration_preview_service = providers.Factory(
         IntegrationPreviewService,

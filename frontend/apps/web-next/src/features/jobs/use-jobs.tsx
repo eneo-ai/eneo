@@ -2,6 +2,7 @@
 
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
   createContext,
@@ -16,10 +17,22 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessage, unwrap } from "@/lib/api/errors";
 import { toast } from "@/lib/toast";
+import {
+  pendingImports,
+  reportImports,
+  type SettledImport
+} from "@/features/knowledge/integrations/import-completion";
+import { pendingSyncs, untrackSyncs } from "@/features/knowledge/integrations/pending-syncs";
 import { subscribeJobEvents, useJobEventsConnected } from "./job-events";
 import { describeJobOutcome } from "./job-feedback";
 import { invalidateAfterJobs } from "./job-invalidation";
-import { diffJobs, EMPTY_LEDGER, rememberActiveJob, type JobLedger } from "./job-transitions";
+import {
+  diffJobs,
+  EMPTY_LEDGER,
+  isJobOver,
+  rememberActiveJob,
+  type JobLedger
+} from "./job-transitions";
 import { isJobActive, JOBS_KEY, type Job } from "./jobs";
 import { recordFinishedJob } from "./recent-results";
 
@@ -77,14 +90,17 @@ function createUploadStore(): UploadStore {
 type JobsContextValue = {
   /**
    * Register a backend job: switches to fast polling for quick feedback.
-   * Pass the job the call returned so its completion is caught even when the
-   * first poll already reports it finished (see job-transitions.ts).
+   * Pass the job the call returned (or every job, for calls made together) so
+   * its completion is caught even when the first poll already reports it
+   * finished (see job-transitions.ts).
    */
-  trackJob: (job?: Job) => void;
+  trackJob: (job?: Job | Job[]) => void;
   /** Queue files for upload into a collection. */
   queueUploads: (collectionId: string, files: File[]) => void;
   clearFinishedUploads: () => void;
   uploadStore: UploadStore;
+  /** The jobs query's fetcher; every reader of the list shares it. */
+  listJobs: () => Promise<Job[]>;
 };
 
 const JobsContext = createContext<JobsContextValue | null>(null);
@@ -142,16 +158,25 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
   const announce = useAnnounce();
+  const router = useRouter();
 
   const fastPollUntil = useRef(0);
+  // Set by the fetcher, not by the cache: a pushed update can fill the cache
+  // before the first list arrives, and only a list says which jobs are gone.
+  const listReceived = useRef(false);
+  const listJobs = useCallback(async () => {
+    const items = await fetchJobs();
+    listReceived.current = true;
+    return items;
+  }, []);
 
   // The live feed (job-events.ts) delivers every status change the moment it
   // is committed. Polling stays as the safety net: slow while the feed is
   // open, fast while it is down and something is running or was just started.
   const live = useJobEventsConnected();
-  const { data: jobs = NO_JOBS } = useQuery({
+  const { data: jobs, dataUpdatedAt: jobsUpdatedAt } = useQuery({
     queryKey: JOBS_KEY,
-    queryFn: fetchJobs,
+    queryFn: listJobs,
     refetchInterval: (query) =>
       !live && (Date.now() < fastPollUntil.current || query.state.data?.some(isJobActive))
         ? FAST_POLL_MS
@@ -177,15 +202,21 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   );
 
   // Each snapshot is compared with the last one: a job that was active and
-  // now has an outcome gets a toast, an announcement and a row highlight, and
-  // the data it produced is refreshed. The ledger lives in a ref because it
-  // is bookkeeping, not render state.
+  // now has an outcome gets a toast (which speaks it) and a row highlight, and
+  // the data it produced is refreshed. An import's first sync is told with
+  // its counts instead, once its item is read (import-completion.ts); a sync
+  // queued from a menu stops reading as queued once its job is over. The
+  // ledger lives in a ref because it is bookkeeping, not render state.
   const ledger = useRef<JobLedger>(EMPTY_LEDGER);
   const handleSnapshot = useCallback(
-    (snapshot: readonly Job[]) => {
+    (loaded: readonly Job[] | undefined) => {
+      const snapshot = loaded ?? NO_JOBS;
       const diff = diffJobs(ledger.current, snapshot);
       ledger.current = diff.ledger;
+      const imports = pendingImports();
       for (const { job, outcome } of diff.transitions) {
+        recordFinishedJob(job);
+        if (imports.some((item) => item.jobId === job.id)) continue;
         const feedback = describeJobOutcome(job, outcome, t);
         if (feedback.tone === "success") {
           toast.success(feedback.title);
@@ -194,28 +225,48 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
         } else {
           toast.info(feedback.title);
         }
-        announce(feedback.title);
-        recordFinishedJob(job);
       }
       // A vanished job finished (or was cleaned up) without reporting; its
       // data may still have changed, so refresh as for a reported outcome.
-      if (diff.transitions.length > 0 || diff.vanished.length > 0) {
-        invalidateAfterJobs(queryClient);
+      const changed = diff.transitions.length > 0 || diff.vanished.length > 0;
+      if (changed) invalidateAfterJobs(queryClient);
+      if (!loaded) return;
+      const over = (jobId: string) => isJobOver(jobId, snapshot, diff.ledger, listReceived.current);
+      untrackSyncs(pendingSyncs().flatMap((item) => (over(item.jobId) ? [item.jobId] : [])));
+      // Retry pending reports on each successful poll, even when no job changed.
+      // reportImports serialises attempts and removes only reported imports.
+      const settled = imports.flatMap((item): SettledImport[] =>
+        over(item.jobId)
+          ? [
+              {
+                ...item,
+                jobStatus: snapshot.find((job) => job.id === item.jobId)?.status ?? null
+              }
+            ]
+          : []
+      );
+      if (settled.length > 0) {
+        void reportImports(settled, {
+          queryClient,
+          t,
+          navigate: (href) => router.push(href)
+        });
       }
     },
-    [announce, queryClient, t]
+    [queryClient, router, t]
   );
   useEffect(() => {
     handleSnapshot(jobs);
-  }, [handleSnapshot, jobs]);
+  }, [handleSnapshot, jobs, jobsUpdatedAt]);
 
   const trackJob = useCallback(
-    (job?: Job) => {
-      if (job) {
-        ledger.current = rememberActiveJob(ledger.current, job);
-        // The cached list may already show this job finished. Judge it now:
+    (job?: Job | Job[]) => {
+      const jobs = job === undefined ? [] : Array.isArray(job) ? job : [job];
+      if (jobs.length > 0) {
+        for (const started of jobs) ledger.current = rememberActiveJob(ledger.current, started);
+        // The cached list may already show these jobs finished. Judge it now:
         // a refetch that returns identical data does not re-run the effect.
-        handleSnapshot(queryClient.getQueryData<Job[]>(JOBS_KEY) ?? NO_JOBS);
+        handleSnapshot(queryClient.getQueryData<Job[]>(JOBS_KEY));
       }
       fastPollUntil.current = Date.now() + FAST_POLL_WINDOW_MS;
       void queryClient.invalidateQueries({ queryKey: JOBS_KEY });
@@ -311,8 +362,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   }, [sync]);
 
   const value = useMemo<JobsContextValue>(
-    () => ({ trackJob, queueUploads, clearFinishedUploads, uploadStore }),
-    [trackJob, queueUploads, clearFinishedUploads, uploadStore]
+    () => ({ trackJob, queueUploads, clearFinishedUploads, uploadStore, listJobs }),
+    [trackJob, queueUploads, clearFinishedUploads, uploadStore, listJobs]
   );
 
   return <JobsContext.Provider value={value}>{children}</JobsContext.Provider>;
@@ -331,8 +382,9 @@ export function useJobs(): JobsContextValue {
  * only reads them.
  */
 export function useJobActivity(): { jobs: Job[]; uploads: Upload[]; runningCount: number } {
-  const { uploadStore } = useJobs();
-  const { data: jobs = NO_JOBS } = useQuery({ queryKey: JOBS_KEY, queryFn: fetchJobs });
+  const { uploadStore, listJobs } = useJobs();
+  // The provider's fetcher: the query runs whichever observer's queryFn rendered last.
+  const { data: jobs = NO_JOBS } = useQuery({ queryKey: JOBS_KEY, queryFn: listJobs });
   const uploads = useSyncExternalStore(
     uploadStore.subscribe,
     uploadStore.getSnapshot,

@@ -10,6 +10,7 @@ import type {
   CompletionModel,
   EmbeddingModel,
   ImageModel,
+  RerankModel,
   SecurityClassification,
   TranscriptionModel
 } from "@eneo/eneo-js";
@@ -22,8 +23,9 @@ import {
   type ImageSize
 } from "$lib/features/ai-models/imageModelOptions";
 
-export type ModelType = "completion" | "embedding" | "transcription" | "image";
-export type AnyCatalogModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+export type ModelType = "completion" | "embedding" | "transcription" | "image" | "rerank";
+export type AnyCatalogModel =
+  CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
 
 export interface ModelDraftState {
   name: string;
@@ -304,7 +306,7 @@ export function applyCatalogModelToDraft(
     if (info.cost_per_minute != null) next.costPerMinuteStr = String(info.cost_per_minute);
   } else if (modelType === "image") {
     if (info.cost_per_image != null) next.costPerImageStr = String(info.cost_per_image);
-  } else {
+  } else if (modelType !== "rerank") {
     if (info.input_cost_per_token != null) {
       next.inputCostPerTokenStr = perMillionFromTokenCost(info.input_cost_per_token);
     }
