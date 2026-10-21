@@ -9,7 +9,7 @@
   import SkillRevisionHistory from "$lib/features/skills/SkillRevisionHistory.svelte";
   import type { SkillRevisionFormValue } from "$lib/features/skills/skillBindings";
   import {
-    personalSkillBindings,
+    fromSavedBindings,
     personalSkillHasNewerRevision,
     personalSkillsSaveErrorMessage,
     withLatestPersonalSkillRevision
@@ -58,15 +58,23 @@
   const canEdit = $derived(data.currentSpace.skill_permissions.includes(EDIT_SKILL_PERMISSION));
 
   async function usePersonalChatLatestVersion() {
-    const configuration = data.personalChatSkills;
     const assistant = data.currentSpace.default_assistant;
+    // The revision the person reviewed here; the other Skills come from the server.
     const binding = personalChatOnOlderVersion;
-    if (!spaces || !assistant || !configuration || !binding) return;
+    if (!spaces || !assistant || !binding) return;
     personalChatSaving = true;
     personalChatError = null;
     try {
-      await spaces.updateDefaultAssistantSkills({ id: assistant.id }, async () =>
-        withLatestPersonalSkillRevision(personalSkillBindings(configuration.bindings), binding)
+      await spaces.updateDefaultAssistantSkills(
+        { id: assistant.id },
+        fromSavedBindings(
+          () =>
+            data.eneo.skills.getAssistantConfiguration({
+              spaceId: data.currentSpace.id,
+              assistantId: assistant.id
+            }),
+          (bindings) => withLatestPersonalSkillRevision(bindings, binding)
+        )
       );
       await invalidate("space:skills");
     } catch (error) {

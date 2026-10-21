@@ -6,6 +6,7 @@ import type {
 import { SvelteMap } from "svelte/reactivity";
 import { getErrorMessage } from "$lib/core/errors";
 import {
+  fromSavedBindings,
   personalSkillBindings,
   personalSkillRows,
   personalSkillsSaveErrorMessage,
@@ -14,16 +15,23 @@ import {
   type OwnSkillRow,
   type PersonalSkillMode
 } from "./personalChatSkills";
+import { emptySkillCatalogPage, type ListSkills } from "./skillCatalog";
+import { SkillCatalogQuery } from "./skillCatalogQuery.svelte";
 
 type Bindings = AssistantSkillBindingInput[];
 
 /** One choice the person made, applied to whatever is saved when its turn comes. */
-type Change = { skillId: string; apply: (bindings: Bindings) => Bindings };
+type Change = {
+  skillId: string;
+  attempt: number;
+  apply: (bindings: Bindings) => Bindings;
+};
 
 type Sources = {
   /** Reads what the server holds now. */
   readConfiguration: () => Promise<AssistantSkillConfiguration>;
-  readLibrary: () => Promise<SkillSparse[]>;
+  /** One page of the person's library, searched on the server. */
+  listLibrary: ListSkills;
   /** Queues a save; `bindings` builds the full ordered list when its turn comes. */
   save: (bindings: () => Promise<Bindings>) => Promise<void>;
   /** Settles once every queued default-assistant update has. */
@@ -39,14 +47,19 @@ type Sources = {
  */
 export class PersonalChatSkills {
   configuration = $state<AssistantSkillConfiguration | null>(null);
-  library = $state<SkillSparse[] | null>(null);
+  /** Paged and searched on the server; only read for a person who may choose. */
+  readonly library: SkillCatalogQuery<SkillSparse>;
+  /** Whether a first library page has been read. */
+  libraryLoaded = $state(false);
   loadError = $state<string | null>(null);
   /** Why a change was refused, per Skill. */
   saveErrors = new SvelteMap<string, string>();
   #pending = $state.raw<Change[]>([]);
   #sources: Sources;
   #configurationReads = 0;
-  #libraryReads = 0;
+  #attempts = 0;
+  // The latest change per Skill: only its refusal is still news.
+  #latestAttempt: Record<string, number> = {};
 
   /** Whether the person may choose their own Skills. */
   readonly canEdit: boolean;
@@ -54,6 +67,7 @@ export class PersonalChatSkills {
   constructor(sources: Sources, canEdit: boolean) {
     this.#sources = sources;
     this.canEdit = canEdit;
+    this.library = new SkillCatalogQuery(emptySkillCatalogPage(), sources.listLibrary);
   }
 
   /** The saved bindings with the pending changes applied, in order. */
@@ -64,53 +78,61 @@ export class PersonalChatSkills {
     );
   }
 
-  ownRows: OwnSkillRow[] = $derived(
-    personalSkillRows(this.configuration?.bindings ?? [], this.library, this.bindings)
+  ownRows: OwnSkillRow[] = $derived.by(() =>
+    personalSkillRows(this.configuration?.bindings ?? [], this.library.items, this.bindings, {
+      searching: this.library.query.trim() !== ""
+    })
   );
 
-  /** Reads the configuration, and the library too when the person may choose. */
+  /** Reads the configuration, and the library's first page when the person may choose. */
   async load({ library = false } = {}): Promise<void> {
     this.loadError = null;
     await Promise.all([
       // After queued model and Skill saves, so it describes the next turn.
       this.#sources.settled().then(() => this.#readConfiguration()),
-      library && this.canEdit ? this.#readLibrary() : undefined
+      library && this.canEdit ? this.#loadLibrary() : undefined
     ]);
   }
 
   setMode(row: OwnSkillRow, mode: PersonalSkillMode): void {
     if (mode === row.mode) return;
-    void this.#save({
-      skillId: row.id,
-      apply: (bindings) => withPersonalSkillMode(bindings, row, mode)
-    });
+    void this.#save(row.id, (bindings) => withPersonalSkillMode(bindings, row, mode));
   }
 
   useLatestRevision(row: OwnSkillRow): void {
     const binding = row.binding;
     if (!binding || !row.hasNewerRevision) return;
-    void this.#save({
-      skillId: row.id,
-      apply: (bindings) => withLatestPersonalSkillRevision(bindings, binding)
-    });
+    void this.#save(row.id, (bindings) => withLatestPersonalSkillRevision(bindings, binding));
   }
 
-  async #save(change: Change): Promise<void> {
+  dispose(): void {
+    this.library.dispose();
+  }
+
+  async #loadLibrary(): Promise<void> {
+    // Each opening starts from the first page, unsearched.
+    if (this.library.query) this.library.reset(emptySkillCatalogPage());
+    await this.library.reload();
+    this.libraryLoaded = true;
+  }
+
+  async #save(skillId: string, apply: Change["apply"]): Promise<void> {
+    const change = { skillId, attempt: ++this.#attempts, apply };
+    this.#latestAttempt[skillId] = change.attempt;
     this.#pending = [...this.#pending, change];
-    this.saveErrors.delete(change.skillId);
+    this.saveErrors.delete(skillId);
     let failure: unknown = null;
     try {
-      await this.#sources.save(async () =>
-        change.apply(personalSkillBindings((await this.#sources.readConfiguration()).bindings))
-      );
+      await this.#sources.save(fromSavedBindings(this.#sources.readConfiguration, apply));
     } catch (error) {
       failure = error;
     }
     // Show the outcome from the server before the change stops showing.
     await this.#readConfiguration();
     this.#pending = this.#pending.filter((pending) => pending !== change);
-    if (failure !== null) {
-      this.saveErrors.set(change.skillId, personalSkillsSaveErrorMessage(failure));
+    // A later choice for the same Skill decides what is shown under it.
+    if (failure !== null && this.#latestAttempt[skillId] === change.attempt) {
+      this.saveErrors.set(skillId, personalSkillsSaveErrorMessage(failure));
     }
   }
 
@@ -121,16 +143,6 @@ export class PersonalChatSkills {
       if (read === this.#configurationReads) this.configuration = configuration;
     } catch (error) {
       if (read === this.#configurationReads) this.loadError = getErrorMessage(error);
-    }
-  }
-
-  async #readLibrary(): Promise<void> {
-    const read = ++this.#libraryReads;
-    try {
-      const library = await this.#sources.readLibrary();
-      if (read === this.#libraryReads) this.library = library;
-    } catch (error) {
-      if (read === this.#libraryReads) this.loadError = getErrorMessage(error);
     }
   }
 }

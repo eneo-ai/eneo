@@ -9,6 +9,7 @@ import {
 import { page, userEvent } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SKILL_CATALOG_PAGE_SIZE } from "$lib/features/skills/skillCatalog";
 import { m } from "$lib/paraglide/messages";
 import { expectNoAxeViolations } from "$lib/test/axe";
 
@@ -237,6 +238,14 @@ describe("ChatSkills", () => {
     await expect
       .element(page.getByRole("link", { name: m.personal_chat_skills_manage() }))
       .toHaveAttribute("href", "/spaces/personal/skills");
+    // One bounded page of the library, not all of it.
+    expect(mocks.list).toHaveBeenCalledOnce();
+    expect(mocks.list).toHaveBeenCalledWith({
+      spaceId: "personal-space",
+      limit: SKILL_CATALOG_PAGE_SIZE,
+      cursor: null,
+      query: null
+    });
     await expectNoAxeViolations(document.body);
   });
 
@@ -464,11 +473,12 @@ describe("ChatSkills", () => {
     await expect.element(modeGroup("Mina svarspreferenser")).toBeVisible();
   });
 
-  it("searches the person's own Skills once there are more than seven", async () => {
-    mocks.list.mockResolvedValue(
-      libraryPage(
-        Array.from({ length: 8 }, (_, index) => librarySkill(`skill-${index}`, `Skill ${index}`))
-      )
+  it("searches the person's own Skills on the server once there are more than seven", async () => {
+    const skills = Array.from({ length: 8 }, (_, index) =>
+      librarySkill(`skill-${index}`, `Skill ${index}`)
+    );
+    mocks.list.mockImplementation(async ({ query }: { query: string | null }) =>
+      libraryPage(query ? skills.filter((skill) => skill.display_name.includes(query)) : skills)
     );
     server = personalChatServer({ bindings: [] });
     renderControl();
@@ -476,11 +486,63 @@ describe("ChatSkills", () => {
 
     const search = page.getByRole("searchbox", { name: m.personal_chat_skills_search() });
     await search.fill("Skill 7");
+    await vi.waitFor(() => expect(modeGroup("Skill 6").elements()).toHaveLength(0));
     await expect.element(modeGroup("Skill 7")).toBeVisible();
-    expect(modeGroup("Skill 6").elements()).toHaveLength(0);
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ query: "Skill 7" }));
 
     await search.fill("nothing like it");
     await expect.element(page.getByText(m.personal_chat_skills_search_empty())).toBeVisible();
+  });
+
+  it("pages the library in and keeps the Skills in the chat usable when a later page fails", async () => {
+    mocks.list.mockImplementation(async ({ cursor }: { cursor: string | null }) => {
+      if (cursor) throw new Error("offline");
+      return { items: [librarySkill("translate", "Engelsk översättning")], next_cursor: "page-2" };
+    });
+    renderControl();
+    await openControl(3);
+
+    // In the chat, though no loaded page lists them.
+    await expect.element(modeGroup("Mötesanteckningar")).toBeVisible();
+    await expect.element(modeGroup("Mina svarspreferenser")).toBeVisible();
+    // More to come, so it can be searched.
+    await expect
+      .element(page.getByRole("searchbox", { name: m.personal_chat_skills_search() }))
+      .toBeVisible();
+    await page.getByRole("button", { name: m.load_more() }).click();
+    await expect.element(page.getByRole("alert").getByText(m.request_failed())).toBeVisible();
+
+    await mode("Mötesanteckningar", m.personal_chat_skills_mode_off()).click();
+    await vi.waitFor(() =>
+      expect(server.sent).toEqual([
+        [{ skill_id: "answers", skill_revision_id: "answers-r1", activation_mode: "always" }]
+      ])
+    );
+    expect(mocks.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("lets a later choice for the same Skill replace an earlier refusal", async () => {
+    let release!: () => void;
+    server.hold = new Promise((resolve) => (release = resolve));
+    server.refuse = (bindings) =>
+      bindings.some((b) => b.skill_id === "translate" && b.activation_mode === "on_demand") &&
+      refusal("on_demand_unavailable", "model_lacks_tool_calling");
+    renderControl();
+    await openControl(3);
+
+    await mode("Engelsk översättning", m.skills_activation_mode_on_demand()).click();
+    await mode("Engelsk översättning", m.skills_activation_mode_always()).click();
+    server.hold = null;
+    release();
+
+    await expect
+      .element(page.getByText(m.personal_chat_skills_counts({ always: 3, on_demand: 1 })))
+      .toBeVisible();
+    await expect
+      .element(mode("Engelsk översättning", m.skills_activation_mode_always()))
+      .toBeChecked();
+    expect(server.sent).toHaveLength(2);
+    expect(ownSkillRow("Engelsk översättning").getByRole("alert").elements()).toHaveLength(0);
   });
 
   it("opens the same choices in a bottom sheet in a narrow composer", async () => {

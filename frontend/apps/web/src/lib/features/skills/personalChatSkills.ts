@@ -23,8 +23,6 @@ type PersonalSkillLayer = NonNullable<AssistantSkillConfiguration["personal_laye
 type PersonalSkillLayerReason = NonNullable<PersonalSkillLayer["reason"]>;
 
 const PERSONAL_SKILLS_REJECTED: EneoErrorCode = 9080;
-// The backend's largest Skill catalogue page.
-const LIBRARY_PAGE_LIMIT = 100;
 
 const LAYER_REASON_MESSAGES: Record<PersonalSkillLayerReason, () => string> = {
   permission_missing: () => m.personal_chat_skills_reason_permission_missing(),
@@ -80,34 +78,41 @@ export type OwnSkillRow = {
 };
 
 /**
- * One row per own Skill, in library order, showing the chosen `bindings`
- * (the change being saved, or the saved list). Without the library, which is
- * only read for a person who may choose, the saved Skills are all there is.
+ * One row per own Skill showing the chosen `bindings` (the saved list with
+ * the pending changes applied): the loaded library pages first, then the
+ * Skills in the chat that no loaded page shows, so they stay usable while
+ * the library pages in, fails, or is not read at all for a person who may
+ * not choose. A search shows only what the server found.
  */
 export function personalSkillRows(
   saved: AssistantSkillBindingSummary[],
-  library: SkillSparse[] | null,
-  bindings: AssistantSkillBindingInput[]
+  library: SkillSparse[],
+  bindings: AssistantSkillBindingInput[],
+  { searching = false } = {}
 ): OwnSkillRow[] {
   const savedById = new Map(saved.map((binding) => [binding.skill_id, binding]));
   const chosenById = new Map(bindings.map((binding) => [binding.skill_id, binding]));
-  const skills = library
-    ? library
-        // A deactivated Skill cannot join the chat, but keeps running in it.
-        .filter((skill) => skill.is_active || savedById.has(skill.id) || chosenById.has(skill.id))
-        .map((skill) => ({
-          id: skill.id,
-          name: skill.display_name,
-          description: skill.description,
-          revisionId: skill.current_revision_id
-        }))
-    : saved.map((binding) => ({
-        id: binding.skill_id,
-        name: binding.display_name,
-        description: binding.description,
-        revisionId: binding.skill_revision_id
-      }));
-  return skills.map((skill) => {
+  const listed = library
+    // A deactivated Skill cannot join the chat, but keeps running in it.
+    .filter((skill) => skill.is_active || savedById.has(skill.id) || chosenById.has(skill.id))
+    .map((skill) => ({
+      id: skill.id,
+      name: skill.display_name,
+      description: skill.description,
+      revisionId: skill.current_revision_id
+    }));
+  const listedIds = new Set(listed.map((skill) => skill.id));
+  const unlisted = searching
+    ? []
+    : saved
+        .filter((binding) => !listedIds.has(binding.skill_id))
+        .map((binding) => ({
+          id: binding.skill_id,
+          name: binding.display_name,
+          description: binding.description,
+          revisionId: binding.skill_revision_id
+        }));
+  return [...listed, ...unlisted].map((skill) => {
     const binding = savedById.get(skill.id);
     const choice = chosenById.get(skill.id);
     return {
@@ -118,6 +123,20 @@ export function personalSkillRows(
         !!binding && !!choice && personalSkillHasNewerRevision(binding, choice.skill_revision_id)
     };
   });
+}
+
+/**
+ * The full list a personal chat Skill save sends, built when the save's turn
+ * comes in the default-assistant queue: the change applied to what the
+ * server holds then, so a change refused earlier never travels with it and
+ * a change accepted earlier is never undone by it. Every write of the
+ * person's own Skills goes through this.
+ */
+export function fromSavedBindings(
+  readConfiguration: () => Promise<AssistantSkillConfiguration>,
+  change: (bindings: AssistantSkillBindingInput[]) => AssistantSkillBindingInput[]
+): () => Promise<AssistantSkillBindingInput[]> {
+  return async () => change(personalSkillBindings((await readConfiguration()).bindings));
 }
 
 /** Whether the chat is pinned to an older revision than the one it may move to. */
@@ -194,18 +213,6 @@ export function personalSkillsSaveErrorMessage(error: unknown): string {
     if (error.status === 403) return m.personal_chat_skills_reason_permission_missing();
   }
   return m.personal_chat_skills_save_failed();
-}
-
-/** Every Skill in the person's own space, which is all they may choose from. */
-export async function listPersonalSpaceSkills(eneo: Eneo, spaceId: string): Promise<SkillSparse[]> {
-  const skills: SkillSparse[] = [];
-  let cursor: string | null = null;
-  do {
-    const page = await eneo.skills.list({ spaceId, limit: LIBRARY_PAGE_LIMIT, cursor });
-    skills.push(...page.items);
-    cursor = page.next_cursor ?? null;
-  } while (cursor);
-  return skills;
 }
 
 /**

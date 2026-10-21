@@ -94,7 +94,28 @@ describe("Skill detail page", () => {
     updateDefaultAssistantSkills.mockReset();
   });
 
-  function personalChatOn(pinned: SkillRevisionPublic, latest: SkillRevisionPublic) {
+  const OTHER_SKILL = {
+    skill_id: "skill-2",
+    skill_revision_id: "skill-2-revision-1",
+    attachable_revision_id: "skill-2-revision-1",
+    slug: "minutes",
+    revision_number: 1,
+    attachable_revision_number: 1,
+    display_name: "Minutes",
+    description: "",
+    content_digest: "digest",
+    position: 1,
+    is_active: true,
+    source: "space" as const,
+    execution_blocked: false,
+    activation_mode: "always" as const
+  };
+
+  function personalChatOn(
+    pinned: SkillRevisionPublic,
+    latest: SkillRevisionPublic,
+    others: AssistantSkillConfiguration["bindings"] = []
+  ) {
     return {
       bindings: [
         {
@@ -112,7 +133,8 @@ describe("Skill detail page", () => {
           source: "space",
           execution_blocked: false,
           activation_mode: "on_demand"
-        }
+        },
+        ...others
       ],
       organisation_bindings: [],
       runtime: null,
@@ -120,9 +142,14 @@ describe("Skill detail page", () => {
     } satisfies AssistantSkillConfiguration;
   }
 
-  function renderPersonalSkill() {
+  /** The page was loaded with `loaded`; the server holds `saved` by the time the save runs. */
+  function renderPersonalSkill({
+    loaded = personalChatOn(revision(1), revision(2)),
+    saved = loaded
+  }: { loaded?: AssistantSkillConfiguration; saved?: AssistantSkillConfiguration } = {}) {
     const pinned = revision(1);
     const current = revision(2);
+    const getAssistantConfiguration = vi.fn(async () => saved);
     render(SkillDetailPage, {
       data: {
         currentSpace: {
@@ -134,10 +161,11 @@ describe("Skill detail page", () => {
         },
         skill: skill(current),
         revisionPage: revisionPage(current, pinned),
-        personalChatSkills: personalChatOn(pinned, current),
+        personalChatSkills: loaded,
         eneo: {
           skills: {
             createRevision: vi.fn(),
+            getAssistantConfiguration,
             getRevision: vi.fn(),
             listRevisionSummaries: vi.fn(),
             restoreRevision: vi.fn(),
@@ -146,10 +174,15 @@ describe("Skill detail page", () => {
         }
       } as never
     });
+    return { getAssistantConfiguration };
   }
 
-  test("moves the personal chat to the latest version only when the person asks", async () => {
-    renderPersonalSkill();
+  test("moves only this Skill to its latest version, on top of what is saved when the move runs", async () => {
+    // Loaded with another Skill that an earlier queued save then switched off.
+    const { getAssistantConfiguration } = renderPersonalSkill({
+      loaded: personalChatOn(revision(1), revision(2), [OTHER_SKILL]),
+      saved: personalChatOn(revision(1), revision(2))
+    });
 
     await expect
       .element(page.getByText(m.personal_chat_skills_version_notice({ version: "1" })))
@@ -162,6 +195,10 @@ describe("Skill detail page", () => {
     await expect(bindings()).resolves.toEqual([
       { skill_id: "skill-1", skill_revision_id: "revision-2", activation_mode: "on_demand" }
     ]);
+    expect(getAssistantConfiguration).toHaveBeenCalledWith({
+      spaceId: "personal-space",
+      assistantId: "default-assistant"
+    });
     await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("space:skills"));
   });
 

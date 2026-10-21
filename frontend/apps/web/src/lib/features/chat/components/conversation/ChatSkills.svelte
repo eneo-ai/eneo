@@ -22,7 +22,6 @@
   import { PersonalChatSkills } from "$lib/features/skills/PersonalChatSkills.svelte";
   import {
     activationModeLabel,
-    listPersonalSpaceSkills,
     personalSkillLayerMessage,
     runningPersonalChatSkills,
     type OwnSkillRow,
@@ -70,7 +69,7 @@
     return new PersonalChatSkills(
       {
         readConfiguration: () => eneo.skills.getAssistantConfiguration({ spaceId, assistantId }),
-        readLibrary: () => listPersonalSpaceSkills(eneo, spaceId),
+        listLibrary: (params) => eneo.skills.list({ spaceId, ...params }),
         save: (bindings) => updateDefaultAssistantSkills(assistant, bindings),
         settled: awaitDefaultAssistantUpdates
       },
@@ -85,6 +84,10 @@
     track(modelId);
     const owner = skills;
     if (owner) untrack(() => void owner.load());
+  });
+  $effect(() => {
+    const owner = skills;
+    return () => owner?.dispose();
   });
 
   const configuration = $derived(skills?.configuration ?? null);
@@ -106,15 +109,7 @@
     (skills?.canEdit ?? false) && ($currentSpace.skill_permissions?.includes("create") ?? false)
   );
 
-  let query = $state("");
   const ownRows = $derived(skills?.ownRows ?? []);
-  const shownRows = $derived.by(() => {
-    const needle = query.trim().toLocaleLowerCase();
-    if (!needle) return ownRows;
-    return ownRows.filter((row) =>
-      `${row.name} ${row.description}`.toLocaleLowerCase().includes(needle)
-    );
-  });
 
   const titleId = useId();
   let label = $state<HTMLElement | null>(null);
@@ -123,7 +118,6 @@
 
   function setOpen(open: boolean) {
     if (open) {
-      query = "";
       void skills?.load({ library: true });
       // The label is hidden where the toolbar is icon-only: a bottom sheet
       // then has the room the choices need.
@@ -253,10 +247,11 @@
 
 {#snippet body(owner: PersonalChatSkills, sheet: boolean)}
   {@const gutter = sheet ? "px-4" : "px-3"}
+  {@const loadError = owner.loadError ?? owner.library.error}
   <div class="min-h-0 flex-1 overflow-y-auto py-1">
-    {#if owner.loadError}
+    {#if loadError}
       <p class={cn("text-destructive flex items-center gap-2 py-2 text-xs", gutter)} role="alert">
-        {owner.loadError}
+        {loadError}
         <Button
           variant="link"
           size="xs"
@@ -335,23 +330,42 @@
             </div>
           {/if}
 
-          {#if ownRows.length > SEARCH_THRESHOLD}
+          {#if owner.library.query || owner.library.items.length > SEARCH_THRESHOLD || owner.library.hasMore}
             <div class={cn("pb-1", gutter)}>
               <InputGroup.Root>
                 <InputGroup.Addon>
                   <Search aria-hidden="true" />
                 </InputGroup.Addon>
                 <InputGroup.Input
-                  bind:value={query}
+                  value={owner.library.query}
                   type="search"
                   placeholder={m.personal_chat_skills_search()}
                   aria-label={m.personal_chat_skills_search()}
+                  oninput={(event) => owner.library.setQuery(event.currentTarget.value)}
                 />
               </InputGroup.Root>
             </div>
           {/if}
 
-          {#if owner.canEdit && owner.library === null && ownRows.length === 0}
+          {#if ownRows.length > 0}
+            <ul role="list">
+              {#each ownRows as row (row.id)}
+                {@render ownSkill(owner, row, sheet)}
+              {/each}
+            </ul>
+            {#if owner.library.hasMore && !owner.library.loading}
+              <div class={cn("py-1", gutter)}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={owner.library.loadingMore}
+                  onclick={() => owner.library.loadMore()}
+                >
+                  {owner.library.loadingMore ? m.loading() : m.load_more()}
+                </Button>
+              </div>
+            {/if}
+          {:else if owner.library.loading || (owner.canEdit && !owner.libraryLoaded && !loadError)}
             <p
               class="text-muted-foreground flex items-center justify-center gap-2 py-4 text-sm"
               role="status"
@@ -359,7 +373,11 @@
               <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
               {m.loading()}
             </p>
-          {:else if ownRows.length === 0}
+          {:else if owner.library.query}
+            <p class={cn("text-muted-foreground py-3 text-sm", gutter)} role="status">
+              {m.personal_chat_skills_search_empty()}
+            </p>
+          {:else if owner.canEdit && !loadError}
             <div class={cn("flex flex-col items-start gap-2 pt-1 pb-3", gutter)}>
               <p class="text-muted-foreground max-w-[42ch] text-sm">
                 {m.personal_chat_skills_empty()}
@@ -371,16 +389,6 @@
                 </Button>
               {/if}
             </div>
-          {:else if shownRows.length === 0}
-            <p class={cn("text-muted-foreground py-3 text-sm", gutter)} role="status">
-              {m.personal_chat_skills_search_empty()}
-            </p>
-          {:else}
-            <ul role="list">
-              {#each shownRows as row (row.id)}
-                {@render ownSkill(owner, row, sheet)}
-              {/each}
-            </ul>
           {/if}
         </div>
       {/if}

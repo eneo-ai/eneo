@@ -2,7 +2,7 @@ import { EneoError, type AssistantSkillBindingSummary } from "@eneo/eneo-js";
 import { describe, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 import {
-  listPersonalSpaceSkills,
+  fromSavedBindings,
   loadPersonalChatSkillConfiguration,
   personalSkillBindings,
   personalSkillHasNewerRevision,
@@ -112,14 +112,41 @@ describe("the person's own Skill rows", () => {
     expect(rows[0].binding).toBe(saved[0]);
   });
 
-  test("follows the change being saved and shows the saved Skills when there is no library", () => {
-    const saved = [binding("a", { attachable_revision_id: "a-r2" })];
+  test("follows the change being saved and keeps Skills in the chat that no loaded page shows", () => {
+    const saved = [binding("a", { attachable_revision_id: "a-r2" }), binding("z", { position: 1 })];
     const moved = [
-      { skill_id: "a", skill_revision_id: "a-r2", activation_mode: "on_demand" as const }
+      { skill_id: "a", skill_revision_id: "a-r2", activation_mode: "on_demand" as const },
+      { skill_id: "z", skill_revision_id: "z-r1", activation_mode: "always" as const }
+    ];
+    const library = [
+      { id: "b", display_name: "B", description: "", is_active: true, current_revision_id: "b-r1" }
     ];
 
-    expect(personalSkillRows(saved, null, moved)).toMatchObject([
-      { id: "a", name: "Skill a", mode: "on_demand", hasNewerRevision: false }
+    expect(personalSkillRows(saved, library as never, moved)).toMatchObject([
+      { id: "b", mode: "off" },
+      { id: "a", name: "Skill a", mode: "on_demand", hasNewerRevision: false },
+      { id: "z", mode: "always" }
+    ]);
+    // A search shows what the server found, and only that.
+    expect(
+      personalSkillRows(saved, library as never, moved, { searching: true }).map((row) => row.id)
+    ).toEqual(["b"]);
+  });
+});
+
+describe("saving a personal chat Skill change", () => {
+  test("applies the change to what is saved when its turn comes, not when it was made", async () => {
+    let saved = [binding("a"), binding("b", { position: 1 })];
+    const build = fromSavedBindings(
+      async () => ({ bindings: saved, runtime: null }),
+      (bindings) => withPersonalSkillMode(bindings, { id: "c", revisionId: "c-r1" }, "always")
+    );
+    // An earlier save in the queue switched b off.
+    saved = [binding("a")];
+
+    await expect(build()).resolves.toEqual([
+      { skill_id: "a", skill_revision_id: "a-r1", activation_mode: "always" },
+      { skill_id: "c", skill_revision_id: "c-r1", activation_mode: "always" }
     ]);
   });
 });
@@ -192,25 +219,6 @@ describe("personal chat Skill messages", () => {
     expect(personalSkillsSaveErrorMessage(new Error("offline"))).toBe(
       m.personal_chat_skills_save_failed()
     );
-  });
-});
-
-describe("the person's Skills library", () => {
-  test("reads every page so each own Skill can be chosen", async () => {
-    const list = vi
-      .fn()
-      .mockResolvedValueOnce({ items: [{ id: "a" }], next_cursor: "a" })
-      .mockResolvedValueOnce({ items: [{ id: "b" }], next_cursor: null });
-
-    await expect(
-      listPersonalSpaceSkills({ skills: { list } } as never, "personal-space")
-    ).resolves.toEqual([{ id: "a" }, { id: "b" }]);
-    expect(list).toHaveBeenNthCalledWith(1, {
-      spaceId: "personal-space",
-      limit: 100,
-      cursor: null
-    });
-    expect(list).toHaveBeenNthCalledWith(2, { spaceId: "personal-space", limit: 100, cursor: "a" });
   });
 });
 
