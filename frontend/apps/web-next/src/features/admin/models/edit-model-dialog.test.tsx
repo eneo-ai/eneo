@@ -109,3 +109,54 @@ describe("EditModelDialog for an image model", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
+
+describe("EditModelDialog for a forecast model", () => {
+  const forecastModel = {
+    id: "f1",
+    name: "default",
+    nickname: "Timestral",
+    org: "Mistral AI",
+    open_source: true,
+    security_classification: null
+  } as unknown as AdminModel;
+
+  it("renames it and sets its class through the forecast endpoint, nothing else", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const onOpenChange = vi.fn();
+    renderInApp(
+      <EditModelDialog
+        model={forecastModel}
+        kind="forecast"
+        classifications={[{ id: "s3", name: "Klass 3", security_level: 3 } as never]}
+        securityEnabled
+        open
+        onOpenChange={onOpenChange}
+      />
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Redigera modell" });
+    expect(
+      (within(dialog).getByLabelText("Modellidentifierare") as HTMLInputElement).readOnly
+    ).toBe(true);
+    // Eneo sets the rest: the endpoint takes the name and the class.
+    for (const label of ["Beskrivning", "Modellfamilj", "Hosting-region", "Stabilitet"]) {
+      expect(within(dialog).queryByLabelText(label)).toBeNull();
+    }
+    expect(within(dialog).queryByText("Öppen källkod")).toBeNull();
+    await expectNoAxeViolations(dialog);
+
+    fireEvent.change(within(dialog).getByLabelText("Visningsnamn"), {
+      target: { value: "  Prognosmodellen " }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/forecast-models/{id}/", {
+        params: { path: { id: "f1" } },
+        body: { display_name: "Prognosmodellen", security_classification: null }
+      })
+    );
+    expect(api.PUT).not.toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalledWith("Modellen har uppdaterats");
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});

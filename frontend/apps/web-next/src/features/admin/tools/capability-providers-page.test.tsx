@@ -259,6 +259,58 @@ describe("admin function sources", () => {
     expect(screen.queryByText("tools_builtin_model_missing_hint")).toBeNull();
   });
 
+  it("names the model a forecast source runs and where, and why it is blocked while it is off", async () => {
+    const forecastSource = (readiness: string | null) => ({
+      ...source,
+      id: "forecast",
+      mcp_server_id: "forecast",
+      name: "Forecast",
+      http_url: "http://runtime:8765/forecast",
+      http_auth_type: "bundled",
+      purpose: "forecast",
+      is_enabled: true,
+      readiness_reason: readiness,
+      forecast_model_id: "f1",
+      forecast_model: {
+        id: "f1",
+        name: "default",
+        nickname: "Timestral",
+        // The stored name; the line says where it runs in the reader's language.
+        provider_name: "Eneo tool service",
+        is_enabled: readiness === null
+      }
+    });
+    const serve = (readiness: string | null) =>
+      get.mockImplementation((path?: string) => {
+        if (path === "/api/v1/mcp-servers/settings/")
+          return ok({ items: [forecastSource(readiness)] });
+        if (path === "/api/v1/mcp-servers/bundled/")
+          return ok({
+            ...bundled,
+            items: bundled.items.map((item) =>
+              item.tool === "forecast"
+                ? { ...item, mcp_server_id: "forecast", available: true, unavailable_reason: null }
+                : item
+            )
+          });
+        return ok({ items: [] });
+      });
+
+    serve(null);
+    show();
+    expect(await screen.findByRole("heading", { level: 3, name: "forecast" })).toBeTruthy();
+    expect(screen.getByText("tools_builtin_forecast_summary")).toBeTruthy();
+    expect(screen.getByText("model · Timestral · mcp_auth_bundled")).toBeTruthy();
+    expect(screen.queryByText("tools_readiness_model_disabled")).toBeNull();
+    cleanup();
+
+    // Switched off in Admin > Models: the source says why, like an image source.
+    serve("model_disabled");
+    show();
+    expect(await screen.findByText("tools_readiness_model_disabled")).toBeTruthy();
+    expect(screen.getByText("tools_blocked")).toBeTruthy();
+  });
+
   it("activates an existing source through the capability endpoint", async () => {
     get.mockImplementation((path?: string) =>
       path === "/api/v1/mcp-servers/settings/" ? ok({ items: [source] }) : ok({ items: [] })

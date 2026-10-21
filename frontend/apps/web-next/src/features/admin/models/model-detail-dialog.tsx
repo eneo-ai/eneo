@@ -20,10 +20,11 @@ import { modelDisplayName } from "@/lib/models/model-display-name";
 import { useImageOptionLabels } from "./image-model-options";
 import {
   type AdminModel,
-  imageModelUsedBy,
   type MigratableModelKind,
   type ModelKind,
-  modelUsageDetailsQueryOptions
+  modelUsageDetailsQueryOptions,
+  modelUsedBy,
+  usedByLabel
 } from "./models";
 
 /** Labels for the entity types the usage endpoint returns; an unknown one shows as sent. */
@@ -47,7 +48,7 @@ export function ModelDetailDialog({
   onOpenChange
 }: {
   model: AdminModel;
-  kind: Exclude<ModelKind, "embedding">;
+  kind: Exclude<ModelKind, "embedding" | "forecast">;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -86,13 +87,14 @@ function InfoTab({
   t
 }: {
   model: AdminModel;
-  kind: Exclude<ModelKind, "embedding">;
+  kind: Exclude<ModelKind, "embedding" | "forecast">;
   t: ReturnType<typeof useTranslations>;
 }) {
   const imageLabels = useImageOptionLabels();
   const get = (key: string) => (model as Record<string, unknown>)[key];
   const contextWindow = get("max_input_tokens");
-  const usedBy = imageModelUsedBy(model);
+  const hosting = get("hosting");
+  const usedBy = modelUsedBy(model);
 
   return (
     <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
@@ -105,7 +107,9 @@ function InfoTab({
       {typeof get("family") === "string" && (
         <Field label={t("model_family")} value={String(get("family"))} />
       )}
-      {model.hosting && <Field label={t("hosting_region")} value={model.hosting} />}
+      {typeof hosting === "string" && hosting !== "" && (
+        <Field label={t("hosting_region")} value={hosting} />
+      )}
       {typeof contextWindow === "number" && (
         <Field label={t("model_context_label")} value={contextWindow.toLocaleString()} />
       )}
@@ -122,9 +126,7 @@ function InfoTab({
           />
           {usedBy.length > 0 && (
             <div className="sm:col-span-2">
-              <dt className="text-muted-foreground text-xs">
-                {t("model_used_by_image_generation")}
-              </dt>
+              <dt className="text-muted-foreground text-xs">{usedByLabel(t, usedBy)}</dt>
               <dd>
                 <ul className="flex flex-wrap gap-1 pt-0.5">
                   {usedBy.map((source) => (

@@ -253,6 +253,47 @@ describe("Tools capability configuration", () => {
     );
   });
 
+  it("names the model a Prognos source runs and where, and why it is blocked while it is off", async () => {
+    const forecast = (readiness: string | null) =>
+      source({
+        mcp_server_id: "forecast",
+        name: "Forecast",
+        purpose: "forecast",
+        http_auth_type: "bundled",
+        http_url: "http://runtime:8765/forecast",
+        image_model_id: null,
+        image_model: null,
+        readiness_reason: readiness,
+        forecast_model_id: "f1",
+        // The stored provider name; the line says where it runs in the reader's language.
+        forecast_model: {
+          id: "f1",
+          name: "default",
+          nickname: "Timestral",
+          provider_name: "Eneo tool service",
+          is_enabled: readiness === null
+        }
+      });
+    const offer = [
+      { tool: "forecast", purpose: "forecast", available: true, mcp_server_id: "forecast" }
+    ];
+    const rendered = render(ToolsPage, { data: pageData([forecast(null)], offer) });
+    await expect
+      .element(page.getByRole("heading", { level: 3, name: m.forecast(), exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.tools_builtin_forecast_summary(), { exact: true }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(`${m.model()} · Timestral · ${m.mcp_auth_bundled()}`))
+      .toBeVisible();
+    expect(page.getByText(m.tools_readiness_model_disabled()).elements()).toHaveLength(0);
+
+    // Switched off under Admin > Models: the source says why, like an image source.
+    await rendered.rerender({ data: pageData([forecast("model_disabled")], offer) });
+    await expect.element(page.getByText(m.tools_readiness_model_disabled())).toBeVisible();
+  });
+
   it("keeps an edit action and allows disabling a blocked active source", async () => {
     show([source({ readiness_reason: "model_disabled" })]);
     await expect

@@ -9,6 +9,9 @@
       the legacy eneo.models.update fallback for security_classification
       and is_default no longer exists — those fields live on the tenant
       update contract now).
+  A forecast model comes with the installation and has no tenant-model
+  contract: its display name and classification go to the forecast model
+  endpoint, which also switches it on and off.
 -->
 
 <script lang="ts">
@@ -16,6 +19,7 @@
   import type {
     CompletionModel,
     EmbeddingModel,
+    ForecastModel,
     ImageModel,
     RerankModel,
     TranscriptionModel,
@@ -46,12 +50,17 @@
     modelToDraft,
     rawCostToNumber,
     tokenCostFromPerMillion,
-    type ModelDraftState,
-    type ModelType
+    type DraftModelType,
+    type ModelDraftState
   } from "./AddWizard/models/draft";
 
   type ModelTypeKey =
-    "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
+    | "completionModel"
+    | "embeddingModel"
+    | "transcriptionModel"
+    | "imageModel"
+    | "rerankModel"
+    | "forecastModel";
 
   let {
     openController,
@@ -59,7 +68,13 @@
     type
   }: {
     openController: Writable<boolean>;
-    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
+    model:
+      | CompletionModel
+      | EmbeddingModel
+      | TranscriptionModel
+      | ImageModel
+      | RerankModel
+      | ForecastModel;
     type: ModelTypeKey;
   } = $props();
 
@@ -73,7 +88,7 @@
   });
 
   // --- Draft state ------------------------------------------------------
-  const modelType: ModelType = $derived(
+  const modelType: DraftModelType = $derived(
     type === "completionModel"
       ? "completion"
       : type === "embeddingModel"
@@ -82,7 +97,9 @@
           ? "image"
           : type === "rerankModel"
             ? "rerank"
-            : "transcription"
+            : type === "forecastModel"
+              ? "forecast"
+              : "transcription"
   );
 
   let draft = $state<ModelDraftState>(untrack(() => createEmptyDraft(modelType, "openai")));
@@ -226,6 +243,11 @@
         await eneo.tenantModels.updateImage({ id: model.id }, buildImageUpdate());
       } else if (type === "rerankModel") {
         await eneo.tenantModels.updateRerank({ id: model.id }, buildRerankUpdate());
+      } else if (type === "forecastModel") {
+        await eneo.models.update({
+          forecastModel: { id: model.id },
+          update: { display_name: draft.displayName.trim(), ...securityClassificationPatch() }
+        });
       } else {
         await eneo.tenantModels.updateTranscription({ id: model.id }, buildTranscriptionUpdate());
       }
@@ -272,21 +294,23 @@
           nameReadOnly={type !== "completionModel"}
         />
 
-        <fieldset class="border-border/40 mt-2 border-t pt-4">
-          <legend class="sr-only">{m.model_details()}</legend>
-          <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
-            <Field.Field orientation="horizontal" class="w-fit">
-              <Checkbox id="open-source" bind:checked={openSource} />
-              <Field.Label for="open-source">{m.model_label_open_source()}</Field.Label>
-            </Field.Field>
-            {#if "is_org_default" in model}
+        {#if modelType !== "forecast"}
+          <fieldset class="border-border/40 mt-2 border-t pt-4">
+            <legend class="sr-only">{m.model_details()}</legend>
+            <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
               <Field.Field orientation="horizontal" class="w-fit">
-                <Checkbox id="is-default" bind:checked={isDefault} />
-                <Field.Label for="is-default">{m.default_model()}</Field.Label>
+                <Checkbox id="open-source" bind:checked={openSource} />
+                <Field.Label for="open-source">{m.model_label_open_source()}</Field.Label>
               </Field.Field>
-            {/if}
-          </div>
-        </fieldset>
+              {#if "is_org_default" in model}
+                <Field.Field orientation="horizontal" class="w-fit">
+                  <Checkbox id="is-default" bind:checked={isDefault} />
+                  <Field.Label for="is-default">{m.default_model()}</Field.Label>
+                </Field.Field>
+              {/if}
+            </div>
+          </fieldset>
+        {/if}
       </div>
     </div>
 

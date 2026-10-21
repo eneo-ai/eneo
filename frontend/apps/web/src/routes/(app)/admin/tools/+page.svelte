@@ -437,6 +437,14 @@
                           {#if capability.bundledSummary}
                             <p class="text-secondary mt-1 text-sm">{capability.bundledSummary()}</p>
                           {/if}
+                          <!-- And which model it runs where: a bundled source's model runs in Eneo's tool
+                               service, named in the reader's language (the provider's stored name is English). -->
+                          {#if source.forecast_model}
+                            <p class="text-secondary mt-1 text-sm break-words">
+                              {m.model()} · {source.forecast_model.nickname ||
+                                source.forecast_model.name} · {m.mcp_auth_bundled()}
+                            </p>
+                          {/if}
                         {:else}
                           <p class="text-secondary mt-1 text-sm break-words">{source.http_url}</p>
                         {/if}

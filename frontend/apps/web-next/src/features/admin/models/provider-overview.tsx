@@ -165,13 +165,15 @@ export function ProviderOverview({
   const [securityFilter, setSecurityFilter] = useState("all");
   const security = securityEnabled ? securityFilter : "all";
   const filters: ModelFilters = { search, kind, security };
+  // The provider that comes with the installation, as the Functions page names it.
+  const managedName = t("mcp_auth_bundled");
 
   const sections = useMemo(
     () =>
       capabilities.data
-        ? buildProviderSections(models, providers.data ?? [], capabilities.data)
+        ? buildProviderSections(models, providers.data ?? [], capabilities.data, managedName)
         : [],
-    [models, providers.data, capabilities.data]
+    [models, providers.data, capabilities.data, managedName]
   );
   const rendered = useMemo(
     () => filterSections(sections, { search, kind, security }),
@@ -244,6 +246,10 @@ export function ProviderOverview({
   } else if (providers.isPending || capabilities.isPending) {
     content = <LoadingState rows={4} />;
   } else if (rendered.length === 0) {
+    // No forecast model at all: it comes with the installation, once Prognos is on.
+    const noForecastModel =
+      kind === "forecast" &&
+      !sections.some((section) => section.models.some((entry) => entry.kind === "forecast"));
     content =
       sections.length === 0 ? (
         <EmptyState
@@ -256,6 +262,11 @@ export function ProviderOverview({
               onClick={onAddProvider}
             />
           }
+        />
+      ) : noForecastModel ? (
+        <EmptyState
+          title={t("forecast_models_empty_title")}
+          description={t("forecast_models_empty_description")}
         />
       ) : (
         <EmptyState title={t("no_providers_match")} />

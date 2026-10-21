@@ -10,6 +10,7 @@
   import type {
     CompletionModel,
     EmbeddingModel,
+    ForecastModel,
     ImageModel,
     RerankModel,
     TranscriptionModel
@@ -37,11 +38,27 @@
     completionModels = []
   }: {
     openController: Writable<boolean>;
-    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
+    model:
+      | CompletionModel
+      | EmbeddingModel
+      | TranscriptionModel
+      | ImageModel
+      | RerankModel
+      | ForecastModel;
     type:
-      "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
+      | "completionModel"
+      | "embeddingModel"
+      | "transcriptionModel"
+      | "imageModel"
+      | "rerankModel"
+      | "forecastModel";
     completionModels?: CompletionModel[];
   } = $props();
+
+  // A forecast model runs in Eneo's tool service and has none of these.
+  const hosting = $derived("hosting" in model ? model.hosting : null);
+  const family = $derived("family" in model ? model.family : null);
+  const hfLink = $derived("hf_link" in model ? model.hf_link : null);
 
   // Bridge the legacy Writable<boolean> contract to runes so shadcn Dialog's
   // bind:open works. Same pattern as AddWizard / EditModelDialog.
@@ -230,10 +247,10 @@
         </tr>
 
         <!-- Hosting -->
-        {#if model.hosting}
+        {#if hosting}
           <tr>
             <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.hosting_region()}</td>
-            <td class="py-2.5">{findHostingLabel(model.hosting) || model.hosting.toUpperCase()}</td>
+            <td class="py-2.5">{findHostingLabel(hosting) || hosting.toUpperCase()}</td>
           </tr>
         {/if}
 
@@ -289,16 +306,16 @@
         {/if}
 
         <!-- Metadata divider only if at least one of the metadata rows below renders -->
-        {#if model.family || model.org || model.description}
+        {#if family || model.org || model.description}
           <tr>
             <td colspan="2" class="py-2"><div class="border-dimmer border-t"></div></td>
           </tr>
         {/if}
 
-        {#if model.family}
+        {#if family}
           <tr>
             <td class="text-muted py-2.5 pr-8 align-top whitespace-nowrap">{m.model_family()}</td>
-            <td class="py-2.5">{model.family}</td>
+            <td class="py-2.5">{family}</td>
           </tr>
         {/if}
         {#if model.org}
@@ -316,10 +333,10 @@
       </tbody>
     </table>
 
-    {#if model.hf_link}
+    {#if hfLink}
       <!-- eslint-disable svelte/no-navigation-without-resolve -- external HuggingFace URL from model metadata -->
       <a
-        href={model.hf_link}
+        href={hfLink}
         target="_blank"
         rel="noopener noreferrer"
         class="text-accent-default mt-4 inline-flex items-center gap-1.5 text-sm hover:underline"

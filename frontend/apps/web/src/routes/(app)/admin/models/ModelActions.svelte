@@ -5,6 +5,7 @@
     EneoError,
     type CompletionModel,
     type EmbeddingModel,
+    type ForecastModel,
     type ImageModel,
     type RerankModel,
     type TranscriptionModel
@@ -34,9 +35,20 @@
    *  Mirrors `ErrorCodes.MODEL_IN_USE` in `backend/src/eneo/main/exceptions.py`. */
   const MODEL_IN_USE_CODE = 9039;
 
-  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
+  type AnyModel =
+    | CompletionModel
+    | EmbeddingModel
+    | TranscriptionModel
+    | ImageModel
+    | RerankModel
+    | ForecastModel;
   type ModelTypeKey =
-    "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
+    | "completionModel"
+    | "embeddingModel"
+    | "transcriptionModel"
+    | "imageModel"
+    | "rerankModel"
+    | "forecastModel";
 
   export let model: AnyModel;
   export let type: ModelTypeKey;
@@ -57,6 +69,8 @@
   let showMigrateOption = false;
 
   $: supportsMigration = type === "completionModel" || type === "transcriptionModel";
+  // A forecast model comes with the installation: renamed and classified, never deleted.
+  $: canDelete = type !== "forecastModel";
   $: migrateTargets =
     type === "completionModel"
       ? completionModels
@@ -137,19 +151,21 @@
       </DropdownMenu.Item>
     {/if}
 
-    <DropdownMenu.Separator />
+    {#if canDelete}
+      <DropdownMenu.Separator />
 
-    <DropdownMenu.Item variant="destructive" disabled={deleteBlocked} onclick={openDelete}>
-      <Trash2 />
-      <span class="flex flex-col">
-        <span>{m.delete_model()}</span>
-        {#if deleteBlocked}
-          <span class="text-muted-foreground text-xs whitespace-normal">
-            {m.model_delete_blocked_used_by({ names: deleteBlockedNames })}
-          </span>
-        {/if}
-      </span>
-    </DropdownMenu.Item>
+      <DropdownMenu.Item variant="destructive" disabled={deleteBlocked} onclick={openDelete}>
+        <Trash2 />
+        <span class="flex flex-col">
+          <span>{m.delete_model()}</span>
+          {#if deleteBlocked}
+            <span class="text-muted-foreground text-xs whitespace-normal">
+              {m.model_delete_blocked_used_by({ names: deleteBlockedNames })}
+            </span>
+          {/if}
+        </span>
+      </DropdownMenu.Item>
+    {/if}
   </DropdownMenu.Content>
 </DropdownMenu.Root>
 

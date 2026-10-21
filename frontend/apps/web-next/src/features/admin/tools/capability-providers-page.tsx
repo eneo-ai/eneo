@@ -140,7 +140,10 @@ function BundledOffer({
   );
 }
 
-/** One line under a source's name: the model, what the bundled provider does, or the address. */
+/**
+ * The lines under a source's name: the model, what the bundled provider does
+ * (and the model it runs, for Prognos), or the address.
+ */
 function SourceDetail({
   source,
   capability
@@ -162,10 +165,23 @@ function SourceDetail({
     );
   }
   if (kind === "bundled") {
-    // The runtime address is deployment plumbing; say what the provider does, in one line.
-    return capability.bundledSummary ? (
-      <p className="text-ax-text-secondary text-sm">{t(capability.bundledSummary)}</p>
-    ) : null;
+    // The runtime address is deployment plumbing; say what the provider does,
+    // in one line, and which model it runs where. A bundled source's model
+    // runs in Eneo's tool service, named in the reader's language (the
+    // provider's stored name is English).
+    const model = source.forecast_model;
+    return (
+      <>
+        {capability.bundledSummary ? (
+          <p className="text-ax-text-secondary text-sm">{t(capability.bundledSummary)}</p>
+        ) : null}
+        {model ? (
+          <p className="text-ax-text-secondary text-sm break-words">
+            {t("model")} · {model.nickname || model.name} · {t("mcp_auth_bundled")}
+          </p>
+        ) : null}
+      </>
+    );
   }
   return (
     <p className="text-ax-text-secondary text-sm break-all">
