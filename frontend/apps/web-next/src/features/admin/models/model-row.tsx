@@ -242,7 +242,8 @@ export function ModelRow({
   });
 
   // The technical id under the display name, unless the name already is the id.
-  const technicalId = modelTechnicalId(model);
+  // A forecast model's key ("default") is Eneo's own mapping, not a name an admin uses.
+  const technicalId = kind === "forecast" ? null : modelTechnicalId(model);
   const locked = (model as { is_locked?: boolean | null }).is_locked ?? false;
   const readonly = "readonly" in model && model.readonly === true;
   const isDefault = hasDefault(model) && model.is_org_default === true;
@@ -353,7 +354,8 @@ export function ModelRow({
                 label={t("model_label_retiring", { date: lifecycle.date })}
               />
             )}
-            {deleteBlocked && <Badge variant="warning" label={usedByLabel(t, usedBy)} />}
+            {/* Information, not a warning: why it cannot be deleted is said at Delete. */}
+            {deleteBlocked && <Badge label={usedByLabel(t, usedBy)} />}
           </div>
           {technicalId && (
             <Text type="code" size="sm" color="secondary" maxLines={1}>

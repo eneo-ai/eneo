@@ -143,7 +143,7 @@
         {#snippet child({ props })}
           <div
             {...props}
-            class="bg-warning-dimmer text-warning-stronger inline-flex cursor-default items-center rounded-full px-2 py-[2px] text-[11px] font-medium tracking-wide"
+            class="text-secondary bg-secondary inline-flex cursor-default items-center rounded px-2 py-0.5 text-xs"
             data-status="in-use"
           >
             {m.model_used_by_function({ function: usedByFunctions })}

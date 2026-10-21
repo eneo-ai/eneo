@@ -386,6 +386,8 @@
                 {#each sources as source (source.mcp_server_id)}
                   {@const expanded = reviewing === source.mcp_server_id}
                   {@const kind = sourceKind(source.http_auth_type)}
+                  <!-- A bundled source is named after its function, also for screen readers. -->
+                  {@const shownName = bundledIdentity(source)?.name ?? source.name}
                   <div class="border-dimmer border-b p-5 last:border-b-0">
                     <div
                       class="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
@@ -393,7 +395,7 @@
                       <Button
                         variant="ghost"
                         size="icon"
-                        aria-label={`${expanded ? m.governance_mcp_hide_tools() : m.governance_mcp_show_tools()}: ${source.name}`}
+                        aria-label={`${expanded ? m.governance_mcp_hide_tools() : m.governance_mcp_show_tools()}: ${shownName}`}
                         aria-expanded={expanded}
                         aria-controls={"source-tools-" + source.mcp_server_id}
                         onclick={() => (reviewing = expanded ? null : source.mcp_server_id)}
@@ -408,7 +410,7 @@
                       <div class="min-w-0">
                         <div class="flex flex-wrap items-center gap-2">
                           <h3 class="text-default text-sm font-medium">
-                            {bundledIdentity(source)?.name ?? source.name}
+                            {shownName}
                           </h3>
                           <!-- Every source carries its kind: Eneo itself, Eneo's tool service, or an external server. -->
                           <span
@@ -480,7 +482,7 @@
                                 variant="ghost"
                                 size="icon"
                                 class="hover:bg-hover-on-fill hover:text-primary"
-                                aria-label={`${m.actions()}: ${source.name}`}
+                                aria-label={`${m.actions()}: ${shownName}`}
                               >
                                 <IconEllipsis />
                               </Button>
@@ -524,7 +526,7 @@
                         {:else}
                           <MCPToolsPanel
                             mcpServerId={source.mcp_server_id}
-                            serverName={source.name}
+                            serverName={shownName}
                             tools={source.tools ?? []}
                             eneoClient={data.eneo}
                           />
