@@ -1250,3 +1250,86 @@ async def test_an_in_flight_policy_save_refuses_the_apply_without_waiting(
             )
             assert confirm is PersonalChatPinConfirmOutcome.POLICY_CHANGED
             await staging.session().rollback()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_pin_apply_and_an_assistant_binding_save_cannot_deadlock(
+    db_container, admin_user
+):
+    """An Assistant save takes the shared fit token, then resolves binding
+    references, which hold Skill rows FOR SHARE. The apply must take the fit
+    token before it locks the Skill row (lock order: policy row, fit token,
+    then other rows), or each would wait for the other."""
+    async with db_container() as container:
+        session = container.session()
+        repo = container.skill_repo()
+        org = await _org_space_id(session, tenant_id=admin_user.tenant_id)
+        skill = await _published_skill(
+            repo, space_id=org, tenant_id=admin_user.tenant_id, user_id=admin_user.id
+        )
+        old_revision = skill.current_revision
+        await _bind_to_personal_chat(
+            repo,
+            session,
+            tenant_id=admin_user.tenant_id,
+            org_space_id=org,
+            references=[
+                SkillBindingReference(
+                    skill_id=skill.id, skill_revision_id=old_revision.id
+                )
+            ],
+        )
+        published = await _publish_second_revision(
+            repo,
+            tenant_id=admin_user.tenant_id,
+            skill_id=skill.id,
+            user_id=admin_user.id,
+        )
+
+    async with db_container() as assistant_save:
+        await acquire_personal_default_fit_lock(
+            session=assistant_save.session(),
+            tenant_id=admin_user.tenant_id,
+            shared=True,
+        )
+        async with db_container() as staging:
+            stage = await staging.skill_repo().stage_personal_chat_skill_pin_advance(
+                tenant_id=admin_user.tenant_id,
+                skill_id=skill.id,
+                expected_pinned_revision_id=old_revision.id,
+                expected_published_revision_id=published.id,
+            )
+            assert stage is not None
+            pid = await staging.session().scalar(sa.text("SELECT pg_backend_pid()"))
+            confirm = asyncio.create_task(
+                staging.skill_repo().confirm_personal_chat_skill_pin_advance(
+                    tenant_id=admin_user.tenant_id,
+                    skill_id=skill.id,
+                    policy_id=stage.policy_id,
+                    policy_version=stage.policy_version,
+                    personal_defaults_snapshot=stage.personal_defaults_snapshot,
+                    expected_pinned_revision_id=old_revision.id,
+                    expected_published_revision_id=published.id,
+                )
+            )
+            try:
+                await _wait_until_advisory_lock(db_container, pid=pid, task=confirm)
+                await asyncio.wait_for(
+                    assistant_save.skill_repo().resolve_published_references_for_binding_update(
+                        tenant_id=admin_user.tenant_id,
+                        references=[
+                            SkillBindingReference(
+                                skill_id=skill.id, skill_revision_id=published.id
+                            )
+                        ],
+                    ),
+                    timeout=5,
+                )
+                await assistant_save.session().commit()
+                outcome = await asyncio.wait_for(confirm, timeout=10)
+            finally:
+                if not confirm.done():
+                    confirm.cancel()
+                    await asyncio.gather(confirm, return_exceptions=True)
+            assert outcome is PersonalChatPinConfirmOutcome.CONFIRMED

@@ -2070,24 +2070,22 @@ class SkillRepoImpl:
         Tenant-level model and MCP catalogue changes are outside this snapshot;
         their administrator flows own their validation.
 
-        The policy lock is NOWAIT so a concurrent policy save refuses this
-        apply instead of waiting. Publication and block state are rechecked
-        under the Skill lock. The exclusive tenant fit token then drains
-        in-flight Assistant saves before the snapshot recheck; later saves wait
-        until this transaction commits and validate against the new pin. The
-        runtime-policy row is then held FOR SHARE, draining an in-flight update
-        and making later updates wait until this short apply completes.
-
         Every writer follows one lock order: policy row, fit token, then other
-        rows. Waiting for the token cannot deadlock: an Assistant save holds
-        only its row and the shared token, never policy, Skill, or binding
-        locks. A governance save takes the policy row before the exclusive
-        token, so while it runs the NOWAIT policy lock refuses before confirm
-        can wait. Runtime-policy
-        updates hold only their own row FOR UPDATE; they take neither the token
-        nor policy, Skill, or binding locks, so our FOR SHARE wait cannot form a
-        cycle. The binding recheck, guarded write, and policy-row bump then
-        finish the short apply.
+        rows (Assistant, Skill, binding, runtime-policy).
+
+        The policy lock is NOWAIT so a concurrent policy save, which holds the
+        policy row before its own exclusive token, refuses this apply instead
+        of waiting. The exclusive tenant fit token then drains in-flight
+        Assistant saves; later saves wait until this transaction commits and
+        validate against the new pin. Assistant saves hold the shared token and
+        then lock Assistant and Skill rows (binding resolution holds Skills FOR
+        SHARE), never the policy row, so the token is taken before the Skill
+        lock here. Publication and block state are rechecked under the Skill
+        lock, and the runtime-policy row is then held FOR SHARE, draining an
+        in-flight update and making later updates wait until this short apply
+        completes. Runtime-policy updates hold only their own row FOR UPDATE and
+        take no token, so that wait cannot form a cycle. The binding recheck,
+        guarded write, and policy-row bump then finish the short apply.
         """
         try:
             async with self.session.begin_nested():
@@ -2106,6 +2104,11 @@ class SkillRepoImpl:
         if locked_version != policy_version:
             return PersonalChatPinConfirmOutcome.POLICY_CHANGED
 
+        await acquire_personal_default_fit_lock(
+            session=self.session,
+            tenant_id=tenant_id,
+            shared=False,
+        )
         skill_row = await self._lock_organization_skill(
             tenant_id=tenant_id, skill_id=skill_id
         )
@@ -2125,11 +2128,6 @@ class SkillRepoImpl:
         if active_block is not None:
             return PersonalChatPinConfirmOutcome.BLOCKED
 
-        await acquire_personal_default_fit_lock(
-            session=self.session,
-            tenant_id=tenant_id,
-            shared=False,
-        )
         current_personal_defaults_snapshot = await self.personal_defaults_fit_snapshot(
             tenant_id=tenant_id, lock_runtime_policy=True
         )

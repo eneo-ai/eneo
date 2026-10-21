@@ -1079,11 +1079,7 @@ class AssistantService:
         baseline, including the activation transcript and configured MCP schemas.
         Combinations and live per-user MCP narrowing remain turn-time decisions.
         Skipped only when no model is resolved."""
-        await acquire_personal_default_fit_lock(
-            session=self.repo.session,
-            tenant_id=self.user.tenant_id,
-            shared=True,
-        )
+        await self._acquire_personal_default_fit_lock(shared=True)
         # Mirror ask()'s governance resolution so the fit check uses the model
         # and prompt the request will really send, not the assistant's own.
         effective_config = await self._resolve_effective_config(
@@ -1266,6 +1262,20 @@ class AssistantService:
             )
         return resolved_model
 
+    async def _acquire_personal_default_fit_lock(self, *, shared: bool) -> None:
+        """Take the tenant fit token in the protocol's lock order.
+
+        Every token request in this service goes through here, so none can
+        forget that the runtime-policy row must exist before the token is
+        requested (see ``SkillService.ensure_runtime_policy``).
+        """
+        await self.skill_service.ensure_runtime_policy()
+        await acquire_personal_default_fit_lock(
+            session=self.repo.session,
+            tenant_id=self.user.tenant_id,
+            shared=shared,
+        )
+
     async def confirm_personal_default_governance_fit(self) -> None:
         """Validate a staged personal chat policy save against every personal chat.
 
@@ -1281,11 +1291,7 @@ class AssistantService:
             lock_runtime_policy=False
         )
         await self.assert_personal_default_governance_context_fit()
-        await acquire_personal_default_fit_lock(
-            session=self.repo.session,
-            tenant_id=self.user.tenant_id,
-            shared=False,
-        )
+        await self._acquire_personal_default_fit_lock(shared=False)
         confirmed = await self.skill_service.personal_defaults_fit_snapshot(
             lock_runtime_policy=True
         )
@@ -1617,11 +1623,7 @@ class AssistantService:
         # Partial writes must validate against the latest committed model,
         # prompt and attachments. Take the fit token before the parent row lock,
         # matching governance lock order, and hold both until the request commits.
-        await acquire_personal_default_fit_lock(
-            session=self.repo.session,
-            tenant_id=self.user.tenant_id,
-            shared=True,
-        )
+        await self._acquire_personal_default_fit_lock(shared=True)
         assert space.id is not None
         await self.repo.lock(assistant_id, space.id)
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
@@ -3925,11 +3927,7 @@ class AssistantService:
         assert space.id is not None
         # Incremental additions share the update path's fit/row lock order.
         # Reload after waiting so combined tool schemas are validated together.
-        await acquire_personal_default_fit_lock(
-            session=self.repo.session,
-            tenant_id=self.user.tenant_id,
-            shared=True,
-        )
+        await self._acquire_personal_default_fit_lock(shared=True)
         await self.repo.lock(assistant_id, space.id)
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         assert space.id is not None

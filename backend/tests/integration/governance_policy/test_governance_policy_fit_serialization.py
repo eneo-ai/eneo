@@ -17,6 +17,7 @@ import sqlalchemy as sa
 
 from eneo.assistants.assistant_service import AssistantService
 from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.skill_table import SkillRuntimePolicies
 from eneo.main.exceptions import BadRequestException
 from eneo.skills.domain.skill import SkillBindingIntent, SkillBindingReference
 
@@ -194,3 +195,58 @@ async def test_the_fit_protocol_runs_under_read_committed(db_container):
     async with db_container() as container:
         level = await container.session().scalar(sa.text("SHOW transaction_isolation"))
     assert level == "read committed"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_tenant_without_a_runtime_policy_row_serializes_without_deadlock(
+    db_container, test_settings, completion_model_factory
+):
+    """The runtime-policy row is created on first read. A policy save creates it
+    during its lock-free validation; a personal chat save that then starts must
+    wait for that row before it takes the fit token, or the two deadlock."""
+    default_id, _, small_id, skill = await _personal_chat_with_two_models(
+        db_container, test_settings, completion_model_factory
+    )
+    async with db_container() as container:
+        await container.session().execute(
+            sa.delete(SkillRuntimePolicies).where(
+                SkillRuntimePolicies.tenant_id == container.user().tenant_id
+            )
+        )
+
+    async with db_container() as admin:
+        service = admin.governance_policy_service()
+        await service.get_policy_for_update()
+        await service.update_policy(
+            skill_intents=[
+                SkillBindingIntent(
+                    reference=SkillBindingReference(
+                        skill_id=skill.id,
+                        skill_revision_id=skill.current_revision.id,
+                    )
+                )
+            ]
+        )
+        # Validation reads the runtime policy and so creates the missing row.
+        await admin.skill_repo().get_runtime_policy_snapshot(
+            tenant_id=admin.user().tenant_id
+        )
+        with pytest.raises(BadRequestException, match="context window"):
+            async with db_container() as person:
+                pid = await person.session().scalar(sa.text("SELECT pg_backend_pid()"))
+                pending = asyncio.create_task(
+                    _switch_model(person, default_id, small_id)
+                )
+                try:
+                    await _wait_until_lock_wait(db_container, pid=pid, task=pending)
+                    await asyncio.wait_for(
+                        admin.assistant_service().confirm_personal_default_governance_fit(),
+                        timeout=10,
+                    )
+                    await admin.session().commit()
+                    await asyncio.wait_for(pending, timeout=10)
+                finally:
+                    if not pending.done():
+                        pending.cancel()
+                        await asyncio.gather(pending, return_exceptions=True)

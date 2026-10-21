@@ -929,6 +929,16 @@ class SkillService:
             lock_runtime_policy=lock_runtime_policy,
         )
 
+    async def ensure_runtime_policy(self) -> None:
+        """Create the tenant's runtime-policy row if it is still missing.
+
+        The row is otherwise created on first read. Callers do this before they
+        request the personal-default fit token: creating it while holding the
+        token could wait for a policy save that created it first and is itself
+        waiting for the token.
+        """
+        await self.repo.get_or_seed_runtime_policy(tenant_id=self.user.tenant_id)
+
     async def resolve_governance_bindings_for_runtime(
         self,
         *,

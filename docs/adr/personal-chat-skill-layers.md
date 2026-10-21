@@ -170,9 +170,18 @@ administrator prompt change and a user model switch can each validate against
 the other's old state and commit an unusable baseline. This race predates this
 feature; the personal layer widens it.
 
-**Lock order: policy row, then tenant fit token, then Assistant, Skill or
-runtime-policy rows.** Pin confirmation already follows this order and does
-not change.
+**Invariant: no transaction waits for the fit token while holding a lock that
+a token holder may wait for.** Token holders wait for Assistant rows, Skill
+rows and the runtime-policy row, so in practice:
+
+- the policy row comes first, so a governance save and pin confirmation
+  exclude each other there;
+- the tenant's runtime-policy row exists before anyone requests the token
+  (`SkillService.ensure_runtime_policy`). It is otherwise created on first read,
+  and the inserted row would be held across the token wait;
+- Skill rows are locked `FOR UPDATE` only after the token. Pin confirmation
+  took its Skill lock first, which deadlocked with an Assistant save that holds
+  the token and then resolves Skills `FOR SHARE`; it now takes the token first.
 
 A governance save keeps its existing policy row lock
 (`governance_policy_router.py:199`). It then works like pin confirmation:
@@ -180,7 +189,8 @@ A governance save keeps its existing policy row lock
 1. It captures the `PersonalDefaultsSnapshot` (`skill.py:684`): Assistant
    count, digest of row versions, and runtime-policy version.
 2. It validates the fleet without the token, as today, so ordinary Assistant
-   saves are not blocked during the walk.
+   saves are not blocked during the walk. It holds only Skill rows
+   `FOR SHARE` here, which never conflict with a token holder's locks.
 3. It takes the token exclusive and holds the runtime-policy row `FOR SHARE`.
 4. It rechecks the snapshot. Only if it moved does it validate again. That
    second validation runs under the token, so no Assistant save can commit
@@ -188,21 +198,24 @@ A governance save keeps its existing policy row lock
 
 A personal-layer save rewrites the Assistant row, so it moves the digest.
 
-- **Assistant saves** keep shared token, then Assistant row. They never wait
-  for policy or Skill rows.
+- **Assistant saves** take the shared token, then the Assistant row, then
+  Skill rows `FOR SHARE`. They never wait for the policy row.
 - **Runtime-policy updates** keep locking only their own row. They take no
   token, so no reverse edge forms.
-- **Isolation:** confirm the effective level with
-  `SHOW transaction_isolation`.
+- **Isolation:** the recheck relies on READ COMMITTED, the PostgreSQL default
+  the engine uses; a test pins it.
+- **Scope:** the guarantee covers the save paths that take the token. Creating
+  a personal default Assistant and repairing its fallback model
+  (`space_init_service.py:66`, `:148`) write without it; bringing them into the
+  protocol is a follow-up.
 
 Real-transaction tests cover:
 
 - governance save against a model switch, in both orders;
-- governance save against a personal-layer save;
-- governance save against pin confirmation;
-- runtime-policy update against pin confirmation.
-
-They extend `tests/integration/test_assistant_update_context_fit.py`.
+- a tenant without a runtime-policy row (no deadlock);
+- governance save in flight against pin confirmation (refused at once);
+- pin confirmation against an Assistant binding save (no deadlock);
+- runtime-policy update against pin confirmation (existing).
 
 ### 7. Revisions
 
