@@ -1,13 +1,16 @@
 "use client";
 
 import * as React from "react";
-import { isFocusLost } from "@/lib/focus-rescue";
+import { isFocusLost, notifyFocusLost } from "@/lib/focus-rescue";
 
 /*
  * Focus return for dialogs (ACCESSIBILITY.md rule 2: when the focused element
  * disappears, move focus somewhere logical). Astryx Dialog returns focus to
  * the element that was focused when it opened; this module covers the cases
- * it cannot, for every dialog in the app.
+ * it cannot, for every dialog in the app. When the opener is gone too (the
+ * dialog confirmed deleting its own row), the page behind the dialog is told
+ * at that moment (`notifyFocusLost`) and rescues focus itself
+ * (src/lib/focus-rescue.ts).
  */
 
 /**
@@ -92,7 +95,7 @@ export function returnTarget(): HTMLElement | null {
  * Astryx Dialog returns focus to the element focused when it opened. This
  * covers what it cannot: that element is gone (a menu item), the browser never
  * focused the trigger on click (Safari), or the dialog unmounted while open.
- * It only acts when focus was actually lost.
+ * It only acts when focus was actually lost, and reports when it stays lost.
  */
 export function useReturnFocus(open: boolean, triggerRef: React.RefObject<HTMLElement | null>) {
   const targetRef = React.useRef<HTMLElement | null>(null);
@@ -111,14 +114,20 @@ export function useReturnFocus(open: boolean, triggerRef: React.RefObject<HTMLEl
     const target = targetRef.current;
     if (open || !target) return;
     targetRef.current = null;
-    if (isFocusLost() && target.isConnected) target.focus();
+    returnFocusTo(target);
   }, [open]);
 
   React.useEffect(
     () => () => {
-      const target = targetRef.current;
-      if (openRef.current && target?.isConnected && isFocusLost()) target.focus();
+      if (openRef.current) returnFocusTo(targetRef.current);
     },
     []
   );
+}
+
+/** Places focus on `target` when it is lost; when it stays lost, the page is told. */
+function returnFocusTo(target: HTMLElement | null) {
+  if (!isFocusLost()) return;
+  if (target?.isConnected) target.focus();
+  if (isFocusLost()) notifyFocusLost();
 }

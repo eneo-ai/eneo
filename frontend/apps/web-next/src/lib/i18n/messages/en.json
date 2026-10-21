@@ -19,7 +19,7 @@
   "governance_mcp_summary_inactive": "Inactive – no tools in the personal assistant",
   "governance_mcp_summary_none": "Active – no tools selected",
   "governance_mcp_summary_count": "Active – {selected} of {total}",
-  "governance_prompt_summary_inactive": "Inactive – the user's own prompts apply",
+  "governance_prompt_summary_inactive": "Inactive – no shared prompt",
   "governance_prompt_summary_none": "Active – no prompt selected",
   "governance_prompt_summary_selected": "Active – {name}",
   "governance_prompt_unknown": "unknown prompt",
@@ -32,7 +32,7 @@
   "governance_mcp_show_tools": "Show tools",
   "governance_mcp_hide_tools": "Hide tools",
   "governance_mcp_tools_disabled_note": "Tools you switch off here are unavailable in the personal assistant. New tools added to the server are allowed automatically.",
-  "governance_confirm_prompt_forced": "Users' own prompts will be hidden and the selected prompt used instead.",
+  "governance_confirm_prompt_forced": "The selected prompt guides how the personal assistant answers.",
   "governance_save_success": "The settings have been saved.",
   "governance_save_failure": "The settings could not be saved.",
   "governance_save_error": "Could not save the policy.",
@@ -66,7 +66,7 @@
   "governance_mcp_legend": "Allowed tools",
   "governance_mcp_help_disabled": "No tools are available in the personal assistant.",
   "governance_prompt_heading": "Shared prompt",
-  "governance_prompt_section_desc": "Enforce a shared system prompt on all personal assistants. Users' own prompts are hidden while the policy is active.",
+  "governance_prompt_section_desc": "Give all personal assistants the same system prompt. It guides how the assistant answers in users' personal chat.",
   "governance_prompt_toggle_label": "Enforce shared prompt",
   "governance_prompt_library_empty": "There are no prompts in the library.",
   "governance_prompt_create_in_library": "Create a prompt in the library →",
@@ -6759,5 +6759,8 @@
   "pages_succeeded": "{count} pages succeeded",
   "files_succeeded": "{count} files succeeded",
   "pages_and_files_succeeded": "{pages} pages and {files} files succeeded",
-  "pages_unchanged_count": "{count} pages unchanged"
+  "pages_unchanged_count": "{count} pages unchanged",
+  "chat_md_formula_label": "Formula",
+  "chat_md_download_diagram_format": "Download diagram as {format}",
+  "chat_md_diagram_label": "Diagram"
 }

@@ -480,9 +480,7 @@ describe("ModelsPage", () => {
     await waitFor(() => expect(screen.queryByText("Claude 3.7 Sonnet")).toBeNull());
     expect(trigger.isConnected).toBe(false);
     // The focused row is gone: focus moves to the tab panel, not <body>.
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
-      timeout: 1500
-    });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
   });
 
   it("deletes a provider without models after confirmation and keeps focus on the page", async () => {
@@ -510,9 +508,7 @@ describe("ModelsPage", () => {
     await waitFor(() => expect(screen.queryByRole("region", { name: "OpenAI" })).toBeNull());
     expect(toast.success).toHaveBeenCalledWith("OpenAI togs bort");
     // The card and its menu are gone: focus moves to the tab panel, not <body>.
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
-      timeout: 1500
-    });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
   });
 
   it("says at the delete action, and when it is chosen, why a provider with models stays", async () => {

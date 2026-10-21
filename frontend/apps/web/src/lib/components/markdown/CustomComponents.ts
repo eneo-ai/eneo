@@ -64,7 +64,23 @@ export type EneoFileCustomComponentProps = {
 
 export type CustomFileComponent = Component<EneoFileCustomComponentProps>;
 
-export type EneoToken = EneoInrefToken | EneoMentionToken | EneoFileToken;
+/**
+ * 4. EneoMath: a LaTeX formula, rendered with KaTeX (see math.ts)
+ */
+export type EneoMathToken = {
+  type: "eneoMath";
+  /** Block when the formula is a paragraph or fence of its own. */
+  level: "block" | "inline";
+  raw: string;
+  /** The TeX source between the delimiters. */
+  text: string;
+  /** KaTeX display mode: centred on its own line. */
+  display: boolean;
+  /** Written with `$$` or `\[`, so display math when it stands alone. */
+  displayDelimiter: boolean;
+};
+
+export type EneoToken = EneoInrefToken | EneoMentionToken | EneoFileToken | EneoMathToken;
 export type CustomRenderers = {
   inref?: CustomInfoBlobComponent;
   mention?: CustomMentionComponent;

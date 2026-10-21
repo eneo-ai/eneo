@@ -1617,5 +1617,8 @@
   "pages_succeeded": "{count} sidor lyckades",
   "files_succeeded": "{count} filer lyckades",
   "pages_and_files_succeeded": "{pages} sidor och {files} filer lyckades",
-  "pages_unchanged_count": "{count} sidor oförändrade"
+  "pages_unchanged_count": "{count} sidor oförändrade",
+  "chat_md_formula_label": "Formel",
+  "chat_md_download_diagram_format": "Ladda ner diagram som {format}",
+  "chat_md_diagram_label": "Diagram"
 }

@@ -423,6 +423,16 @@
 }
 
 /*
+ * Astryx names ScrollableArea's logical axis with the class "inline".
+ * Tailwind interprets that as display:inline, which stops the viewport from
+ * containing overflowing tables/formulas. Restore the component's block
+ * formatting outside the layers so the utility cannot override it.
+ */
+.astryx-scrollable-area[data-axis] {
+  display: block;
+}
+
+/*
  * 10. Forced colours (Windows contrast themes; ACCESSIBILITY.md → manual
  *    protocol, step 6). The mode swaps author colours for the system palette,
  *    so a state drawn only as a tint or a coloured bar disappears: mark what
