@@ -712,7 +712,7 @@ describe("WrapperDetail navigation", () => {
     fireEvent.click(link);
 
     const heading = await screen.findByRole("heading", { level: 2, name: "Protokoll" });
-    await waitFor(() => expect(document.activeElement).toBe(heading), { timeout: 1500 });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
   });
 
   it("moves focus to the next folder's row when one is deleted from its row", async () => {
@@ -737,14 +737,12 @@ describe("WrapperDetail navigation", () => {
     await waitFor(() =>
       expect(within(overview).queryByRole("link", { name: "Protokoll" })).toBeNull()
     );
-    await waitFor(
-      () =>
-        expect(document.activeElement).toBe(
-          within(screen.getByRole("table", { name: "Mappar i Byggnad" })).getByRole("link", {
-            name: "Rutiner"
-          })
-        ),
-      { timeout: 1500 }
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(screen.getByRole("table", { name: "Mappar i Byggnad" })).getByRole("link", {
+          name: "Rutiner"
+        })
+      )
     );
   });
 
@@ -980,9 +978,7 @@ describe("WrapperDetail navigation", () => {
 
     expect(screen.getByRole("tab", { name: /Problem/ }).getAttribute("aria-selected")).toBe("true");
     expect(showProblems.isConnected).toBe(false);
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
-      timeout: 1500
-    });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
   });
 });
 
@@ -1002,9 +998,8 @@ describe("WrapperDetail documents", () => {
     focusFixup();
 
     expect(await screen.findByRole("button", { name: /Dokument 51\.docx/ })).toBeTruthy();
-    await waitFor(
-      () => expect(document.activeElement).toBe(screen.getByRole("region", { name: "Mallar" })),
-      { timeout: 1500 }
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("region", { name: "Mallar" }))
     );
     expect(screen.getByText(/^Visar 51–60 av 60/)).toBeTruthy();
     announcements.stop();
@@ -1243,9 +1238,7 @@ describe("WrapperDetail problems", () => {
     fireEvent.click(retry);
 
     await waitFor(() => expect(screen.queryByRole("button", { name: "Försök igen" })).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")), {
-      timeout: 1500
-    });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
   });
 
   it("shows failed folders without speaking the banner, on every return from Problems or later", async () => {

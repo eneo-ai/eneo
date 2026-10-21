@@ -388,8 +388,10 @@ Shared behaviour outside `composites`:
 
 - Removing something from a list: `useRemovalMutation` + `RemovalFocusScope`
   (`src/features/spaces/removal.tsx`) wait for the refetch, close the dialog and
-  move focus with `rescueFocus` (`src/lib/focus-rescue.ts`) to the list's
-  heading or panel, so focus never falls to `<body>`.
+  move focus to the list's heading or panel, so focus never falls to `<body>`.
+  The scope owns that rescue (`useFocusRescue`, `src/lib/focus-rescue.ts`);
+  other actions that may remove the focused element call the hook in the
+  list or page that survives the change, never in the row.
 - Settings switches that save on toggle: `useSettingSwitch`
   (`src/features/admin/use-setting-switch.ts`) — optimistic, reverts on error,
   queues a press made during a save.

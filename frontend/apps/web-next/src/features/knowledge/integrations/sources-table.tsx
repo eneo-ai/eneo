@@ -20,7 +20,7 @@ import { Table } from "@/components/astryx/table";
 import { EmptyState } from "@/components/composites/empty-state";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
-import { rescueFocus } from "@/lib/focus-rescue";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import type { IntegrationKnowledge } from "../knowledge";
 import { KnowledgeTableControls } from "../table-controls-ui";
 import { IntegrationActions, WrapperActions } from "./actions";
@@ -306,6 +306,7 @@ export function SourcesList({
   const bannerRef = useRef<HTMLDivElement>(null);
   const allFilterRef = useRef<HTMLButtonElement>(null);
   const chosenFilterRef = useRef<HTMLButtonElement>(null);
+  const rescue = useFocusRescue();
   const [filter, setFilter] = useState<SourceFilter>("all");
   // Once a filter has been chosen the bar stays, so the pressed segment never vanishes under focus.
   const [filterUsed, setFilterUsed] = useState(false);
@@ -342,8 +343,8 @@ export function SourcesList({
   useAnnounceChange(noMatch ? t("integration_filter_no_match") : null);
   // The tables went, and focus with them if it was in one: the filter in use takes it.
   useEffect(() => {
-    if (noMatch) rescueFocus(chosenFilterRef.current);
-  }, [noMatch]);
+    if (noMatch) rescue(chosenFilterRef.current);
+  }, [noMatch, rescue]);
 
   function chooseFilter(next: SourceFilter) {
     setFilter(next);
@@ -364,7 +365,7 @@ export function SourcesList({
         filter={filter}
         onShowThem={() => {
           chooseFilter("attention");
-          rescueFocus(bannerRef.current);
+          rescue(bannerRef.current);
         }}
       />
       {rows.length > 1 || filterUsed ? (

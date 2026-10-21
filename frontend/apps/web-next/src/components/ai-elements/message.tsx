@@ -40,6 +40,10 @@ const streamdownPlugins = {
   renderers: [{ language: "mermaid", component: AnswerDiagram }]
 };
 
+// Streamdown closes an unfinished `$$` while text streams in; math stays as
+// written until the model closes it, the same as in the web app.
+const REMEND_OPTIONS = { katex: false };
+
 /**
  * Assistant markdown (Streamdown) with Eneo defaults: GFM always on, accessible
  * tables/headings/lists/code regions (markdown-components.tsx) and Streamdown's
@@ -97,7 +101,7 @@ export const MessageResponse = memo(
         )}
         plugins={streamdownPlugins}
         controls={controls}
-        remend={{ katex: false }}
+        remend={REMEND_OPTIONS}
         remarkPlugins={remark}
         rehypePlugins={rehype}
         components={mergedComponents}
