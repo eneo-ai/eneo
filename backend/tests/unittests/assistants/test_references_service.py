@@ -171,7 +171,7 @@ def _service_with_datastore():
 
 
 def _embedding_model(max_input: int | None = 8191) -> MagicMock:
-    embedding_model = MagicMock(max_input=max_input)
+    embedding_model = MagicMock(max_input=max_input, id=uuid4())
     embedding_model.name = "model"
     return embedding_model
 
@@ -327,7 +327,7 @@ async def test_get_references_hands_the_rerank_spec_to_the_datastore():
     datastore.semantic_search = AsyncMock(return_value=[])
     service = ReferencesService(AsyncMock(), datastore)
     spec = object()
-    collection = MagicMock()
+    collection = MagicMock(embedding_model=_embedding_model())
 
     await service.get_references(
         question="q", collections=[collection], version=2, rerank=spec
@@ -341,6 +341,8 @@ async def test_get_references_passes_no_spec_by_default():
     datastore.semantic_search = AsyncMock(return_value=[])
     service = ReferencesService(AsyncMock(), datastore)
 
-    await service.get_references(question="q", collections=[MagicMock()])
+    await service.get_references(
+        question="q", collections=[MagicMock(embedding_model=_embedding_model())]
+    )
 
     assert datastore.semantic_search.await_args.kwargs["rerank"] is None

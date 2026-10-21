@@ -135,6 +135,12 @@ FORWARDERS: frozenset[tuple[str, str]] = frozenset(
     }
 )
 
+# `history=` keywords that are not the flow history flag but a field of another
+# model with the same name.
+UNRELATED_HISTORY_KEYWORDS: frozenset[tuple[str, str]] = frozenset(
+    {("spaces/api/space_router.py", "get_integration_sync_details")}
+)
+
 
 def _history_sites() -> tuple[
     dict[tuple[str, str], set[str]], dict[tuple[str, str], ast.AST]
@@ -174,7 +180,9 @@ def _history_sites() -> tuple[
 def test_only_listed_read_routes_and_forwarders_admit_a_retired_flow() -> None:
     sites, _functions = _history_sites()
 
-    assert set(sites) == READ_ROUTES | FORWARDERS
+    for site in UNRELATED_HISTORY_KEYWORDS:
+        assert all(value.startswith("PaginatedSyncLogList(") for value in sites[site])
+    assert set(sites) - UNRELATED_HISTORY_KEYWORDS == READ_ROUTES | FORWARDERS
     for site in READ_ROUTES:
         assert sites[site] == {"True"}, site
     for site in FORWARDERS:

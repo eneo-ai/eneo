@@ -14,6 +14,7 @@ from eneo.assistants.api.assistant_protocol import (
     to_ask_conversation_response,
     to_sse_response,
 )
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import File, FileType
 from eneo.questions.question import UseTools
 from eneo.sessions.session import SessionInDB, TokenUsageEvent
@@ -59,7 +60,8 @@ def test_non_streaming_conversation_response_carries_the_files_the_answer_made()
         text="# Plan",
         mimetype="text/markdown",
         file_type=FileType.TEXT,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
     )
 

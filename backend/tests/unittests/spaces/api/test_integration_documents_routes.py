@@ -56,7 +56,7 @@ def _embedding_model(user: UserInDB) -> EmbeddingModel:
         id=uuid4(),
         created_at=None,
         updated_at=None,
-        user=user,
+        tenant=user.tenant,
         nickname=None,
         name="multilingual-e5-large",
         family=None,

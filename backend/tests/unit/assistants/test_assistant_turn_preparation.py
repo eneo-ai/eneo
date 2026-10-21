@@ -91,7 +91,7 @@ def turn(monkeypatch: pytest.MonkeyPatch) -> TurnFixture:
         security_enabled=True,
     )
     model = CompletionModel(
-        user=user,
+        tenant=tenant,
         id=uuid4(),
         created_at=now,
         updated_at=now,
@@ -257,6 +257,7 @@ def turn(monkeypatch: pytest.MonkeyPatch) -> TurnFixture:
         help_assistant_assignment_history_repo=helper_history,
         auth_service=Mock(),
         skill_service=skills,
+        api_key_scope_revoker=Mock(),
     )
     return TurnFixture(
         service, assistant, space, user, session, history, provider, requests
