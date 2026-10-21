@@ -24,7 +24,7 @@ from eneo.database.tables.transcription_services_table import (
     TranscriptionServiceConnections,
 )
 from eneo.flows.ai_builder.ai_builder_authoring_policy import AIBuilderAuthoringPolicy
-from eneo.flows.api import flow_authoring_router
+from eneo.flows.application import flow_authoring_operations
 from eneo.flows.application.flow_authoring_command import (
     AIBuilderFlowAuthoringOrigin,
     CreateFlowAuthoringCommand,
@@ -1136,7 +1136,7 @@ async def test_a_patch_without_a_revision_is_fenced_on_the_revision_it_was_autho
     """Someone else allows evidence export after this request was authorized
     and before it writes. The request is refused; were it accepted, its audit
     entry would say that it changed the setting."""
-    authorize = flow_authoring_router.require_flow_edit_access
+    authorize = flow_authoring_operations.require_flow_edit_access
 
     async def authorize_then_be_overtaken(request, container, *, flow_id: UUID):
         access = await authorize(request, container, flow_id=flow_id)
@@ -1153,7 +1153,9 @@ async def test_a_patch_without_a_revision_is_fenced_on_the_revision_it_was_autho
         return access
 
     monkeypatch.setattr(
-        flow_authoring_router, "require_flow_edit_access", authorize_then_be_overtaken
+        flow_authoring_operations,
+        "require_flow_edit_access",
+        authorize_then_be_overtaken,
     )
 
     response = await _patch(client, typed, {"name": "Sent", "description": None})
