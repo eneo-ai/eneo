@@ -112,6 +112,13 @@
   // We seed on the falling edge of dialogOpen too so a closed-then-reopened
   // dialog forgets unsaved edits — matches the wizard's behaviour.
   let lastSeededFor: { id: string; open: boolean } | null = null;
+  // What the dialog opened with. `model` follows refetches while the dialog is
+  // open, so the changed-field checks compare with this, not with `model`:
+  // otherwise a value another admin set meanwhile would count as this edit.
+  let opened: { displayName: string; classificationId: string | null } = {
+    displayName: "",
+    classificationId: null
+  };
   $effect(() => {
     if (!dialogOpen) {
       lastSeededFor = null;
@@ -119,6 +126,10 @@
     }
     if (lastSeededFor?.id === model.id && lastSeededFor.open) return;
     draft = modelToDraft(model, modelType);
+    opened = {
+      displayName: draft.displayName.trim(),
+      classificationId: model.security_classification?.id ?? null
+    };
     isDefault = "is_org_default" in model ? Boolean(model.is_org_default) : false;
     openSource = model.open_source ?? false;
     error = null;
@@ -133,14 +144,14 @@
   // state silently demote a tenant default.
   const hasDefaultToggle = $derived("is_org_default" in model);
 
-  // Send security_classification only when it actually changed — and use
-  // explicit null (rather than omission) when the user cleared it, since
-  // the backend distinguishes "field omitted" from "field set to null".
+  // Send security_classification only when the admin changed it in this
+  // dialog — and use explicit null (rather than omission) when the user
+  // cleared it, since the backend distinguishes "field omitted" from "field
+  // set to null".
   function securityClassificationPatch():
     { security_classification: { id: string } | null } | Record<string, never> {
     const next = draft.securityClassification?.id ?? null;
-    const prev = model.security_classification?.id ?? null;
-    if (next === prev) return {};
+    if (next === opened.classificationId) return {};
     return { security_classification: next ? { id: next } : null };
   }
 
@@ -246,7 +257,13 @@
       } else if (type === "forecastModel") {
         await eneo.models.update({
           forecastModel: { id: model.id },
-          update: { display_name: draft.displayName.trim(), ...securityClassificationPatch() }
+          // Only the fields the admin changed: an omitted field keeps its value.
+          update: {
+            ...(draft.displayName.trim() !== opened.displayName
+              ? { display_name: draft.displayName.trim() }
+              : {}),
+            ...securityClassificationPatch()
+          }
         });
       } else {
         await eneo.tenantModels.updateTranscription({ id: model.id }, buildTranscriptionUpdate());

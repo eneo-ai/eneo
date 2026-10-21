@@ -168,6 +168,45 @@ describe("Admin > Models, forecast models", () => {
     );
   });
 
+  it("saves only the class when that is all the admin changed, keeping a rename made meanwhile", async () => {
+    const view = show();
+    await openForecastTab();
+    await page.getByRole("button", { name: m.actions(), exact: true }).click();
+    await page.getByRole("menuitem", { name: m.edit_model() }).click();
+    const dialog = page.getByRole("dialog");
+    await expect.element(dialog).toBeVisible();
+
+    // Another admin renames the model; the refreshed data reaches the open dialog.
+    await view.rerender({
+      data: {
+        models: {
+          completionModels: [],
+          embeddingModels: [],
+          transcriptionModels: [],
+          imageModels: [],
+          rerankModels: [],
+          forecastModels: [{ ...timestral, nickname: "Timestral 28M" }]
+        },
+        providers: [tools, openai],
+        favoriteProviders: [],
+        securityClassifications: {
+          security_enabled: true,
+          security_classifications: [{ id: "s3", name: "Klass 3", security_level: 3 }]
+        }
+      } as never
+    });
+
+    await dialog.getByRole("button", { name: m.security_classification() }).click();
+    await page.getByRole("option", { name: "Klass 3" }).click();
+    await dialog.getByRole("button", { name: m.save(), exact: true }).click();
+    await vi.waitFor(() =>
+      expect(api.models.update).toHaveBeenLastCalledWith({
+        forecastModel: { id: "f1" },
+        update: { security_classification: { id: "s3" } }
+      })
+    );
+  });
+
   it("says where the forecast model comes from while there is none", async () => {
     show([]);
     await page.getByRole("tab", { name: m.forecast_models(), exact: true }).click();
