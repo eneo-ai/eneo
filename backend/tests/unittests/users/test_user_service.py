@@ -148,7 +148,15 @@ async def test_register_user_creates_a_user_and_settings(service: UserService):
 
     assert user == expected_user_in_db
 
-    service.repo.add.assert_awaited_with(expected_user_upsert)
+    added = service.repo.add.await_args.args[0]
+    assert added.model_dump(
+        exclude={"password_changed_at", "password_change_required"}
+    ) == expected_user_upsert.model_dump(
+        exclude={"password_changed_at", "password_change_required"}
+    )
+    # A password someone else chose is always one-time.
+    assert added.password_change_required is True
+    assert added.password_changed_at is not None
     service.settings_repo.add.assert_awaited_with(expected_settings)
 
 
