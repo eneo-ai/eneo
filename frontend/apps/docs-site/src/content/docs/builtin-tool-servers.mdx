@@ -212,10 +212,10 @@ independently operated one, in the backend's data:
 - **Admin > Tools** reports connectivity, version, confinement and file-origin
   diagnostics from the runtime's `/diagnostics` endpoint
   (`mcp_servers/application/runtime_status.py`), advisory only and never on
-  the execution path. Version mismatches warn without blocking calls, and so
-  does an endpoint the runtime lists as `unavailable` (`forecast` while its
-  model is missing); runtime failure does not change backend readiness or
-  ordinary chat.
+  the execution path. Version mismatches warn without blocking calls. An
+  endpoint the runtime lists as `unavailable` (`forecast` while its model is
+  missing) is offered as unavailable with reason `model_missing` instead of a
+  warning; runtime failure does not change backend readiness or ordinary chat.
 
 Why this work runs outside the backend, and what the runtime does to contain
 it, are covered in [Tools and MCP Architecture](/docs/tool-architecture#why-heavy-and-untrusted-work-runs-in-a-separate-runtime)

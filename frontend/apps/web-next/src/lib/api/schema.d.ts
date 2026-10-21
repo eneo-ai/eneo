@@ -12079,6 +12079,8 @@ export interface components {
       available: boolean;
       /** Mcp Server Id */
       mcp_server_id?: string | null;
+      /** Unavailable Reason */
+      unavailable_reason?: ("runtime_not_configured" | "model_missing") | null;
     };
     /**
      * CallbackRequest
@@ -20440,7 +20442,6 @@ export interface components {
         | "file_origin_unreachable"
         | "file_origin_not_allowed"
         | "file_origin_unknown"
-        | "forecast_model_unavailable"
       )[];
       /** Files Confined */
       files_confined?: boolean | null;

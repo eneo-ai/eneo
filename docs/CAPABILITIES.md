@@ -108,8 +108,10 @@ conversation setting. Charts, Compute and Forecast are Functions with purposes
 before the function existed keeps working until an administrator retires it.
 Forecast also needs a model checkpoint that the operator mounts into the
 runtime. While it is missing, the runtime's `GET /diagnostics` lists `forecast`
-under `unavailable`, and **Admin → Verktyg** shows the runtime warning
-`forecast_model_unavailable` on the **Eneos verktygstjänst** card. Calls are not
+under `unavailable`, and `GET /mcp-servers/bundled/` offers the forecast tool
+with `available: false` and `unavailable_reason: "model_missing"`: **Admin →
+Verktyg** says on the Forecast card that the function needs a model, and it
+cannot be turned on there. Other deployments see no warning. Calls are not
 refused; a forecast without its model fails with `MODEL_UNAVAILABLE`.
 
 ## 3. Ask-time resolution

@@ -170,6 +170,8 @@ export function createHandler(options: ServerOptions) {
       if (controlActive >= 4) return new Response("Busy", { status: 429 });
       controlActive++;
       try {
+        // Asked beside the file-origin probe, so a diagnostic waits for the slower of the two.
+        const unavailable = unavailableEndpoints([...endpoints.values()]);
         const origin = parseOrigin(request.headers.get("x-eneo-file-origin"));
         let fileOrigin = origin ? "unreachable" : "unknown";
         if (origin) {
@@ -197,7 +199,7 @@ export function createHandler(options: ServerOptions) {
             execution: scheduler.status,
             native: options.nativeStatus?.() ?? { active: 0, queued: 0 },
             file_origin: fileOrigin,
-            unavailable: await unavailableEndpoints([...endpoints.values()]),
+            unavailable: await unavailable,
           },
           { headers: { "cache-control": "no-store" } },
         );
@@ -427,10 +429,23 @@ async function boundedJson(request: Request, maxBytes = MAX_BODY_BYTES): Promise
   }
 }
 
-/** The endpoints whose own check says they cannot run now; a failing check counts as cannot. */
+/** How long an endpoint's own check may take before a diagnostic counts it as cannot run. */
+const READY_TIMEOUT_MS = 1000;
+
+/** The endpoints whose own check says they cannot run now; a failing or slow check counts as cannot. */
 async function unavailableEndpoints(endpoints: Endpoint[]): Promise<string[]> {
   const checked = await Promise.all(
-    endpoints.map(async (endpoint) => (!endpoint.ready || (await endpoint.ready().catch(() => false)) ? null : endpoint.slug)),
+    endpoints.map(async (endpoint) => {
+      if (!endpoint.ready) return null;
+      let timer: Timer | undefined;
+      const ready = await Promise.race([
+        // A check that throws at once fails like one that rejects.
+        Promise.resolve().then(endpoint.ready).catch(() => false),
+        new Promise<boolean>((resolve) => (timer = setTimeout(() => resolve(false), READY_TIMEOUT_MS))),
+      ]);
+      clearTimeout(timer);
+      return ready ? null : endpoint.slug;
+    }),
   );
   return checked.filter((slug): slug is string => slug !== null);
 }

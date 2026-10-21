@@ -44,15 +44,22 @@ const bundled = {
     { tool: "file-analysis", purpose: "file_analysis", available: true, mcp_server_id: null },
     { tool: "file-creation", purpose: "file_creation", available: true, mcp_server_id: null },
     { tool: "charts", purpose: "charts", available: true, mcp_server_id: null },
-    { tool: "compute", purpose: "compute", available: false, mcp_server_id: null }
+    { tool: "compute", purpose: "compute", available: false, mcp_server_id: null },
+    {
+      tool: "forecast",
+      purpose: "forecast",
+      available: false,
+      mcp_server_id: null,
+      unavailable_reason: "model_missing"
+    }
   ],
-  count: 4,
+  count: 5,
   runtime: {
     configured: true,
     state: "ready",
     expected_version: "1.4.0",
     version: "1.4.0",
-    warnings: ["confinement_unavailable", "forecast_model_unavailable"]
+    warnings: ["confinement_unavailable"]
   }
 };
 
@@ -149,13 +156,16 @@ describe("admin function sources", () => {
     const status = await screen.findByRole("region", { name: "tools_runtime_title" });
     expect(status.textContent).toContain("tools_runtime_ready");
     expect(status.textContent).toContain("tools_runtime_confinement");
-    expect(status.textContent).toContain("tools_runtime_forecast_model");
     expect(status.textContent).toContain("tools_runtime_versions");
-    // Four offers: a deployment without the runtime cannot turn compute on.
+    // Five offers: a deployment without the runtime cannot turn compute on, and a runtime
+    // without the forecast model cannot turn forecast on; each says why.
     const turnOn = screen.getAllByRole("button", { name: "tools_builtin_turn_on" });
-    expect(turnOn).toHaveLength(4);
+    expect(turnOn).toHaveLength(5);
     expect((turnOn[3] as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getAllByText("tools_builtin_unavailable")).toHaveLength(1);
+    expect((turnOn[4] as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getAllByText("tools_builtin_unavailable")).toHaveLength(2);
+    expect(screen.getByText(/tools_builtin_unavailable_hint/)).toBeTruthy();
+    expect(screen.getByText(/tools_builtin_model_missing_hint/)).toBeTruthy();
     fireEvent.click(turnOn[0]!);
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/v1/mcp-servers/bundled/{tool}/", {

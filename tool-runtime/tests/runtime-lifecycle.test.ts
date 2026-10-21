@@ -195,3 +195,25 @@ test("diagnostics name the functions that cannot run now, such as a forecast wit
   installed = true;
   expect((await diagnose()).unavailable).toEqual([]);
 });
+test("a check that throws or hangs counts as cannot run, and the diagnostic still answers", async () => {
+  const handler = createHandler({
+    token,
+    maxConcurrency: 1,
+    endpoints: [
+      {
+        slug: "throws",
+        tools: [],
+        toolTimeoutMs: 1000,
+        ready: () => {
+          throw new Error("no model");
+        },
+      },
+      { slug: "hangs", tools: [], toolTimeoutMs: 1000, ready: () => new Promise<boolean>(() => {}) },
+    ],
+  });
+  const started = performance.now();
+  const response = await handler(new Request("http://runtime/diagnostics", { headers: { authorization: "Bearer " + token } }));
+  expect(response.status).toBe(200);
+  expect(((await response.json()) as any).unavailable).toEqual(["throws", "hangs"]);
+  expect(performance.now() - started).toBeLessThan(2500);
+});

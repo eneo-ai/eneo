@@ -9,7 +9,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, PrivateAttr, ValidationError
 
 from eneo.files.file_reference import file_reference_base_url
 from eneo.main.config import get_settings
@@ -26,7 +26,6 @@ RuntimeWarning = Literal[
     "file_origin_unreachable",
     "file_origin_not_allowed",
     "file_origin_unknown",
-    "forecast_model_unavailable",
 ]
 FILE_ORIGIN_WARNING: dict[str, RuntimeWarning] = {
     "unreachable": "file_origin_unreachable",
@@ -52,6 +51,16 @@ class RuntimeStatus(BaseModel):
     )
     active: int = 0
     queued: int = 0
+    # The runtime's endpoints that said they cannot run now. Not part of the
+    # status shown: the offer of each such tool says why instead.
+    _unavailable: frozenset[str] = PrivateAttr(default_factory=frozenset)
+
+    def cannot_run(self, endpoint: str) -> bool:
+        """Whether the runtime last said this endpoint cannot run (advisory)."""
+        return endpoint in self._unavailable
+
+    def note_unavailable(self, endpoints: list[str]) -> None:
+        self._unavailable = frozenset(endpoints)
 
 
 class _Counts(BaseModel):
@@ -175,8 +184,7 @@ async def runtime_status() -> RuntimeStatus:
                                     status.warnings.append(
                                         FILE_ORIGIN_WARNING[data.file_origin]
                                     )
-                                if "forecast" in data.unavailable:
-                                    status.warnings.append("forecast_model_unavailable")
+                                status.note_unavailable(data.unavailable)
             except (httpx.HTTPError, TimeoutError, ValidationError, ValueError):
                 # Exception text can contain origins or credentials. Log only safe state.
                 status.state = "unreachable"

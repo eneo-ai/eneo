@@ -23,8 +23,7 @@ export function runtimeMessages(status: RuntimeDiagnostics): string[] {
     confinement_unavailable: m.tools_runtime_confinement,
     file_origin_unreachable: m.tools_runtime_file_origin,
     file_origin_not_allowed: m.tools_runtime_file_origin,
-    file_origin_unknown: m.tools_runtime_file_origin,
-    forecast_model_unavailable: m.tools_runtime_forecast_model
+    file_origin_unknown: m.tools_runtime_file_origin
   };
   return [
     ...new Set([

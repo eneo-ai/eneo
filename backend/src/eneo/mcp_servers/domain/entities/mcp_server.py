@@ -2,7 +2,7 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional
 from urllib.parse import unquote, urlsplit
 from uuid import UUID
 
@@ -144,6 +144,10 @@ class BundledToolSpec:
     purpose: str
     forward_identity: bool
 
+
+# Why a deployment cannot offer one of the bundled runtime's tools: it has no
+# runtime, or the runtime lacks the model the tool runs on.
+BundledUnavailableReason = Literal["runtime_not_configured", "model_missing"]
 
 BUNDLED_TOOLS: dict[str, BundledToolSpec] = {
     "compute": BundledToolSpec(purpose="compute", forward_identity=False),

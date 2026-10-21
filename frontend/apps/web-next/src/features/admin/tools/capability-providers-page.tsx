@@ -61,7 +61,8 @@ function StatusBadge({ source }: { source: McpServer }) {
 /**
  * The provider built into Eneo, offered as a function's first source ahead
  * of the external form: one button turns it on as the tenant default. A
- * deployment without the tool runtime shows why it cannot be turned on.
+ * deployment without the tool runtime, or a runtime without the model the
+ * function runs on, shows why it cannot be turned on.
  */
 function BundledOffer({
   capability,
@@ -103,7 +104,11 @@ function BundledOffer({
               t(capability.bundledDescription ?? "tools_builtin_menu_description")
             ) : (
               <>
-                {t("tools_builtin_unavailable_hint")}{" "}
+                {t(
+                  bundled.unavailable_reason === "model_missing"
+                    ? "tools_builtin_model_missing_hint"
+                    : "tools_builtin_unavailable_hint"
+                )}{" "}
                 <a
                   href={DEPLOYMENT_GUIDE_URL}
                   target="_blank"

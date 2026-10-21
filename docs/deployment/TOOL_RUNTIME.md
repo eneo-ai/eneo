@@ -302,10 +302,10 @@ now. `forecast` is listed while the sidecar's Python or the checkpoint files
 (`config.json` and `model.safetensors` in `FORECAST_MODEL_PATH`) are missing.
 The runtime checks on each diagnostics request, so a checkpoint copied into
 the mounted directory later counts without a restart. **Admin > Tools** then
-shows "The forecast model is missing from the tool runtime, so Forecast cannot
-run." on the Eneo tool service card (warning `forecast_model_unavailable`).
-Calls are not refused: a forecast fails with `MODEL_UNAVAILABLE` and every
-other tool keeps working.
+offers Forecast as unavailable, saying "This function needs a model that your
+operator adds to the tool runtime." (reason `model_missing`); it raises no
+warning on the runtime card. Calls are not refused: a forecast fails with
+`MODEL_UNAVAILABLE` and every other tool keeps working.
 
 Structured runtime events report request ID, tool, queue and execution time,
 cache revalidation, transferred bytes and cancellation. They omit tokens,

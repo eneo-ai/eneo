@@ -146,16 +146,16 @@ async def test_file_origin_and_confinement_warnings_are_additive(monkeypatch, or
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "unavailable,warnings",
+    "unavailable,forecast",
     [
-        (None, []),  # A runtime from before readiness was reported.
-        ([], []),
-        (["forecast"], ["forecast_model_unavailable"]),
-        (["something-new"], []),
+        (None, False),  # A runtime from before readiness was reported.
+        ([], False),
+        (["forecast"], True),
+        (["something-new"], False),
     ],
 )
-async def test_a_forecast_without_its_model_is_named(
-    monkeypatch, unavailable, warnings
+async def test_an_endpoint_that_cannot_run_is_known_without_a_warning(
+    monkeypatch, unavailable, forecast
 ):
     settings = SimpleNamespace(
         tool_runtime_url="http://tools:3010",
@@ -185,4 +185,9 @@ async def test_a_forecast_without_its_model_is_named(
     monkeypatch.setattr(module.httpx, "AsyncClient", lambda **_: client)
     result = await module.runtime_status()
     assert result.state == "ready"
-    assert result.warnings == warnings
+    # Said on the tool's offer, not as a warning on every deployment.
+    assert result.warnings == []
+    assert result.cannot_run("forecast") is forecast
+    assert "unavailable" not in result.model_dump()
+    # The cached copy keeps it.
+    assert (await module.runtime_status()).cannot_run("forecast") is forecast

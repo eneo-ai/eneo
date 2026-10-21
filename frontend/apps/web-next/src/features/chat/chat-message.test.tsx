@@ -229,3 +229,41 @@ describe("ChatMessage debug action", () => {
     expect(onActivityToggle).toHaveBeenCalledWith(more, { tab: "debug" });
   });
 });
+
+describe("ChatMessage generated files", () => {
+  it("leaves out the picture of a chart drawn for a report, not the CSV it exported", () => {
+    const file = (id: string, name: string, mimetype: string) =>
+      ({ id, name, mimetype, size: 2048 }) as NonNullable<
+        NonNullable<EneoUIMessage["metadata"]>["generatedFiles"]
+      >[number];
+    const report: EneoUIMessage = {
+      id: "a-2",
+      role: "assistant",
+      metadata: {
+        ...answer.metadata,
+        generatedFiles: [
+          file("png-1", "prognos.png", "image/png"),
+          file("csv-1", "prognos.csv", "text/csv")
+        ]
+      },
+      parts: [
+        {
+          type: "dynamic-tool",
+          toolCallId: "call-1",
+          toolName: "create_forecast",
+          state: "output-available",
+          input: { display: "none", export: true },
+          output: {},
+          callProviderMetadata: {
+            eneo: { is_bundled: true, generated_file_ids: ["png-1", "csv-1"] }
+          }
+        } as Part,
+        { type: "text", text: "Prognosen ligger i rapporten.", state: "done" }
+      ]
+    };
+    renderMessages(<ChatMessage message={report} assistant={assistant} />);
+    expect(screen.getByText(/prognos\.csv/)).toBeTruthy();
+    expect(screen.queryByRole("img", { name: /prognos\.png/ })).toBeNull();
+    expect(screen.queryByText(/prognos\.png/)).toBeNull();
+  });
+});

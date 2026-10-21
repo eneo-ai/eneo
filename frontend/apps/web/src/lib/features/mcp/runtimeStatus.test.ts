@@ -31,10 +31,4 @@ describe("runtime status", () => {
       })
     ).toEqual(["tools_runtime_ready", "tools_runtime_file_origin", "tools_runtime_confinement"]);
   });
-  it("says when the forecast model is missing", () => {
-    expect(runtimeMessages({ ...ready, warnings: ["forecast_model_unavailable"] })).toEqual([
-      "tools_runtime_ready",
-      "tools_runtime_forecast_model"
-    ]);
-  });
 });

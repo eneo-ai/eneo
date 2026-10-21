@@ -346,7 +346,9 @@
                             {capability.bundledDescription?.() ??
                               m.tools_builtin_menu_description()}
                           {:else}
-                            {m.tools_builtin_unavailable_hint()}
+                            {bundled.unavailable_reason === "model_missing"
+                              ? m.tools_builtin_model_missing_hint()
+                              : m.tools_builtin_unavailable_hint()}
                             <a
                               href={DEPLOYMENT_GUIDE_URL}
                               target="_blank"
