@@ -41,6 +41,8 @@ import { FlowSettings } from "./flow-settings";
 import { FlowStatusBadge } from "./flow-status";
 import { FlowStepList, stepControlId } from "./flow-step-list";
 import { orderWithMove, orderWithout, stepsInOrder } from "./flow-steps";
+import { runKeys } from "./runs/runs-api";
+import { StartRunDialog } from "./runs/start-run-dialog";
 
 type Notice = { key: number; status: "error" | "warning"; title: string; description: string };
 type View = "definition" | "chat";
@@ -80,6 +82,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const isPublished = flow.published_version != null;
   const canManage = can("flows_manage");
   const canEdit = canManage && !isPublished;
+  const canRun = isPublished && can("flows_run");
 
   const stepsHeadingRef = useRef<HTMLHeadingElement>(null);
   const editorRef = useRef<HTMLElement>(null);
@@ -89,6 +92,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const [openStepId, setOpenStepId] = useState<string | null>(null);
   const [addAt, setAddAt] = useState<number | null>(null);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
+  const [starting, setStarting] = useState(false);
 
   /** A refusal above both columns; a stale draft is reloaded first. */
   const refused = useCallback(
@@ -236,26 +240,35 @@ export function FlowPage({ flowId }: { flowId: string }) {
 
   const openedStep = openStepId ? steps.find((step) => step.id === openStepId) : undefined;
 
-  const actions = canManage ? (
-    <div className="flex flex-wrap items-center gap-2">
-      {isPublished ? (
-        <Button
-          label={t("unpublish")}
-          onClick={() => setConfirmUnpublish(true)}
-          isLoading={unpublish.isPending}
-          isInterruptible
-        />
-      ) : (
-        <Button
-          label={t("publish")}
-          variant="primary"
-          onClick={requestPublish}
-          isLoading={publish.isPending}
-          isInterruptible
-        />
-      )}
-    </div>
-  ) : undefined;
+  const actions =
+    canManage || canRun ? (
+      <div className="flex flex-wrap items-center gap-2">
+        {canRun ? (
+          <Button
+            label={t("flow_runs_start")}
+            variant="primary"
+            onClick={() => setStarting(true)}
+          />
+        ) : null}
+        {canManage && isPublished ? (
+          <Button
+            label={t("unpublish")}
+            onClick={() => setConfirmUnpublish(true)}
+            isLoading={unpublish.isPending}
+            isInterruptible
+          />
+        ) : null}
+        {canManage && !isPublished ? (
+          <Button
+            label={t("publish")}
+            variant="primary"
+            onClick={requestPublish}
+            isLoading={publish.isPending}
+            isInterruptible
+          />
+        ) : null}
+      </div>
+    ) : undefined;
 
   return (
     <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
@@ -387,6 +400,18 @@ export function FlowPage({ flowId }: { flowId: string }) {
             saved(updated);
             setAddAt(null);
             announce(t("flows_step_added"));
+          }}
+        />
+      ) : null}
+      {canRun ? (
+        <StartRunDialog
+          flow={flow}
+          open={starting}
+          onOpenChange={setStarting}
+          onStarted={() => {
+            setStarting(false);
+            void queryClient.invalidateQueries({ queryKey: runKeys.list(flow.id) });
+            announce(t("flow_runs_started"));
           }}
         />
       ) : null}

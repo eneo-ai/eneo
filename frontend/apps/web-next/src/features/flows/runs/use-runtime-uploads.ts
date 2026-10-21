@@ -1,0 +1,259 @@
+"use client";
+
+import { useAnnounce } from "@astryxdesign/core/hooks";
+import { createFlowRuntimeUploadTimeoutController } from "@eneo/eneo-js/flows/runtime-upload-policy";
+import { useLocale, useTranslations } from "next-intl";
+import { useEffect, useRef, useState } from "react";
+import { apiErrorFromResponse, EneoApiError } from "@/lib/api/errors";
+import { formatBytes } from "@/lib/format";
+import type { Schema } from "@/lib/api/models";
+import type { UploadEntry, UploadsByStep } from "./run-contract";
+import { refusalText, type Translator } from "./run-messages";
+import { deleteRuntimeFile, type RuntimeInput, type UploadedFile } from "./runs-api";
+
+type UploadPolicy = Schema<"FlowRuntimeUploadPolicyPublic">;
+
+/** Whether a file's type is one the step takes (`type/*` covers the family). */
+export function acceptsType(accepted: readonly string[], mimetype: string): boolean {
+  if (accepted.length === 0) return true;
+  const type = mimetype.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  if (!type) return false;
+  return accepted.some((entry) => {
+    const allowed = entry.toLowerCase();
+    return allowed.endsWith("/*") ? type.startsWith(allowed.slice(0, -1)) : type === allowed;
+  });
+}
+
+/**
+ * Sends one file to a step's runtime upload endpoint through the app's proxy,
+ * reporting progress. XHR rather than fetch, because the core's timeout policy
+ * keeps an upload alive while its bytes keep moving, and only XHR reports them.
+ */
+function sendFile(
+  flowId: string,
+  stepId: string,
+  file: File,
+  policy: UploadPolicy | undefined,
+  onProgress: (share: number) => void,
+  abort: AbortController
+): Promise<UploadedFile> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    const timeout = createFlowRuntimeUploadTimeoutController({
+      fileSizeBytes: file.size,
+      policy,
+      abortController: abort,
+      onTimeout: () => reject(new UploadTimeoutError())
+    });
+    abort.signal.addEventListener("abort", () => xhr.abort(), { once: true });
+    xhr.upload.onprogress = (event) => {
+      timeout.onProgress(event);
+      if (event.lengthComputable && event.total > 0) onProgress(event.loaded / event.total);
+    };
+    xhr.onload = () => {
+      timeout.clear();
+      let body: unknown = null;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        // A body that is not JSON leaves only the status to go on.
+      }
+      if (xhr.status === 401) {
+        // As the API client does: the session is gone, so sign in again here.
+        window.location.reload();
+        return;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(body as UploadedFile);
+        return;
+      }
+      const headers = new Headers();
+      const trace = xhr.getResponseHeader("x-trace-id");
+      if (trace) headers.set("x-trace-id", trace);
+      reject(apiErrorFromResponse(new Response(null, { status: xhr.status, headers }), body));
+    };
+    xhr.onerror = () => {
+      timeout.clear();
+      reject(new UploadNetworkError());
+    };
+    xhr.onabort = () => {
+      timeout.clear();
+      reject(new DOMException("Upload aborted", "AbortError"));
+    };
+    const body = new FormData();
+    body.append("upload_file", file);
+    xhr.open("POST", `/api/eneo/api/v1/flows/${flowId}/steps/${stepId}/runtime-files/`);
+    xhr.setRequestHeader("accept", "application/json");
+    xhr.send(body);
+  });
+}
+
+/** Deletes an upload no run will use; the core also sweeps orphans, so a failure is not news. */
+function forgetRuntimeFile(flowId: string, fileId: string) {
+  void deleteRuntimeFile(flowId, fileId).catch(() => {});
+}
+
+class UploadTimeoutError extends Error {
+  constructor() {
+    super("The upload stopped making progress");
+    this.name = "UploadTimeoutError";
+  }
+}
+
+class UploadNetworkError extends Error {
+  constructor() {
+    super("The upload could not reach the server");
+    this.name = "UploadNetworkError";
+  }
+}
+
+function uploadProblem(error: unknown, input: RuntimeInput, t: Translator, locale: string) {
+  if (error instanceof UploadTimeoutError) return t("flow_runs_upload_stalled");
+  if (error instanceof UploadNetworkError) return t("flow_runs_upload_network");
+  if (error instanceof EneoApiError && error.status === 413 && input.max_file_size_bytes) {
+    return t("flow_runs_upload_too_large", {
+      max: formatBytes(input.max_file_size_bytes, locale)
+    });
+  }
+  return refusalText(error, t);
+}
+
+/**
+ * The files of a run form, per step, from the moment they are picked until
+ * the run starts. Each file uploads as soon as it is picked; one the step
+ * cannot take (type, size, count) is refused before any byte is sent. A file
+ * removed from the form, or left behind when the form closes without
+ * starting a run, is deleted again, since nothing else would ever use it.
+ * Files the started run took (`claim`) stay.
+ */
+export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefined) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const announce = useAnnounce();
+  const [uploads, setUploads] = useState<UploadsByStep>({});
+  const current = useRef<UploadsByStep>({});
+  const inFlight = useRef(new Map<string, AbortController>());
+  const claimed = useRef(false);
+  const mounted = useRef(true);
+
+  function replace(next: UploadsByStep) {
+    current.current = next;
+    if (mounted.current) setUploads(next);
+  }
+
+  function update(stepId: string, key: string, change: Partial<UploadEntry>) {
+    const entries = current.current[stepId] ?? [];
+    if (!entries.some((entry) => entry.key === key)) return false;
+    replace({
+      ...current.current,
+      [stepId]: entries.map((entry) => (entry.key === key ? { ...entry, ...change } : entry))
+    });
+    return true;
+  }
+
+  function forget(fileId: string) {
+    forgetRuntimeFile(flowId, fileId);
+  }
+
+  useEffect(() => {
+    mounted.current = true;
+    const controllers = inFlight.current;
+    const entriesNow = current;
+    return () => {
+      mounted.current = false;
+      for (const controller of controllers.values()) controller.abort();
+      controllers.clear();
+      if (claimed.current) return;
+      for (const entries of Object.values(entriesNow.current)) {
+        for (const entry of entries) if (entry.fileId) forgetRuntimeFile(flowId, entry.fileId);
+      }
+    };
+  }, [flowId]);
+
+  async function upload(input: RuntimeInput, entry: UploadEntry, file: File) {
+    const abort = new AbortController();
+    inFlight.current.set(entry.key, abort);
+    try {
+      const stored = await sendFile(
+        flowId,
+        input.step_id,
+        file,
+        policy,
+        (progress) => update(input.step_id, entry.key, { progress }),
+        abort
+      );
+      if (update(input.step_id, entry.key, { state: "done", fileId: stored.id, progress: 1 })) {
+        announce(t("flow_runs_upload_finished", { name: entry.name }));
+      } else {
+        // Removed while it was uploading: the stored file is not wanted.
+        forget(stored.id);
+      }
+    } catch (error) {
+      if (abort.signal.aborted && !(error instanceof UploadTimeoutError)) return;
+      const failed = update(input.step_id, entry.key, {
+        state: "failed",
+        problem: uploadProblem(error, input, t, locale)
+      });
+      if (failed) announce(t("flow_runs_upload_failed", { name: entry.name }));
+    } finally {
+      inFlight.current.delete(entry.key);
+    }
+  }
+
+  /** Takes picked files for a step: uploads those it can take, refuses the rest at once. */
+  function add(input: RuntimeInput, files: readonly File[]) {
+    const existing = current.current[input.step_id] ?? [];
+    let slots =
+      input.max_files == null
+        ? Infinity
+        : input.max_files - existing.filter((entry) => entry.state !== "failed").length;
+    const started: { entry: UploadEntry; file: File }[] = [];
+    const added = files.map((file): UploadEntry => {
+      const base = {
+        key: crypto.randomUUID(),
+        name: file.name,
+        size: file.size,
+        mimetype: file.type
+      };
+      const refuse = (problem: string): UploadEntry => ({ ...base, state: "failed", problem });
+      if (file.size === 0) return refuse(t("flow_error_flow_runtime_file_empty"));
+      if (!acceptsType(input.accepted_mimetypes ?? [], file.type)) {
+        return refuse(t("flow_runs_upload_wrong_type"));
+      }
+      if (input.max_file_size_bytes != null && file.size > input.max_file_size_bytes) {
+        return refuse(
+          t("flow_runs_upload_too_large", { max: formatBytes(input.max_file_size_bytes, locale) })
+        );
+      }
+      if (slots <= 0) {
+        return refuse(t("flow_runs_upload_too_many", { count: input.max_files ?? 0 }));
+      }
+      slots -= 1;
+      const entry: UploadEntry = { ...base, state: "uploading", progress: 0 };
+      started.push({ entry, file });
+      return entry;
+    });
+    replace({ ...current.current, [input.step_id]: [...existing, ...added] });
+    for (const { entry, file } of started) void upload(input, entry, file);
+    return added;
+  }
+
+  /** Takes a file off the form: stops its upload, or deletes it if it was stored. */
+  function remove(stepId: string, key: string) {
+    const entry = current.current[stepId]?.find((candidate) => candidate.key === key);
+    if (!entry) return;
+    inFlight.current.get(key)?.abort();
+    if (entry.fileId) forget(entry.fileId);
+    replace({
+      ...current.current,
+      [stepId]: (current.current[stepId] ?? []).filter((candidate) => candidate.key !== key)
+    });
+  }
+
+  /** The run took the files: leaving the form no longer deletes them. */
+  function claim() {
+    claimed.current = true;
+  }
+
+  return { uploads, add, remove, claim };
+}

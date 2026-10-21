@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import type { Permission } from "@/lib/auth/permissions";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { makeFlow, makeStep } from "./flow-fixtures";
@@ -106,7 +107,10 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderPage(flow: FlowPublic = makeFlow({ steps })) {
+function renderPage(
+  flow: FlowPublic = makeFlow({ steps }),
+  permissions: Permission[] = ["flows_view", "flows_manage"]
+) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(flowKeys.flow(flow.id), flow);
   queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
@@ -116,7 +120,7 @@ function renderPage(flow: FlowPublic = makeFlow({ steps })) {
     </Suspense>,
     {
       queryClient,
-      appContext: testAppContext({ permissions: ["flows_view", "flows_manage"] })
+      appContext: testAppContext({ permissions })
     }
   );
 }
@@ -233,6 +237,22 @@ describe("FlowPage", () => {
     expect(
       await screen.findByRole("button", { name: "Flytta ner Steg 1: Sammanfatta" })
     ).toBeTruthy();
+  });
+
+  it("offers a run of a published flow to someone who may run it", async () => {
+    const published = makeFlow({ steps, published_version: 3 });
+    renderPage(published, ["flows_view", "flows_run"]);
+    fireEvent.click(screen.getByRole("button", { name: "Kör flödet" }));
+    expect(await screen.findByRole("dialog", { name: "Kör Medborgarbrev" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Avpublicera" })).toBeNull();
+  });
+
+  it("offers no run of a draft, nor to someone who may not run flows", () => {
+    renderPage(makeFlow({ steps }), ["flows_view", "flows_manage", "flows_run"]);
+    expect(screen.queryByRole("button", { name: "Kör flödet" })).toBeNull();
+    cleanup();
+    renderPage(makeFlow({ steps, published_version: 3 }), ["flows_view", "flows_manage"]);
+    expect(screen.queryByRole("button", { name: "Kör flödet" })).toBeNull();
   });
 
   it("shows what the chat's tools changed and says so", async () => {

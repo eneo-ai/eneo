@@ -79,6 +79,18 @@ describe("/api/eneo proxy", () => {
     await expect(new Response(init.body).text()).resolves.toBe('{"name":"New space"}');
   });
 
+  it("forwards the idempotency key of a retried write", async () => {
+    await POST(
+      new NextRequest("http://localhost:3100/api/eneo/api/v1/flows/f1/runs/r1/retry/", {
+        method: "POST",
+        headers: { "idempotency-key": "retry-r1-1" }
+      })
+    );
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Headers).get("idempotency-key")).toBe("retry-r1-1");
+  });
+
   it("preserves partial file downloads for audio seeking and resumed transfers", async () => {
     fetchMock.mockResolvedValue(
       new Response("part", {
