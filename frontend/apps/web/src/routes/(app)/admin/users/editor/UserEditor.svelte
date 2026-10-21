@@ -79,10 +79,11 @@
 
   function handleOpenChange(next: boolean) {
     if (busy) return;
+    const passwordWasShown = issuedPassword !== null;
     open = next;
     // Held back while a set password is on screen: a refreshed list may
     // re-render or drop this row, and the password with it.
-    if (!next && issuedPassword !== null) void invalidate("admin:users");
+    if (!next && passwordWasShown) invalidate("admin:users").catch(toastError);
   }
 
   async function saveUser(event: SubmitEvent) {
@@ -93,11 +94,19 @@
       return;
     }
 
+    let password: string | null = null;
+    if (mode === "create" || replacePassword) {
+      try {
+        // Drawn against the backend's own policy, so a policy change needs no change here.
+        password = generatePassword(capability.policy);
+      } catch {
+        toast.error(m.admin_password_policy_unsatisfiable());
+        return;
+      }
+    }
+
     pending = true;
     try {
-      // Drawn against the backend's own policy, so a policy change needs no change here.
-      const password =
-        mode === "create" || replacePassword ? generatePassword(capability.policy) : null;
       if (mode === "create" && password) {
         await eneo.users.create({ username, email, password, roles: userRoles });
       } else if (user.username) {
@@ -152,7 +161,7 @@
   >
     {#if issuedPassword !== null}
       <Dialog.Header>
-        <Dialog.Title>
+        <Dialog.Title id={`${id}-issued-title`}>
           {mode === "create" ? m.admin_user_created_title() : m.admin_password_replaced_title()}
         </Dialog.Title>
         <Dialog.Description id={`${id}-issued-hint`}>
@@ -173,7 +182,7 @@
             autocomplete="off"
             spellcheck={false}
             class="font-mono"
-            aria-describedby={`${id}-issued-hint`}
+            aria-describedby={`${id}-issued-title ${id}-issued-hint`}
             onfocus={(event) => event.currentTarget.select()}
           />
           <CopyButton text={issuedPassword} label={m.copy()} showLabel variant="outline" />

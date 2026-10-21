@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { mock } from "node:test";
 import {
   GENERATED_PASSWORD_LENGTH,
   PASSWORD_CHARACTER_CLASSES,
@@ -107,6 +107,18 @@ test("every character of the alphabet is drawn, and nothing else", () => {
   }
   assert.deepEqual([...seen].sort(), [...alphabet].sort());
   for (const lookalike of "0Oo1lI\"'` \\") assert.ok(!alphabet.has(lookalike), lookalike);
+});
+
+test("randomness comes from the platform's cryptographic source only", () => {
+  const getRandomValues = mock.method(globalThis.crypto, "getRandomValues");
+  const random = mock.method(Math, "random");
+  try {
+    generatePassword(backendPolicy);
+    assert.ok(getRandomValues.mock.callCount() >= GENERATED_PASSWORD_LENGTH);
+    assert.equal(random.mock.callCount(), 0);
+  } finally {
+    mock.restoreAll();
+  }
 });
 
 test("passwords do not repeat", () => {

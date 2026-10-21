@@ -5183,6 +5183,7 @@
   "admin_user_created_title": "Account created",
   "admin_password_replaced_title": "New password set",
   "admin_issued_password_handover": "Give this password to {email}. It will not be shown again.",
+  "admin_password_policy_unsatisfiable": "The password policy cannot be met, so no password could be generated. Contact whoever runs Eneo for your organisation.",
   "admin_password_policy_title": "Password policy",
   "admin_password_policy_description": "Applies to passwords stored in Eneo. Accounts that sign in through your identity provider are not affected.",
   "admin_password_policy_require_change": "Admin-set passwords are one-time",

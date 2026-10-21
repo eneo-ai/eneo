@@ -193,6 +193,7 @@ describe("UserEditorDialog", () => {
     submit(dialog);
 
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(screen.queryByRole("dialog", { name: "Kontot har skapats" })).toBeNull();
     expect(screen.getByRole("dialog", { name: "Skapa en ny användare" })).toBe(dialog);
     expect(field(dialog, /^E-post/).value).toBe("anna.lind@example.se");
   });
@@ -230,6 +231,40 @@ describe("UserEditorDialog", () => {
     const reveal = await screen.findByRole("dialog", { name: "Nytt lösenord har satts" });
     within(reveal).getByText(sentPassword(0));
     expect(api.POST.mock.calls[0]?.[0]).toBe("/api/v1/admin/users/{username}/");
+  });
+
+  it("refreshes the list when the one-time view is closed with its close button", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog, invalidate } = await renderEditor(existing);
+    fireEvent.click(replaceSwitch(dialog));
+    submit(dialog);
+    const reveal = await screen.findByRole("dialog", { name: "Nytt lösenord har satts" });
+    expect(invalidate).not.toHaveBeenCalled();
+
+    fireEvent.click(within(reveal).getByRole("button", { name: "Stäng" }));
+
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin-users"] }));
+  });
+
+  it("says so, and sends nothing, when no password can meet the policy", async () => {
+    const { dialog } = await renderEditor(existing, {
+      policyResponse: ok({
+        ...policy,
+        min_length: 1,
+        max_bytes: 3,
+        requires_uppercase: true,
+        requires_lowercase: true,
+        requires_symbol: true
+      })
+    });
+    fireEvent.click(replaceSwitch(dialog));
+
+    submit(dialog);
+
+    expect(toast.error).toHaveBeenCalledWith(
+      "Lösenordspolicyn går inte att uppfylla, så inget lösenord kunde genereras. Kontakta den som driftar Eneo för er organisation."
+    );
+    expect(api.POST).not.toHaveBeenCalled();
   });
 
   it("says so when the policy cannot be read, and generates no password without it", async () => {

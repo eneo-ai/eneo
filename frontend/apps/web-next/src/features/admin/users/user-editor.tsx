@@ -198,12 +198,12 @@ function UserEditorForm({
         password = generatePassword(policy);
       } catch {
         // The backend sent a policy no password can meet.
-        toast.error(t("password_policy_unavailable"));
+        toast.error(t("admin_password_policy_unsatisfiable"));
         return;
       }
     }
-    if (mode === "create" && password) create.mutate(password);
-    else updateUser.mutate(password);
+    if (mode === "update") updateUser.mutate(password);
+    else if (password) create.mutate(password);
   }
 
   const usernameError = shown("username");

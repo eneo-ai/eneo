@@ -56,7 +56,9 @@ export function generatePassword(policy) {
     policy.maxBytes ?? Number.POSITIVE_INFINITY
   );
   if (length < policy.minLength || length < requiredClasses.length) {
-    throw new RangeError("No password can meet this policy: its byte limit is below its minimum.");
+    throw new RangeError(
+      "No password can meet this policy: its byte limit leaves no room for its minimum length or required characters."
+    );
   }
 
   const characters = requiredClasses.map(pick);

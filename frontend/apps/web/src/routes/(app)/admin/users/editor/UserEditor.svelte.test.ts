@@ -17,22 +17,26 @@ const api = vi.hoisted(() => ({
   update: vi.fn<(request: unknown) => Promise<typeof user>>(),
   create: vi.fn<(request: unknown) => Promise<void>>(),
   invalidate: vi.fn<() => Promise<void>>(),
-  toastError: vi.fn()
+  toastError: vi.fn(),
+  toast: { warning: vi.fn(), error: vi.fn() }
 }));
 vi.mock("$app/navigation", () => ({ invalidate: api.invalidate }));
 vi.mock("$lib/core/Eneo", () => ({ getEneo: () => ({ users: api }) }));
 vi.mock("$lib/core/errors", () => ({ toastError: api.toastError }));
+vi.mock("$lib/components/toast", () => ({ toast: api.toast }));
 const capability = vi.hoisted(() => ({
   source: "eneo" as const,
   policy: {
     minLength: 24,
-    maxBytes: 72,
+    maxBytes: 72 as number | null,
     requiresUppercase: true,
     requiresLowercase: true,
     requiresNumber: true,
     requiresSymbol: true
   }
 }));
+/** Each test starts from this; one narrows the policy until nothing meets it. */
+const strictPolicy = { ...capability.policy };
 vi.mock("../ctx", () => ({
   getAdminUserCtx: () => ({
     roles: [],
@@ -44,6 +48,7 @@ vi.mock("../ctx", () => ({
 
 beforeEach(() => {
   vi.resetAllMocks();
+  Object.assign(capability.policy, strictPolicy);
   api.update.mockResolvedValue(user);
   api.create.mockResolvedValue();
   api.invalidate.mockResolvedValue();
@@ -59,6 +64,13 @@ const replaceSwitch = () => page.getByRole("switch", { name: m.admin_password_re
 const issuedPassword = () => page.getByLabelText(m.password(), { exact: true });
 const saveButton = () => page.getByRole("button", { name: m.save_changes(), exact: true });
 const doneButton = () => page.getByRole("button", { name: m.done(), exact: true });
+
+/** The texts an element's aria-describedby points at, in order. */
+function descriptions(element: Element): (string | undefined)[] {
+  return (element.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .map((id) => document.getElementById(id)?.textContent?.replace(/\s+/g, " ").trim());
+}
 
 function sentPassword(call: unknown): string {
   return (
@@ -115,6 +127,59 @@ describe("administrator user editor", () => {
     await page.getByRole("button", { name: m.edit(), exact: true }).click();
     await expect.element(replaceSwitch()).not.toBeChecked();
     await expect.element(page.getByText(password)).not.toBeInTheDocument();
+  });
+
+  test("names the one-time view and its hand-over for screen readers", async () => {
+    await openEditor();
+    await replaceSwitch().click();
+    await saveButton().click();
+    await expect.element(issuedPassword()).toHaveFocus();
+    const handover = expect.stringContaining(
+      m.admin_issued_password_handover({ email: user.email })
+    );
+    expect(descriptions(issuedPassword().element())).toEqual([
+      m.admin_password_replaced_title(),
+      handover
+    ]);
+    expect(descriptions(page.getByRole("dialog").element())).toEqual([handover]);
+  });
+
+  test("refreshes the list when the one-time view is closed with Escape", async () => {
+    await openEditor();
+    await replaceSwitch().click();
+    await saveButton().click();
+    await expect.element(issuedPassword()).toHaveFocus();
+    await userEvent.keyboard("{Escape}");
+    await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+    await expect.poll(() => api.invalidate.mock.calls).toEqual([["admin:users"]]);
+  });
+
+  test("shows no password when the save is refused, and a retry draws a fresh one", async () => {
+    api.update.mockRejectedValueOnce(new Error("Save failed"));
+    await openEditor();
+    await replaceSwitch().click();
+    await saveButton().click();
+    await expect.poll(() => api.toastError.mock.calls.length).toBe(1);
+    await expect.element(issuedPassword()).not.toBeInTheDocument();
+    await expect.element(replaceSwitch()).toBeChecked();
+
+    await saveButton().click();
+    await expect.poll(() => api.update.mock.calls.length).toBe(2);
+    const refused = sentPassword(api.update.mock.calls[0][0]);
+    const accepted = sentPassword(api.update.mock.calls[1][0]);
+    expect(accepted).not.toBe(refused);
+    await expect.element(issuedPassword()).toHaveValue(accepted);
+  });
+
+  test("says so, and sends nothing, when no password can meet the policy", async () => {
+    Object.assign(capability.policy, { minLength: 1, maxBytes: 3 });
+    await openEditor();
+    await replaceSwitch().click();
+    await saveButton().click();
+    await expect.poll(() => api.toast.error.mock.calls.length).toBe(1);
+    expect(api.toast.error).toHaveBeenCalledWith(m.admin_password_policy_unsatisfiable());
+    expect(api.update).not.toHaveBeenCalled();
+    await expect.element(replaceSwitch()).toBeChecked();
   });
 
   test("keeps a shown password when clicking outside the dialog", async () => {

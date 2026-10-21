@@ -5184,6 +5184,7 @@
   "admin_user_created_title": "Kontot har skapats",
   "admin_password_replaced_title": "Nytt lösenord har satts",
   "admin_issued_password_handover": "Lämna lösenordet till {email}. Det visas inte igen.",
+  "admin_password_policy_unsatisfiable": "Lösenordspolicyn går inte att uppfylla, så inget lösenord kunde genereras. Kontakta den som driftar Eneo för er organisation.",
   "admin_password_policy_title": "Lösenordspolicy",
   "admin_password_policy_description": "Gäller lösenord som lagras i Eneo. Konton som loggar in via er identitetsleverantör påverkas inte.",
   "admin_password_policy_require_change": "Lösenord satta av administratör är engångslösenord",
