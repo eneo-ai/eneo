@@ -5,6 +5,7 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.ASSISTANTS: "Management of Assistants. Create, Update, and Delete Assistants.",
     Permission.SKILLS: "Use Skills. Browse and attach existing Skills to Assistants and Apps you can edit.",
     Permission.SKILLS_MANAGEMENT: "Manage Skills. Together with Use Skills, create, revise, change availability, and delete Skills in Spaces where you have access.",
+    Permission.PERSONAL_SKILLS: "Own Skills. Create, revise, and delete Skills in your own personal space and choose which run in your personal chat. Gives no access to Skills in shared or organisation Spaces.",
     Permission.PERSONAL_CHAT: "Use the personal chat. Without this permission the personal chat is unavailable; all other access is unaffected.",
     Permission.GROUP_CHATS: "Management of Group Chats. Create, Update, and Delete Assistants.",
     Permission.APPS: "Management of Apps. Create, Update, and Delete Apps",
