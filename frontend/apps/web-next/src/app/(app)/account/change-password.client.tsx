@@ -14,6 +14,7 @@ import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
+import { passwordChangedLogoutUrl } from "@/lib/auth/password-change-path";
 import {
   newPasswordErrors,
   passwordCapability,
@@ -29,12 +30,15 @@ type ServerErrors = Partial<Record<"current" | "next", string>>;
 export function ChangePasswordForm({
   policy,
   email,
-  currentPasswordHint
+  currentPasswordHint,
+  afterChangeHref = passwordChangedLogoutUrl(null)
 }: {
   policy: PasswordPolicy;
   email: string;
   /** Under the current-password field, e.g. "enter the one-time password". */
   currentPasswordHint?: string;
+  /** Where the browser goes once the password is changed; signs out by default. */
+  afterChangeHref?: string;
 }) {
   const t = useTranslations();
   const [current, setCurrent] = useState("");
@@ -78,8 +82,10 @@ export function ChangePasswordForm({
         })
       ),
     onSuccess: () => {
-      toast.success(t("password_changed"));
-      window.location.assign("/logout");
+      // The change bumps the credential version, so the session is gone: the
+      // logout route tells the login page the password was changed (a toast
+      // would not survive the navigation).
+      window.location.assign(afterChangeHref);
     },
     onError: (error) => {
       const code = error instanceof EneoApiError ? error.code : undefined;

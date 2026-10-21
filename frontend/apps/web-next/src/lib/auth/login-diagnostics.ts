@@ -7,7 +7,7 @@ export type LoginDiagnostics = {
 };
 
 /** Informational `?message=` values the login page renders itself; not failures. */
-const INFORMATIONAL_MESSAGES = new Set(["logout", "expired"]);
+const INFORMATIONAL_MESSAGES = new Set(["logout", "expired", "password_changed"]);
 const OIDC_FORBIDDEN_CODES = new Set(["access_denied", "forbidden", "oidc_forbidden"]);
 const OIDC_UNAUTHORIZED_CODES = new Set(["unauthorized", "invalid_grant", "oidc_unauthorized"]);
 

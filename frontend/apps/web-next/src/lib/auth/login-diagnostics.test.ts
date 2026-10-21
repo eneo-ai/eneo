@@ -35,6 +35,9 @@ describe("login diagnostics", () => {
     expect(loginDiagnosticsFromSearchParams(new URLSearchParams("message=logout"))).toBeNull();
     expect(loginDiagnosticsFromSearchParams(new URLSearchParams("message=expired"))).toBeNull();
     expect(
+      loginDiagnosticsFromSearchParams(new URLSearchParams("message=password_changed"))
+    ).toBeNull();
+    expect(
       loginDiagnosticsFromSearchParams(new URLSearchParams("message=logout&correlation=c1"))
     ).toMatchObject({ message: undefined, correlation: "c1" });
   });

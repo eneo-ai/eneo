@@ -1,7 +1,9 @@
 import "server-only";
 
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import createClient from "openapi-fetch";
+import { passwordChangeUrl } from "@/lib/auth/password-change-path";
 import { getAccessToken } from "@/lib/auth/session";
 import { env } from "@/lib/env";
 import { errorCodeFromResponse } from "./errors";
@@ -49,9 +51,18 @@ export function eneoApi() {
       if (code === TENANT_SUSPENDED) redirect("/deactivated");
       // A password session must replace its one-time or expired local
       // password first; only that page's endpoints answer until it has.
-      if (code === PASSWORD_CHANGE_REQUIRED) redirect("/password-change");
+      if (code === PASSWORD_CHANGE_REQUIRED) redirect(passwordChangeUrl(await currentPath()));
     }
   });
 
   return client;
+}
+
+/** The page being rendered, as the proxy recorded it; null outside a request. */
+async function currentPath(): Promise<string | null> {
+  try {
+    return (await headers()).get("x-eneo-path");
+  } catch {
+    return null;
+  }
 }

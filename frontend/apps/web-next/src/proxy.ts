@@ -76,6 +76,10 @@ function createSecurityRequestHeaders(request: NextRequest, nonce: string, csp: 
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", csp);
+  // The page being rendered, for server-side redirects that should bring the
+  // user back here afterwards (see lib/api/server.ts). Set here so a client
+  // cannot supply its own value.
+  requestHeaders.set("x-eneo-path", request.nextUrl.pathname + request.nextUrl.search);
   return requestHeaders;
 }
 

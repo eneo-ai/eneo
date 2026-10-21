@@ -1,6 +1,7 @@
 import createClient, { type Client } from "openapi-fetch";
 import { errorCodeFromResponse } from "./errors";
 import type { paths } from "./schema";
+import { passwordChangeUrl } from "@/lib/auth/password-change-path";
 
 /** A typed Eneo API client, regardless of transport (direct or proxied). */
 export type EneoClient = Client<paths>;
@@ -22,7 +23,9 @@ browserApi.use({
       // The session must replace its local password before anything else;
       // the server client sends renders there too (see server.ts).
       if ((await errorCodeFromResponse(response)) === PASSWORD_CHANGE_REQUIRED) {
-        window.location.assign("/password-change");
+        window.location.assign(
+          passwordChangeUrl(window.location.pathname + window.location.search)
+        );
       }
       return;
     }

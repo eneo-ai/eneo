@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { ChangePasswordForm } from "@/app/(app)/account/change-password.client";
 import { passwordCapability } from "@/features/auth/password-policy";
+import { passwordChangedLogoutUrl } from "@/lib/auth/password-change-path";
 import { safeNextPath } from "@/lib/auth/safe-next";
 import { getAccessTokenOrNull } from "@/lib/auth/session";
 import { env } from "@/lib/env";
@@ -19,7 +20,7 @@ export const generateMetadata = pageTitle("password_change_required_title");
  * 403/9070 until the password is replaced, and both API clients send such a
  * session here. Outside the app shell on purpose: the shell's own loads are
  * among the refused ones. The form signs the browser out on success, and the
- * user signs in again with the password they chose.
+ * user signs in again with the password they chose and lands on `next`.
  */
 export default async function PasswordChangePage({
   searchParams
@@ -77,6 +78,7 @@ export default async function PasswordChangePage({
           policy={capability.policy}
           email={me.email}
           currentPasswordHint={t("password_change_required_current_hint")}
+          afterChangeHref={passwordChangedLogoutUrl(next)}
         />
       ) : (
         <p className="text-muted-foreground text-sm">{t("password_change_not_available")}</p>

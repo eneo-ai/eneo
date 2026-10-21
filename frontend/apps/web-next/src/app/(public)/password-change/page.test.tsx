@@ -6,13 +6,47 @@ vi.mock("@/lib/auth/session", () => ({
 vi.mock("next-intl/server", () => ({
   getTranslations: async () => (key: string) => key
 }));
-vi.mock("@/app/(app)/account/change-password.client", () => ({
-  ChangePasswordForm: () => null
-}));
+const { ChangePasswordForm } = vi.hoisted(() => ({ ChangePasswordForm: vi.fn(() => null) }));
+vi.mock("@/app/(app)/account/change-password.client", () => ({ ChangePasswordForm }));
 
 import PasswordChangePage from "./page";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  ChangePasswordForm.mockClear();
+});
+
+function me(changeRequired: boolean) {
+  return new Response(
+    JSON.stringify({
+      email: "person@example.com",
+      password_change: {
+        source: "eneo",
+        policy: {
+          min_length: 7,
+          max_bytes: 72,
+          requires_uppercase: false,
+          requires_lowercase: false,
+          requires_number: false,
+          requires_symbol: false
+        }
+      },
+      password_status: changeRequired
+        ? { change_required: true, reason: "admin_set" }
+        : { change_required: false, reason: null }
+    }),
+    { status: 200, headers: { "content-type": "application/json" } }
+  );
+}
+
+/** Renders the page and returns the props the form was given. */
+async function renderForm(next?: string) {
+  vi.stubGlobal("fetch", async () => me(true));
+  const page = await PasswordChangePage({ searchParams: Promise.resolve({ next }) });
+  const form = page.props.children;
+  expect(form.type).toBe(ChangePasswordForm);
+  return form.props as { afterChangeHref: string };
+}
 
 describe("password-change session recovery", () => {
   it("redirects a backend-rejected session through logout instead of swallowing the redirect", async () => {
@@ -20,6 +54,25 @@ describe("password-change session recovery", () => {
     await expect(PasswordChangePage({ searchParams: Promise.resolve({}) })).rejects.toMatchObject({
       digest: expect.stringContaining("/logout?reason=expired")
     });
+  });
+
+  it("sends a session that needs no change on to the requested page, never off-site", async () => {
+    vi.stubGlobal("fetch", async () => me(false));
+    await expect(
+      PasswordChangePage({ searchParams: Promise.resolve({ next: "/spaces/abc" }) })
+    ).rejects.toMatchObject({ digest: expect.stringContaining(";/spaces/abc;") });
+    await expect(
+      PasswordChangePage({ searchParams: Promise.resolve({ next: "https://evil.example" }) })
+    ).rejects.toMatchObject({ digest: expect.stringContaining(";/spaces/personal/chat;") });
+  });
+
+  it("after the change, signs out with the notice and keeps the requested page", async () => {
+    expect((await renderForm("/spaces/abc")).afterChangeHref).toBe(
+      "/logout?reason=password_changed&next=%2Fspaces%2Fabc"
+    );
+    expect((await renderForm("//evil.example")).afterChangeHref).toBe(
+      "/logout?reason=password_changed"
+    );
   });
 
   it("still renders the unavailable message when the backend cannot be reached", async () => {
