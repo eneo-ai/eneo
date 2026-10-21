@@ -1409,6 +1409,10 @@ class TestTruncateToolResult:
         assert head["text"].startswith("x")
         assert len(head["text"]) < max_chars
         assert "truncated" in notice["text"]
+        # Joined as the adapter joins blocks, the notice starts on its own line.
+        assert "".join(b["text"] for b in truncated["content"]).endswith(
+            "x\n" + notice["text"].lstrip("\n")
+        )
 
     def test_leading_blocks_kept_whole_and_tail_dropped(self):
         from eneo.main.config import get_settings

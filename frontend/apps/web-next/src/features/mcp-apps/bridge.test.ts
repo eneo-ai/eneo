@@ -26,7 +26,10 @@ vi.mock("@modelcontextprotocol/ext-apps/app-bridge", () => ({
   }
 }));
 
+import { EneoApiError } from "@/lib/api/errors";
 import { McpAppBridge, type ToolCallOutcome } from "./bridge";
+
+const notStored = () => new EneoApiError("Not found", { status: 404 });
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
@@ -51,8 +54,8 @@ function finishedView(getToolResult: () => Promise<ToolCallOutcome | null>) {
 it("asks again for a result that is not stored yet", async () => {
   const getToolResult = vi
     .fn()
-    .mockRejectedValueOnce(new Error("404"))
-    .mockRejectedValueOnce(new Error("404"))
+    .mockRejectedValueOnce(notStored())
+    .mockRejectedValueOnce(notStored())
     .mockResolvedValue({ result: "rows" });
   finishedView(getToolResult);
 
@@ -62,14 +65,22 @@ it("asks again for a result that is not stored yet", async () => {
 });
 
 it("stops asking after the last try, or once the view is gone", async () => {
-  const missing = vi.fn().mockRejectedValue(new Error("404"));
+  const missing = vi.fn().mockRejectedValue(notStored());
   finishedView(missing);
   await vi.advanceTimersByTimeAsync(60_000);
   expect(missing).toHaveBeenCalledTimes(5);
 
-  const gone = vi.fn().mockRejectedValue(new Error("404"));
+  const gone = vi.fn().mockRejectedValue(notStored());
   finishedView(gone).destroy();
   await vi.advanceTimersByTimeAsync(60_000);
   expect(gone).toHaveBeenCalledTimes(1);
+  expect(sdk.results).toEqual([]);
+});
+
+it("does not ask again when the result is refused or the request fails otherwise", async () => {
+  const refused = vi.fn().mockRejectedValue(new EneoApiError("Forbidden", { status: 403 }));
+  finishedView(refused);
+  await vi.advanceTimersByTimeAsync(60_000);
+  expect(refused).toHaveBeenCalledTimes(1);
   expect(sdk.results).toEqual([]);
 });

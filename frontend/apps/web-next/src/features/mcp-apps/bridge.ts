@@ -5,6 +5,7 @@ import {
   type McpUiResourcePermissions,
   type McpUiToolResultNotification
 } from "@modelcontextprotocol/ext-apps/app-bridge";
+import { EneoApiError } from "@/lib/api/errors";
 import type { McpAppDisplayMode } from "./mcp-apps";
 
 const MAX_INLINE_HEIGHT = 2000;
@@ -241,25 +242,34 @@ export class McpAppBridge {
   }
 
   async #deliverResult() {
+    let outcome: ToolCallOutcome | null | undefined;
     for (const delay of [0, ...RESULT_RETRY_DELAYS_MS]) {
       if (delay > 0) await new Promise((resolve) => setTimeout(resolve, delay));
       if (this.#destroyed) return;
       try {
-        const outcome = await this.#options.getToolResult();
-        if (this.#destroyed) return;
-        await this.#sdk.sendToolResult({
-          content: outcome?.result == null ? [] : [{ type: "text", text: outcome.result }],
-          ...(outcome?.structuredContent
-            ? { structuredContent: plain(outcome.structuredContent) }
-            : {}),
-          ...(outcome?.isError ? { isError: true } : {})
-        });
-        return;
-      } catch {
-        // Asked for again after the next delay.
+        outcome = await this.#options.getToolResult();
+        break;
+      } catch (error) {
+        // Only a result that is not stored yet is asked for again.
+        if (!(error instanceof EneoApiError && error.status === 404)) break;
       }
     }
-    this.#resultSent = false;
+    if (this.#destroyed) return;
+    if (outcome === undefined) {
+      this.#resultSent = false;
+      return;
+    }
+    try {
+      await this.#sdk.sendToolResult({
+        content: outcome?.result == null ? [] : [{ type: "text", text: outcome.result }],
+        ...(outcome?.structuredContent
+          ? { structuredContent: plain(outcome.structuredContent) }
+          : {}),
+        ...(outcome?.isError ? { isError: true } : {})
+      });
+    } catch {
+      this.#resultSent = false;
+    }
   }
 }
 
