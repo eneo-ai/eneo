@@ -179,6 +179,7 @@ class ModelProviderRepository:
         from eneo.database.tables.ai_models_table import (
             CompletionModels,
             EmbeddingModels,
+            ForecastModels,
             ImageModels,
             RerankModels,
             TranscriptionModels,
@@ -217,10 +218,17 @@ class ModelProviderRepository:
             .where(RerankModels.provider_id == provider_id)
         )
 
+        forecast_count = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(ForecastModels)
+            .where(ForecastModels.provider_id == provider_id)
+        )
+
         return (
             (completion_count or 0)
             + (embedding_count or 0)
             + (transcription_count or 0)
             + (image_count or 0)
             + (rerank_count or 0)
+            + (forecast_count or 0)
         )

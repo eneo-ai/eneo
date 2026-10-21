@@ -6,6 +6,9 @@ from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
+from eneo.forecast_models.application.forecast_model_provisioning import (
+    ensure_default_forecast_model,
+)
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
@@ -45,6 +48,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     is_builtin_provider,
     is_bundled_server,
     is_capability_purpose,
+    runs_forecast_model,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
@@ -573,6 +577,7 @@ class MCPServerService:
         audience_priority: int = DEFAULT_AUDIENCE_PRIORITY,
         user_group_ids: list[UUID] | None = None,
         image_model_id: UUID | None = None,
+        forecast_model_id: UUID | None = None,
         activate: bool = False,
     ) -> MCPServerCreateResult:
         """Create a new MCP server for the tenant (admin only, uses Streamable HTTP transport).
@@ -634,6 +639,7 @@ class MCPServerService:
             audience_priority=audience_priority,
             user_groups=user_groups,
             image_model_id=image_model_id,
+            forecast_model_id=forecast_model_id,
             description=description,
             http_auth_config_schema=http_auth_config_schema,
             forward_identity=forward_identity,
@@ -749,6 +755,10 @@ class MCPServerService:
         per space like any other; a capability provider is saved inactive
         unless ``activate`` switches it in as the tenant's default. Only its
         URL and credential come from the deployment instead of the admin.
+
+        The Forecast source runs on the tenant's default forecast model,
+        provisioned in this same transaction (with the tool service as its
+        provider) the first time: governed in the model catalog from then on.
         """
         if tool not in BUNDLED_TOOLS:
             raise NotFoundException(f"Unknown bundled tool '{tool}'")
@@ -765,12 +775,19 @@ class MCPServerService:
             )
         ):
             raise NameCollisionException(f"The bundled '{tool}' server already exists")
+        purpose = BUNDLED_TOOLS[tool].purpose
+        forecast_model_id = (
+            await ensure_default_forecast_model(self.repo.session, self.user.tenant_id)
+            if runs_forecast_model(BUNDLED_AUTH_TYPE, purpose)
+            else None
+        )
         return await self.create_mcp_server(
             name=BUNDLED_TOOL_NAMES[tool],
             http_url=url,
             http_auth_type=BUNDLED_AUTH_TYPE,
-            purpose=BUNDLED_TOOLS[tool].purpose,
+            purpose=purpose,
             description=BUNDLED_TOOL_DESCRIPTIONS[tool],
+            forecast_model_id=forecast_model_id,
             activate=activate,
         )
 

@@ -202,6 +202,37 @@ class TestCreateBundledTabular:
             )
 
 
+class TestCreateBundledForecast:
+    """The Forecast source runs on the tenant's default forecast model, which
+    Eneo provisions in the same transaction as the source."""
+
+    async def test_runs_on_the_tenants_default_forecast_model(
+        self, monkeypatch, runtime_configured
+    ):
+        service, repo, user = _make_service(monkeypatch)
+        model_id = uuid4()
+        provision = AsyncMock(return_value=model_id)
+        monkeypatch.setattr(service_module, "ensure_default_forecast_model", provision)
+
+        result = await service.create_bundled_mcp_server("forecast")
+
+        provision.assert_awaited_once_with(repo.session, user.tenant_id)
+        assert result.server.purpose == "forecast"
+        assert result.server.forecast_model_id == model_id
+
+    async def test_other_tools_run_on_no_forecast_model(
+        self, monkeypatch, runtime_configured
+    ):
+        service, _, _ = _make_service(monkeypatch)
+        provision = AsyncMock()
+        monkeypatch.setattr(service_module, "ensure_default_forecast_model", provision)
+
+        result = await service.create_bundled_mcp_server("compute")
+
+        provision.assert_not_awaited()
+        assert result.server.forecast_model_id is None
+
+
 class TestListBundled:
     async def test_reports_purpose_availability_and_the_added_server(
         self, monkeypatch, runtime_configured
