@@ -1,5 +1,6 @@
 import { partFileName, recordingTimeLeftMs, type RecordingOptions } from "./recording-format";
 import type { RecorderAudioGraph } from "./live-transcript";
+import type { JournalPart, RecorderJournal } from "./recording-keeper";
 import { withRecordedDuration } from "./webm-duration";
 
 /**
@@ -48,6 +49,8 @@ export type RecordedPart = {
   sessionId: string;
   index: number;
   durationMs: number;
+  /** Wall-clock time at which the part started, which its file name carries. */
+  capturedAt: number;
 };
 
 /** What the step lets this recording take, read when it starts and on every tick. */
@@ -79,6 +82,12 @@ export type RecorderCallbacks = {
   onPause?: (paused: boolean) => void;
   /** The recording is about to go on in a new part: the live text no longer covers one file. */
   onRotate?: () => void;
+  /**
+   * Where each part's chunks are written as they come, so a closed tab or a
+   * crash keeps what was recorded. A handed-over part's journal is ended by
+   * whoever stores the part; one the page leaves mid-recording stays.
+   */
+  journal?: RecorderJournal;
 };
 
 type RecorderEnvironment = {
@@ -151,6 +160,8 @@ function problemOf(error: unknown): RecorderProblem {
 type Part = {
   recorder: MediaRecorder;
   index: number;
+  /** What the journal knows the part by. */
+  journal: JournalPart;
   chunks: Blob[];
   /** Recorded time (the recording's clock) at which this part started. */
   startedAtMs: number;
@@ -182,6 +193,8 @@ export class AudioRecorder {
   #part: Part | null = null;
   #handovers: Promise<void> = Promise.resolve();
   #pendingHandovers = 0;
+  /** Parts started and not handed over yet, whose journals the page would leave. */
+  #unhanded = new Set<Part>();
   #session: StartOptions | null = null;
   #nextIndex = 0;
   #partsThisStart = 0;
@@ -353,11 +366,16 @@ export class AudioRecorder {
     return done;
   }
 
-  /** Lets go of the microphone at once; nothing more is handed over. */
+  /**
+   * Lets go of the microphone at once; nothing more is handed over. What the
+   * journal holds of the parts not handed over stays, to be rebuilt.
+   */
   dispose(): void {
     this.#disposed = true;
     this.#attempt += 1;
     clearInterval(this.#tick);
+    for (const part of this.#unhanded) this.#callbacks.journal?.leave(part.journal);
+    this.#unhanded.clear();
     const part = this.#part;
     this.#part = null;
     if (part) {
@@ -424,18 +442,30 @@ export class AudioRecorder {
     const index = this.#nextIndex++;
     this.#partsThisStart += 1;
     let handOver: () => void = () => undefined;
+    const capturedAt = this.#env.wallNow();
+    const journal = this.#callbacks.journal;
     const part: Part = {
       recorder,
       index,
+      journal: {
+        sessionId: this.#session?.sessionId ?? "",
+        index,
+        mimeType: recorder.mimeType || this.#options.mimeType || "audio/webm",
+        capturedAt
+      },
       chunks: [],
       startedAtMs: this.recordedMs(),
-      capturedAt: this.#env.wallNow(),
+      capturedAt,
       handedOver: new Promise<void>((resolve) => {
         handOver = resolve;
       })
     };
+    this.#unhanded.add(part);
+    journal?.begin(part.journal);
     recorder.ondataavailable = (event: BlobEvent) => {
-      if (event.data.size > 0) part.chunks.push(event.data);
+      if (event.data.size === 0) return;
+      part.chunks.push(event.data);
+      journal?.append(part.journal, event.data, Math.max(0, this.recordedMs() - part.startedAtMs));
     };
     recorder.onerror = () => {
       if (this.#part === part) void this.stop("error");
@@ -448,13 +478,19 @@ export class AudioRecorder {
       // Parts arrive in recording order, whichever file is built first.
       void Promise.all([previous, file.catch(() => null)]).then(([, built]) => {
         this.#pendingHandovers -= 1;
-        if (built && !this.#disposed && this.#session) {
-          this.#callbacks.onPart({
-            file: built,
-            sessionId: this.#session.sessionId,
-            index: part.index,
-            durationMs
-          });
+        if (!this.#disposed) {
+          this.#unhanded.delete(part);
+          if (built && this.#session) {
+            this.#callbacks.onPart({
+              file: built,
+              sessionId: this.#session.sessionId,
+              index: part.index,
+              durationMs,
+              capturedAt: part.capturedAt
+            });
+          } else {
+            journal?.discard(part.journal);
+          }
         }
         handOver();
       });

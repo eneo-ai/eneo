@@ -7,10 +7,12 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Text } from "@astryxdesign/core/Text";
 import { Timer } from "@astryxdesign/core/Timer";
+import { useQuery } from "@tanstack/react-query";
 import { Mic, Pause, Play, Square } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
   useEffect,
+  useId,
   useImperativeHandle,
   useRef,
   useState,
@@ -28,6 +30,15 @@ import {
   type RuntimeInput
 } from "../runs-api";
 import { LiveTranscript, type LiveSnapshot } from "./live-transcript";
+import {
+  contractSnapshot,
+  resumeRefusal,
+  storedPartFile,
+  type RecordingKeeper,
+  type SavedRecording
+} from "./recording-keeper";
+import type { StoredPart } from "./recording-store";
+import { resumeRefusalText, ResumePrompt } from "./resume-prompt";
 import {
   AudioRecorder,
   recordingSupport,
@@ -111,6 +122,14 @@ function refusalReason(error: unknown): string {
 function filesLeft(input: RuntimeInput, entries: readonly UploadEntry[]): number {
   if (input.max_files == null) return Infinity;
   return input.max_files - entries.filter((entry) => entry.state !== "failed").length;
+}
+
+/** The recording the step's last recorded part belongs to, which recording again continues. */
+function latestSession(entries: readonly UploadEntry[]): string | null {
+  return (
+    entries.findLast((entry) => entry.recording && entry.state !== "failed")?.recording
+      ?.sessionId ?? null
+  );
 }
 
 /** The parts of a recording still on the form, in order. */
@@ -209,6 +228,9 @@ export function RunRecorder({
   live: liveOption,
   entries,
   onPart,
+  keeper,
+  publishedFlowVersion,
+  onSaveForLater,
   handleRef
 }: {
   flowId: string;
@@ -217,6 +239,12 @@ export function RunRecorder({
   entries: readonly UploadEntry[];
   /** Adds a finished part to the step's files and answers its entry key. */
   onPart: (file: File, recording: RecordingPartInfo, label: string) => string | undefined;
+  /** Keeps the form's recordings on the device, and finds those kept before. */
+  keeper: RecordingKeeper;
+  /** The published version the run contract describes, kept with each part. */
+  publishedFlowVersion: number | null;
+  /** Closes the form and keeps the recording on the device to continue later. */
+  onSaveForLater?: () => void;
   handleRef?: Ref<RecorderHandle>;
 }) {
   const t = useTranslations();
@@ -248,21 +276,33 @@ export function RunRecorder({
   const [recorder] = useState(() => new AudioRecorder(options));
   const liveWanted = liveAvailable && liveOn;
 
+  const stepId = input.step_id;
+  const snapshotOfContract = () => contractSnapshot(input, publishedFlowVersion);
+  const partLabel = (index: number, durationMs: number) =>
+    t("flow_transcript_rec_part_name", { part: index + 1, length: clockText(durationMs) });
+
   useEffect(() => {
     latestEntries.current = entries;
     recorder.setCallbacks({
       onPart: (part: RecordedPart) => {
-        const label = t("flow_transcript_rec_part_name", {
-          part: part.index + 1,
-          length: clockText(part.durationMs)
+        // Kept on the device while it uploads: a reload meanwhile still finds it.
+        void keeper.keepPart(stepId, {
+          sessionId: part.sessionId,
+          index: part.index,
+          blob: part.file,
+          mimeType: part.file.type,
+          durationMs: part.durationMs,
+          capturedAt: part.capturedAt,
+          contract: snapshotOfContract()
         });
         const key = onPart(
           part.file,
           { sessionId: part.sessionId, index: part.index, durationMs: part.durationMs },
-          label
+          partLabel(part.index, part.durationMs)
         );
         liveEntry.current = key ?? null;
       },
+      journal: keeper.journalFor(stepId, snapshotOfContract),
       onAudioGraph: (graph, signal) => {
         if (!graph) {
           live.stop();
@@ -357,6 +397,93 @@ export function RunRecorder({
   const recordedParts = entries.some((entry) => entry.recording);
   useBeforeUnloadWarning(snapshot.phase !== "idle" || recordedParts);
 
+  // What this device kept of earlier recordings of the step, offered to continue.
+  const scan = useQuery({
+    queryKey: ["flow-recordings", flowId, stepId, "kept"],
+    queryFn: () => keeper.scan(stepId),
+    enabled: keeper.available,
+    staleTime: Infinity,
+    gcTime: 0,
+    retry: false
+  });
+  /** Kept recordings continued or discarded here, which are not offered again. */
+  const [handled, setHandled] = useState<ReadonlySet<string>>(new Set());
+  const [promptDismissed, setPromptDismissed] = useState(false);
+  const [resumeBusy, setResumeBusy] = useState<"continue" | "discard" | null>(null);
+  const [resumeProblem, setResumeProblem] = useState<string | null>(null);
+  const onForm = new Set(entries.flatMap((entry) => entry.recording?.sessionId ?? []));
+  const offered = (scan.data?.saved ?? []).find(
+    (saved) => !onForm.has(saved.sessionId) && !handled.has(saved.sessionId)
+  );
+
+  function settle(saved: SavedRecording) {
+    setHandled((current) => new Set(current).add(saved.sessionId));
+    setResumeProblem(null);
+  }
+
+  async function continueSaved(saved: SavedRecording) {
+    setResumeBusy("continue");
+    setResumeProblem(null);
+    try {
+      let parts: StoredPart[];
+      try {
+        parts = await keeper.readSession(stepId, saved.sessionId);
+      } catch {
+        setResumeProblem(t("flow_transcript_resume_read_failed"));
+        return;
+      }
+      if (parts.length === 0) {
+        settle(saved);
+        return;
+      }
+      // The flow may have changed since: its step must still take these parts as they are.
+      const refusal = resumeRefusal(snapshotOfContract(), parts);
+      if (refusal) {
+        setResumeProblem(resumeRefusalText(refusal, t));
+        return;
+      }
+      keeper.adopt(stepId, parts);
+      setSession(saved.sessionId);
+      for (const part of parts) {
+        onPart(
+          storedPartFile(part),
+          { sessionId: part.sessionId, index: part.index, durationMs: part.durationMs },
+          partLabel(part.index, part.durationMs)
+        );
+      }
+      settle(saved);
+      announce(t("flow_transcript_resume_added"));
+    } finally {
+      setResumeBusy(null);
+    }
+  }
+
+  async function discardSaved(saved: SavedRecording) {
+    setResumeBusy("discard");
+    setResumeProblem(null);
+    const discarded = await keeper.forgetSession(stepId, saved.sessionId);
+    setResumeBusy(null);
+    if (!discarded) {
+      setResumeProblem(t("flow_transcript_resume_discard_failed"));
+      return;
+    }
+    settle(saved);
+    announce(t("flow_transcript_resume_discarded"));
+  }
+
+  // Where the form's recorded parts are kept, which "Spara och fortsätt senare" needs.
+  useSyncExternalStore(keeper.subscribe, keeper.getVersion, keeper.getVersion);
+  const recorded = entries.flatMap((entry) => (entry.recording ? [entry.recording] : []));
+  const keeping = recorded.map((part) => keeper.keeping(stepId, part.sessionId, part.index));
+  const laterBlocked =
+    snapshot.phase !== "idle" || keeping.some((where) => where === undefined)
+      ? t("flow_transcript_save_later_busy")
+      : keeping.some((where) => where === "tab")
+        ? t("flow_transcript_save_later_only_in_tab")
+        : null;
+  const degradation = keeper.available ? keeper.degradation(stepId) : "failed";
+
+  const laterId = useId();
   const [filesFull, setFilesFull] = useState(false);
   const limits = recordingLimits(input, options.audioBitsPerSecond);
 
@@ -368,9 +495,10 @@ export function RunRecorder({
       return;
     }
     setFilesFull(false);
-    const before = partsOf(session, entries);
+    const current = session ?? latestSession(entries);
+    const before = partsOf(current, entries);
     // Recording again while the last recording's parts are on the form goes on with it.
-    const sessionId = before.length > 0 && session ? session : crypto.randomUUID();
+    const sessionId = before.length > 0 && current ? current : crypto.randomUUID();
     setSession(sessionId);
     const firstIndex = before.reduce((next, part) => Math.max(next, part.index + 1), 0);
     const recordedBeforeMs = before.reduce((sum, part) => sum + part.durationMs, 0);
@@ -409,7 +537,7 @@ export function RunRecorder({
   }
 
   const { phase, problem, ended } = snapshot;
-  const continues = partsOf(session, entries).length > 0;
+  const continues = partsOf(session ?? latestSession(entries), entries).length > 0;
   const running = phase === "recording" || phase === "paused";
   return (
     <div className="border-ax-border rounded-ax-inner flex flex-col gap-3 border p-3">
@@ -423,11 +551,68 @@ export function RunRecorder({
         </Text>
       </div>
 
+      {offered && !promptDismissed ? (
+        <div className="flex flex-col gap-2">
+          <ResumePrompt
+            saved={offered}
+            busy={resumeBusy}
+            onContinue={() => void continueSaved(offered)}
+            onDiscard={() => void discardSaved(offered)}
+            onDismiss={() => {
+              setPromptDismissed(true);
+              setResumeProblem(null);
+            }}
+          />
+          {resumeProblem ? (
+            <QuietBanner
+              status="error"
+              title={t("flow_transcript_resume_problem_title")}
+              description={resumeProblem}
+              collapsible={false}
+            />
+          ) : null}
+        </div>
+      ) : null}
+      {scan.data?.incomplete || scan.isError ? (
+        <QuietBanner
+          status="warning"
+          title={t("flow_transcript_resume_scan_failed_title")}
+          description={t("flow_transcript_resume_scan_failed")}
+          collapsible={false}
+          endContent={
+            <Button
+              label={t("flow_transcript_resume_scan_retry")}
+              size="sm"
+              isLoading={scan.isFetching}
+              isInterruptible
+              onClick={() => {
+                if (!scan.isFetching) void scan.refetch();
+              }}
+            />
+          }
+        />
+      ) : null}
+
       {problem ? (
         <QuietBanner
           status="error"
           title={t("flow_transcript_rec_problem_title")}
           description={problemText(problem, t)}
+          collapsible={false}
+        />
+      ) : null}
+      {degradation === "failed" && (phase !== "idle" || recorded.length > 0) ? (
+        <QuietBanner
+          status="warning"
+          title={t("flow_transcript_storage_degraded_title")}
+          description={t("flow_transcript_storage_degraded")}
+          collapsible={false}
+        />
+      ) : degradation === "unavailable" && phase !== "idle" ? (
+        <QuietBanner
+          status="info"
+          title={t("flow_transcript_storage_on_part_end_title")}
+          description={t("flow_transcript_storage_on_part_end")}
           collapsible={false}
         />
       ) : null}
@@ -528,6 +713,25 @@ export function RunRecorder({
           </span>
         ) : null}
       </div>
+
+      {onSaveForLater && keeper.available && recorded.length > 0 ? (
+        <div className="flex flex-col gap-1">
+          <div>
+            <Button
+              label={t("flow_transcript_save_later")}
+              size="sm"
+              aria-describedby={laterId}
+              onClick={() => {
+                if (laterBlocked) announce(laterBlocked);
+                else onSaveForLater();
+              }}
+            />
+          </div>
+          <Text type="supporting" as="p" id={laterId}>
+            {laterBlocked ?? t("flow_transcript_save_later_hint")}
+          </Text>
+        </div>
+      ) : null}
 
       <LiveText snapshot={text} />
     </div>

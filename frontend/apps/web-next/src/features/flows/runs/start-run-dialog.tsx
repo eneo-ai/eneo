@@ -16,7 +16,9 @@ import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
+import { toast } from "@/lib/toast";
 import type { FlowPublic } from "../flows-api";
+import { RecordingKeeper } from "./recording/recording-keeper";
 import { RunRecorder, type RecorderHandle } from "./recording/run-recorder";
 import {
   blockingTemplates,
@@ -66,6 +68,8 @@ const NO_SERVER_PROBLEMS: ServerProblems = { fields: {}, inputs: {} };
 type StartRunFormHandle = {
   /** A recording runs, or recorded parts would be thrown away with the form. */
   holdsRecording: () => boolean;
+  /** The form's recordings are thrown away, from this device too. */
+  discardRecordings: () => void;
 };
 
 /** The record without `key`. */
@@ -131,6 +135,7 @@ function StartRunForm({
   formId,
   onPendingChange,
   onStarted,
+  onSaveForLater,
   handleRef
 }: {
   flow: FlowPublic;
@@ -138,6 +143,8 @@ function StartRunForm({
   formId: string;
   onPendingChange: (pending: boolean) => void;
   onStarted: (run: RunPublic) => void;
+  /** Closes the form; its recordings stay on the device to continue later. */
+  onSaveForLater: () => void;
   handleRef?: Ref<StartRunFormHandle>;
 }) {
   const t = useTranslations();
@@ -155,10 +162,14 @@ function StartRunForm({
   // The step whose recording ran when the person tried to start the run.
   const [stopFirst, setStopFirst] = useState<string | null>(null);
 
+  // The form's recordings, kept on the device until the run takes them or they are thrown away.
+  const [keeper] = useState(() => new RecordingKeeper(flow.id));
+
   useImperativeHandle(handleRef, () => ({
     holdsRecording: () =>
       [...recorders.current.values()].some((recorder) => recorder.busy()) ||
-      Object.values(uploads).some((entries) => entries.some((entry) => entry.recording))
+      Object.values(uploads).some((entries) => entries.some((entry) => entry.recording)),
+    discardRecordings: () => void keeper.forgetAll()
   }));
 
   function recorderRef(stepId: string) {
@@ -232,6 +243,8 @@ function StartRunForm({
     onSettled: () => onPendingChange(false),
     onSuccess: (run) => {
       claim();
+      // The run took the recordings: nothing is left to continue on this device.
+      void keeper.forgetAll();
       onStarted(run);
     },
     onError: (error) => {
@@ -401,6 +414,8 @@ function StartRunForm({
           }}
           onRemove={(key) => {
             clearInputProblem(input.step_id);
+            const recorded = uploads[input.step_id]?.find((entry) => entry.key === key)?.recording;
+            if (recorded) void keeper.forgetPart(input.step_id, recorded.sessionId, recorded.index);
             remove(input.step_id, key);
           }}
           onRetry={(key) => {
@@ -420,6 +435,9 @@ function StartRunForm({
                   setStopFirst((current) => (current === input.step_id ? null : current));
                   return add(input, [file], { recording, label })[0]?.key;
                 }}
+                keeper={keeper}
+                publishedFlowVersion={contract.published_flow_version ?? null}
+                onSaveForLater={onSaveForLater}
                 handleRef={recorderRef(input.step_id)}
               />
             ) : null
@@ -522,6 +540,10 @@ export function StartRunDialog({
           formId={formId}
           onPendingChange={setPending}
           onStarted={onStarted}
+          onSaveForLater={() => {
+            toast.success(t("flow_transcript_save_later_done"));
+            onOpenChange(false);
+          }}
           handleRef={form}
         />
       );
@@ -580,6 +602,7 @@ export function StartRunDialog({
         cancelLabel={t("flow_transcript_close_cancel")}
         onAction={() => {
           setConfirmClose(false);
+          form.current?.discardRecordings();
           onOpenChange(false);
         }}
       />
