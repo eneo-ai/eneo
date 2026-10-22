@@ -305,19 +305,22 @@ for (const locale of ["sv", "en"] satisfies Locale[]) {
 
     it("filters by area and fits a narrow screen", async () => {
       state.admin = true;
+      const entries = visibleEntries(release, can);
       overwriteGetLocale(() => locale);
       await page.viewport(320, 800);
       const screen = render(WhatsNewPage);
       await page.getByRole("button", { name: /^2\.3\.0/ }).click();
       await page.getByRole("button", { name: m.whats_new_area_admin(), exact: true }).click();
       expect(screen.container.querySelectorAll("h3")).toHaveLength(
-        release.entries.filter((entry) => entry.area === "admin").length
+        entries.filter((entry) => entry.area === "admin").length
       );
       const content = screen.container.querySelector<HTMLElement>("#content")!;
       expect(content.scrollWidth).toBeLessThanOrEqual(content.clientWidth);
       await page.screenshot({ path: `__screenshots__/whats-new-${locale}-narrow.png` });
       await page.getByRole("button", { name: m.whats_new_filter_all(), exact: true }).click();
-      expect(screen.container.querySelectorAll("h3")).toHaveLength(release.entries.length);
+      expect(
+        Array.from(screen.container.querySelectorAll("h3"), (heading) => heading.textContent)
+      ).toEqual(entries.map((entry) => entry.title[locale]));
       await page.getByRole("button", { name: /^2\.2\.0/ }).click();
       expect(screen.container.querySelector("#release-2\\.2\\.0")).not.toBeNull();
     });
