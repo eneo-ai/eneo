@@ -12,8 +12,9 @@ import {
 
 /**
  * What a step that read long material in parts covered: complete, partial or
- * cancelled, how many segments it read with how many model calls, why
- * anything was left out, and which sources.
+ * cancelled, how many segments it read with how many model calls, what the
+ * result is (the record's mode: `digest` writes one answer from the notes on
+ * every segment), why anything was left out, and which sources.
  */
 export function LongMaterialCoverage({ coverage }: { coverage: Coverage }) {
   const t = useTranslations();
@@ -42,6 +43,11 @@ export function LongMaterialCoverage({ coverage }: { coverage: Coverage }) {
           sources: coverage.sources.length
         })}
       </MetadataListItem>
+      {(coverage.mode ?? "digest") === "digest" && coverage.coverage !== "cancelled" ? (
+        <MetadataListItem label={t("flow_editor_tools_long_material_result")}>
+          {t("flow_editor_tools_long_material_result_digest")}
+        </MetadataListItem>
+      ) : null}
       <MetadataListItem label={t("flow_editor_tools_long_material_calls")}>
         {t("flow_editor_tools_long_material_calls_value", {
           calls: coverage.map_calls + coverage.reduce_calls,

@@ -52,9 +52,16 @@ describe("LongMaterialCoverage", () => {
     const { container } = renderInApp(<LongMaterialCoverage coverage={partial} />);
     expect(screen.getByText("Delvis läst")).toBeTruthy();
     expect(screen.getByText("4 av 8 delar från 2 källor")).toBeTruthy();
+    expect(screen.getByText("Ett samlat svar utifrån delarnas anteckningar")).toBeTruthy();
     expect(screen.getByText("5 anrop till modellen, 0 misslyckades")).toBeTruthy();
     expect(screen.getByText("tiden tog slut, something new")).toBeTruthy();
     expect(screen.getByText("Bilaga.pdf: del 3-6 av 6")).toBeTruthy();
     await expectNoAxeViolations(container);
+  });
+
+  it("names no result for a read that was cancelled", () => {
+    renderInApp(<LongMaterialCoverage coverage={{ ...partial, coverage: "cancelled" }} />);
+    expect(screen.getByText("Avbruten")).toBeTruthy();
+    expect(screen.queryByText("Ett samlat svar utifrån delarnas anteckningar")).toBeNull();
   });
 });

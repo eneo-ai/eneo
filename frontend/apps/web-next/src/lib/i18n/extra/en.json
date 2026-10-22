@@ -3548,5 +3548,9 @@
   "flow_runs_summary_next": "Review",
   "flow_runs_summary_title": "Included in this run",
   "flow_runs_summary_ready": "Everything required is ready. Check the details and start the run, or go back to change them.",
-  "flow_runs_summary_empty": "Nothing is filled in for this run."
+  "flow_runs_summary_empty": "Nothing is filled in for this run.",
+  "flow_run_sections_read_each": "Read part by part: {count} parts. Each part gave one entry in the result, in the order of the material.",
+  "flow_run_sections_read_summarized": "Read part by part: {count} parts, summarized step by step into one result.",
+  "flow_editor_tools_long_material_result": "Result",
+  "flow_editor_tools_long_material_result_digest": "One combined answer from the parts' notes"
 }

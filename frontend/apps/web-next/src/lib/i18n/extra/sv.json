@@ -3548,5 +3548,9 @@
   "flow_runs_summary_next": "Granska",
   "flow_runs_summary_title": "Det här följer med i körningen",
   "flow_runs_summary_ready": "Allt som krävs är klart. Kontrollera uppgifterna och starta körningen, eller gå tillbaka och ändra.",
-  "flow_runs_summary_empty": "Inget är ifyllt för den här körningen."
+  "flow_runs_summary_empty": "Inget är ifyllt för den här körningen.",
+  "flow_run_sections_read_each": "Läst del för del: {count} delar. Varje del gav en post i resultatet, i samma ordning som i underlaget.",
+  "flow_run_sections_read_summarized": "Läst del för del: {count} delar, sammanfattade stegvis till ett resultat.",
+  "flow_editor_tools_long_material_result": "Resultat",
+  "flow_editor_tools_long_material_result_digest": "Ett samlat svar utifrån delarnas anteckningar"
 }
