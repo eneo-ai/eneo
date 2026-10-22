@@ -21,8 +21,10 @@ import { withRecordedDuration } from "./webm-duration";
  * in recording order, each with the recorded duration written into its
  * header so a player can seek in it.
  *
- * What happened is kept as recent events for the recording's diagnostics
- * (`diagnostics()`).
+ * A microphone that cannot meet the preferred settings (one channel, echo
+ * cancellation, noise suppression) is asked for again with none, and the
+ * settings are then applied where it can. What happened is kept as recent
+ * events for the recording's diagnostics (`diagnostics()`).
  *
  * Read it from React with `useSyncExternalStore(subscribe, getSnapshot)`.
  */
@@ -192,6 +194,9 @@ const PREFERRED_AUDIO: MediaTrackConstraints = {
   channelCount: 1
 };
 
+/** Refusals that may be about the settings asked for rather than the microphone itself. */
+const RELAXABLE = new Set(["NotFoundError", "OverconstrainedError"]);
+
 function errorName(error: unknown): string {
   return error instanceof DOMException || error instanceof Error ? error.name : "unknown";
 }
@@ -341,7 +346,7 @@ export class AudioRecorder {
 
     let stream: MediaStream;
     try {
-      stream = await this.#openMicrophone();
+      stream = await this.#openMicrophone(attempt);
     } catch (error) {
       if (attempt === this.#attempt) this.#set({ ...IDLE, problem: problemOf(error) });
       return;
@@ -505,19 +510,40 @@ export class AudioRecorder {
     this.#set({ ...IDLE });
   }
 
-  /** The microphone with the preferred settings. */
-  async #openMicrophone(): Promise<MediaStream> {
+  /**
+   * The microphone with the preferred settings; where the browser finds no
+   * microphone that meets them, again with none (any microphone, as it
+   * records), and the preferred settings are then applied where it can.
+   */
+  async #openMicrophone(attempt: number): Promise<MediaStream> {
+    const devices = this.#env.mediaDevices!;
     this.#constraints = null;
     this.#inputs = null;
     try {
-      const stream = await this.#env.mediaDevices!.getUserMedia({ audio: PREFERRED_AUDIO });
+      const stream = await devices.getUserMedia({ audio: PREFERRED_AUDIO });
       this.#constraints = "preferred";
       return stream;
     } catch (error) {
       this.#log.add("microphone_refused", errorName(error));
       await this.#countInputs();
+      if (!RELAXABLE.has(errorName(error)) || attempt !== this.#attempt) throw error;
+    }
+    this.#log.add("microphone_retry_relaxed");
+    let stream: MediaStream;
+    try {
+      stream = await devices.getUserMedia({ audio: true });
+    } catch (error) {
+      this.#log.add("microphone_refused", errorName(error));
       throw error;
     }
+    this.#constraints = "relaxed";
+    try {
+      await stream.getAudioTracks()[0]?.applyConstraints?.(PREFERRED_AUDIO);
+    } catch (error) {
+      // The microphone records as it is.
+      this.#log.add("constraints_not_applied", errorName(error));
+    }
+    return stream;
   }
 
   /** How many microphones the browser lists, without their names. */

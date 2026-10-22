@@ -318,6 +318,46 @@ describe("AudioRecorder", () => {
     expect(recorder.getSnapshot().micHint).toBeNull();
   });
 
+  it("asks again with looser settings when no microphone meets the preferred ones", async () => {
+    const { stream, track } = fakeStream();
+    const applyConstraints = vi.fn(() =>
+      Promise.reject(new DOMException("no", "OverconstrainedError"))
+    );
+    Object.assign(track, { applyConstraints });
+    const getUserMedia = vi
+      .fn<(constraints: MediaStreamConstraints) => Promise<MediaStream>>()
+      .mockRejectedValueOnce(new DOMException("no", "OverconstrainedError"))
+      .mockResolvedValueOnce(stream);
+    const { recorder } = setup(getUserMedia);
+    await recorder.start({ sessionId: "abc", firstIndex: 0, limits: limits() });
+
+    expect(recorder.getSnapshot().phase).toBe("recording");
+    expect(getUserMedia.mock.calls.map(([constraints]) => constraints.audio)).toEqual([
+      { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+      true
+    ]);
+    // The preferred settings are applied where the microphone can; here it records as it is.
+    expect(applyConstraints).toHaveBeenCalledWith(expect.objectContaining({ channelCount: 1 }));
+    const report = recorder.diagnostics();
+    expect(report.microphone.constraints).toBe("relaxed");
+    expect(report.events.map((entry) => entry.event)).toEqual(
+      expect.arrayContaining([
+        "microphone_refused",
+        "microphone_retry_relaxed",
+        "constraints_not_applied",
+        "microphone_open"
+      ])
+    );
+  });
+
+  it("does not ask again after a refusal that is not about the settings", async () => {
+    const getUserMedia = vi.fn(() => Promise.reject(new DOMException("no", "NotAllowedError")));
+    const { recorder } = setup(getUserMedia);
+    await recorder.start({ sessionId: "abc", firstIndex: 0, limits: limits() });
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(recorder.getSnapshot().problem).toBe("permission_denied");
+  });
+
   it("reports its state and recent events without naming the device", async () => {
     const { stream, track } = fakeStream();
     Object.assign(track, {
