@@ -216,6 +216,60 @@ describe("FlowStepEditor", () => {
     expect(dialog.textContent).not.toContain("$secret");
   });
 
+  it("proposes an output contract from an example answer, for the author to accept", async () => {
+    api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
+    const { onSaved, container } = renderEditor(
+      makeFlow({ steps: [makeStep({ output_type: "json" })] })
+    );
+    await nameField();
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_editor_tools_contract_example_button })
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: messages.flow_editor_tools_contract_example_title
+    });
+    fireEvent.change(screen.getByLabelText(/^Exempel på svar/), {
+      target: { value: '{"beslut": "Bifall", "belopp": 4500}' }
+    });
+    expect(dialog.textContent).toContain("beslut");
+    expect(dialog.textContent).toContain("Tal");
+    await expectNoAxeViolations(container);
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_editor_tools_contract_example_accept })
+    );
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(patchBodies()[0]).toMatchObject({
+      step_edits: [
+        {
+          step_id: "step-1",
+          changes: {
+            output_contract: {
+              type: "object",
+              properties: { beslut: { type: "string" }, belopp: { type: "number" } },
+              required: ["beslut", "belopp"]
+            }
+          }
+        }
+      ]
+    });
+  }, 20_000);
+
+  it("explains an example that gives no contract at the field", async () => {
+    renderEditor(makeFlow({ steps: [makeStep({ output_type: "json" })] }));
+    await nameField();
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_editor_tools_contract_example_button })
+    );
+    const field = await screen.findByLabelText(/^Exempel på svar/);
+    fireEvent.change(field, { target: { value: "[1, 2]" } });
+    expect(
+      await screen.findByText(messages.flow_editor_tools_contract_example_problem_not_object)
+    ).toBeTruthy();
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+  });
+
   it("offers no long material where the step does not let a model answer", async () => {
     renderEditor(makeFlow({ steps: [makeStep({ output_mode: "compose_text" })] }));
     await nameField();

@@ -4,6 +4,7 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "next-intl";
 import { Switch } from "@/components/astryx/switch";
+import { ContractFromExampleDialog } from "./contract-from-example-dialog";
 import { Anchor, EditorSection, problemStatus } from "./editor-fields";
 import type { FieldProblems } from "./field-problems";
 import {
@@ -31,7 +32,14 @@ import {
   outputTypeOptions
 } from "./step-rules";
 import { TemplateFillFields } from "./step-template-fields";
-import type { FlowPublic, OutputMode, OutputType, StepConfig } from "./step-types";
+import {
+  objectOf,
+  type FlowPublic,
+  type JsonObject,
+  type OutputMode,
+  type OutputType,
+  type StepConfig
+} from "./step-types";
 import { formFieldsOf, type VariableGroup } from "./step-variables";
 
 const NONE = "__none";
@@ -111,7 +119,8 @@ export function StepOutputSection({
   onChange,
   problems,
   groups,
-  wholeValueGroups
+  wholeValueGroups,
+  onContractProposed
 }: {
   formId: string;
   sectionId: string;
@@ -123,6 +132,8 @@ export function StepOutputSection({
   problems: FieldProblems;
   groups: VariableGroup[];
   wholeValueGroups: VariableGroup[];
+  /** An output contract the author accepted from an example answer. */
+  onContractProposed: (contract: JsonObject) => void;
 }) {
   const t = useTranslations();
   const modes = outputModeOptions(draft, isLast);
@@ -174,6 +185,22 @@ export function StepOutputSection({
       <Text type="supporting" size="sm" as="p" display="block" className="m-0">
         {t(`flow_step_editor_output_mode_help_${draft.output_mode}`)}
       </Text>
+
+      {draft.output_type === "json" && draft.output_mode !== "speaker_mapping" && (
+        <div className="flex flex-col gap-1">
+          <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+            {draft.output_contract
+              ? t("flow_editor_tools_contract_example_has_contract", {
+                  count: Object.keys(objectOf(draft.output_contract.properties)).length
+                })
+              : t("flow_editor_tools_contract_example_hint")}
+          </Text>
+          <ContractFromExampleDialog
+            current={draft.output_contract}
+            onAccept={onContractProposed}
+          />
+        </div>
+      )}
 
       {draft.output_mode === "http_post" && (
         <Anchor formId={formId} anchor="output_config.http">

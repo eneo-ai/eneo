@@ -617,6 +617,12 @@ function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel
             problems={shownProblems}
             groups={groups}
             wholeValueGroups={wholeValueGroups}
+            onContractProposed={(contract) => {
+              // The advanced section shows the accepted contract, not text typed before it.
+              setContractDrafts((drafts) => ({ ...drafts, output_contract: undefined }));
+              changeStep({ ...draft, output_contract: contract });
+              announce(t("flow_editor_tools_contract_example_accepted"));
+            }}
           />
 
           <StepControlSection
