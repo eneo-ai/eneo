@@ -11,6 +11,7 @@ import { flowErrorText, runErrorText } from "./run-messages";
 import { outputStructured, outputText, tokenTotal, type RunStepView } from "./run-progress";
 import { RunFiles, RunInputFiles } from "./run-files";
 import { stepStatusView } from "./run-status";
+import { StepPromptDetails } from "./run-step-details";
 import type { RunStep } from "./runs-api";
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -171,6 +172,7 @@ function StepCard({ flowId, runId, step }: { flowId: string; runId: string; step
           </div>
         </Collapsible>
       ) : null}
+      {result ? <StepPromptDetails result={result} /> : null}
     </article>
   );
 }

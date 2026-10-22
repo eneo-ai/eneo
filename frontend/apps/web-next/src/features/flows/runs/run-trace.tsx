@@ -1,0 +1,182 @@
+"use client";
+
+import { Button } from "@astryxdesign/core/Button";
+import { useClipboard } from "@astryxdesign/core/hooks";
+import { useQuery } from "@tanstack/react-query";
+import { Check, Copy, Download } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { useId, useState } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
+import { ListError } from "@/components/composites/query-state";
+import { useAppContext } from "@/components/providers/app-context";
+import { saveBlob } from "@/features/chat/side-panel/document-export";
+import { useSpace } from "@/features/spaces/use-space";
+import { toast } from "@/lib/toast";
+import { evidenceExportAllowed } from "../flow-form-fields";
+import type { FlowPublic } from "../flows-api";
+import { RunEvidenceExport } from "./run-evidence-export";
+import type { RunStepView } from "./run-progress";
+import { startedByUser } from "./run-starter";
+import { stepTitle } from "./run-steps";
+import { RunTraceAttempts } from "./run-trace-attempts";
+import { RunTraceProviderCalls } from "./run-trace-provider-calls";
+import { mayReadEvidence } from "./run-trace-rules";
+import { runEvidenceQueryOptions, type RunEvidence, type RunSummary } from "./runs-api";
+
+function Part({ title, children }: { title: string; children: React.ReactNode }) {
+  const headingId = useId();
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col gap-2">
+      <h3 id={headingId} className="text-ax-text text-base font-semibold">
+        {title}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+/** The content-free diagnostic export the trace carries, to copy or save for support. */
+function DebugExport({ evidence, runId }: { evidence: RunEvidence; runId: string }) {
+  const t = useTranslations();
+  const { copy, isCopied } = useClipboard({ announce: t("flow_run_extras_debug_copied") });
+  const debug = evidence.debug_export;
+  const text = JSON.stringify(debug, null, 2);
+  return (
+    <div className="flex flex-col items-start gap-2">
+      <p className="text-ax-text-secondary text-sm">{t("flow_run_extras_debug_hint")}</p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          label={isCopied ? t("copied") : t("flow_run_extras_debug_copy")}
+          icon={isCopied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+          onClick={async () => {
+            if (!(await copy(text))) toast.error(t("chat_copy_failed"));
+          }}
+        />
+        <Button
+          label={t("flow_run_extras_debug_download")}
+          icon={<Download aria-hidden="true" />}
+          onClick={() =>
+            saveBlob(
+              new Blob([text], { type: "application/json" }),
+              `flow-debug-export-${debug.run.run_id || runId}.json`
+            )
+          }
+        />
+      </div>
+    </div>
+  );
+}
+
+function TraceBody({
+  flowId,
+  runId,
+  evidence,
+  stepName
+}: {
+  flowId: string;
+  runId: string;
+  evidence: RunEvidence;
+  stepName: (order: number) => string;
+}) {
+  const t = useTranslations();
+  const omitted = (evidence.debug_export.run.summary?.omissions ?? []).length > 0;
+  return (
+    <div className="flex flex-col gap-6">
+      {omitted ? (
+        <p className="text-ax-text-secondary text-sm">{t("flow_run_extras_trace_omitted")}</p>
+      ) : null}
+      <Part title={t("flow_run_extras_attempts_heading")}>
+        <RunTraceAttempts attempts={evidence.step_attempts} stepName={stepName} />
+      </Part>
+      <Part title={t("flow_run_extras_calls_heading")}>
+        <RunTraceProviderCalls
+          flowId={flowId}
+          runId={runId}
+          firstPage={evidence.provider_calls}
+          stepName={stepName}
+        />
+      </Part>
+      <Part title={t("flow_run_extras_debug_heading")}>
+        <DebugExport evidence={evidence} runId={runId} />
+      </Part>
+    </div>
+  );
+}
+
+/**
+ * The run's evidence for those the core lets read it: every attempt each
+ * step made, the calls to AI services page by page, the content-free
+ * diagnostic export, and the evidence export when the flow allows it. The
+ * evidence is an audited read, so it loads when asked for (one read serves
+ * the knowledge section too); a caller the core would refuse is not
+ * offered the section at all.
+ */
+export function RunTrace({
+  flow,
+  summary,
+  steps
+}: {
+  flow: FlowPublic;
+  summary: RunSummary;
+  steps: readonly RunStepView[];
+}) {
+  const t = useTranslations();
+  const headingId = useId();
+  const { can, user } = useAppContext();
+  const { can: canInSpace, space } = useSpace();
+  const [requested, setRequested] = useState(false);
+  const evidence = useQuery({
+    ...runEvidenceQueryOptions(flow.id, summary.id),
+    enabled: requested
+  });
+
+  const allowed = mayReadEvidence({
+    tenantAdmin: can("admin"),
+    personalSpace: space.personal,
+    spaceAdmin: canInSpace("edit", "member"),
+    startedRun: startedByUser(summary, user.id) === true,
+    canTrace: can("flows_trace")
+  });
+  if (!allowed) return null;
+
+  const stepName = (order: number) =>
+    stepTitle({ order, label: steps.find((step) => step.order === order)?.label ?? "" }, t);
+
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col gap-4">
+      <h2 id={headingId} className="text-ax-text text-lg font-semibold">
+        {t("flow_run_extras_trace_heading")}
+      </h2>
+      <Part title={t("flow_run_extras_export_heading")}>
+        <RunEvidenceExport
+          flowId={flow.id}
+          runId={summary.id}
+          exportAllowed={evidenceExportAllowed(flow.metadata_json)}
+        />
+      </Part>
+      {!requested ? (
+        <div className="flex flex-col items-start gap-2">
+          <p className="text-ax-text-secondary text-sm">{t("flow_run_extras_trace_hint")}</p>
+          <Button label={t("flow_run_extras_trace_show")} onClick={() => setRequested(true)} />
+        </div>
+      ) : evidence.isPending ? (
+        <LoadingState rows={3} label={t("flow_run_extras_trace_loading")} />
+      ) : evidence.isError ? (
+        <ListError
+          error={evidence.error}
+          title={t("flow_run_extras_trace_failed")}
+          onRetry={() => void evidence.refetch()}
+          isRetrying={evidence.isFetching}
+        />
+      ) : (
+        <TraceBody
+          key={evidence.dataUpdatedAt}
+          flowId={flow.id}
+          runId={summary.id}
+          evidence={evidence.data}
+          stepName={stepName}
+        />
+      )}
+    </section>
+  );
+}

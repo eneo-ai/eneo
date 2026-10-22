@@ -150,6 +150,96 @@ describe("FlowRunPage", () => {
     ).toBeTruthy();
   });
 
+  it("guides a failed run with its error's facts and keeps the technical detail closed", async () => {
+    const failed = makeRunSummary({ status: "failed" });
+    answerRun(
+      failed,
+      makeRunDetail({
+        ...failed,
+        result: null,
+        error: {
+          code: "flow_step_timeout",
+          message: "step 2 timed out after 300s",
+          step_order: 2,
+          details: {
+            step_description: "Skriv svar",
+            phase: "provider_request",
+            provider_work_may_have_completed: true
+          },
+          retryable: true
+        }
+      } as Partial<RunDetail>)
+    );
+    const { container } = renderRun();
+
+    expect(await screen.findByText("Körningen stannade i steg 2: Skriv svar.")).toBeTruthy();
+    expect(screen.getByText(messages.flow_run_extras_failure_provider_unknown)).toBeTruthy();
+    expect(screen.getByText(messages.flow_run_extras_failure_retryable)).toBeTruthy();
+    expect(screen.queryByText("step 2 timed out after 300s")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_run_extras_failure_technical })
+    );
+    expect(screen.getByText("step 2 timed out after 300s")).toBeTruthy();
+    expect(screen.getByText("flow_step_timeout")).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
+  it("shows a step's prompt and model settings when asked, and the run's webhook deliveries", async () => {
+    const summary = makeRunSummary();
+    answerRun(
+      summary,
+      makeRunDetail({
+        ...summary,
+        webhook_deliveries: [
+          {
+            id: "delivery-1",
+            step_id: "step-2",
+            step_order: 2,
+            attempt_no: 1,
+            delivery_status: "dead_lettered",
+            delivery_attempts: 5,
+            dead_lettered_at: "2026-10-21T09:00:00Z",
+            created_at: "2026-10-21T08:01:00Z",
+            updated_at: "2026-10-21T09:00:00Z"
+          }
+        ]
+      })
+    );
+    state.routes[STEPS] = () => ({
+      body: [
+        makeRunStep(1, {
+          effective_prompt: "Sammanfatta ärendet: Bygglov",
+          effective_prompt_truncated: true,
+          model_parameters_json: { temperature: 0.2 }
+        }),
+        makeRunStep(2)
+      ]
+    });
+    const { container } = renderRun();
+
+    const first = await screen.findByRole("article", { name: "Steg 1: Sammanfatta" });
+    expect(within(first).queryByText("Sammanfatta ärendet: Bygglov")).toBeNull();
+    fireEvent.click(
+      await within(first).findByRole("button", { name: messages.flow_run_extras_prompt_heading })
+    );
+    expect(within(first).getByText("Sammanfatta ärendet: Bygglov")).toBeTruthy();
+    expect(within(first).getByText(messages.flow_run_extras_prompt_truncated)).toBeTruthy();
+    expect(within(first).getByText("temperature")).toBeTruthy();
+    const second = screen.getByRole("article", { name: "Steg 2: Skriv svar" });
+    expect(
+      within(second).queryByRole("button", { name: messages.flow_run_extras_prompt_heading })
+    ).toBeNull();
+
+    const deliveries = screen.getByRole("table", {
+      name: messages.flow_run_extras_webhook_heading
+    });
+    const row = within(deliveries).getAllByRole("row")[1]!;
+    expect(within(row).getByText("Steg 2: Skriv svar")).toBeTruthy();
+    expect(within(row).getByText(messages.flow_run_extras_webhook_dead_lettered)).toBeTruthy();
+    expect(within(row).getByText("5")).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
   it("names the files a step received, with a download for each", async () => {
     answerRun(makeRunSummary());
     state.routes[STEPS] = () => ({

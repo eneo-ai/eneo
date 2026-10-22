@@ -29,6 +29,7 @@ import { useSpace } from "@/features/spaces/use-space";
 import { formFieldsOf } from "../flow-form-fields";
 import { flowQueryOptions, type FlowPublic } from "../flows-api";
 import { formatCount, formatSeconds } from "./run-format";
+import { RunFailure } from "./run-failure";
 import { RunFiles } from "./run-files";
 import { JsonValue } from "./run-json";
 import { refusalText, runErrorText } from "./run-messages";
@@ -36,7 +37,9 @@ import { progressSignature, runStepViews, tokenTotal } from "./run-progress";
 import { RunKnowledge } from "./run-knowledge";
 import { startedByUser, starterName } from "./run-starter";
 import { RunSteps, stepTitle } from "./run-steps";
+import { RunTrace } from "./run-trace";
 import { RunTranscripts } from "./run-transcript";
+import { RunWebhookDeliveries } from "./run-webhooks";
 import { transcriptTargets } from "./transcript";
 import {
   canRedispatch,
@@ -167,16 +170,7 @@ function RunUsage({ run }: { run: RunDetail }) {
 /** Why the run stopped, or why a queued run has not started. */
 function RunProblem({ run }: { run: RunDetail }) {
   const t = useTranslations();
-  if (run.status === "failed" && run.error) {
-    return (
-      <QuietBanner
-        status="error"
-        title={t("flow_runs_failed_title")}
-        description={runErrorText(run.error, t)}
-        collapsible={false}
-      />
-    );
-  }
+  if (run.status === "failed" && run.error) return <RunFailure error={run.error} />;
   if (run.status === "cancelled" && run.error) {
     return (
       <QuietBanner
@@ -573,7 +567,29 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                     <RunUsage run={run} />
                   </Section>
                 ) : null}
+                {run.webhook_deliveries.length > 0 ? (
+                  <Section title={t("flow_run_extras_webhook_heading")}>
+                    <RunWebhookDeliveries
+                      deliveries={run.webhook_deliveries}
+                      stepName={(order) =>
+                        stepTitle(
+                          runStepViews(progress.data.graph, steps.data).find(
+                            (step) => step.order === order
+                          ) ?? { order, label: "" },
+                          t
+                        )
+                      }
+                    />
+                  </Section>
+                ) : null}
               </>
+            ) : null}
+            {summary ? (
+              <RunTrace
+                flow={flow}
+                summary={summary}
+                steps={runStepViews(progress.data.graph, steps.data)}
+              />
             ) : null}
             <p className="text-ax-text-secondary text-xs">
               {t("flow_runs_trace_id", { id: summary?.trace_id ?? "" })}
