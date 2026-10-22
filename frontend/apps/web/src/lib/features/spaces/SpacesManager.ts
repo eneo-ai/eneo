@@ -74,9 +74,11 @@ function SpacesManager(data: SpacesManagerParams) {
   // Every full-space response replaces the current space, so an older one
   // landing after a newer update would bring back links that update changed.
   // Updates run one at a time (spaceUpdates) and each applied update bumps
-  // appliedSpaceUpdates, so a read started before it is dropped instead of
-  // installed. A response is only installed while the space it belongs to is
-  // still current and no navigation happened since the read began.
+  // appliedSpaceUpdates, so a full read started before it is dropped instead
+  // of installed. A read of one part (applications or knowledge) merges into
+  // the space as it stands, so it keeps such an update and is not dropped.
+  // A response is only installed while the space it belongs to is still
+  // current and no navigation happened since the read began.
   let appliedSpaceUpdates = 0;
   let spaceUpdates: Promise<unknown> = Promise.resolve();
 
@@ -94,10 +96,10 @@ function SpacesManager(data: SpacesManagerParams) {
     const isCurrent = () =>
       navigation === navigationVersion &&
       requestedSpace.id === get(currentSpace).id &&
-      updates === appliedSpaceUpdates &&
       (type
         ? refreshVersions[type] === request
-        : Object.values(refreshVersions).every((version) => version === request));
+        : updates === appliedSpaceUpdates &&
+          Object.values(refreshVersions).every((version) => version === request));
     try {
       if (type) {
         switch (type) {
