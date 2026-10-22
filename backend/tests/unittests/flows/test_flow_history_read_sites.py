@@ -69,6 +69,7 @@ FORWARDERS: frozenset[tuple[str, str]] = frozenset(
             "FlowRunAccessPolicy._ensure_flow_allows_evidence_export",
             "FlowRunAccessPolicy.can_list_all_runs_in_flow",
             "FlowRunAccessPolicy.ensure_can_access_run",
+            "FlowRunAccessPolicy.evidence_access_for_run",
             "FlowRunAccessPolicy.load_run",
             "FlowRunAccessPolicy.load_run_status",
             "FlowRunAccessPolicy.load_space_access",
@@ -99,6 +100,7 @@ FORWARDERS: frozenset[tuple[str, str]] = frozenset(
         for name in (
             "_lists_every_run",
             "count_run_statuses",
+            "evidence_access",
             "get_run",
             "get_run_detail_with_result_files_and_usage",
             "get_run_status",

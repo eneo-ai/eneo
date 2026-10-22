@@ -17,6 +17,7 @@ from eneo.flows.api.flow_run_contract_models import FlowFinalOutputContractPubli
 from eneo.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
     FlowRunAccessPolicy,
+    FlowRunEvidenceAccess,
 )
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.domain.flow import (
@@ -951,6 +952,13 @@ class FlowRunService:
             offset=offset,
             listing=listing,
         )
+
+    async def evidence_access(
+        self, run: FlowRunStatusSnapshot, *, history: bool = False
+    ) -> FlowRunEvidenceAccess:
+        """What the caller may do with the run's evidence, decided by the run
+        access policy the evidence routes use."""
+        return await self.access_policy.evidence_access_for_run(run, history=history)
 
     async def count_run_statuses(
         self,

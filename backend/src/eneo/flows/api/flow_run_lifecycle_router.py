@@ -836,6 +836,9 @@ async def get_flow_run(
                 final_output=run_view.final_output,
                 webhook_deliveries=run_view.webhook_deliveries,
                 started_by=await started_by_for_run(container, run_view.run),
+                evidence_access=await run_service.evidence_access(
+                    run_view.run, history=True
+                ),
             )
             user = container.user()
             await log_flow_trace_audit_or_raise(

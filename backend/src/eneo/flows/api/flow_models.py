@@ -1746,6 +1746,73 @@ class FlowRunWebhookDeliveryPublic(BaseModel):
     updated_at: datetime
 
 
+FLOW_RUN_EVIDENCE_ACCESS_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "can_read_evidence": True,
+    "can_export_redacted": True,
+    "can_export_raw": False,
+    "read_refusal_code": None,
+    "redacted_export_refusal_code": None,
+    "raw_export_refusal_code": "flow_run_evidence_raw_export_forbidden",
+}
+
+_EVIDENCE_REFUSAL_CODE_DESCRIPTION = (
+    "The `code` {route} would refuse this caller with (`flow_run_access_denied`, "
+    "`flow_run_evidence_forbidden`, `flow_run_evidence_export_disabled`, "
+    "`flow_run_evidence_raw_export_forbidden` or `insufficient_tenant_permission`), "
+    "or null when it would answer."
+)
+
+
+class FlowRunEvidenceAccessPublic(BaseModel):
+    """What the caller may do with this run's evidence, decided when the run
+    detail is read by the same run access policy the evidence routes use."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUN_EVIDENCE_ACCESS_PUBLIC_EXAMPLE},
+    )
+
+    can_read_evidence: bool = Field(
+        description=(
+            "Whether `GET .../runs/{run_id}/evidence/` and the provider-call pages "
+            "would answer this caller. Offer the trace only when true."
+        ),
+    )
+    can_export_redacted: bool = Field(
+        description=(
+            "Whether the redacted evidence export (`.../evidence/export` with "
+            "`detail=redacted`) would answer this caller. It includes the flow's "
+            "export setting."
+        ),
+    )
+    can_export_raw: bool = Field(
+        description=(
+            "Whether the raw evidence export (`detail=raw` with a reason) would "
+            "answer this caller. It includes the flow's export setting and the "
+            "classification-3 rule: evidence held to classification 3 (the space's "
+            "level now or the level the run recorded) is exported raw only to "
+            "space owners, tenant admins, and the roles the tenant's evidence "
+            "policy allows."
+        ),
+    )
+    read_refusal_code: str | None = Field(
+        description=_EVIDENCE_REFUSAL_CODE_DESCRIPTION.format(
+            route="the evidence read"
+        ),
+        examples=[None, "insufficient_tenant_permission"],
+    )
+    redacted_export_refusal_code: str | None = Field(
+        description=_EVIDENCE_REFUSAL_CODE_DESCRIPTION.format(
+            route="the redacted export"
+        ),
+        examples=[None, "flow_run_evidence_export_disabled"],
+    )
+    raw_export_refusal_code: str | None = Field(
+        description=_EVIDENCE_REFUSAL_CODE_DESCRIPTION.format(route="the raw export"),
+        examples=[None, "flow_run_evidence_raw_export_forbidden"],
+    )
+
+
 class FlowRunDetailPublic(FlowRunPublic):
     model_config = ConfigDict(
         from_attributes=True,
@@ -1753,6 +1820,7 @@ class FlowRunDetailPublic(FlowRunPublic):
             "example": {
                 **FLOW_RUN_PUBLIC_EXAMPLE,
                 "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
+                "evidence_access": FLOW_RUN_EVIDENCE_ACCESS_PUBLIC_EXAMPLE,
             }
         },
     )
@@ -1764,6 +1832,14 @@ class FlowRunDetailPublic(FlowRunPublic):
             "HTTP delivery. Eneo has no inbound webhook subscription surface, so this "
             "reports deliveries the flow author configured, never callbacks a client "
             "registered."
+        ),
+    )
+    evidence_access: FlowRunEvidenceAccessPublic = Field(
+        description=(
+            "What this caller may do with the run's evidence (read the trace, export "
+            "it redacted or raw), so a client offers only what the evidence routes "
+            "would allow instead of approximating their rules. Computed for the "
+            "caller when the detail is read."
         ),
     )
 

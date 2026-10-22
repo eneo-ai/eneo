@@ -11,6 +11,7 @@ from eneo.authentication.auth_models import FlowServicePrincipalActorPublic
 from eneo.flows.api.flow_models import (
     FlowPublic,
     FlowRunDetailPublic,
+    FlowRunEvidenceAccessPublic,
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
     FlowRunStartedByPublic,
@@ -38,6 +39,7 @@ from eneo.flows.api.flow_runtime_paths import (
     FlowRuntimePublic,
     build_flow_runtime_paths,
 )
+from eneo.flows.application.flow_run_access_policy import FlowRunEvidenceAccess
 from eneo.flows.domain.flow import (
     Flow,
     FlowRun,
@@ -200,6 +202,7 @@ class FlowAssembler:
         final_output: FlowFinalOutputContractPublic | None = None,
         webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = (),
         started_by: FlowRunStartedByPublic | None = None,
+        evidence_access: FlowRunEvidenceAccess,
     ) -> FlowRunDetailPublic:
         run_payload = self.to_run_public(
             run,
@@ -216,6 +219,16 @@ class FlowAssembler:
                     FlowRunWebhookDeliveryPublic.model_validate(delivery)
                     for delivery in webhook_deliveries
                 ],
+                "evidence_access": FlowRunEvidenceAccessPublic(
+                    can_read_evidence=evidence_access.view_refusal is None,
+                    can_export_redacted=evidence_access.redacted_export_refusal is None,
+                    can_export_raw=evidence_access.raw_export_refusal is None,
+                    read_refusal_code=evidence_access.view_refusal,
+                    redacted_export_refusal_code=(
+                        evidence_access.redacted_export_refusal
+                    ),
+                    raw_export_refusal_code=evidence_access.raw_export_refusal,
+                ),
             }
         )
 

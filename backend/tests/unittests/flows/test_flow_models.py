@@ -38,6 +38,7 @@ from eneo.flows.api.flow_models import (
     FormFieldPublic,
     StepRunInput,
 )
+from eneo.flows.application.flow_run_access_policy import FlowRunEvidenceAccess
 from eneo.flows.domain.flow import (
     Flow,
     FlowRun,
@@ -583,7 +584,12 @@ def test_run_public_carries_the_runs_speaker_options(
         }
     )
 
-    public = FlowAssembler().to_run_detail_public(run)
+    public = FlowAssembler().to_run_detail_public(
+        run,
+        evidence_access=FlowRunEvidenceAccess(
+            view_refusal=None, redacted_export_refusal=None, raw_export_refusal=None
+        ),
+    )
 
     assert (public.speaker_labels, public.max_speakers) == speaker_options
     assert public.input_payload_json == {}

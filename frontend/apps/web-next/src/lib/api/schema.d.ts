@@ -21425,6 +21425,14 @@ export interface components {
      *       "dispatch_attempt_count": 0,
      *       "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
      *       "dispatch_pending_since": "2026-03-17T10:05:00Z",
+     *       "evidence_access": {
+     *         "can_export_raw": false,
+     *         "can_export_redacted": true,
+     *         "can_read_evidence": true,
+     *         "raw_export_refusal_code": "flow_run_evidence_raw_export_forbidden",
+     *         "read_refusal_code": null,
+     *         "redacted_export_refusal_code": null
+     *       },
      *       "flow_id": "00000000-0000-0000-0000-000000000001",
      *       "flow_version": 3,
      *       "id": "00000000-0000-0000-0000-000000000301",
@@ -21508,6 +21516,8 @@ export interface components {
       dispatched_at?: string | null;
       /** @description Structured terminal run error available only through audited detail and evidence reads. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
       error?: components["schemas"]["FlowRunError"] | null;
+      /** @description What this caller may do with the run's evidence (read the trace, export it redacted or raw), so a client offers only what the evidence routes would allow instead of approximating their rules. Computed for the caller when the detail is read. */
+      evidence_access: components["schemas"]["FlowRunEvidenceAccessPublic"];
       /**
        * Finished At
        * @description When the run reached a terminal status. Null while non-terminal.
@@ -21924,6 +21934,57 @@ export interface components {
        * @description Last observed transcription service stage before the interruption.
        */
       transcription_stage?: string | null;
+    };
+    /**
+     * FlowRunEvidenceAccessPublic
+     * @description What the caller may do with this run's evidence, decided when the run
+     *     detail is read by the same run access policy the evidence routes use.
+     * @example {
+     *       "can_export_raw": false,
+     *       "can_export_redacted": true,
+     *       "can_read_evidence": true,
+     *       "raw_export_refusal_code": "flow_run_evidence_raw_export_forbidden",
+     *       "read_refusal_code": null,
+     *       "redacted_export_refusal_code": null
+     *     }
+     */
+    FlowRunEvidenceAccessPublic: {
+      /**
+       * Can Export Raw
+       * @description Whether the raw evidence export (`detail=raw` with a reason) would answer this caller. It includes the flow's export setting and the classification-3 rule: evidence held to classification 3 (the space's level now or the level the run recorded) is exported raw only to space owners, tenant admins, and the roles the tenant's evidence policy allows.
+       */
+      can_export_raw: boolean;
+      /**
+       * Can Export Redacted
+       * @description Whether the redacted evidence export (`.../evidence/export` with `detail=redacted`) would answer this caller. It includes the flow's export setting.
+       */
+      can_export_redacted: boolean;
+      /**
+       * Can Read Evidence
+       * @description Whether `GET .../runs/{run_id}/evidence/` and the provider-call pages would answer this caller. Offer the trace only when true.
+       */
+      can_read_evidence: boolean;
+      /**
+       * Raw Export Refusal Code
+       * @description The `code` the raw export would refuse this caller with (`flow_run_access_denied`, `flow_run_evidence_forbidden`, `flow_run_evidence_export_disabled`, `flow_run_evidence_raw_export_forbidden` or `insufficient_tenant_permission`), or null when it would answer.
+       * @example null
+       * @example flow_run_evidence_raw_export_forbidden
+       */
+      raw_export_refusal_code: string | null;
+      /**
+       * Read Refusal Code
+       * @description The `code` the evidence read would refuse this caller with (`flow_run_access_denied`, `flow_run_evidence_forbidden`, `flow_run_evidence_export_disabled`, `flow_run_evidence_raw_export_forbidden` or `insufficient_tenant_permission`), or null when it would answer.
+       * @example null
+       * @example insufficient_tenant_permission
+       */
+      read_refusal_code: string | null;
+      /**
+       * Redacted Export Refusal Code
+       * @description The `code` the redacted export would refuse this caller with (`flow_run_access_denied`, `flow_run_evidence_forbidden`, `flow_run_evidence_export_disabled`, `flow_run_evidence_raw_export_forbidden` or `insufficient_tenant_permission`), or null when it would answer.
+       * @example null
+       * @example flow_run_evidence_export_disabled
+       */
+      redacted_export_refusal_code: string | null;
     };
     /**
      * FlowRunEvidenceExportResponse
