@@ -122,6 +122,12 @@ function StepCard({
   const result = step.result;
   const duration = result ? stepDurationMs(result) : null;
   const tokens = result ? tokenTotal(result.num_tokens_input, result.num_tokens_output) : null;
+  // A step that ran and ended without counts: its usage was not recorded, not zero.
+  const usageNotRecorded =
+    !notRun &&
+    tokens === null &&
+    (result?.status === "completed" || result?.status === "failed") &&
+    Boolean(result.started_at);
   const title = stepTitle(step, t);
   const warnings = (result?.diagnostics ?? []).filter((item) => item.severity !== "info");
 
@@ -146,7 +152,7 @@ function StepCard({
             : t("flow_run_progress_running_body")}
         </p>
       ) : null}
-      {duration !== null || tokens !== null ? (
+      {duration !== null || tokens !== null || usageNotRecorded ? (
         <p className="text-ax-text-secondary text-sm">
           {[
             duration !== null
@@ -158,7 +164,9 @@ function StepCard({
                   input: formatCount(result.num_tokens_input ?? 0, locale),
                   output: formatCount(result.num_tokens_output ?? 0, locale)
                 })
-              : null
+              : usageNotRecorded
+                ? t("flow_run_token_usage_not_recorded")
+                : null
           ]
             .filter(Boolean)
             .join(" · ")}
@@ -239,7 +247,7 @@ function StepCard({
 
 /**
  * The run's steps in order, each with its status, how long it took and the
- * tokens it used in and out, what it produced (text, a structured value,
+ * tokens it used in and out (or that its usage was not recorded), what it produced (text, a structured value,
  * the speakers it named, files; how it read long material and the document
  * template it filled), the sources it cited, what was sent in at run time,
  * how it transcribed audio, and why it failed when it did, with the answer

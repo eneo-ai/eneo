@@ -28,6 +28,33 @@ describe("RunSteps", () => {
     expect(within(card).getByText(/1\s500 token \(1\s200 in, 300 ut\)/)).toBeTruthy();
   });
 
+  it("says when a step that ran has no recorded token usage", () => {
+    const steps = runStepViews(
+      makeRunGraph([
+        { order: 1, label: "Sammanfatta", status: "completed" },
+        { order: 2, label: "Skriv svar", status: "running" }
+      ]),
+      [
+        makeRunStep(1, { num_tokens_input: null, num_tokens_output: null }),
+        makeRunStep(2, {
+          status: "running",
+          finished_at: null,
+          num_tokens_input: null,
+          num_tokens_output: null
+        })
+      ]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const first = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+    expect(
+      within(first).getByText(new RegExp(messages.flow_run_token_usage_not_recorded))
+    ).toBeTruthy();
+    const second = screen.getByRole("article", { name: "Steg 2: Skriv svar" });
+    expect(
+      within(second).queryByText(new RegExp(messages.flow_run_token_usage_not_recorded))
+    ).toBeNull();
+  });
+
   it("says what a running step does and which step is next in turn", async () => {
     const running = runStepViews(
       makeRunGraph([
@@ -112,6 +139,24 @@ describe("RunSteps copying", () => {
     );
     await waitFor(() =>
       expect(writeText).toHaveBeenLastCalledWith(JSON.stringify({ mottagare: "Anna" }, null, 2))
+    );
+  });
+
+  it("copies what a step was sent", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
+      [makeRunStep(1, { input_payload_json: { text: "Ärendet gäller bygglov." } })]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+    fireEvent.click(within(card).getByRole("button", { name: messages.flow_runs_step_input }));
+    fireEvent.click(within(card).getByRole("button", { name: messages.flow_run_more_copy_input }));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        JSON.stringify({ text: "Ärendet gäller bygglov." }, null, 2)
+      )
     );
   });
 });

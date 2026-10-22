@@ -33,6 +33,8 @@ export type RunActionNotice = {
   status: "error" | "warning" | "info" | "success";
   title: string;
   description?: string;
+  /** A page the notice points to, offered as a link beside it. */
+  link?: { label: string; href: string };
 };
 
 /** Why a failed run cannot be retried by this person now. */
@@ -68,6 +70,9 @@ export function runActions(
 /**
  * Retries a failed run from its failed step and opens the new run's page.
  * One key per retry of the run, so a lost response replays the same new run.
+ * When the core answers with a retry started earlier (nothing new started),
+ * the person is told so, with a link to that run, instead of being taken
+ * there unawares.
  */
 export function useRetryRun(
   run: { spaceRouteId: string; flowId: string; runId: string },
@@ -86,8 +91,17 @@ export function useRetryRun(
     },
     onSuccess: (child: RunRetry) => {
       void queryClient.invalidateQueries({ queryKey: runKeys.list(flowId) });
+      const href = runHref(spaceRouteId, flowId, child.run.id);
+      if (!child.created) {
+        report({
+          status: "info",
+          title: t("flow_runs_retry_replayed"),
+          link: { label: t("flow_runs_retry_replayed_open"), href }
+        });
+        return;
+      }
       announce(t("flow_runs_retry_started", { order: child.first_executed_step_order }));
-      router.push(runHref(spaceRouteId, flowId, child.run.id));
+      router.push(href);
     },
     onError: (error) => {
       if (error instanceof EneoApiError && error.reason === "flow_run_idempotency_conflict") {

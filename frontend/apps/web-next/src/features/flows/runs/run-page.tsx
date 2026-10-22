@@ -160,7 +160,10 @@ function RunInput({ flow, run }: { flow: FlowPublic; run: RunDetail }) {
   );
 }
 
-/** What the run used from providers: tokens, and audio for a transcription. */
+/**
+ * What the run used from providers: tokens, with what a token is and what
+ * the count covers, and audio for a transcription.
+ */
 function RunUsage({ run }: { run: RunDetail }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -168,7 +171,7 @@ function RunUsage({ run }: { run: RunDetail }) {
   const audio = run.transcription_usage;
   if (!tokens && !audio) return null;
   const total = tokens ? tokenTotal(tokens.num_tokens_input, tokens.num_tokens_output) : null;
-  return (
+  const list = (
     <MetadataList columns="multi">
       {tokens && total !== null ? (
         <MetadataListItem label={t("flow_runs_usage_tokens")}>
@@ -189,6 +192,15 @@ function RunUsage({ run }: { run: RunDetail }) {
         </MetadataListItem>
       ) : null}
     </MetadataList>
+  );
+  if (!tokens || total === null) return list;
+  return (
+    <div className="flex flex-col gap-2">
+      {list}
+      <p className="text-ax-text-secondary m-0 max-w-prose text-xs">
+        {t("flow_runs_usage_tokens_explainer")}
+      </p>
+    </div>
   );
 }
 
@@ -473,6 +485,11 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
             status={notice.status}
             title={notice.title}
             description={notice.description}
+            endContent={
+              notice.link ? (
+                <Button label={notice.link.label} href={notice.link.href} size="sm" />
+              ) : undefined
+            }
             collapsible={false}
             isDismissable
             dismissLabel={t("flows_notice_dismiss")}
@@ -630,8 +647,16 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
             ) : null}
             {summary ? (
               <dl className="m-0 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
-                <CopyableValue label={t("flow_run_more_run_id")} value={summary.id} />
-                <CopyableValue label={t("flow_run_more_trace_id")} value={summary.trace_id} />
+                <CopyableValue
+                  label={t("flow_run_more_run_id")}
+                  value={summary.id}
+                  hint={t("flow_run_more_run_id_hint")}
+                />
+                <CopyableValue
+                  label={t("flow_run_more_trace_id")}
+                  value={summary.trace_id}
+                  hint={t("flow_run_more_trace_id_hint")}
+                />
               </dl>
             ) : null}
           </>
