@@ -58,7 +58,7 @@ const CONVERSATIONS = [
   conversation(
     "c3",
     "Veckomöte",
-    { type: "group-chat", id: "g1", name: "Inköpsrådet" },
+    { type: "assistant", id: "a2", name: "Inköpsrådet" },
     { id: "s2", name: "Socialtjänst", personal: false, organization: false }
   ),
   conversation(
@@ -149,7 +149,7 @@ describe("DesktopSideNav (main)", () => {
     ).toEqual([
       "/spaces/personal/chat?session_id=c1",
       "/spaces/s1/chat?type=assistant&id=a1&session_id=c2",
-      "/spaces/s2/chat?type=group-chat&id=g1&session_id=c3",
+      "/spaces/s2/chat?type=assistant&id=a2&session_id=c3",
       "/spaces/organization/chat?session_id=c4",
       "/spaces/personal/chat?session_id=c5"
     ]);

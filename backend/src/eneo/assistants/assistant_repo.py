@@ -32,10 +32,6 @@ from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.capabilities_table import AssistantCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.document_templates_table import AssistantDocumentTemplates
-from eneo.database.tables.group_chats_table import (
-    GroupChatsAssistantsMapping,
-    GroupChatsTable,
-)
 from eneo.database.tables.help_assistant_assignment_history_table import (
     HelpAssistantAssignmentHistory,
 )
@@ -1096,15 +1092,5 @@ class AssistantRepository:
                     AssistantSpecialists.assistant_id == assistant_id,
                     AssistantSpecialists.specialist_id == assistant_id,
                 )
-            )
-        )
-        await self.session.execute(
-            sa.delete(GroupChatsAssistantsMapping).where(
-                GroupChatsAssistantsMapping.assistant_id == assistant_id,
-                GroupChatsAssistantsMapping.group_chat_id.in_(
-                    sa.select(GroupChatsTable.id).where(
-                        GroupChatsTable.space_id == source_space_id,
-                    )
-                ),
             )
         )

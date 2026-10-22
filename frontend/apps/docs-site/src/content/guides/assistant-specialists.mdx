@@ -111,5 +111,20 @@ and must identify missing evidence.
 
 This version is available through interactive user sessions. An API key asking
 an assistant that has specialists receives `400` with
-`code: "orchestration_requires_session"`. Group chats are unchanged: they route
-each question to one member assistant.
+`code: "orchestration_requires_session"`.
+
+## Former group chats
+
+Group chats no longer exist as a separate kind of application. Every group chat
+became an assistant with the same id, in the same Space, with the same owner,
+name, icon, publication and insight setting, and its members became that
+assistant's specialists with their routing descriptions. Conversations, insights
+and links kept working because the id did not change.
+
+The migrated assistant uses the Space's first enabled model that supports tool
+calling; where the Space had none, it has no model until an editor chooses one.
+It has no instructions, so review each former group: give it a prompt that says
+what the combined answer should look like, and check the specialists and their
+descriptions. Mentions (`@assistant`) and the "show response labels" setting are
+gone; the steps under the answer show who said what. Calls to the old
+`/api/v1/group-chats/` endpoints answer `410` with `code: "group_chats_retired"`.

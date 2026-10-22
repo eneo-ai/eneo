@@ -71,7 +71,6 @@ const PERMISSION_KEYS: Partial<Record<Permission, string>> = {
   skills: "permission_skills",
   skills_management: "permission_skills_management",
   personal_chat: "permission_personal_chat",
-  group_chats: "permission_group_chats",
   apps: "permission_apps",
   services: "permission_services",
   collections: "permission_collections",

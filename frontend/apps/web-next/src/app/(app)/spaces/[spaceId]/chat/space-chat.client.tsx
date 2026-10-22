@@ -1,8 +1,9 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
+import { useEffect } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
@@ -156,11 +157,22 @@ function ComposerPickers() {
 export function SpaceChat() {
   const t = useTranslations();
   const { space, routeId } = useSpace();
+  const router = useRouter();
   const searchParams = useSearchParams();
 
-  const type = searchParams.get("type") ?? "default-assistant";
+  const requestedType = searchParams.get("type") ?? "default-assistant";
+  // A retired group chat lives on as the assistant with the same id, so a
+  // saved `type=group-chat` link opens that assistant (and the URL follows).
+  const type = requestedType === "group-chat" ? "assistant" : requestedType;
   const partnerId = searchParams.get("id");
   const sessionId = searchParams.get("session_id");
+
+  useEffect(() => {
+    if (requestedType !== "group-chat") return;
+    const params = new URLSearchParams(searchParams);
+    params.set("type", "assistant");
+    router.replace(`/spaces/${routeId}/chat?${params}`);
+  }, [requestedType, routeId, router, searchParams]);
 
   const assistantQuery = useQuery({
     queryKey: ["assistants", partnerId],
@@ -170,22 +182,8 @@ export function SpaceChat() {
     retry: retryPartnerQuery
   });
 
-  const groupChatQuery = useQuery({
-    queryKey: ["group-chats", partnerId],
-    enabled: type === "group-chat" && partnerId !== null,
-    queryFn: () =>
-      unwrap(browserApi.GET("/api/v1/group-chats/{id}/", { params: { path: { id: partnerId! } } })),
-    retry: retryPartnerQuery
-  });
   // The query that loads a non-default partner (null for the space's own assistant).
-  const partnerQuery =
-    partnerId === null
-      ? null
-      : type === "assistant"
-        ? assistantQuery
-        : type === "group-chat"
-          ? groupChatQuery
-          : null;
+  const partnerQuery = partnerId !== null && type === "assistant" ? assistantQuery : null;
 
   const spaceName = space.personal
     ? t("personal")
@@ -199,25 +197,7 @@ export function SpaceChat() {
   };
 
   let partner: ChatPartner | null = null;
-  if (type === "group-chat" && groupChatQuery.data) {
-    const groupChat = groupChatQuery.data;
-    partner = {
-      type: "group-chat",
-      id: groupChat.id,
-      name: groupChat.name,
-      allowedAttachments: groupChat.allowed_attachments,
-      insightEnabled: groupChat.insight_enabled,
-      iconId: groupChat.icon_id ?? null,
-      ...spaceInfo,
-      showResponseLabel: groupChat.show_response_label,
-      mentionableAssistants: groupChat.allow_mentions
-        ? groupChat.tools.assistants.map((assistant) => ({
-            id: assistant.id,
-            handle: assistant.handle
-          }))
-        : []
-    };
-  } else if (type === "assistant" && assistantQuery.data) {
+  if (type === "assistant" && assistantQuery.data) {
     const assistant = assistantQuery.data;
     partner = {
       type: "assistant",
@@ -277,9 +257,7 @@ export function SpaceChat() {
   const editHref =
     type === "assistant" && assistantQuery.data?.permissions?.includes("edit")
       ? `/spaces/${routeId}/assistants/${partner.id}/edit`
-      : type === "group-chat" && groupChatQuery.data?.permissions?.includes("edit")
-        ? `/spaces/${routeId}/group-chats/${partner.id}/edit`
-        : null;
+      : null;
 
   return (
     <ChatPage

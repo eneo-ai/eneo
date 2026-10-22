@@ -2,7 +2,7 @@ import type { UIMessage } from "ai";
 import type { Schema } from "@/lib/api/models";
 
 /** Chat partner discriminator; mirrors the Svelte app's URL contract. */
-export type ChatPartnerType = "default-assistant" | "assistant" | "group-chat";
+export type ChatPartnerType = "default-assistant" | "assistant";
 
 /** A knowledge source attached to a partner (collection or crawled website). */
 export type KnowledgeOrigin = { id: string; name: string; kind: "collection" | "website" };
@@ -25,10 +25,6 @@ export type ChatPartner = {
      */
     supports_tool_calling?: boolean | null;
   } | null;
-  /** Group chats: assistants available for @mentions. */
-  mentionableAssistants?: { id: string; handle: string }[];
-  /** Group chats: label which assistant answered. */
-  showResponseLabel?: boolean;
   /** MCP servers that can be toggled for this partner when no policy overrides them. */
   mcpServers?: Schema<"MCPServerPublicDict">[];
   enabledCapabilities?: Schema<"AssistantPublic">["enabled_capabilities"];
@@ -37,7 +33,7 @@ export type ChatPartner = {
   effectiveConfig?: Schema<"EffectiveConfigPublic"> | null;
   /** Whether the partner exposes the conversation insights tab. */
   insightEnabled?: boolean;
-  /** Short description shown on the start screen (assistants, group chats). */
+  /** Short description shown on the start screen (assistants). */
   description?: string | null;
   /** Uploaded icon id (tile image), when the partner has one. */
   iconId?: string | null;
@@ -167,7 +163,7 @@ export type EneoMessageMetadata = {
   mcpToolReferences?: Schema<"McpToolReferencePublic">[];
   tokens?: { prompt?: number | null; completion?: number | null };
   completionModel?: CompletionModelInfo | null;
-  /** Group chats: which member assistant answered this message. */
+  /** The assistant the backend names as the answerer, when it names one. */
   answeringAssistant?: { id: string; handle: string } | null;
   /** When the message was created (ISO 8601), for the timestamp under answers. */
   createdAt?: string | null;
@@ -182,9 +178,7 @@ export type ConversationBody = {
   question: string;
   session_id?: string | null;
   assistant_id?: string | null;
-  group_chat_id?: string | null;
   files: { id: string }[];
-  tools?: { assistants: { id: string; handle: string }[] } | null;
   stream: true;
   disabled_capabilities?: Schema<"ConversationRequest">["disabled_capabilities"];
   require_tool_approval?: boolean;

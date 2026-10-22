@@ -85,7 +85,6 @@ class MockSpaceRole:
 
 class MockPermission:
     ASSISTANTS = "assistants"
-    GROUP_CHATS = "group_chats"
     COLLECTIONS = "collections"
     WEBSITES = "websites"
     SERVICES = "services"

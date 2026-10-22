@@ -22,22 +22,14 @@ import { groupPermissions } from "$lib/features/roles/permission-groups";
 import RoleRow from "./RoleRow.svelte";
 
 const catalogue = (
-  [
-    "personal_chat",
-    "group_chats",
-    "assistants",
-    "apps",
-    "collections",
-    "admin",
-    "api_keys"
-  ] as Permission[]
+  ["personal_chat", "assistants", "apps", "collections", "admin", "api_keys"] as Permission[]
 ).map((name) => ({ name, description: `${name} description` }));
 const groups = groupPermissions(catalogue);
 
 const role: Role = {
   id: "role-1",
   name: "Editor",
-  permissions: ["personal_chat", "group_chats", "assistants"] as Permission[],
+  permissions: ["personal_chat", "assistants"] as Permission[],
   predefined_source: "User"
 };
 
@@ -60,7 +52,7 @@ describe("RoleRow", () => {
     await expect.element(summary).toBeVisible();
     const items = summary.element().querySelectorAll("li");
     expect([...items].map((item) => item.textContent?.replace(/\s+/g, " ").trim())).toEqual([
-      'permission_group_chat_short 2/2 roles_group_count {"granted":2,"total":2}',
+      'permission_group_chat_short 1/1 roles_group_count {"granted":1,"total":1}',
       'permission_group_build_short 1/2 roles_group_count {"granted":1,"total":2}',
       'permission_group_knowledge_short 0/1 roles_group_count {"granted":0,"total":1}',
       'permission_group_admin_short 0/2 roles_group_count {"granted":0,"total":2}'

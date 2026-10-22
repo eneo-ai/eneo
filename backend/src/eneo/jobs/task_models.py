@@ -95,4 +95,3 @@ class AnalyzeConversationInsightsTask(TaskParams):
     to_date: str
     include_followups: bool = False
     assistant_id: UUID | None = None
-    group_chat_id: UUID | None = None

@@ -77,7 +77,7 @@ const data = {
     conversation(
       "c3",
       "Veckomöte",
-      { type: "group-chat", id: "g1", name: "Inköpsrådet" },
+      { type: "assistant", id: "a2", name: "Inköpsrådet" },
       UPPHANDLING
     )
   ],
@@ -153,7 +153,7 @@ describe("buildPaletteEntries", () => {
       [
         "Veckomöte",
         "recent_partner_in_space(Inköpsrådet,Upphandling)",
-        { type: "navigate", href: "/spaces/s1/chat?type=group-chat&id=g1&session_id=c3" }
+        { type: "navigate", href: "/spaces/s1/chat?type=assistant&id=a2&session_id=c3" }
       ]
     ]);
   });

@@ -64,7 +64,7 @@
           awaiting: {
             ring: "border-accent-default/40 bg-accent-dimmer text-accent-default",
             badge: "bg-accent-dimmer text-accent-default",
-            label: m.group_consultation_approval()
+            label: m.consultation_approval()
           },
           running: {
             ring: "border-accent-default/40 bg-accent-dimmer text-accent-default",

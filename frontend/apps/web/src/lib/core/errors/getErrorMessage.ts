@@ -133,7 +133,7 @@ export function getAnswerFailureMessage(error: unknown): string | undefined {
   if (!(error instanceof EneoError)) return undefined;
   const reason = error.response?.code;
   if (typeof reason !== "string") return undefined;
-  // An orchestrated group chat names the exhausted limit after the prefix
+  // An orchestrated turn names the exhausted limit after the prefix
   // (`execution_limit_duration`, `execution_limit_model_requests`, ...); the
   // user needs the same instruction whichever limit it was.
   if (reason.startsWith("execution_limit_")) return m.chat_answer_failed_execution_limit();

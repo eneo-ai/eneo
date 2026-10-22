@@ -5,7 +5,6 @@ import { Button } from "@astryxdesign/core/Button";
 import { ChatLayout, ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { Selector } from "@astryxdesign/core/Selector";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -64,7 +63,6 @@ import { StartState } from "./start-state";
 import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
 import { useToolChoices } from "./use-tool-choices";
 
-const NO_MENTION = "__none__";
 /** The current time as ISO 8601 (the timestamp of a question sent now). */
 function isoNow(): string {
   return new Date().toISOString();
@@ -73,7 +71,7 @@ function isoNow(): string {
 type SentFiles = NonNullable<NonNullable<EneoUIMessage["metadata"]>["files"]>;
 
 /** The request options of a question as they stood when it left the composer. */
-type SendRequest = Omit<ChatSendOptions, "files" | "session_id" | "assistant_id" | "group_chat_id">;
+type SendRequest = Omit<ChatSendOptions, "files" | "session_id" | "assistant_id">;
 
 /**
  * A question sent before its attachments were on the server. It waits in the
@@ -209,8 +207,8 @@ function ConversationView({
     findExisting: (file) => uploadsRef.current.find((uploaded) => matchesUpload(file, uploaded))
   });
   const panel = useSidePanel()!;
-  // The Felsök tab reads a saved turn's diagnostics; group chats have none.
-  const debugAvailable = can("assistant_debug") && partner.type !== "group-chat";
+  // The Felsök tab reads a saved turn's diagnostics.
+  const debugAvailable = can("assistant_debug");
   // Astryx's shared polite live region (mounted empty, cleared after a moment):
   // only "Svaret är klart", errors and tool approvals go there, never tokens.
   const announce = useAnnounce();
@@ -219,7 +217,6 @@ function ConversationView({
   const toolChoices = useToolChoices(partner);
 
   const [input, setInput] = useState("");
-  const [mentionId, setMentionId] = useState<string>(NO_MENTION);
   const fileInput = useRef<HTMLInputElement>(null);
   // Ref for event-time reads (send body, onFinish); state for render-time
   // consumers (preflight). Both are set together when data-session arrives.
@@ -525,8 +522,7 @@ function ConversationView({
     question: input,
     fileIds: attachments.fileIds,
     sessionId,
-    assistantId: sessionId || partner.type === "group-chat" ? null : partner.id,
-    groupChatId: !sessionId && partner.type === "group-chat" ? partner.id : null
+    assistantId: sessionId ? null : partner.id
   });
 
   const usage = deriveContextUsage({
@@ -567,18 +563,12 @@ function ConversationView({
 
   /** The request options as they stand now, for the question leaving the composer. */
   function requestOptions(): SendRequest {
-    const mention =
-      partner.type === "group-chat" && mentionId !== NO_MENTION
-        ? partner.mentionableAssistants?.find((assistant) => assistant.id === mentionId)
-        : undefined;
     const mcpOptions = mcpConversationOptions({
       servers: toolChoices.mcpServers,
       disabledServerIds: toolChoices.disabledMcpServerIds,
-      autoAcceptTools: toolChoices.autoAcceptTools,
-      supportsToolApproval: partner.type !== "group-chat"
+      autoAcceptTools: toolChoices.autoAcceptTools
     });
     return {
-      tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
       disabled_capabilities: disabledCapabilitiesForRequest(
         partner,
         toolChoices.disabledCapabilities,
@@ -609,7 +599,6 @@ function ConversationView({
     const request = requestOptions();
     // A retry leaves the composer alone unless it holds the retried question.
     setInput((current) => (resendFiles && current.trim() !== question ? current : ""));
-    setMentionId(NO_MENTION);
 
     const batch = attachments.attachments;
     if (!resendFiles && batch.some((attachment) => attachment.uploading)) {
@@ -661,13 +650,12 @@ function ConversationView({
     };
     setLastQuestion({ text, files });
 
-    // The backend wants exactly ONE of session_id/assistant_id/group_chat_id:
-    // continuing a session identifies the partner through the session.
+    // The backend wants exactly ONE of session_id/assistant_id: continuing a
+    // session identifies the partner through the session.
     const continuing = sessionIdRef.current !== null;
     const body: ChatSendOptions = {
       session_id: sessionIdRef.current,
-      assistant_id: continuing || partner.type === "group-chat" ? null : partner.id,
-      group_chat_id: !continuing && partner.type === "group-chat" ? partner.id : null,
+      assistant_id: continuing ? null : partner.id,
       files: files.map((file) => ({ id: file.id })),
       ...request
     };
@@ -760,25 +748,6 @@ function ConversationView({
 
   const partnerName = displayPartnerName(partner, t);
   const assistantIdentity = { id: partner.id, name: partnerName, iconId: partner.iconId };
-  const mention =
-    partner.type === "group-chat" && (partner.mentionableAssistants?.length ?? 0) > 0 ? (
-      <Selector
-        label={t("mention")}
-        isLabelHidden
-        variant="ghost"
-        size="sm"
-        value={mentionId}
-        onChange={setMentionId}
-        options={[
-          { value: NO_MENTION, label: t("mentions") },
-          ...partner.mentionableAssistants!.map((assistant) => ({
-            value: assistant.id,
-            label: `@${assistant.handle}`
-          }))
-        ]}
-      />
-    ) : null;
-
   const tools = (
     <ChatTools
       capabilities={toolChoices.capabilities}
@@ -808,7 +777,6 @@ function ConversationView({
     onOpenFileDialog: openAttachmentDialog,
     knowledge: partner.knowledge,
     tools,
-    mention,
     modelSelector,
     quote: composerQuote,
     contextBar: (
@@ -993,7 +961,6 @@ function ConversationView({
                   message={message}
                   assistant={assistantIdentity}
                   isStreaming={streaming}
-                  showResponseLabel={partner.showResponseLabel ?? false}
                   liveAnswering={liveAnswering}
                   knowledge={partner.knowledge}
                   durations={timings.durations(message.id)}

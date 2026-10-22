@@ -7,7 +7,7 @@ import { useEffect, useState } from "react";
  * A module-level set, not a query parameter, so a reload or a shared link
  * never refocuses or re-announces.
  */
-export type CreatedResourceKind = "assistant" | "app" | "group-chat";
+export type CreatedResourceKind = "assistant" | "app";
 
 const pending = new Set<string>();
 

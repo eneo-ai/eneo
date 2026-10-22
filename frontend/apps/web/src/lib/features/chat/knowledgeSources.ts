@@ -18,7 +18,7 @@ function named(value: unknown, fallbackKey?: string): NamedSource[] {
   }));
 }
 
-/** The knowledge attached to an assistant or group chat, by kind. */
+/** The knowledge attached to an assistant, by kind. */
 export function getPartnerKnowledgeSources(partner: unknown): PartnerKnowledgeSources {
   const record = (partner ?? {}) as Record<string, unknown>;
   return {

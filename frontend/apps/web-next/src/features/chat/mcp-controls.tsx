@@ -76,20 +76,17 @@ export function activeMcpServerCount(
 export function mcpConversationOptions({
   servers,
   disabledServerIds,
-  autoAcceptTools,
-  supportsToolApproval
+  autoAcceptTools
 }: {
   servers: McpServerSummary[];
   disabledServerIds: Set<string>;
   autoAcceptTools: boolean;
-  supportsToolApproval: boolean;
 }): Pick<ConversationBody, "require_tool_approval" | "disabled_mcp_server_ids"> {
   const disabledIds = [...disabledServerIds].filter((id) =>
     servers.some((server) => server.id === id)
   );
   return {
-    require_tool_approval:
-      supportsToolApproval && servers.length > 0 && !autoAcceptTools ? true : undefined,
+    require_tool_approval: servers.length > 0 && !autoAcceptTools ? true : undefined,
     disabled_mcp_server_ids: disabledIds.length > 0 ? disabledIds : undefined
   };
 }

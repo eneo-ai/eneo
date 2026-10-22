@@ -11,7 +11,6 @@ function list<T>(items: T[] = [], permissions: ResourcePermission[] = ALL) {
 export type SpaceFixtureOptions = {
   permissions?: ResourcePermission[];
   assistants?: unknown[];
-  groupChats?: unknown[];
   apps?: unknown[];
   services?: unknown[];
   collections?: unknown[];
@@ -38,7 +37,6 @@ export function makeSpace(options: SpaceFixtureOptions = {}): Space {
     permissions: options.permissions ?? ["read", "edit", "delete"],
     applications: {
       assistants: list(options.assistants, resource),
-      group_chats: list(options.groupChats, resource),
       services: list(options.services, resource),
       apps: list(options.apps, resource)
     },

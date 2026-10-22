@@ -23,7 +23,7 @@ import {
 } from "@/features/insights/insights-range";
 import { InsightsRangePicker } from "@/features/insights/insights-range-picker";
 
-type InsightPartner = Extract<ChatPartner["type"], "assistant" | "group-chat">;
+type InsightPartner = Extract<ChatPartner["type"], "assistant">;
 
 /** How long to wait for an asynchronous insight job, polled once a second. */
 const MAX_POLLS = 120;

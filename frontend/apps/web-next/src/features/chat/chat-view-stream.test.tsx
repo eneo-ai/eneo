@@ -225,33 +225,6 @@ describe("ChatView rating a streamed answer", () => {
 });
 
 describe("ChatView sending", () => {
-  it("sends an @-mention to the group chat member it names", async () => {
-    spies.mode = "answer";
-    renderInApp(
-      <Harness
-        chatPartner={{
-          type: "group-chat",
-          id: "group-1",
-          name: "Upphandlingsgruppen",
-          mentionableAssistants: [{ id: "assistant-9", handle: "juristen" }]
-        }}
-      />
-    );
-    fireEvent.click(screen.getByRole("combobox", { name: "Nämn" }));
-    fireEvent.click(await screen.findByRole("option", { name: "@juristen" }));
-    ask("Är avtalet förenligt med LOU?");
-    await waitFor(() => expect(spies.sent).toHaveLength(1));
-    expect(spies.sent[0]?.body).toMatchObject({
-      group_chat_id: "group-1",
-      assistant_id: null,
-      tools: { assistants: [{ id: "assistant-9", handle: "juristen" }] }
-    });
-    // The mention applies to that question only.
-    await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Nämn" }).textContent).toContain("Omnämnanden")
-    );
-  });
-
   it("stops an answer from the stop button and says so", async () => {
     spies.mode = "hold";
     renderInApp(<Harness />);

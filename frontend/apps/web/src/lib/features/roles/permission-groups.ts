@@ -25,7 +25,7 @@ export type GroupSummary = {
 // Display order of the groups, and of the permissions inside each group.
 // Keys the backend adds later land in "other" until they are placed here.
 const MEMBERS: Record<Exclude<PermissionGroupId, "other">, readonly string[]> = {
-  chat: ["personal_chat", "group_chats", "shared_spaces"],
+  chat: ["personal_chat", "shared_spaces"],
   // The functions assistants offer (Admin > Tools > Functions); each is a permission of its
   // own, so a new function is visible here instead of lost among the chat rights.
   functions: [

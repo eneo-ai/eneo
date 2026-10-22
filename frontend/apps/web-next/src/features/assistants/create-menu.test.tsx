@@ -26,7 +26,6 @@ const collision = () =>
 afterEach(() => {
   vi.clearAllMocks();
   clearJustCreated("assistant", "a-new");
-  clearJustCreated("group-chat", "g-new");
 });
 
 describe("CreateChatAppMenu", () => {
@@ -42,7 +41,7 @@ describe("CreateChatAppMenu", () => {
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent?.trim())
-    ).toEqual(["Skapa ny assistent", "Börja med en mall...", "Skapa ny gruppchatt"]);
+    ).toEqual(["Skapa ny assistent", "Börja med en mall..."]);
   });
 
   it("creates the assistant as 'Ny assistent' at once and opens its editor", async () => {
@@ -79,22 +78,5 @@ describe("CreateChatAppMenu", () => {
     expect(
       api.POST.mock.calls.map((call) => (call[1] as { body: { name: string } }).body.name)
     ).toEqual(["Ny assistent", "Ny assistent 2"]);
-  });
-
-  it("creates a group chat as 'Ny gruppchatt' from the menu", async () => {
-    api.POST.mockReturnValue(created("g-new"));
-    renderInApp(<CreateChatAppMenu />, { appContext: testAppContext() });
-
-    fireEvent.keyDown(screen.getByRole("button", { name: "Fler sätt att skapa" }), {
-      key: "Enter"
-    });
-    fireEvent.click(screen.getByRole("menuitem", { name: "Skapa ny gruppchatt" }));
-
-    await waitFor(() =>
-      expect(router.push).toHaveBeenCalledWith("/spaces/space-1/group-chats/g-new/edit")
-    );
-    expect(api.POST.mock.calls[0]?.[0]).toBe("/api/v1/spaces/{id}/applications/group-chats/");
-    expect(api.POST.mock.calls[0]?.[1]).toMatchObject({ body: { name: "Ny gruppchatt" } });
-    expect(isJustCreated("group-chat", "g-new")).toBe(true);
   });
 });

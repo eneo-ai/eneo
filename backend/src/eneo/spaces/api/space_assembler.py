@@ -12,7 +12,6 @@ from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
 )
-from eneo.group_chat.presentation.models import GroupChatSparse
 from eneo.integration.presentation.assemblers.integration_knowledge_assembler import (
     IntegrationKnowledgeAssembler,
 )
@@ -44,7 +43,6 @@ from eneo.spaces.space import Space
 from eneo.spaces.space_applications_projection import (
     AppApplicationsProjection,
     AssistantApplicationsProjection,
-    GroupChatApplicationsProjection,
     ServiceApplicationsProjection,
     SpaceApplicationsProjection,
 )
@@ -117,20 +115,6 @@ class SpaceAssembler:
                     insight_enabled=assistant.insight_enabled,
                 )
                 for assistant in space.assistants
-            ),
-            group_chats=tuple(
-                GroupChatApplicationsProjection(
-                    id=group_chat.id,
-                    created_at=SpaceAssembler._required_datetime(group_chat.created_at),
-                    updated_at=SpaceAssembler._required_datetime(group_chat.updated_at),
-                    name=group_chat.name,
-                    user_id=group_chat.user_id,
-                    published=group_chat.published,
-                    metadata_json=group_chat.metadata_json,
-                    icon_id=group_chat.icon_id,
-                    insight_enabled=group_chat.insight_enabled,
-                )
-                for group_chat in space.group_chats
             ),
             apps=tuple(
                 AppApplicationsProjection(
@@ -301,9 +285,6 @@ class SpaceAssembler:
         applications.assistants.permissions = cap(
             applications.assistants.permissions, rp.assistants.value
         )
-        applications.group_chats.permissions = cap(
-            applications.group_chats.permissions, rp.assistants.value
-        )
         applications.apps.permissions = cap(
             applications.apps.permissions, rp.apps.value
         )
@@ -312,8 +293,6 @@ class SpaceAssembler:
         )
         for assistant in applications.assistants.items:
             assistant.permissions = cap(assistant.permissions, rp.assistants.value)
-        for group_chat in applications.group_chats.items:
-            group_chat.permissions = cap(group_chat.permissions, rp.assistants.value)
         for app in applications.apps.items:
             app.permissions = cap(app.permissions, rp.apps.value)
         for service in applications.services.items:
@@ -343,24 +322,6 @@ class SpaceAssembler:
         if actor.can_create_assistants():
             permissions.append(ResourcePermission.CREATE)
         if actor.can_publish_assistants():
-            permissions.append(ResourcePermission.PUBLISH)
-
-        return permissions
-
-    def _get_group_chat_permissions(self, space: Space) -> list[ResourcePermission]:
-        actor = self.actor_manager.get_space_actor_from_space(space=space)
-        return self._get_group_chat_permissions_from_actor(actor)
-
-    @staticmethod
-    def _get_group_chat_permissions_from_actor(
-        actor: "SpaceActor",
-    ) -> list[ResourcePermission]:
-        permissions: list[ResourcePermission] = []
-        if actor.can_read_group_chats():
-            permissions.append(ResourcePermission.READ)
-        if actor.can_create_group_chats():
-            permissions.append(ResourcePermission.CREATE)
-        if actor.can_publish_group_chats():
             permissions.append(ResourcePermission.PUBLISH)
 
         return permissions
@@ -555,24 +516,6 @@ class SpaceAssembler:
             completion_model_id=assistant.completion_model_id,
         )
 
-    def _get_group_chat_model(
-        self,
-        group_chat: GroupChatApplicationsProjection,
-        permissions: list[ResourcePermission],
-    ) -> GroupChatSparse:
-        return GroupChatSparse(
-            created_at=group_chat.created_at,
-            updated_at=group_chat.updated_at,
-            name=group_chat.name,
-            id=group_chat.id,
-            user_id=group_chat.user_id,
-            published=group_chat.published,
-            permissions=permissions,
-            type="group-chat",
-            metadata_json=group_chat.metadata_json,
-            icon_id=group_chat.icon_id,
-        )
-
     def _get_app_model(
         self,
         app: AppApplicationsProjection,
@@ -608,18 +551,6 @@ class SpaceAssembler:
                     and (not only_published or assistant.published)
                 ],
                 permissions=self._get_assistant_permissions_from_actor(actor),
-            ),
-            group_chats=PaginatedPermissions[GroupChatSparse](
-                items=[
-                    self._get_group_chat_model(
-                        group_chat,
-                        actor.get_group_chat_permissions(group_chat),
-                    )
-                    for group_chat in projection.group_chats
-                    if actor.can_read_group_chat(group_chat=group_chat)
-                    and (not only_published or group_chat.published)
-                ],
-                permissions=self._get_group_chat_permissions_from_actor(actor),
             ),
             apps=PaginatedPermissions[AppSparse](
                 items=[
@@ -904,7 +835,6 @@ class SpaceAssembler:
         if applications is None:
             applications = Applications(
                 assistants=PaginatedPermissions[AssistantSparse](items=[]),
-                group_chats=PaginatedPermissions[GroupChatSparse](items=[]),
                 apps=PaginatedPermissions[AppSparse](items=[]),
                 services=PaginatedPermissions[ServiceSparse](items=[]),
             )
@@ -915,11 +845,6 @@ class SpaceAssembler:
                 item
                 for item in applications.assistants.items
                 if item.id in result.affected_assistant_ids
-            ],
-            group_chats=[
-                item
-                for item in applications.group_chats.items
-                if item.id in result.affected_group_chat_ids
             ],
             apps=[
                 item

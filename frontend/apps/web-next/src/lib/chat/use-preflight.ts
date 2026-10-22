@@ -18,12 +18,11 @@ export function usePreflight(request: {
   fileIds: string[];
   sessionId?: string | null;
   assistantId?: string | null;
-  groupChatId?: string | null;
 }): PreflightState {
   const [preflight, setPreflight] = useState<PreflightState>(null);
   const generation = useRef(0);
 
-  const { question, sessionId, assistantId, groupChatId } = request;
+  const { question, sessionId, assistantId } = request;
   const fileKey = request.fileIds.join(",");
 
   useEffect(() => {
@@ -38,8 +37,7 @@ export function usePreflight(request: {
               question,
               file_ids: fileKey ? fileKey.split(",") : [],
               session_id: sessionId ?? null,
-              assistant_id: assistantId ?? null,
-              group_chat_id: groupChatId ?? null
+              assistant_id: assistantId ?? null
             }
           })
         );
@@ -50,7 +48,7 @@ export function usePreflight(request: {
     }, DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [question, fileKey, sessionId, assistantId, groupChatId]);
+  }, [question, fileKey, sessionId, assistantId]);
 
   // Empty input: report no pending cost (derived, not reset via setState).
   return question || fileKey ? preflight : null;

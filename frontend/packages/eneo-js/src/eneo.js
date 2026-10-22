@@ -23,7 +23,6 @@ import { initPrompts } from "./endpoints/prompts.js";
 import { initApps } from "./endpoints/apps.js";
 import { initTemplates } from "./endpoints/templates.js";
 import { initUsage } from "./endpoints/usage.js";
-import { initGroupChats } from "./endpoints/group-chats.js";
 import { initIntegrations } from "./endpoints/integrations.js";
 import { initConversations } from "./endpoints/conversations.js";
 import { initSecurityClassifications } from "./endpoints/security-classifications.js";
@@ -83,7 +82,6 @@ export function createEneo(args) {
     prompts: initPrompts(client),
     templates: initTemplates(client),
     usage: initUsage(client),
-    groupChats: initGroupChats(client),
     integrations: initIntegrations(client),
     conversations: initConversations(client),
     securityClassifications: initSecurityClassifications(client),

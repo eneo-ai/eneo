@@ -22,12 +22,11 @@ function time(value: string | null | undefined): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-/** Assistants and group chats, most recently changed first. */
+/** Assistants, most recently changed first. */
 export function recentChatItems(space: Space, compare: Compare): ChatAppItem[] {
-  return [
-    ...(space.applications?.assistants.items ?? []),
-    ...(space.applications?.group_chats.items ?? [])
-  ].sort((a, b) => time(b.updated_at) - time(a.updated_at) || compare(a.name, b.name));
+  return [...(space.applications?.assistants.items ?? [])].sort(
+    (a, b) => time(b.updated_at) - time(a.updated_at) || compare(a.name, b.name)
+  );
 }
 
 export type KnowledgeKind = "collection" | "website" | "integration";

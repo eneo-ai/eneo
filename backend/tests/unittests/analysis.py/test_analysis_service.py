@@ -57,7 +57,6 @@ def user():
 def mock_actor():
     actor = MagicMock(spec=SpaceActor)
     actor.can_access_insight_assistant.return_value = True
-    actor.can_access_insight_group_chat.return_value = True
     return actor
 
 
@@ -73,7 +72,6 @@ def mock_space_service(mock_actor):
     # Configure space
     mock_space = MagicMock()
     service.get_space_by_assistant.return_value = mock_space
-    service.get_space_by_group_chat.return_value = mock_space
     service.get_space.return_value = mock_space
 
     return service
@@ -85,9 +83,7 @@ def analysis_service(user, mock_space_service):
     assistant_service = AsyncMock()
     repo = AsyncMock()
     repo.get_assistant_question_texts_since.return_value = []
-    repo.get_group_chat_question_texts_since.return_value = []
     repo.count_assistant_questions_since.return_value = 0
-    repo.count_group_chat_questions_since.return_value = 0
     repo.get_message_feedback_counts.return_value = MessageFeedbackCounts(
         positive=0, negative=0
     )
@@ -95,12 +91,6 @@ def analysis_service(user, mock_space_service):
     # Configure assistant for insight checks
     mock_assistant = AsyncMock()
     mock_assistant.insight_enabled = True
-
-    # Configure group_chat_service
-    group_chat_service = AsyncMock()
-    mock_group_chat = MagicMock()
-    mock_group_chat.insight_enabled = True
-    group_chat_service.get_group_chat.return_value = (mock_group_chat, MagicMock())
 
     # Configure assistant_service
     assistant_service.get_assistant.return_value = (mock_assistant, MagicMock())
@@ -113,19 +103,16 @@ def analysis_service(user, mock_space_service):
         session_repo=AsyncMock(),
         space_service=mock_space_service,
         session_service=AsyncMock(),
-        group_chat_service=group_chat_service,
         completion_service=AsyncMock(),
     )
 
 
-@pytest.mark.parametrize("target", ["assistant", "group_chat"])
 async def test_insight_job_poll_rechecks_access_after_revocation(
     service: AnalysisService,
     mock_actor: SpaceActor,
     monkeypatch: pytest.MonkeyPatch,
-    target: str,
 ):
-    target_id = uuid4()
+    assistant_id = uuid4()
     job_id = uuid4()
     now = datetime.now(timezone.utc)
     job = AnalysisJob(
@@ -133,8 +120,7 @@ async def test_insight_job_poll_rechecks_access_after_revocation(
         tenant_id=TEST_UUID,
         status=AnalysisJobStatus.COMPLETED,
         question="What happened?",
-        assistant_id=target_id if target == "assistant" else None,
-        group_chat_id=target_id if target == "group_chat" else None,
+        assistant_id=assistant_id,
         answer="Private insight answer",
         created_at=now,
         updated_at=now,
@@ -149,16 +135,13 @@ async def test_insight_job_poll_rechecks_access_after_revocation(
     assert response.answer == "Private insight answer"
     get_job.assert_awaited_with(tenant_id=TEST_UUID, job_id=job_id)
 
-    if target == "assistant":
-        mock_actor.can_access_insight_assistant.return_value = False
-    else:
-        mock_actor.can_access_insight_group_chat.return_value = False
+    mock_actor.can_access_insight_assistant.return_value = False
 
     with pytest.raises(UnauthorizedException):
         await get_conversation_insight_job(job_id=job_id, container=container)
 
 
-@pytest.mark.parametrize("invalid_target", ["missing", "ambiguous", "other_tenant"])
+@pytest.mark.parametrize("invalid_target", ["missing", "other_tenant"])
 async def test_insight_job_poll_rejects_invalid_persisted_access_target(
     service: AnalysisService,
     mock_actor: SpaceActor,
@@ -171,7 +154,6 @@ async def test_insight_job_poll_rejects_invalid_persisted_access_target(
         status=AnalysisJobStatus.COMPLETED,
         question="What happened?",
         assistant_id=None if invalid_target == "missing" else uuid4(),
-        group_chat_id=uuid4() if invalid_target == "ambiguous" else None,
         answer="Private insight answer",
         created_at=now,
         updated_at=now,
@@ -181,7 +163,6 @@ async def test_insight_job_poll_rejects_invalid_persisted_access_target(
         await service.authorize_insight_job(job)
 
     mock_actor.can_access_insight_assistant.assert_not_called()
-    mock_actor.can_access_insight_group_chat.assert_not_called()
 
 
 async def test_get_message_for_insights_authorizes_assistant_before_hydration(
@@ -194,7 +175,6 @@ async def test_get_message_for_insights_authorizes_assistant_before_hydration(
     service.user.permissions = [Permission.INSIGHTS]
     service.question_repo.get_session_partner.return_value = QuestionSessionPartner(
         assistant_id=assistant_id,
-        group_chat_id=None,
     )
     service.question_repo.get_for_tenant.return_value = question
 
@@ -208,36 +188,11 @@ async def test_get_message_for_insights_authorizes_assistant_before_hydration(
     )
 
 
-async def test_get_message_for_insights_authorizes_group_chat_before_hydration(
-    service: AnalysisService,
-    mock_actor,
-):
-    message_id = uuid4()
-    group_chat_id = uuid4()
-    question = MagicMock()
-    service.user.permissions = [Permission.INSIGHTS]
-    service.question_repo.get_session_partner.return_value = QuestionSessionPartner(
-        assistant_id=None,
-        group_chat_id=group_chat_id,
-    )
-    service.question_repo.get_for_tenant.return_value = question
-
-    result = await service.get_message_for_insights(message_id=message_id)
-
-    assert result is question
-    mock_actor.can_access_insight_group_chat.assert_called_once()
-    service.question_repo.get_for_tenant.assert_awaited_once_with(
-        id=message_id,
-        tenant_id=service.user.tenant_id,
-    )
-
-
 @pytest.mark.parametrize(
     "partner",
     [
         None,
-        QuestionSessionPartner(assistant_id=None, group_chat_id=None),
-        QuestionSessionPartner(assistant_id=uuid4(), group_chat_id=uuid4()),
+        QuestionSessionPartner(assistant_id=None),
     ],
 )
 async def test_get_message_for_insights_hides_missing_or_malformed_session(
@@ -260,7 +215,6 @@ async def test_get_message_for_insights_hides_denied_actor_before_hydration(
     service.user.permissions = [Permission.INSIGHTS]
     service.question_repo.get_session_partner.return_value = QuestionSessionPartner(
         assistant_id=uuid4(),
-        group_chat_id=None,
     )
     mock_actor.can_access_insight_assistant.return_value = False
 
@@ -447,51 +401,13 @@ async def test_get_questions_since_passes_tenant_id(service: AnalysisService):
     )
 
 
-async def test_get_questions_from_group_chat_passes_tenant_id(
-    service: AnalysisService,
-):
-    group_chat_id = uuid4()
-    from_date = date.today()
-    to_date = from_date
-
-    service.repo.get_group_chat_sessions_since = AsyncMock(return_value=[])
-
-    await service.get_questions_from_group_chat(
-        group_chat_id=group_chat_id,
-        from_date=from_date,
-        to_date=to_date,
-    )
-
-    service.repo.get_group_chat_sessions_since.assert_awaited_once_with(
-        group_chat_id=group_chat_id,
-        from_date=from_date,
-        to_date=to_date,
-        tenant_id=service.user.tenant_id,
-    )
-
-
 async def test_get_conversation_stats_no_id(service: AnalysisService):
-    """Test that an exception is raised when neither assistant_id nor group_chat_id is provided."""
+    """Test that an exception is raised when assistant_id is not provided."""
     user = MagicMock(tenant_id=TEST_UUID, permissions=[Permission.INSIGHTS])
     service.user = user
 
     with pytest.raises(BadRequestException):
-        await service.get_conversation_stats(
-            assistant_id=None,
-            group_chat_id=None,
-        )
-
-
-async def test_get_conversation_stats_both_ids(service: AnalysisService):
-    """Test that an exception is raised when both assistant_id and group_chat_id are provided."""
-    user = MagicMock(tenant_id=TEST_UUID, permissions=[Permission.INSIGHTS])
-    service.user = user
-
-    with pytest.raises(BadRequestException):
-        await service.get_conversation_stats(
-            assistant_id=uuid4(),
-            group_chat_id=uuid4(),
-        )
+        await service.get_conversation_stats(assistant_id=None)
 
 
 async def test_get_conversation_stats_assistant(service: AnalysisService):
@@ -532,38 +448,6 @@ async def test_get_conversation_stats_assistant(service: AnalysisService):
     service.repo.get_message_feedback_counts.assert_awaited_once_with(
         tenant_id=service.user.tenant_id,
         assistant_id=assistant_id,
-        group_chat_id=None,
-        from_date=ANY,
-        to_date=ANY,
-    )
-
-
-async def test_get_conversation_stats_group_chat(service: AnalysisService):
-    """Test getting conversation stats for a group chat."""
-    user = MagicMock(tenant_id=TEST_UUID, permissions=[Permission.INSIGHTS])
-    service.user = user
-
-    group_chat_id = uuid4()
-
-    # Mock repository response - now using optimized count method
-    service.repo.get_group_chat_conversation_counts.return_value = (3, 4)
-    service.repo.get_message_feedback_counts.return_value = MessageFeedbackCounts(
-        positive=0, negative=2
-    )
-
-    # Call the service method
-    result = await service.get_conversation_stats(
-        group_chat_id=group_chat_id,
-    )
-
-    # Verify results
-    assert result.total_conversations == 3
-    assert result.total_questions == 4
-    assert result.feedback == MessageFeedbackCounts(positive=0, negative=2)
-    service.repo.get_message_feedback_counts.assert_awaited_once_with(
-        tenant_id=service.user.tenant_id,
-        assistant_id=None,
-        group_chat_id=group_chat_id,
         from_date=ANY,
         to_date=ANY,
     )
@@ -762,16 +646,16 @@ async def test_get_conversation_stats_with_date_range(service: AnalysisService):
     user = MagicMock(tenant_id=TEST_UUID, permissions=[Permission.INSIGHTS])
     service.user = user
 
-    group_chat_id = uuid4()
+    assistant_id = uuid4()
     start_time = datetime(2023, 1, 1, 0, 0)
     end_time = datetime(2023, 1, 31, 23, 59)
 
     # Mock repository response - now using optimized count method
-    service.repo.get_group_chat_conversation_counts.return_value = (1, 1)
+    service.repo.get_assistant_conversation_counts.return_value = (1, 1)
 
     # Call the service method
     result = await service.get_conversation_stats(
-        group_chat_id=group_chat_id,
+        assistant_id=assistant_id,
         start_time=start_time,
         end_time=end_time,
     )
@@ -779,8 +663,8 @@ async def test_get_conversation_stats_with_date_range(service: AnalysisService):
     # Verify results
     assert result.total_conversations == 1
     assert result.total_questions == 1
-    service.repo.get_group_chat_conversation_counts.assert_called_once_with(
-        group_chat_id=group_chat_id,
+    service.repo.get_assistant_conversation_counts.assert_called_once_with(
+        assistant_id=assistant_id,
         from_date=start_time,
         to_date=end_time,
         tenant_id=service.user.tenant_id,
@@ -807,26 +691,6 @@ async def test_get_assistant_insight_sessions_passes_tenant_id(
     )
 
 
-async def test_get_group_chat_insight_sessions_passes_tenant_id(
-    service: AnalysisService,
-):
-    group_chat_id = uuid4()
-    service.session_repo.get_metadata_by_group_chat = AsyncMock(return_value=([], 0))
-
-    await service.get_group_chat_insight_sessions(group_chat_id=group_chat_id)
-
-    service.session_repo.get_metadata_by_group_chat.assert_awaited_once_with(
-        group_chat_id=group_chat_id,
-        limit=ANY,
-        cursor=ANY,
-        previous=ANY,
-        name_filter=ANY,
-        start_date=ANY,
-        end_date=ANY,
-        tenant_id=service.user.tenant_id,
-    )
-
-
 async def test_should_queue_unified_analysis_job_auto(service: AnalysisService):
     assistant_id = uuid4()
     service.repo.count_assistant_questions_since.return_value = (
@@ -835,7 +699,6 @@ async def test_should_queue_unified_analysis_job_auto(service: AnalysisService):
 
     should_queue = await service.should_queue_unified_analysis_job(
         assistant_id=assistant_id,
-        group_chat_id=None,
         from_date=datetime(2026, 1, 1, 0, 0),
         to_date=datetime(2026, 1, 31, 23, 59),
         mode=AnalysisProcessingMode.AUTO,
@@ -847,7 +710,6 @@ async def test_should_queue_unified_analysis_job_auto(service: AnalysisService):
 async def test_should_queue_unified_analysis_job_sync(service: AnalysisService):
     should_queue = await service.should_queue_unified_analysis_job(
         assistant_id=uuid4(),
-        group_chat_id=None,
         from_date=datetime(2026, 1, 1, 0, 0),
         to_date=datetime(2026, 1, 31, 23, 59),
         mode=AnalysisProcessingMode.SYNC,

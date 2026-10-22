@@ -32,9 +32,7 @@ type ActiveConversation = {
   focusComposer?: boolean;
 };
 
-function hasInsights(partner: ChatPartner): partner is ChatPartner & {
-  type: "assistant" | "group-chat";
-} {
+function hasInsights(partner: ChatPartner): partner is ChatPartner & { type: "assistant" } {
   return Boolean(partner.insightEnabled && partner.type !== "default-assistant");
 }
 

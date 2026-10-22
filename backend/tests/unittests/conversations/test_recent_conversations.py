@@ -1,8 +1,8 @@
 """RecentConversationsService: which partners' conversations are listed.
 
 The service must authorize each partner exactly like its own history does
-(AssistantService._authorize_read_assistant, GroupChatService.get_group_chat)
-through SpaceActor, and read conversations only for the partners that pass.
+(AssistantService._authorize_read_assistant) through SpaceActor, and read
+conversations only for the partners that pass.
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ from eneo.sessions.sessions_repo import ChatPartnerAccess, RecentSessionRow
 
 CHAT_PERMISSIONS = {
     Permission.ASSISTANTS,
-    Permission.GROUP_CHATS,
     Permission.PERSONAL_CHAT,
 }
 NOW = datetime(2026, 9, 26, 12, 0, tzinfo=timezone.utc)
@@ -74,20 +73,7 @@ def _space(
 def _assistant(space: SpaceAccessFacts, *, assistant_id: UUID | None = None, name="A"):
     return ChatPartnerAccess(
         assistant_id=assistant_id or uuid4(),
-        group_chat_id=None,
         name=name,
-        published=False,
-        space_name="Space",
-        space=space,
-    )
-
-
-def _group_chat(space: SpaceAccessFacts, *, published: bool, name="G"):
-    return ChatPartnerAccess(
-        assistant_id=None,
-        group_chat_id=uuid4(),
-        name=name,
-        published=published,
         space_name="Space",
         space=space,
     )
@@ -107,7 +93,6 @@ def _row(partner: ChatPartnerAccess, *, minutes_ago: int = 0) -> RecentSessionRo
         created_at=at - timedelta(days=1),
         last_activity_at=at,
         assistant_id=partner.assistant_id,
-        group_chat_id=partner.group_chat_id,
     )
 
 
@@ -131,7 +116,8 @@ async def _listed_partner_ids(user, partners: list[ChatPartnerAccess]) -> set[UU
     if not repo.get_recent_for_user.await_count:
         return set()
     kwargs = repo.get_recent_for_user.await_args.kwargs
-    return set(kwargs["assistant_ids"]) | set(kwargs["group_chat_ids"])
+    assert "group_chat_ids" not in kwargs
+    return set(kwargs["assistant_ids"])
 
 
 async def test_the_personal_chat_needs_the_personal_chat_permission():
@@ -185,25 +171,6 @@ async def test_a_role_through_a_user_group_counts():
     unrelated = _assistant(_space(group=(uuid4(), "admin")))
 
     assert await _listed_partner_ids(user, [assistant, unrelated]) == {assistant.id}
-
-
-@pytest.mark.parametrize(
-    ("role", "published", "permissions", "listed"),
-    [
-        ("viewer", True, CHAT_PERMISSIONS, True),
-        ("viewer", False, CHAT_PERMISSIONS, False),
-        ("editor", False, CHAT_PERMISSIONS, True),
-        ("editor", True, CHAT_PERMISSIONS - {Permission.GROUP_CHATS}, False),
-    ],
-)
-async def test_group_chats_are_published_ones_for_viewers(
-    role, published, permissions, listed
-):
-    user = _user(permissions=permissions)
-    group_chat = _group_chat(_space(member=(user.id, role)), published=published)
-
-    expected = {group_chat.id} if listed else set()
-    assert await _listed_partner_ids(user, [group_chat]) == expected
 
 
 @pytest.mark.parametrize(
@@ -262,11 +229,9 @@ async def test_lists_rows_in_repo_order_labelled_with_partner_and_space():
     shared = _space(member=(user.id, "editor"), default_assistant_id=shared_default_id)
     space_chat = _assistant(shared, assistant_id=shared_default_id, name="Upphandling")
     assistant = _assistant(shared, name="Avtalsgranskaren")
-    group_chat = _group_chat(shared, published=False, name="Inköpsrådet")
     hidden = _assistant(_space(), name="Hidden")
-    partners = [personal, space_chat, assistant, group_chat, hidden]
+    partners = [personal, space_chat, assistant, hidden]
     rows = [
-        _row(group_chat, minutes_ago=1),
         _row(personal, minutes_ago=2),
         _row(assistant, minutes_ago=3),
         _row(space_chat, minutes_ago=4),
@@ -282,23 +247,21 @@ async def test_lists_rows_in_repo_order_labelled_with_partner_and_space():
     assert query["user_id"] == user.id
     assert query["limit"] == 7
     assert set(query["assistant_ids"]) == {personal.id, space_chat.id, assistant.id}
-    assert query["group_chat_ids"] == [group_chat.id]
 
     assert [item.id for item in recent] == [row.id for row in rows]
     assert [(item.partner.type, item.partner.name) for item in recent] == [
-        ("group-chat", "Inköpsrådet"),
         ("default-assistant", "Personal"),
         ("assistant", "Avtalsgranskaren"),
         ("default-assistant", "Upphandling"),
     ]
-    first, personal_item = recent[0], recent[1]
-    assert first.partner.id == group_chat.id
-    assert first.last_activity_at == rows[0].last_activity_at
-    assert first.created_at == rows[0].created_at
-    assert (first.space.id, first.space.personal, first.space.organization) == (
-        shared.id,
-        False,
-        False,
-    )
+    personal_item, assistant_item = recent[0], recent[1]
+    assert personal_item.partner.id == personal.id
+    assert personal_item.last_activity_at == rows[0].last_activity_at
+    assert personal_item.created_at == rows[0].created_at
     assert personal_item.space.id == personal.space.id
     assert personal_item.space.personal is True
+    assert (
+        assistant_item.space.id,
+        assistant_item.space.personal,
+        assistant_item.space.organization,
+    ) == (shared.id, False, False)

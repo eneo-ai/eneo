@@ -24,7 +24,6 @@ const catalogue = (
     "skills",
     "skills_management",
     "personal_chat",
-    "group_chats",
     "apps",
     "services",
     "collections",
@@ -58,11 +57,7 @@ describe("groupPermissions", () => {
     const names = groups.flatMap((group) => group.permissions.map((p) => p.name));
     expect(new Set(names).size).toBe(catalogue.length);
     expect(names).toHaveLength(catalogue.length);
-    expect(groups[0].permissions.map((p) => p.name)).toEqual([
-      "personal_chat",
-      "group_chats",
-      "shared_spaces"
-    ]);
+    expect(groups[0].permissions.map((p) => p.name)).toEqual(["personal_chat", "shared_spaces"]);
     expect(groups[1].permissions.map((p) => p.name)).toEqual(["web_search", "image_generation"]);
   });
 
@@ -101,7 +96,7 @@ describe("summarizeGroups", () => {
     const summary = summarizeGroups(groups, ["personal_chat", "web_search", "admin"]);
 
     expect(summary.map(({ id, granted, total }) => [id, granted, total])).toEqual([
-      ["chat", 1, 3],
+      ["chat", 1, 2],
       ["functions", 1, 2],
       ["build", 0, 6],
       ["knowledge", 0, 3],

@@ -34,7 +34,6 @@ def to_metadata(
             id=session.id,  # type: ignore[arg-type]  # InDB.id is Optional[UUID]; persisted sessions always have id set
             created_at=session.created_at,  # type: ignore[arg-type]  # InDB.created_at is Optional[datetime]; persisted sessions always have created_at
             assistant_id=session.assistant.id if session.assistant else None,  # type: ignore[union-attr]  # assistant.id is UUID|None; if present it's set
-            group_chat_id=session.group_chat_id,
         )
         for session in sessions
     ]
@@ -73,7 +72,6 @@ def to_metadata_from_rows(
             id=row.id,
             created_at=row.created_at,
             assistant_id=row.assistant_id,
-            group_chat_id=row.group_chat_id,
         )
         for row in sessions
     ]

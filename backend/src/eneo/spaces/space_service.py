@@ -59,7 +59,6 @@ if TYPE_CHECKING:
     from eneo.assistants.assistant import Assistant
     from eneo.completion_models.domain.completion_model import CompletionModel
     from eneo.embedding_models.domain.embedding_model import EmbeddingModel
-    from eneo.group_chat.domain.entities.group_chat import GroupChat
     from eneo.main.models import MCPToolSetting
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.security_classifications.application.security_classification_service import (
@@ -85,7 +84,6 @@ class SpaceSecurityClassificationImpactAnalysis:
     affected_embedding_models: list["EmbeddingModel"]
     affected_transcription_models: list["TranscriptionModel"]
     affected_assistant_ids: frozenset[UUID] = frozenset()
-    affected_group_chat_ids: frozenset[UUID] = frozenset()
     affected_app_ids: frozenset[UUID] = frozenset()
     affected_service_ids: frozenset[UUID] = frozenset()
     affected_capabilities: list[CapabilityPurpose] = field(
@@ -658,13 +656,6 @@ class SpaceService:
                 if assistant not in affected_assistants:
                     affected_assistants.append(assistant)
 
-        affected_group_chats: list["GroupChat"] = []
-        for group_chat in space.group_chats or []:
-            for assistant in group_chat.get_assistants():
-                if assistant.id in [a.id for a in affected_assistants]:
-                    if group_chat not in affected_group_chats:
-                        affected_group_chats.append(group_chat)
-
         affected_apps: list["App"] = []
         for app in space.apps:
             completion_model = cast("CompletionModel | None", app.completion_model)
@@ -705,7 +696,6 @@ class SpaceService:
             affected_mcp_servers=affected_mcp_servers,
             affected_capabilities=affected_capabilities,
             affected_assistant_ids=frozenset(a.id for a in affected_assistants),
-            affected_group_chat_ids=frozenset(c.id for c in affected_group_chats),
             affected_app_ids=frozenset(a.id for a in affected_apps if a.id is not None),
             affected_service_ids=frozenset(s.id for s in affected_services),
         )
@@ -1053,10 +1043,6 @@ class SpaceService:
             )
 
         return space
-
-    async def get_space_by_group_chat(self, group_chat_id: UUID) -> Space:
-        space = await self.repo.get_space_by_group_chat(group_chat_id=group_chat_id)
-        return await self._get_space_by_resource(space)
 
     async def get_space_by_assistant(self, assistant_id: UUID) -> Space:
         space = await self.repo.get_space_by_assistant(assistant_id=assistant_id)

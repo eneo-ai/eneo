@@ -33,8 +33,7 @@ describe("insight ranges", () => {
     expect(params.endTime).toBe(new Date("2026-10-03T00:00:00").toISOString());
   });
 
-  it("asks about the assistant or the group chat", () => {
-    expect(insightPartnerQuery({ type: "assistant", id: "a" })).toEqual({ assistant_id: "a" });
-    expect(insightPartnerQuery({ type: "group-chat", id: "g" })).toEqual({ group_chat_id: "g" });
+  it("asks about the assistant", () => {
+    expect(insightPartnerQuery({ id: "a" })).toEqual({ assistant_id: "a" });
   });
 });

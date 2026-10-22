@@ -2,13 +2,47 @@
   "$schema": "./releases.schema.json",
   "releases": [
     {
+      "version": "2.4.0",
+      "entries": [
+        {
+          "id": "assistant-specialists",
+          "type": "new",
+          "area": "assistants",
+          "title": {
+            "en": "Assistants that consult specialists",
+            "sv": "Assistenter som rådfrågar specialister"
+          },
+          "body": {
+            "en": "An assistant can now consult other assistants in its space before it answers. Add them under Specialists in the assistant's settings and describe what each one should be asked about. The assistant asks them focused questions, can follow up, and writes one combined answer. Expand View steps under the answer to see each question, the specialist's reply, its sources and the tools it used. Consulting needs a model that supports tools.",
+            "sv": "En assistent kan nu rådfråga andra assistenter i sin yta innan den svarar. Lägg till dem under Specialister i assistentens inställningar och beskriv vad var och en ska frågas om. Assistenten ställer avgränsade frågor till dem, kan ställa följdfrågor och skriver ett samlat svar. Expandera Visa steg under svaret för att se varje fråga, specialistens svar, dess källor och verktyg. Att rådfråga kräver en modell med verktygsstöd."
+          }
+        },
+        {
+          "id": "group-chats-became-assistants",
+          "type": "improved",
+          "area": "spaces",
+          "title": {
+            "en": "Group chats are now assistants",
+            "sv": "Gruppchattar är nu assistenter"
+          },
+          "body": {
+            "en": "Each group chat became an assistant with the same name and its members as specialists, so conversations and insights carried over. Open the former group in the assistant list, give it instructions for the combined answer, and check its model and specialists. Mentions and response labels are gone; the steps under each answer show who said what.",
+            "sv": "Varje gruppchatt blev en assistent med samma namn och medlemmarna som specialister, så konversationer och insikter följde med. Öppna den tidigare gruppen i assistentlistan, ge den instruktioner för det samlade svaret och kontrollera modell och specialister. Omnämnanden och svarsetiketter är borta; stegen under varje svar visar vem som sa vad."
+          }
+        }
+      ]
+    },
+    {
       "version": "2.3.0",
       "entries": [
         {
           "id": "file-creation-progress",
           "type": "new",
           "area": "chat",
-          "aliases": ["charts-in-documents", "file-download-links"],
+          "aliases": [
+            "charts-in-documents",
+            "file-download-links"
+          ],
           "title": {
             "en": "Create, edit and restore documents",
             "sv": "Skapa, redigera och återställ dokument"
@@ -22,7 +56,9 @@
           "id": "file-analysis-trace",
           "type": "new",
           "area": "chat",
-          "aliases": ["spreadsheet-selection-quotes"],
+          "aliases": [
+            "spreadsheet-selection-quotes"
+          ],
           "title": {
             "en": "Explore CSV and Excel files in chat",
             "sv": "Utforska CSV- och Excel-filer i chatten"
@@ -36,7 +72,10 @@
           "id": "compute-and-charts",
           "type": "new",
           "area": "chat",
-          "aliases": ["intermediate-query-tables", "chat-widget-scroll"],
+          "aliases": [
+            "intermediate-query-tables",
+            "chat-widget-scroll"
+          ],
           "title": {
             "en": "Calculate and explore interactive charts",
             "sv": "Beräkna och utforska interaktiva diagram"
@@ -199,7 +238,9 @@
           "id": "clearer-errors",
           "type": "fixed",
           "area": "platform",
-          "aliases": ["sign-in-behind-reverse-proxy"],
+          "aliases": [
+            "sign-in-behind-reverse-proxy"
+          ],
           "title": {
             "en": "Understand why a request failed",
             "sv": "Förstå varför en förfrågan misslyckades"

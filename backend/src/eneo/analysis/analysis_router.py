@@ -49,7 +49,7 @@ from eneo.sessions.session_protocol import (
 
 _TENANT_ANALYTICS_ACCESS_REASON = "Tenant analytics require the insights permission."
 _RESOURCE_INSIGHTS_ACCESS_REASON = (
-    "AnalysisService checks insight access to the requested assistant or group chat."
+    "AnalysisService checks insight access to the requested assistant."
 )
 
 logger = get_logger(__name__)
@@ -433,7 +433,7 @@ async def ask_question_about_questions(
 @router.post(
     "/conversation-insights/",
     response_model=None,
-    description="Ask a question about an assistant's or group chat's conversations.",
+    description="Ask a question about an assistant's conversations.",
     responses=responses.get_responses([400, 403, 404]),
 )
 @endpoint_access(
@@ -444,45 +444,30 @@ async def ask_question_about_questions(
 async def ask_unified_questions_about_questions(
     ask_analysis: AskAnalysis,
     container: Annotated[Container, Depends(get_container(with_user=True))],
+    assistant_id: UUID,
     days_since: Annotated[int, Query(ge=0, le=90)] = DEFAULT_INSIGHTS_DAYS,
     from_date: datetime | None = None,
     to_date: datetime | None = None,
     include_followups: bool = False,
-    assistant_id: UUID | None = None,
-    group_chat_id: UUID | None = None,
     processing_mode: Annotated[
         AnalysisProcessingMode, Query()
     ] = AnalysisProcessingMode.SYNC,
 ):
-    """Ask a question about the questions asked to an assistant or group chat.
-
-    This unified endpoint works with both assistants and group chats.
-    Either assistant_id or group_chat_id must be provided, but not both.
+    """Ask a question about the questions asked to an assistant.
 
     Args:
         ask_analysis: Contains the question and streaming preference
+        assistant_id: UUID of assistant to analyze questions for
         days_since: How long back in time to get the questions
         from_date: Start date to filter questions (overrides days_since).
             If no time is provided, time components default to 00:00:00.
         to_date: End date to filter questions (overrides days_since).
             If no time is provided, time components default to 00:00:00.
         include_followups: If False, only returns first question of each session
-        assistant_id: UUID of assistant to analyze questions for
-        group_chat_id: UUID of group chat to analyze questions for
 
     Returns:
         AnalysisAnswer containing the AI response
     """
-    if assistant_id is None and group_chat_id is None:
-        raise BadRequestException(
-            "Either assistant_id or group_chat_id must be provided"
-        )
-
-    if assistant_id is not None and group_chat_id is not None:
-        raise BadRequestException(
-            "Only one of assistant_id or group_chat_id should be provided"
-        )
-
     from_date, to_date = _normalize_datetime_range(
         from_date=from_date,
         to_date=to_date,
@@ -496,7 +481,6 @@ async def ask_unified_questions_about_questions(
 
     should_queue_job = await service.should_queue_unified_analysis_job(
         assistant_id=assistant_id,
-        group_chat_id=group_chat_id,
         from_date=from_date,
         to_date=to_date,
         mode=processing_mode,
@@ -512,7 +496,6 @@ async def ask_unified_questions_about_questions(
             tenant_id=tenant_id,
             question=ask_analysis.question,
             assistant_id=assistant_id,
-            group_chat_id=group_chat_id,
         )
         await job_manager.enqueue(
             task=Task.ANALYZE_CONVERSATION_INSIGHTS,
@@ -524,7 +507,6 @@ async def ask_unified_questions_about_questions(
                 to_date=to_date.isoformat(),
                 include_followups=include_followups,
                 assistant_id=assistant_id,
-                group_chat_id=group_chat_id,
             ),
         )
         return AnalysisJobCreateResponse(
@@ -538,7 +520,6 @@ async def ask_unified_questions_about_questions(
         question=ask_analysis.question,
         stream=ask_analysis.stream,
         assistant_id=assistant_id,
-        group_chat_id=group_chat_id,
         from_date=from_date,
         to_date=to_date,
         include_followup=include_followups,
@@ -586,9 +567,8 @@ async def get_conversation_insights(
     request: Annotated[ConversationInsightRequest, Depends()],
 ):
     """
-    Get statistics about conversations for either an assistant or a group chat.
+    Get statistics about an assistant's conversations.
 
-    Either assistant_id or group_chat_id must be provided, but not both.
     Start time and end time are optional filters. If no time is provided in the datetime parameters,
     time components default to 00:00:00.
     """
@@ -602,7 +582,6 @@ async def get_conversation_insights(
     service = container.analysis_service()
     return await service.get_conversation_stats(
         assistant_id=request.assistant_id,
-        group_chat_id=request.group_chat_id,
         start_time=start_time,
         end_time=end_time,
     )
@@ -617,7 +596,7 @@ async def get_conversation_insights(
 @endpoint_access(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
-    reason="Current insight access to the job's assistant or group chat is required.",
+    reason="Current insight access to the job's assistant is required.",
 )
 async def get_conversation_insight_job(
     job_id: UUID,
@@ -653,8 +632,7 @@ async def get_conversation_insight_job(
 )
 async def get_conversation_insight_sessions(
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    assistant_id: Optional[UUID] = None,
-    group_chat_id: Optional[UUID] = None,
+    assistant_id: UUID,
     limit: Annotated[Optional[int], Query(ge=1, le=100)] = DEFAULT_SESSIONS_PAGE_LIMIT,
     cursor: Optional[datetime] = None,
     previous: bool = False,
@@ -663,15 +641,14 @@ async def get_conversation_insight_sessions(
     end_date: Optional[datetime] = None,
 ):
     """
-    Get all sessions for an assistant or group chat across all
+    Get all sessions for an assistant across all
     users in the tenant (with insight access).
 
     This endpoint requires the user to be OWNER or EDITOR,
-    and the assistant/group chat must have insight_enabled set to true.
+    and the assistant must have insight_enabled set to true.
 
     Args:
-        assistant_id: UUID of the assistant (optional)
-        group_chat_id: UUID of the group chat (optional)
+        assistant_id: UUID of the assistant
         limit: Maximum number of sessions to return
         cursor: Datetime to start fetching from. If no time is provided, time defaults to 00:00:00.
         previous: Whether to fetch sessions before or after the cursor
@@ -684,16 +661,6 @@ async def get_conversation_insight_sessions(
     Returns:
         Paginated list of sessions
     """
-    if not assistant_id and not group_chat_id:
-        raise BadRequestException(
-            "Either assistant_id or group_chat_id must be provided"
-        )
-
-    if assistant_id and group_chat_id:
-        raise BadRequestException(
-            "Only one of assistant_id or group_chat_id should be provided"
-        )
-
     if cursor is not None and cursor.tzinfo is None:
         cursor = cursor.replace(tzinfo=timezone.utc)
     if start_date is not None and start_date.tzinfo is None:
@@ -707,27 +674,15 @@ async def get_conversation_insight_sessions(
 
     service = container.analysis_service()
 
-    if assistant_id:
-        sessions, total = await service.get_assistant_insight_sessions(
-            assistant_id=assistant_id,
-            limit=limit,
-            cursor=cursor,
-            previous=previous,
-            name_filter=name_filter,
-            start_date=start_date,
-            end_date=end_date,
-        )
-    else:
-        assert group_chat_id is not None
-        sessions, total = await service.get_group_chat_insight_sessions(
-            group_chat_id=group_chat_id,
-            limit=limit,
-            cursor=cursor,
-            previous=previous,
-            name_filter=name_filter,
-            start_date=start_date,
-            end_date=end_date,
-        )
+    sessions, total = await service.get_assistant_insight_sessions(
+        assistant_id=assistant_id,
+        limit=limit,
+        cursor=cursor,
+        previous=previous,
+        name_filter=name_filter,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
     return to_session_metadata_paginated_response(
         sessions=sessions,
@@ -755,13 +710,11 @@ async def get_conversation_insight_session(
     """
     Get a specific session with insight access.
 
-    This endpoint requires the user to be OWNER or EDITOR, and the assistant/group chat
+    This endpoint requires the user to be OWNER or EDITOR, and the assistant
     must have insight_enabled set to true.
 
     Args:
         session_id: UUID of the session
-        assistant_id: UUID of the assistant (optional)
-        group_chat_id: UUID of the group chat (optional)
 
     Returns:
         Session data

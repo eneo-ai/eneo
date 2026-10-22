@@ -149,7 +149,6 @@ class TestIntegrationKnowledgeUnion:
             ("get_space_by_assistant", (uuid4(),), False),
             ("get_space_by_app", (uuid4(),), False),
             ("get_space_by_service", (uuid4(),), False),
-            ("get_space_by_group_chat", (uuid4(),), False),
             ("get_space_by_collection", (uuid4(),), False),
             ("get_space_by_website", (uuid4(),), False),
             ("get_space_by_integration_knowledge", (uuid4(),), False),

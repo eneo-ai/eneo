@@ -16,7 +16,6 @@ class Permission(str, Enum):
     SKILLS = "skills"
     SKILLS_MANAGEMENT = "skills_management"
     PERSONAL_CHAT = "personal_chat"
-    GROUP_CHATS = "group_chats"
     APPS = "apps"
     SERVICES = "services"
     COLLECTIONS = "collections"

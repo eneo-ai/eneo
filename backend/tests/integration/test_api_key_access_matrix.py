@@ -628,9 +628,6 @@ def _build_probes(resource_ids: dict) -> list[dict]:
             "scope_resource": "service",
             "target_resource_key": None,
         },
-        # --- Group Chats (resource_type="assistants", scope_resource="group_chat") ---
-        # NOTE: Skipping fake UUID probe — scope enforcement fails-closed for
-        # non-tenant keys when the resource doesn't exist.
         # --- Groups/Knowledge (resource_type="knowledge", scope_resource="collection") ---
         {
             "name": "list-groups",

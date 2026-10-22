@@ -25,7 +25,6 @@ from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_service import AssistantService
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.static_prompts import ANALYSIS_PROMPT
-from eneo.group_chat.application.group_chat_service import GroupChatService
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -91,7 +90,6 @@ class AnalysisService:
         session_repo: SessionRepository,
         space_service: SpaceService,
         session_service: SessionService,
-        group_chat_service: GroupChatService,
         completion_service: CompletionService,
     ):
         super().__init__()
@@ -102,7 +100,6 @@ class AnalysisService:
         self.question_repo = question_repo
         self.space_service = space_service
         self.session_service = session_service
-        self.group_chat_service = group_chat_service
         self.completion_service = completion_service
 
     @staticmethod
@@ -366,55 +363,26 @@ class AnalysisService:
     async def _get_question_texts_for_unified_analysis(
         self,
         *,
-        assistant_id: UUID | None,
-        group_chat_id: UUID | None,
+        assistant_id: UUID,
         from_date: datetime,
         to_date: datetime,
         include_followup: bool,
     ) -> tuple[Assistant, list[str]]:
-        if assistant_id:
-            await self._check_insight_access(assistant_id=assistant_id)
-            assistant, _ = await self.assistant_service.get_assistant(assistant_id)
-            rows = await self.repo.get_assistant_question_texts_since(
-                assistant_id=assistant_id,
-                from_date=from_date,
-                to_date=to_date,
-                include_followups=include_followup,
-                tenant_id=self.user.tenant_id,
-            )
-            return assistant, [row.question for row in rows]
-
-        if group_chat_id is None:
-            raise BadRequestException(
-                "Either assistant_id or group_chat_id must be provided"
-            )
-
-        await self._check_insight_access(group_chat_id=group_chat_id)
-        space = await self.space_service.get_space_by_group_chat(
-            group_chat_id=group_chat_id
-        )
-        group_chat = space.get_group_chat(group_chat_id=group_chat_id)
-
-        if not group_chat.assistants:
-            raise BadRequestException(
-                "Group chat has no assistants to process the analysis"
-            )
-
-        model_to_use: Assistant = group_chat.assistants[0].assistant
-        rows = await self.repo.get_group_chat_question_texts_since(
-            group_chat_id=group_chat_id,
+        await self._check_insight_access(assistant_id=assistant_id)
+        assistant, _ = await self.assistant_service.get_assistant(assistant_id)
+        rows = await self.repo.get_assistant_question_texts_since(
+            assistant_id=assistant_id,
             from_date=from_date,
             to_date=to_date,
             include_followups=include_followup,
             tenant_id=self.user.tenant_id,
         )
-        return model_to_use, [row.question for row in rows]
+        return assistant, [row.question for row in rows]
 
     async def should_queue_unified_analysis_job(
         self,
         *,
-        assistant_id: UUID | None,
-        group_chat_id: UUID | None,
+        assistant_id: UUID,
         from_date: datetime,
         to_date: datetime,
         mode: AnalysisProcessingMode,
@@ -422,36 +390,13 @@ class AnalysisService:
         if mode != AnalysisProcessingMode.AUTO:
             return False
 
-        if not assistant_id and not group_chat_id:
-            raise BadRequestException(
-                "Either assistant_id or group_chat_id must be provided"
-            )
-
-        if assistant_id and group_chat_id:
-            raise BadRequestException(
-                "Only one of assistant_id or group_chat_id should be provided"
-            )
-
-        if assistant_id:
-            await self._check_insight_access(assistant_id=assistant_id)
-            question_count = await self.repo.count_assistant_questions_since(
-                assistant_id=assistant_id,
-                from_date=from_date,
-                to_date=to_date,
-                tenant_id=self.user.tenant_id,
-            )
-        else:
-            if group_chat_id is None:
-                raise BadRequestException(
-                    "Either assistant_id or group_chat_id must be provided"
-                )
-            await self._check_insight_access(group_chat_id=group_chat_id)
-            question_count = await self.repo.count_group_chat_questions_since(
-                group_chat_id=group_chat_id,
-                from_date=from_date,
-                to_date=to_date,
-                tenant_id=self.user.tenant_id,
-            )
+        await self._check_insight_access(assistant_id=assistant_id)
+        question_count = await self.repo.count_assistant_questions_since(
+            assistant_id=assistant_id,
+            from_date=from_date,
+            to_date=to_date,
+            tenant_id=self.user.tenant_id,
+        )
 
         return question_count > ASYNC_AUTO_QUESTION_THRESHOLD
 
@@ -595,16 +540,11 @@ class AnalysisService:
             id=message_id,
             tenant_id=self.user.tenant_id,
         )
-        if partner is None or (partner.assistant_id is None) == (
-            partner.group_chat_id is None
-        ):
+        if partner is None or partner.assistant_id is None:
             raise NotFoundException("Message not found")
 
         try:
-            await self._check_insight_access(
-                assistant_id=partner.assistant_id,
-                group_chat_id=partner.group_chat_id,
-            )
+            await self._check_insight_access(assistant_id=partner.assistant_id)
         except (BadRequestException, NotFoundException, UnauthorizedException) as exc:
             raise NotFoundException("Message not found") from exc
 
@@ -616,46 +556,23 @@ class AnalysisService:
             raise NotFoundException("Message not found")
         return question
 
-    async def _check_insight_access(
-        self,
-        group_chat_id: UUID | None = None,
-        assistant_id: UUID | None = None,
-    ):
-        if assistant_id:
-            space = await self.space_service.get_space_by_assistant(
-                assistant_id=assistant_id
-            )
-            assistant = space.get_assistant(assistant_id=assistant_id)
-            self._require_assistant_insight_access(space=space, assistant=assistant)
+    async def _check_insight_access(self, *, assistant_id: UUID | None):
+        if not assistant_id:
+            raise BadRequestException("assistant_id must be provided")
 
-        elif group_chat_id:
-            space = await self.space_service.get_space_by_group_chat(
-                group_chat_id=group_chat_id
-            )
-            actor = self.space_service.actor_manager.get_space_actor_from_space(
-                space=space
-            )
-            group_chat = space.get_group_chat(group_chat_id=group_chat_id)
-
-            if not actor.can_access_insight_group_chat(group_chat=group_chat):
-                raise UnauthorizedException(
-                    "Insights are not enabled for this group chat"
-                )
-        else:
-            raise BadRequestException(
-                "Either assistant_id or group_chat_id must be provided"
-            )
+        space = await self.space_service.get_space_by_assistant(
+            assistant_id=assistant_id
+        )
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        self._require_assistant_insight_access(space=space, assistant=assistant)
 
     async def authorize_insight_job(self, job: AnalysisJob) -> None:
         """Recheck access to the resource behind a persisted insight result."""
         if job.tenant_id != self.user.tenant_id:
             raise NotFoundException("Insights analysis job not found")
-        if (job.assistant_id is None) == (job.group_chat_id is None):
+        if job.assistant_id is None:
             raise NotFoundException("Insights analysis job not found")
-        await self._check_insight_access(
-            assistant_id=job.assistant_id,
-            group_chat_id=job.group_chat_id,
-        )
+        await self._check_insight_access(assistant_id=job.assistant_id)
 
     async def get_questions_since(
         self,
@@ -687,39 +604,6 @@ class AnalysisService:
             else:
                 # Session did not contain any questions, log this as an error
                 # and don't add anything to the list
-                logger.error(
-                    "Session was empty",
-                    extra=dict(session_id=session.id),
-                )
-
-        return first_questions
-
-    async def get_questions_from_group_chat(
-        self,
-        group_chat_id: UUID,
-        from_date: datetime,
-        to_date: datetime,
-        include_followups: bool = False,
-    ) -> list[Question]:
-        """Get questions asked to a group chat within a date range"""
-        # Get sessions for the group chat
-        sessions = await self.repo.get_group_chat_sessions_since(
-            group_chat_id=group_chat_id,
-            from_date=from_date,
-            to_date=to_date,
-            tenant_id=self.user.tenant_id,
-        )
-
-        if include_followups:
-            return [question for session in sessions for question in session.questions]
-
-        first_questions: list[Question] = []
-        for session in sessions:
-            questions = session.questions
-            if questions:
-                first_questions.append(questions[0])
-            else:
-                # Session did not contain any questions, log this as an error
                 logger.error(
                     "Session was empty",
                     extra=dict(session_id=session.id),
@@ -764,10 +648,9 @@ class AnalysisService:
         to_date: datetime,
         include_followup: bool = False,
         assistant_id: UUID | None = None,
-        group_chat_id: UUID | None = None,
     ) -> CompletionModelResponse:
         """
-        Ask a question about the questions previously asked to an assistant or group chat.
+        Ask a question about the questions previously asked to an assistant.
 
         Args:
             question: The question to ask about the previous questions
@@ -775,24 +658,16 @@ class AnalysisService:
             from_date: Start date to filter questions
             to_date: End date to filter questions
             include_followup: Whether to include follow-up questions
-            assistant_id: UUID of the assistant (optional)
-            group_chat_id: UUID of the group chat (optional)
+            assistant_id: UUID of the assistant
 
         Returns:
             AI response about the questions
 
         Raises:
-            BadRequestException: If neither assistant_id nor group_chat_id is provided
+            BadRequestException: If assistant_id is not provided
         """
-        if not assistant_id and not group_chat_id:
-            raise BadRequestException(
-                "Either assistant_id or group_chat_id must be provided"
-            )
-
-        if assistant_id and group_chat_id:
-            raise BadRequestException(
-                "Provide either assistant_id or group_chat_id, not both"
-            )
+        if not assistant_id:
+            raise BadRequestException("assistant_id must be provided")
 
         started = perf_counter()
         (
@@ -800,7 +675,6 @@ class AnalysisService:
             question_texts,
         ) = await self._get_question_texts_for_unified_analysis(
             assistant_id=assistant_id,
-            group_chat_id=group_chat_id,
             from_date=from_date,
             to_date=to_date,
             include_followup=include_followup,
@@ -819,7 +693,6 @@ class AnalysisService:
                 "duration_ms": round((perf_counter() - started) * 1000, 2),
                 "tenant_id": str(self.user.tenant_id),
                 "assistant_id": str(assistant_id) if assistant_id else None,
-                "group_chat_id": str(group_chat_id) if group_chat_id else None,
                 "question_count": len(question_texts),
                 "stream": stream,
             },
@@ -969,48 +842,6 @@ class AnalysisService:
         )
         return sessions, int(total or 0)
 
-    async def get_group_chat_insight_sessions(
-        self,
-        group_chat_id: UUID,
-        limit: int | None = None,
-        cursor: datetime | None = None,
-        previous: bool = False,
-        name_filter: str | None = None,
-        start_date: datetime | None = None,
-        end_date: datetime | None = None,
-    ) -> Tuple[List[SessionMetadataPublic], int]:
-        """Get all sessions for a group chat across all users in the tenant (with insight access)
-
-        Args:
-            group_chat_id: UUID of the group chat
-            limit: Maximum number of sessions to return
-            cursor: Datetime to start fetching from
-            previous: Whether to fetch sessions before or after the cursor
-            name_filter: Filter sessions by name
-            start_date: Start date to filter sessions (optional)
-            end_date: End date to filter sessions (optional)
-
-        Returns:
-            List of sessions for the group chat
-
-        Raises:
-            UnauthorizedException: If the user doesn't have insight access
-        """
-
-        await self._check_insight_access(group_chat_id=group_chat_id)
-
-        sessions, total = await self.session_repo.get_metadata_by_group_chat(
-            group_chat_id=group_chat_id,
-            limit=limit,
-            cursor=cursor,
-            previous=previous,
-            name_filter=name_filter,
-            start_date=start_date,
-            end_date=end_date,
-            tenant_id=self.user.tenant_id,
-        )
-        return sessions, int(total or 0)
-
     async def get_insight_session(
         self,
         session_id: UUID,
@@ -1019,43 +850,35 @@ class AnalysisService:
 
         Args:
             session_id: UUID of the session
-            assistant_id: UUID of the assistant (optional)
-            group_chat_id: UUID of the group chat (optional)
 
         Returns:
             Session data
 
         Raises:
             UnauthorizedException: If the user doesn't have insight access
-            BadRequestException: If neither assistant_id nor group_chat_id is provided
         """
         session = await self.session_repo.get(id=session_id)
         assert session is not None
 
-        if session.group_chat_id is not None:
-            await self._check_insight_access(group_chat_id=session.group_chat_id)
-        else:
-            if session.assistant is None:
-                raise NotFoundException("Session assistant not found")
-            await self._check_insight_access(assistant_id=session.assistant.id)
+        if session.assistant is None:
+            raise NotFoundException("Session assistant not found")
+        await self._check_insight_access(assistant_id=session.assistant.id)
 
         return session
 
     async def get_conversation_stats(
         self,
         assistant_id: Optional[UUID] = None,
-        group_chat_id: Optional[UUID] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
     ) -> ConversationInsightResponse:
         """
-        Get statistics about conversations for either an assistant or a group chat.
+        Get statistics about conversations for an assistant.
 
         Uses optimized COUNT queries instead of fetching full session data.
 
         Args:
-            assistant_id: UUID of the assistant (optional)
-            group_chat_id: UUID of the group chat (optional)
+            assistant_id: UUID of the assistant
             start_time: Start datetime to filter data (optional)
             end_time: End datetime to filter data (optional)
 
@@ -1063,24 +886,12 @@ class AnalysisService:
             ConversationStatsResponse with total conversations and questions
 
         Raises:
-            BadRequestException: If neither assistant_id nor group_chat_id is provided
+            BadRequestException: If assistant_id is not provided
         """
+        if not assistant_id:
+            raise BadRequestException("assistant_id must be provided")
 
-        # check all permissions
-        if not assistant_id and not group_chat_id:
-            raise BadRequestException(
-                "Either assistant_id or group_chat_id must be provided"
-            )
-
-        if assistant_id and group_chat_id:
-            raise BadRequestException(
-                "Only one of assistant_id or group_chat_id should be provided"
-            )
-
-        if assistant_id:
-            await self._check_insight_access(assistant_id=assistant_id)
-        elif group_chat_id:
-            await self._check_insight_access(group_chat_id=group_chat_id)
+        await self._check_insight_access(assistant_id=assistant_id)
 
         # Use default date range if not provided
         if start_time is None:
@@ -1090,32 +901,19 @@ class AnalysisService:
 
         started = perf_counter()
         # Use optimized count queries instead of fetching full session data
-        if assistant_id:
-            (
-                session_count,
-                question_count,
-            ) = await self.repo.get_assistant_conversation_counts(
-                assistant_id=assistant_id,
-                from_date=start_time,
-                to_date=end_time,
-                tenant_id=self.user.tenant_id,
-            )
-        else:
-            assert group_chat_id is not None
-            (
-                session_count,
-                question_count,
-            ) = await self.repo.get_group_chat_conversation_counts(
-                group_chat_id=group_chat_id,
-                from_date=start_time,
-                to_date=end_time,
-                tenant_id=self.user.tenant_id,
-            )
+        (
+            session_count,
+            question_count,
+        ) = await self.repo.get_assistant_conversation_counts(
+            assistant_id=assistant_id,
+            from_date=start_time,
+            to_date=end_time,
+            tenant_id=self.user.tenant_id,
+        )
 
         feedback = await self.repo.get_message_feedback_counts(
             tenant_id=self.user.tenant_id,
             assistant_id=assistant_id,
-            group_chat_id=group_chat_id,
             from_date=start_time,
             to_date=end_time,
         )
@@ -1126,7 +924,6 @@ class AnalysisService:
                 "duration_ms": round((perf_counter() - started) * 1000, 2),
                 "tenant_id": str(self.user.tenant_id),
                 "assistant_id": str(assistant_id) if assistant_id else None,
-                "group_chat_id": str(group_chat_id) if group_chat_id else None,
                 "total_conversations": session_count,
                 "total_questions": question_count,
             },
@@ -1143,7 +940,6 @@ class AnalysisService:
         *,
         question: str,
         assistant_id: UUID | None,
-        group_chat_id: UUID | None,
         from_date: datetime,
         to_date: datetime,
         include_followup: bool,
@@ -1155,7 +951,6 @@ class AnalysisService:
             to_date=to_date,
             include_followup=include_followup,
             assistant_id=assistant_id,
-            group_chat_id=group_chat_id,
         )
         completion = cast(Completion, response.completion)
         return completion.text or ""

@@ -80,7 +80,6 @@ import { SpaceModelSelect, type ModelKind, type ModelSelectionChange } from "./s
 type SpaceUpdate = Schema<"PartialUpdateSpaceRequest">;
 const SECURITY_IMPACT_LABEL_KEYS: Record<SpaceSecurityImpactKey, string> = {
   assistants: "assistants",
-  group_chats: "group_chats",
   apps: "apps",
   services: "services",
   completion_models: "completion_models",

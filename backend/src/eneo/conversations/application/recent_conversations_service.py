@@ -23,12 +23,11 @@ if TYPE_CHECKING:
 class RecentConversationsService:
     """The caller's own latest conversations with every partner they can open.
 
-    A conversation is listed only while its assistant or group chat passes the
-    read check of its own history (``GET /conversations/`` with an
-    ``assistant_id`` or ``group_chat_id``): one that became unreachable (the
-    user left the space, a permission was revoked, a group chat was
-    unpublished for a viewer) drops out. Partners are authorized before the
-    conversations are read, so hidden rows never eat into the limit.
+    A conversation is listed only while its assistant passes the read check
+    of its own history (``GET /conversations/`` with an ``assistant_id``): one
+    that became unreachable (the user left the space, a permission was
+    revoked) drops out. Partners are authorized before the conversations are
+    read, so hidden rows never eat into the limit.
     """
 
     def __init__(
@@ -56,16 +55,7 @@ class RecentConversationsService:
 
         rows = await self.session_repo.get_recent_for_user(
             user_id=self.user.id,
-            assistant_ids=[
-                partner.assistant_id
-                for partner in readable.values()
-                if partner.assistant_id is not None
-            ],
-            group_chat_ids=[
-                partner.group_chat_id
-                for partner in readable.values()
-                if partner.group_chat_id is not None
-            ],
+            assistant_ids=[partner.assistant_id for partner in readable.values()],
             limit=limit,
         )
         return [
@@ -74,9 +64,6 @@ class RecentConversationsService:
 
     def _can_open(self, partner: "ChatPartnerAccess") -> bool:
         actor = self.actor_manager.get_space_actor(partner.space)
-        if partner.group_chat_id is not None:
-            # GroupChatService.get_group_chat: viewers read published ones only.
-            return actor.can_read_group_chat(group_chat=partner)
         # AssistantService._authorize_read_assistant: the personal chat (the
         # personal space's own assistant) is gated by PERSONAL_CHAT, every
         # other assistant by the space's assistant read permission.
@@ -90,18 +77,15 @@ class RecentConversationsService:
 
 def _partner_type(
     partner: "ChatPartnerAccess",
-) -> Literal["assistant", "default-assistant", "group-chat"]:
-    if partner.group_chat_id is not None:
-        return "group-chat"
+) -> Literal["assistant", "default-assistant"]:
     if partner.assistant_id == partner.space.default_assistant_id:
         return "default-assistant"
     return "assistant"
 
 
 def _partner_id(row: "RecentSessionRow") -> "UUID":
-    partner_id = row.group_chat_id or row.assistant_id
-    assert partner_id is not None
-    return partner_id
+    assert row.assistant_id is not None
+    return row.assistant_id
 
 
 def _to_recent_conversation(

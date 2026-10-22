@@ -26,7 +26,6 @@ from eneo.collections.presentation.collection_models import CollectionPublic
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelPublic,
 )
-from eneo.group_chat.presentation.models import GroupChatSparse
 from eneo.groups_legacy.api.group_models import GroupMetadata, GroupPublicWithMetadata
 from eneo.integration.domain.entities.integration_knowledge import (
     KNOWLEDGE_NAME_MAX_LENGTH,
@@ -173,7 +172,6 @@ class UpdateSpaceDryRunResponse(BaseModel):
         default_factory=list[CapabilityPurpose]
     )
     assistants: list[AssistantSparse]
-    group_chats: list[GroupChatSparse]
     services: list[ServiceSparse]
     apps: list[AppSparse]
     completion_models: list[CompletionModelPublic]
@@ -188,7 +186,6 @@ class UpdateSpaceDryRunResponse(BaseModel):
 
 class Applications(BaseModel):
     assistants: PaginatedPermissions[AssistantSparse]
-    group_chats: PaginatedPermissions[GroupChatSparse]
     services: PaginatedPermissions[ServiceSparse]
     apps: PaginatedPermissions[AppSparse]
 

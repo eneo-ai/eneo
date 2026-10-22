@@ -81,7 +81,6 @@ result guards.
 | `backend/src/eneo/skills/**`, skill permissions in `roles/**`, `frontend/apps/web/src/routes/(app)/admin/skills/**`                                                                                                                                                                                                | `guides/skills.mdx`                                                                                                                   |
 | `backend/src/eneo/integration/**` (SharePoint) , `frontend/apps/web/src/routes/(app)/admin/integrations/**`, `frontend/apps/web/src/routes/(app)/spaces/[spaceId]/knowledge/integrations/**`                                                                                                                       | `guides/sharepoint-integration.mdx`                                                                                                   |
 
-| `backend/src/eneo/group_chat/**` and `frontend/apps/web/src/lib/features/group-chats/**` | `docs/api.mdx` (group chat fields of the conversation request) |
 | Assistant specialists: `assistants/delegation.py`, `assistants_specialists`, consultation history and `frontend/apps/web/src/lib/features/assistants/components/specialists/**` | `guides/assistant-specialists.mdx`, `docs/api.mdx`, root `docs/adr/assistant-delegation-execution-boundary.md` |
 
 ## Storage, workers and operations

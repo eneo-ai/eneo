@@ -119,8 +119,7 @@ describe("MCP chat controls", () => {
       mcpConversationOptions({
         servers,
         disabledServerIds: new Set(["a", "missing"]),
-        autoAcceptTools: false,
-        supportsToolApproval: true
+        autoAcceptTools: false
       })
     ).toEqual({
       require_tool_approval: true,
@@ -131,23 +130,11 @@ describe("MCP chat controls", () => {
       mcpConversationOptions({
         servers,
         disabledServerIds: new Set(),
-        autoAcceptTools: true,
-        supportsToolApproval: true
+        autoAcceptTools: true
       })
     ).toEqual({
       require_tool_approval: undefined,
       disabled_mcp_server_ids: undefined
     });
-  });
-
-  it("does not request tool approval for partners that do not support it", () => {
-    expect(
-      mcpConversationOptions({
-        servers: [server("a")],
-        disabledServerIds: new Set(),
-        autoAcceptTools: false,
-        supportsToolApproval: false
-      }).require_tool_approval
-    ).toBeUndefined();
   });
 });

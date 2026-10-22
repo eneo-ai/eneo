@@ -31,12 +31,12 @@
   });
   const labels: Record<Consultation["status"], () => string> = {
     running: m.chat_reasoning_working,
-    awaiting_approval: m.group_consultation_approval,
+    awaiting_approval: m.consultation_approval,
     complete: m.chat_tool_status_done,
-    denied: m.group_consultation_denied,
-    timeout: m.group_consultation_timeout,
-    cancelled: m.group_consultation_cancelled,
-    incomplete: m.group_consultation_incomplete,
+    denied: m.consultation_denied,
+    timeout: m.consultation_timeout,
+    cancelled: m.consultation_cancelled,
+    incomplete: m.consultation_incomplete,
     failed: m.chat_tool_status_failed
   };
   // A consultation persisted as still running (a turn that died before its
@@ -45,9 +45,9 @@
   const label = $derived.by(() => {
     const status = consultation.status;
     if (!streaming && (status === "running" || status === "awaiting_approval")) {
-      return m.group_consultation_incomplete();
+      return m.consultation_incomplete();
     }
-    return (labels[status] ?? m.group_consultation_incomplete)();
+    return (labels[status] ?? m.consultation_incomplete)();
   });
 </script>
 
@@ -58,7 +58,7 @@
   </summary>
   <div class="border-dimmer flex flex-col gap-3 border-t px-3 py-3">
     <div>
-      <p class="text-muted mb-1 text-xs font-medium">{m.group_consultation_question()}</p>
+      <p class="text-muted mb-1 text-xs font-medium">{m.consultation_question()}</p>
       <p class="whitespace-pre-wrap text-sm">{consultation.question}</p>
     </div>
     {#each consultation.tool_calls as step (step.step_id)}
@@ -93,7 +93,7 @@
     {/each}
     {#if consultation.answer}
       <div>
-        <p class="text-muted mb-1 text-xs font-medium">{m.group_consultation_answer()}</p>
+        <p class="text-muted mb-1 text-xs font-medium">{m.consultation_answer()}</p>
         <Markdown source={consultation.answer} customRenderers={{ inref: MessageEneoInfoBlob }} />
       </div>
     {/if}
