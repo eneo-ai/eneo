@@ -289,16 +289,13 @@ def test_admin_empty_file_limit_copy_names_deployment_ceiling(
 ):
     messages_path = (
         Path(__file__).resolve().parents[4]
-        / "frontend/apps/web/messages"
+        / "frontend/apps/web-next/src/lib/i18n/messages"
         / f"{locale}.json"
     )
     messages = json.loads(messages_path.read_text())
-    for key in (
-        "flow_input_limits_max_files_description",
-        "flow_input_limits_unlimited_hint",
-    ):
-        assert ceiling_word in messages[key].lower()
-        assert unlimited_word not in messages[key].lower()
+    copy = messages["flow_admin_max_files_description"].lower()
+    assert ceiling_word in copy
+    assert unlimited_word not in copy
 
 
 # The longest recording a flow takes: the admin's value on the flow-settings page, below the deployment's flow
