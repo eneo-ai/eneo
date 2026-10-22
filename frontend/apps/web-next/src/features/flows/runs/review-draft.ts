@@ -168,6 +168,26 @@ export function editedValueOf(
   }
 }
 
+/**
+ * The flat fields whose value differs from the step's own output before any
+ * review changed it (`original`), compared by the value an edit would send.
+ * A field the original does not have, or one that cannot be sent as it is,
+ * differs.
+ */
+export function changedFields(
+  fields: readonly DraftField[],
+  original: Readonly<Record<string, unknown>>
+): ReadonlySet<string> {
+  const changed = new Set<string>();
+  for (const field of fields) {
+    const parsed = fieldValue(field);
+    if (!(field.name in original) || !parsed.ok || parsed.value !== original[field.name]) {
+      changed.add(field.name);
+    }
+  }
+  return changed;
+}
+
 /** Whether the reviewer changed the output from what the checkpoint holds. */
 export function draftChanged(
   draft: ReviewDraft,
