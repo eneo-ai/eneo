@@ -116,6 +116,9 @@ services:
     environment:
       - POSTGRES_HOST=db
       - REDIS_HOST=redis
+      # The workers read the same object store as the backend; plain HTTP is
+      # fine for local development (see the eneo service above).
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP=${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
     volumes:
       - ../:/workspace
       - backend_venv:/workspace/backend/.venv
@@ -132,6 +135,9 @@ services:
     environment:
       - POSTGRES_HOST=db
       - REDIS_HOST=redis
+      # The workers read the same object store as the backend; plain HTTP is
+      # fine for local development (see the eneo service above).
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP=${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
     volumes:
       - ../:/workspace
       - backend_venv:/workspace/backend/.venv
