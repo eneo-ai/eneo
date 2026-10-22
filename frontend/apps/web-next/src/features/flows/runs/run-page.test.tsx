@@ -664,6 +664,88 @@ describe("FlowRunPage", () => {
       );
     });
 
+    it("gives a line, or a marked part of it, to another speaker", async () => {
+      answerAudioRun();
+      let revision = 0;
+      state.routes[EDIT] = (init: { body: Record<string, unknown> }) => {
+        revision += 1;
+        return {
+          body: {
+            flow_run_id: "run-1",
+            step_id: "step-1",
+            created_at: "2026-10-21T09:00:00Z",
+            updated_at: "2026-10-21T09:00:00Z",
+            edited_by_principal_type: "user",
+            schema_version: 3,
+            segments_hash: "hash-1",
+            stale: false,
+            revision,
+            occurrences: init.body.occurrences,
+            speaker_edits: init.body.speaker_edits,
+            speaker_names: init.body.speaker_names ?? {}
+          }
+        };
+      };
+      const { container } = renderRun(["flows_view", "flows_manage"]);
+      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+
+      // The whole line, unsure.
+      fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
+      await expectNoAxeViolations(container);
+      fireEvent.click(within(lines).getByLabelText(messages.flow_transcript_speaker_unsure));
+      fireEvent.click(
+        within(lines).getByRole("button", { name: messages.flow_transcript_speaker_apply })
+      );
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_speaker_saved)
+      );
+      expect(calls(EDIT)[0]?.init.body).toMatchObject({
+        speaker_edits: [
+          {
+            segment_index: 1,
+            char_start: null,
+            char_end: null,
+            original: null,
+            original_speaker: "SPEAKER_01",
+            speaker: "SPEAKER_00",
+            decision: "unresolved"
+          }
+        ]
+      });
+      expect(
+        await within(lines).findByText(messages.flow_transcript_speaker_unresolved)
+      ).toBeTruthy();
+
+      // The marked part of a line.
+      fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 0:00" }));
+      const field = within(lines).getByLabelText<HTMLTextAreaElement>("Texten på raden 0:00");
+      field.setSelectionRange(0, 4);
+      fireEvent.click(
+        within(lines).getByRole("radio", { name: messages.flow_transcript_speaker_scope_selection })
+      );
+      fireEvent.click(
+        within(lines).getByRole("button", { name: messages.flow_transcript_speaker_apply })
+      );
+      await waitFor(() => expect(calls(EDIT)).toHaveLength(2));
+      expect(calls(EDIT)[1]?.init.body).toMatchObject({
+        expected_revision: 1,
+        speaker_edits: [
+          {
+            segment_index: 0,
+            char_start: 0,
+            char_end: 4,
+            original: "Välk",
+            original_speaker: "SPEAKER_00",
+            speaker: "SPEAKER_01",
+            decision: "confirmed"
+          },
+          { segment_index: 1, speaker: "SPEAKER_00", decision: "unresolved" }
+        ]
+      });
+      expect(await within(lines).findByText("Välk")).toBeTruthy();
+      expect(within(lines).getByText("omna.")).toBeTruthy();
+    });
+
     it("lets only someone who may review name the speakers", async () => {
       answerAudioRun();
       renderRun(["flows_view", "flows_run"]);

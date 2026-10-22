@@ -203,3 +203,251 @@ export function withoutLineText(set: CorrectionSet, segmentIndex: number): Corre
     occurrences: set.occurrences.filter((occurrence) => occurrence.segment_index !== segmentIndex)
   };
 }
+
+export type SpeakerDecision = "confirmed" | "unresolved";
+
+/** One part of a shown line: whose words they are once corrections and speaker edits apply. */
+export type LinePart = {
+  /** The part's speaker label, or null for no speaker. */
+  speaker: string | null;
+  /** A speaker edit gave this part its speaker. */
+  overridden: boolean;
+  decision: SpeakerDecision | null;
+  /** The part's text with the line's text corrections applied. */
+  text: string;
+  rawStart: number;
+  rawEnd: number;
+};
+
+function anchors(edit: WireSpeakerEdit, rawText: string, segmentSpeaker: string | null): boolean {
+  if (edit.original_speaker !== segmentSpeaker) return false;
+  if (edit.char_start == null || edit.char_end == null) return edit.original == null;
+  return (
+    edit.char_start >= 0 &&
+    edit.char_end <= rawText.length &&
+    edit.char_start < edit.char_end &&
+    rawText.slice(edit.char_start, edit.char_end) === edit.original
+  );
+}
+
+/**
+ * A raw offset in the corrected text. Monotone; an offset inside a replaced
+ * span stays within its replacement.
+ */
+function rawToShown(applicable: readonly Occurrence[], offset: number): number {
+  let delta = 0;
+  for (const occurrence of applicable) {
+    if (occurrence.char_end <= offset) {
+      delta += occurrence.corrected.length - (occurrence.char_end - occurrence.char_start);
+    } else if (occurrence.char_start < offset) {
+      return (
+        occurrence.char_start +
+        delta +
+        Math.min(offset - occurrence.char_start, occurrence.corrected.length)
+      );
+    } else {
+      break;
+    }
+  }
+  return offset + delta;
+}
+
+/**
+ * An offset in the corrected text as a raw offset; inside a replaced span it
+ * snaps to the span's start or end (`bias`).
+ */
+export function shownToRaw(
+  rawText: string,
+  occurrences: readonly Occurrence[],
+  offset: number,
+  bias: "start" | "end"
+): number {
+  let delta = 0;
+  for (const occurrence of applicableOccurrences(rawText, occurrences)) {
+    const start = occurrence.char_start + delta;
+    const end = start + occurrence.corrected.length;
+    if (offset <= start) return offset - delta;
+    if (offset < end) return bias === "start" ? occurrence.char_start : occurrence.char_end;
+    delta += occurrence.corrected.length - (occurrence.char_end - occurrence.char_start);
+  }
+  return offset - delta;
+}
+
+/**
+ * A line's parts: one, with the line's own speaker, unless speaker edits
+ * reassign it; a whole-line edit gives one reassigned part, span edits split
+ * the line. Overlapping spans can only mean corrupt storage and are skipped.
+ */
+export function lineParts(
+  rawText: string,
+  segmentSpeaker: string | null,
+  occurrences: readonly Occurrence[],
+  speakerEdits: readonly WireSpeakerEdit[]
+): LinePart[] {
+  const applicable = applicableOccurrences(rawText, occurrences);
+  const shown = correctedText(rawText, applicable);
+  const base: LinePart = {
+    speaker: segmentSpeaker,
+    overridden: false,
+    decision: null,
+    text: shown,
+    rawStart: 0,
+    rawEnd: rawText.length
+  };
+  const anchored = speakerEdits.filter((edit) => anchors(edit, rawText, segmentSpeaker));
+  const whole = anchored.find((edit) => edit.char_start == null);
+  if (whole) {
+    return [
+      { ...base, speaker: whole.speaker, overridden: true, decision: whole.decision ?? "confirmed" }
+    ];
+  }
+  const spans = anchored
+    .filter((edit) => edit.char_start != null)
+    .sort((a, b) => (a.char_start ?? 0) - (b.char_start ?? 0));
+  if (spans.length === 0) return [base];
+  const parts: LinePart[] = [];
+  const push = (
+    rawStart: number,
+    rawEnd: number,
+    speaker: string | null,
+    decision: SpeakerDecision | null
+  ) => {
+    const start = rawToShown(applicable, rawStart);
+    const end = rawToShown(applicable, rawEnd);
+    if (start >= end) return;
+    parts.push({
+      speaker,
+      overridden: decision !== null,
+      decision,
+      text: shown.slice(start, end),
+      rawStart,
+      rawEnd
+    });
+  };
+  let cursor = 0;
+  for (const edit of spans) {
+    const start = edit.char_start ?? 0;
+    const end = edit.char_end ?? 0;
+    if (start < cursor) continue;
+    if (cursor < start) push(cursor, start, segmentSpeaker, null);
+    push(start, end, edit.speaker, edit.decision ?? "confirmed");
+    cursor = end;
+  }
+  if (cursor < rawText.length) push(cursor, rawText.length, segmentSpeaker, null);
+  return parts.length > 0 ? parts : [base];
+}
+
+type Run = { start: number; end: number; speaker: string | null; decision: SpeakerDecision | null };
+
+function overlay(runs: Run[], next: Run): Run[] {
+  if (next.start >= next.end) return runs;
+  const kept: Run[] = [];
+  for (const run of runs) {
+    if (run.end <= next.start || run.start >= next.end) {
+      kept.push(run);
+      continue;
+    }
+    if (run.start < next.start) kept.push({ ...run, end: next.start });
+    if (run.end > next.end) kept.push({ ...run, start: next.end });
+  }
+  return [...kept, next].sort((a, b) => a.start - b.start);
+}
+
+/**
+ * The set with part of a line (`span` in raw offsets, or null for the whole
+ * line) given to `speaker` with `decision`, or reset to the line's own
+ * speaker (`speaker` undefined). Later decisions win within their span;
+ * neighbouring parts with the same speaker and decision merge, and a part
+ * that is only spaces or punctuation joins its neighbour.
+ */
+export function withSpeaker(
+  set: CorrectionSet,
+  segment: Pick<TranscriptSegment, "index" | "text" | "speaker">,
+  span: { start: number; end: number } | null,
+  change: { speaker: string | null; decision: SpeakerDecision } | "reset"
+): CorrectionSet {
+  const length = segment.text.length;
+  const own = set.speakerEdits.filter((edit) => edit.segment_index === segment.index);
+  let runs: Run[] = [{ start: 0, end: length, speaker: segment.speaker, decision: null }];
+  const sorted = own
+    .filter((edit) => anchors(edit, segment.text, segment.speaker))
+    .sort((a, b) => (a.char_start ?? -1) - (b.char_start ?? -1));
+  for (const edit of sorted) {
+    runs = overlay(runs, {
+      start: edit.char_start ?? 0,
+      end: edit.char_end ?? length,
+      speaker: edit.speaker,
+      decision: edit.decision ?? "confirmed"
+    });
+  }
+  const start = Math.max(0, span?.start ?? 0);
+  const end = Math.min(length, span?.end ?? length);
+  runs = overlay(
+    runs,
+    change === "reset"
+      ? { start, end, speaker: segment.speaker, decision: null }
+      : { start, end, speaker: change.speaker, decision: change.decision }
+  );
+  const hasWords = (run: Run) => /[\p{L}\p{N}]/u.test(segment.text.slice(run.start, run.end));
+  const absorbed: Run[] = [];
+  for (const run of runs) {
+    const previous = absorbed.at(-1);
+    if (previous && !hasWords(run)) previous.end = run.end;
+    else absorbed.push({ ...run });
+  }
+  while (absorbed.length > 1 && !hasWords(absorbed[0]!)) {
+    absorbed[1]!.start = absorbed[0]!.start;
+    absorbed.shift();
+  }
+  const merged: Run[] = [];
+  for (const run of absorbed) {
+    const last = merged.at(-1);
+    if (last && last.speaker === run.speaker && last.decision === run.decision) last.end = run.end;
+    else merged.push({ ...run });
+  }
+  const edits: WireSpeakerEdit[] = merged
+    .filter((run) => run.decision !== null && run.start < run.end)
+    .map((run) => {
+      const whole = run.start === 0 && run.end === length;
+      return {
+        segment_index: segment.index,
+        char_start: whole ? null : run.start,
+        char_end: whole ? null : run.end,
+        original: whole ? null : segment.text.slice(run.start, run.end),
+        original_speaker: segment.speaker,
+        speaker: run.speaker,
+        decision: run.decision ?? "confirmed"
+      };
+    });
+  return {
+    ...set,
+    speakerEdits: [
+      ...set.speakerEdits.filter((edit) => edit.segment_index !== segment.index),
+      ...edits
+    ].sort(
+      (a, b) => a.segment_index - b.segment_index || (a.char_start ?? -1) - (b.char_start ?? -1)
+    )
+  };
+}
+
+/** The speaker labels of a transcript and of its speaker edits, in order of first appearance. */
+export function knownSpeakers(
+  segments: readonly Pick<TranscriptSegment, "speaker">[],
+  speakerEdits: readonly Pick<WireSpeakerEdit, "speaker">[]
+): string[] {
+  const labels = [
+    ...segments.map((segment) => segment.speaker),
+    ...speakerEdits.map((edit) => edit.speaker)
+  ];
+  return [...new Set(labels.filter((label): label is string => Boolean(label)))];
+}
+
+/** The next unused `SPEAKER_NN` label: a new speaker split out of a merged one. */
+export function nextSpeakerLabel(labels: readonly string[]): string {
+  let max = -1;
+  for (const label of labels) {
+    const match = /^SPEAKER_(\d{2,})$/.exec(label);
+    if (match) max = Math.max(max, Number(match[1]));
+  }
+  return `SPEAKER_${String(max + 1).padStart(2, "0")}`;
+}

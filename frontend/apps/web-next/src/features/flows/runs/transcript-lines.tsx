@@ -1,7 +1,11 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { Heading } from "@astryxdesign/core/Heading";
 import { IconButton } from "@astryxdesign/core/IconButton";
+import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
+import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { Token } from "@astryxdesign/core/Token";
@@ -11,13 +15,22 @@ import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { clockTime, type ShownSegment, type TranscriptTarget } from "./transcript";
-import { withLineText, withoutLineText, type CorrectionSet } from "./transcript-corrections";
+import {
+  nextSpeakerLabel,
+  shownToRaw,
+  withLineText,
+  withoutLineText,
+  withSpeaker,
+  type CorrectionSet
+} from "./transcript-corrections";
 import { useTranscriptPlayback } from "./transcript-player";
-import { textRuns, type PlacedWord } from "./transcript-playback";
+import { textRuns, type PlacedWord, type TextRun } from "./transcript-playback";
 
 /** What editing a transcript's lines needs: the saved set, and a save that says what went wrong. */
 export type LineEditing = {
   set: CorrectionSet;
+  /** Every speaker label of the transcript and its speaker edits. */
+  speakers: string[];
   /** Saves the set; null when it was saved, else why not, as a sentence. */
   save: (next: CorrectionSet, done: string) => Promise<string | null>;
   saving: boolean;
@@ -34,7 +47,141 @@ function lineTime(segment: ShownSegment, multiFile: boolean, t: Translator): str
     : clockTime(segment.start);
 }
 
-/** Corrects one line's text: saved as a correction of the raw text, which stays. */
+const NEW_SPEAKER = "__new__";
+const NO_SPEAKER = "__none__";
+
+function speakerName(label: string | null, names: Record<string, string | null>, t: Translator) {
+  if (!label) return t("flow_runs_transcript_unknown_speaker");
+  return names[label]?.trim() || label;
+}
+
+/**
+ * Gives a line, or the part of it marked in the text field, to another
+ * speaker; the reviewer can say they are unsure, which keeps the line marked
+ * for someone to check (the core's `unresolved` decision).
+ */
+function SpeakerEditor({
+  segment,
+  editing,
+  textField,
+  textChanged,
+  onDone,
+  onProblem
+}: {
+  segment: ShownSegment;
+  editing: LineEditing;
+  textField: React.RefObject<HTMLTextAreaElement | null>;
+  textChanged: boolean;
+  onDone: () => void;
+  onProblem: (problem: string) => void;
+}) {
+  const t = useTranslations();
+  const others = editing.speakers.filter((label) => label !== segment.label);
+  const newLabel = nextSpeakerLabel(editing.speakers);
+  const [to, setTo] = useState(others[0] ?? NEW_SPEAKER);
+  const [scope, setScope] = useState<"line" | "selection">("line");
+  const [unsure, setUnsure] = useState(false);
+  const reassigned = segment.parts.some((part) => part.overridden);
+  const line = { index: segment.index, text: segment.raw, speaker: segment.speaker };
+
+  async function apply() {
+    if (editing.saving) return;
+    let span: { start: number; end: number } | null = null;
+    if (scope === "selection") {
+      const field = textField.current;
+      if (textChanged) return onProblem(t("flow_transcript_speaker_text_changed"));
+      if (!field || field.selectionStart === field.selectionEnd) {
+        return onProblem(t("flow_transcript_speaker_select_text"));
+      }
+      const own = editing.set.occurrences.filter((item) => item.segment_index === segment.index);
+      span = {
+        start: shownToRaw(segment.raw, own, field.selectionStart, "start"),
+        end: shownToRaw(segment.raw, own, field.selectionEnd, "end")
+      };
+    }
+    const speaker = to === NEW_SPEAKER ? newLabel : to === NO_SPEAKER ? null : to;
+    const failed = await editing.save(
+      withSpeaker(editing.set, line, span, {
+        speaker,
+        decision: unsure || speaker === null ? "unresolved" : "confirmed"
+      }),
+      t("flow_transcript_speaker_saved")
+    );
+    if (failed) onProblem(failed);
+    else onDone();
+  }
+
+  async function reset() {
+    if (editing.saving) return;
+    const failed = await editing.save(
+      withSpeaker(editing.set, line, null, "reset"),
+      t("flow_transcript_speaker_reset_done")
+    );
+    if (failed) onProblem(failed);
+    else onDone();
+  }
+
+  return (
+    <div className="border-ax-border flex flex-col gap-3 border-t pt-3">
+      <Heading level={5}>{t("flow_transcript_speaker_heading")}</Heading>
+      <Selector
+        label={t("flow_transcript_speaker_to")}
+        value={to}
+        onChange={setTo}
+        options={[
+          ...others.map((label) => ({
+            value: label,
+            label: speakerName(label, editing.set.names, t)
+          })),
+          { value: NEW_SPEAKER, label: t("flow_transcript_speaker_new", { label: newLabel }) },
+          { value: NO_SPEAKER, label: t("flow_runs_transcript_unknown_speaker") }
+        ]}
+        width="100%"
+      />
+      <RadioList
+        label={t("flow_transcript_speaker_scope")}
+        value={scope}
+        onChange={(value) => setScope(value === "selection" ? "selection" : "line")}
+        size="sm"
+      >
+        <RadioListItem value="line" label={t("flow_transcript_speaker_scope_line")} />
+        <RadioListItem
+          value="selection"
+          label={t("flow_transcript_speaker_scope_selection")}
+          description={t("flow_transcript_speaker_scope_selection_hint")}
+        />
+      </RadioList>
+      <CheckboxInput
+        label={t("flow_transcript_speaker_unsure")}
+        description={t("flow_transcript_speaker_unsure_hint")}
+        value={unsure}
+        onChange={setUnsure}
+        size="sm"
+      />
+      <div className="flex flex-wrap gap-2">
+        <Button
+          label={t("flow_transcript_speaker_apply")}
+          isLoading={editing.saving}
+          isInterruptible
+          onClick={() => void apply()}
+        />
+        {reassigned ? (
+          <Button
+            label={t("flow_transcript_speaker_reset")}
+            variant="ghost"
+            isInterruptible
+            onClick={() => void reset()}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Corrects one line: its text, saved as a correction of the raw text (which
+ * stays), and who said it.
+ */
 function LineEditor({
   segment,
   time,
@@ -47,6 +194,7 @@ function LineEditor({
   onClose: () => void;
 }) {
   const t = useTranslations();
+  const textField = useRef<HTMLTextAreaElement>(null);
   const [text, setText] = useState(segment.text);
   const [problem, setProblem] = useState<string | null>(null);
   const changed = text !== segment.text;
@@ -58,22 +206,7 @@ function LineEditor({
   }
 
   return (
-    <form
-      noValidate
-      className="border-ax-border rounded-ax-inner mt-1 mb-2 flex flex-col gap-3 border p-3"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (editing.saving) return;
-        if (!changed) {
-          onClose();
-          return;
-        }
-        void save(
-          withLineText(editing.set, { index: segment.index, text: segment.raw }, text),
-          t("flow_transcript_line_saved")
-        );
-      }}
-    >
+    <div className="border-ax-border rounded-ax-inner mt-1 mb-2 flex flex-col gap-3 border p-3">
       {problem ? (
         <QuietBanner
           status="error"
@@ -82,42 +215,126 @@ function LineEditor({
           collapsible={false}
         />
       ) : null}
-      <TextArea
-        label={t("flow_transcript_line_text", { time })}
-        value={text}
-        onChange={setText}
-        rows={3}
-        width="100%"
-      />
-      {segment.corrected ? (
-        <Text type="supporting" as="p">
-          {t("flow_transcript_line_original", { text: segment.raw })}
-        </Text>
-      ) : null}
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="submit"
-          variant="primary"
-          label={t("flow_transcript_line_save")}
-          isLoading={editing.saving}
-          isInterruptible
+      <form
+        noValidate
+        className="flex flex-col gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (editing.saving) return;
+          if (!changed) {
+            onClose();
+            return;
+          }
+          void save(
+            withLineText(editing.set, { index: segment.index, text: segment.raw }, text),
+            t("flow_transcript_line_saved")
+          );
+        }}
+      >
+        <TextArea
+          ref={textField}
+          label={t("flow_transcript_line_text", { time })}
+          value={text}
+          onChange={setText}
+          rows={3}
+          width="100%"
         />
         {segment.corrected ? (
-          <Button
-            label={t("flow_transcript_line_revert")}
-            isInterruptible
-            onClick={() => {
-              if (editing.saving) return;
-              void save(
-                withoutLineText(editing.set, segment.index),
-                t("flow_transcript_line_reverted")
-              );
-            }}
-          />
+          <Text type="supporting" as="p">
+            {t("flow_transcript_line_original", { text: segment.raw })}
+          </Text>
         ) : null}
-        <Button label={t("cancel")} variant="ghost" onClick={onClose} />
-      </div>
-    </form>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="submit"
+            variant="primary"
+            label={t("flow_transcript_line_save")}
+            isLoading={editing.saving}
+            isInterruptible
+          />
+          {segment.corrected ? (
+            <Button
+              label={t("flow_transcript_line_revert")}
+              isInterruptible
+              onClick={() => {
+                if (editing.saving) return;
+                void save(
+                  withoutLineText(editing.set, segment.index),
+                  t("flow_transcript_line_reverted")
+                );
+              }}
+            />
+          ) : null}
+          <Button label={t("cancel")} variant="ghost" onClick={onClose} />
+        </div>
+      </form>
+      <SpeakerEditor
+        segment={segment}
+        editing={editing}
+        textField={textField}
+        textChanged={changed}
+        onDone={onClose}
+        onProblem={setProblem}
+      />
+    </div>
+  );
+}
+
+/** The speakers and words of a shown line: one part, or one per speaker when part of it moved. */
+function LineText({
+  segment,
+  runs,
+  active,
+  activeWord
+}: {
+  segment: ShownSegment;
+  runs: TextRun[] | null;
+  active: boolean;
+  activeWord: number;
+}) {
+  const t = useTranslations();
+  const unresolved = (
+    <Token size="sm" color="orange" label={t("flow_transcript_speaker_unresolved")} />
+  );
+  if (segment.parts.length > 1) {
+    return (
+      <>
+        {segment.parts.map((part, index) => (
+          <span key={index}>
+            {index > 0 ? " " : null}
+            <span className="font-semibold">
+              {part.name ?? part.speaker ?? t("flow_runs_transcript_unknown_speaker")}:
+            </span>{" "}
+            {part.decision === "unresolved" ? <>{unresolved} </> : null}
+            {part.text.trim()}
+          </span>
+        ))}
+      </>
+    );
+  }
+  const speaker = segment.name ?? segment.label ?? t("flow_runs_transcript_unknown_speaker");
+  return (
+    <>
+      <span className="font-semibold">{speaker}:</span>{" "}
+      {segment.decision === "unresolved" ? <>{unresolved} </> : null}
+      {runs
+        ? runs.map((run, index) =>
+            run.word === null ? (
+              <span key={index}>{run.text}</span>
+            ) : (
+              <span
+                key={index}
+                data-word={run.word}
+                className={
+                  active && run.word === activeWord ? "bg-ax-accent-muted rounded-sm" : undefined
+                }
+              >
+                {run.text}
+              </span>
+            )
+          )
+        : segment.text}
+    </>
   );
 }
 
@@ -149,10 +366,12 @@ function SegmentLine({
   onCloseEditor: () => void;
 }) {
   const t = useTranslations();
-  const speaker = segment.name ?? segment.label ?? t("flow_runs_transcript_unknown_speaker");
   const time = lineTime(segment, multiFile, t);
-  // Words are placed in the raw text: a corrected line is marked as a whole.
-  const runs = words && !segment.corrected ? textRuns(segment.text, words) : null;
+  // Words are placed in the raw text: a corrected or split line is marked as a whole.
+  const runs =
+    words && !segment.corrected && segment.parts.length === 1
+      ? textRuns(segment.text, words)
+      : null;
   const body = (
     <>
       <span className="text-ax-text-secondary text-xs tabular-nums sm:pt-0.5">
@@ -160,24 +379,7 @@ function SegmentLine({
         {time}
       </span>
       <span className="text-ax-text text-sm break-words">
-        <span className="font-semibold">{speaker}:</span>{" "}
-        {runs
-          ? runs.map((run, index) =>
-              run.word === null ? (
-                <span key={index}>{run.text}</span>
-              ) : (
-                <span
-                  key={index}
-                  data-word={run.word}
-                  className={
-                    active && run.word === activeWord ? "bg-ax-accent-muted rounded-sm" : undefined
-                  }
-                >
-                  {run.text}
-                </span>
-              )
-            )
-          : segment.text}
+        <LineText segment={segment} runs={runs} active={active} activeWord={activeWord} />
         {segment.corrected ? (
           <>
             {" "}

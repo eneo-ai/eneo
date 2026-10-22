@@ -18,7 +18,12 @@ import {
   transcriptCorrectionsQueryOptions,
   transcriptQueryOptions
 } from "./runs-api";
-import { correctionSet, editRequest, type EditRequest } from "./transcript-corrections";
+import {
+  correctionSet,
+  editRequest,
+  knownSpeakers,
+  type EditRequest
+} from "./transcript-corrections";
 import { TranscriptLines } from "./transcript-lines";
 import {
   parseSegments,
@@ -198,6 +203,7 @@ function StepTranscript({
         editable
           ? {
               set: correctionSet(corrections, segments),
+              speakers: knownSpeakers(segments, corrections?.speaker_edits ?? []),
               saving: save.isPending,
               save: async (next, done) => {
                 try {

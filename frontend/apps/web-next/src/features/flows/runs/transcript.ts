@@ -1,6 +1,12 @@
 import type { Schema } from "@/lib/api/models";
 import type { RunStep } from "./runs-api";
-import { applicableOccurrences, correctedText, correctionSet } from "./transcript-corrections";
+import {
+  applicableOccurrences,
+  correctionSet,
+  lineParts,
+  type LinePart,
+  type SpeakerDecision
+} from "./transcript-corrections";
 
 /**
  * A run's transcript as a reader sees it: the transcription step's
@@ -102,22 +108,29 @@ export function parseSegments(raw: readonly TranscriptSourceSegment[]): Transcri
   }));
 }
 
+/** A part of a shown line with its speaker's label and shown name. */
+export type ShownPart = LinePart & { name: string | null };
+
 /**
  * A line with the saved corrections applied: its corrected text (`text`)
- * and raw text (`raw`), whether a text correction changed it, and its
- * speaker's label and shown name.
+ * and raw text (`raw`), whether a text correction changed it, its parts by
+ * speaker (more than one when part of the line was given to another
+ * speaker), and the line's speaker label and shown name.
  */
 export type ShownSegment = TranscriptSegment & {
   raw: string;
   label: string | null;
   name: string | null;
   corrected: boolean;
+  parts: ShownPart[];
+  /** How sure the reviewer was of a whole-line reassignment; null without one. */
+  decision: SpeakerDecision | null;
 };
 
 /**
  * Applies saved corrections: each text correction replaces exactly its span
- * of the raw text; a whole-line speaker edit decided as confirmed reassigns
- * the line; a speaker's name replaces its label. Anchors that no longer match
+ * of the raw text; speaker edits give the line, or parts of it, to another
+ * speaker; a speaker's name replaces its label. Anchors that no longer match
  * are left out.
  */
 export function shownSegments(
@@ -125,23 +138,40 @@ export function shownSegments(
   corrections: Pick<TranscriptCorrections, "occurrences" | "speaker_edits" | "speaker_names"> | null
 ): ShownSegment[] {
   const set = correctionSet(corrections, segments);
-  const edits = set.speakerEdits.filter((edit) => edit.char_start == null && edit.char_end == null);
+  const nameOf = (label: string | null) => (label ? set.names[label]?.trim() || null : null);
   return segments.map((segment) => {
     const own = set.occurrences.filter((occurrence) => occurrence.segment_index === segment.index);
     const corrected = applicableOccurrences(segment.text, own).length > 0;
-    const text = corrected ? correctedText(segment.text, own) : segment.text;
-    const edit = edits.find(
-      (item) => item.segment_index === segment.index && item.original_speaker === segment.speaker
-    );
-    const label = edit && edit.decision !== "unresolved" ? edit.speaker : segment.speaker;
-    const name = label ? set.names[label]?.trim() || null : null;
-    return { ...segment, text, raw: segment.text, label, name, corrected };
+    const parts = lineParts(
+      segment.text,
+      segment.speaker,
+      own,
+      set.speakerEdits.filter((edit) => edit.segment_index === segment.index)
+    ).map((part) => ({ ...part, name: nameOf(part.speaker) }));
+    const single = parts.length === 1 ? parts[0]! : null;
+    const label = single ? single.speaker : segment.speaker;
+    return {
+      ...segment,
+      text: parts.map((part) => part.text).join(""),
+      raw: segment.text,
+      label,
+      name: nameOf(label),
+      corrected,
+      parts,
+      decision: single?.decision ?? null
+    };
   });
 }
 
 /** The speaker labels a transcript uses, in order of first appearance. */
-export function speakerLabels(segments: readonly Pick<ShownSegment, "label">[]): string[] {
-  return [...new Set(segments.flatMap((segment) => (segment.label ? [segment.label] : [])))];
+export function speakerLabels(segments: readonly Pick<ShownSegment, "parts">[]): string[] {
+  return [
+    ...new Set(
+      segments.flatMap((segment) =>
+        segment.parts.flatMap((part) => (part.speaker ? [part.speaker] : []))
+      )
+    )
+  ];
 }
 
 /** Seconds as `m:ss`, or `h:mm:ss` past the hour. */
