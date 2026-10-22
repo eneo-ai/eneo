@@ -17954,6 +17954,9 @@ export interface components {
       | "flow_run_required_step_input_missing"
       | "flow_document_runtime_required"
       | "flow_step_read_lost_producer"
+      | "flow_unpublish_required"
+      | "flow_form_field_still_read"
+      | "flow_form_field_rename_invalid"
       | "flow_run_runtime_input_disabled"
       | "flow_run_top_level_file_ids_not_supported"
       | "flow_run_idempotency_conflict"
@@ -32237,6 +32240,16 @@ export interface components {
        * @description The `draft_revision` the editor read before making these changes. When set, the update is refused with `400` and code `stale_revision` if the draft has moved on since; when omitted the write is fenced on the revision read at the start of this request.
        */
       expected_revision?: number | null;
+      /**
+       * Form Field Renames
+       * @description Run form fields this update renames, from the saved name to the name the field has in `metadata_json.form_schema`. Every read of a renamed field in the steps (prompts, input bindings, HTTP requests, template bindings, tool arguments) follows it. A saved field the new form no longer has and this map does not name is removed, and the update is refused with `flow_form_field_still_read` while a step reads it. A rename the form does not describe is refused with `flow_form_field_rename_invalid`.
+       * @example {
+       *       "kommun": "ort"
+       *     }
+       */
+      form_field_renames?: {
+        [key: string]: string;
+      } | null;
       /** Metadata Json */
       metadata_json?: {
         [key: string]: unknown;

@@ -87,9 +87,30 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     FlowApiErrorCode.STEP_READ_LOST_PRODUCER: _entry(
         category="Flow authoring",
         surfaced_through="API error response",
-        cause="A step order change removes a step another step reads, or moves it to where that step cannot read it.",
-        consumer_action="Change the read named by step_id, site and reads_step in the error context, or keep each step before the steps that read it.",
+        cause="A change removes, renames or moves a step another step reads, or moves the reader before it.",
+        consumer_action="Change the read named by reason, step_id, site and reads_step in the error context, or keep each step before the steps that read it.",
         user_action="Change what the step reads first, or keep each step before the steps that use it.",
+    ),
+    FlowApiErrorCode.UNPUBLISH_REQUIRED: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The draft or one of its step assistants was changed while the flow is published.",
+        consumer_action="Unpublish the flow, then send the change again with the new draft_revision.",
+        user_action="Unpublish the flow before you change it.",
+    ),
+    FlowApiErrorCode.FORM_FIELD_STILL_READ: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="A change removes a run form field that a step still reads.",
+        consumer_action="Change the reads the error context lists under readers first, or rename the field with form_field_renames.",
+        user_action="Change what the steps read first, or rename the field instead of removing it.",
+    ),
+    FlowApiErrorCode.FORM_FIELD_RENAME_INVALID: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="form_field_renames names a field or a new name the forms do not have, or a name another field keeps.",
+        consumer_action="Rename each saved field once, to its name in the new form; problem in the error context says what is wrong.",
+        user_action="Reload the flow and rename the field again.",
     ),
     FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_REQUIRES_ONE_AUDIO_FILE: _entry(
         category="Run input",
@@ -122,7 +143,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     FlowApiErrorCode.FLOW_NOT_PUBLISHED: _entry(
         category="Flow access",
         surfaced_through="API error response",
-        cause="The caller used a runtime action before the flow had a published version.",
+        cause="The caller used a runtime action before the flow had a published version, or unpublished a flow that is not published.",
         consumer_action="Publish the flow or refetch the runtime contract before retrying.",
         user_action="Publish the flow, then start the run again.",
     ),

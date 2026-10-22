@@ -299,7 +299,8 @@ class FlowService:
         existing = await self.get_flow(flow_id)
         if existing.published_version is not None:
             raise BadRequestException(
-                "Cannot mutate a published flow. Unpublish first."
+                "Cannot mutate a published flow. Unpublish first.",
+                code=FlowApiErrorCode.UNPUBLISH_REQUIRED.value,
             )
 
         if steps is not None:
@@ -587,7 +588,10 @@ class FlowService:
             )
             is not None
         ):
-            raise BadRequestException("Cannot mutate assistant of a published flow")
+            raise BadRequestException(
+                "Cannot mutate assistant of a published flow",
+                code=FlowApiErrorCode.UNPUBLISH_REQUIRED.value,
+            )
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
         self._assert_flow_assistant_owned_by_flow(flow=flow, assistant=assistant)
         reclaimable = await self.flow_repo.orphaned_flow_managed_assistant_ids(
@@ -624,7 +628,9 @@ class FlowService:
     async def unpublish_flow(self, *, flow_id: UUID) -> Flow:
         flow = await self.get_flow(flow_id)
         if flow.published_version is None:
-            raise BadRequestException("Flow is not published.")
+            raise BadRequestException(
+                "Flow is not published.", code=FlowApiErrorCode.FLOW_NOT_PUBLISHED.value
+            )
         updated = flow.model_copy(update={"published_version": None}, deep=True)
         return await self.flow_repo.update(
             updated,
@@ -1414,7 +1420,10 @@ class FlowService:
 
     def _ensure_flow_is_mutable(self, flow: Flow) -> None:
         if flow.published_version is not None:
-            raise BadRequestException("Cannot mutate assistant of a published flow")
+            raise BadRequestException(
+                "Cannot mutate assistant of a published flow",
+                code=FlowApiErrorCode.UNPUBLISH_REQUIRED.value,
+            )
 
     def _assert_flow_assistant_owned_by_flow(
         self, *, flow: Flow, assistant: Assistant

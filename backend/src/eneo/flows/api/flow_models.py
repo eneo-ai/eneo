@@ -787,6 +787,20 @@ class FlowUpdateRequest(BaseModel):
     description: str | None
     steps: list[FlowStepUpdateRequest]
     metadata_json: dict[str, Any] | None | NotProvided = Field(default=NOT_PROVIDED)
+    form_field_renames: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Run form fields this update renames, from the saved name to the name "
+            "the field has in `metadata_json.form_schema`. Every read of a renamed "
+            "field in the steps (prompts, input bindings, HTTP requests, template "
+            "bindings, tool arguments) follows it. A saved field the new form no "
+            "longer has and this map does not name is removed, and the update is "
+            "refused with `flow_form_field_still_read` while a step reads it. A "
+            "rename the form does not describe is refused with "
+            "`flow_form_field_rename_invalid`."
+        ),
+        examples=[{"kommun": "ort"}],
+    )
     expected_revision: int | None = Field(
         default=None,
         ge=0,

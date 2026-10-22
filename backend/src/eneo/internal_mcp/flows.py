@@ -221,15 +221,24 @@ async def read_flow(ctx: Context, offset: int = 0) -> CallToolResult:
 async def update_flow_settings(
     ctx: Context, expected_revision: int, changes: dict[str, Any]
 ) -> CallToolResult:
-    """Change flow name, description or metadata_json, preserving all other fields."""
+    """Change flow name, description or metadata_json, preserving all other fields.
+    To rename a run form field, send the new metadata_json with
+    form_field_renames ({"old name": "new name"}): the steps' reads of the field
+    follow it. A field a step reads cannot be removed."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_models import FlowEditorUpdateRequest
         from eneo.flows.application.flow_authoring_operations import apply_editor_update
 
-        if set(changes) - {"name", "description", "metadata_json"}:
+        if set(changes) - {
+            "name",
+            "description",
+            "metadata_json",
+            "form_field_renames",
+        }:
             raise BadRequestException(
-                "Only name, description and metadata_json can be changed here."
+                "Only name, description, metadata_json and form_field_renames "
+                "can be changed here."
             )
         flow = await apply_editor_update(
             chat.flow_id,
@@ -342,7 +351,9 @@ async def update_step(
     changes: dict[str, Any],
     assistant_changes: dict[str, Any] | None = None,
 ) -> CallToolResult:
-    """Patch one saved step and optionally its assistant in one revision. Use core field names."""
+    """Patch one saved step and optionally its assistant in one revision. Use core
+    field names. Renaming the step (user_description) rewrites the reads of its
+    old name in every step."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_models import (

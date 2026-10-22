@@ -34,6 +34,7 @@ def editor_context():
         SimpleNamespace(id=flow.steps[0].assistant_id, name="Step"),
         [],
     )
+    service.get_flow_assistant_prompts.return_value = {}
     container.flow_service.return_value = service
     container.user.return_value = user
     container.audit_service.return_value = AsyncMock()
