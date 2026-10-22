@@ -632,7 +632,10 @@ async def unpublish_flow(ctx: Context, expected_revision: int) -> CallToolResult
 
 @mcp.tool()
 async def read_tool_options(ctx: Context, offset: int = 0) -> CallToolResult:
-    """Read permitted unattended tools and refusal reasons for this flow, with pagination."""
+    """Read the MCP tools a tool step may call unattended, and why others are
+    refused, with pagination. It says nothing about HTTP steps: http_get and
+    http_post need no tool option, and the core checks their destination when
+    the step is saved and run."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_tool_options_router import list_flow_tool_options

@@ -73,7 +73,12 @@ an http_post step in output_config, flat in this shape: {"url": "...",
 "json_template", "template": "..."}. The step decides the method, so there is no
 method or headers key. The url and a body template may read
 {{ flow_input.<field> }} and earlier steps. Keep auth at {"mode": "none"}:
-credentials and custom headers are set by the user in the editor.
+credentials and custom headers are set by the user in the editor. An HTTP step
+without credentials is added through the tools like any other step; it does not
+depend on read_tool_options. When a tool refuses a change, the refusal names
+what to fix: correct it and try again rather than concluding that the change
+is impossible, and do not rely on an earlier refusal in this conversation
+without calling the tool again.
 """
 
 
