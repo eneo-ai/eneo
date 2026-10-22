@@ -77,7 +77,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const announce = useAnnounce();
   const queryClient = useQueryClient();
   const rescue = useFocusRescue();
-  const { routeId } = useSpace();
+  const { routeId, space } = useSpace();
   const { can } = useAppContext();
   const spaceName = useSpaceDisplayName();
   const sections = useSpaceSections();
@@ -417,7 +417,15 @@ export function FlowPage({ flowId }: { flowId: string }) {
                   onRemove={removeStep}
                   onAdd={(position) => setAddAt(position)}
                 />
-                <FlowSettings flow={flow} canEdit={canEdit} onSave={saveSettings} />
+                <FlowSettings
+                  flow={flow}
+                  canEdit={canEdit}
+                  transcription={{
+                    models: space.transcription_models,
+                    services: space.transcription_services ?? []
+                  }}
+                  onSave={saveSettings}
+                />
               </>
             )}
           </div>
