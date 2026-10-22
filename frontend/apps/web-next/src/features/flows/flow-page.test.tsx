@@ -281,8 +281,8 @@ describe("FlowPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Körningar" }));
 
     expect(screen.getByRole("tab", { name: "Körningar", selected: true })).toBeTruthy();
-    expect(await screen.findByRole("table", { name: "Körningar" })).toBeTruthy();
-    expect(screen.getByText("Klar")).toBeTruthy();
+    const table = await screen.findByRole("table", { name: "Körningar" });
+    expect(within(table).getByText("Klar")).toBeTruthy();
     expect(window.location.search).toBe("?tab=runs");
     await expectNoAxeViolations(container);
     window.history.replaceState(null, "", "/");

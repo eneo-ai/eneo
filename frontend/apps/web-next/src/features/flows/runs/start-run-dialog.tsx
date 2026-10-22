@@ -53,6 +53,8 @@ import {
   type RunCreateRequest,
   type RunPublic
 } from "./runs-api";
+import { withRunLabel } from "./start-run-checks";
+import { RunLabelField, TemplateReadiness, useAudioLengthCheck } from "./start-run-extras";
 import { useRuntimeUploads } from "./use-runtime-uploads";
 
 type ServerProblems = {
@@ -121,6 +123,7 @@ function ContractNotices({ contract }: { contract: RunContract }) {
           collapsible={false}
         />
       ) : null}
+      <TemplateReadiness contract={contract} />
     </>
   );
 }
@@ -218,8 +221,14 @@ function StartRunForm({
     summaryRef.current?.focus();
   }
 
+  const [runLabel, setRunLabel] = useState("");
+  const screenAudio = useAudioLengthCheck((stepId, message) =>
+    setServer((current) => ({ ...current, inputs: { ...current.inputs, [stepId]: message } }))
+  );
+
   const start = useMutation({
-    mutationFn: (body: RunCreateRequest) => {
+    mutationFn: (request: RunCreateRequest) => {
+      const body = withRunLabel(request, runLabel);
       // A retried request with the same body keeps its key, so a lost
       // response cannot start the run twice; a changed body is a new run.
       const serialized = JSON.stringify(body);
@@ -366,6 +375,8 @@ function StartRunForm({
         ) : null}
       </div>
 
+      <RunLabelField value={runLabel} onChange={setRunLabel} />
+
       {fields.map((field) => (
         <RunFormFieldControl
           key={field.name}
@@ -397,7 +408,7 @@ function StartRunForm({
           message={inputMessage(input.step_id)}
           onAdd={(files) => {
             clearInputProblem(input.step_id);
-            add(input, files);
+            screenAudio(input, files, (accepted) => add(input, accepted));
           }}
           onRemove={(key) => {
             clearInputProblem(input.step_id);

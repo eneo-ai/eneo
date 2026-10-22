@@ -5,12 +5,14 @@ import { useLocale, useTranslations } from "next-intl";
 import { QuietBanner } from "@/components/astryx/banner";
 import { StatusLabel } from "@/components/composites/status-label";
 import { LongMaterialCoverage } from "../long-material-coverage";
+import { CitationSummary } from "./run-citations";
 import { formatCount, formatSeconds, stepInputFiles } from "./run-format";
 import { JsonValue } from "./run-json";
 import { flowErrorText, runErrorText } from "./run-messages";
 import { outputStructured, outputText, tokenTotal, type RunStepView } from "./run-progress";
 import { RunFiles, RunInputFiles } from "./run-files";
 import { stepStatusView } from "./run-status";
+import { StepPromptDetails } from "./run-step-details";
 import type { RunStep } from "./runs-api";
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -45,45 +47,6 @@ function StepOutput({ result }: { result: RunStep }) {
     );
   }
   return <p className="text-ax-text-secondary text-sm">{t("flow_runs_output_none")}</p>;
-}
-
-/** What the step's answer leaned on: the cited sources, as the core resolved them. */
-function StepCitations({ result }: { result: RunStep }) {
-  const t = useTranslations();
-  const summary = result.citation_summary;
-  if (!summary || summary.status === "unavailable") return null;
-  const names = summary.sources
-    .map((source) =>
-      [source.display_name ?? t("flow_runs_citation_unnamed"), source.container_label]
-        .filter(Boolean)
-        .join(" · ")
-    )
-    .filter(Boolean);
-  return (
-    <div className="flex flex-col gap-1">
-      <p className="text-ax-text text-sm font-medium">{t("flow_runs_citations_heading")}</p>
-      {summary.status === "missing_required_citations" ? (
-        <p className="text-ax-text text-sm">{t("flow_runs_citations_missing")}</p>
-      ) : summary.status === "unknown_citation_ids_present" ? (
-        <p className="text-ax-text text-sm">{t("flow_runs_citations_unknown")}</p>
-      ) : summary.status === "citations_on_without_sources" ? (
-        <p className="text-ax-text text-sm">{t("flow_runs_citations_no_sources")}</p>
-      ) : null}
-      {names.length > 0 ? (
-        <ul className="text-ax-text flex list-disc flex-col gap-0.5 pl-5 text-sm">
-          {names.map((name, index) => (
-            <li key={index}>{name}</li>
-          ))}
-        </ul>
-      ) : null}
-      {summary.sources_truncated ? (
-        <p className="text-ax-text-secondary text-xs">{t("flow_runs_citations_truncated")}</p>
-      ) : null}
-      {summary.stale_after_edit ? (
-        <p className="text-ax-text-secondary text-xs">{t("flow_runs_citations_stale")}</p>
-      ) : null}
-    </div>
-  );
 }
 
 function StepCard({ flowId, runId, step }: { flowId: string; runId: string; step: RunStepView }) {
@@ -146,7 +109,7 @@ function StepCard({ flowId, runId, step }: { flowId: string; runId: string; step
             files={result.result_files ?? []}
             label={t("flow_runs_step_files", { step: title })}
           />
-          <StepCitations result={result} />
+          <CitationSummary summary={result.citation_summary} />
         </div>
       ) : null}
       {result && (result.runtime_input_file_ids ?? []).length > 0 ? (
@@ -171,6 +134,7 @@ function StepCard({ flowId, runId, step }: { flowId: string; runId: string; step
           </div>
         </Collapsible>
       ) : null}
+      {result ? <StepPromptDetails result={result} /> : null}
     </article>
   );
 }
