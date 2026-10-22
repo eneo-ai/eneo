@@ -1749,7 +1749,7 @@ class FlowRunWebhookDeliveryPublic(BaseModel):
 
 FLOW_RUN_ERROR_PUBLIC_EXAMPLE: dict[str, Any] = {
     "schema_version": 1,
-    "code": "flow_step_timeout",
+    "code": FlowApiErrorCode.STEP_TIMEOUT.value,
     "message": "Step 2 exceeded its execution budget during provider_request.",
     "source": "executor_failed",
     "step_order": 2,

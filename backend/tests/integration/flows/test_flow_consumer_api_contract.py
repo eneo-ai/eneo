@@ -2194,10 +2194,13 @@ async def test_flow_run_list_omits_content_and_skips_enrichment_queries(
         "flow_run_step_result_files": 0,
         "flow_step_attempts": 0,
     }
-    assert len(flow_run_selects) == 1
-    assert "flow_runs.input_payload_json" not in flow_run_selects[0]
-    assert "flow_runs.output_payload_json" not in flow_run_selects[0]
-    assert "flow_runs.error_json" not in flow_run_selects[0]
+    # One read for the page, one for the per-status counts; neither reads content.
+    assert len(flow_run_selects) == 2
+    assert "group by flow_runs.status" in flow_run_selects[1]
+    for select in flow_run_selects:
+        assert "flow_runs.input_payload_json" not in select
+        assert "flow_runs.output_payload_json" not in select
+        assert "flow_runs.error_json" not in select
 
     version_one_detail_response = await client.get(
         f"/api/v1/flows/{flow['id']}/runs/{version_one_run['id']}/",
@@ -2277,6 +2280,8 @@ async def test_flow_run_detail_sanitizes_corrupt_persisted_error_json(
         "step_id": None,
         "step_order": None,
         "details": None,
+        "user_action": "Contact support with the run ID.",
+        "consumer_action": "Treat the run as failed and contact support with the run ID.",
     }
 
 
