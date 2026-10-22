@@ -63,9 +63,12 @@ function patchBodies() {
     .map((call) => call.init.body);
 }
 
-function renderEditor(flow: FlowPublic, overrides: { readOnly?: boolean } = {}) {
+function renderEditor(
+  flow: FlowPublic,
+  overrides: { readOnly?: boolean; space?: ReturnType<typeof makeSpace> } = {}
+) {
   const queryClient = testQueryClient();
-  queryClient.setQueryData(["spaces", "space-1"], makeSpace());
+  queryClient.setQueryData(["spaces", "space-1"], overrides.space ?? makeSpace());
   const onSaved = vi.fn();
   const onCancel = vi.fn();
   const view = renderInApp(
@@ -268,6 +271,63 @@ describe("FlowStepEditor", () => {
       await screen.findByText(messages.flow_editor_tools_contract_example_problem_not_object)
     ).toBeTruthy();
     expect(field.getAttribute("aria-invalid")).toBe("true");
+  });
+
+  it("names classification levels from the space when the list is refused", async () => {
+    api.routes["GET /api/v1/security-classifications/"] = () => ({
+      status: 403,
+      body: { message: "Forbidden", code: "forbidden" }
+    });
+    api.routes["POST /api/v1/flows/{id}/security-classification/preview"] = () => ({
+      body: {
+        steps: [
+          {
+            step_id: "step-1",
+            step_order: 1,
+            input_level: 1,
+            reads: [],
+            knowledge_level: null,
+            external_source_level: null,
+            model_level: 2,
+            required_model_level: 1,
+            qualifying_model_ids: ["model-1"],
+            effective_output_level: 2,
+            output_floor: 1,
+            violation: null
+          }
+        ]
+      }
+    });
+    const space = makeSpace({
+      overrides: {
+        security_classification: {
+          id: "c-1",
+          name: "Intern",
+          description: null,
+          security_level: 1
+        },
+        completion_models: [
+          {
+            id: "model-1",
+            name: "claude-haiku",
+            nickname: "Haiku 4.5",
+            security_classification: {
+              id: "c-2",
+              name: "Känslig",
+              description: null,
+              security_level: 2
+            }
+          }
+        ]
+      }
+    });
+    renderEditor(makeFlow(), { space });
+    await nameField();
+    const facts = await screen.findByText(messages.flow_step_editor_classification_facts);
+    const list = facts.closest("div")?.parentElement ?? document.body;
+    await waitFor(() => expect(list.textContent).toContain("Känslig"));
+    expect(list.textContent).toContain("Intern");
+    expect(list.textContent).not.toContain("Nivå 2");
   });
 
   it("offers no long material where the step does not let a model answer", async () => {

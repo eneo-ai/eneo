@@ -9,6 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { LoadingState } from "@/components/composites/loading-state";
 import { useSpace } from "@/features/spaces/use-space";
+import { knownClassifications, levelName } from "./classification-names";
 import { Anchor, EditorSection, problemStatus } from "./editor-fields";
 import { securityClassificationsQueryOptions } from "./editor-api";
 import { describeSaveError, type FieldProblems } from "./field-problems";
@@ -21,7 +22,7 @@ import {
   type ReviewChoice
 } from "./step-configs";
 import { reviewChoiceLabel, stepLabel } from "./step-labels";
-import type { SecurityClassification, StepClassification, StepConfig } from "./step-types";
+import type { StepClassification, StepConfig } from "./step-types";
 
 const INHERIT = "__inherit";
 const HOUR = 3600;
@@ -102,18 +103,6 @@ function Review({
   );
 }
 
-function levelName(
-  level: number | null,
-  classifications: SecurityClassification[],
-  t: ReturnType<typeof useTranslations>
-): string {
-  if (level === null) return t("flow_step_editor_classification_none");
-  return (
-    classifications.find((item) => item.security_level === level)?.name ??
-    t("flow_step_editor_classification_level", { level })
-  );
-}
-
 /**
  * The step's security classification as the core's rule judges the draft:
  * what its input carries, what its model must clear and what its result
@@ -135,9 +124,8 @@ function Classification({
   const t = useTranslations();
   const { space } = useSpace();
   const listing = useQuery(securityClassificationsQueryOptions());
-  const classifications = [...(listing.data?.items ?? [])].sort(
-    (left, right) => left.security_level - right.security_level
-  );
+  // A member the list refuses still reads the names the space carries.
+  const classifications = knownClassifications(listing.data?.items, space);
   const enabled = listing.data?.enabled ?? space.security_classification !== null;
   const facts = preview.data;
   const floor = facts?.output_floor ?? space.security_classification?.security_level ?? null;
