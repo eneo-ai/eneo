@@ -152,6 +152,12 @@ places no constraint; a present group must be non-empty. The schema and the CI
 validator reject unknown permissions, empty groups and misspelled keys. Types
 reuse the SDK's `Permission` contract.
 
+When adding or renaming a backend permission, update the permission enum in
+`releases.schema.json` too. The contract test compares it with
+`backend/src/eneo/roles/permissions.py`; CI runs that test when either file
+changes. Assign requirements to relevant news entries explicitly: a new
+permission does not classify news automatically.
+
 Check the actual feature owner before assigning requirements, not the entry's
 area. Current examples:
 
