@@ -11,7 +11,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { Token } from "@astryxdesign/core/Token";
-import { Download, Pencil, Volume2 } from "lucide-react";
+import { Download, Pencil, Undo2, Volume2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -20,6 +20,7 @@ import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { clockTime, type ShownPart, type ShownSegment, type TranscriptTarget } from "./transcript";
 import {
   nextSpeakerLabel,
+  sameCorrections,
   shownToRaw,
   withLineText,
   withoutLineText,
@@ -660,12 +661,21 @@ function OverlapReview({
   found,
   unavailable,
   multiFile,
-  onGo
+  onGo,
+  onListen,
+  unsure,
+  onConfirmAll
 }: {
   found: Overlap[];
   unavailable: boolean;
   multiFile: boolean;
   onGo: (overlap: Overlap) => void;
+  /** Plays the overlap alone; absent without audio. */
+  onListen: ((overlap: Overlap) => void) | null;
+  /** Lines whose speaker the service was unsure of and nobody has decided yet. */
+  unsure: number;
+  /** Keeps the service's speaker on every such line; absent when the transcript is read only. */
+  onConfirmAll: (() => void) | null;
 }) {
   const t = useTranslations();
   if (found.length === 0) {
@@ -710,6 +720,15 @@ function OverlapReview({
                     : t("flow_transcript_overlap_checked")
                 }
               />
+              {onListen ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<Volume2 aria-hidden="true" />}
+                  label={t("flow_transcript_overlap_listen", { time: where })}
+                  onClick={() => onListen(overlap)}
+                />
+              ) : null}
               {overlap.lines.length > 0 ? (
                 <Button
                   size="sm"
@@ -722,9 +741,21 @@ function OverlapReview({
           );
         })}
       </ol>
+      {onConfirmAll && unsure > 0 ? (
+        <div className="pt-2">
+          <Button
+            size="sm"
+            label={t("flow_transcript_overlap_confirm_all", { count: unsure })}
+            onClick={onConfirmAll}
+          />
+        </div>
+      ) : null}
     </QuietBanner>
   );
 }
+
+/** How many of the reviewer's changes "Ångra" can take back, one at a time. */
+const MAX_UNDO = 20;
 
 /** A line to hear a speaker by: theirs, said with confidence, with words in it. */
 function sampleLine(shown: readonly ShownSegment[], label: string): ShownSegment | undefined {
@@ -791,7 +822,7 @@ export function TranscriptLines({
   shown,
   sourceHash,
   multiFile,
-  editing,
+  editing: given,
   speakerReview = null,
   onUnsavedChange,
   children
@@ -814,13 +845,34 @@ export function TranscriptLines({
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
+  /**
+   * The reviewer's own changes, latest last: the set before each and the set
+   * it made. "Ångra" takes the latest back while the transcript is still as
+   * that change left it.
+   */
+  const [undoable, setUndoable] = useState<{ before: CorrectionSet; after: CorrectionSet }[]>([]);
+  const editing: LineEditing | null = given
+    ? {
+        ...given,
+        save: async (next, done) => {
+          const before = given.set;
+          const failed = await given.save(next, done);
+          if (!failed)
+            setUndoable((stack) => [...stack.slice(1 - MAX_UNDO), { before, after: next }]);
+          return failed;
+        }
+      }
+    : null;
+  const lastChange = undoable.at(-1);
+  const canUndo =
+    given !== null && lastChange !== undefined && sameCorrections(lastChange.after, given.set);
   const playback = useTranscriptPlayback({
     flowId,
     runId,
     target,
     lines: shown,
     sourceHash,
-    eagerWords: editing !== null
+    eagerWords: given !== null
   });
   const [open, setOpen] = useState<number | null>(null);
   /** The turn being edited, by its key. */
@@ -952,6 +1004,32 @@ export function TranscriptLines({
       setDirty(false);
     });
     focusEditButton(id);
+  }
+
+  /** Takes the reviewer's latest change back, as a change of its own. */
+  async function undoLast() {
+    if (!given || !lastChange || given.saving) return;
+    const failed = await given.save(lastChange.before, t("flow_transcript_undo_done"));
+    setMenuProblem(failed);
+    if (!failed) setUndoable((stack) => stack.slice(0, -1));
+  }
+
+  /** Keeps the speaker service's speaker on every line it was unsure of. */
+  async function confirmAll() {
+    if (!editing || editing.saving) return;
+    const next = shown
+      .filter((segment) => segment.unsure)
+      .reduce(
+        (set, segment) =>
+          withSpeaker(
+            set,
+            { index: segment.index, text: segment.raw, speaker: segment.speaker },
+            null,
+            { speaker: segment.speaker, decision: "confirmed" }
+          ),
+        editing.set
+      );
+    setMenuProblem(await editing.save(next, t("flow_transcript_overlap_confirmed_all")));
   }
 
   /** Gives parts (of a line or a turn) to a speaker from its badge's menu, or resets them. */
@@ -1118,6 +1196,13 @@ export function TranscriptLines({
         found={overlaps(speakerReview, shown)}
         unavailable={overlapDetectionUnavailable(speakerReview)}
         multiFile={multiFile}
+        onListen={
+          playback
+            ? (overlap) => playback.seek(overlap.fileIndex, overlap.start, overlap.end)
+            : null
+        }
+        unsure={shown.filter((segment) => segment.unsure).length}
+        onConfirmAll={editing ? () => void confirmAll() : null}
         onGo={(overlap) => {
           playback?.seek(overlap.fileIndex, overlap.start);
           const first = overlap.lines[0];
@@ -1154,6 +1239,15 @@ export function TranscriptLines({
           <ToggleButton value="turns" label={t("flow_transcript_view_turns")} />
         </ToggleButtonGroup>
         <div className="flex flex-wrap items-center gap-3">
+          {canUndo ? (
+            <Button
+              label={t("flow_transcript_undo")}
+              icon={<Undo2 aria-hidden="true" />}
+              size="sm"
+              variant="ghost"
+              onClick={() => void undoLast()}
+            />
+          ) : null}
           {corrected > 0 ? (
             <Text type="supporting">
               {t("flow_transcript_corrected_count", { count: corrected })}

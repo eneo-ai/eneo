@@ -5,7 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
-import { parseSegments, shownSegments, type TranscriptTarget } from "./transcript";
+import type { TranscriptSpeakerReview } from "./runs-api";
+import {
+  parseSegments,
+  shownSegments,
+  type TranscriptSegment,
+  type TranscriptTarget
+} from "./transcript";
 import { correctionSet, knownSpeakers, type CorrectionSet } from "./transcript-corrections";
 import { TranscriptLines } from "./transcript-lines";
 
@@ -59,9 +65,19 @@ const segments = parseSegments([
 const target: TranscriptTarget = { stepId: "step-1", stepOrder: 1, attemptNo: 1, fileIds: [] };
 
 /** The transcript with corrections saved as the reviewer makes them. */
-function Harness({ saves, audio = target }: { saves: CorrectionSet[]; audio?: TranscriptTarget }) {
-  const [set, setSet] = useState<CorrectionSet>(() => correctionSet(null, segments));
-  const shown = shownSegments(segments, {
+function Harness({
+  saves,
+  audio = target,
+  lines = segments,
+  speakerReview = null
+}: {
+  saves: CorrectionSet[];
+  audio?: TranscriptTarget;
+  lines?: TranscriptSegment[];
+  speakerReview?: TranscriptSpeakerReview | null;
+}) {
+  const [set, setSet] = useState<CorrectionSet>(() => correctionSet(null, lines));
+  const shown = shownSegments(lines, {
     occurrences: set.occurrences,
     speaker_edits: set.speakerEdits,
     speaker_names: set.names
@@ -74,9 +90,10 @@ function Harness({ saves, audio = target }: { saves: CorrectionSet[]; audio?: Tr
       shown={shown}
       sourceHash="hash-1"
       multiFile={false}
+      speakerReview={speakerReview}
       editing={{
         set,
-        speakers: knownSpeakers(segments, set.speakerEdits),
+        speakers: knownSpeakers(lines, set.speakerEdits),
         saving: false,
         save: async (next) => {
           saves.push(next);
@@ -343,6 +360,95 @@ describe("TranscriptLines", () => {
       [2, null, "unresolved"],
       [3, null, "unresolved"]
     ]);
+  });
+
+  it("takes the reviewer's latest changes back one at a time", async () => {
+    const { saves, lines } = renderLines();
+    expect(screen.queryByRole("button", { name: messages.flow_transcript_undo })).toBeNull();
+    fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 0:05" }));
+    fireEvent.change(within(lines).getByLabelText("Texten på raden 0:05"), {
+      target: { value: "Hur mår ni?" }
+    });
+    fireEvent.click(
+      within(lines).getByRole("button", { name: messages.flow_transcript_line_save })
+    );
+    fireEvent.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: messages.flow_transcript_suggest_skip
+      })
+    );
+    await waitFor(() => expect(saves).toHaveLength(1));
+    const menu = openMenu(
+      within(lines).getByRole("button", { name: "SPEAKER_01, byt talare för raden 0:10" })
+    );
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "SPEAKER_00" }));
+    await waitFor(() => expect(saves).toHaveLength(2));
+
+    fireEvent.click(await screen.findByRole("button", { name: messages.flow_transcript_undo }));
+    await waitFor(() => expect(saves).toHaveLength(3));
+    expect(saves[2]!.speakerEdits).toEqual([]);
+    expect(saves[2]!.occurrences).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_transcript_undo }));
+    await waitFor(() => expect(saves).toHaveLength(4));
+    expect(saves[3]!.occurrences).toEqual([]);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: messages.flow_transcript_undo })).toBeNull()
+    );
+  });
+
+  it("keeps the suggested speakers on every line to check at once", async () => {
+    const unsure = parseSegments([
+      {
+        segment_index: 0,
+        file_index: 0,
+        start: 0,
+        end: 4,
+        speaker: "SPEAKER_00",
+        text: "Ja, precis.",
+        overlap_ids: ["audio-1:o1"],
+        speaker_attribution: "provisional"
+      },
+      {
+        segment_index: 1,
+        file_index: 0,
+        start: 2,
+        end: 5,
+        speaker: "SPEAKER_01",
+        text: "Nej, vänta.",
+        overlap_ids: ["audio-1:o1"],
+        speaker_attribution: "provisional"
+      },
+      { segment_index: 2, file_index: 0, start: 6, end: 9, speaker: "SPEAKER_00", text: "Okej." }
+    ]);
+    const saves: CorrectionSet[] = [];
+    renderInApp(
+      <Harness
+        saves={saves}
+        lines={unsure}
+        speakerReview={{
+          files: [
+            {
+              file_index: 0,
+              overlap_detection: "available",
+              overlaps: [{ id: "audio-1:o1", start: 1.5, end: 5, detected_speaker_count: 2 }]
+            }
+          ]
+        }}
+      />
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Behåll föreslagna talare på alla 2 rader att kontrollera"
+      })
+    );
+    await waitFor(() => expect(saves).toHaveLength(1));
+    expect(
+      saves[0]!.speakerEdits.map((edit) => [edit.segment_index, edit.speaker, edit.decision])
+    ).toEqual([
+      [0, "SPEAKER_00", "confirmed"],
+      [1, "SPEAKER_01", "confirmed"]
+    ]);
+    expect(await screen.findByText(messages.flow_transcript_overlap_done)).toBeTruthy();
   });
 
   it("downloads the reviewed transcript as text", async () => {
