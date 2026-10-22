@@ -13,7 +13,6 @@ import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
-import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { focusAfterRemoval } from "@/lib/focus-after-removal";
 import { useFocusRescue } from "@/lib/focus-rescue";
@@ -83,15 +82,21 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const queryClient = useQueryClient();
   const rescue = useFocusRescue();
   const { routeId, space } = useSpace();
-  const { can } = useAppContext();
   const spaceName = useSpaceDisplayName();
   const sections = useSpaceSections();
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
   const steps = stepsInOrder(flow);
   const isPublished = flow.published_version != null;
-  const canManage = can("flows_manage");
-  const canEdit = canManage && !isPublished;
-  const canRun = isPublished && can("flows_run");
+  // What the caller may do with this flow, as the core reports it; a flag is
+  // permission, not state (a published flow still reports `can_edit`).
+  const { permissions } = flow;
+  const mayEdit = permissions.can_edit;
+  const canEdit = mayEdit && !isPublished;
+  const canPublish = permissions.can_publish;
+  // Unpublishing leads to editing only for someone who may do both.
+  const canUnpublishToEdit = canPublish && mayEdit;
+  const canRun = isPublished && permissions.can_run;
+  const canViewRuns = permissions.can_view_runs;
 
   const stepsHeadingRef = useRef<HTMLHeadingElement>(null);
   const editorRef = useRef<HTMLElement>(null);
@@ -105,9 +110,10 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const [exporting, setExporting] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<PageTab>(
+  const [chosenTab, setTab] = useState<PageTab>(
     searchParams.get("tab") === "runs" ? "runs" : "definition"
   );
+  const tab: PageTab = canViewRuns ? chosenTab : "definition";
   const tabsId = useId();
   const tabId = (id: PageTab) => `${tabsId}-tab-${id}`;
   const panelId = `${tabsId}-panel`;
@@ -322,7 +328,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const speakerOption = speakerCandidate ? speakerStepOption(speakerKinds.data) : null;
 
   const actions =
-    canManage || canRun ? (
+    mayEdit || canPublish || canRun ? (
       <div className="flex flex-wrap items-center gap-2">
         {canRun ? (
           <Button
@@ -331,13 +337,13 @@ export function FlowPage({ flowId }: { flowId: string }) {
             onClick={() => setStarting(true)}
           />
         ) : null}
-        {canManage ? (
+        {mayEdit ? (
           <Button
             label={t("flow_editor_tools_package_export")}
             onClick={() => setExporting(true)}
           />
         ) : null}
-        {canManage && isPublished ? (
+        {canPublish && isPublished ? (
           <Button
             label={t("unpublish")}
             onClick={() => setConfirmUnpublish(true)}
@@ -345,7 +351,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
             isInterruptible
           />
         ) : null}
-        {canManage && !isPublished ? (
+        {canPublish && !isPublished ? (
           <Button
             label={t("publish")}
             variant="primary"
@@ -407,30 +413,32 @@ export function FlowPage({ flowId }: { flowId: string }) {
             view !== "definition" && "max-lg:hidden"
           )}
         >
-          <TabList
-            role="tablist"
-            aria-label={t("flow_runs_tabs_label")}
-            value={tab}
-            onChange={(value) => selectTab(value as PageTab)}
-            hasDivider
-          >
-            <Tab
-              id={tabId("definition")}
-              value="definition"
-              label={t("flow_runs_tab_definition")}
-              panelId={panelId}
-            />
-            <Tab
-              id={tabId("runs")}
-              value="runs"
-              label={t("flow_runs_tab_runs")}
-              panelId={panelId}
-            />
-          </TabList>
+          {canViewRuns ? (
+            <TabList
+              role="tablist"
+              aria-label={t("flow_runs_tabs_label")}
+              value={tab}
+              onChange={(value) => selectTab(value as PageTab)}
+              hasDivider
+            >
+              <Tab
+                id={tabId("definition")}
+                value="definition"
+                label={t("flow_runs_tab_definition")}
+                panelId={panelId}
+              />
+              <Tab
+                id={tabId("runs")}
+                value="runs"
+                label={t("flow_runs_tab_runs")}
+                panelId={panelId}
+              />
+            </TabList>
+          ) : null}
           <div
-            role="tabpanel"
+            role={canViewRuns ? "tabpanel" : undefined}
             id={panelId}
-            aria-labelledby={tabId(tab)}
+            aria-labelledby={canViewRuns ? tabId(tab) : undefined}
             className="flex min-w-0 flex-col gap-6"
           >
             {tab === "runs" ? (
@@ -460,11 +468,13 @@ export function FlowPage({ flowId }: { flowId: string }) {
                     status="info"
                     title={t("flows_published_title", { version: flow.published_version ?? "" })}
                     description={
-                      canManage ? t("flows_published_description") : t("flows_published_read_only")
+                      canUnpublishToEdit
+                        ? t("flows_published_description")
+                        : t("flows_published_read_only")
                     }
                     collapsible={false}
                     endContent={
-                      canManage ? (
+                      canUnpublishToEdit ? (
                         <Button
                           label={t("flows_unpublish_to_edit")}
                           size="sm"
@@ -559,7 +569,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
           }}
         />
       ) : null}
-      {canManage ? (
+      {mayEdit ? (
         <FlowPackageExportDialog flow={flow} open={exporting} onOpenChange={setExporting} />
       ) : null}
       <ConfirmDialogControlled

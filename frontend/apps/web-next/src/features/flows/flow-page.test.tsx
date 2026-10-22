@@ -7,8 +7,9 @@ import type { Permission } from "@/lib/auth/permissions";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { makeKindOption, makeKindPlace } from "./editor/testing/fixtures";
-import { makeFlow, makeStep } from "./flow-fixtures";
+import { flowPermissions, makeFlow, makeStep } from "./flow-fixtures";
 import { flowKeys, type FlowPublic } from "./flows-api";
+import messages from "@/lib/i18n/messages/sv.json";
 import { FlowPage } from "./flow-page";
 
 type Reply = { data?: unknown; error?: unknown; response: Response };
@@ -355,19 +356,60 @@ describe("FlowPage", () => {
   });
 
   it("offers a run of a published flow to someone who may run it", async () => {
-    const published = makeFlow({ steps, published_version: 3 });
-    renderPage(published, ["flows_view", "flows_run"]);
+    const published = makeFlow({
+      steps,
+      published_version: 3,
+      permissions: flowPermissions({ can_edit: false, can_publish: false, can_delete: false })
+    });
+    renderPage(published);
     fireEvent.click(screen.getByRole("button", { name: "Kör flödet" }));
     expect(await screen.findByRole("dialog", { name: "Kör Medborgarbrev" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Avpublicera" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Avpublicera för att ändra" })).toBeNull();
+    expect(screen.getByText("Ett publicerat flöde kan inte ändras.")).toBeTruthy();
   });
 
-  it("offers no run of a draft, nor to someone who may not run flows", () => {
-    renderPage(makeFlow({ steps }), ["flows_view", "flows_manage", "flows_run"]);
+  it("offers no run of a draft, nor to someone who may not run the flow", () => {
+    renderPage(makeFlow({ steps }));
     expect(screen.queryByRole("button", { name: "Kör flödet" })).toBeNull();
     cleanup();
-    renderPage(makeFlow({ steps, published_version: 3 }), ["flows_view", "flows_manage"]);
+    renderPage(
+      makeFlow({ steps, published_version: 3, permissions: flowPermissions({ can_run: false }) })
+    );
     expect(screen.queryByRole("button", { name: "Kör flödet" })).toBeNull();
+  });
+
+  it("shows a draft read only to someone the core lets read it, whatever their role", () => {
+    const viewOnly = flowPermissions({
+      can_edit: false,
+      can_publish: false,
+      can_delete: false,
+      can_run: false,
+      can_view_runs: false
+    });
+    renderPage(makeFlow({ steps, permissions: viewOnly }), ["flows_view", "flows_manage"]);
+
+    expect(screen.getByRole("button", { name: "Visa Steg 1: Sammanfatta" })).toBeTruthy();
+    for (const name of [/Flytta/, "Publicera", "Exportera", "Lägg till steg"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    // Without the runs to read there is one view, so no tabs.
+    expect(screen.queryByRole("tab", { name: "Körningar" })).toBeNull();
+    // The chat needs edit access, so it is not asked for.
+    expect(screen.getByText(messages.flows_chat_no_access)).toBeTruthy();
+    expect(api.POST).not.toHaveBeenCalledWith(
+      "/api/v1/flows/{id}/authoring-chat/",
+      expect.anything()
+    );
+  });
+
+  it("offers publishing by the flag, not by role", () => {
+    renderPage(makeFlow({ steps, permissions: flowPermissions({ can_publish: false }) }));
+    expect(screen.queryByRole("button", { name: "Publicera" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Flytta ner Steg 1: Sammanfatta" })).toBeTruthy();
+    cleanup();
+    renderPage(makeFlow({ steps }), ["flows_view"]);
+    expect(screen.getByRole("button", { name: "Publicera" })).toBeTruthy();
   });
 
   it("lists the flow's runs in their own tab and remembers it in the address", async () => {
