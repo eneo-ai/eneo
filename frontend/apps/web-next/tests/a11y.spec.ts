@@ -555,6 +555,28 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
+    test("admin flow settings", async ({ page }) => {
+      await page.goto("/admin");
+      const flowsLink = page
+        .getByRole("navigation", { name: /^Administration$/ })
+        .getByRole("link", { name: /^(Flöden|Flows)$/ });
+      test.skip(
+        (await flowsLink.count()) === 0,
+        "The tenant's flows_core gate is off in this stack, so /admin/flow-settings 404s."
+      );
+
+      await scan(page, "/admin/flow-settings", async () => {
+        await expect(
+          page.getByRole("heading", { level: 1, name: /^(Flöden|Flows)$/ })
+        ).toBeVisible();
+        await expect(
+          page.getByRole("switch", {
+            name: /^(Tillåt nya steg som körs per fil|Allow new steps that run once per file)/
+          })
+        ).toBeVisible();
+      });
+    });
+
     test("account", async ({ page }) => {
       await scan(page, "/account", async () => {
         await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
