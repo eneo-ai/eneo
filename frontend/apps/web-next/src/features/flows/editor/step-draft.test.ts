@@ -190,9 +190,36 @@ describe("classificationPreviewRequest", () => {
       ["step-1", null],
       ["step-2", 3]
     ]);
-    // The prompt plays no part in the rule; knowledge does.
+    // Prose in the prompt plays no part in the rule; knowledge does.
     expect(request.assistants).toEqual([
       { assistant_id: "assistant-2", update: { websites: [{ id: "w1" }] } }
+    ]);
+  });
+
+  it("sends the references a drafted prompt reads, as the rule reads them", () => {
+    const flow = makeFlow({ steps: [makeStep()] });
+    const saved = { ...assistantConfigOf(makeAssistant()), prompt: "Läs {{step_1.output.text}}." };
+    const request = (prompt: string) =>
+      classificationPreviewRequest({
+        flow,
+        stepId: "step-1",
+        draft: stepConfigOf(flow.steps[0]!),
+        assistantId: "assistant-1",
+        assistant: { ...saved, prompt },
+        savedAssistant: saved
+      }).assistants;
+
+    expect(request("Läs noga {{ step_1.output.text }} och svara.")).toEqual([]);
+    expect(request("Läs {{step_1.output.text}} och {{flow_input.diarienummer}}.")).toEqual([
+      {
+        assistant_id: "assistant-1",
+        update: {
+          prompt: { text: "{{step_1.output.text}} {{flow_input.diarienummer}}", description: null }
+        }
+      }
+    ]);
+    expect(request("Svara kort.")).toEqual([
+      { assistant_id: "assistant-1", update: { prompt: { text: "", description: null } } }
     ]);
   });
 });

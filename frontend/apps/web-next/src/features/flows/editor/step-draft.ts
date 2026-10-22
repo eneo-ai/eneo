@@ -2,6 +2,7 @@ import {
   filterSupportedKwargs,
   type ModelWithKwargs
 } from "@/features/assistants/editor/model-kwargs";
+import { tokensOf } from "../flow-steps";
 import { readRuntimeInput } from "./step-configs";
 import {
   EDITABLE_STEP_FIELDS,
@@ -152,10 +153,19 @@ function updateRequestOf(
   };
 }
 
+/** The references a prompt reads, as a text of them alone. */
+function promptReads(prompt: string): string {
+  return tokensOf(prompt)
+    .map((token) => `{{${token}}}`)
+    .join(" ");
+}
+
 /**
  * The classification preview of the draft: every step as saved with this
- * step's draft in place, and the assistant's model and knowledge as drafted.
- * The prompt does not take part in the rule, so typing it asks nothing.
+ * step's draft in place, and the assistant's model, knowledge and prompt as
+ * drafted. The rule reads the prompt only for the steps it refers to, so the
+ * preview sends those references alone: typing prose asks nothing, a new or
+ * removed reference asks again.
  */
 export function classificationPreviewRequest(params: {
   flow: FlowPublic;
@@ -171,6 +181,10 @@ export function classificationPreviewRequest(params: {
   );
   const update: AssistantUpdate = {};
   if (assistant && savedAssistant) {
+    const reads = promptReads(assistant.prompt);
+    if (reads !== promptReads(savedAssistant.prompt)) {
+      update.prompt = { text: reads, description: null };
+    }
     if (
       assistant.completion_model_id &&
       assistant.completion_model_id !== savedAssistant.completion_model_id
