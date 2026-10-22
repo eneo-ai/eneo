@@ -513,7 +513,7 @@ describe("FlowRunPage", () => {
 
       const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
       expect(within(lines).getByText("1:05")).toBeTruthy();
-      expect(within(lines).getByText("SPEAKER_01:")).toBeTruthy();
+      expect(within(lines).getByText("SPEAKER_01")).toBeTruthy();
       await expectNoAxeViolations(container);
 
       fireEvent.change(screen.getByLabelText("Namn för SPEAKER_00"), { target: { value: "Anna" } });
@@ -589,7 +589,9 @@ describe("FlowRunPage", () => {
       // The word playing is marked for the eye only, once the word timings came.
       await waitFor(() => {
         fireEvent.timeUpdate(audio);
-        expect(within(playing).getByText("Tack.").className).toContain("bg-ax-accent-muted");
+        expect(within(playing.closest("li")!).getByText("Tack.").className).toContain(
+          "bg-ax-accent-muted"
+        );
       });
       expect(container.querySelector("[aria-live] [data-word]")).toBeNull();
       await expectNoAxeViolations(container);

@@ -3,15 +3,17 @@
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { Heading } from "@astryxdesign/core/Heading";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
+import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { Token } from "@astryxdesign/core/Token";
 import { Pencil } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { clockTime, type ShownSegment, type TranscriptTarget } from "./transcript";
@@ -26,6 +28,17 @@ import {
 import { useTranscriptPlayback } from "./transcript-player";
 import { textRuns, type PlacedWord, type TextRun } from "./transcript-playback";
 import { overlapDetectionUnavailable, overlaps, type Overlap } from "./transcript-overlaps";
+import { partAttributes, selectedSpans, type SelectedSpan } from "./transcript-selection";
+import { SelectionToolbar } from "./transcript-selection-toolbar";
+import { SpeakerBadge } from "./transcript-speakers";
+import { SuggestionsDialog } from "./transcript-suggestions-dialog";
+import {
+  suggestionsFor,
+  withSuggestions,
+  type Candidate,
+  type Suggestions
+} from "./transcript-suggestions";
+import { transcriptTurns, type Turn } from "./transcript-turns";
 import type { TranscriptSpeakerReview } from "./runs-api";
 
 /** What editing a transcript's lines needs: the saved set, and a save that says what went wrong. */
@@ -39,14 +52,12 @@ export type LineEditing = {
 };
 
 type Translator = ReturnType<typeof useTranslations>;
+type View = "lines" | "turns";
 
-function lineTime(segment: ShownSegment, multiFile: boolean, t: Translator): string {
+function placeTime(fileIndex: number, start: number, multiFile: boolean, t: Translator): string {
   return multiFile
-    ? t("flow_runs_transcript_time_in_file", {
-        file: segment.fileIndex + 1,
-        time: clockTime(segment.start)
-      })
-    : clockTime(segment.start);
+    ? t("flow_runs_transcript_time_in_file", { file: fileIndex + 1, time: clockTime(start) })
+    : clockTime(start);
 }
 
 const NEW_SPEAKER = "__new__";
@@ -203,17 +214,23 @@ function SpeakerEditor({
 
 /**
  * Corrects one line: its text, saved as a correction of the raw text (which
- * stays), and who said it.
+ * stays), and who said it. A correction of a word or a name that the
+ * transcript likely says elsewhere too is offered for those places first.
  */
 function LineEditor({
   segment,
   time,
   editing,
+  lines,
+  onSuggest,
   onClose
 }: {
   segment: ShownSegment;
   time: string;
   editing: LineEditing;
+  /** Every line's raw text, where the same correction may apply. */
+  lines: readonly { index: number; text: string }[];
+  onSuggest: (next: CorrectionSet, suggestions: Suggestions) => void;
   onClose: () => void;
 }) {
   const t = useTranslations();
@@ -248,10 +265,11 @@ function LineEditor({
             onClose();
             return;
           }
-          void save(
-            withLineText(editing.set, { index: segment.index, text: segment.raw }, text),
-            t("flow_transcript_line_saved")
-          );
+          const line = { index: segment.index, text: segment.raw };
+          const next = withLineText(editing.set, line, text);
+          const offer = suggestionsFor(next, line, text, lines);
+          if (offer) onSuggest(next, offer);
+          else void save(next, t("flow_transcript_line_saved"));
         }}
       >
         <TextArea
@@ -303,61 +321,119 @@ function LineEditor({
   );
 }
 
-/** The speakers and words of a shown line: one part, or one per speaker when part of it moved. */
+/** Where each part starts in its line's corrected text: the parts follow one another. */
+function partStarts(parts: readonly { text: string }[]): number[] {
+  return parts.reduce<number[]>(
+    (starts, part, index) => [
+      ...starts,
+      index === 0 ? 0 : starts[index - 1]! + parts[index - 1]!.text.length
+    ],
+    []
+  );
+}
+
+function Unresolved() {
+  const t = useTranslations();
+  return <Token size="sm" color="orange" label={t("flow_transcript_speaker_unresolved")} />;
+}
+
+/**
+ * The speakers and words of a shown line: one part, or one per speaker when
+ * part of it moved. Each part's text carries its anchors, so text marked in
+ * it maps back to the line; a placed word carries where it plays from.
+ */
 function LineText({
   segment,
   runs,
+  words,
   active,
   activeWord
 }: {
   segment: ShownSegment;
   runs: TextRun[] | null;
+  words: readonly PlacedWord[] | undefined;
   active: boolean;
   activeWord: number;
 }) {
-  const t = useTranslations();
-  const unresolved = (
-    <Token size="sm" color="orange" label={t("flow_transcript_speaker_unresolved")} />
-  );
   if (segment.parts.length > 1) {
+    const starts = partStarts(segment.parts);
     return (
       <>
         {segment.parts.map((part, index) => (
           <span key={index}>
             {index > 0 ? " " : null}
-            <span className="font-semibold">
-              {part.name ?? part.speaker ?? t("flow_runs_transcript_unknown_speaker")}:
-            </span>{" "}
-            {part.decision === "unresolved" ? <>{unresolved} </> : null}
-            {part.text.trim()}
+            <SpeakerBadge label={part.speaker} name={part.name} />{" "}
+            {part.decision === "unresolved" ? (
+              <>
+                <Unresolved />{" "}
+              </>
+            ) : null}
+            <span {...partAttributes(segment.index, starts[index]!)}>{part.text}</span>
           </span>
         ))}
       </>
     );
   }
-  const speaker = segment.name ?? segment.label ?? t("flow_runs_transcript_unknown_speaker");
   return (
     <>
-      <span className="font-semibold">{speaker}:</span>{" "}
-      {segment.decision === "unresolved" || segment.unsure ? <>{unresolved} </> : null}
-      {runs
-        ? runs.map((run, index) =>
-            run.word === null ? (
-              <span key={index}>{run.text}</span>
-            ) : (
-              <span
-                key={index}
-                data-word={run.word}
-                className={
-                  active && run.word === activeWord ? "bg-ax-accent-muted rounded-sm" : undefined
-                }
-              >
-                {run.text}
-              </span>
-            )
-          )
-        : segment.text}
+      <SpeakerBadge label={segment.label} name={segment.name} />{" "}
+      {segment.decision === "unresolved" || segment.unsure ? (
+        <>
+          <Unresolved />{" "}
+        </>
+      ) : null}
+      <span {...partAttributes(segment.index, 0)}>
+        {runs
+          ? runs.map((run, index) => {
+              const word = run.word === null ? undefined : words?.[run.word];
+              return word === undefined ? (
+                <span key={index}>{run.text}</span>
+              ) : (
+                <span
+                  key={index}
+                  data-word={run.word}
+                  data-seek={word.start}
+                  data-file={segment.fileIndex}
+                  className={
+                    active && run.word === activeWord
+                      ? "bg-ax-accent-muted cursor-pointer rounded-sm"
+                      : "cursor-pointer"
+                  }
+                >
+                  {run.text}
+                </span>
+              );
+            })
+          : segment.text}
+      </span>
     </>
+  );
+}
+
+/** Plays from a line or a turn; its accessible name says so before the time. */
+function TimeButton({
+  time,
+  active,
+  onPlay
+}: {
+  time: string;
+  active: boolean;
+  onPlay: (() => void) | null;
+}) {
+  const t = useTranslations();
+  if (!onPlay) {
+    return <span className="text-ax-text-secondary text-xs tabular-nums sm:pt-0.5">{time}</span>;
+  }
+  return (
+    <button
+      type="button"
+      aria-current={active ? "time" : undefined}
+      className="text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text focus-visible:outline-ring rounded-ax-inner min-h-6 self-start px-1 text-left text-xs tabular-nums outline-none focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+      onClick={onPlay}
+    >
+      <span className="sr-only">{t("flow_transcript_play_from")} </span>
+      {time}
+    </button>
   );
 }
 
@@ -372,7 +448,8 @@ function SegmentLine({
   editing,
   isEditing,
   onEdit,
-  onCloseEditor
+  editor,
+  toolbar
 }: {
   segment: ShownSegment;
   multiFile: boolean;
@@ -386,59 +463,48 @@ function SegmentLine({
   editing: LineEditing | null;
   isEditing: boolean;
   onEdit: () => void;
-  onCloseEditor: () => void;
+  editor: React.ReactNode;
+  /** The toolbar for text marked up to this line. */
+  toolbar: React.ReactNode;
 }) {
   const t = useTranslations();
-  const time = lineTime(segment, multiFile, t);
+  const time = placeTime(segment.fileIndex, segment.start, multiFile, t);
   // Words are placed in the raw text: a corrected or split line is marked as a whole.
   const runs =
     words && !segment.corrected && segment.parts.length === 1
       ? textRuns(segment.text, words)
       : null;
-  const body = (
-    <>
-      <span className="text-ax-text-secondary text-xs tabular-nums sm:pt-0.5">
-        {onSeek ? <span className="sr-only">{t("flow_transcript_play_from")} </span> : null}
-        {time}
-      </span>
-      <span className="text-ax-text text-sm break-words">
-        <LineText segment={segment} runs={runs} active={active} activeWord={activeWord} />
-        {segment.corrected ? (
-          <>
-            {" "}
-            <Token size="sm" label={t("flow_transcript_line_corrected")} />
-          </>
-        ) : null}
-        {segment.overlapIds?.length ? (
-          <>
-            {" "}
-            <Token size="sm" color="gray" label={t("flow_transcript_overlap_line")} />
-          </>
-        ) : null}
-      </span>
-    </>
-  );
-  const layout = "grid gap-x-3 gap-y-0.5 py-1.5 sm:grid-cols-[minmax(6rem,max-content)_1fr]";
   return (
     <li id={id} className={active ? "bg-ax-selected rounded-ax-inner" : undefined}>
       <div className="flex items-start gap-1">
-        {onSeek ? (
-          <button
-            type="button"
-            aria-current={active ? "time" : undefined}
-            className={`${layout} hover:bg-ax-hover focus-visible:outline-ring rounded-ax-inner min-w-0 flex-1 px-1 text-left outline-none focus-visible:outline-2 focus-visible:outline-offset-2`}
-            onClick={(event) => {
-              // A click on a word plays from that word; the keyboard plays the line.
-              const word = (event.target as HTMLElement).closest<HTMLElement>("[data-word]");
-              const placed = word ? words?.[Number(word.dataset.word)] : undefined;
-              onSeek(placed ? placed.start : segment.start);
-            }}
-          >
-            {body}
-          </button>
-        ) : (
-          <div className={`${layout} min-w-0 flex-1 px-1`}>{body}</div>
-        )}
+        <div className="grid min-w-0 flex-1 gap-x-3 gap-y-0.5 px-1 py-1.5 sm:grid-cols-[minmax(6rem,max-content)_1fr]">
+          <TimeButton
+            time={time}
+            active={active}
+            onPlay={onSeek ? () => onSeek(segment.start) : null}
+          />
+          <span className="text-ax-text text-sm break-words">
+            <LineText
+              segment={segment}
+              runs={runs}
+              words={words}
+              active={active}
+              activeWord={activeWord}
+            />
+            {segment.corrected ? (
+              <>
+                {" "}
+                <Token size="sm" label={t("flow_transcript_line_corrected")} />
+              </>
+            ) : null}
+            {segment.overlapIds?.length ? (
+              <>
+                {" "}
+                <Token size="sm" color="gray" label={t("flow_transcript_overlap_line")} />
+              </>
+            ) : null}
+          </span>
+        </div>
         {editing && !isEditing ? (
           <span id={`${id}-edit`} className="shrink-0">
             <IconButton
@@ -451,10 +517,78 @@ function SegmentLine({
           </span>
         ) : null}
       </div>
-      {editing && isEditing ? (
-        <LineEditor segment={segment} time={time} editing={editing} onClose={onCloseEditor} />
-      ) : null}
+      {editor}
+      {toolbar}
     </li>
+  );
+}
+
+/**
+ * The transcript as speaker turns: what one speaker said in a row, as one
+ * paragraph, each playable from its start. Text is corrected in the line
+ * view; speakers can be given to marked text here too.
+ */
+function TurnList({
+  turns,
+  multiFile,
+  activeLine,
+  onSeek,
+  toolbarAt,
+  toolbar
+}: {
+  turns: readonly Turn[];
+  multiFile: boolean;
+  activeLine: number;
+  onSeek: ((fileIndex: number, time: number) => void) | null;
+  /** The turn the marked text ends in, which shows the toolbar. */
+  toolbarAt: number;
+  toolbar: React.ReactNode;
+}) {
+  const t = useTranslations();
+  return (
+    <ol aria-label={t("flow_transcript_turns_list")} className="m-0 flex flex-col gap-1 p-0">
+      {turns.map((turn, index) => {
+        const active = turn.parts.some((part) => part.position === activeLine);
+        return (
+          <li
+            key={`${turn.parts[0]!.segmentIndex}:${turn.parts[0]!.shownStart}`}
+            className={active ? "bg-ax-selected rounded-ax-inner" : undefined}
+          >
+            <div className="flex flex-col gap-1 px-1 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <TimeButton
+                  time={placeTime(turn.fileIndex, turn.start, multiFile, t)}
+                  active={active}
+                  onPlay={onSeek ? () => onSeek(turn.fileIndex, turn.start) : null}
+                />
+                <SpeakerBadge label={turn.speaker} name={turn.name} />
+                {turn.marker ? <Unresolved /> : null}
+              </div>
+              <p className="text-ax-text m-0 text-sm break-words">
+                {turn.parts.map((part, at) => {
+                  const previous = turn.parts[at - 1];
+                  const gap = previous && !/\s$/.test(previous.text) && !/^\s/.test(part.text);
+                  return (
+                    <span key={`${part.segmentIndex}:${part.shownStart}`}>
+                      {gap ? " " : null}
+                      <span
+                        {...partAttributes(part.segmentIndex, part.shownStart)}
+                        className={
+                          part.position === activeLine ? "bg-ax-accent-muted rounded-sm" : undefined
+                        }
+                      >
+                        {part.text}
+                      </span>
+                    </span>
+                  );
+                })}
+              </p>
+            </div>
+            {index === toolbarAt ? toolbar : null}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 
@@ -537,7 +671,8 @@ function OverlapReview({
  * The lines of one transcript, with its audio player above them. Someone who
  * may correct the transcript corrects a line's text in place; the line then
  * shows that it is corrected and what it said before, and the correction can
- * be reverted.
+ * be reverted. Text marked in the transcript can be given to a speaker, and
+ * the transcript reads as lines or as speaker turns.
  */
 export function TranscriptLines({
   flowId,
@@ -562,10 +697,90 @@ export function TranscriptLines({
   children?: React.ReactNode;
 }) {
   const t = useTranslations();
+  const announce = useAnnounce();
   const playback = useTranscriptPlayback({ flowId, runId, target, lines: shown, sourceHash });
   const [open, setOpen] = useState<number | null>(null);
-  const listRef = useRef<HTMLOListElement>(null);
+  const [view, setView] = useState<View>("lines");
+  const [suggesting, setSuggesting] = useState<{
+    next: CorrectionSet;
+    suggestions: Suggestions;
+    lineId: string;
+    problem: string | null;
+  } | null>(null);
+  const [picked, setPicked] = useState<SelectedSpan[] | null>(null);
+  const [pickProblem, setPickProblem] = useState<string | null>(null);
+  const area = useRef<HTMLDivElement>(null);
+  const toolbarBox = useRef<HTMLDivElement>(null);
   const corrected = shown.filter((segment) => segment.corrected).length;
+  const turns = view === "turns" ? transcriptTurns(shown) : [];
+  const byIndex = new Map(shown.map((segment) => [segment.index, segment]));
+  const rawLines = shown.map((segment) => ({ index: segment.index, text: segment.raw }));
+
+  /** What the document listeners read: the latest lines, corrections and player. */
+  const latest = useRef({ shown, editing, seek: playback?.seek });
+  useEffect(() => {
+    latest.current = { shown, editing, seek: playback?.seek };
+  });
+
+  // Text marked in the transcript: the toolbar acts on it once it is inside one transcript.
+  const markable = editing !== null;
+  useEffect(() => {
+    if (!markable) return;
+    let had = false;
+    const onChange = () => {
+      const box = area.current;
+      const selection = document.getSelection();
+      const range =
+        selection && selection.rangeCount > 0 && !selection.isCollapsed
+          ? selection.getRangeAt(0)
+          : null;
+      const inside =
+        range && box?.contains(range.startContainer) && box.contains(range.endContainer);
+      const spans =
+        inside && range && box
+          ? selectedSpans(box, range, (index) => {
+              const { shown: lines, editing: current } = latest.current;
+              const line = lines.find((item) => item.index === index);
+              return line
+                ? {
+                    raw: line.raw,
+                    occurrences: (current?.set.occurrences ?? []).filter(
+                      (item) => item.segment_index === index
+                    )
+                  }
+                : null;
+            })
+          : [];
+      if (spans.length === 0) {
+        // A keyboard user who moved into the toolbar keeps it.
+        if (toolbarBox.current?.contains(document.activeElement)) return;
+        had = false;
+        setPicked(null);
+        setPickProblem(null);
+        return;
+      }
+      if (!had) announce(t("flow_transcript_selection_announce"));
+      had = true;
+      setPicked(spans);
+    };
+    document.addEventListener("selectionchange", onChange);
+    return () => document.removeEventListener("selectionchange", onChange);
+  }, [markable, announce, t]);
+
+  // A click on a word (not the end of marking text) plays from that word. The
+  // pointer's shortcut: the keyboard plays a line from its time.
+  useEffect(() => {
+    const box = area.current;
+    if (!box) return;
+    const onClick = (event: MouseEvent) => {
+      if (!document.getSelection()?.isCollapsed) return;
+      const word = (event.target as Element | null)?.closest<HTMLElement>("[data-seek]");
+      if (!word || !box.contains(word)) return;
+      latest.current.seek?.(Number(word.dataset.file), Number(word.dataset.seek));
+    };
+    box.addEventListener("click", onClick);
+    return () => box.removeEventListener("click", onClick);
+  }, []);
 
   function lineId(position: number, segment: ShownSegment) {
     return playback?.lineId(position) ?? `${target.stepId}-line-${segment.index}`;
@@ -576,11 +791,90 @@ export function TranscriptLines({
     document.getElementById(id)?.querySelector("textarea")?.focus();
   }
 
+  function focusEditButton(id: string) {
+    area.current?.querySelector<HTMLElement>(`[id="${id}-edit"] button`)?.focus();
+  }
+
   function closeEditor(id: string) {
     flushSync(() => setOpen(null));
     // Back to the line's edit button.
-    listRef.current?.querySelector<HTMLElement>(`[id="${id}-edit"] button`)?.focus();
+    focusEditButton(id);
   }
+
+  async function saveSuggested(chosen: Candidate[]) {
+    if (!editing || !suggesting) return;
+    const next = withSuggestions(suggesting.next, suggesting.suggestions, chosen);
+    const failed = await editing.save(
+      next,
+      chosen.length > 0
+        ? t("flow_transcript_suggest_saved", { count: chosen.length + 1 })
+        : t("flow_transcript_line_saved")
+    );
+    if (failed) {
+      setSuggesting((current) => (current ? { ...current, problem: failed } : current));
+      return;
+    }
+    const id = suggesting.lineId;
+    flushSync(() => setSuggesting(null));
+    focusEditButton(id);
+  }
+
+  async function assign(speaker: string | null) {
+    if (!editing || !picked || editing.saving) return;
+    let next = editing.set;
+    for (const span of picked) {
+      const line = byIndex.get(span.segmentIndex);
+      if (!line) continue;
+      next = withSpeaker(
+        next,
+        { index: line.index, text: line.raw, speaker: line.speaker },
+        { start: span.start, end: span.end },
+        { speaker, decision: speaker === null ? "unresolved" : "confirmed" }
+      );
+    }
+    const failed = await editing.save(next, t("flow_transcript_speaker_saved"));
+    if (failed) {
+      setPickProblem(failed);
+      return;
+    }
+    closeToolbar();
+  }
+
+  function closeToolbar() {
+    const focusWasInside = toolbarBox.current?.contains(document.activeElement);
+    const last = picked?.at(-1);
+    document.getSelection()?.removeAllRanges();
+    flushSync(() => {
+      setPicked(null);
+      setPickProblem(null);
+    });
+    if (focusWasInside && last) {
+      const position = shown.findIndex((segment) => segment.index === last.segmentIndex);
+      const line =
+        position >= 0 ? document.getElementById(lineId(position, shown[position]!)) : null;
+      line?.querySelector<HTMLElement>("button")?.focus();
+    }
+  }
+
+  const lastPicked = picked?.at(-1)?.segmentIndex;
+  const toolbar =
+    editing && picked ? (
+      <div ref={toolbarBox}>
+        <SelectionToolbar
+          lines={new Set(picked.map((span) => span.segmentIndex)).size}
+          speakers={editing.speakers}
+          names={editing.set.names}
+          newLabel={nextSpeakerLabel(editing.speakers)}
+          saving={editing.saving}
+          problem={pickProblem}
+          onChoose={(speaker) => void assign(speaker)}
+          onClose={closeToolbar}
+        />
+      </div>
+    ) : null;
+  const seek = playback
+    ? (fileIndex: number, time: number) => playback.seek(fileIndex, time)
+    : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -593,42 +887,111 @@ export function TranscriptLines({
           playback?.seek(overlap.fileIndex, overlap.start);
           const first = overlap.lines[0];
           if (first === undefined) return;
+          if (view !== "lines") flushSync(() => setView("lines"));
           const line = document.getElementById(lineId(first, shown[first]!));
           line?.scrollIntoView({ block: "nearest" });
           line?.querySelector<HTMLElement>("button")?.focus();
         }}
       />
       {playback?.player}
-      {corrected > 0 ? (
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <ToggleButtonGroup
+          label={t("flow_transcript_view_label")}
+          value={view}
+          onChange={(next) => {
+            if (next === "lines" || next === "turns") {
+              setOpen(null);
+              setPicked(null);
+              setView(next);
+            }
+          }}
+          size="sm"
+        >
+          <ToggleButton value="lines" label={t("flow_transcript_view_lines")} />
+          <ToggleButton value="turns" label={t("flow_transcript_view_turns")} />
+        </ToggleButtonGroup>
+        {corrected > 0 ? (
+          <Text type="supporting">
+            {t("flow_transcript_corrected_count", { count: corrected })}
+          </Text>
+        ) : null}
+      </div>
+      {editing ? (
         <Text type="supporting" as="p">
-          {t("flow_transcript_corrected_count", { count: corrected })}
+          {view === "turns"
+            ? t("flow_transcript_view_turns_hint")
+            : t("flow_transcript_selection_intro")}
         </Text>
       ) : null}
-      <ol
-        ref={listRef}
-        aria-label={t("flow_runs_transcript_lines")}
-        className="m-0 flex flex-col p-0"
-      >
-        {shown.map((segment, position) => {
-          const id = lineId(position, segment);
-          return (
-            <SegmentLine
-              key={segment.index}
-              id={id}
-              segment={segment}
-              multiFile={multiFile}
-              active={playback?.activeLine === position}
-              activeWord={playback?.activeLine === position ? playback.activeWord : -1}
-              words={playback?.words.get(segment.index)}
-              onSeek={playback ? (time) => playback.seek(segment.fileIndex, time) : null}
-              editing={editing}
-              isEditing={open === segment.index}
-              onEdit={() => openEditor(id, segment.index)}
-              onCloseEditor={() => closeEditor(id)}
-            />
-          );
-        })}
-      </ol>
+      <div ref={area}>
+        {view === "turns" ? (
+          <TurnList
+            turns={turns}
+            multiFile={multiFile}
+            activeLine={playback?.activeLine ?? -1}
+            onSeek={seek}
+            toolbarAt={
+              lastPicked === undefined
+                ? -1
+                : turns.findLastIndex((turn) =>
+                    turn.parts.some((part) => part.segmentIndex === lastPicked)
+                  )
+            }
+            toolbar={toolbar}
+          />
+        ) : (
+          <ol aria-label={t("flow_runs_transcript_lines")} className="m-0 flex flex-col p-0">
+            {shown.map((segment, position) => {
+              const id = lineId(position, segment);
+              const isEditing = open === segment.index;
+              return (
+                <SegmentLine
+                  key={segment.index}
+                  id={id}
+                  segment={segment}
+                  multiFile={multiFile}
+                  active={playback?.activeLine === position}
+                  activeWord={playback?.activeLine === position ? playback.activeWord : -1}
+                  words={playback?.words.get(segment.index)}
+                  onSeek={seek ? (time) => seek(segment.fileIndex, time) : null}
+                  editing={editing}
+                  isEditing={isEditing}
+                  onEdit={() => openEditor(id, segment.index)}
+                  editor={
+                    editing && isEditing ? (
+                      <LineEditor
+                        segment={segment}
+                        time={placeTime(segment.fileIndex, segment.start, multiFile, t)}
+                        editing={editing}
+                        lines={rawLines}
+                        onSuggest={(next, suggestions) => {
+                          flushSync(() => {
+                            setOpen(null);
+                            setSuggesting({ next, suggestions, lineId: id, problem: null });
+                          });
+                        }}
+                        onClose={() => closeEditor(id)}
+                      />
+                    ) : null
+                  }
+                  toolbar={segment.index === lastPicked ? toolbar : null}
+                />
+              );
+            })}
+          </ol>
+        )}
+      </div>
+      {editing && suggesting ? (
+        <SuggestionsDialog
+          suggestions={suggesting.suggestions}
+          lines={byIndex}
+          multiFile={multiFile}
+          saving={editing.saving}
+          problem={suggesting.problem}
+          onConfirm={(chosen) => void saveSuggested(chosen)}
+          onSkip={() => void saveSuggested([])}
+        />
+      ) : null}
     </div>
   );
 }
