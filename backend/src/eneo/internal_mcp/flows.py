@@ -353,7 +353,9 @@ async def update_step(
 ) -> CallToolResult:
     """Patch one saved step and optionally its assistant in one revision. Use core
     field names. Renaming the step (user_description) rewrites the reads of its
-    old name in every step."""
+    old name in every step. When other steps share the step's assistant, the
+    step gets its own copy with assistant_changes and the others keep theirs;
+    the result names the step's assistant_id."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_models import (
@@ -384,7 +386,11 @@ async def update_step(
             []
             if assistant_changes is None
             else [
-                {"assistant_id": str(step.assistant_id), "changes": assistant_changes}
+                {
+                    "assistant_id": str(step.assistant_id),
+                    "step_id": str(step_id),
+                    "changes": assistant_changes,
+                }
             ]
         )
         updated = await apply_editor_update(
@@ -400,8 +406,13 @@ async def update_step(
             ),
             container,
         )
+        saved_step = next(item for item in updated.steps if item.id == step_id)
         return page_result(
-            {"saved": True, "step_id": str(step_id)},
+            {
+                "saved": True,
+                "step_id": str(step_id),
+                "assistant_id": str(saved_step.assistant_id),
+            },
             flow_id=chat.flow_id,
             revision=updated.draft_revision,
         )

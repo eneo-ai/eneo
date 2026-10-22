@@ -7,6 +7,7 @@ one path. Callers own a transaction; exceptions must reach its context manager.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import Any, cast
 from uuid import UUID
 
@@ -27,6 +28,7 @@ from eneo.flows.api.flow_definition_access import (
 )
 from eneo.flows.api.flow_models import (
     FlowCreateRequest,
+    FlowEditorAssistantChange,
     FlowEditorStepPatch,
     FlowEditorUpdateRequest,
     FlowPublic,
@@ -379,7 +381,10 @@ async def apply_editor_update(
     )
     audit = _AuditEntries(container)
     user = container.user()
+    copies = _copy_on_write_changes(update, access.flow.steps)
     for change in update.assistants:
+        if change in copies:
+            continue
         assistant, _ = await service.update_reserved_flow_assistant(
             reservation=reservation,
             assistant_id=change.assistant_id,
@@ -458,6 +463,20 @@ async def apply_editor_update(
         )
     else:
         placed = [PlacedStep(step=step, saved=step) for step in access.flow.steps]
+    if placed is not None:
+        # A step that gets its own copy of a shared assistant reads the
+        # prompt the change gives the copy, not the shared one.
+        copied_prompts = {
+            change.step_id
+            for change in copies
+            if "prompt" in change.changes.model_fields_set
+        }
+        placed = [
+            replace(item, prompt_written=True)
+            if item.saved is not None and item.saved.id in copied_prompts
+            else item
+            for item in placed
+        ]
     structure = await _follow_reads(
         placed=placed,
         saved=access.flow,
@@ -465,7 +484,7 @@ async def apply_editor_update(
         rewritten_prompts=frozenset(
             change.assistant_id
             for change in update.assistants
-            if "prompt" in change.changes.model_fields_set
+            if change not in copies and "prompt" in change.changes.model_fields_set
         ),
         reservation=reservation,
         container=container,
@@ -475,9 +494,20 @@ async def apply_editor_update(
     if (
         placed is not None
         and structure is not None
-        and (replaces_steps or edits_steps or _rewrites_steps(placed, structure.steps))
+        and (
+            replaces_steps
+            or edits_steps
+            or copies
+            or _rewrites_steps(placed, structure.steps)
+        )
     ):
-        steps_override = structure.steps
+        steps_override = await _give_steps_their_copies(
+            structure,
+            copies=copies,
+            reservation=reservation,
+            container=container,
+            audit=audit,
+        )
     # With no step edit, explicitly retain saved rows. This also validates the
     # updated assistant against its final step configuration, without cleaning
     # inactive settings the editor never changed.
@@ -500,6 +530,88 @@ async def apply_editor_update(
     )
     await audit.log()
     return updated
+
+
+def _copy_on_write_changes(
+    update: "FlowEditorUpdateRequest", saved_steps: list[FlowStep]
+) -> list[FlowEditorAssistantChange]:
+    """The assistant changes that name a step whose assistant other steps
+    share: that step gets its own copy with the change. A change naming a
+    step that does not use the assistant is refused."""
+
+    saved_by_id = {step.id: step for step in saved_steps if step.id is not None}
+    copies: list[FlowEditorAssistantChange] = []
+    for change in update.assistants:
+        if change.step_id is None:
+            continue
+        step = saved_by_id.get(change.step_id)
+        if step is None or step.assistant_id != change.assistant_id:
+            raise NotFoundException("Step not found.")
+        if any(
+            other.id != step.id and other.assistant_id == step.assistant_id
+            for other in saved_steps
+        ):
+            copies.append(change)
+    return copies
+
+
+async def _give_steps_their_copies(
+    structure: StepStructure,
+    *,
+    copies: list[FlowEditorAssistantChange],
+    reservation: DraftRevisionReservation,
+    container: Container,
+    audit: _AuditEntries,
+) -> list[FlowStep]:
+    """``structure``'s steps, each step a change names pointing at its own copy
+    of the assistant it shared, the change applied to the copy. The copy
+    starts from the shared assistant as this edit has written it, its reads
+    that followed the change included."""
+
+    from eneo.flows.api.flow_assistant_router import flow_assistant_update_command
+
+    if not copies:
+        return structure.steps
+    service = container.flow_service()
+    user = container.user()
+    steps = list(structure.steps)
+    for change in copies:
+        index = next(
+            index for index, step in enumerate(steps) if step.id == change.step_id
+        )
+        copy, _ = await service.copy_reserved_flow_assistant(
+            reservation=reservation, assistant_id=change.assistant_id
+        )
+        copy, _ = await service.update_reserved_flow_assistant(
+            reservation=reservation,
+            assistant_id=copy.id,
+            update=flow_assistant_update_command(change.changes),
+            classification_judged_by_flow_update=True,
+        )
+        steps[index] = steps[index].model_copy(update={"assistant_id": copy.id})
+        flow_id = reservation.flow_id
+        audit.add(
+            tenant_id=user.tenant_id,
+            actor_id=user.id,
+            action=ActionType.ASSISTANT_CREATED,
+            entity_type=EntityType.ASSISTANT,
+            entity_id=copy.id,
+            description=(
+                f"Gave step {steps[index].step_order} of flow {flow_id} its own copy "
+                f"of the assistant '{copy.name}' it shared, with its change"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=copy,
+                extra={
+                    "flow_id": str(flow_id),
+                    "origin": "flow_managed",
+                    "step_id": str(change.step_id),
+                    "copied_from": str(change.assistant_id),
+                },
+            ),
+        )
+    return steps
 
 
 class _AuditEntries:

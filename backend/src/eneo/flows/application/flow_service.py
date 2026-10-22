@@ -571,6 +571,24 @@ class FlowService:
             include_hidden=True,
         )
 
+    async def copy_reserved_flow_assistant(
+        self,
+        *,
+        reservation: DraftRevisionReservation,
+        assistant_id: UUID,
+    ) -> tuple[Assistant, list[ResourcePermission]]:
+        """A copy of an assistant of the reserved draft, with its settings as
+        they are, for a step that stops sharing it with other steps. The
+        caller points the step at the copy in the same transaction."""
+
+        flow = await self.get_flow(reservation.flow_id)
+        self._ensure_flow_is_mutable(flow)
+        assistant, _ = await self.assistant_service.get_assistant(assistant_id)
+        self._assert_flow_assistant_owned_by_flow(flow=flow, assistant=assistant)
+        return await self.assistant_service.copy_flow_managed_assistant(
+            assistant_id=assistant_id
+        )
+
     async def delete_flow_assistant(
         self,
         *,

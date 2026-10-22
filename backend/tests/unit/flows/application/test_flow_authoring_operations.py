@@ -124,7 +124,7 @@ async def test_joint_update_preserves_unedited_step_rows_and_audits_both_entitie
     assert actions == [ActionType.ASSISTANT_UPDATED, ActionType.FLOW_UPDATED]
 
 
-async def test_final_validation_error_reaches_transaction_owner():
+async def test_final_validation_error_reaches_transaction_owner_and_audits_nothing():
     container, service, flow = editor_context()
     service.update_flow.side_effect = BadRequestException(
         "invalid final classification"
@@ -134,14 +134,21 @@ async def test_final_validation_error_reaches_transaction_owner():
             flow.id,
             _request(),
             FlowEditorUpdateRequest.model_validate(
-                {"expected_revision": 4, "definition": {}}
+                {
+                    "expected_revision": 4,
+                    "definition": {},
+                    "assistants": [
+                        {
+                            "assistant_id": str(flow.steps[0].assistant_id),
+                            "changes": {"prompt": {"text": "never saved"}},
+                        }
+                    ],
+                }
             ),
             container,
         )
-    assert all(
-        call.kwargs["action"] != ActionType.FLOW_UPDATED
-        for call in container.audit_service().log_async.await_args_list
-    )
+    service.update_reserved_flow_assistant.assert_awaited()
+    container.audit_service().log_async.assert_not_awaited()
 
 
 async def test_sparse_step_patch_carries_other_steps_as_stored():
@@ -168,3 +175,55 @@ async def test_sparse_step_patch_carries_other_steps_as_stored():
     assert saved["steps"][0].assistant_id == flow.steps[0].assistant_id
     assert saved["steps"][1] is flow.steps[1]
     assert saved["unchanged_step_ids"] == frozenset({flow.steps[1].id})
+
+
+async def test_an_assistant_change_naming_a_step_that_uses_another_is_refused():
+    from eneo.main.exceptions import NotFoundException
+
+    container, service, flow = editor_context()
+    with pytest.raises(NotFoundException):
+        await apply_editor_update(
+            flow.id,
+            _request(),
+            FlowEditorUpdateRequest.model_validate(
+                {
+                    "expected_revision": 4,
+                    "definition": {},
+                    "assistants": [
+                        {
+                            "assistant_id": str(uuid4()),
+                            "step_id": str(flow.steps[0].id),
+                            "changes": {"prompt": {"text": "new"}},
+                        }
+                    ],
+                }
+            ),
+            container,
+        )
+    service.update_reserved_flow_assistant.assert_not_awaited()
+    container.audit_service().log_async.assert_not_awaited()
+
+
+async def test_an_assistant_change_for_a_step_with_its_own_assistant_edits_it_in_place():
+    container, service, flow = editor_context()
+    await apply_editor_update(
+        flow.id,
+        _request(),
+        FlowEditorUpdateRequest.model_validate(
+            {
+                "expected_revision": 4,
+                "definition": {},
+                "assistants": [
+                    {
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "step_id": str(flow.steps[0].id),
+                        "changes": {"prompt": {"text": "new"}},
+                    }
+                ],
+            }
+        ),
+        container,
+    )
+    service.copy_reserved_flow_assistant.assert_not_awaited()
+    call = service.update_reserved_flow_assistant.await_args
+    assert call.kwargs["assistant_id"] == flow.steps[0].assistant_id

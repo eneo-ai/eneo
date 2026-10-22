@@ -178,11 +178,14 @@ def form_field_change(
 class PlacedStep:
     """A step at its place in the new order: a saved step (``saved``) or a new
     one. ``step`` holds the columns the edit writes for it; for a saved step
-    ``written_columns`` names them, and every other column is the saved one."""
+    ``written_columns`` names them, and every other column is the saved one.
+    ``prompt_written``: the edit writes the prompt this step reads, as given,
+    and no other step's."""
 
     step: FlowStep
     saved: FlowStep | None = None
     written_columns: frozenset[str] = frozenset()
+    prompt_written: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,6 +246,7 @@ def restructure_steps(
         prompt = (
             prompts.get(saved.assistant_id)
             if saved.assistant_id not in rewritten_prompts
+            and not item.prompt_written
             and item.step.assistant_id == saved.assistant_id
             else None
         )

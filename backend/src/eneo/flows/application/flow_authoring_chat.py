@@ -60,6 +60,12 @@ and {{ step_input.text }} the step's own upload. A step reads only earlier steps
 When a later step needs specific facts, let an earlier json step declare them in
 its output_contract. Give every step a short, unique name. Publishing checks the
 whole flow and names what to fix.
+Moving, removing or renaming a step, or renaming a run form field (send
+form_field_renames with the new metadata_json), keeps every read pointing where
+it pointed: the core rewrites the reads, and refuses a change that would leave a
+read without its step or field. Change that read first when it is refused.
+When two steps share an assistant, update_step with assistant_changes gives the
+edited step its own copy and leaves the other step's assistant as it was.
 """
 
 

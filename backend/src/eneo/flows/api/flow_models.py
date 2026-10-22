@@ -1082,6 +1082,17 @@ class FlowEditorAssistantChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     assistant_id: UUID
+    step_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The step whose assistant this changes. When other steps share the "
+            "assistant, this step gets its own copy of it with the change, and "
+            "the other steps keep the assistant as it was; the saved revision "
+            "shows the step with its new `assistant_id`. Without `step_id` the "
+            "change reaches every step that uses the assistant."
+        ),
+        examples=["00000000-0000-0000-0000-000000000102"],
+    )
     changes: FlowAssistantUpdateRequest
 
 
@@ -1188,7 +1199,7 @@ class FlowEditorUpdateRequest(BaseModel):
         step_ids = [change.step_id for change in self.step_edits]
         if len(step_ids) != len(set(step_ids)):
             raise ValueError("A step can only be updated once per edit.")
-        ids = [change.assistant_id for change in self.assistants]
+        ids = [(change.assistant_id, change.step_id) for change in self.assistants]
         if len(ids) != len(set(ids)):
             raise ValueError("An assistant can only be updated once per edit.")
         if self.step_order is not None:

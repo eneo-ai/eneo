@@ -295,7 +295,7 @@ async def get_flow_assistant(
             description=(
                 "The flow's draft has moved on since `expected_revision` (or since "
                 "the revision this request read); nothing is written. A published "
-                "flow is refused with 400 `bad_request`."
+                "flow is refused with `flow_unpublish_required`."
             ),
             message=(
                 "Flödet har ändrats sedan det lästes in, till exempel i en annan "
@@ -401,7 +401,7 @@ async def update_flow_assistant(
                 "A step of the flow (`context.reason` `step_reference`) or a run that "
                 "has not finished (`unfinished_run_reference`, with "
                 "`context.flow_version`) still uses the assistant. A published flow "
-                "is refused with 400 `bad_request`."
+                "is refused with `flow_unpublish_required`."
             ),
             message=(
                 "An unfinished run of version 3 still uses this assistant. Retry "
