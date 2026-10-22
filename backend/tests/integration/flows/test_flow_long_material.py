@@ -43,7 +43,11 @@ from eneo.database.tables.flow_tables import (
 from eneo.database.tables.token_usage_table import ProviderTokenUsages
 from eneo.flows.assistant_execution_snapshot import build_assistant_execution_snapshot
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
+from eneo.flows.domain.provider_call import DigestCallInput
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallRepository,
+)
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
 from eneo.flows.published_definition import build_published_definition_json
@@ -540,6 +544,16 @@ async def test_a_structured_step_digests_material_larger_than_its_window(
     assert {receipt.status for receipt in receipts} == {"completed"}
     assert receipts[-1].response_format != "none"
     assert all(r.response_format == "none" for r in receipts[:-1])
+
+    # The evidence read model parses each call's stage and sources.
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        page = await FlowProviderCallRepository(session).list_evidence_page(
+            run_id=context.run_id, tenant_id=context.tenant_id, limit=200
+        )
+    assert [item.digest_call for item in page.items] == [
+        DigestCallInput.model_validate(receipt.digest_call) for receipt in receipts
+    ]
 
     # Every call is in the step's token usage and in the usage ledger.
     assert step.num_tokens_input == sum(r.num_tokens_input for r in receipts)
