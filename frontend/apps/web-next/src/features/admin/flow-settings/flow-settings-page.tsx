@@ -9,13 +9,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { flushSync } from "react-dom";
+import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { useFieldFocus } from "@/features/admin/models/provider-form-fields";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
+import { useLeaveConfirmation } from "@/lib/hooks/use-leave-confirmation";
 import {
   buildPatches,
   DOCUMENT_RENDER_KEYS,
@@ -86,7 +87,7 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
   const bounds = fieldBounds(settings);
   const dirty = dirtyKeys(draft, baseline);
   const problems = submitted ? validateDraft(draft, baseline, settings) : {};
-  useBeforeUnloadWarning(dirty.length > 0);
+  const leaving = useLeaveConfirmation(dirty.length > 0);
 
   function problem(key: FieldKey): string | null {
     const found = problems[key];
@@ -302,6 +303,17 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
           </div>
         </div>
       </div>
+
+      <ConfirmDialogControlled
+        open={leaving.pendingHref !== null}
+        onOpenChange={(open) => {
+          if (!open) leaving.stay();
+        }}
+        title={t("flow_admin_leave_title")}
+        description={t("flow_admin_leave_description")}
+        confirmLabel={t("flow_admin_leave_confirm")}
+        onConfirm={leaving.leave}
+      />
     </div>
   );
 }
