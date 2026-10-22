@@ -13,7 +13,11 @@ import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient
 
-from eneo.database.tables.flow_tables import FlowRunAuditOutbox, FlowRuns
+from eneo.database.tables.flow_tables import (
+    FlowRunAuditOutbox,
+    FlowRunReviewCheckpoints,
+    FlowRuns,
+)
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_DISPATCH_MAX_ATTEMPTS,
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
@@ -592,9 +596,10 @@ async def test_a_run_cancelled_while_queued_starts_no_step_when_its_delivery_arr
     assert audit_rows == [("flow_run_cancelled", "cancelled")]
 
 
-@pytest.mark.parametrize("decision", ["edit_and_continue", "reject"])
+@pytest.mark.parametrize("decision", ["edit_and_continue", "reject", "expire"])
 async def test_a_review_decided_after_a_worker_restart_ends_the_run_it_paused(
     client: AsyncClient,
+    db_container,
     flow_process_auth_headers: Mapping[str, str],
     create_published_compose_text_flow,
     flow_broker_worker_seam: FlowBrokerWorkerSeam,
@@ -603,7 +608,8 @@ async def test_a_review_decided_after_a_worker_restart_ends_the_run_it_paused(
     # The run pauses for review in one worker process, and the decision is
     # taken after that worker is gone and another has started. An edited
     # approval continues the run in the new worker with the reviewer's text
-    # and without running the step again; a rejection cancels the run.
+    # and without running the step again; a rejection cancels the run, and so
+    # does the maintenance worker's expiry job once the review has expired.
     flow = await create_published_compose_text_flow(
         client,
         flow_process_auth_headers,
@@ -643,7 +649,30 @@ async def test_a_review_decided_after_a_worker_restart_ends_the_run_it_paused(
     assert active_response.status_code == 200, active_response.text
     checkpoint = active_response.json()
     checkpoint_path = f"{run_path}/review-checkpoints/{checkpoint['id']}"
-    if decision == "reject":
+    if decision == "expire":
+        async with db_container() as container:
+            await container.session().execute(
+                sa.update(FlowRunReviewCheckpoints)
+                .where(FlowRunReviewCheckpoints.id == UUID(checkpoint["id"]))
+                .values(expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+            )
+            await container.session().commit()
+        expiry = await flow_broker_worker_seam.send_task_and_wait(
+            task_name="flows.reconcile_review_expiry",
+            timeout_seconds=30,
+        )
+        assert expiry == {"status": "ok", "reconciled": 1}
+        ended, _ = await flow_broker_worker_seam.wait_for_public_run_status(
+            client=client,
+            headers=flow_process_auth_headers,
+            flow_id=flow.flow_id,
+            run_id=run_id,
+            expected_status="cancelled",
+            timeout_seconds=30,
+        )
+        assert ended["result"] is None
+        assert ended["error"]["code"] == "flow_review_expired"
+    elif decision == "reject":
         reject_response = await client.post(
             f"{checkpoint_path}/reject/",
             json={
