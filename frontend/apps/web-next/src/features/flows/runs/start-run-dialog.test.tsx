@@ -70,7 +70,13 @@ const contract = makeContract({
   steps_requiring_input: [makeInput({ step_id: "step-1", label: "Brevet", required: true })]
 });
 
-function Harness({ onStarted }: { onStarted: (run: RunPublic) => void }) {
+function Harness({
+  onStarted,
+  metadata = null
+}: {
+  onStarted: (run: RunPublic) => void;
+  metadata?: Record<string, unknown> | null;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -78,7 +84,7 @@ function Harness({ onStarted }: { onStarted: (run: RunPublic) => void }) {
         Kör
       </button>
       <StartRunDialog
-        flow={makeFlow({ published_version: 4 })}
+        flow={makeFlow({ published_version: 4, metadata_json: metadata })}
         open={open}
         onOpenChange={setOpen}
         onStarted={onStarted}
@@ -87,14 +93,21 @@ function Harness({ onStarted }: { onStarted: (run: RunPublic) => void }) {
   );
 }
 
-async function openDialog(withContract: RunContract = contract) {
+async function openDialog(
+  withContract: RunContract = contract,
+  metadata: Record<string, unknown> | null = null
+) {
   api.routes[CONTRACT] = () => ({ body: withContract });
   const onStarted = vi.fn();
-  renderInApp(<Harness onStarted={onStarted} />);
+  renderInApp(<Harness onStarted={onStarted} metadata={metadata} />);
   fireEvent.click(screen.getByRole("button", { name: "Kör" }));
   const dialog = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
   await within(dialog).findByLabelText(/^Ärende/);
   return { dialog, onStarted };
+}
+
+function button(dialog: HTMLElement, name: string) {
+  return within(dialog).getByRole("button", { name });
 }
 
 function pickFile(dialog: HTMLElement, file: File) {
@@ -126,7 +139,7 @@ describe("StartRunDialog", () => {
 
   it("says what is missing at each field and moves focus to the first", async () => {
     const { dialog } = await openDialog();
-    fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_start_submit }));
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
 
     expect(await within(dialog).findByText("Fyll i Ärende.")).toBeTruthy();
     expect(within(dialog).getByText("Lägg till en fil i Brevet.")).toBeTruthy();
@@ -150,7 +163,7 @@ describe("StartRunDialog", () => {
     expect(FakeUpload.sent).toEqual([]);
   });
 
-  it("uploads the files and starts the run pinned to the published version", async () => {
+  it("uploads the files, sums up what is sent and starts the run pinned to the published version", async () => {
     const run = makeRunSummary({ id: "run-9", status: "queued" });
     api.routes[START] = () => ({ status: 201, body: run });
     const { dialog, onStarted } = await openDialog();
@@ -161,7 +174,24 @@ describe("StartRunDialog", () => {
       "/api/eneo/api/v1/flows/flow-1/steps/step-1/runtime-files/"
     );
 
-    fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_start_submit }));
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
+
+    // Nothing is sent until the person has seen what will be.
+    const heading = within(dialog).getByRole("heading", { name: messages.flow_runs_summary_title });
+    expect(document.activeElement).toBe(heading);
+    const summary = within(dialog).getByRole("region", { name: messages.flow_runs_summary_title });
+    expect(within(summary).getByText("Ärende")).toBeTruthy();
+    expect(within(summary).getByText("Bygglov")).toBeTruthy();
+    expect(within(summary).getByText("Brevet")).toBeTruthy();
+    expect(within(summary).getByText("brev.pdf")).toBeTruthy();
+    // The optional field left empty carries no answer.
+    expect(within(summary).queryByText("Prioritet")).toBeNull();
+    // The form waits, hidden, with its files and recordings.
+    expect(within(dialog).queryByRole("textbox", { name: /^Ärende/ })).toBeNull();
+    expect(api.stub.calls.filter((call) => call.method === "POST")).toEqual([]);
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.click(button(dialog, messages.flow_runs_start_submit));
 
     await waitFor(() => expect(onStarted).toHaveBeenCalledWith(run));
     const call = api.stub.calls.find((entry) => `${entry.method} ${entry.path}` === START);
@@ -221,6 +251,51 @@ describe("StartRunDialog", () => {
     expect(within(dialog).queryByRole("button", { name: messages.flow_run_more_reuse })).toBeNull();
   });
 
+  it("goes back from the summary to the form as it was filled in", async () => {
+    const { dialog } = await openDialog(
+      makeContract({
+        form_fields: [{ name: "arende", label: "Ärende", type: "text", required: false }]
+      })
+    );
+    fireEvent.change(within(dialog).getByLabelText(/^Ärende/), { target: { value: "Bygglov" } });
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
+    const summary = within(dialog).getByRole("region", { name: messages.flow_runs_summary_title });
+    expect(within(summary).getByText("Bygglov")).toBeTruthy();
+
+    fireEvent.click(button(dialog, messages.back));
+
+    const field = within(dialog).getByLabelText(/^Ärende/) as HTMLInputElement;
+    expect(field.value).toBe("Bygglov");
+    expect(
+      within(dialog).queryByRole("heading", { name: messages.flow_runs_summary_title })
+    ).toBeNull();
+    // Focus goes to the form's first control, the run's name.
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole("textbox", {
+        name: new RegExp(`^${messages.flow_run_extras_run_label}`)
+      })
+    );
+    expect(button(dialog, messages.cancel)).toBeTruthy();
+  });
+
+  it("says before starting that a sensitive flow limits who may see its material", async () => {
+    const { dialog } = await openDialog(contract, {
+      care_data_policy: { sensitive: true, pre_approval_visibility: "uploader_and_reviewers" }
+    });
+    const notice = within(dialog).getByText(messages.flow_runs_sensitive_title);
+    expect(within(dialog).getByText(messages.flow_runs_sensitive_body)).toBeTruthy();
+    // A lasting state, not news: no live region reads it out again.
+    expect(notice.closest("[role=alert]")).toBeNull();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("does not mark a flow sensitive when its policy lets space members see the material", async () => {
+    const { dialog } = await openDialog(contract, {
+      care_data_policy: { sensitive: true, pre_approval_visibility: "space_members" }
+    });
+    expect(within(dialog).queryByText(messages.flow_runs_sensitive_title)).toBeNull();
+  });
+
   it("shows the core's refusal at the field it names", async () => {
     api.routes[START] = () => ({
       status: 400,
@@ -235,8 +310,10 @@ describe("StartRunDialog", () => {
         form_fields: [{ name: "arende", label: "Ärende", type: "text", required: false }]
       })
     );
-    fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_start_submit }));
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
+    fireEvent.click(button(dialog, messages.flow_runs_start_submit));
 
+    // The form comes back with the refusal at the field.
     expect(
       await within(dialog).findByText(messages.flow_error_flow_input_required_field_empty)
     ).toBeTruthy();
@@ -259,7 +336,7 @@ describe("StartRunDialog", () => {
       })
     );
     expect(within(dialog).getByText(messages.flow_runs_speakers_blocked_title)).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_start_submit }));
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
     expect(await within(dialog).findByText(messages.flow_runs_blocked)).toBeTruthy();
     expect(api.stub.calls.filter((call) => call.method === "POST")).toEqual([]);
   });

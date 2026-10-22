@@ -3542,5 +3542,11 @@
   "flow_run_more_attempts_loading": "Läser stegets försök",
   "flow_run_more_attempts_failed": "Stegets försök kunde inte läsas",
   "flow_run_more_attempts_none": "Steget har inga registrerade försök.",
-  "flow_run_more_elapsed": "{time} hittills"
+  "flow_run_more_elapsed": "{time} hittills",
+  "flow_runs_sensitive_title": "Känsligt flöde: begränsad åtkomst före godkännande",
+  "flow_runs_sensitive_body": "Innan resultatet är slutligt godkänt får bara den som laddade upp underlaget och särskilt behöriga granskare hantera innehållet och bevisunderlaget.",
+  "flow_runs_summary_next": "Granska",
+  "flow_runs_summary_title": "Det här följer med i körningen",
+  "flow_runs_summary_ready": "Allt som krävs är klart. Kontrollera uppgifterna och starta körningen, eller gå tillbaka och ändra.",
+  "flow_runs_summary_empty": "Inget är ifyllt för den här körningen."
 }

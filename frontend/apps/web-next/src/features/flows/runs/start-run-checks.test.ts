@@ -5,6 +5,8 @@ import {
   reusedInput,
   RUN_LABEL_MAX_LENGTH,
   screenAudioFiles,
+  startSummary,
+  summaryIsEmpty,
   takesReusableInput,
   withRunLabel
 } from "./start-run-checks";
@@ -113,5 +115,55 @@ describe("takesReusableInput", () => {
       takesReusableInput(makeContract({ form_fields: [{ name: "a", label: "A", type: "text" }] }))
     ).toBe(true);
     expect(takesReusableInput(makeContract({ steps_requiring_input: [makeInput()] }))).toBe(false);
+  });
+});
+
+describe("startSummary", () => {
+  const contract = makeContract({
+    form_fields: [
+      { name: "arende", label: "Ärende", type: "text", required: true, order: 1 },
+      { name: "taggar", label: "Taggar", type: "list", order: 2 },
+      { name: "prio", label: "Prioritet", type: "select", options: ["Hög"], order: 3 }
+    ],
+    steps_requiring_input: [
+      makeInput({ step_id: "step-2", step_order: 2, label: "Bilagor" }),
+      makeInput({ step_id: "step-1", step_order: 1, label: "Brevet" })
+    ]
+  });
+
+  it("lists the name, the fields given a value and each step's stored files in order", () => {
+    const summary = startSummary(contract, {
+      runLabel: "  Ärende 12 ",
+      values: { arende: " Bygglov ", taggar: [" a ", "", "b"], prio: "" },
+      freeText: "ignored",
+      uploads: {
+        "step-2": [
+          { key: "k2", name: "bilaga.pdf", size: 5, mimetype: "", state: "done", fileId: "f2" }
+        ],
+        "step-1": [
+          { key: "k1", name: "brev.pdf", size: 3, mimetype: "", state: "done", fileId: "f1" },
+          { key: "k3", name: "trasig.pdf", size: 1, mimetype: "", state: "failed" }
+        ]
+      }
+    });
+    expect(summary.runLabel).toBe("Ärende 12");
+    expect(summary.fields.map(({ field, value }) => [field.name, value])).toEqual([
+      ["arende", "Bygglov"],
+      ["taggar", "a, b"]
+    ]);
+    expect(summary.freeText).toBeNull();
+    expect(
+      summary.files.map(({ input, files }) => [input.step_id, files.map((f) => f.name)])
+    ).toEqual([
+      ["step-1", ["brev.pdf"]],
+      ["step-2", ["bilaga.pdf"]]
+    ]);
+  });
+
+  it("carries the free text of a form that takes one, and is empty when nothing is filled in", () => {
+    const free = makeContract();
+    const choices = { runLabel: " ", values: {}, uploads: {} };
+    expect(startSummary(free, { ...choices, freeText: " Hej\nhej " }).freeText).toBe("Hej\nhej");
+    expect(summaryIsEmpty(startSummary(free, { ...choices, freeText: "  " }))).toBe(true);
   });
 });

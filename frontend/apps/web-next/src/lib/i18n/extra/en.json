@@ -3542,5 +3542,11 @@
   "flow_run_more_attempts_loading": "Reading the step's attempts",
   "flow_run_more_attempts_failed": "The step's attempts could not be read",
   "flow_run_more_attempts_none": "The step has no recorded attempts.",
-  "flow_run_more_elapsed": "{time} so far"
+  "flow_run_more_elapsed": "{time} so far",
+  "flow_runs_sensitive_title": "Sensitive flow: limited access before approval",
+  "flow_runs_sensitive_body": "Until the result is finally approved, only the person who uploaded the material and specifically authorised reviewers may handle the content and evidence.",
+  "flow_runs_summary_next": "Review",
+  "flow_runs_summary_title": "Included in this run",
+  "flow_runs_summary_ready": "Everything required is ready. Check the details and start the run, or go back to change them.",
+  "flow_runs_summary_empty": "Nothing is filled in for this run."
 }

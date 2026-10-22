@@ -63,6 +63,8 @@ describe("StartRunDialog extras", () => {
       within(dialog).getByLabelText(new RegExp(`^${messages.flow_run_extras_run_label}`)),
       { target: { value: "  Ärende 2026-114 " } }
     );
+    fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_summary_next }));
+    expect(within(dialog).getByText("Ärende 2026-114")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_start_submit }));
 
     await waitFor(() => expect(onStarted).toHaveBeenCalledWith(run));
