@@ -71,6 +71,7 @@ from eneo.flows.flow_api_exceptions import (
     flow_run_abandonment_refusal,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_review_reject_reason import normalize_review_reject_reason
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,
@@ -109,7 +110,6 @@ from eneo.users.user import UserInDB
 logger = logging.getLogger(__name__)
 
 _ReviewOperationResult = TypeVar("_ReviewOperationResult")
-_REVIEW_REJECT_REASON_MAX_LENGTH = 1024
 _REVIEW_RESUME_IDEMPOTENCY_KEY_MAX_LENGTH = 255
 _REVIEW_CHECKPOINT_SCHEMA_VERSION = 1
 # The reviewer edits the step's value; both persisted encodings of that value are
@@ -1229,7 +1229,7 @@ class FlowRunReviewCheckpointService:
         reason: str,
     ) -> FlowRunReviewCheckpoint:
         principal = self._principal()
-        normalized_reason = self._normalize_review_reject_reason(reason)
+        normalized_reason = normalize_review_reject_reason(reason)
         run = await self.access_policy.load_run(
             run_id=run_id,
             flow_id=flow_id,
@@ -1263,23 +1263,6 @@ class FlowRunReviewCheckpointService:
         except FlowRunNotFoundError as exc:
             raise NotFoundException("Flow run not found.") from exc
         return checkpoint
-
-    @staticmethod
-    def _normalize_review_reject_reason(reason: str) -> str:
-        normalized_reason = reason.strip()
-        if not normalized_reason:
-            raise FlowBadRequestException(
-                "Review rejection reason is required.",
-                code=FlowApiErrorCode.REVIEW_REJECT_REASON_REQUIRED,
-            )
-        if len(normalized_reason) > _REVIEW_REJECT_REASON_MAX_LENGTH:
-            raise FlowBadRequestException(
-                "Review rejection reason must be at most "
-                f"{_REVIEW_REJECT_REASON_MAX_LENGTH} characters.",
-                code=FlowApiErrorCode.REVIEW_REJECT_REASON_TOO_LONG,
-                context={"max_length": _REVIEW_REJECT_REASON_MAX_LENGTH},
-            )
-        return normalized_reason
 
     async def resume_review_checkpoint(
         self,

@@ -381,6 +381,21 @@ describe("FlowRunPage", () => {
       ).toBeTruthy();
       expect(document.activeElement).toBe(within(panel).getByLabelText(/^Varför avvisar du/));
 
+      // Over the limit is said at the field, without asking the core.
+      fireEvent.change(within(panel).getByLabelText(/^Varför avvisar du/), {
+        target: { value: "x".repeat(1025) }
+      });
+      fireEvent.click(confirm);
+      expect(
+        await within(panel).findByText(
+          messages.flow_runs_review_reject_reason_too_long.replace("{max}", "1024")
+        )
+      ).toBeTruthy();
+      expect(
+        calls("POST /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/")
+      ).toHaveLength(0);
+      await expectNoAxeViolations(panel);
+
       fireEvent.change(within(panel).getByLabelText(/^Varför avvisar du/), {
         target: { value: "Fel mottagare" }
       });

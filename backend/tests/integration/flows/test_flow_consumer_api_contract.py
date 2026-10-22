@@ -3067,6 +3067,79 @@ async def test_flow_review_edit_refuses_a_checkpoint_opened_for_viewing(
     assert payload["context"] == {"review_mode": "view"}
 
 
+@pytest.mark.parametrize(
+    ("reason", "code", "context"),
+    [
+        ("x" * 1025, "flow_review_reject_reason_too_long", {"max_length": 1024}),
+        ("   ", "flow_review_reject_reason_required", None),
+    ],
+)
+async def test_a_reject_reason_outside_its_bounds_is_refused_before_the_review(
+    client,
+    db_container,
+    admin_token,
+    monkeypatch,
+    reason: str,
+    code: str,
+    context: dict[str, object] | None,
+):
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
+    )
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    run_response = await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/",
+        json={
+            "expected_flow_version": flow["published_version"],
+            "input_payload_json": {"text": "hello"},
+        },
+        headers=headers,
+    )
+    assert run_response.status_code == 201, run_response.text
+    run = run_response.json()
+    checkpoint_id = await _open_first_step_review_checkpoint(
+        db_container=db_container,
+        run=run,
+        flow=flow,
+        output_contract={
+            "type": "object",
+            "required": ["summary"],
+            "properties": {"summary": {"type": "string"}},
+            "additionalProperties": False,
+        },
+        current_payload_json={
+            "text": '{"summary":"Original."}',
+            "structured": {"summary": "Original."},
+        },
+    )
+    review_path = (
+        f"/api/v1/flows/{flow['id']}/runs/{run['id']}/review-checkpoints/"
+        f"{checkpoint_id}/"
+    )
+
+    response = await client.post(
+        f"{review_path}reject/",
+        json={"expected_checkpoint_revision": 1, "reason": reason},
+        headers=headers,
+    )
+
+    assert response.status_code == 400, response.text
+    payload = response.json()
+    assert payload["code"] == code
+    assert payload.get("context") == context
+    active = await client.get(
+        f"/api/v1/flows/{flow['id']}/runs/{run['id']}/review-checkpoints/active/",
+        headers=headers,
+    )
+    assert active.status_code == 200, active.text
+    assert active.json()["id"] == checkpoint_id
+    assert active.json()["state"] == "awaiting_review"
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_flow_consumer_golden_journey_uses_review_runtime_paths(

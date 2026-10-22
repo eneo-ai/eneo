@@ -123,6 +123,10 @@ from eneo.flows.flow_review_policy import (
     FlowStepReviewMode,
     FlowStepReviewPolicy,
 )
+from eneo.flows.flow_review_reject_reason import (
+    FLOW_REVIEW_REJECT_REASON_MAX_LENGTH,
+    normalize_review_reject_reason,
+)
 from eneo.flows.flow_run_error import (
     FlowRunDispatchError,
     FlowRunError,
@@ -1808,13 +1812,28 @@ class FlowRunReviewCheckpointRejectRequest(BaseModel):
         ),
     )
     reason: str = Field(
+        min_length=1,
+        max_length=FLOW_REVIEW_REJECT_REASON_MAX_LENGTH,
         description=(
             "Human-readable rejection reason stored with the run audit trail. "
-            "Blank reasons return `400` with code `flow_review_reject_reason_required`; "
-            "reasons longer than 1024 characters return `400` with code "
-            "`flow_review_reject_reason_too_long`."
+            "Surrounding whitespace is trimmed before the reason is checked and "
+            "stored. Blank reasons return `400` with code "
+            "`flow_review_reject_reason_required`; reasons longer than 1024 "
+            "characters (Unicode code points) after trimming return `400` with "
+            "code `flow_review_reject_reason_too_long` and "
+            "`context.max_length`."
         ),
+        examples=["The summary names the wrong case number."],
     )
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _normalize_reason(cls, value: object) -> object:
+        # Before the length constraints, so a refusal keeps the flow's own
+        # `400` codes instead of a generic validation error.
+        if isinstance(value, str):
+            return normalize_review_reject_reason(value)
+        return value
 
 
 class FlowRunReviewCheckpointResumeRequest(BaseModel):

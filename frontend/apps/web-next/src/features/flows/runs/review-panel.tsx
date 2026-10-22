@@ -19,6 +19,8 @@ import { isStaleRefusal, refusalText } from "./run-messages";
 import {
   draftChanged,
   editedValueOf,
+  REJECT_REASON_MAX_LENGTH,
+  rejectReasonProblem,
   reviewDraftOf,
   reviewOptions,
   type DraftField,
@@ -398,6 +400,7 @@ export function ReviewPanel({
               setReasonProblem(null);
             }}
             rows={3}
+            maxLength={REJECT_REASON_MAX_LENGTH}
             status={reasonProblem ? { type: "error", message: reasonProblem } : undefined}
             isRequired
             width="100%"
@@ -410,8 +413,17 @@ export function ReviewPanel({
               isInterruptible
               onClick={() => {
                 if (reject.isPending) return;
-                if (!reason.trim()) {
-                  flushSync(() => setReasonProblem(t("flow_runs_review_reject_reason_required")));
+                const reasonRefusal = rejectReasonProblem(reason);
+                if (reasonRefusal) {
+                  flushSync(() =>
+                    setReasonProblem(
+                      reasonRefusal === "required"
+                        ? t("flow_runs_review_reject_reason_required")
+                        : t("flow_runs_review_reject_reason_too_long", {
+                            max: REJECT_REASON_MAX_LENGTH
+                          })
+                    )
+                  );
                   focusFirstControl(`${baseId}-reason`);
                   return;
                 }

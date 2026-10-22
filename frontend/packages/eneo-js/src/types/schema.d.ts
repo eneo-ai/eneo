@@ -24206,7 +24206,8 @@ export interface components {
       expected_checkpoint_revision: number;
       /**
        * Reason
-       * @description Human-readable rejection reason stored with the run audit trail. Blank reasons return `400` with code `flow_review_reject_reason_required`; reasons longer than 1024 characters return `400` with code `flow_review_reject_reason_too_long`.
+       * @description Human-readable rejection reason stored with the run audit trail. Surrounding whitespace is trimmed before the reason is checked and stored. Blank reasons return `400` with code `flow_review_reject_reason_required`; reasons longer than 1024 characters (Unicode code points) after trimming return `400` with code `flow_review_reject_reason_too_long` and `context.max_length`.
+       * @example The summary names the wrong case number.
        */
       reason: string;
     };
