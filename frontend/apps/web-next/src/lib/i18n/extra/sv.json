@@ -2288,5 +2288,7 @@
   "flow_runs_transcript_names_unchanged": "Inga ändrade namn att spara.",
   "flow_runs_transcript_names_not_saved": "Namnen sparades inte",
   "flow_runs_review_speakers_hint": "Rätta namnen om det behövs. Lämna tomt om talaren inte ska ha något namn.",
-  "flow_runs_review_speaker_name": "Namn för {label}"
+  "flow_runs_review_speaker_name": "Namn för {label}",
+  "flow_runs_started_by_named": "Startad av {name}",
+  "flow_runs_retry_starter_only": "Bara den som startade körningen ({name}) kan köra om den från steget som misslyckades."
 }

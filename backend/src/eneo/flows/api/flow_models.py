@@ -77,6 +77,7 @@ from eneo.flows.application.flow_run_evidence_export_summary import (
     EvidenceExportSummary,
 )
 from eneo.flows.assistant_execution_snapshot import assistant_execution_surface_hash
+from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import (
     FlowRunReviewCheckpointEdit,
     FlowStepRetrievalPolicy,
@@ -357,12 +358,20 @@ FLOW_PUBLIC_EXAMPLE: dict[str, Any] = {
 }
 
 
+FLOW_RUN_STARTED_BY_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "principal_type": "user",
+    "id": "00000000-0000-0000-0000-000000000030",
+    "display_name": "Alex Example",
+    "email": "alex.example@example.com",
+}
+
 FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000301",
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "flow_version": 3,
     "purpose": "production",
-    "principal_type": None,
+    "principal_type": "user",
+    "started_by": FLOW_RUN_STARTED_BY_PUBLIC_EXAMPLE,
     "tenant_id": "00000000-0000-0000-0000-000000000010",
     "trace_id": "00000000-0000-0000-0000-000000000302",
     "revision": 1,
@@ -1318,6 +1327,51 @@ class FlowRunTranscriptionUsagePublic(BaseModel):
     )
 
 
+class FlowRunStartedByPublic(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": FLOW_RUN_STARTED_BY_PUBLIC_EXAMPLE,
+            "examples": [
+                FLOW_RUN_STARTED_BY_PUBLIC_EXAMPLE,
+                {
+                    "principal_type": "service_key",
+                    "id": "00000000-0000-0000-0000-000000000040",
+                    "display_name": "Case intake integration",
+                    "email": None,
+                },
+            ],
+        },
+    )
+
+    principal_type: PrincipalType = Field(
+        description=(
+            "Who started the run: `user` for a person (also through a module "
+            "session or a personal API key) or `service_key` for a service key."
+        ),
+    )
+    id: UUID = Field(
+        description=(
+            "For `user`, the user's id. For `service_key`, the id of the "
+            "service principal behind the key, which stays the same when the "
+            "key is rotated. Compare it with your own id to tell whether you "
+            "started the run: retrying a failed run requires the principal "
+            "that started it."
+        ),
+    )
+    display_name: str | None = Field(
+        description=(
+            "Name to show for the starter: the user's username, else their "
+            "email, or the service key's name. Null when the account can no "
+            "longer be read."
+        ),
+    )
+    email: str | None = Field(
+        default=None,
+        description="The user's email. Always null for a service key.",
+    )
+
+
 class FlowRunSummaryPublic(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
@@ -1343,6 +1397,16 @@ class FlowRunSummaryPublic(BaseModel):
         description=(
             "Principal kind that created the run, once resolved. Service-key "
             "callers only see runs their own key created."
+        ),
+    )
+    started_by: FlowRunStartedByPublic | None = Field(
+        default=None,
+        description=(
+            "Who started the run, by id and name. It is shown to every caller "
+            "who may see the run: the starter, tenant admins, and admins and "
+            "owners of the flow's space. A service key sees only runs it "
+            "started, so only its own name. Null when the run has no resolved "
+            "principal."
         ),
     )
     tenant_id: UUID = Field(description="Tenant that owns the run and its data.")
@@ -2699,13 +2763,57 @@ class FlowRunEvidenceResponse(BaseModel):
     )
 
 
+FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE: dict[str, Any] = {
+    # The bundle carries the persisted run, which names its
+    # principal by id only.
+    "run": {
+        key: value
+        for key, value in FLOW_RUN_PUBLIC_EXAMPLE.items()
+        if key != "started_by"
+    },
+    "definition_integrity": {
+        "status": "verified",
+        "expected_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
+        "current_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
+    },
+    "definition_snapshot": FLOW_PUBLISHED_DEFINITION_EXAMPLE,
+    "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
+    "step_attempts": [],
+    "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
+    "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
+    "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
+    "provider_calls": PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
+    "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
+}
+
+
+def _without_null_members(value: object) -> object:
+    if isinstance(value, Mapping):
+        members = cast(Mapping[str, object], value)
+        return {
+            key: _without_null_members(item)
+            for key, item in members.items()
+            if item is not None
+        }
+    if isinstance(value, list):
+        return [_without_null_members(item) for item in cast(list[object], value)]
+    return value
+
+
+# The published OpenAPI document drops null members from examples, so the
+# example hash covers the bundle as a reader of the document sees it.
+FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE_CONTENT_HASH = canonical_json_hash(
+    _without_null_members(FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE)
+)
+
+
 class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "schema_version": "flow-evidence-export.v18",
                 "generated_at": "2026-03-31T12:00:00Z",
-                "content_hash": "e66736c443a4e643e6c96219794d20973c17376047c8754bf57b7bd48e255cb7",
+                "content_hash": FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE_CONTENT_HASH,
                 "manifest": {
                     "schema_version": "flow-evidence-export.v18",
                     "app_version": "DEV",
@@ -2717,7 +2825,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
                     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
                     "flow_version": 3,
-                    "content_hash": "e66736c443a4e643e6c96219794d20973c17376047c8754bf57b7bd48e255cb7",
+                    "content_hash": FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE_CONTENT_HASH,
                     "content_hash_input": "redacted",
                     "exported_at": "2026-03-31T12:00:00Z",
                     "actor": {
@@ -3057,22 +3165,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                         }
                     ],
                 },
-                "bundle": {
-                    "run": FLOW_RUN_PUBLIC_EXAMPLE,
-                    "definition_integrity": {
-                        "status": "verified",
-                        "expected_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
-                        "current_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
-                    },
-                    "definition_snapshot": FLOW_PUBLISHED_DEFINITION_EXAMPLE,
-                    "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
-                    "step_attempts": [],
-                    "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
-                    "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
-                    "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
-                    "provider_calls": PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
-                    "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
-                },
+                "bundle": FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE,
             }
         }
     )

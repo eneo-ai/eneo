@@ -2288,5 +2288,7 @@
   "flow_runs_transcript_names_unchanged": "No changed names to save.",
   "flow_runs_transcript_names_not_saved": "The names were not saved",
   "flow_runs_review_speakers_hint": "Correct the names if needed. Leave it empty if the speaker should have no name.",
-  "flow_runs_review_speaker_name": "Name for {label}"
+  "flow_runs_review_speaker_name": "Name for {label}",
+  "flow_runs_started_by_named": "Started by {name}",
+  "flow_runs_retry_starter_only": "Only the one who started the run ({name}) can run it again from the failed step."
 }

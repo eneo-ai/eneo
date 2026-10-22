@@ -102,6 +102,7 @@ describe("FlowRunPage", () => {
     expect(within(first).getByText("Resultat från steg 1")).toBeTruthy();
     expect(within(first).getByText(messages.flow_runs_step_status_completed)).toBeTruthy();
     expect(screen.getByText(/^1\s500 totalt \(1\s200 in, 300 ut\)/)).toBeTruthy();
+    expect(screen.getByText("Startad av Anna Lind")).toBeTruthy();
     expect(screen.queryByRole("button", { name: messages.flow_runs_cancel })).toBeNull();
     await expectNoAxeViolations(container);
   });
@@ -147,6 +148,28 @@ describe("FlowRunPage", () => {
         "Idempotency-Key"
       ]
     ).toBeTruthy();
+  });
+
+  it("says up front that only the one who started a failed run can run it again", async () => {
+    answerRun(
+      makeRunSummary({
+        status: "failed",
+        started_by: {
+          principal_type: "user",
+          id: "user-2",
+          display_name: "Erik Berg",
+          email: "erik.berg@example.se"
+        }
+      })
+    );
+    const { container } = renderRun();
+
+    expect(
+      await screen.findByText(messages.flow_runs_retry_starter_only.replace("{name}", "Erik Berg"))
+    ).toBeTruthy();
+    expect(screen.getByText("Startad av Erik Berg")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: messages.flow_runs_retry })).toBeNull();
+    await expectNoAxeViolations(container);
   });
 
   it("does not offer a retry of a run of an earlier version, and says why", async () => {

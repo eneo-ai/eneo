@@ -13,6 +13,7 @@ from eneo.flows.api.flow_models import (
     FlowRunDetailPublic,
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
+    FlowRunStartedByPublic,
     FlowRunStepPublic,
     FlowRunSummaryPublic,
     FlowRunTokenUsagePublic,
@@ -146,6 +147,7 @@ class FlowAssembler:
         token_usage: FlowRunTokenUsage | None = None,
         transcription_usage: FlowRunTranscriptionUsage | None = None,
         final_output: FlowFinalOutputContractPublic | None = None,
+        started_by: FlowRunStartedByPublic | None = None,
     ) -> FlowRunPublic:
         public_token_usage = (
             FlowRunTokenUsagePublic.model_validate(token_usage)
@@ -172,12 +174,19 @@ class FlowAssembler:
                 "result_files": list(result_files),
                 "token_usage": public_token_usage,
                 "transcription_usage": public_transcription_usage,
+                "started_by": started_by,
             }
         )
 
     @staticmethod
-    def to_run_summary_public(run: FlowRunStatusSnapshot) -> FlowRunSummaryPublic:
-        return FlowRunSummaryPublic.model_validate(run)
+    def to_run_summary_public(
+        run: FlowRunStatusSnapshot,
+        *,
+        started_by: FlowRunStartedByPublic | None = None,
+    ) -> FlowRunSummaryPublic:
+        return FlowRunSummaryPublic.model_validate(run).model_copy(
+            update={"started_by": started_by}
+        )
 
     def to_run_detail_public(
         self,
@@ -188,6 +197,7 @@ class FlowAssembler:
         transcription_usage: FlowRunTranscriptionUsage | None = None,
         final_output: FlowFinalOutputContractPublic | None = None,
         webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = (),
+        started_by: FlowRunStartedByPublic | None = None,
     ) -> FlowRunDetailPublic:
         run_payload = self.to_run_public(
             run,
@@ -195,6 +205,7 @@ class FlowAssembler:
             token_usage=token_usage,
             transcription_usage=transcription_usage,
             final_output=final_output,
+            started_by=started_by,
         ).model_dump()
         return FlowRunDetailPublic.model_validate(
             {

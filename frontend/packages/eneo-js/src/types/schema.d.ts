@@ -21393,10 +21393,17 @@ export interface components {
      *         "employee_name": "Alex Example"
      *       },
      *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "principal_type": "user",
      *       "purpose": "production",
      *       "result_files": [],
      *       "revision": 1,
      *       "run_label": "Case 123",
+     *       "started_by": {
+     *         "display_name": "Alex Example",
+     *         "email": "alex.example@example.com",
+     *         "id": "00000000-0000-0000-0000-000000000030",
+     *         "principal_type": "user"
+     *       },
      *       "status": "queued",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -21547,6 +21554,8 @@ export interface components {
        * @description When a worker began executing the first step. Null while queued.
        */
       started_at?: string | null;
+      /** @description Who started the run, by id and name. It is shown to every caller who may see the run: the starter, tenant admins, and admins and owners of the flow's space. A service key sees only runs it started, so only its own name. Null when the run has no resolved principal. */
+      started_by?: components["schemas"]["FlowRunStartedByPublic"] | null;
       /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, or redispatch. */
       status: components["schemas"]["FlowRunStatus"];
       /**
@@ -22098,6 +22107,7 @@ export interface components {
      *             "employee_name": "Alex Example"
      *           },
      *           "job_id": "00000000-0000-0000-0000-000000000401",
+     *           "principal_type": "user",
      *           "purpose": "production",
      *           "result_files": [],
      *           "revision": 1,
@@ -22166,7 +22176,7 @@ export interface components {
      *           }
      *         ]
      *       },
-     *       "content_hash": "e66736c443a4e643e6c96219794d20973c17376047c8754bf57b7bd48e255cb7",
+     *       "content_hash": "9ab52b60d68fafc0fa838e1e7d141c372506a72e3e263d556af75ee560367a8f",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "actor": {
@@ -22202,7 +22212,7 @@ export interface components {
      *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
-     *         "content_hash": "e66736c443a4e643e6c96219794d20973c17376047c8754bf57b7bd48e255cb7",
+     *         "content_hash": "9ab52b60d68fafc0fa838e1e7d141c372506a72e3e263d556af75ee560367a8f",
      *         "content_hash_input": "redacted",
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
@@ -22814,10 +22824,17 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "principal_type": "user",
      *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 1,
      *         "run_label": "Case 123",
+     *         "started_by": {
+     *           "display_name": "Alex Example",
+     *           "email": "alex.example@example.com",
+     *           "id": "00000000-0000-0000-0000-000000000030",
+     *           "principal_type": "user"
+     *         },
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -23079,10 +23096,17 @@ export interface components {
      *         "employee_name": "Alex Example"
      *       },
      *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "principal_type": "user",
      *       "purpose": "production",
      *       "result_files": [],
      *       "revision": 1,
      *       "run_label": "Case 123",
+     *       "started_by": {
+     *         "display_name": "Alex Example",
+     *         "email": "alex.example@example.com",
+     *         "id": "00000000-0000-0000-0000-000000000030",
+     *         "principal_type": "user"
+     *       },
      *       "status": "queued",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -23220,6 +23244,8 @@ export interface components {
        * @description When a worker began executing the first step. Null while queued.
        */
       started_at?: string | null;
+      /** @description Who started the run, by id and name. It is shown to every caller who may see the run: the starter, tenant admins, and admins and owners of the flow's space. A service key sees only runs it started, so only its own name. Null when the run has no resolved principal. */
+      started_by?: components["schemas"]["FlowRunStartedByPublic"] | null;
       /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, or redispatch. */
       status: components["schemas"]["FlowRunStatus"];
       /**
@@ -23294,10 +23320,17 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "principal_type": "user",
      *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 1,
      *         "run_label": "Case 123",
+     *         "started_by": {
+     *           "display_name": "Alex Example",
+     *           "email": "alex.example@example.com",
+     *           "id": "00000000-0000-0000-0000-000000000030",
+     *           "principal_type": "user"
+     *         },
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -23664,10 +23697,17 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "principal_type": "user",
      *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 1,
      *         "run_label": "Case 123",
+     *         "started_by": {
+     *           "display_name": "Alex Example",
+     *           "email": "alex.example@example.com",
+     *           "id": "00000000-0000-0000-0000-000000000030",
+     *           "principal_type": "user"
+     *         },
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -24246,10 +24286,17 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "principal_type": "user",
      *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 2,
      *         "run_label": "Case 123",
+     *         "started_by": {
+     *           "display_name": "Alex Example",
+     *           "email": "alex.example@example.com",
+     *           "id": "00000000-0000-0000-0000-000000000030",
+     *           "principal_type": "user"
+     *         },
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -24267,6 +24314,46 @@ export interface components {
      */
     FlowRunReviewCheckpointState:
       "awaiting_review" | "edited" | "approved" | "rejected" | "resumed" | "cancelled" | "expired";
+    /**
+     * FlowRunStartedByPublic
+     * @example {
+     *       "display_name": "Alex Example",
+     *       "email": "alex.example@example.com",
+     *       "id": "00000000-0000-0000-0000-000000000030",
+     *       "principal_type": "user"
+     *     }
+     * @example {
+     *       "display_name": "Alex Example",
+     *       "email": "alex.example@example.com",
+     *       "id": "00000000-0000-0000-0000-000000000030",
+     *       "principal_type": "user"
+     *     }
+     * @example {
+     *       "display_name": "Case intake integration",
+     *       "id": "00000000-0000-0000-0000-000000000040",
+     *       "principal_type": "service_key"
+     *     }
+     */
+    FlowRunStartedByPublic: {
+      /**
+       * Display Name
+       * @description Name to show for the starter: the user's username, else their email, or the service key's name. Null when the account can no longer be read.
+       */
+      display_name: string | null;
+      /**
+       * Email
+       * @description The user's email. Always null for a service key.
+       */
+      email?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       * @description For `user`, the user's id. For `service_key`, the id of the service principal behind the key, which stays the same when the key is rotated. Compare it with your own id to tell whether you started the run: retrying a failed run requires the principal that started it.
+       */
+      id: string;
+      /** @description Who started the run: `user` for a person (also through a module session or a personal API key) or `service_key` for a service key. */
+      principal_type: components["schemas"]["PrincipalType"];
+    };
     /**
      * FlowRunStatus
      * @enum {string}
@@ -24759,8 +24846,15 @@ export interface components {
      *       "flow_version": 3,
      *       "id": "00000000-0000-0000-0000-000000000301",
      *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "principal_type": "user",
      *       "purpose": "production",
      *       "revision": 1,
+     *       "started_by": {
+     *         "display_name": "Alex Example",
+     *         "email": "alex.example@example.com",
+     *         "id": "00000000-0000-0000-0000-000000000030",
+     *         "principal_type": "user"
+     *       },
      *       "status": "queued",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -24856,6 +24950,8 @@ export interface components {
        * @description When a worker began executing the first step. Null while queued.
        */
       started_at?: string | null;
+      /** @description Who started the run, by id and name. It is shown to every caller who may see the run: the starter, tenant admins, and admins and owners of the flow's space. A service key sees only runs it started, so only its own name. Null when the run has no resolved principal. */
+      started_by?: components["schemas"]["FlowRunStartedByPublic"] | null;
       /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, or redispatch. */
       status: components["schemas"]["FlowRunStatus"];
       /**
@@ -27186,10 +27282,17 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "principal_type": "user",
      *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 1,
      *         "run_label": "Case 123",
+     *         "started_by": {
+     *           "display_name": "Alex Example",
+     *           "email": "alex.example@example.com",
+     *           "id": "00000000-0000-0000-0000-000000000030",
+     *           "principal_type": "user"
+     *         },
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -58845,8 +58948,15 @@ export interface operations {
            *           "flow_version": 3,
            *           "id": "00000000-0000-0000-0000-000000000301",
            *           "job_id": "00000000-0000-0000-0000-000000000401",
+           *           "principal_type": "user",
            *           "purpose": "production",
            *           "revision": 1,
+           *           "started_by": {
+           *             "display_name": "Alex Example",
+           *             "email": "alex.example@example.com",
+           *             "id": "00000000-0000-0000-0000-000000000030",
+           *             "principal_type": "user"
+           *           },
            *           "status": "queued",
            *           "tenant_id": "00000000-0000-0000-0000-000000000010",
            *           "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -59864,10 +59974,17 @@ export interface operations {
            *           "employee_name": "Alex Example"
            *         },
            *         "job_id": "00000000-0000-0000-0000-000000000401",
+           *         "principal_type": "user",
            *         "purpose": "production",
            *         "result_files": [],
            *         "revision": 1,
            *         "run_label": "Case 123",
+           *         "started_by": {
+           *           "display_name": "Alex Example",
+           *           "email": "alex.example@example.com",
+           *           "id": "00000000-0000-0000-0000-000000000030",
+           *           "principal_type": "user"
+           *         },
            *         "status": "queued",
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -60309,10 +60426,17 @@ export interface operations {
            *           "employee_name": "Alex Example"
            *         },
            *         "job_id": "00000000-0000-0000-0000-000000000401",
+           *         "principal_type": "user",
            *         "purpose": "production",
            *         "result_files": [],
            *         "revision": 2,
            *         "run_label": "Case 123",
+           *         "started_by": {
+           *           "display_name": "Alex Example",
+           *           "email": "alex.example@example.com",
+           *           "id": "00000000-0000-0000-0000-000000000030",
+           *           "principal_type": "user"
+           *         },
            *         "status": "queued",
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -60844,10 +60968,17 @@ export interface operations {
            *           "employee_name": "Alex Example"
            *         },
            *         "job_id": "00000000-0000-0000-0000-000000000401",
+           *         "principal_type": "user",
            *         "purpose": "production",
            *         "result_files": [],
            *         "revision": 2,
            *         "run_label": "Case 123",
+           *         "started_by": {
+           *           "display_name": "Alex Example",
+           *           "email": "alex.example@example.com",
+           *           "id": "00000000-0000-0000-0000-000000000030",
+           *           "principal_type": "user"
+           *         },
            *         "status": "queued",
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -61215,10 +61346,17 @@ export interface operations {
            *           "employee_name": "Alex Example"
            *         },
            *         "job_id": "00000000-0000-0000-0000-000000000401",
+           *         "principal_type": "user",
            *         "purpose": "production",
            *         "result_files": [],
            *         "revision": 1,
            *         "run_label": "Case 123",
+           *         "started_by": {
+           *           "display_name": "Alex Example",
+           *           "email": "alex.example@example.com",
+           *           "id": "00000000-0000-0000-0000-000000000030",
+           *           "principal_type": "user"
+           *         },
            *         "status": "queued",
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "trace_id": "00000000-0000-0000-0000-000000000302",

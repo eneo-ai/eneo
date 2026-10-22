@@ -50,17 +50,31 @@ describe("FlowRunsList", () => {
   it("lists the runs with status, start, who started them, duration and version", async () => {
     answerList([
       makeRunSummary({ id: "run-2", status: "failed" }),
-      makeRunSummary({ id: "run-1", principal_type: "service_key", purpose: "test" })
+      makeRunSummary({
+        id: "run-1",
+        principal_type: "service_key",
+        started_by: {
+          principal_type: "service_key",
+          id: "service-1",
+          display_name: "Ärendeintag",
+          email: null
+        },
+        purpose: "test"
+      }),
+      makeRunSummary({ id: "run-0", principal_type: "service_key", started_by: null })
     ]);
     const { container } = renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" />);
 
     const table = await screen.findByRole("table", { name: messages.flow_runs_heading });
     const rows = within(table).getAllByRole("row");
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(4);
     expect(within(rows[1]!).getByText(messages.flow_runs_status_failed)).toBeTruthy();
     expect(within(rows[1]!).getByText("1 min 5 s")).toBeTruthy();
     expect(within(rows[1]!).getByText("Version 3")).toBeTruthy();
-    expect(within(rows[2]!).getByText(messages.flow_runs_started_by_service_key)).toBeTruthy();
+    expect(within(rows[1]!).getByText("Anna Lind")).toBeTruthy();
+    expect(within(rows[2]!).getByText("Ärendeintag")).toBeTruthy();
+    // A backend that names no one still says what kind of principal it was.
+    expect(within(rows[3]!).getByText(messages.flow_runs_started_by_service_key)).toBeTruthy();
     expect(within(rows[2]!).getByText(messages.flow_runs_purpose_test)).toBeTruthy();
     const link = within(rows[1]!).getByRole("link");
     expect(link.getAttribute("href")).toBe("/spaces/space-1/flows/flow-1/runs/run-2");

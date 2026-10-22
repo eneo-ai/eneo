@@ -50,8 +50,10 @@ from eneo.flows.api.flow_models import (
     FlowRunReviewCheckpointRejectRequest,
     FlowRunReviewCheckpointResumeRequest,
     FlowRunReviewCheckpointResumeResponse,
+    FlowRunStartedByPublic,
 )
 from eneo.flows.api.flow_run_contract_models import FlowCitationSummaryPublic
+from eneo.flows.api.flow_run_started_by import started_by_for_run
 from eneo.flows.api.flow_runtime_paths import (
     FLOW_REVIEW_ACTIVE_PATH,
     FLOW_REVIEW_APPROVE_AND_CONTINUE_PATH,
@@ -1219,6 +1221,7 @@ class _ContinuationResponseParts:
     run: FlowRun
     dispatch_run: FlowRun | None
     completed_run_view: FlowRunWithResultFilesAndUsage | None
+    started_by: FlowRunStartedByPublic | None
 
 
 async def _prepare_continuation_response(
@@ -1244,6 +1247,7 @@ async def _prepare_continuation_response(
         run=run,
         dispatch_run=run if accepted else None,
         completed_run_view=completed_run_view,
+        started_by=await started_by_for_run(container, run),
     )
 
 
@@ -1269,9 +1273,10 @@ def _continuation_response(
             token_usage=view.token_usage,
             transcription_usage=view.transcription_usage,
             final_output=view.final_output,
+            started_by=parts.started_by,
         )
         if view is not None
-        else assembler.to_run_public(parts.run)
+        else assembler.to_run_public(parts.run, started_by=parts.started_by)
     )
     return FlowRunReviewCheckpointResumeResponse(
         checkpoint=parts.checkpoint,

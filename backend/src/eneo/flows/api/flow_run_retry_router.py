@@ -22,6 +22,7 @@ from eneo.flows.api.flow_models import FLOW_RUN_RETRY_PUBLIC_EXAMPLE, FlowRunRet
 from eneo.flows.api.flow_run_concurrency_response import (
     flow_run_concurrency_limit_response,
 )
+from eneo.flows.api.flow_run_started_by import started_by_for_run
 from eneo.flows.api.flow_runtime_paths import FLOW_RUN_RETRY_PATH
 from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
@@ -144,7 +145,12 @@ async def retry_flow_run_from_failed_step(
                 flow_id=id, run_id=run_id, idempotency_key=idempotency_key
             )
             public = FlowRunRetryPublic(
-                run=FlowAssembler().to_run_public(result.run_result.run),
+                run=FlowAssembler().to_run_public(
+                    result.run_result.run,
+                    started_by=await started_by_for_run(
+                        container, result.run_result.run
+                    ),
+                ),
                 created=result.run_result.created,
                 source_run_id=result.source_run_id,
                 first_executed_step_order=result.first_executed_step_order,

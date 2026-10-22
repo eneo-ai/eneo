@@ -119,10 +119,11 @@ async def _create_flow_service_key(
     scope_id: str | None = None,
     permission: str = "write",
     resource_permissions: dict[str, str] | None = None,
+    name: str | None = None,
 ) -> str:
     expires_at = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
     payload: dict[str, object] = {
-        "name": f"flow-service-key-{uuid4().hex[:8]}",
+        "name": name or f"flow-service-key-{uuid4().hex[:8]}",
         "key_type": "sk_",
         "permission": permission,
         "scope_type": scope_type,
@@ -1175,6 +1176,95 @@ async def test_service_key_evidence_permission_matrix(
     )
     assert redacted_export_response.status_code == 403, redacted_export_response.text
     assert redacted_export_response.json()["code"] == "flow_run_evidence_forbidden"
+
+
+async def test_runs_name_who_started_them_only_to_callers_who_see_the_run(
+    client,
+    admin_token,
+    admin_user,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch_flow_run_recoverably_after_commit,
+    )
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
+    runs_path = f"/api/v1/flows/{flow['id']}/runs/"
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    intake_key = await _create_flow_service_key(
+        client, token=admin_token, name="Case intake"
+    )
+    other_key = await _create_flow_service_key(
+        client, token=admin_token, name="Archive export"
+    )
+
+    async def start_run(headers: dict[str, str]) -> dict:
+        response = await client.post(
+            runs_path,
+            json={
+                "expected_flow_version": flow["published_version"],
+                "input_payload_json": {"text": "who started me"},
+            },
+            headers={**headers, "Idempotency-Key": f"started-by:{uuid4().hex}"},
+        )
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    person_run = await start_run(admin_headers)
+    key_run = await start_run({"X-API-Key": intake_key})
+    person = {
+        "principal_type": "user",
+        "id": str(admin_user.id),
+        "display_name": (admin_user.username or "").strip() or admin_user.email,
+        "email": admin_user.email,
+    }
+    assert person_run["started_by"] == person
+    intake_name = key_run["started_by"]
+    assert intake_name["principal_type"] == "service_key"
+    assert intake_name["display_name"] == "Case intake"
+    assert intake_name["email"] is None
+
+    admin_list = await client.get(runs_path, headers=admin_headers)
+    assert admin_list.status_code == 200, admin_list.text
+    assert {item["id"]: item["started_by"] for item in admin_list.json()["items"]} == {
+        person_run["id"]: person,
+        key_run["id"]: intake_name,
+    }
+    for path in (f"{runs_path}{key_run['id']}/status/", f"{runs_path}{key_run['id']}/"):
+        response = await client.get(path, headers=admin_headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["started_by"] == intake_name
+    evidence = await client.get(
+        f"{runs_path}{key_run['id']}/evidence/", headers=admin_headers
+    )
+    assert evidence.status_code == 200, evidence.text
+    assert evidence.json()["run"]["started_by"] == intake_name
+
+    intake_list = await client.get(runs_path, headers={"X-API-Key": intake_key})
+    assert intake_list.status_code == 200, intake_list.text
+    assert [
+        (item["id"], item["started_by"]) for item in intake_list.json()["items"]
+    ] == [(key_run["id"], intake_name)]
+    for path in (
+        f"{runs_path}{person_run['id']}/status/",
+        f"{runs_path}{person_run['id']}/",
+    ):
+        response = await client.get(path, headers={"X-API-Key": intake_key})
+        assert response.status_code == 403, response.text
+        assert response.json()["code"] == "flow_run_access_denied"
+        assert "started_by" not in response.json()
+        assert admin_user.email not in response.text
+
+    other_list = await client.get(runs_path, headers={"X-API-Key": other_key})
+    assert other_list.status_code == 200, other_list.text
+    assert other_list.json()["items"] == []
+    other_status = await client.get(
+        f"{runs_path}{key_run['id']}/status/", headers={"X-API-Key": other_key}
+    )
+    assert other_status.status_code == 403, other_status.text
+    assert "Case intake" not in other_status.text
 
 
 @pytest.mark.asyncio

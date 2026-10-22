@@ -44,6 +44,7 @@ from eneo.flows.api.flow_models import (
     FlowRunPublic,
     FlowRunRedispatchRequest,
     FlowRunRedispatchResponse,
+    FlowRunStartedByPublic,
     FlowRunSummaryPublic,
 )
 from eneo.flows.api.flow_run_concurrency_response import (
@@ -52,6 +53,10 @@ from eneo.flows.api.flow_run_concurrency_response import (
     flow_run_concurrency_limit_response,
 )
 from eneo.flows.api.flow_run_contract_models import FlowRunCapacityPublic
+from eneo.flows.api.flow_run_started_by import (
+    started_by_for_run,
+    started_by_for_runs,
+)
 from eneo.flows.api.flow_run_status_capability_models import (
     FlowRunStatusCapabilitiesPublic,
     flow_run_status_capabilities_public,
@@ -464,6 +469,7 @@ async def create_flow_run(
     assembler = FlowAssembler()
     dispatch_run: FlowRun | None = None
     completed_replay_view = None
+    started_by: FlowRunStartedByPublic | None = None
     try:
         async with commit_flow_runtime_write_before_response(container):
             await flow_access_context.enforce_flow_scope(
@@ -499,6 +505,7 @@ async def create_flow_run(
                 ),
             )
             run = create_result.run
+            started_by = await started_by_for_run(container, run)
             if create_result.created:
                 await container.audit_service().log(
                     tenant_id=user.tenant_id,
@@ -542,8 +549,9 @@ async def create_flow_run(
             token_usage=completed_replay_view.token_usage,
             transcription_usage=completed_replay_view.transcription_usage,
             final_output=completed_replay_view.final_output,
+            started_by=started_by,
         )
-    return assembler.to_run_public(run)
+    return assembler.to_run_public(run, started_by=started_by)
 
 
 @router.get(
@@ -637,10 +645,14 @@ async def list_flow_runs(
         history=True,
     )
     page_runs = runs[:limit]
+    started_by = await started_by_for_runs(container, page_runs)
     assembler = FlowAssembler()
     return {
         "count": len(page_runs),
-        "items": [assembler.to_run_summary_public(run) for run in page_runs],
+        "items": [
+            assembler.to_run_summary_public(run, started_by=started_by.get(run.id))
+            for run in page_runs
+        ],
         "has_more": len(runs) > limit,
     }
 
@@ -695,7 +707,9 @@ async def get_flow_run_status(
         flow_id=id,
         history=True,
     )
-    return FlowAssembler.to_run_summary_public(run)
+    return FlowAssembler.to_run_summary_public(
+        run, started_by=await started_by_for_run(container, run)
+    )
 
 
 @router.get(
@@ -773,6 +787,7 @@ async def get_flow_run(
                 transcription_usage=run_view.transcription_usage,
                 final_output=run_view.final_output,
                 webhook_deliveries=run_view.webhook_deliveries,
+                started_by=await started_by_for_run(container, run_view.run),
             )
             user = container.user()
             await log_flow_trace_audit_or_raise(
@@ -847,6 +862,7 @@ async def cancel_flow_run(
         )
         run_service = container.flow_run_service()
         run = await run_service.cancel_run(run_id=run_id, flow_id=id)
+        started_by = await started_by_for_run(container, run)
         if run.status is FlowRunStatus.COMPLETED:
             completed_run_view = (
                 await run_service.enrich_run_with_result_files_and_usage(
@@ -860,8 +876,9 @@ async def cancel_flow_run(
             token_usage=completed_run_view.token_usage,
             transcription_usage=completed_run_view.transcription_usage,
             final_output=completed_run_view.final_output,
+            started_by=started_by,
         )
-    return FlowAssembler().to_run_public(run)
+    return FlowAssembler().to_run_public(run, started_by=started_by)
 
 
 @router.post(
@@ -1005,6 +1022,7 @@ async def redispatch_flow_run(
         if run.status is FlowRunStatus.COMPLETED
         else None
     )
+    started_by = await started_by_for_run(container, run)
     assembler = FlowAssembler()
     public_run = (
         assembler.to_run_public(
@@ -1013,9 +1031,10 @@ async def redispatch_flow_run(
             token_usage=completed_run_view.token_usage,
             transcription_usage=completed_run_view.transcription_usage,
             final_output=completed_run_view.final_output,
+            started_by=started_by,
         )
         if completed_run_view is not None
-        else assembler.to_run_public(run)
+        else assembler.to_run_public(run, started_by=started_by)
     )
     return FlowRunRedispatchResponse(
         run=public_run,
