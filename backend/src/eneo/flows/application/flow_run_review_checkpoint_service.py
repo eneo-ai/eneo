@@ -47,6 +47,7 @@ from eneo.flows.domain.review_checkpoint_exceptions import (
     FlowReviewRunNoLongerAwaitingReviewError,
     FlowReviewRunNotAwaitingReviewError,
 )
+from eneo.flows.domain.review_reject_reason import normalize_review_reject_reason
 from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
 from eneo.flows.domain.speaker_labels import (
     apply_speaker_names,
@@ -71,7 +72,6 @@ from eneo.flows.flow_api_exceptions import (
     flow_run_abandonment_refusal,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
-from eneo.flows.flow_review_reject_reason import normalize_review_reject_reason
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.flow_run_input_envelope import (
     FLOW_INPUT_TRANSCRIPTION_KEY,

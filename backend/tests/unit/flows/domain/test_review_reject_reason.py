@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from eneo.flows.flow_api_exceptions import FlowBadRequestException
-from eneo.flows.flow_review_reject_reason import (
+from eneo.flows.domain.review_reject_reason import (
     FLOW_REVIEW_REJECT_REASON_MAX_LENGTH,
     normalize_review_reject_reason,
 )
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 
 
 def test_the_reason_is_trimmed():

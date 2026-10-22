@@ -99,6 +99,10 @@ from eneo.flows.domain.rag_evidence import (
     RecordedPassageContent,
     RetrievedSource,
 )
+from eneo.flows.domain.review_reject_reason import (
+    FLOW_REVIEW_REJECT_REASON_MAX_LENGTH,
+    normalize_review_reject_reason,
+)
 from eneo.flows.domain.step_output import StepMaterialReference, parse_step_text_aliases
 from eneo.flows.domain.text_processing import TextProcessingConfig
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
@@ -122,10 +126,6 @@ from eneo.flows.flow_review_policy import (
     FLOW_STEP_REVIEW_POLICY_DESCRIPTION,
     FlowStepReviewMode,
     FlowStepReviewPolicy,
-)
-from eneo.flows.flow_review_reject_reason import (
-    FLOW_REVIEW_REJECT_REASON_MAX_LENGTH,
-    normalize_review_reject_reason,
 )
 from eneo.flows.flow_run_error import (
     FlowRunDispatchError,

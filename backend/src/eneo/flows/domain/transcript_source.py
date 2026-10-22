@@ -15,7 +15,6 @@ from pydantic import (
     model_validator,
 )
 from pydantic.json_schema import JsonSchemaValue
-from pydantic_core import CoreSchema
 
 
 class TranscriptSourceOmissionReason(IntEnum):
@@ -30,7 +29,7 @@ class TranscriptSourceOmissionReason(IntEnum):
 
     @classmethod
     def __get_pydantic_json_schema__(
-        cls, core_schema: CoreSchema, handler: GetJsonSchemaHandler
+        cls, core_schema: Any, handler: GetJsonSchemaHandler
     ) -> JsonSchemaValue:
         json_schema = handler.resolve_ref_schema(handler(core_schema))
         # Names for the wire numbers, for generators that build named enums.
