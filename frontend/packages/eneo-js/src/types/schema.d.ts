@@ -22188,7 +22188,7 @@ export interface components {
      *           {
      *             "attempt_no": 1,
      *             "availability": "available",
-     *             "checksum": "artifact-checksum",
+     *             "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
      *             "file_id": "00000000-0000-0000-0000-000000000501",
      *             "file_type": "document",
      *             "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
@@ -22335,7 +22335,7 @@ export interface components {
      *           }
      *         ]
      *       },
-     *       "content_hash": "9ab52b60d68fafc0fa838e1e7d141c372506a72e3e263d556af75ee560367a8f",
+     *       "content_hash": "80c48fd41127875b330cd1342521885ab81c98c520ca43476d755769ba13c65d",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "actor": {
@@ -22349,7 +22349,7 @@ export interface components {
      *             {
      *               "attempt_no": 1,
      *               "availability": "available",
-     *               "checksum": "artifact-checksum",
+     *               "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
      *               "file_id": "00000000-0000-0000-0000-000000000501",
      *               "file_type": "document",
      *               "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
@@ -22371,7 +22371,7 @@ export interface components {
      *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
-     *         "content_hash": "9ab52b60d68fafc0fa838e1e7d141c372506a72e3e263d556af75ee560367a8f",
+     *         "content_hash": "80c48fd41127875b330cd1342521885ab81c98c520ca43476d755769ba13c65d",
      *         "content_hash_input": "redacted",
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
@@ -22383,7 +22383,7 @@ export interface components {
      *         "provenance_schema_version_current": "flow-attempt-provenance.v3",
      *         "provenance_schema_version_min": "flow-attempt-provenance.v3",
      *         "redaction_applied": true,
-     *         "redaction_policy_version": "flow-evidence-redaction.v3",
+     *         "redaction_policy_version": "flow-evidence-redaction.v4",
      *         "retention_state_summary": {
      *           "note": "Deleted evidence is not tracked separately; missing rows remain indistinguishable from never-recorded evidence.",
      *           "tracking_state": "not_tracked"
@@ -22422,7 +22422,7 @@ export interface components {
      *           "bundle.run.input_payload_json.api_key",
      *           "bundle.definition_snapshot.steps[0].output_config.headers.Authorization"
      *         ],
-     *         "policy_version": "flow-evidence-redaction.v3"
+     *         "policy_version": "flow-evidence-redaction.v4"
      *       },
      *       "schema_version": "flow-evidence-export.v18",
      *       "summary": {
@@ -22430,7 +22430,7 @@ export interface components {
      *           {
      *             "attempt_no": 1,
      *             "availability": "available",
-     *             "checksum": "artifact-checksum",
+     *             "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
      *             "file_id": "00000000-0000-0000-0000-000000000501",
      *             "file_type": "document",
      *             "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
@@ -22470,7 +22470,7 @@ export interface components {
      *             {
      *               "attempt_no": 1,
      *               "availability": "available",
-     *               "checksum": "artifact-checksum",
+     *               "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
      *               "file_id": "00000000-0000-0000-0000-000000000501",
      *               "file_type": "document",
      *               "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
@@ -22554,7 +22554,7 @@ export interface components {
      *               {
      *                 "attempt_no": 1,
      *                 "availability": "available",
-     *                 "checksum": "artifact-checksum",
+     *                 "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
      *                 "file_id": "00000000-0000-0000-0000-000000000501",
      *                 "file_type": "document",
      *                 "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
@@ -22905,7 +22905,7 @@ export interface components {
      *         {
      *           "attempt_no": 1,
      *           "availability": "available",
-     *           "checksum": "artifact-checksum",
+     *           "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
      *           "file_id": "00000000-0000-0000-0000-000000000501",
      *           "file_type": "document",
      *           "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
@@ -24946,7 +24946,7 @@ export interface components {
       availability: "available" | "content_purged";
       /**
        * Checksum
-       * @description Content checksum of the stored bytes, prefixed with its algorithm.
+       * @description SHA-256 of the stored bytes as 64 lowercase hexadecimal digits, with no algorithm prefix.
        */
       checksum: string;
       /**
@@ -24991,7 +24991,7 @@ export interface components {
       size: number;
       /**
        * Source
-       * @description `generated_output` means the step rendered or generated the file as its own output, such as a DOCX or PDF. `declared_artifact` means the step's authored configuration explicitly declared the file as an artifact of the step.
+       * @description `declared_artifact` means the file is the step's result document: a DOCX or PDF the step rendered from its text or filled from a template. `generated_output` means the run wrote the file beside the step's result: the full text of an output too large to return inline, or a transcript.
        * @enum {string}
        */
       source: "generated_output" | "declared_artifact";

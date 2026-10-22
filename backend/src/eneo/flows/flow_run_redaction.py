@@ -6,7 +6,7 @@ from typing import Any, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 _REDACTED_VALUE = "[REDACTED]"
-REDACTION_POLICY_VERSION = "flow-evidence-redaction.v3"
+REDACTION_POLICY_VERSION = "flow-evidence-redaction.v4"
 _MAX_NESTED_URL_REDACTION_DEPTH = 8
 _SENSITIVE_URL_QUERY_EXACT_KEYS = {"code", "sig", "state"}
 _SENSITIVE_EXACT_KEYS = {

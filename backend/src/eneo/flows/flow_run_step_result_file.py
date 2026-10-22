@@ -48,13 +48,15 @@ class FlowRunStepResultFile(BaseModel):
         description="Stable position of this file within its step, starting at 0.",
     )
     source: FlowRunStepResultFileSource = Field(
-        description="`generated_output` means the step rendered or generated the file as its "
-        "own output, such as a DOCX or PDF. `declared_artifact` means the step's authored "
-        "configuration explicitly declared the file as an artifact of the step.",
+        description="`declared_artifact` means the file is the step's result document: "
+        "a DOCX or PDF the step rendered from its text or filled from a template. "
+        "`generated_output` means the run wrote the file beside the step's result: the "
+        "full text of an output too large to return inline, or a transcript.",
     )
     name: str = Field(description="Suggested download filename.")
     checksum: str = Field(
-        description="Content checksum of the stored bytes, prefixed with its algorithm.",
+        description="SHA-256 of the stored bytes as 64 lowercase hexadecimal digits, "
+        "with no algorithm prefix.",
     )
     size: int = Field(description="Size of the stored bytes in bytes.")
     mimetype: str | None = Field(

@@ -2075,7 +2075,7 @@ def test_render_evidence_json_export_adds_manifest_and_summary(
     assert export["manifest"]["redaction_applied"] is True
     assert isinstance(export["manifest"]["masked_fields_count"], int)
     assert (
-        export["manifest"]["redaction_policy_version"] == "flow-evidence-redaction.v3"
+        export["manifest"]["redaction_policy_version"] == "flow-evidence-redaction.v4"
     )
     assert export["manifest"]["redaction_applied"] == export["redaction"]["applied"]
     assert (
@@ -2127,7 +2127,7 @@ def test_render_evidence_json_export_adds_manifest_and_summary(
     assert export["summary"]["steps_count"] == 0
     assert export["summary"]["artifacts_count"] == 0
     assert export["redaction"]["applied"] is True
-    assert export["redaction"]["policy_version"] == "flow-evidence-redaction.v3"
+    assert export["redaction"]["policy_version"] == "flow-evidence-redaction.v4"
     assert export["redaction"]["masked_fields_count"] >= 1
     assert export["redaction"]["masked_paths"] == [expected_masked_path]
     assert export["redaction"]["masked_fields"][0]["reason"] in {
@@ -3069,7 +3069,7 @@ def test_evidence_export_manifest_rejects_unknown_fields() -> None:
         "detail_mode": "redacted",
         "redaction_applied": True,
         "masked_fields_count": 1,
-        "redaction_policy_version": "flow-evidence-redaction.v3",
+        "redaction_policy_version": "flow-evidence-redaction.v4",
         "retention_state_summary": {
             "tracking_state": "not_tracked",
             "note": (
@@ -3272,7 +3272,7 @@ def test_render_evidence_json_export_adds_human_readable_rag_and_artifact_summar
         "psykologi.se/psykologilexikon/affekt"
     ]
     assert (
-        export["manifest"]["redaction_policy_version"] == "flow-evidence-redaction.v3"
+        export["manifest"]["redaction_policy_version"] == "flow-evidence-redaction.v4"
     )
     assert (
         export["bundle"]["definition_snapshot"]["metadata_json"]["ai_builder"][

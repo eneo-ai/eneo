@@ -2641,7 +2641,7 @@ FLOW_RUN_RESULT_FILE_EXAMPLE: dict[str, Any] = {
     "ordinal": 0,
     "source": "declared_artifact",
     "name": "case-summary.pdf",
-    "checksum": "artifact-checksum",
+    "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
     "size": 14012,
     "mimetype": "application/pdf",
     "file_type": "document",
@@ -3020,7 +3020,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "detail_mode": "redacted",
                     "redaction_applied": True,
                     "masked_fields_count": 2,
-                    "redaction_policy_version": "flow-evidence-redaction.v3",
+                    "redaction_policy_version": "flow-evidence-redaction.v4",
                     "retention_state_summary": {
                         "tracking_state": "not_tracked",
                         "note": (
@@ -3079,7 +3079,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                             "name": "case-summary.pdf",
                             "mimetype": "application/pdf",
                             "size": 14012,
-                            "checksum": "artifact-checksum",
+                            "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
                             "file_type": "document",
                             "availability": "available",
                         }
@@ -3165,7 +3165,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                                 "name": "case-summary.pdf",
                                 "mimetype": "application/pdf",
                                 "size": 14012,
-                                "checksum": "artifact-checksum",
+                                "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
                                 "file_type": "document",
                                 "availability": "available",
                             }
@@ -3258,7 +3258,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                                     "name": "case-summary.pdf",
                                     "mimetype": "application/pdf",
                                     "size": 14012,
-                                    "checksum": "artifact-checksum",
+                                    "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
                                     "file_type": "document",
                                     "availability": "available",
                                 }
@@ -3335,7 +3335,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                 },
                 "redaction": {
                     "applied": True,
-                    "policy_version": "flow-evidence-redaction.v3",
+                    "policy_version": "flow-evidence-redaction.v4",
                     "masked_fields_count": 2,
                     "masked_paths": [
                         "bundle.run.input_payload_json.api_key",
