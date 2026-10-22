@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+import hashlib
+import io
+import os
+import zipfile
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -410,3 +415,108 @@ async def test_generated_pdf_downloads_under_the_flow_name_and_run_day(
         f'attachment; filename="Namndmote protokoll {run_day}.pdf"; '
         f"filename*=UTF-8''N%C3%A4mndm%C3%B6te%20protokoll%20{run_day}.pdf"
     )
+
+
+# The runtime lays out PDFs with its WeasyPrint sidecar; CI installs it, a
+# developer machine may not.
+_PDF_SIDECAR_INSTALLED = Path(
+    os.environ.get("PDF_PYTHON", "/opt/pdf/bin/python3")
+).exists()
+
+
+@pytest.mark.parametrize(
+    "output_type",
+    [
+        "docx",
+        pytest.param(
+            "pdf",
+            marks=pytest.mark.skipif(
+                not _PDF_SIDECAR_INSTALLED,
+                reason="The tool runtime's PDF sidecar is not installed here.",
+            ),
+        ),
+    ],
+)
+async def test_a_rendered_document_is_stored_recorded_and_served_by_a_signed_link(
+    client,
+    flow_process_auth_headers,
+    create_published_compose_text_flow,
+    flow_broker_worker_seam,
+    output_type: str,
+) -> None:
+    # The worker renders the step's text in the shared tool runtime (a real
+    # process, not a stand-in) and stores the document as the step's declared
+    # artifact. The run's result is the stored bytes, served only through a
+    # signed link that names the producing run's file.
+    flow = await create_published_compose_text_flow(
+        client,
+        flow_process_auth_headers,
+        name="Beslutsunderlag",
+        output_mode="render_verbatim",
+        output_type=output_type,
+    )
+    await flow_broker_worker_seam.start_worker()
+    create_response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/",
+        json={
+            "expected_flow_version": flow.published_version,
+            "input_payload_json": {
+                "text": "# Beslut\n\nNämnden godkänner förslaget om ny bibliotekslokal."
+            },
+        },
+        headers={
+            **flow_process_auth_headers,
+            "Idempotency-Key": f"flow-rendered-document:{uuid4().hex}",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    run_id = create_response.json()["id"]
+
+    completed_run, _ = await flow_broker_worker_seam.wait_for_public_run_status(
+        client=client,
+        headers=flow_process_auth_headers,
+        flow_id=flow.flow_id,
+        run_id=run_id,
+        expected_status="completed",
+        timeout_seconds=60,
+    )
+    result = completed_run["result"]
+    assert isinstance(result, dict) and result["kind"] == "artifact"
+    [artifact] = result["files"]
+    assert artifact["source"] == "declared_artifact"
+    assert artifact["step_id"] == flow.step_id
+    assert artifact["attempt_no"] == 1
+    assert artifact["name"].endswith(f".{output_type}")
+
+    unsigned = await client.get(
+        f"/api/v1/flows/{flow.flow_id}/runs/{run_id}"
+        f"/artifacts/{artifact['file_id']}/signed-url/",
+    )
+    assert unsigned.status_code in {401, 403, 405}
+    signed_url_response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/{run_id}"
+        f"/artifacts/{artifact['file_id']}/signed-url/",
+        json={"expires_in": 60, "content_disposition": "attachment"},
+        headers=flow_process_auth_headers,
+    )
+    assert signed_url_response.status_code == 200, signed_url_response.text
+    signed_url = signed_url_response.json()["url"]
+    download = await client.get(signed_url)
+    assert download.status_code == 200, download.text
+    content = download.content
+    assert len(content) == artifact["size"]
+    assert artifact["checksum"].removeprefix("sha256:") == (
+        hashlib.sha256(content).hexdigest()
+    )
+    if output_type == "pdf":
+        assert content.startswith(b"%PDF-")
+        assert artifact["mimetype"] == "application/pdf"
+    else:
+        with zipfile.ZipFile(io.BytesIO(content)) as document:
+            body = document.read("word/document.xml").decode("utf-8")
+        assert "godkänner förslaget" in body
+        assert artifact["mimetype"] == (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+    tampered = await client.get(signed_url.replace("token=", "token=x", 1))
+    assert tampered.status_code != 200
