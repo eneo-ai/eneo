@@ -188,6 +188,11 @@ export function classificationPreviewRequest(params: {
   };
 }
 
+/** The classification preview of the draft as saved: every step, no assistant changes. */
+export function savedFlowPreviewRequest(flow: FlowPublic) {
+  return { steps: flow.steps.map((step) => updateRequestOf(step)) as never, assistants: [] };
+}
+
 /** The edits that still change something on top of `saved`, for "N changes" and rebasing. */
 export function changedStepFields(saved: StepConfig, edits: StepEdits): (keyof StepConfig)[] {
   return (Object.keys(edits) as (keyof StepConfig)[]).filter(

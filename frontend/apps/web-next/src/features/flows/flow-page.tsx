@@ -37,6 +37,7 @@ import {
   type FlowStep
 } from "./flows-api";
 import { FlowChatPanel } from "./flow-chat-panel";
+import { FlowDraftCheck } from "./flow-draft-check-panel";
 import { FlowPackageExportDialog } from "./flow-package-export-dialog";
 import { stepLabel } from "./flow-labels";
 import { flowRefusalMessage, STALE_REVISION } from "./flow-refusals";
@@ -414,6 +415,13 @@ export function FlowPage({ flowId }: { flowId: string }) {
                         />
                       ) : undefined
                     }
+                  />
+                ) : null}
+                {canEdit ? (
+                  <FlowDraftCheck
+                    flow={flow}
+                    speakerServices={space.transcription_services ?? []}
+                    onOpenStep={openStep}
                   />
                 ) : null}
                 <FlowStepList
