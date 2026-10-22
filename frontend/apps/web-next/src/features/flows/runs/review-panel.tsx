@@ -13,6 +13,7 @@ import { QuietBanner } from "@/components/astryx/banner";
 import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime } from "@/components/composites/client-time";
 import { EneoApiError } from "@/lib/api/errors";
+import { CitationSummary } from "./run-citations";
 import { focusFirstControl } from "./run-form-fields";
 import { JsonValue } from "./run-json";
 import { isStaleRefusal, refusalText } from "./run-messages";
@@ -29,6 +30,9 @@ import {
   type EditedValue,
   type ReviewDraft
 } from "./review-draft";
+import { ReviewApproveOnly } from "./review-approve-only";
+import { ReviewHistory } from "./review-history";
+import { StructuredReviewEditor } from "./review-structured-editor";
 import {
   approveAndContinue,
   editReview,
@@ -337,6 +341,11 @@ export function ReviewPanel({
         ) : null}
       </div>
 
+      <CitationSummary
+        summary={checkpoint.citation_summary}
+        heading={t("flow_run_extras_review_citations")}
+      />
+
       {draft.kind === "file" ? (
         <p className="text-ax-text text-sm">{t("flow_runs_review_file")}</p>
       ) : !options.canEdit ? (
@@ -369,6 +378,14 @@ export function ReviewPanel({
           fields={draft.fields}
           problem={problem}
           onChange={(fields) => setDraft({ kind: "fields", fields })}
+        />
+      ) : draft.kind === "structured" ? (
+        <StructuredReviewEditor
+          id={`${baseId}-editor`}
+          schema={draft.schema}
+          value={draft.value}
+          problem={problem?.field === null ? problem.message : null}
+          onChange={(value) => setDraft({ ...draft, value })}
         />
       ) : (
         <div id={`${baseId}-editor`}>
@@ -455,6 +472,9 @@ export function ReviewPanel({
               if (value !== false) approve.mutate(value);
             }}
           />
+          {changed ? null : (
+            <ReviewApproveOnly checkpoint={checkpoint} isBlocked={busy} onRefused={refused} />
+          )}
           {changed ? (
             <Button
               label={t("flow_runs_review_save")}
@@ -494,6 +514,7 @@ export function ReviewPanel({
           </div>
         </div>
       ) : null}
+      {checkpoint.revision > 1 ? <ReviewHistory checkpoint={checkpoint} /> : null}
     </section>
   );
 }

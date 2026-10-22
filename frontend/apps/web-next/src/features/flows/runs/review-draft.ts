@@ -1,3 +1,4 @@
+import { formFits, schemaOf, type ReviewSchema, type ReviewValue } from "./review-structured";
 import type { ReviewCheckpoint } from "./runs-api";
 
 /**
@@ -29,6 +30,8 @@ export type ReviewDraft =
   | { kind: "speakers"; speakers: DraftSpeaker[]; rest: Record<string, unknown> }
   /** A flat JSON object: one control per field. */
   | { kind: "fields"; fields: DraftField[] }
+  /** Nested JSON the step's output contract describes: a form built from the contract. */
+  | { kind: "structured"; schema: ReviewSchema; value: ReviewValue }
   /** Any other JSON value: edited as JSON text. */
   | { kind: "json"; text: string }
   /** A document step (PDF, Word): reviewed as its file, never edited. */
@@ -62,7 +65,7 @@ function speakerRows(value: unknown): DraftSpeaker[] | null {
 
 /** The working copy of what the checkpoint holds now. */
 export function reviewDraftOf(
-  checkpoint: Pick<ReviewCheckpoint, "output_type" | "current_payload_json">
+  checkpoint: Pick<ReviewCheckpoint, "output_type" | "current_payload_json" | "output_contract">
 ): ReviewDraft {
   const payload = checkpoint.current_payload_json ?? {};
   if (checkpoint.output_type === "text") {
@@ -83,6 +86,9 @@ export function reviewDraftOf(
       if (fields.every((field): field is DraftField => field !== null)) {
         return { kind: "fields", fields };
       }
+    }
+    if (formFits(checkpoint.output_contract, value)) {
+      return { kind: "structured", schema: schemaOf(checkpoint.output_contract), value };
     }
     return { kind: "json", text: JSON.stringify(value, null, 2) };
   }
@@ -143,6 +149,8 @@ export function editedValueOf(
       }
       return { ok: true, value };
     }
+    case "structured":
+      return { ok: true, value: draft.value as EditedValue };
     case "json": {
       let parsed: unknown;
       try {
@@ -163,7 +171,7 @@ export function editedValueOf(
 /** Whether the reviewer changed the output from what the checkpoint holds. */
 export function draftChanged(
   draft: ReviewDraft,
-  checkpoint: Pick<ReviewCheckpoint, "output_type" | "current_payload_json">
+  checkpoint: Pick<ReviewCheckpoint, "output_type" | "current_payload_json" | "output_contract">
 ): boolean {
   return JSON.stringify(draft) !== JSON.stringify(reviewDraftOf(checkpoint));
 }
