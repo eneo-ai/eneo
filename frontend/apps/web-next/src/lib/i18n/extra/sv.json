@@ -2953,5 +2953,13 @@
   "flow_run_journey_export_refused": "Du kan inte ladda ner det här underlaget.",
   "flow_run_journey_failure_consumer_action": "För integrationer",
   "flow_run_journey_progress": "Körningens förlopp",
-  "flow_run_journey_sections_read": "Läst del för del: {count} delar."
+  "flow_run_journey_sections_read": "Läst del för del: {count} delar.",
+  "flow_run_journey_source_show": "Visa källan",
+  "flow_run_journey_source_show_named": "Visa källan {name}",
+  "flow_run_journey_source_subtitle": "Textavsnitten som steget hämtade är markerade i dokumentet.",
+  "flow_run_journey_source_passages": "Textavsnitt",
+  "flow_run_journey_source_document": "Dokumentet {name}",
+  "flow_run_journey_source_passage_now": "Textavsnitt {chunk}, {current} av {total}",
+  "flow_run_journey_source_passage_not_found": "Finns inte längre i dokumentet.",
+  "flow_run_journey_source_passage_count": "{count, plural, one {# textavsnitt} other {# textavsnitt}}"
 }

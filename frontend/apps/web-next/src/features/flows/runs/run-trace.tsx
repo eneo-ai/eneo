@@ -11,6 +11,7 @@ import { ListError } from "@/components/composites/query-state";
 import { saveBlob } from "@/features/chat/side-panel/document-export";
 import { toast } from "@/lib/toast";
 import type { FlowPublic } from "../flows-api";
+import { EvidenceOmissions } from "./run-evidence-counters";
 import { RunEvidenceExport } from "./run-evidence-export";
 import type { RunStepView } from "./run-progress";
 import { stepTitle } from "./run-steps";
@@ -79,12 +80,9 @@ function TraceBody({
   stepName: (order: number) => string;
 }) {
   const t = useTranslations();
-  const omitted = (evidence.debug_export.run.summary?.omissions ?? []).length > 0;
   return (
     <div className="flex flex-col gap-6">
-      {omitted ? (
-        <p className="text-ax-text-secondary text-sm">{t("flow_run_extras_trace_omitted")}</p>
-      ) : null}
+      <EvidenceOmissions summary={evidence.debug_export.run.summary} />
       <Part title={t("flow_run_extras_attempts_heading")}>
         <RunTraceAttempts attempts={evidence.step_attempts} stepName={stepName} />
       </Part>

@@ -7,7 +7,9 @@ import { useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import type { Schema } from "@/lib/api/models";
+import { KnowledgeViewCounters } from "./run-evidence-counters";
 import { formatCount } from "./run-format";
+import { KnowledgeSourceViewer } from "./run-knowledge-source";
 import { stepTitle } from "./run-steps";
 import type { RunStepView } from "./run-progress";
 import { runEvidenceQueryOptions } from "./runs-api";
@@ -34,6 +36,8 @@ function referenceName(reference: Reference, fallback: string): string {
 function ReferenceRow({ reference }: { reference: Reference }) {
   const t = useTranslations();
   const locale = useLocale();
+  const [viewing, setViewing] = useState(false);
+  const name = referenceName(reference, t("flow_runs_citation_unnamed"));
   const container =
     reference.source_container_display_name?.trim() || reference.source_container_label?.trim();
   const withheld = (reference.passages ?? []).filter(
@@ -41,12 +45,26 @@ function ReferenceRow({ reference }: { reference: Reference }) {
   ).length;
   return (
     <li className="border-ax-border flex flex-col gap-1 border-t py-2 first:border-t-0">
-      <span className="text-ax-text text-sm font-medium break-words">
-        {referenceName(reference, t("flow_runs_citation_unnamed"))}
-        {container ? (
-          <span className="text-ax-text-secondary font-normal"> · {container}</span>
-        ) : null}
+      <span className="flex flex-wrap items-start justify-between gap-2">
+        <span className="text-ax-text text-sm font-medium break-words">
+          {name}
+          {container ? (
+            <span className="text-ax-text-secondary font-normal"> · {container}</span>
+          ) : null}
+        </span>
+        <Button
+          label={t("flow_run_journey_source_show")}
+          aria-label={t("flow_run_journey_source_show_named", { name })}
+          size="sm"
+          onClick={() => setViewing(true)}
+        />
       </span>
+      <KnowledgeSourceViewer
+        reference={reference}
+        name={name}
+        open={viewing}
+        onOpenChange={setViewing}
+      />
       <span className="text-ax-text-secondary text-xs">
         {[
           t("flow_runs_knowledge_matches", {
@@ -72,8 +90,10 @@ function ReferenceRow({ reference }: { reference: Reference }) {
 /**
  * What the run's steps found in their knowledge: per step, each source a
  * search matched, how many passages it matched, whether they went into the
- * prompt, and the text the evidence policy lets this reader see. The
- * evidence is an audited read, so it loads when asked for.
+ * prompt, and the text the evidence policy lets this reader see; each source
+ * opens in a viewer with its passages highlighted. What the evidence view
+ * left out is counted. The evidence is an audited read, so it loads when
+ * asked for.
  */
 export function RunKnowledge({
   flowId,
@@ -107,14 +127,23 @@ export function RunKnowledge({
       />
     );
   }
+  const counters = (
+    <KnowledgeViewCounters view={evidence.data.debug_export.run.summary?.knowledge_evidence_view} />
+  );
   const traces = (evidence.data.knowledge_traces ?? [])
     .map((trace) => ({ trace, references: traceReferences(trace.rag) }))
     .filter(({ trace, references }) => references.length > 0 || trace.rag.attempted);
   if (traces.length === 0) {
-    return <p className="text-ax-text-secondary text-sm">{t("flow_runs_knowledge_none")}</p>;
+    return (
+      <div className="flex flex-col gap-2">
+        {counters}
+        <p className="text-ax-text-secondary text-sm">{t("flow_runs_knowledge_none")}</p>
+      </div>
+    );
   }
   return (
     <div className="flex flex-col gap-4">
+      {counters}
       {traces.map(({ trace, references }) => {
         const step = steps.find((candidate) => candidate.order === trace.step_order);
         return (
