@@ -192,7 +192,7 @@ describe("classificationPreviewRequest", () => {
     ]);
     // Prose in the prompt plays no part in the rule; knowledge does.
     expect(request.assistants).toEqual([
-      { assistant_id: "assistant-2", update: { websites: [{ id: "w1" }] } }
+      { assistant_id: "assistant-2", step_id: "step-2", update: { websites: [{ id: "w1" }] } }
     ]);
   });
 
@@ -213,13 +213,59 @@ describe("classificationPreviewRequest", () => {
     expect(request("Läs {{step_1.output.text}} och {{flow_input.diarienummer}}.")).toEqual([
       {
         assistant_id: "assistant-1",
+        step_id: "step-1",
         update: {
           prompt: { text: "{{step_1.output.text}} {{flow_input.diarienummer}}", description: null }
         }
       }
     ]);
     expect(request("Svara kort.")).toEqual([
-      { assistant_id: "assistant-1", update: { prompt: { text: "", description: null } } }
+      {
+        assistant_id: "assistant-1",
+        step_id: "step-1",
+        update: { prompt: { text: "", description: null } }
+      }
+    ]);
+  });
+
+  it("previews a change to one of two steps that share an assistant as the save makes it", () => {
+    const second = makeStep({ id: "step-2", step_order: 2, input_source: "previous_step" });
+    const flow = makeFlow({ steps: [makeStep(), second] });
+    const saved = assistantConfigOf(makeAssistant());
+    const drafted = { ...saved, completion_model_id: "model-2" };
+    const draft = stepConfigOf(second);
+
+    const preview = classificationPreviewRequest({
+      flow,
+      stepId: "step-2",
+      draft,
+      assistantId: "assistant-1",
+      assistant: drafted,
+      savedAssistant: saved
+    });
+    const save = buildEditorUpdate({
+      flow,
+      stepId: "step-2",
+      stepPatch: null,
+      assistantId: "assistant-1",
+      assistantUpdate: assistantChanges(saved, drafted),
+      draft
+    });
+
+    // Both name the edited step, so only it gets the shared assistant's copy with the change.
+    expect(preview.assistants).toEqual([
+      {
+        assistant_id: "assistant-1",
+        step_id: "step-2",
+        update: { completion_model: { id: "model-2" } }
+      }
+    ]);
+    expect(save.assistants).toEqual([
+      {
+        assistant_id: "assistant-1",
+        step_id: "step-2",
+        changes: { completion_model: { id: "model-2" } }
+      }
     ]);
   });
 });

@@ -35,7 +35,7 @@ from eneo.flows.api.flow_security_classification_router import (
 from eneo.flows.api.flow_security_classification_router import (
     router as preview_router,
 )
-from eneo.flows.application.flow_service import FlowService
+from eneo.flows.application.flow_service import CandidateAssistantChange, FlowService
 from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_authoring_spec import (
     MAX_FLOW_AUTHORING_REQUEST_BYTES,
@@ -387,11 +387,12 @@ async def test_preview_evaluates_a_candidate_model_change(reading_world):
     world = reading_world
     saved = await world.preview()
     candidate = await world.preview(
-        assistant_updates={
-            world.weak.id: AssistantUpdateCommand(
-                completion_model_id=world.weak_model.id
+        assistant_changes=[
+            CandidateAssistantChange(
+                assistant_id=world.weak.id,
+                update=AssistantUpdateCommand(completion_model_id=world.weak_model.id),
             )
-        }
+        ]
     )
 
     assert _violation_code(saved, 2) is None
@@ -404,11 +405,14 @@ async def test_preview_evaluates_a_candidate_model_change(reading_world):
 async def test_preview_evaluates_a_candidate_prompt(world):
     saved = await world.preview()
     candidate = await world.preview(
-        assistant_updates={
-            world.weak.id: AssistantUpdateCommand(
-                prompt=PromptCreate(text="Bakgrund: {{ step_1.output.text }}")
+        assistant_changes=[
+            CandidateAssistantChange(
+                assistant_id=world.weak.id,
+                update=AssistantUpdateCommand(
+                    prompt=PromptCreate(text="Bakgrund: {{ step_1.output.text }}")
+                ),
             )
-        }
+        ]
     )
 
     assert saved[1].reads == ()
@@ -420,9 +424,12 @@ async def test_preview_evaluates_a_candidate_prompt(world):
 async def test_preview_evaluates_candidate_knowledge(world):
     saved = await world.preview()
     candidate = await world.preview(
-        assistant_updates={
-            world.weak.id: AssistantUpdateCommand(groups=[world.knowledge.id])
-        }
+        assistant_changes=[
+            CandidateAssistantChange(
+                assistant_id=world.weak.id,
+                update=AssistantUpdateCommand(groups=[world.knowledge.id]),
+            )
+        ]
     )
 
     assert saved[1].knowledge_level is None
@@ -435,12 +442,15 @@ async def test_preview_evaluates_candidate_knowledge(world):
 async def test_preview_writes_nothing(world):
     await world.preview(
         steps=world.candidate_steps(input_source="previous_step", input_bindings=None),
-        assistant_updates={
-            world.weak.id: AssistantUpdateCommand(
-                completion_model_id=world.strong_model.id,
-                prompt=PromptCreate(text="Skriv kort."),
+        assistant_changes=[
+            CandidateAssistantChange(
+                assistant_id=world.weak.id,
+                update=AssistantUpdateCommand(
+                    completion_model_id=world.strong_model.id,
+                    prompt=PromptCreate(text="Skriv kort."),
+                ),
             )
-        },
+        ],
     )
 
     assert {call[0] for call in world.flow_repo.mock_calls} <= {
@@ -491,10 +501,107 @@ async def test_preview_refuses_a_step_whose_assistant_the_flow_does_not_own(worl
 async def test_preview_refuses_a_change_for_an_assistant_no_step_uses(world):
     with pytest.raises(BadRequestException):
         await world.preview(
-            assistant_updates={
-                uuid4(): AssistantUpdateCommand(completion_model_id=uuid4())
-            }
+            assistant_changes=[
+                CandidateAssistantChange(
+                    assistant_id=uuid4(),
+                    update=AssistantUpdateCommand(completion_model_id=uuid4()),
+                )
+            ]
         )
+
+
+def _shared_steps(world: _World) -> list[FlowStep]:
+    """Steps 2 and 3 share an assistant whose model clears the level 3 that
+    step 1's output carries, and each reads the step before it."""
+    return [
+        world.first,
+        world.second,
+        _step(3, world.weak.id, input_source="previous_step"),
+    ]
+
+
+def _weak_model(world: _World, step_id: UUID | None = None) -> CandidateAssistantChange:
+    return CandidateAssistantChange(
+        assistant_id=world.weak.id,
+        step_id=step_id,
+        update=AssistantUpdateCommand(completion_model_id=world.weak_model.id),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_change_for_one_step_of_a_shared_assistant_explains_its_own_copy(
+    reading_world,
+):
+    world = reading_world
+    steps = _shared_steps(world)
+
+    for_the_step = await world.preview(
+        steps=steps, assistant_changes=[_weak_model(world, steps[2].id)]
+    )
+    for_every_step = await world.preview(
+        steps=steps, assistant_changes=[_weak_model(world)]
+    )
+
+    assert [_violation_code(for_the_step, order) for order in (2, 3)] == [
+        None,
+        MISMATCH,
+    ]
+    assert [item.model_level for item in for_the_step[1:]] == [3, 1]
+    assert [_violation_code(for_every_step, order) for order in (2, 3)] == [
+        MISMATCH,
+        MISMATCH,
+    ]
+    assert [step.assistant_id for step in steps] == [
+        world.strong.id,
+        world.weak.id,
+        world.weak.id,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_steps_copy_starts_from_the_shared_assistant_as_the_other_changes_leave_it(
+    reading_world,
+):
+    world = reading_world
+    steps = _shared_steps(world)
+    shared_knowledge = CandidateAssistantChange(
+        assistant_id=world.weak.id,
+        update=AssistantUpdateCommand(groups=[world.knowledge.id]),
+    )
+
+    preview = await world.preview(
+        steps=steps,
+        assistant_changes=[_weak_model(world, steps[2].id), shared_knowledge],
+    )
+
+    assert [item.knowledge_level for item in preview[1:]] == [3, 3]
+    assert [item.model_level for item in preview[1:]] == [3, 1]
+    assert [_violation_code(preview, order) for order in (2, 3)] == [None, MISMATCH]
+
+
+@pytest.mark.asyncio
+async def test_a_change_for_the_only_step_of_an_assistant_changes_the_assistant(
+    reading_world,
+):
+    world = reading_world
+
+    for_the_step = await world.preview(
+        assistant_changes=[_weak_model(world, world.second.id)]
+    )
+    for_every_step = await world.preview(assistant_changes=[_weak_model(world)])
+
+    assert for_the_step == for_every_step
+    assert _violation_code(for_the_step, 2) == MISMATCH
+
+
+@pytest.mark.asyncio
+async def test_preview_refuses_a_change_for_a_step_that_does_not_use_the_assistant(
+    world,
+):
+    for step_id in (world.first.id, uuid4()):
+        with pytest.raises(BadRequestException) as refused:
+            await world.preview(assistant_changes=[_weak_model(world, step_id)])
+        assert "does not use its assistant" in str(refused.value)
 
 
 @pytest.mark.asyncio
@@ -882,7 +989,9 @@ def _step_request(step: FlowStep, **updates) -> FlowStepUpdateRequest:
     return FlowStepUpdateRequest.model_validate(values | updates)
 
 
-def _body(world) -> FlowSecurityClassificationPreviewRequest:
+def _body(
+    world, *, step_id: UUID | None = None
+) -> FlowSecurityClassificationPreviewRequest:
     return FlowSecurityClassificationPreviewRequest(
         steps=[
             _step_request(world.first),
@@ -893,6 +1002,7 @@ def _body(world) -> FlowSecurityClassificationPreviewRequest:
         assistants=[
             FlowSecurityClassificationAssistantCandidate(
                 assistant_id=world.weak.id,
+                step_id=step_id,
                 update=FlowAssistantUpdateRequest.model_validate(
                     {"completion_model": {"id": str(world.weak_model.id)}}
                 ),
@@ -921,12 +1031,30 @@ async def test_the_route_lets_an_editor_preview_and_records_no_business_event(wo
     assert second.qualifying_model_ids == [world.strong_model.id]
     (call,) = flow_service.preview_step_security_classification.await_args_list
     assert [step.step_order for step in call.kwargs["steps"]] == [1, 2]
-    update = call.kwargs["assistant_updates"][world.weak.id]
-    assert isinstance(update, AssistantUpdateCommand)
-    assert update.completion_model_id == world.weak_model.id
+    (change,) = call.kwargs["assistant_changes"]
+    assert change.assistant_id == world.weak.id
+    assert change.step_id is None
+    assert isinstance(change.update, AssistantUpdateCommand)
+    assert change.update.completion_model_id == world.weak_model.id
     audit_service.log_async.assert_not_awaited()
     flow_service.update_flow.assert_not_awaited()
     flow_service.update_flow_assistant.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_route_hands_the_service_the_step_a_change_is_for(world):
+    container, flow_service, _ = _route_container(world)
+
+    await preview_flow_security_classification(
+        id=world.flow.id,
+        request=_request(),
+        body=_body(world, step_id=world.second.id),
+        container=container,
+    )
+
+    (call,) = flow_service.preview_step_security_classification.await_args_list
+    (change,) = call.kwargs["assistant_changes"]
+    assert (change.assistant_id, change.step_id) == (world.weak.id, world.second.id)
 
 
 @pytest.mark.asyncio
@@ -970,11 +1098,18 @@ async def test_the_route_refuses_a_member_who_may_only_read_flows_and_writes_not
     audit_service.log_async.assert_not_awaited()
 
 
-def test_two_candidates_for_one_assistant_are_refused_at_the_request_boundary(world):
+def test_two_candidates_for_one_assistant_and_step_are_refused_at_the_request_boundary(
+    world,
+):
     update = FlowAssistantUpdateRequest.model_validate({"completion_model": None})
     candidate = FlowSecurityClassificationAssistantCandidate(
         assistant_id=world.weak.id, update=update
     )
+    for_a_step = FlowSecurityClassificationAssistantCandidate(
+        assistant_id=world.weak.id, step_id=world.second.id, update=update
+    )
 
-    with pytest.raises(ValueError):
-        FlowSecurityClassificationPreviewRequest(assistants=[candidate, candidate])
+    FlowSecurityClassificationPreviewRequest(assistants=[candidate, for_a_step])
+    for twice in (candidate, for_a_step):
+        with pytest.raises(ValueError):
+            FlowSecurityClassificationPreviewRequest(assistants=[twice, twice])
