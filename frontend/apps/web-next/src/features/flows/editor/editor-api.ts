@@ -14,6 +14,7 @@ import {
   type TemplateInspection,
   type ToolOptions
 } from "./step-types";
+import type { StepKindPlace } from "./step-kinds";
 
 /**
  * The flow-core endpoints the step editor reads and writes. Every write goes
@@ -65,6 +66,8 @@ export const flowEditorKeys = {
     ["flows", flowId, "template-files", assetId, "inspection"] as const,
   classificationPreview: (flowId: string, request: string) =>
     ["flows", flowId, "classification-preview", request] as const,
+  insertionKinds: (flowId: string, revision: number, position: number) =>
+    ["flows", flowId, "step-kinds", revision, "insertion", position] as const,
   securityClassifications: () => ["security-classifications"] as const
 };
 
@@ -125,6 +128,26 @@ export function uploadTemplate(flowId: string, file: File): Promise<TemplateAsse
       bodySerializer: (formData: unknown) => formData as FormData
     })
   );
+}
+
+/**
+ * The kinds of step the core allows at one insertion place (1 is first), as
+ * the draft save judges them, keyed by the draft revision they judge.
+ */
+export function insertionKindsQueryOptions(flowId: string, revision: number, position: number) {
+  return queryOptions({
+    queryKey: flowEditorKeys.insertionKinds(flowId, revision, position),
+    queryFn: async (): Promise<StepKindPlace> => {
+      const answer = await unwrapFlow(
+        browserApi.GET("/api/v1/flows/{id}/step-kinds/", {
+          params: { path: { id: flowId }, query: { position } }
+        })
+      );
+      const place = answer.insertions.find((candidate) => candidate.position === position);
+      if (!place) throw new Error(`The core answered no insertion place ${position}.`);
+      return place;
+    }
+  });
 }
 
 type PreviewRequest = components["schemas"]["FlowSecurityClassificationPreviewRequest"];

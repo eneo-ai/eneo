@@ -2,6 +2,7 @@
  * Test-only: flows, steps and step assistants as the flow API returns them,
  * and a stand-in for the typed API client that answers by path.
  */
+import type { StepKind, StepKindOption, StepKindPlace, StepKindRefusal } from "../step-kinds";
 import type { FlowAssistant, FlowPublic, FlowStep } from "../step-types";
 
 export function makeStep(overrides: Partial<FlowStep> = {}): FlowStep {
@@ -76,6 +77,75 @@ export function makeAssistant(overrides: Partial<FlowAssistant> = {}): FlowAssis
     insight_enabled: false,
     ...overrides
   } as FlowAssistant;
+}
+
+/** A kind as the core's step-kinds answer gives it: allowed unless refused, an AI step's configuration. */
+export function makeKindOption(
+  kind: StepKind,
+  {
+    configuration,
+    ...overrides
+  }: Omit<Partial<StepKindOption>, "configuration"> & {
+    configuration?: Partial<StepKindOption["configuration"]>;
+  } = {}
+): StepKindOption {
+  const refusals = overrides.refusals ?? [];
+  return {
+    kind,
+    allowed: refusals.length === 0,
+    configuration: {
+      input_source: "previous_step",
+      input_type: "text",
+      input_contract: null,
+      output_mode: "pass_through",
+      output_type: "text",
+      output_contract: null,
+      input_bindings: null,
+      input_config: null,
+      output_config: null,
+      review_policy: null,
+      ...configuration
+    },
+    step_edits: [],
+    turns_on_transcription: false,
+    ...overrides,
+    refusals
+  };
+}
+
+export function makeKindRefusal(overrides: Partial<StepKindRefusal> = {}): StepKindRefusal {
+  return {
+    code: "typed_io_incompatible_type_chain",
+    issue_code: "typed_io_incompatible_type_chain",
+    step_order: 2,
+    step_id: null,
+    message: "Refused.",
+    ...overrides
+  };
+}
+
+/** An insertion place of the core's answer with `options` (every other kind allowed). */
+export function makeKindPlace(position: number, options: StepKindOption[] = []): StepKindPlace {
+  const kinds: StepKind[] = [
+    "ai",
+    "structured",
+    "compose",
+    "document",
+    "template",
+    "transcribe",
+    "speakers",
+    "review",
+    "fetch_http",
+    "tool",
+    "send_http"
+  ];
+  return {
+    position,
+    step_id: null,
+    options: kinds.map(
+      (kind) => options.find((option) => option.kind === kind) ?? makeKindOption(kind)
+    )
+  };
 }
 
 type Answer = { status?: number; body: unknown };

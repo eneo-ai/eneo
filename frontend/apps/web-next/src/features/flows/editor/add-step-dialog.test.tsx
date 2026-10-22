@@ -6,7 +6,13 @@ import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import type { FlowPublic } from "./step-types";
-import { makeFlow, makeStep } from "./testing/fixtures";
+import {
+  makeFlow,
+  makeKindOption,
+  makeKindPlace,
+  makeKindRefusal,
+  makeStep
+} from "./testing/fixtures";
 
 const api = vi.hoisted(() => ({
   routes: {} as Record<string, (init: never) => { status?: number; body: unknown }>,
@@ -22,6 +28,7 @@ vi.mock("@/lib/api/browser", async () => {
 import { AddStepDialog } from "./add-step-dialog";
 
 const EDITOR = "PATCH /api/v1/flows/{id}/editor/";
+const KINDS = "GET /api/v1/flows/{id}/step-kinds/";
 
 const flow = makeFlow({
   steps: [
@@ -63,10 +70,22 @@ async function openDialog(position = 2) {
   return { dialog, onSaved };
 }
 
+/** The core's answer at place 2: Word or PDF before step 3, which reads JSON, is refused. */
+const readsJson = makeKindRefusal({ step_order: 3, step_id: "step-2" });
+const ai = makeKindOption("ai", { configuration: { input_type: "json" } });
+const place = makeKindPlace(2, [
+  ai,
+  makeKindOption("document", { refusals: [readsJson] }),
+  makeKindOption("template", { refusals: [readsJson] })
+]);
+
 beforeEach(() => {
   api.routes = {
     "GET /api/v1/flows/{id}/tool-options": () => ({
       body: { items: [], security_classifications_enabled: false }
+    }),
+    [KINDS]: () => ({
+      body: { flow_id: "flow-1", draft_revision: 4, insertions: [place], steps: [] }
     })
   };
 });
@@ -76,11 +95,13 @@ afterEach(() => {
 });
 
 describe("AddStepDialog", () => {
-  it("is a named form dialog whose kinds that do not fit say why", async () => {
+  it("is a named form dialog whose kinds that do not fit say why, as the core judges them", async () => {
     const { dialog } = await openDialog();
-    const documentKind = within(dialog).getByRole("radio", {
+    const documentKind = await within(dialog).findByRole("radio", {
       name: new RegExp(messages.flow_step_editor_kind_document)
     });
+    const asked = api.stub.calls.find((call) => `${call.method} ${call.path}` === KINDS);
+    expect(asked?.init.params).toEqual({ path: { id: "flow-1" }, query: { position: 2 } });
     expect(
       (documentKind as HTMLInputElement).disabled ||
         documentKind.getAttribute("aria-disabled") === "true"
@@ -94,10 +115,13 @@ describe("AddStepDialog", () => {
     await expectNoAxeViolations(document.body);
   });
 
-  it("adds an AI step where it was asked for, reading the step before it", async () => {
+  it("adds an AI step where it was asked for, with the configuration the core gives it", async () => {
     const updated = makeFlow({ draft_revision: 5 });
     api.routes[EDITOR] = () => ({ body: updated });
     const { dialog, onSaved } = await openDialog(2);
+    await within(dialog).findByRole("radio", {
+      name: new RegExp(messages.flow_step_editor_kind_ai)
+    });
     const name = within(dialog).getByLabelText(/^Stegnamn/) as HTMLInputElement;
     expect(name.value).toBe(messages.flow_step_editor_kind_ai_name);
     fireEvent.change(name, { target: { value: "Bedöm ärendet" } });
@@ -110,18 +134,7 @@ describe("AddStepDialog", () => {
     expect(body).toEqual({
       expected_revision: 4,
       definition: {},
-      new_steps: [
-        {
-          name: "Bedöm ärendet",
-          configuration: {
-            input_source: "previous_step",
-            input_type: "json",
-            output_mode: "pass_through",
-            output_type: "text"
-          },
-          assistant: {}
-        }
-      ],
+      new_steps: [{ name: "Bedöm ärendet", configuration: ai.configuration, assistant: {} }],
       step_order: [{ step_id: "step-1" }, { new_step: 0 }, { step_id: "step-2" }]
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
@@ -129,6 +142,9 @@ describe("AddStepDialog", () => {
 
   it("explains a taken name at the field instead of adding", async () => {
     const { dialog } = await openDialog();
+    await within(dialog).findByRole("radio", {
+      name: new RegExp(messages.flow_step_editor_kind_ai)
+    });
     const name = within(dialog).getByLabelText(/^Stegnamn/) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "skriv svar" } });
     fireEvent.click(
@@ -144,7 +160,7 @@ describe("AddStepDialog", () => {
   it("asks for the address of a step that fetches over HTTP", async () => {
     const { dialog } = await openDialog();
     fireEvent.click(
-      within(dialog).getByRole("radio", {
+      await within(dialog).findByRole("radio", {
         name: new RegExp(`^${messages.flow_step_editor_kind_fetch_http}`)
       })
     );
@@ -156,5 +172,16 @@ describe("AddStepDialog", () => {
       await within(dialog).findByText(messages.flow_step_editor_http_url_missing)
     ).toBeTruthy();
     expect(document.activeElement).toBe(within(dialog).getByLabelText(/^Adress att hämta från/));
+  });
+
+  it("cannot add while the core has not answered for the place, and offers a retry", async () => {
+    api.routes[KINDS] = () => ({ status: 500, body: { message: "Fel", code: "internal" } });
+    const { dialog } = await openDialog();
+    expect(await within(dialog).findByRole("button", { name: messages.retry })).toBeTruthy();
+    const submit = within(dialog).getByRole("button", {
+      name: messages.flow_step_editor_add_submit
+    }) as HTMLButtonElement;
+    expect(submit.disabled || submit.getAttribute("aria-disabled") === "true").toBe(true);
+    expect(within(dialog).queryByRole("radio")).toBeNull();
   });
 });

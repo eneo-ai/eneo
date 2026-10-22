@@ -29,11 +29,13 @@ import {
 import type { InputSource, InputType, OutputMode, OutputType, StepConfig } from "./step-types";
 
 /**
- * What a step can be at its place in the flow, and what changing one setting
- * does to the others. The core's rules (`enums.py`, `step_chain_rules.py`,
- * `output_modes.py`) decide; this is the editor's copy of them, ported from
- * the reference editor's `flowStepTypes.ts` and `flowStepTransitionPolicy.ts`
- * so a choice never leaves the step in a state a save refuses.
+ * The choices each setting of a saved step offers at its place, and what
+ * changing one setting does to the others. The core's rules (`enums.py`,
+ * `step_chain_rules.py`, `output_modes.py`) decide; this is the editor's copy
+ * of them for the field pickers, ported from the reference editor's
+ * `flowStepTypes.ts` and `flowStepTransitionPolicy.ts` so a choice never
+ * leaves the step in a state a save refuses. Which kinds of step may be added
+ * where is the core's own answer (`step-kinds.ts`).
  */
 
 export const INPUT_SOURCES: readonly InputSource[] = [
@@ -75,12 +77,12 @@ const CHAIN_COMPATIBLE: Record<OutputType, readonly InputType[]> = {
   docx: ["text", "any"]
 };
 
-export function chainCompatible(outputType: OutputType, inputType: InputType): boolean {
+function chainCompatible(outputType: OutputType, inputType: InputType): boolean {
   return CHAIN_COMPATIBLE[outputType].includes(inputType);
 }
 
 /** The input type a step reading `outputType` starts with. */
-export function inputTypeForOutput(outputType: OutputType | null | undefined): InputType {
+function inputTypeForOutput(outputType: OutputType | null | undefined): InputType {
   return outputType === "json" ? "json" : "text";
 }
 

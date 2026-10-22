@@ -15,6 +15,20 @@ export function makeStep(order: number, overrides: Partial<FlowStep> = {}): Flow
   };
 }
 
+/** What the caller may do with a flow: everything, unless a test says otherwise. */
+export function flowPermissions(
+  overrides: Partial<FlowPublic["permissions"]> = {}
+): FlowPublic["permissions"] {
+  return {
+    can_edit: true,
+    can_publish: true,
+    can_delete: true,
+    can_run: true,
+    can_view_runs: true,
+    ...overrides
+  };
+}
+
 export function makeFlow(overrides: Partial<FlowPublic> = {}): FlowPublic {
   const steps = overrides.steps ?? [
     makeStep(1, { user_description: "Sammanfatta" }),
@@ -32,6 +46,7 @@ export function makeFlow(overrides: Partial<FlowPublic> = {}): FlowPublic {
     step_count: steps.length,
     metadata_json: null,
     run_history_retention: { source: "none" },
+    permissions: flowPermissions(),
     ...overrides,
     steps
   } as FlowPublic;

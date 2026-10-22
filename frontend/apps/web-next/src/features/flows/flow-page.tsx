@@ -5,7 +5,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useId, useRef, useState } from "react";
@@ -13,7 +13,6 @@ import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
-import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { focusAfterRemoval } from "@/lib/focus-after-removal";
 import { useFocusRescue } from "@/lib/focus-rescue";
@@ -22,7 +21,9 @@ import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/s
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
 import { useSpace } from "@/features/spaces/use-space";
 import { AddStepDialog } from "./editor/add-step-dialog";
+import { insertionKindsQueryOptions } from "./editor/editor-api";
 import { FlowStepEditor } from "./editor/flow-step-editor";
+import type { StepKindOption } from "./editor/step-kinds";
 import {
   flowKeys,
   flowQueryOptions,
@@ -45,7 +46,7 @@ import { FlowSettings } from "./flow-settings";
 import { FlowStatusBadge } from "./flow-status";
 import { FlowStepList, stepControlId } from "./flow-step-list";
 import { orderWithMove, orderWithout, stepsInOrder } from "./flow-steps";
-import { speakerStepOffer, speakerStepUpdate } from "./speaker-step-offer";
+import { speakerStepCandidate, speakerStepOption, speakerStepUpdate } from "./speaker-step-offer";
 import { runKeys } from "./runs/runs-api";
 import { FlowRunsList, runHref } from "./runs/runs-list";
 import { StartRunDialog } from "./runs/start-run-dialog";
@@ -81,15 +82,21 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const queryClient = useQueryClient();
   const rescue = useFocusRescue();
   const { routeId, space } = useSpace();
-  const { can } = useAppContext();
   const spaceName = useSpaceDisplayName();
   const sections = useSpaceSections();
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
   const steps = stepsInOrder(flow);
   const isPublished = flow.published_version != null;
-  const canManage = can("flows_manage");
-  const canEdit = canManage && !isPublished;
-  const canRun = isPublished && can("flows_run");
+  // What the caller may do with this flow, as the core reports it; a flag is
+  // permission, not state (a published flow still reports `can_edit`).
+  const { permissions } = flow;
+  const mayEdit = permissions.can_edit;
+  const canEdit = mayEdit && !isPublished;
+  const canPublish = permissions.can_publish;
+  // Unpublishing leads to editing only for someone who may do both.
+  const canUnpublishToEdit = canPublish && mayEdit;
+  const canRun = isPublished && permissions.can_run;
+  const canViewRuns = permissions.can_view_runs;
 
   const stepsHeadingRef = useRef<HTMLHeadingElement>(null);
   const editorRef = useRef<HTMLElement>(null);
@@ -103,9 +110,10 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const [exporting, setExporting] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<PageTab>(
+  const [chosenTab, setTab] = useState<PageTab>(
     searchParams.get("tab") === "runs" ? "runs" : "definition"
   );
+  const tab: PageTab = canViewRuns ? chosenTab : "definition";
   const tabsId = useId();
   const tabId = (id: PageTab) => `${tabsId}-tab-${id}`;
   const panelId = `${tabsId}-panel`;
@@ -254,9 +262,9 @@ export function FlowPage({ flowId }: { flowId: string }) {
   }
 
   /** Adds the step that names the speakers after `after`; focus goes to the new step. */
-  function addSpeakerStep(after: FlowStep) {
+  function addSpeakerStep(after: FlowStep, option: StepKindOption) {
     if (edit.isPending) return;
-    const update = speakerStepUpdate(flow, after, {
+    const update = speakerStepUpdate(flow, after, option, {
       step: t("flows_speaker_step_name"),
       fieldLabel: t("flows_speaker_participants_label"),
       fieldName: t("flows_speaker_participants_name")
@@ -305,12 +313,22 @@ export function FlowPage({ flowId }: { flowId: string }) {
   }
 
   const openedStep = openStepId ? steps.find((step) => step.id === openStepId) : undefined;
-  const speakerOfferStep = canEdit
-    ? speakerStepOffer(flow, space.transcription_services ?? [])
+  const speakerCandidate = canEdit
+    ? speakerStepCandidate(flow, space.transcription_services ?? [])
     : null;
+  // The core decides whether the speaker step may follow the candidate.
+  const speakerKinds = useQuery({
+    ...insertionKindsQueryOptions(
+      flow.id,
+      flow.draft_revision,
+      (speakerCandidate?.step_order ?? 0) + 1
+    ),
+    enabled: speakerCandidate !== null
+  });
+  const speakerOption = speakerCandidate ? speakerStepOption(speakerKinds.data) : null;
 
   const actions =
-    canManage || canRun ? (
+    mayEdit || canPublish || canRun ? (
       <div className="flex flex-wrap items-center gap-2">
         {canRun ? (
           <Button
@@ -319,13 +337,13 @@ export function FlowPage({ flowId }: { flowId: string }) {
             onClick={() => setStarting(true)}
           />
         ) : null}
-        {canManage ? (
+        {mayEdit ? (
           <Button
             label={t("flow_editor_tools_package_export")}
             onClick={() => setExporting(true)}
           />
         ) : null}
-        {canManage && isPublished ? (
+        {canPublish && isPublished ? (
           <Button
             label={t("unpublish")}
             onClick={() => setConfirmUnpublish(true)}
@@ -333,7 +351,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
             isInterruptible
           />
         ) : null}
-        {canManage && !isPublished ? (
+        {canPublish && !isPublished ? (
           <Button
             label={t("publish")}
             variant="primary"
@@ -395,30 +413,32 @@ export function FlowPage({ flowId }: { flowId: string }) {
             view !== "definition" && "max-lg:hidden"
           )}
         >
-          <TabList
-            role="tablist"
-            aria-label={t("flow_runs_tabs_label")}
-            value={tab}
-            onChange={(value) => selectTab(value as PageTab)}
-            hasDivider
-          >
-            <Tab
-              id={tabId("definition")}
-              value="definition"
-              label={t("flow_runs_tab_definition")}
-              panelId={panelId}
-            />
-            <Tab
-              id={tabId("runs")}
-              value="runs"
-              label={t("flow_runs_tab_runs")}
-              panelId={panelId}
-            />
-          </TabList>
+          {canViewRuns ? (
+            <TabList
+              role="tablist"
+              aria-label={t("flow_runs_tabs_label")}
+              value={tab}
+              onChange={(value) => selectTab(value as PageTab)}
+              hasDivider
+            >
+              <Tab
+                id={tabId("definition")}
+                value="definition"
+                label={t("flow_runs_tab_definition")}
+                panelId={panelId}
+              />
+              <Tab
+                id={tabId("runs")}
+                value="runs"
+                label={t("flow_runs_tab_runs")}
+                panelId={panelId}
+              />
+            </TabList>
+          ) : null}
           <div
-            role="tabpanel"
+            role={canViewRuns ? "tabpanel" : undefined}
             id={panelId}
-            aria-labelledby={tabId(tab)}
+            aria-labelledby={canViewRuns ? tabId(tab) : undefined}
             className="flex min-w-0 flex-col gap-6"
           >
             {tab === "runs" ? (
@@ -448,11 +468,13 @@ export function FlowPage({ flowId }: { flowId: string }) {
                     status="info"
                     title={t("flows_published_title", { version: flow.published_version ?? "" })}
                     description={
-                      canManage ? t("flows_published_description") : t("flows_published_read_only")
+                      canUnpublishToEdit
+                        ? t("flows_published_description")
+                        : t("flows_published_read_only")
                     }
                     collapsible={false}
                     endContent={
-                      canManage ? (
+                      canUnpublishToEdit ? (
                         <Button
                           label={t("flows_unpublish_to_edit")}
                           size="sm"
@@ -480,11 +502,11 @@ export function FlowPage({ flowId }: { flowId: string }) {
                   onRemove={removeStep}
                   onAdd={(position) => setAddAt(position)}
                   speakerOffer={
-                    speakerOfferStep?.id
+                    speakerCandidate?.id && speakerOption
                       ? {
-                          stepId: speakerOfferStep.id,
+                          stepId: speakerCandidate.id,
                           pending: edit.isPending,
-                          onAccept: () => addSpeakerStep(speakerOfferStep)
+                          onAccept: () => addSpeakerStep(speakerCandidate, speakerOption)
                         }
                       : null
                   }
@@ -547,7 +569,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
           }}
         />
       ) : null}
-      {canManage ? (
+      {mayEdit ? (
         <FlowPackageExportDialog flow={flow} open={exporting} onOpenChange={setExporting} />
       ) : null}
       <ConfirmDialogControlled

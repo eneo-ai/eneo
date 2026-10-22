@@ -23,6 +23,7 @@ from eneo.flows.api.flow_security_classification_models import (
     FlowSecurityClassificationPreviewPublic,
     FlowSecurityClassificationPreviewRequest,
 )
+from eneo.flows.application.flow_service import CandidateAssistantChange
 from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_spec import (
@@ -71,7 +72,10 @@ router = APIRouter(route_class=_CappedBodyRoute)
         "override the rule accepts, and the violation a save would be refused "
         "with. `steps` and `assistants` are the editor's unsaved state in the "
         "shape a flow update and an assistant update accept; omit them to "
-        "explain the saved draft. The rule is the one a save applies, so a "
+        "explain the saved draft. An assistant change with `step_id` means what "
+        "it means in `PATCH /flows/{id}/editor/`: when other steps share the "
+        "assistant, that step is explained with its own copy of it with the "
+        "change. The rule is the one a save applies, so a "
         "candidate reported without a violation is not refused for "
         "classification by a save. The preview does not report what the tool "
         "decision refuses at publish: a tool whose server has a lower "
@@ -97,7 +101,8 @@ router = APIRouter(route_class=_CappedBodyRoute)
             description=(
                 "The candidate state cannot be evaluated: a step names an "
                 "assistant the flow does not manage, an assistant change "
-                "names an assistant no candidate step uses, or the steps, "
+                "names an assistant no candidate step uses or a step that "
+                "does not use its assistant, or the steps, "
                 "submitted or saved, are more than a flow can have "
                 "(`flow_step_limit_exceeded`, with `step_count` and "
                 "`max_steps` in the context)."
@@ -162,10 +167,14 @@ async def preview_flow_security_classification(
             if body.steps is None
             else [assembler.to_domain_step_for_update(step) for step in body.steps]
         ),
-        assistant_updates={
-            candidate.assistant_id: flow_assistant_update_command(candidate.update)
+        assistant_changes=[
+            CandidateAssistantChange(
+                assistant_id=candidate.assistant_id,
+                step_id=candidate.step_id,
+                update=flow_assistant_update_command(candidate.update),
+            )
             for candidate in body.assistants
-        },
+        ],
     )
     return FlowSecurityClassificationPreviewPublic.from_explanations(explanations)
 

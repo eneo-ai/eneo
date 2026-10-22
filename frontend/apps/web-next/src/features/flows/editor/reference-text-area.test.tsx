@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import messages from "@/lib/i18n/messages/sv.json";
 import { renderInApp } from "@/test/render";
 import { makeFlow, makeStep } from "../flow-fixtures";
 import { TemplateScope, TemplateTextArea } from "./reference-text-area";
@@ -26,7 +27,7 @@ const flow = makeFlow({
   ]
 });
 
-function Field({ initial }: { initial: string }) {
+function Field({ initial, perSection = false }: { initial: string; perSection?: boolean }) {
   const [value, setValue] = useState(initial);
   return (
     <TemplateScope value={{ flow, stepOrder: 2 }}>
@@ -34,7 +35,7 @@ function Field({ initial }: { initial: string }) {
         label="Instruktion"
         value={value}
         onChange={setValue}
-        groups={variableGroups({ flow, stepOrder: 2 })}
+        groups={variableGroups({ flow, stepOrder: 2, sectionVariables: perSection })}
       />
     </TemplateScope>
   );
@@ -118,6 +119,39 @@ describe("TemplateTextArea", () => {
       expect.stringContaining("Steg 3 finns inte")
     ]);
     await expectNoAxeViolations(container);
+  });
+
+  it("warns at the field about fields of a step that answers in text", () => {
+    renderInApp(<Field initial="Beslut: {{step_1.output.structured.beslut}}" />);
+    const area = screen.getByRole("textbox", { name: "Instruktion" });
+    const warning = messages.flow_step_editor_reference_warning_fields_of_text.replace(
+      "{step}",
+      "Steg 1: Sammanfatta"
+    );
+
+    expect(screen.getByText(warning)).toBeTruthy();
+    expect(area.getAttribute("aria-describedby")).toContain(
+      screen.getByText(warning).closest("[id]")?.id
+    );
+    const reads = screen.getByRole("list", { name: "Texten läser" });
+    expect(within(reads).getByRole("listitem").textContent).toContain(
+      "Steg 1: Sammanfatta: fält, men steget svarar inte i fast format"
+    );
+  });
+
+  it("warns about the section's number only outside an instruction run per section", () => {
+    renderInApp(<Field initial="Del {{section_index}}" />);
+    expect(
+      screen.getByText(messages.flow_step_editor_reference_warning_section_index)
+    ).toBeTruthy();
+    cleanup();
+    renderInApp(<Field initial="Del {{section_index}}" perSection />);
+    expect(
+      screen.queryByText(messages.flow_step_editor_reference_warning_section_index)
+    ).toBeNull();
+    expect(screen.getByRole("list", { name: "Texten läser" }).textContent).toContain(
+      messages.flow_step_editor_variable_section_index
+    );
   });
 
   it("opens nothing for an @ inside a word or after deleting", () => {

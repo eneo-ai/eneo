@@ -13,6 +13,7 @@ import { useState } from "react";
 import { modelDisplayName } from "@/features/spaces/space-models";
 import { useSpace } from "@/features/spaces/use-space";
 import { toolOptionsQueryOptions } from "./editor-api";
+import { tokenColor } from "./reference-text-area";
 import { answerShape, modelParameters, previewParts, type PreviewPart } from "./request-preview";
 import {
   argumentText,
@@ -40,7 +41,7 @@ function Template({ parts, flow }: { parts: PreviewPart[]; flow: FlowPublic }) {
           <Token
             key={index}
             size="sm"
-            color={part.meaning.kind === "missing" ? "red" : "blue"}
+            color={tokenColor(part.meaning)}
             label={meaningLabel(part.meaning, part.token, flow, t)}
             description={`{{${part.token}}}`}
             className="mx-0.5 align-baseline"
@@ -123,7 +124,12 @@ function RequestPreview({
             {t("flow_step_editor_instruction")}
           </Text>
           {assistant.prompt.trim() ? (
-            <Template parts={previewParts(assistant.prompt, stepOrder, flow)} flow={flow} />
+            <Template
+              parts={previewParts(assistant.prompt, stepOrder, flow, {
+                sectionIndex: readingMode === "process_each_section"
+              })}
+              flow={flow}
+            />
           ) : (
             <Text type="supporting" size="sm" as="p" display="block" className="m-0">
               {t("flow_step_editor_instruction_none")}

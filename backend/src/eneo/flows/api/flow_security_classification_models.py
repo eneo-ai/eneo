@@ -15,8 +15,16 @@ from eneo.flows.flow_security_classification import (
 )
 
 _STEP_ID = "00000000-0000-0000-0000-000000000101"
+_SECOND_STEP_ID = "00000000-0000-0000-0000-000000000102"
 _ASSISTANT_ID = "00000000-0000-0000-0000-000000000002"
 _MODEL_ID = "00000000-0000-0000-0000-000000000031"
+
+# Both steps use one assistant; the change is to the second step's own copy.
+_STEP_MODEL_CANDIDATE: dict[str, Any] = {
+    "assistant_id": _ASSISTANT_ID,
+    "step_id": _SECOND_STEP_ID,
+    "update": {"completion_model": {"id": _MODEL_ID}},
+}
 
 FLOW_SECURITY_CLASSIFICATION_PREVIEW_REQUEST_EXAMPLE: dict[str, Any] = {
     "steps": [
@@ -29,14 +37,19 @@ FLOW_SECURITY_CLASSIFICATION_PREVIEW_REQUEST_EXAMPLE: dict[str, Any] = {
             "input_type": "text",
             "output_mode": "pass_through",
             "output_type": "text",
-        }
-    ],
-    "assistants": [
+        },
         {
+            "id": _SECOND_STEP_ID,
             "assistant_id": _ASSISTANT_ID,
-            "update": {"completion_model": {"id": _MODEL_ID}},
-        }
+            "step_order": 2,
+            "user_description": "Draft the reply",
+            "input_source": "previous_step",
+            "input_type": "text",
+            "output_mode": "pass_through",
+            "output_type": "text",
+        },
     ],
+    "assistants": [_STEP_MODEL_CANDIDATE],
 }
 
 FLOW_SECURITY_CLASSIFICATION_PREVIEW_EXAMPLE: dict[str, Any] = {
@@ -64,15 +77,47 @@ FLOW_SECURITY_CLASSIFICATION_PREVIEW_EXAMPLE: dict[str, Any] = {
                 "cause": "space",
                 "source_step_orders": [],
             },
-        }
+        },
+        {
+            "step_order": 2,
+            "step_id": _SECOND_STEP_ID,
+            "reads": [1],
+            "input_level": 2,
+            "external_source_level": None,
+            "knowledge_level": None,
+            "required_model_level": 2,
+            "model_level": 2,
+            "qualifying_model_ids": [_MODEL_ID],
+            "effective_output_level": 2,
+            "output_floor": 2,
+            "violation": None,
+        },
     ]
 }
 
 
 class FlowSecurityClassificationAssistantCandidate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid", json_schema_extra={"example": _STEP_MODEL_CANDIDATE}
+    )
 
-    assistant_id: UUID
+    assistant_id: UUID = Field(
+        description="The flow-managed assistant the unsaved change is to.",
+        examples=[_ASSISTANT_ID],
+    )
+    step_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The step whose assistant this changes, as `step_id` of an "
+            "assistant change in `PATCH /flows/{id}/editor/`. When other "
+            "candidate steps share the assistant, this step is explained with "
+            "its own copy of it with the change, and the other steps with the "
+            "assistant as it was (after any change without `step_id`). Without "
+            "`step_id` the change reaches every step that uses the assistant. "
+            "The step must be a candidate step that uses `assistant_id`."
+        ),
+        examples=[_SECOND_STEP_ID],
+    )
     update: FlowAssistantUpdateRequest
 
 
@@ -102,16 +147,20 @@ class FlowSecurityClassificationPreviewRequest(BaseModel):
         description=(
             "Unsaved changes to the flow-managed assistants the steps use, in the "
             "shape an assistant update accepts. Only the model, the knowledge and "
-            "the prompt affect the result. At most one entry per assistant, and no "
-            "more entries than a flow can have steps."
+            "the prompt affect the result. At most one entry per assistant and "
+            "`step_id`, and no more entries than a flow can have steps."
         ),
     )
 
     @model_validator(mode="after")
-    def _one_candidate_per_assistant(self) -> Self:
-        ids = [candidate.assistant_id for candidate in self.assistants]
-        if len(ids) != len(set(ids)):
-            raise ValueError("Send at most one candidate change per assistant.")
+    def _one_candidate_per_assistant_and_step(self) -> Self:
+        keys = [
+            (candidate.assistant_id, candidate.step_id) for candidate in self.assistants
+        ]
+        if len(keys) != len(set(keys)):
+            raise ValueError(
+                "Send at most one candidate change per assistant and step."
+            )
         return self
 
 
