@@ -170,6 +170,8 @@ export type MaterialOption = {
   stepName: string;
   output: "text" | "structured";
   fieldPath: string | null;
+  /** A declared field's JSON Schema type, when it names one. */
+  fieldType: string | null;
 };
 
 /**
@@ -192,7 +194,8 @@ export function materialOptions(
       stepOrder: order,
       stepName,
       output,
-      fieldPath: null
+      fieldPath: null,
+      fieldType: null
     });
     if (output === "structured") {
       for (const field of contractFields(step.output_contract)) {
@@ -201,7 +204,8 @@ export function materialOptions(
           stepOrder: order,
           stepName,
           output: "structured",
-          fieldPath: field.name
+          fieldPath: field.name,
+          fieldType: field.type
         });
       }
     }

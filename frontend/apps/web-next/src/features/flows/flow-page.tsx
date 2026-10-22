@@ -252,6 +252,24 @@ export function FlowPage({ flowId }: { flowId: string }) {
     }
   }
 
+  /** Saves a step's underlag with a read of a removed step replaced (the draft check's repair). */
+  async function repairReference(
+    step: FlowStep,
+    inputBindings: Record<string, unknown> | null
+  ): Promise<boolean> {
+    if (!step.id || edit.isPending) return false;
+    try {
+      await edit.mutateAsync({
+        step_edits: [{ step_id: step.id, changes: { input_bindings: inputBindings } }]
+      });
+      announce(t("flow_editor_tools_repair_done", { step: stepLabel(step, t) }));
+      return true;
+    } catch {
+      // Refused: the notice above the columns says why.
+      return false;
+    }
+  }
+
   async function saveSettings(definition: FlowDefinitionUpdate): Promise<boolean> {
     try {
       await edit.mutateAsync({ definition });
@@ -422,6 +440,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                     flow={flow}
                     speakerServices={space.transcription_services ?? []}
                     onOpenStep={openStep}
+                    onRepair={repairReference}
                   />
                 ) : null}
                 <FlowStepList

@@ -169,6 +169,37 @@ describe("FlowPage", () => {
     expect(within(firstStep).getByText("Skriv svar")).toBeTruthy();
   });
 
+  it("saves the draft check's repair of a read of a removed step as a step edit", async () => {
+    const broken = {
+      ...steps[1]!,
+      input_bindings: { question: "Om {{step_3_deleted.output.text}}" }
+    };
+    const repaired = { ...steps[1]!, input_bindings: { question: "Om {{step_1.output.text}}" } };
+    state.editor = ok(makeFlow({ draft_revision: 5, steps: [steps[0]!, repaired] }));
+    renderPage(makeFlow({ steps: [steps[0]!, broken] }));
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Välj vad som ska användas i stället för {{step_3_deleted.output.text}} i Steg 2: Skriv svar"
+      })
+    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Steg 1: Sammanfatta/ }));
+
+    await waitFor(() =>
+      expect(state.announce).toHaveBeenCalledWith("Hänvisningen i Steg 2: Skriv svar är ersatt.")
+    );
+    expect(editorBody()).toEqual({
+      step_edits: [
+        {
+          step_id: "step-2",
+          changes: { input_bindings: { question: "Om {{step_1.output.text}}" } }
+        }
+      ],
+      definition: {},
+      expected_revision: 4
+    });
+  });
+
   it("explains a refused removal by the step that reads the removed one", async () => {
     state.editor = refused(400, {
       code: "flow_step_read_lost_producer",

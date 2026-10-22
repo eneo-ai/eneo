@@ -42,7 +42,12 @@ describe("readMeaning", () => {
   it("keeps the text around the references", () => {
     expect(previewParts("Läs {{ step_1.output.text }} nu", 2, flow)).toEqual([
       { kind: "text", text: "Läs " },
-      { kind: "read", token: "step_1.output.text", meaning: { kind: "step_answer", order: 1 } },
+      {
+        kind: "read",
+        token: "step_1.output.text",
+        raw: "{{ step_1.output.text }}",
+        meaning: { kind: "step_answer", order: 1 }
+      },
       { kind: "text", text: " nu" }
     ]);
   });

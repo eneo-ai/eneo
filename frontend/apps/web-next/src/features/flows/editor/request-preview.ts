@@ -64,7 +64,8 @@ export function readMeaning(
 }
 
 export type PreviewPart =
-  { kind: "text"; text: string } | { kind: "read"; token: string; meaning: ReadMeaning };
+  | { kind: "text"; text: string }
+  | { kind: "read"; token: string; raw: string; meaning: ReadMeaning };
 
 export function previewParts(
   text: string,
@@ -72,9 +73,7 @@ export function previewParts(
   flow: Pick<FlowPublic, "steps" | "metadata_json">
 ): PreviewPart[] {
   return templateParts(text).map((part) =>
-    part.kind === "text"
-      ? part
-      : { kind: "read", token: part.token, meaning: readMeaning(part.token, stepOrder, flow) }
+    part.kind === "text" ? part : { ...part, meaning: readMeaning(part.token, stepOrder, flow) }
   );
 }
 

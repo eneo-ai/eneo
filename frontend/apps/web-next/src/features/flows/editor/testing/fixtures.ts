@@ -55,7 +55,7 @@ export function makeAssistant(overrides: Partial<FlowAssistant> = {}): FlowAssis
       description: null,
       user: { id: "user-1", email: "anna.lind@example.se", username: "Anna Lind" }
     } as FlowAssistant["prompt"],
-    completion_model: { id: "model-1", name: "claude-haiku" } as FlowAssistant["completion_model"],
+    completion_model: { id: "model-1", name: "snabb-modell" } as FlowAssistant["completion_model"],
     completion_model_kwargs: {},
     logging_enabled: false,
     attachments: [],
