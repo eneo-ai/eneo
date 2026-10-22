@@ -11,7 +11,12 @@ import {
   type TableSortState
 } from "@astryxdesign/core/Table";
 import { FLOW_RUN_STATUS_FILTER_ORDER } from "@eneo/eneo-js/flows/run-status-capabilities";
-import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient
+} from "@tanstack/react-query";
 import { History, Search } from "lucide-react";
 import Link from "next/link";
 import { useLocale, useTranslations } from "next-intl";
@@ -23,10 +28,14 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
+import { toast } from "@/lib/toast";
 import { useDebouncedValue } from "../editor/use-debounced-value";
 import { formatCount, formatSeconds } from "./run-format";
+import { refusalText } from "./run-messages";
 import { starterName } from "./run-starter";
+import { useStartedRuns, withStartedRuns } from "./runs-optimistic";
 import {
+  canRedispatch,
   createPollClock,
   listNeedsPolling,
   listSignature,
@@ -35,9 +44,12 @@ import {
   statusChanges
 } from "./run-status";
 import {
+  redispatchRun,
+  runKeys,
   RUNS_MAX_PAGES,
   RUNS_PAGE_SIZE,
   runsListQueryOptions,
+  type RunsFilter,
   type RunsSort,
   type RunStatus as RunStatusValue,
   type RunSummary
@@ -106,6 +118,36 @@ function RunLink({ run, href }: { run: RunSummary; href: string }) {
   );
 }
 
+/**
+ * "Försök starta nu" for a queued run whose dispatch is due or gave up (the
+ * same rule as on the run's page); the list is read again after it.
+ */
+function RedispatchButton({ flowId, run }: { flowId: string; run: RunSummary }) {
+  const t = useTranslations();
+  const queryClient = useQueryClient();
+  const redispatch = useMutation({
+    mutationFn: () => redispatchRun(flowId, run),
+    onSuccess: (answer) => {
+      if (answer.redispatched_count > 0) toast.success(t("flow_runs_redispatch_done"));
+      else toast.info(t("flow_runs_redispatch_noop"));
+      void queryClient.invalidateQueries({ queryKey: runKeys.list(flowId) });
+    },
+    onError: (error) =>
+      toast.error(t("flow_runs_redispatch_failed"), { description: refusalText(error, t) })
+  });
+  return (
+    <Button
+      label={t("flow_runs_redispatch")}
+      size="sm"
+      isLoading={redispatch.isPending}
+      isInterruptible
+      onClick={() => {
+        if (!redispatch.isPending) redispatch.mutate();
+      }}
+    />
+  );
+}
+
 const SORT_KEYS: readonly RunsSort["key"][] = ["started_at", "status", "duration"];
 
 function isSortKey(value: string): value is RunsSort["key"] {
@@ -119,7 +161,9 @@ function isSortKey(value: string): value is RunsSort["key"] {
  * or to the caller's own runs, and counts the runs per status for the status
  * filter. The list keeps itself current while a run in it is queued, running
  * or waiting for review, on the cadence the run API asks for, and stops once
- * all of them have ended. A run that moves on is announced.
+ * all of them have ended. A run that moves on is announced. A queued run
+ * whose start is due or gave up can be sent again from its row, and a run
+ * this tab just started shows at once (`runs-optimistic.ts`).
  */
 export function FlowRunsList({
   flowId,
@@ -142,8 +186,10 @@ export function FlowRunsList({
   const [clock] = useState(() => createPollClock());
   const seen = useRef(new Map<string, string>());
 
+  const filter: RunsFilter = { mine, status, search, sort };
+  const started = useStartedRuns(flowId);
   const runs = useInfiniteQuery({
-    ...runsListQueryOptions(flowId, { mine, status, search, sort }),
+    ...runsListQueryOptions(flowId, filter),
     // A new search or order keeps the rows and counts on screen until it answers.
     placeholderData: keepPreviousData,
     refetchInterval: (query) => {
@@ -153,16 +199,24 @@ export function FlowRunsList({
     refetchIntervalInBackground: false
   });
 
-  const items = useMemo(() => runs.data?.pages.flatMap((page) => page.items) ?? [], [runs.data]);
+  const listed = useMemo(() => runs.data?.pages.flatMap((page) => page.items) ?? [], [runs.data]);
+  const shown = withStartedRuns(
+    listed,
+    runs.data?.pages[0]?.status_counts,
+    started,
+    filter,
+    runs.dataUpdatedAt
+  );
+  const items = shown.items;
 
   // Announces each run that moved on since the last answer; comparing with
   // what was seen makes a repeated pass over the same answer a no-op.
   useEffect(() => {
-    for (const run of statusChanges(seen.current, items)) {
+    for (const run of statusChanges(seen.current, listed)) {
       announce(t("flow_runs_status_changed", { status: t(runStatusView(run.status).labelKey) }));
     }
-    seen.current = new Map(items.map((run) => [run.id, run.status]));
-  }, [items, announce, t]);
+    seen.current = new Map(listed.map((run) => [run.id, run.status]));
+  }, [listed, announce, t]);
 
   const sortState: TableSortState<RunsSort["key"]> = [
     { sortKey: sort.key, direction: sort.order === "asc" ? "ascending" : "descending" }
@@ -176,7 +230,7 @@ export function FlowRunsList({
     },
     allowUnsortedState: false
   });
-  const counts = runs.data?.pages[0]?.status_counts;
+  const counts = shown.counts;
   const countText = (count: number | undefined) =>
     count === undefined ? "" : ` (${formatCount(count, locale)})`;
   const total = counts ? Object.values(counts).reduce((sum, count) => sum + count, 0) : undefined;
@@ -194,7 +248,14 @@ export function FlowRunsList({
       header: t("flow_runs_column_status"),
       width: proportional(3),
       sortable: true,
-      renderCell: (run) => <RunStatus status={run.status} purpose={run.purpose} />
+      renderCell: (run) => (
+        <span className="flex flex-col items-start gap-1">
+          <RunStatus status={run.status} purpose={run.purpose} />
+          {canRedispatch(run, runs.dataUpdatedAt) ? (
+            <RedispatchButton flowId={flowId} run={run} />
+          ) : null}
+        </span>
+      )
     },
     {
       key: "principal",
@@ -221,7 +282,7 @@ export function FlowRunsList({
   ];
 
   const Heading = `h${headingLevel}` as const;
-  const shown = items.length;
+  const shownCount = items.length;
   const capped = !runs.hasNextPage && runs.data?.pages.at(-1)?.has_more === true;
 
   return (
@@ -317,7 +378,7 @@ export function FlowRunsList({
               })}
             </p>
           ) : (
-            <p className="sr-only">{t("flow_runs_shown", { count: shown })}</p>
+            <p className="sr-only">{t("flow_runs_shown", { count: shownCount })}</p>
           )}
         </>
       )}
