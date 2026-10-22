@@ -19,6 +19,7 @@ import {
 } from "@tanstack/react-query";
 import { History, Search } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";
@@ -152,9 +153,19 @@ function RedispatchButton({ flowId, run }: { flowId: string; run: RunSummary }) 
   );
 }
 
-/** What came of a row's retry or cancel, as a toast (errors stay until closed). */
-function toastNotice(notice: RunActionNotice) {
-  const options = notice.description ? { description: notice.description } : undefined;
+/**
+ * What came of a row's retry or cancel, as a toast (errors stay until
+ * closed); a page the notice points to is the toast's action.
+ */
+function toastNotice(notice: RunActionNotice, navigate: (href: string) => void) {
+  const { link } = notice;
+  const options =
+    notice.description || link
+      ? {
+          ...(notice.description ? { description: notice.description } : {}),
+          ...(link ? { action: { label: link.label, onClick: () => navigate(link.href) } } : {})
+        }
+      : undefined;
   switch (notice.status) {
     case "error":
       toast.error(notice.title, options);
@@ -188,7 +199,8 @@ function isSortKey(value: string): value is RunsSort["key"] {
  * whose start is due or gave up can be sent again from its row, a failed run
  * retried and a run under way cancelled, by the run page's rules
  * (`run-actions.tsx`), and a run this tab just started shows at once
- * (`runs-optimistic.ts`).
+ * (`runs-optimistic.ts`). A flow with no runs that is not published yet
+ * says to publish it first.
  */
 export function FlowRunsList({
   flowId,
@@ -206,6 +218,8 @@ export function FlowRunsList({
   const locale = useLocale();
   const announce = useAnnounce();
   const { can, user } = useAppContext();
+  const router = useRouter();
+  const report = (notice: RunActionNotice) => toastNotice(notice, (href) => router.push(href));
   // A cancelled run's button goes: focus moves to the run's link in its row,
   // or to the heading when the run left the list (a status filter).
   const rescue = useFocusRescue();
@@ -299,7 +313,7 @@ export function FlowRunsList({
                     spaceRouteId={spaceRouteId}
                     flowId={flowId}
                     runId={run.id}
-                    report={toastNotice}
+                    report={report}
                     size="sm"
                   />
                 ) : null}
@@ -307,7 +321,7 @@ export function FlowRunsList({
                   <CancelRunButton
                     flowId={flowId}
                     runId={run.id}
-                    report={toastNotice}
+                    report={report}
                     onCancelled={() =>
                       rescue(() => document.getElementById(linkId(run.id)) ?? headingRef.current)
                     }
@@ -420,7 +434,9 @@ export function FlowRunsList({
               ? t("flow_run_journey_search_empty")
               : status
                 ? t("flow_run_extras_status_empty")
-                : t("flow_runs_empty_description")
+                : publishedVersion === null
+                  ? t("flow_runs_empty_description_unpublished")
+                  : t("flow_runs_empty_description")
           }
         />
       ) : (

@@ -103,6 +103,7 @@ describe("FlowRunPage", () => {
     expect(within(first).getByText("Resultat från steg 1")).toBeTruthy();
     expect(within(first).getByText(messages.flow_runs_step_status_completed)).toBeTruthy();
     expect(screen.getByText(/^1\s500 totalt \(1\s200 in, 300 ut\)/)).toBeTruthy();
+    expect(screen.getByText(messages.flow_runs_usage_tokens_explainer)).toBeTruthy();
     expect(screen.getByText("Startad av Anna Lind")).toBeTruthy();
     expect(screen.queryByRole("button", { name: messages.flow_runs_cancel })).toBeNull();
     await expectNoAxeViolations(container);
@@ -176,6 +177,28 @@ describe("FlowRunPage", () => {
         "Idempotency-Key"
       ]
     ).toBeTruthy();
+  });
+
+  it("says a retry was already started, with a link to it, instead of opening it", async () => {
+    const failed = makeRunSummary({ status: "failed" });
+    answerRun(failed, makeRunDetail({ ...failed, result: null } as Partial<RunDetail>));
+    state.routes["POST /api/v1/flows/{id}/runs/{run_id}/retry/"] = () => ({
+      status: 200,
+      body: {
+        created: false,
+        first_executed_step_order: 2,
+        reused_step_orders: [1],
+        source_run_id: "run-1",
+        run: makeRunSummary({ id: "run-2", status: "completed" })
+      }
+    });
+    renderRun();
+
+    fireEvent.click(await screen.findByRole("button", { name: messages.flow_runs_retry }));
+    expect(await screen.findByText(messages.flow_runs_retry_replayed)).toBeTruthy();
+    const link = screen.getByRole("link", { name: messages.flow_runs_retry_replayed_open });
+    expect(link.getAttribute("href")).toBe("/spaces/space-1/flows/flow-1/runs/run-2");
+    expect(router.push).not.toHaveBeenCalled();
   });
 
   it("guides a failed run with its error's facts and keeps the technical detail closed", async () => {
@@ -392,6 +415,25 @@ describe("FlowRunPage", () => {
       })
     );
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("run-1"));
+  });
+
+  it("explains what the run id and the trace id are for", async () => {
+    answerRun(makeRunSummary());
+    const { container } = renderRun();
+    await screen.findByText("Beslutet är fattat.");
+
+    for (const [label, hint] of [
+      [messages.flow_run_more_run_id, messages.flow_run_more_run_id_hint],
+      [messages.flow_run_more_trace_id, messages.flow_run_more_trace_id_hint]
+    ] as const) {
+      const about = screen.getByRole("button", {
+        name: messages.chat_debug_value_about.replace("{label}", label)
+      });
+      fireEvent.focus(about);
+      expect(await screen.findByText(hint)).toBeTruthy();
+      fireEvent.blur(about);
+    }
+    await expectNoAxeViolations(container);
   });
 
   it("offers every other file the run made beside its result", async () => {

@@ -112,7 +112,15 @@ describe("FlowRunsList", () => {
     answerList([]);
     const { container } = renderInApp(<List />);
     expect(await screen.findByText(messages.flow_runs_empty_title)).toBeTruthy();
+    expect(screen.getByText(messages.flow_runs_empty_description)).toBeTruthy();
     await expectNoAxeViolations(container);
+  });
+
+  it("says to publish a flow that has no runs and is not published", async () => {
+    answerList([]);
+    renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" publishedVersion={null} />);
+    expect(await screen.findByText(messages.flow_runs_empty_description_unpublished)).toBeTruthy();
+    expect(screen.queryByText(messages.flow_runs_empty_description)).toBeNull();
   });
 
   it("asks for the caller's own runs only when asked", async () => {
@@ -323,6 +331,33 @@ describe("FlowRunsList", () => {
     expect(state.announce).toHaveBeenCalledWith(
       messages.flow_runs_retry_started.replace("{order}", "2")
     );
+  });
+
+  it("says in a toast that a retry was already started, with a way to it", async () => {
+    answerList([makeRunSummary({ id: "run-f", status: "failed" })]);
+    state.routes[RETRY] = () => ({
+      body: {
+        created: false,
+        first_executed_step_order: 2,
+        reused_step_orders: [1],
+        source_run_id: "run-f",
+        run: makeRunSummary({ id: "run-2" })
+      }
+    });
+    renderInApp(<List />, {
+      appContext: testAppContext({ permissions: ["flows_view", "flows_run"] })
+    });
+    fireEvent.click(await screen.findByRole("button", { name: messages.flow_runs_retry }));
+    await vi.waitFor(() => expect(state.toast.info).toHaveBeenCalled());
+    const [title, options] = state.toast.info.mock.calls[0] as [
+      string,
+      { action: { label: string; onClick: () => void } }
+    ];
+    expect(title).toBe(messages.flow_runs_retry_replayed);
+    expect(options.action.label).toBe(messages.flow_runs_retry_replayed_open);
+    expect(router.push).not.toHaveBeenCalled();
+    options.action.onClick();
+    expect(router.push).toHaveBeenCalledWith("/spaces/space-1/flows/flow-1/runs/run-2");
   });
 
   it("offers a retry by the run page's rules only", async () => {

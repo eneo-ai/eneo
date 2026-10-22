@@ -3657,5 +3657,13 @@
   "flow_run_ktrace_latency": "Söktid: {time}",
   "flow_run_ktrace_relevance": "{level} · {percent} %",
   "flow_run_ktrace_all_sources_subtitle": "{step} · {count, plural, one {# källa} other {# källor}}",
-  "flow_run_ktrace_search_sources": "Sök bland källor"
+  "flow_run_ktrace_search_sources": "Sök bland källor",
+  "flow_run_token_usage_not_recorded": "Tokenanvändningen registrerades inte",
+  "flow_runs_retry_replayed": "Den här körningen har redan startats om.",
+  "flow_runs_retry_replayed_open": "Gå till den nya körningen",
+  "flow_runs_empty_description_unpublished": "Flödet har inte körts än. Publicera det först, sedan kan du köra det.",
+  "flow_run_more_run_id_hint": "Körningens id. Det behövs till exempel när en rättslig spärr ska gälla enskilda körningar.",
+  "flow_run_more_trace_id_hint": "En unik referens till körningens loggar. Uppge den om du kontaktar supporten om körningen.",
+  "chat_debug_value_about": "Förklaring: {label}",
+  "flow_runs_usage_tokens_explainer": "Tokens är de små textbitar som AI-modellen läser och skriver. Antalet räknar alla anrop till modellen, även nya försök, och kommer från tjänsten eller är uppskattat. Ofullständigt betyder att antalet saknas för minst ett anrop."
 }

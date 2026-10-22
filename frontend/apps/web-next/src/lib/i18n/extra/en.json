@@ -3657,5 +3657,13 @@
   "flow_run_ktrace_latency": "Search time: {time}",
   "flow_run_ktrace_relevance": "{level} · {percent}%",
   "flow_run_ktrace_all_sources_subtitle": "{step} · {count, plural, one {# source} other {# sources}}",
-  "flow_run_ktrace_search_sources": "Search the sources"
+  "flow_run_ktrace_search_sources": "Search the sources",
+  "flow_run_token_usage_not_recorded": "Token usage was not recorded",
+  "flow_runs_retry_replayed": "This run was already retried.",
+  "flow_runs_retry_replayed_open": "Go to the new run",
+  "flow_runs_empty_description_unpublished": "This flow has not run yet. Publish it first, then you can run it.",
+  "flow_run_more_run_id_hint": "The run's id. It is needed, for example, when a legal hold should cover specific runs.",
+  "flow_run_more_trace_id_hint": "A unique reference to the run's logs. Give it to support if you contact them about this run.",
+  "chat_debug_value_about": "Explanation: {label}",
+  "flow_runs_usage_tokens_explainer": "Tokens are the small pieces of text the AI model reads and writes. The count covers every call to the model, retries included, and comes from the service or is estimated. Incomplete means the count is missing for at least one call."
 }
