@@ -79,8 +79,12 @@ export const RUNS_PAGE_SIZE = 25;
 /** The history reads at most this many pages, newest first. */
 export const RUNS_MAX_PAGES = 8;
 
-/** `mine`: only the runs the caller started, within those the caller may see. */
-export type RunsFilter = { mine: boolean };
+/**
+ * `mine`: only the runs the caller started, within those the caller may see.
+ * `status`: only runs with this status; the list endpoint filters, so every
+ * page and "show more" stay within it.
+ */
+export type RunsFilter = { mine: boolean; status?: RunStatus | null };
 
 export function runsListQueryOptions(flowId: string, filter: RunsFilter = { mine: false }) {
   return infiniteQueryOptions({
@@ -93,7 +97,8 @@ export function runsListQueryOptions(flowId: string, filter: RunsFilter = { mine
             query: {
               limit: RUNS_PAGE_SIZE,
               offset: pageParam * RUNS_PAGE_SIZE,
-              ...(filter.mine ? { mine: true } : {})
+              ...(filter.mine ? { mine: true } : {}),
+              ...(filter.status ? { status: [filter.status] } : {})
             }
           },
           signal

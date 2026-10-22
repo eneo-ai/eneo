@@ -100,16 +100,44 @@ describe("FlowRunsList", () => {
     );
   });
 
+  it("asks the list endpoint for one status and says when none has it", async () => {
+    answerList([makeRunSummary()]);
+    const { container } = renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" />);
+    await screen.findByRole("table");
+
+    answerList([]);
+    fireEvent.click(screen.getByRole("combobox", { name: messages.flow_run_extras_status_filter }));
+    fireEvent.click(await screen.findByRole("option", { name: messages.flow_runs_status_failed }));
+    await vi.waitFor(() =>
+      expect(listCalls().at(-1)?.init.params?.query).toEqual({
+        limit: 25,
+        offset: 0,
+        status: ["failed"]
+      })
+    );
+    expect(
+      await screen.findByText(
+        messages.flow_run_extras_status_empty_title.replace(
+          "{status}",
+          messages.flow_runs_status_failed
+        )
+      )
+    ).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
   it("polls while a run moves, announces the change, then stops", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     answerList([makeRunSummary({ status: "running", finished_at: null, revision: 1 })]);
     renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" />);
-    await screen.findByText(messages.flow_runs_status_running);
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText(messages.flow_runs_status_running)).toBeTruthy();
     expect(listCalls()).toHaveLength(1);
 
     answerList([makeRunSummary({ status: "completed", revision: 2 })]);
     await act(() => vi.advanceTimersByTimeAsync(2_100));
-    await screen.findByText(messages.flow_runs_status_completed);
+    // The status filter's options share the status names; the table is what changed.
+    await within(table).findByText(messages.flow_runs_status_completed);
     expect(listCalls()).toHaveLength(2);
     expect(state.announce).toHaveBeenCalledWith(
       messages.flow_runs_status_changed.replace("{status}", messages.flow_runs_status_completed)
