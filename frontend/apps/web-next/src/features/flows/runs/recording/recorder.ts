@@ -1,6 +1,12 @@
 import { partFileName, recordingTimeLeftMs, type RecordingOptions } from "./recording-format";
 import type { RecorderAudioGraph } from "./live-transcript";
 import type { JournalPart, RecorderJournal } from "./recording-keeper";
+import {
+  microphoneSettings,
+  RecorderEventLog,
+  type MicrophoneSettings,
+  type RecorderDiagnostics
+} from "./recorder-diagnostics";
 import { withRecordedDuration } from "./webm-duration";
 
 /**
@@ -14,6 +20,11 @@ import { withRecordedDuration } from "./webm-duration";
  * The recorded clock leaves the person's pauses out. Parts are handed over
  * in recording order, each with the recorded duration written into its
  * header so a player can seek in it.
+ *
+ * A microphone that cannot meet the preferred settings (one channel, echo
+ * cancellation, noise suppression) is asked for again with none, and the
+ * settings are then applied where it can. What happened is kept as recent
+ * events for the recording's diagnostics (`diagnostics()`).
  *
  * Read it from React with `useSyncExternalStore(subscribe, getSnapshot)`.
  */
@@ -56,6 +67,8 @@ export type RecorderSnapshot = {
   minutesLeft: number | null;
   /** Why the microphone may not be heard; null while it is, or while not recording. */
   micHint: MicrophoneHint | null;
+  /** Bytes of the part being recorded so far, as its chunks arrive. */
+  partBytes: number;
 };
 
 export type RecordedPart = {
@@ -107,7 +120,9 @@ export type RecorderCallbacks = {
 };
 
 type RecorderEnvironment = {
-  mediaDevices: Pick<MediaDevices, "getUserMedia"> | undefined;
+  mediaDevices:
+    | (Pick<MediaDevices, "getUserMedia"> & Partial<Pick<MediaDevices, "enumerateDevices">>)
+    | undefined;
   MediaRecorder: typeof MediaRecorder | undefined;
   AudioContext: typeof AudioContext | undefined;
   isSecureContext: boolean;
@@ -173,8 +188,23 @@ export const STALL_GRACE_MS = 2_000;
 const AUDIBLE_LEVEL = 0.035;
 export const SILENCE_HINT_MS = 6_000;
 
+/** What the recorder asks of the microphone first. */
+const PREFERRED_AUDIO: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  channelCount: 1
+};
+
+/** Refusals that may be about the settings asked for rather than the microphone itself. */
+const RELAXABLE = new Set(["NotFoundError", "OverconstrainedError"]);
+
+function errorName(error: unknown): string {
+  return error instanceof DOMException || error instanceof Error ? error.name : "unknown";
+}
+
 function problemOf(error: unknown): RecorderProblem {
-  const name = error instanceof DOMException || error instanceof Error ? error.name : "";
+  const name = errorName(error);
   switch (name) {
     case "NotAllowedError":
     case "PermissionDeniedError":
@@ -214,7 +244,8 @@ const IDLE: RecorderSnapshot = {
   recordedMs: 0,
   clockStartedAt: null,
   minutesLeft: null,
-  micHint: null
+  micHint: null,
+  partBytes: 0
 };
 
 export class AudioRecorder {
@@ -253,6 +284,18 @@ export class AudioRecorder {
   #disposed = false;
   #attempt = 0;
 
+  // What the diagnostics tell: nothing that names the person or the device.
+  #log: RecorderEventLog;
+  #constraints: "preferred" | "relaxed" | null = null;
+  #settings: MicrophoneSettings | null = null;
+  #inputs: number | null = null;
+  #partChunks = 0;
+  #partBytes = 0;
+  #emptyChunks = 0;
+  /** Monotonic time the running start began recording, for the first chunk's delay. */
+  #recordingSince = 0;
+  #firstChunkAfterMs: number | null = null;
+
   constructor(
     options: RecordingOptions,
     callbacks: RecorderCallbacks = { onPart: () => undefined },
@@ -261,6 +304,7 @@ export class AudioRecorder {
     this.#options = options;
     this.#callbacks = callbacks;
     this.#env = environment;
+    this.#log = new RecorderEventLog(environment.now);
   }
 
   /** Who hears of parts, the audio graph and pauses from now on. */
@@ -298,18 +342,14 @@ export class AudioRecorder {
     this.#session = options;
     this.#nextIndex = options.firstIndex;
     this.#partsThisStart = 0;
+    this.#emptyChunks = 0;
+    this.#firstChunkAfterMs = null;
+    this.#log.add("start", `part ${options.firstIndex + 1}`);
     this.#set({ ...IDLE, phase: "starting" });
 
     let stream: MediaStream;
     try {
-      stream = await this.#env.mediaDevices!.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: 1
-        }
-      });
+      stream = await this.#openMicrophone(attempt);
     } catch (error) {
       if (attempt === this.#attempt) this.#set({ ...IDLE, problem: problemOf(error) });
       return;
@@ -320,6 +360,8 @@ export class AudioRecorder {
     }
     this.#stream = stream;
     this.#muted = false;
+    this.#settings = microphoneSettings(stream.getAudioTracks()[0]?.getSettings?.());
+    this.#log.add("microphone_open", this.#constraints ?? undefined);
     for (const track of stream.getAudioTracks()) {
       track.addEventListener("ended", this.#onTrackEnded);
       track.addEventListener("mute", this.#onMute);
@@ -337,7 +379,9 @@ export class AudioRecorder {
     this.#pausedAt = null;
     this.#pausedTotal = 0;
     this.#firstChunkSeen = false;
+    this.#recordingSince = this.#env.now();
     if (!this.#startPart()) {
+      this.#log.add("recorder_failed");
       this.#callbacks.onAudioGraph?.(null);
       this.#release();
       this.#set({ ...IDLE, problem: "microphone_failed" });
@@ -366,6 +410,7 @@ export class AudioRecorder {
       return;
     }
     this.#pausedAt = this.#env.now();
+    this.#log.add("paused");
     this.#set({
       ...this.#snapshot,
       phase: "paused",
@@ -386,6 +431,7 @@ export class AudioRecorder {
     }
     if (this.#pausedAt !== null) this.#pausedTotal += this.#env.now() - this.#pausedAt;
     this.#pausedAt = null;
+    this.#log.add("resumed");
     // No chunk came while paused, and nobody spoke: both watches start again.
     this.#lastChunkAt = this.#env.now();
     this.#lastAudibleAt = this.#lastChunkAt;
@@ -405,12 +451,14 @@ export class AudioRecorder {
     const { phase } = this.#snapshot;
     if (phase === "starting") {
       // The prompt is still open: whatever it answers is not recorded.
+      this.#log.add("start_cancelled");
       this.#attempt += 1;
       this.#set({ ...IDLE });
       return Promise.resolve();
     }
     if (phase !== "recording" && phase !== "paused") return this.#handovers;
     const recorded = this.recordedMs();
+    this.#log.add("stopped", reason);
     // The clock stops here: the last part's length is what was recorded until now.
     this.#pausedAt ??= this.#env.now();
     clearInterval(this.#tick);
@@ -466,6 +514,97 @@ export class AudioRecorder {
   }
 
   /**
+   * The microphone with the preferred settings; where the browser finds no
+   * microphone that meets them, again with none (any microphone, as it
+   * records), and the preferred settings are then applied where it can.
+   */
+  async #openMicrophone(attempt: number): Promise<MediaStream> {
+    const devices = this.#env.mediaDevices!;
+    this.#constraints = null;
+    this.#inputs = null;
+    try {
+      const stream = await devices.getUserMedia({ audio: PREFERRED_AUDIO });
+      this.#constraints = "preferred";
+      return stream;
+    } catch (error) {
+      this.#log.add("microphone_refused", errorName(error));
+      await this.#countInputs();
+      if (!RELAXABLE.has(errorName(error)) || attempt !== this.#attempt) throw error;
+    }
+    this.#log.add("microphone_retry_relaxed");
+    let stream: MediaStream;
+    try {
+      stream = await devices.getUserMedia({ audio: true });
+    } catch (error) {
+      this.#log.add("microphone_refused", errorName(error));
+      throw error;
+    }
+    this.#constraints = "relaxed";
+    try {
+      await stream.getAudioTracks()[0]?.applyConstraints?.(PREFERRED_AUDIO);
+    } catch (error) {
+      // The microphone records as it is.
+      this.#log.add("constraints_not_applied", errorName(error));
+    }
+    return stream;
+  }
+
+  /** How many microphones the browser lists, without their names. */
+  async #countInputs() {
+    try {
+      const devices = (await this.#env.mediaDevices?.enumerateDevices?.()) ?? null;
+      if (!devices) return;
+      this.#inputs = devices.filter((device) => device.kind === "audioinput").length;
+      this.#log.add("microphones_listed", String(this.#inputs));
+    } catch {
+      // Nothing to count.
+    }
+  }
+
+  /** The recorder's state, settings, counters and recent events, for the diagnostics. */
+  diagnostics(): RecorderDiagnostics {
+    const { phase, problem, ended, micHint } = this.#snapshot;
+    const part = this.#part;
+    const running = phase === "recording" || phase === "paused";
+    const now = this.#env.now();
+    return {
+      phase,
+      problem,
+      ended,
+      support: {
+        secureContext: this.#env.isSecureContext,
+        mediaRecorder: Boolean(this.#env.MediaRecorder),
+        audioContext: Boolean(this.#env.AudioContext)
+      },
+      format: {
+        requested: this.#options.mimeType ?? null,
+        recorder: part?.recorder.mimeType || null,
+        audioBitsPerSecond: this.#options.audioBitsPerSecond
+      },
+      microphone: {
+        constraints: this.#constraints,
+        settings: this.#settings,
+        inputs: this.#inputs,
+        muted: this.#muted
+      },
+      meter: this.#context
+        ? { state: this.#context.state, sampleRate: this.#context.sampleRate }
+        : null,
+      recording: {
+        recordedMs: Math.round(running ? this.recordedMs() : this.#snapshot.recordedMs),
+        partsThisStart: this.#partsThisStart,
+        part: part ? { index: part.index, chunks: this.#partChunks, bytes: this.#partBytes } : null,
+        pendingParts: this.#pendingHandovers,
+        emptyChunks: this.#emptyChunks,
+        firstChunkAfterMs: this.#firstChunkAfterMs,
+        lastChunkAgoMs: running ? Math.round(now - this.#lastChunkAt) : null,
+        micHint
+      },
+      events: this.#log.list()
+    };
+  }
+
+  /**
    * The microphone's audio graph: the level meter's analyser, and the live
    * text's tap when it listens. Without an audio graph the recording goes on
    * without either.
@@ -480,7 +619,8 @@ export class AudioRecorder {
       graph = { context, source: context.createMediaStreamSource(stream) };
       // A context made outside a user gesture (an automatic restart) may start suspended.
       if (context.state === "suspended") void context.resume().catch(() => undefined);
-    } catch {
+    } catch (error) {
+      this.#log.add("audio_graph_failed", errorName(error));
       return;
     }
     try {
@@ -543,11 +683,15 @@ export class AudioRecorder {
         audioBitsPerSecond: this.#options.audioBitsPerSecond
       });
       recorder.start(TIMESLICE_MS);
-    } catch {
+    } catch (error) {
+      this.#log.add("part_not_started", errorName(error));
       return false;
     }
     const index = this.#nextIndex++;
     this.#partsThisStart += 1;
+    this.#partChunks = 0;
+    this.#partBytes = 0;
+    this.#log.add("part_started", `part ${index + 1}, ${recorder.mimeType || "default type"}`);
     let handOver: () => void = () => undefined;
     const capturedAt = this.#env.wallNow();
     const journal = this.#callbacks.journal;
@@ -569,18 +713,37 @@ export class AudioRecorder {
     };
     this.#unhanded.add(part);
     journal?.begin(part.journal);
+    let emptyTold = false;
     recorder.ondataavailable = (event: BlobEvent) => {
       // An empty chunk is no sign of life: it must not quiet the stall watch.
-      if (event.data.size === 0) return;
+      if (event.data.size === 0) {
+        this.#emptyChunks += 1;
+        if (!emptyTold) this.#log.add("chunk_empty", `part ${index + 1}`);
+        emptyTold = true;
+        return;
+      }
       if (this.#part === part) {
-        this.#lastChunkAt = this.#env.now();
+        const now = this.#env.now();
+        this.#lastChunkAt = now;
+        if (this.#firstChunkAfterMs === null) {
+          this.#firstChunkAfterMs = Math.round(now - this.#recordingSince);
+          this.#log.add("first_chunk", `${this.#firstChunkAfterMs} ms`);
+        }
         this.#firstChunkSeen = true;
         this.#rescueAt = null;
+        this.#partChunks += 1;
+        this.#partBytes += event.data.size;
+        const { phase } = this.#snapshot;
+        if (phase === "recording" || phase === "paused") {
+          this.#set({ ...this.#snapshot, partBytes: this.#partBytes });
+        }
       }
       part.chunks.push(event.data);
       journal?.append(part.journal, event.data, Math.max(0, this.recordedMs() - part.startedAtMs));
     };
-    recorder.onerror = () => {
+    recorder.onerror = (event: Event) => {
+      const error = (event as Event & { error?: unknown }).error;
+      this.#log.add("recorder_error", `part ${index + 1}, ${errorName(error)}`);
       if (this.#part === part) void this.stop("error");
     };
     const previous = this.#handovers;
@@ -594,6 +757,10 @@ export class AudioRecorder {
         if (!this.#disposed) {
           this.#unhanded.delete(part);
           if (built && this.#session) {
+            this.#log.add(
+              "part_handed_over",
+              `part ${part.index + 1}, ${Math.round(durationMs)} ms, ${built.size} B`
+            );
             this.#callbacks.onPart({
               file: built,
               sessionId: this.#session.sessionId,
@@ -602,6 +769,7 @@ export class AudioRecorder {
               capturedAt: part.capturedAt
             });
           } else {
+            this.#log.add("part_empty", `part ${part.index + 1}`);
             journal?.discard(part.journal);
           }
         }
@@ -646,6 +814,7 @@ export class AudioRecorder {
       return false;
     }
     this.#callbacks.onRotate?.();
+    this.#set({ ...this.#snapshot, partBytes: 0 });
     // The new part's encoder starts again: it may take its time for the first chunk.
     this.#firstChunkSeen = false;
     this.#lastChunkAt = this.#env.now();
@@ -712,11 +881,13 @@ export class AudioRecorder {
   #watchStall(): boolean {
     const now = this.#env.now();
     if (this.#env.isHidden()) {
+      if (this.#hiddenSince === null) this.#log.add("page_hidden");
       this.#hiddenSince ??= now;
       this.#rescueAt = null;
       return false;
     }
     if (this.#hiddenSince !== null) {
+      this.#log.add("page_visible");
       const hiddenFor = now - this.#hiddenSince;
       if (this.#lastChunkAt <= this.#hiddenSince) this.#lastChunkAt += hiddenFor;
       if (this.#lastAudibleAt <= this.#hiddenSince) this.#lastAudibleAt += hiddenFor;
@@ -730,6 +901,7 @@ export class AudioRecorder {
     if (this.#rescueAt === null) {
       // Some encoders hold chunks back under load: a healthy one answers this at once.
       this.#rescueAt = now;
+      this.#log.add("data_requested", `${Math.round(now - this.#lastChunkAt)} ms without audio`);
       try {
         this.#part?.recorder.requestData();
       } catch {
@@ -738,6 +910,7 @@ export class AudioRecorder {
       return false;
     }
     if (now - this.#rescueAt < STALL_GRACE_MS) return false;
+    this.#log.add("stalled");
     void this.stop("stall");
     return true;
   }
@@ -754,17 +927,20 @@ export class AudioRecorder {
   }
 
   #onTrackEnded = () => {
+    this.#log.add("microphone_ended");
     void this.stop("device_lost");
   };
 
   // The system may mute the microphone for a moment (a headset switching
   // over): the recording goes on, and the person is told.
   #onMute = () => {
+    this.#log.add("microphone_muted");
     this.#muted = true;
     if (this.#snapshot.phase === "recording") this.#set({ ...this.#snapshot, micHint: "muted" });
   };
 
   #onUnmute = () => {
+    this.#log.add("microphone_unmuted");
     this.#muted = false;
     if (this.#snapshot.phase === "recording") this.#set({ ...this.#snapshot, micHint: null });
   };

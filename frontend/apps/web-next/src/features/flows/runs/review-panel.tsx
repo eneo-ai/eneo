@@ -20,6 +20,7 @@ import { focusFirstControl } from "./run-form-fields";
 import { JsonValue } from "./run-json";
 import { ReviewTranscript } from "./run-transcript";
 import type { TranscriptTarget } from "./transcript";
+import type { TranscriptDraftHandle } from "./transcript-review-draft";
 import { isStaleRefusal, refusalText } from "./run-messages";
 import {
   changedFields,
@@ -233,18 +234,44 @@ export function ReviewPanel({
   const [reasonProblem, setReasonProblem] = useState<string | null>(null);
   // The transcript holds approval while one of its edits is not saved.
   const [transcriptUnsaved, setTranscriptUnsaved] = useState(false);
-  const [approvalHeld, setApprovalHeld] = useState(false);
+  /** Why approval is held, said below the buttons; null while it is not. */
+  const [approvalHeld, setApprovalHeld] = useState<string | null>(null);
+  // The transcript's corrections are a draft that saves itself: approval sends it first.
+  const transcriptDraft = useRef<TranscriptDraftHandle>(null);
+  const [savingTranscript, setSavingTranscript] = useState(false);
 
   /** True, and says why at the edit, when the transcript has an edit not saved yet. */
   function holdForTranscript(): boolean {
     if (!transcriptUnsaved) return false;
-    flushSync(() => setApprovalHeld(true));
-    announce(t("flow_transcript_review_unsaved"));
-    document
-      .getElementById(`${baseId}-transcript`)
-      ?.querySelector<HTMLElement>("textarea")
-      ?.focus();
+    holdApproval();
     return true;
+  }
+
+  function holdApproval() {
+    // To the draft's "save again", else to the edit not saved yet.
+    const transcriptBox = document.getElementById(`${baseId}-transcript`);
+    const retry = transcriptBox?.querySelector<HTMLElement>('[id^="transcript-draft-retry-"]');
+    const message = retry
+      ? t("flow_transcript_review_draft_unsaved")
+      : t("flow_transcript_review_unsaved");
+    flushSync(() => setApprovalHeld(message));
+    announce(message);
+    (retry ?? transcriptBox?.querySelector<HTMLElement>("textarea"))?.focus();
+  }
+
+  /** Whether approval may go ahead: no transcript edit is open and its draft is saved. */
+  async function transcriptReady(): Promise<boolean> {
+    if (holdForTranscript()) return false;
+    const draft = transcriptDraft.current;
+    if (!draft) return true;
+    setSavingTranscript(true);
+    try {
+      if (await draft.flush()) return true;
+    } finally {
+      setSavingTranscript(false);
+    }
+    holdApproval();
+    return false;
   }
 
   const options = reviewOptions(checkpoint, mayReview, now);
@@ -350,7 +377,8 @@ export function ReviewPanel({
     }
   });
 
-  const busy = save.isPending || approve.isPending || reject.isPending || resume.isPending;
+  const busy =
+    save.isPending || approve.isPending || reject.isPending || resume.isPending || savingTranscript;
   const editorStatus =
     problem && !problem.field ? ({ type: "error", message: problem.message } as const) : undefined;
 
@@ -484,6 +512,7 @@ export function ReviewPanel({
             target={transcript}
             mayEdit={options.canDecide}
             onUnsavedChange={setTranscriptUnsaved}
+            draftRef={transcriptDraft}
           />
         </div>
       ) : null}
@@ -542,19 +571,22 @@ export function ReviewPanel({
       ) : null}
 
       {options.canDecide && !rejecting && approvalHeld && transcriptUnsaved ? (
-        <p className="text-ax-error m-0 text-sm">{t("flow_transcript_review_unsaved")}</p>
+        <p className="text-ax-error m-0 text-sm">{approvalHeld}</p>
       ) : null}
       {options.canDecide && !rejecting ? (
         <div className="flex flex-wrap gap-2">
           <Button
             label={changed ? t("flow_runs_review_approve_changed") : t("flow_runs_review_approve")}
             variant="primary"
-            isLoading={approve.isPending}
+            isLoading={approve.isPending || savingTranscript}
             isInterruptible
             onClick={() => {
-              if (busy || holdForTranscript()) return;
-              const value = correction();
-              if (value !== false) approve.mutate(value);
+              if (busy) return;
+              void transcriptReady().then((ready) => {
+                if (!ready) return;
+                const value = correction();
+                if (value !== false) approve.mutate(value);
+              });
             }}
           />
           {changed ? null : (
@@ -562,7 +594,7 @@ export function ReviewPanel({
               checkpoint={checkpoint}
               isBlocked={busy}
               onRefused={refused}
-              mayApprove={() => !holdForTranscript()}
+              mayApprove={transcriptReady}
             />
           )}
           {changed ? (

@@ -9,7 +9,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { Timer } from "@astryxdesign/core/Timer";
 import { useQuery } from "@tanstack/react-query";
 import { Mic, Pause, Play, Square } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   useEffect,
   useId,
@@ -19,8 +19,10 @@ import {
   useSyncExternalStore,
   type Ref
 } from "react";
+import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { EneoApiError } from "@/lib/api/errors";
+import { formatBytes } from "@/lib/format";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import type { RecordingPartInfo, UploadEntry } from "../run-contract";
 import {
@@ -30,6 +32,7 @@ import {
   type RuntimeInput
 } from "../runs-api";
 import { AutoRestart, type RestartOutcome } from "./auto-restart";
+import { DiscardRecording } from "./discard-recording";
 import { LiveTranscript, type LiveSnapshot } from "./live-transcript";
 import {
   contractSnapshot,
@@ -51,7 +54,8 @@ import {
   type RecorderProblem,
   type RecordingEnd
 } from "./recorder";
-import { LastPartPreview, LevelMeter, micHintText } from "./recorder-health";
+import { LastPartPreview, LevelMeter, micHintText, RecordingSize } from "./recorder-health";
+import { partDiagnostics, RecordingDiagnostics, recordingReport } from "./recording-diagnostics";
 import {
   clockText,
   lengthParts,
@@ -268,6 +272,7 @@ export function RunRecorder({
   keeper,
   publishedFlowVersion,
   onSaveForLater,
+  onDiscard,
   handleRef
 }: {
   flowId: string;
@@ -282,9 +287,12 @@ export function RunRecorder({
   publishedFlowVersion: number | null;
   /** Closes the form and keeps the recording on the device to continue later. */
   onSaveForLater?: () => void;
+  /** Takes the step's recorded parts (by entry key) off the form, stopping or deleting their uploads. */
+  onDiscard?: (keys: readonly string[]) => void;
   handleRef?: Ref<RecorderHandle>;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const announce = useAnnounce();
   const [support] = useState(() => recordingSupport(browserEnvironment()));
   const [options] = useState(() =>
@@ -568,6 +576,8 @@ export function RunRecorder({
   const degradation = keeper.available ? keeper.degradation(stepId) : "failed";
 
   const laterId = useId();
+  const startButton = useRef<HTMLButtonElement>(null);
+  const [discardProblem, setDiscardProblem] = useState(false);
   const [filesFull, setFilesFull] = useState(false);
   const [backlogFull, setBacklogFull] = useState(false);
   const limits = recordingLimits(input, options.audioBitsPerSecond);
@@ -618,6 +628,39 @@ export function RunRecorder({
     });
   }
 
+  /**
+   * Throws the step's whole recording away: its parts leave the form (their
+   * uploads stop or are deleted) and nothing of it stays on the device. The
+   * next recording starts a new one.
+   */
+  async function discardRecording() {
+    const parts = latestEntries.current.filter((entry) => entry.recording);
+    const sessions = new Set(parts.map((entry) => entry.recording!.sessionId));
+    if (session) sessions.add(session);
+    const forgotten = await Promise.all(
+      [...sessions].map((sessionId) => keeper.forgetSession(stepId, sessionId))
+    );
+    restart.cancel();
+    live.discard();
+    recorder.dismiss();
+    liveEntry.current = null;
+    flushSync(() => {
+      onDiscard?.(parts.map((entry) => entry.key));
+      setSession(null);
+      setHandled((current) => new Set([...current, ...sessions]));
+      setLastPart((previous) => {
+        if (previous) URL.revokeObjectURL(previous.url);
+        return null;
+      });
+      setFilesFull(false);
+      setBacklogFull(false);
+      setDiscardProblem(forgotten.some((done) => !done));
+    });
+    // The button and its dialog are gone: recording again is what comes next.
+    startButton.current?.focus();
+    announce(t("flow_transcript_discard_done"));
+  }
+
   useEffect(() => {
     restart.setHandlers({
       attempt: async (): Promise<RestartOutcome> => {
@@ -656,17 +699,48 @@ export function RunRecorder({
   }
 
   const { phase, problem, ended } = snapshot;
-  const continues = partsOf(session ?? latestSession(entries), entries).length > 0;
+  const formParts = partsOf(session ?? latestSession(entries), entries);
+  const continues = formParts.length > 0;
   const running = phase === "recording" || phase === "paused";
+  // What recording more may still hold, said once a recording has parts on the form.
+  const roomMs =
+    continues && limits.maxRecordingMs
+      ? recordingTimeLeftMs(
+          limits.maxRecordingMs,
+          formParts.length + 1,
+          formParts.reduce((sum, part) => sum + part.durationMs, 0)
+        )
+      : null;
+
+  /** What the step lets a recording hold, as the form says it under its heading. */
+  function limitHint(): string | null {
+    if (roomMs !== null) {
+      return roomMs >= 60_000
+        ? t("flow_transcript_rec_room_hint", {
+            length: lengthText(Math.floor(roomMs / 60_000) * 60_000, t)
+          })
+        : null;
+    }
+    if (limits.maxRecordingMs) {
+      return t("flow_transcript_rec_length_hint", { length: lengthText(limits.maxRecordingMs, t) });
+    }
+    // No length limit: how long one file of the most a file may be holds at this bit rate.
+    const maxBytes = input.max_file_size_bytes;
+    if (!maxBytes) return null;
+    return t("flow_transcript_rec_file_hint", {
+      size: formatBytes(maxBytes, locale),
+      length: lengthText(((maxBytes * 8) / options.audioBitsPerSecond) * 1000, t)
+    });
+  }
+  const hint = limitHint();
+
   return (
     <div className="border-ax-border rounded-ax-inner flex flex-col gap-3 border p-3">
       <div className="flex flex-col gap-1">
         <Heading level={4}>{t("flow_transcript_rec_heading")}</Heading>
         <Text type="supporting" as="p">
           {t("flow_transcript_rec_hint")}
-          {limits.maxRecordingMs
-            ? ` ${t("flow_transcript_rec_length_hint", { length: lengthText(limits.maxRecordingMs, t) })}`
-            : null}
+          {hint ? ` ${hint}` : null}
         </Text>
       </div>
 
@@ -735,6 +809,14 @@ export function RunRecorder({
           collapsible={false}
         />
       ) : null}
+      {discardProblem ? (
+        <QuietBanner
+          status="warning"
+          title={t("flow_transcript_discard_partly_title")}
+          description={t("flow_transcript_discard_partly")}
+          collapsible={false}
+        />
+      ) : null}
       {filesFull ? (
         <QuietBanner
           status="warning"
@@ -788,6 +870,7 @@ export function RunRecorder({
       <div className="flex flex-wrap items-center gap-3">
         {phase === "idle" || phase === "starting" ? (
           <Button
+            ref={startButton}
             label={continues ? t("flow_transcript_rec_continue") : t("flow_transcript_rec_start")}
             icon={<Mic aria-hidden="true" />}
             variant="primary"
@@ -855,6 +938,14 @@ export function RunRecorder({
         ) : null}
       </div>
 
+      {running ? (
+        <RecordingSize
+          bytes={snapshot.partBytes}
+          maxBytes={input.max_file_size_bytes ?? null}
+          bitsPerSecond={options.audioBitsPerSecond}
+        />
+      ) : null}
+
       {onSaveForLater && keeper.available && recorded.length > 0 ? (
         <div className="flex flex-col gap-1">
           <div>
@@ -874,12 +965,29 @@ export function RunRecorder({
         </div>
       ) : null}
 
+      {onDiscard && phase === "idle" && recorded.length > 0 ? (
+        <DiscardRecording onDiscard={discardRecording} />
+      ) : null}
+
       {running ? <LevelMeter recorder={recorder} hint={snapshot.micHint} /> : null}
       {phase === "idle" && lastPart && entries.some((entry) => entry.key === lastPart.key) ? (
         <LastPartPreview url={lastPart.url} />
       ) : null}
 
       <LiveText snapshot={text} />
+
+      <RecordingDiagnostics
+        report={() =>
+          recordingReport({
+            recorder,
+            parts: partDiagnostics(latestEntries.current, (sessionId, index) =>
+              keeper.keeping(stepId, sessionId, index)
+            ),
+            storage: degradation,
+            live: liveAvailable ? live.getSnapshot().status : null
+          })
+        }
+      />
     </div>
   );
 }

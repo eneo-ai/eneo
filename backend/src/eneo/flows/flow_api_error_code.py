@@ -28,6 +28,14 @@ class FlowApiErrorCode(StrEnum):
     UNPUBLISH_REQUIRED = "flow_unpublish_required"
     FORM_FIELD_STILL_READ = "flow_form_field_still_read"
     FORM_FIELD_RENAME_INVALID = "flow_form_field_rename_invalid"
+    AUTHORING_CHAT_NO_MODEL = "flow_authoring_chat_no_model"
+    AUTHORING_MODEL_NOT_IN_SPACE = "flow_authoring_model_not_in_space"
+    AUTHORING_MODEL_BELOW_CLASSIFICATION = "flow_authoring_model_below_classification"
+    AUTHORING_MODEL_WITHOUT_TOOLS = "flow_authoring_model_without_tools"
+    AUTHORING_MODEL_UNAVAILABLE = "flow_authoring_model_unavailable"
+    AUTHORING_REASONING_EFFORT_UNSUPPORTED = (
+        "flow_authoring_reasoning_effort_unsupported"
+    )
     RUN_RUNTIME_INPUT_DISABLED = "flow_run_runtime_input_disabled"
     RUN_TOP_LEVEL_FILE_IDS_NOT_SUPPORTED = "flow_run_top_level_file_ids_not_supported"
     RUN_IDEMPOTENCY_CONFLICT = "flow_run_idempotency_conflict"

@@ -11,6 +11,10 @@ from eneo.flows.domain.rag_evidence_policy import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_authoring_chat_policy import (
+    FLOW_AUTHORING_CHAT_SETTINGS_KEY,
+    validate_flow_authoring_chat_policy_object,
+)
 from eneo.flows.flow_document_limits import (
     validate_flow_document_render_limits_object,
 )
@@ -39,6 +43,7 @@ FLOW_SETTINGS_EVIDENCE_POLICY_KEY: Final[str] = "evidence_policy"
 FLOW_SETTINGS_RETENTION_POLICY_KEY: Final[str] = "retention_policy"
 FLOW_SETTINGS_MAPPED_EXECUTION_KEY: Final[str] = "mapped_execution"
 FLOW_SETTINGS_RAG_EVIDENCE_KEY: Final[str] = "rag_evidence"
+FLOW_SETTINGS_AUTHORING_CHAT_KEY: Final[str] = FLOW_AUTHORING_CHAT_SETTINGS_KEY
 
 FLOW_SETTINGS_TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset(
     {
@@ -49,6 +54,7 @@ FLOW_SETTINGS_TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset(
         FLOW_SETTINGS_RETENTION_POLICY_KEY,
         FLOW_SETTINGS_MAPPED_EXECUTION_KEY,
         FLOW_SETTINGS_RAG_EVIDENCE_KEY,
+        FLOW_SETTINGS_AUTHORING_CHAT_KEY,
     }
 )
 
@@ -169,6 +175,10 @@ def validate_flow_settings_object(value: object | None) -> dict[str, Any]:
     if FLOW_SETTINGS_RAG_EVIDENCE_KEY in settings:
         validate_flow_rag_evidence_policy_object(
             settings[FLOW_SETTINGS_RAG_EVIDENCE_KEY]
+        )
+    if FLOW_SETTINGS_AUTHORING_CHAT_KEY in settings:
+        validate_flow_authoring_chat_policy_object(
+            settings[FLOW_SETTINGS_AUTHORING_CHAT_KEY]
         )
 
     return settings

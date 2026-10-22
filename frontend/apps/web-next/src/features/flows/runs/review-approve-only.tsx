@@ -26,7 +26,7 @@ export function ReviewApproveOnly({
   isBlocked: boolean;
   onRefused: (error: unknown) => void;
   /** Asked on each press: false when the panel holds approval and says why. */
-  mayApprove?: () => boolean;
+  mayApprove?: () => boolean | Promise<boolean>;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -47,7 +47,10 @@ export function ReviewApproveOnly({
       isLoading={approve.isPending}
       isInterruptible
       onClick={() => {
-        if (!isBlocked && !approve.isPending && mayApprove()) approve.mutate();
+        if (isBlocked || approve.isPending) return;
+        void Promise.resolve(mayApprove()).then((may) => {
+          if (may) approve.mutate();
+        });
       }}
     />
   );

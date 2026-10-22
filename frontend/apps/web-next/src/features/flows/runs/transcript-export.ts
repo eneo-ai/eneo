@@ -45,8 +45,8 @@ export function transcriptText(shown: readonly ShownSegment[], words: ExportWord
 }
 
 /** Hands the text to the person as a file. */
-export function saveText(text: string, fileName: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+export function saveText(text: string, fileName: string, type = "text/plain;charset=utf-8") {
+  const url = URL.createObjectURL(new Blob([text], { type }));
   const link = document.createElement("a");
   link.href = url;
   link.download = fileName;

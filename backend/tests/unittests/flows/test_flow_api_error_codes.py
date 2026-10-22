@@ -30,7 +30,10 @@ SDK_ERROR_CODES_JS = (
     / "flow-api-error-codes.js"
 )
 SDK_ERROR_CODES_DTS = SDK_ERROR_CODES_JS.with_suffix(".d.ts")
-WEB_MESSAGES_DIR = REPO_ROOT / "frontend" / "apps" / "web" / "messages"
+# The flow error texts belong to web-next, which owns them in its extra catalog.
+WEB_MESSAGES_DIR = (
+    REPO_ROOT / "frontend" / "apps" / "web-next" / "src" / "lib" / "i18n" / "extra"
+)
 FLOW_SOURCE_ROOT = BACKEND_ROOT / "src" / "eneo" / "flows"
 FLOW_API_SOURCE_ROOT = FLOW_SOURCE_ROOT / "api"
 CATALOG_MODULE_PATH = FLOW_SOURCE_ROOT / "flow_api_error_code.py"

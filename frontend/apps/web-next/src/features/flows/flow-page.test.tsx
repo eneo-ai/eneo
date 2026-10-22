@@ -486,4 +486,26 @@ describe("FlowPage", () => {
       body: { editing: true, expected_revision: 4 }
     });
   });
+
+  it("follows the new conversation edit mode starts after a pause, without a reload", async () => {
+    const chat = { flow_id: "flow-1", assistant_id: "assistant-chat", session_id: "session-1" };
+    state.chat = ok({ ...chat, editing: false });
+    state.mode = ok({ ...chat, session_id: "session-2", editing: true });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("switch", { name: /Redigeringsläge/ }));
+
+    await waitFor(() =>
+      expect(state.announce).toHaveBeenCalledWith(
+        "Redigeringsläget är på. Det var ett tag sedan sist, så chatten började en ny konversation."
+      )
+    );
+    await waitFor(() =>
+      expect(api.GET).toHaveBeenCalledWith("/api/v1/conversations/{session_id}/", {
+        params: { path: { session_id: "session-2" } },
+        signal: expect.anything()
+      })
+    );
+    expect(await screen.findByRole("button", { name: "Ny konversation" })).toBeTruthy();
+  });
 });

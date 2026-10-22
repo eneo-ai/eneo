@@ -84,7 +84,7 @@ function fakeStream() {
 }
 
 function setup(
-  getUserMedia: () => Promise<MediaStream>,
+  getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>,
   { meter = false, journal }: { meter?: boolean; journal?: JournalSpy } = {}
 ) {
   let now = 0;
@@ -316,6 +316,101 @@ describe("AudioRecorder", () => {
     recorder.pause();
     expect(recorder.level()).toBe(0);
     expect(recorder.getSnapshot().micHint).toBeNull();
+  });
+
+  it("asks again with looser settings when no microphone meets the preferred ones", async () => {
+    const { stream, track } = fakeStream();
+    const applyConstraints = vi.fn(() =>
+      Promise.reject(new DOMException("no", "OverconstrainedError"))
+    );
+    Object.assign(track, { applyConstraints });
+    const getUserMedia = vi
+      .fn<(constraints: MediaStreamConstraints) => Promise<MediaStream>>()
+      .mockRejectedValueOnce(new DOMException("no", "OverconstrainedError"))
+      .mockResolvedValueOnce(stream);
+    const { recorder } = setup(getUserMedia);
+    await recorder.start({ sessionId: "abc", firstIndex: 0, limits: limits() });
+
+    expect(recorder.getSnapshot().phase).toBe("recording");
+    expect(getUserMedia.mock.calls.map(([constraints]) => constraints.audio)).toEqual([
+      { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+      true
+    ]);
+    // The preferred settings are applied where the microphone can; here it records as it is.
+    expect(applyConstraints).toHaveBeenCalledWith(expect.objectContaining({ channelCount: 1 }));
+    const report = recorder.diagnostics();
+    expect(report.microphone.constraints).toBe("relaxed");
+    expect(report.events.map((entry) => entry.event)).toEqual(
+      expect.arrayContaining([
+        "microphone_refused",
+        "microphone_retry_relaxed",
+        "constraints_not_applied",
+        "microphone_open"
+      ])
+    );
+  });
+
+  it("does not ask again after a refusal that is not about the settings", async () => {
+    const getUserMedia = vi.fn(() => Promise.reject(new DOMException("no", "NotAllowedError")));
+    const { recorder } = setup(getUserMedia);
+    await recorder.start({ sessionId: "abc", firstIndex: 0, limits: limits() });
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(recorder.getSnapshot().problem).toBe("permission_denied");
+  });
+
+  it("tells the part's size as it grows and from zero in a new part", async () => {
+    const { stream } = fakeStream();
+    const { recorder, advance } = setup(() => Promise.resolve(stream));
+    await recorder.start({ sessionId: "abc", firstIndex: 0, limits: limits({ partMs: 60_000 }) });
+    await advance(3_000);
+    // Each fake chunk is the five bytes of "audio".
+    expect(recorder.getSnapshot().partBytes).toBe(15);
+    await advance(57_000, 500);
+    expect(recorder.getSnapshot().partBytes).toBe(0);
+    await advance(2_000);
+    expect(recorder.getSnapshot().partBytes).toBe(10);
+  });
+
+  it("reports its state and recent events without naming the device", async () => {
+    const { stream, track } = fakeStream();
+    Object.assign(track, {
+      getSettings: () => ({
+        deviceId: "device-secret",
+        groupId: "group-secret",
+        sampleRate: 48_000,
+        channelCount: 1,
+        echoCancellation: true
+      })
+    });
+    const { recorder, advance } = setup(() => Promise.resolve(stream));
+    await recorder.start({ sessionId: "session-secret", firstIndex: 0, limits: limits() });
+    await advance(2_000);
+    const report = recorder.diagnostics();
+    expect(report).toMatchObject({
+      phase: "recording",
+      format: {
+        requested: "audio/ogg;codecs=opus",
+        recorder: "audio/ogg",
+        audioBitsPerSecond: 24_000
+      },
+      microphone: {
+        constraints: "preferred",
+        settings: { sampleRate: 48_000, channelCount: 1, echoCancellation: true }
+      },
+      recording: {
+        recordedMs: 2_000,
+        part: { index: 0, chunks: 2, bytes: 10 },
+        firstChunkAfterMs: expect.any(Number)
+      }
+    });
+    expect(report.events.map((entry) => entry.event)).toEqual([
+      "start",
+      "microphone_open",
+      "part_started",
+      "first_chunk"
+    ]);
+    const text = JSON.stringify(report);
+    expect(text).not.toMatch(/secret/);
   });
 
   it("stops rather than pile up parts waiting for their upload", async () => {

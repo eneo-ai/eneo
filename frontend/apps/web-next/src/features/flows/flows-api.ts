@@ -140,15 +140,44 @@ export function authoringChatQueryOptions(flowId: string) {
   });
 }
 
-/** Turns the chat's edit mode on or off, fenced on the draft revision the caller has seen. */
+/**
+ * Turns the chat's edit mode on or off, fenced on the draft revision the
+ * caller has seen. Turning it on after a pause may start a new conversation:
+ * the answer then names another `session_id`.
+ */
 export function setAuthoringMode(
   chat: Pick<FlowAuthoringChat, "flow_id" | "session_id">,
   body: { editing: boolean; expectedRevision: number }
 ): Promise<FlowAuthoringChat> {
+  return updateAuthoringChat(chat, {
+    editing: body.editing,
+    expected_revision: body.expectedRevision
+  });
+}
+
+/**
+ * Changes the chat's edit mode, model or reasoning effort; a null model or
+ * effort returns to the default.
+ */
+export function updateAuthoringChat(
+  chat: Pick<FlowAuthoringChat, "flow_id" | "session_id">,
+  body: Schema<"FlowAuthoringChatUpdateRequest">
+): Promise<FlowAuthoringChat> {
   return unwrap(
     browserApi.PATCH("/api/v1/flows/{id}/authoring-chat/{session_id}/", {
       params: { path: { id: chat.flow_id, session_id: chat.session_id } },
-      body: { editing: body.editing, expected_revision: body.expectedRevision }
+      body
+    })
+  );
+}
+
+/** Leaves the chat's conversation for a new, empty one with the same assistant. */
+export function startAuthoringConversation(
+  chat: Pick<FlowAuthoringChat, "flow_id" | "session_id">
+): Promise<FlowAuthoringChat> {
+  return unwrap(
+    browserApi.POST("/api/v1/flows/{id}/authoring-chat/{session_id}/conversations/", {
+      params: { path: { id: chat.flow_id, session_id: chat.session_id } }
     })
   );
 }

@@ -40,6 +40,7 @@ from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionReviewPage,
     FlowRunRetentionSpaceTargetPage,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, ErrorCodes
 from eneo.main.logging import get_logger
@@ -53,6 +54,8 @@ from eneo.settings.setting_service import (
     SettingService,
 )
 from eneo.settings.settings import (
+    FlowAuthoringChatPolicyPublic,
+    FlowAuthoringChatPolicyUpdate,
     FlowDocumentRenderLimitsPublic,
     FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyPublic,
@@ -125,6 +128,12 @@ class _FlowSettingsServiceProtocol(Protocol):
     async def update_flow_evidence_policy(
         self, payload: FlowEvidencePolicyUpdate
     ) -> FlowEvidencePolicyPublic: ...
+    async def get_flow_authoring_chat_policy(
+        self,
+    ) -> FlowAuthoringChatPolicyPublic: ...
+    async def update_flow_authoring_chat_policy(
+        self, payload: FlowAuthoringChatPolicyUpdate
+    ) -> FlowAuthoringChatPolicyPublic: ...
     async def get_flow_retention_policy(self) -> FlowRetentionPolicyPublic: ...
     async def update_flow_retention_policy(
         self, payload: FlowRetentionPolicyUpdate
@@ -801,6 +810,102 @@ async def update_rag_evidence_policy(
 ) -> FlowRagEvidencePolicyPublic:
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_rag_evidence_policy(payload)
+
+
+@flow_settings_admin_router.get(
+    "/flow-authoring-chat-policy",
+    response_model=FlowAuthoringChatPolicyPublic,
+    operation_id="get_flow_authoring_chat_policy",
+    summary="Get the default model for flow chats",
+    description=(
+        "Return the organisation's default model for flow authoring chats. A "
+        "chat whose user has not chosen a model answers with it where the "
+        "flow's space allows it (enabled there, meeting its classification), and "
+        "with the space's default among models that support tools otherwise. "
+        "Null means every chat follows its space's default."
+    ),
+    responses={403: _flow_settings_admin_forbidden_response()},
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
+async def get_flow_authoring_chat_policy(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowAuthoringChatPolicyPublic:
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.get_flow_authoring_chat_policy()
+
+
+@flow_settings_admin_router.patch(
+    "/flow-authoring-chat-policy",
+    response_model=FlowAuthoringChatPolicyPublic,
+    operation_id="update_flow_authoring_chat_policy",
+    summary="Update the default model for flow chats",
+    description=(
+        "Set the organisation's default model for flow authoring chats, or send "
+        "null to remove it. The model must be one of the organisation's enabled "
+        "completion models and support tool calling, which the chat needs to read "
+        "and change flows. Chats whose user has not chosen a model take the new "
+        "default the next time they are opened."
+    ),
+    responses={
+        400: {
+            "model": GeneralError,
+            "description": "The model is not enabled, or does not support tools.",
+            "content": {
+                "application/json": {
+                    "examples": {
+                        FlowApiErrorCode.AUTHORING_MODEL_UNAVAILABLE.value: {
+                            "summary": "The model is not enabled",
+                            "value": {
+                                "message": (
+                                    "The model is not one of the organisation's "
+                                    "enabled models."
+                                ),
+                                "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+                                "code": FlowApiErrorCode.AUTHORING_MODEL_UNAVAILABLE.value,
+                                "context": {
+                                    "completion_model_id": (
+                                        "00000000-0000-0000-0000-000000000401"
+                                    )
+                                },
+                            },
+                        },
+                        FlowApiErrorCode.AUTHORING_MODEL_WITHOUT_TOOLS.value: {
+                            "summary": "The model does not support tools",
+                            "value": {
+                                "message": (
+                                    "The flow chat needs a model that supports tools."
+                                ),
+                                "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+                                "code": FlowApiErrorCode.AUTHORING_MODEL_WITHOUT_TOOLS.value,
+                                "context": {
+                                    "completion_model_id": (
+                                        "00000000-0000-0000-0000-000000000401"
+                                    )
+                                },
+                            },
+                        },
+                    }
+                }
+            },
+        },
+        403: _flow_settings_admin_forbidden_response(),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
+async def update_flow_authoring_chat_policy(
+    payload: FlowAuthoringChatPolicyUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> FlowAuthoringChatPolicyPublic:
+    service = cast(_FlowSettingsServiceProtocol, container.settings_service())
+    return await service.update_flow_authoring_chat_policy(payload)
 
 
 @flow_settings_admin_router.get(

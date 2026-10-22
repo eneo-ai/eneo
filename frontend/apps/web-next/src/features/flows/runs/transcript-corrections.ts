@@ -111,6 +111,38 @@ export function sortOccurrences(occurrences: readonly Occurrence[]): Occurrence[
   );
 }
 
+/**
+ * Whether two sets say the same, whatever order their entries come in (the
+ * core answers a save in its own order) and however empty names are kept.
+ */
+export function sameCorrections(a: CorrectionSet, b: CorrectionSet): boolean {
+  const key = (set: CorrectionSet) =>
+    JSON.stringify({
+      occurrences: sortOccurrences(set.occurrences).map((item) => [
+        item.segment_index,
+        item.char_start,
+        item.char_end,
+        item.original,
+        item.corrected
+      ]),
+      speakers: set.speakerEdits
+        .map((edit) => [
+          edit.segment_index,
+          edit.char_start ?? null,
+          edit.char_end ?? null,
+          edit.original ?? null,
+          edit.original_speaker ?? null,
+          edit.speaker ?? null,
+          edit.decision ?? "confirmed"
+        ])
+        .sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))),
+      names: Object.entries(set.names)
+        .filter(([, name]) => name?.trim())
+        .sort(([x], [y]) => x.localeCompare(y))
+    });
+  return key(a) === key(b);
+}
+
 /** The occurrences that still match a line's raw text, in text order. */
 export function applicableOccurrences(
   rawText: string,

@@ -3523,7 +3523,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 208 actions with their enabled status for the modal UI.
+     * @description Retrieve all 210 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -4891,7 +4891,7 @@ export interface paths {
     put?: never;
     /**
      * Open Flow Authoring Chat
-     * @description Open the caller's chat for editing this flow with an assistant, creating it on first use. The chat is an ordinary conversation whose assistant reaches only this flow through its tools, and it starts in view mode: the tools read the flow but change nothing until the caller turns on edit mode. Each user has one chat per flow; calling again returns it.
+     * @description Open the caller's chat for editing this flow with an assistant, creating it on first use. The chat is an ordinary conversation whose assistant reaches only this flow through its tools, and it starts in view mode: the tools read the flow but change nothing until the caller turns on edit mode. Each user has one chat per flow; calling again returns it with its current conversation, and gives its assistant the current instructions and the model in force: the caller's own choice, else the organisation's default for flow chats when the space allows it, else the space's default among models that support tools.
      */
     post: operations["get_or_create_flow_authoring_chat"];
     delete?: never;
@@ -4914,10 +4914,30 @@ export interface paths {
     options?: never;
     head?: never;
     /**
-     * Set Flow Authoring Mode
-     * @description Turn the authoring chat's edit mode on or off. In edit mode the chat's tools may change the draft through the same validation, permissions, classification and audit as the editor; leaving it waits for a change in progress and stops the next one. The switch is fenced on the draft revision the caller last read, so a mode change made against a stale draft is refused with `stale_revision`.
+     * Update Flow Authoring Chat
+     * @description Turn the authoring chat's edit mode on or off, or choose its model. In edit mode the chat's tools may change the draft through the same validation, permissions, classification and audit as the editor; leaving it waits for a change in progress and stops the next one. A mode change is fenced on the draft revision the caller last read, so one made against a stale draft is refused with `stale_revision`. Turning edit mode on after the configured pause without a question or mode change starts a new conversation: the response then carries the new `session_id`. A model is checked like an assistant's model (enabled in the space and meeting its classification) and must support tools; null returns to the default. The chat's assistant follows the change before the response.
      */
-    patch: operations["set_flow_authoring_mode"];
+    patch: operations["update_flow_authoring_chat"];
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/authoring-chat/{session_id}/conversations/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start a New Flow Authoring Conversation
+     * @description Leave the chat's current conversation and continue in a new, empty one with the same assistant, edit mode and model. Earlier conversations are kept for traceability but are never answered or sent to the model again: asking in one returns not found. The response carries the new `session_id`; the flow itself, its revisions and the audit log stay the record of what changed.
+     */
+    post: operations["start_flow_authoring_conversation"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
     trace?: never;
   };
   "/api/v1/flows/{id}/editor/": {
@@ -8138,6 +8158,30 @@ export interface paths {
      *     ```
      */
     patch: operations["update_audit_logging_setting_api_v1_settings_audit_logging_patch"];
+    trace?: never;
+  };
+  "/api/v1/settings/flow-authoring-chat-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the default model for flow chats
+     * @description Return the organisation's default model for flow authoring chats. A chat whose user has not chosen a model answers with it where the flow's space allows it (enabled there, meeting its classification), and with the space's default among models that support tools otherwise. Null means every chat follows its space's default.
+     */
+    get: operations["get_flow_authoring_chat_policy"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update the default model for flow chats
+     * @description Set the organisation's default model for flow authoring chats, or send null to remove it. The model must be one of the organisation's enabled completion models and support tool calling, which the chat needs to read and change flows. Chats whose user has not chosen a model take the new default the next time they are opened.
+     */
+    patch: operations["update_flow_authoring_chat_policy"];
     trace?: never;
   };
   "/api/v1/settings/flow-document-render-limits": {
@@ -11984,6 +12028,8 @@ export interface components {
       | "flow_updated"
       | "flow_authoring_chat_created"
       | "flow_authoring_mode_changed"
+      | "flow_authoring_chat_model_changed"
+      | "flow_authoring_conversation_started"
       | "flow_deleted"
       | "flow_published"
       | "flow_unpublished"
@@ -14166,7 +14212,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 89,
+     *           "action_count": 91,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -18005,6 +18051,12 @@ export interface components {
       | "flow_unpublish_required"
       | "flow_form_field_still_read"
       | "flow_form_field_rename_invalid"
+      | "flow_authoring_chat_no_model"
+      | "flow_authoring_model_not_in_space"
+      | "flow_authoring_model_below_classification"
+      | "flow_authoring_model_without_tools"
+      | "flow_authoring_model_unavailable"
+      | "flow_authoring_reasoning_effort_unsupported"
       | "flow_run_runtime_input_disabled"
       | "flow_run_top_level_file_ids_not_supported"
       | "flow_run_idempotency_conflict"
@@ -18455,6 +18507,32 @@ export interface components {
       /** Websites */
       websites?: components["schemas"]["ModelId"][] | null;
     };
+    /**
+     * FlowAuthoringChatPolicyPublic
+     * @example {
+     *       "completion_model_id": "00000000-0000-0000-0000-000000000401"
+     *     }
+     */
+    FlowAuthoringChatPolicyPublic: {
+      /**
+       * Completion Model Id
+       * @description The organisation's default model for flow chats. A chat whose user has not chosen a model answers with it where the flow's space allows it, and with the space's default among models that support tools otherwise. Null: always the space's default.
+       */
+      completion_model_id?: string | null;
+    };
+    /**
+     * FlowAuthoringChatPolicyUpdate
+     * @example {
+     *       "completion_model_id": "00000000-0000-0000-0000-000000000401"
+     *     }
+     */
+    FlowAuthoringChatPolicyUpdate: {
+      /**
+       * Completion Model Id
+       * @description An enabled completion model of the organisation that supports tools, or null to remove the default.
+       */
+      completion_model_id: string | null;
+    };
     /** FlowAuthoringChatPublic */
     FlowAuthoringChatPublic: {
       /**
@@ -18462,6 +18540,16 @@ export interface components {
        * Format: uuid
        */
       assistant_id: string;
+      /**
+       * Completion Model Id
+       * @description The model the caller chose for this chat; null follows the default (`default_completion_model_id`).
+       */
+      completion_model_id?: string | null;
+      /**
+       * Default Completion Model Id
+       * @description The model the chat answers with while `completion_model_id` is null: the organisation's default for flow chats when this space allows it, else the space's default among models that support tools.
+       */
+      default_completion_model_id?: string | null;
       /** Editing */
       editing: boolean;
       /**
@@ -18470,23 +18558,45 @@ export interface components {
        */
       flow_id: string;
       /**
+       * Reasoning Effort
+       * @description The reasoning effort the caller chose; null uses the model's own default. Applied only when the chat's model offers that level.
+       */
+      reasoning_effort?: string | null;
+      /**
        * Session Id
        * Format: uuid
+       * @description The chat's current conversation. Starting a new conversation (explicitly, or by entering edit mode after a pause) replaces it; earlier conversations are kept but never answered again.
        */
       session_id: string;
     };
     /**
-     * FlowAuthoringModeRequest
+     * FlowAuthoringChatUpdateRequest
      * @example {
-     *       "editing": true,
-     *       "expected_revision": 4
+     *       "completion_model_id": "00000000-0000-0000-0000-000000000402",
+     *       "reasoning_effort": "high"
      *     }
      */
-    FlowAuthoringModeRequest: {
-      /** Editing */
-      editing: boolean;
-      /** Expected Revision */
-      expected_revision: number;
+    FlowAuthoringChatUpdateRequest: {
+      /**
+       * Completion Model Id
+       * @description The model this chat answers with: one enabled in the flow's space, meeting its security classification, that supports tools. Null returns to the default; omit to keep the current choice.
+       */
+      completion_model_id?: string | null;
+      /**
+       * Editing
+       * @description Turn edit mode on (true) or off (false).
+       */
+      editing?: boolean | null;
+      /**
+       * Expected Revision
+       * @description The draft revision the caller last read. Required with `editing`: a mode change against a stale draft is refused.
+       */
+      expected_revision?: number | null;
+      /**
+       * Reasoning Effort
+       * @description A reasoning effort the chat's model offers (`supported_model_kwargs.reasoning_effort`). Null uses the model's default; omit to keep the current choice.
+       */
+      reasoning_effort?: string | null;
     };
     /** FlowCitationSourcePublic */
     FlowCitationSourcePublic: {
@@ -59454,6 +59564,7 @@ export interface operations {
           /**
            * @example {
            *       "assistant_id": "00000000-0000-0000-0000-000000000201",
+           *       "default_completion_model_id": "00000000-0000-0000-0000-000000000401",
            *       "editing": false,
            *       "flow_id": "00000000-0000-0000-0000-000000000001",
            *       "session_id": "00000000-0000-0000-0000-000000000301"
@@ -59462,7 +59573,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowAuthoringChatPublic"];
         };
       };
-      /** @description The space has no default model that supports tools. */
+      /** @description The space has no model that the chat can use. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -59470,7 +59581,7 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "bad_request",
+           *       "code": "flow_authoring_chat_no_model",
            *       "eneo_error_code": 9007,
            *       "message": "Choose a default model that supports tools for this space."
            *     }
@@ -59524,21 +59635,21 @@ export interface operations {
       };
     };
   };
-  set_flow_authoring_mode: {
+  update_flow_authoring_chat: {
     parameters: {
       query?: never;
       header?: never;
       path: {
         /** @description Identifier of the draft flow to edit. */
         id: string;
-        /** @description Identifier of the chat's conversation. */
+        /** @description Identifier of the chat's current conversation, as the chat last returned it. */
         session_id: string;
       };
       cookie?: never;
     };
     requestBody: {
       content: {
-        "application/json": components["schemas"]["FlowAuthoringModeRequest"];
+        "application/json": components["schemas"]["FlowAuthoringChatUpdateRequest"];
       };
     };
     responses: {
@@ -59551,28 +59662,102 @@ export interface operations {
           /**
            * @example {
            *       "assistant_id": "00000000-0000-0000-0000-000000000201",
+           *       "completion_model_id": "00000000-0000-0000-0000-000000000402",
+           *       "default_completion_model_id": "00000000-0000-0000-0000-000000000401",
            *       "editing": true,
            *       "flow_id": "00000000-0000-0000-0000-000000000001",
+           *       "reasoning_effort": "high",
            *       "session_id": "00000000-0000-0000-0000-000000000301"
            *     }
            */
           "application/json": components["schemas"]["FlowAuthoringChatPublic"];
         };
       };
-      /** @description The draft moved on since `expected_revision`. */
+      /** @description The draft moved on since `expected_revision`, or the model or reasoning effort cannot be used by this chat. */
       400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The caller cannot edit this flow, or called with an API key: the authoring chat takes a signed-in session. */
+      403: {
         headers: {
           [name: string]: unknown;
         };
         content: {
           /**
            * @example {
-           *       "code": "stale_revision",
-           *       "eneo_error_code": 9007,
-           *       "message": "The flow draft changed since it was read."
+           *       "code": "insufficient_space_permission",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to edit flows in this space."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The flow, or the caller's chat for it, is not in the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow authoring chat not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  start_flow_authoring_conversation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow to edit. */
+        id: string;
+        /** @description Identifier of the chat's current conversation, as the chat last returned it. */
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "assistant_id": "00000000-0000-0000-0000-000000000201",
+           *       "default_completion_model_id": "00000000-0000-0000-0000-000000000401",
+           *       "editing": false,
+           *       "flow_id": "00000000-0000-0000-0000-000000000001",
+           *       "session_id": "00000000-0000-0000-0000-000000000302"
+           *     }
+           */
+          "application/json": components["schemas"]["FlowAuthoringChatPublic"];
         };
       };
       /** @description The caller cannot edit this flow, or called with an API key: the authoring chat takes a signed-in session. */
@@ -70438,6 +70623,100 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_flow_authoring_chat_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowAuthoringChatPolicyPublic"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_flow_authoring_chat_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowAuthoringChatPolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowAuthoringChatPolicyPublic"];
+        };
+      };
+      /** @description The model is not enabled, or does not support tools. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update Flow tenant settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };

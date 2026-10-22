@@ -1173,6 +1173,8 @@ describe("FlowRunPage", () => {
       await waitFor(() =>
         expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_line_saved)
       );
+      // The correction is the review's draft, which saves itself a moment later.
+      await waitFor(() => expect(calls(EDIT)).toHaveLength(1), { timeout: 3_000 });
       expect(calls(EDIT)[0]?.init.body).toMatchObject({
         occurrences: [
           { segment_index: 1, char_start: 4, char_end: 5, original: ".", corrected: "ar." }
