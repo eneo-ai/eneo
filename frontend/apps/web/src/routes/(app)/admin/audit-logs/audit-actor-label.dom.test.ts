@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { withLocale } from "$lib/features/flows/testLocale";
+import { withLocale } from "$lib/test/testLocale";
 import { auditActorEmail, auditActorLabel } from "./audit-actor-label";
 
 let restore: (() => void) | undefined;

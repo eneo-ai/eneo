@@ -12,8 +12,7 @@ const api = vi.hoisted(() => ({
     activate: vi.fn(async () => ({})),
     deactivate: vi.fn(async () => ({})),
     delete: vi.fn(async () => ({})),
-    getTools: vi.fn(async () => ({ items: [] })),
-    flowUsage: vi.fn(async () => ({ total_count: 0, items: [] }))
+    getTools: vi.fn(async () => ({ items: [] }))
   },
   spaces: { list: vi.fn(async () => []) },
   userGroups: { list: vi.fn(async () => []) },
