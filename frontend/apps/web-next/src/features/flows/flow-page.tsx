@@ -45,6 +45,7 @@ import { FlowSettings } from "./flow-settings";
 import { FlowStatusBadge } from "./flow-status";
 import { FlowStepList, stepControlId } from "./flow-step-list";
 import { orderWithMove, orderWithout, stepsInOrder } from "./flow-steps";
+import { speakerStepOffer, speakerStepUpdate } from "./speaker-step-offer";
 import { runKeys } from "./runs/runs-api";
 import { FlowRunsList, runHref } from "./runs/runs-list";
 import { StartRunDialog } from "./runs/start-run-dialog";
@@ -252,6 +253,29 @@ export function FlowPage({ flowId }: { flowId: string }) {
     }
   }
 
+  /** Adds the step that names the speakers after `after`; focus goes to the new step. */
+  function addSpeakerStep(after: FlowStep) {
+    if (edit.isPending) return;
+    const update = speakerStepUpdate(flow, after, {
+      step: t("flows_speaker_step_name"),
+      fieldLabel: t("flows_speaker_participants_label"),
+      fieldName: t("flows_speaker_participants_name")
+    });
+    edit.mutate(update, {
+      onSuccess: (updated) => {
+        announce(t("flows_step_added"));
+        const added = stepsInOrder(updated).find(
+          (step) => step.step_order === after.step_order + 1
+        );
+        rescue(
+          () =>
+            (added?.id ? document.getElementById(stepControlId(added.id, "open")) : null) ??
+            stepsHeadingRef.current
+        );
+      }
+    });
+  }
+
   /** Saves a step's underlag with a read of a removed step replaced (the draft check's repair). */
   async function repairReference(
     step: FlowStep,
@@ -281,6 +305,9 @@ export function FlowPage({ flowId }: { flowId: string }) {
   }
 
   const openedStep = openStepId ? steps.find((step) => step.id === openStepId) : undefined;
+  const speakerOfferStep = canEdit
+    ? speakerStepOffer(flow, space.transcription_services ?? [])
+    : null;
 
   const actions =
     canManage || canRun ? (
@@ -452,6 +479,15 @@ export function FlowPage({ flowId }: { flowId: string }) {
                   onMove={moveStep}
                   onRemove={removeStep}
                   onAdd={(position) => setAddAt(position)}
+                  speakerOffer={
+                    speakerOfferStep?.id
+                      ? {
+                          stepId: speakerOfferStep.id,
+                          pending: edit.isPending,
+                          onAccept: () => addSpeakerStep(speakerOfferStep)
+                        }
+                      : null
+                  }
                 />
                 <FlowSettings
                   flow={flow}
