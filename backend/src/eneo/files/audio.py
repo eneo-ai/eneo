@@ -1,5 +1,3 @@
-# MIT License
-
 import asyncio
 import tempfile
 import wave
