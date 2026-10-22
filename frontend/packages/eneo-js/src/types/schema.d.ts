@@ -23106,6 +23106,66 @@ export interface components {
       | "review_checkpoint_cancelled"
       | "review_expired"
       | "review_checkpoint_expired";
+    /**
+     * FlowRunListPublic
+     * @description One page of a flow's run history.
+     * @example {
+     *       "count": 1,
+     *       "has_more": false,
+     *       "items": [
+     *         {
+     *           "created_at": "2026-03-17T10:05:00Z",
+     *           "dispatch_attempt_count": 0,
+     *           "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+     *           "dispatch_pending_since": "2026-03-17T10:05:00Z",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
+     *           "flow_version": 3,
+     *           "id": "00000000-0000-0000-0000-000000000301",
+     *           "job_id": "00000000-0000-0000-0000-000000000401",
+     *           "principal_type": "user",
+     *           "purpose": "production",
+     *           "revision": 1,
+     *           "started_by": {
+     *             "display_name": "Alex Example",
+     *             "email": "alex.example@example.com",
+     *             "id": "00000000-0000-0000-0000-000000000030",
+     *             "principal_type": "user"
+     *           },
+     *           "status": "queued",
+     *           "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *           "trace_id": "00000000-0000-0000-0000-000000000302",
+     *           "updated_at": "2026-03-17T10:05:00Z"
+     *         }
+     *       ],
+     *       "status_counts": {
+     *         "awaiting_review": 0,
+     *         "cancelled": 0,
+     *         "completed": 12,
+     *         "failed": 2,
+     *         "queued": 1,
+     *         "running": 0
+     *       }
+     *     }
+     */
+    FlowRunListPublic: {
+      /**
+       * Count
+       * @description Number of runs in `items`, not a total.
+       */
+      count: number;
+      /**
+       * Has More
+       * @description Whether another page exists after the returned offset window.
+       */
+      has_more: boolean;
+      /**
+       * Items
+       * @description The returned page of runs, in the requested order.
+       */
+      items: components["schemas"]["FlowRunSummaryPublic"][];
+      /** @description How many runs the caller may list have each status, counted over every page within `mine` and `search` and without the `status` filter, so a status filter can show what each choice would leave. Counted when the page is read; a run can move on before the next read. */
+      status_counts: components["schemas"]["FlowRunStatusCountsPublic"];
+    };
     /** FlowRunOutboundHttpResultPublic */
     FlowRunOutboundHttpResultPublic: {
       /**
@@ -24513,6 +24573,50 @@ export interface components {
       should_poll: boolean;
       /** @description Flow run status value this capability row describes. */
       status: components["schemas"]["FlowRunStatus"];
+    };
+    /**
+     * FlowRunStatusCountsPublic
+     * @description How many listed runs have each status, every status included.
+     * @example {
+     *       "awaiting_review": 0,
+     *       "cancelled": 0,
+     *       "completed": 12,
+     *       "failed": 2,
+     *       "queued": 1,
+     *       "running": 0
+     *     }
+     */
+    FlowRunStatusCountsPublic: {
+      /**
+       * Awaiting Review
+       * @description Listed runs with status `awaiting_review`, within `mine` and `search` and before any `status` filter.
+       */
+      awaiting_review: number;
+      /**
+       * Cancelled
+       * @description Listed runs with status `cancelled`, within `mine` and `search` and before any `status` filter.
+       */
+      cancelled: number;
+      /**
+       * Completed
+       * @description Listed runs with status `completed`, within `mine` and `search` and before any `status` filter.
+       */
+      completed: number;
+      /**
+       * Failed
+       * @description Listed runs with status `failed`, within `mine` and `search` and before any `status` filter.
+       */
+      failed: number;
+      /**
+       * Queued
+       * @description Listed runs with status `queued`, within `mine` and `search` and before any `status` filter.
+       */
+      queued: number;
+      /**
+       * Running
+       * @description Listed runs with status `running`, within `mine` and `search` and before any `status` filter.
+       */
+      running: number;
     };
     /**
      * FlowRunStepInputFilePublic
@@ -31072,24 +31176,6 @@ export interface components {
     ObjectStoreSwitchBackInput: {
       /** Expected Previous Revision */
       expected_previous_revision: number;
-    };
-    /** OffsetPaginatedResponse[FlowRunSummaryPublic] */
-    OffsetPaginatedResponse_FlowRunSummaryPublic_: {
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      readonly count: number;
-      /**
-       * Has More
-       * @description Whether another page exists after the returned offset window
-       */
-      has_more: boolean;
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["FlowRunSummaryPublic"][];
     };
     /** OffsetPaginatedResponse[FlowSparsePublic] */
     OffsetPaginatedResponse_FlowSparsePublic_: {
@@ -59305,6 +59391,12 @@ export interface operations {
         status?: components["schemas"]["FlowRunStatus"][] | null;
         /** @description Only return runs the caller started, within the runs the caller may see. A module session counts as its signed-in user. */
         mine?: boolean;
+        /** @description Only return runs whose `run_label`, or the name of whoever started them (a user's username or email, a service key's name), contains this text, ignoring case. It searches run metadata only, never accepted input, output or evidence, so the list stays a content-free read. Blank searches nothing. */
+        search?: string | null;
+        /** @description Order of the runs: `created_at` (when the run was created, the default), `started_at` (when it started; its creation time while it has not), `status` (the status capability table's `filter_order`) or `duration` (from start to finish; runs that have not finished come last in both orders). Ties list the newest run first, so paging stays stable. */
+        sort?: "created_at" | "started_at" | "status" | "duration";
+        /** @description `desc` (the default) or `asc`. */
+        order?: "asc" | "desc";
       };
       header?: never;
       path: {
@@ -59315,7 +59407,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Flow run page. `items` contains the returned page only; `count` is the number of returned runs and `has_more` tells clients whether to request the next offset window. */
+      /** @description Flow run page. `items` contains the returned page only; `count` is the number of returned runs, `has_more` tells clients whether to request the next offset window, and `status_counts` counts every listed run by status. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -59349,10 +59441,18 @@ export interface operations {
            *           "trace_id": "00000000-0000-0000-0000-000000000302",
            *           "updated_at": "2026-03-17T10:05:00Z"
            *         }
-           *       ]
+           *       ],
+           *       "status_counts": {
+           *         "awaiting_review": 0,
+           *         "cancelled": 0,
+           *         "completed": 12,
+           *         "failed": 2,
+           *         "queued": 1,
+           *         "running": 0
+           *       }
            *     }
            */
-          "application/json": components["schemas"]["OffsetPaginatedResponse_FlowRunSummaryPublic_"];
+          "application/json": components["schemas"]["FlowRunListPublic"];
         };
       };
       /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */

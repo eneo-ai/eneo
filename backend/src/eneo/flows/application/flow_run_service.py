@@ -34,6 +34,7 @@ from eneo.flows.domain.flow_run_exceptions import (
     FlowRunConcurrencyLimitReachedError,
     FlowRunNotFoundError,
 )
+from eneo.flows.domain.flow_run_listing import FlowRunListing
 from eneo.flows.domain.mapped_execution_policy import (
     resolve_flow_mapped_execution_policy_from_source,
 )
@@ -918,6 +919,7 @@ class FlowRunService:
         limit: int | None = None,
         offset: int | None = None,
         history: bool = False,
+        listing: FlowRunListing | None = None,
     ) -> list[FlowRunStatusSnapshot]:
         principal = self._principal()
         own_runs_only = mine or not await self._lists_every_run(
@@ -935,6 +937,32 @@ class FlowRunService:
             ),
             limit=limit,
             offset=offset,
+            listing=listing,
+        )
+
+    async def count_run_statuses(
+        self,
+        *,
+        flow_id: UUID,
+        mine: bool = False,
+        history: bool = False,
+        search: str | None = None,
+    ) -> dict[FlowRunStatus, int]:
+        """How many of the runs the caller may list have each status, within
+        ``mine`` and ``search`` and before any status filter: what a status
+        filter would leave."""
+        principal = self._principal()
+        own_runs_only = mine or not await self._lists_every_run(
+            principal, flow_id=flow_id, history=history
+        )
+        return await self.flow_run_repo.count_statuses(
+            tenant_id=self.user.tenant_id,
+            flow_id=flow_id,
+            principal_user_id=principal.principal_user_id if own_runs_only else None,
+            principal_service_id=(
+                principal.principal_service_id if own_runs_only else None
+            ),
+            search=search,
         )
 
     async def _lists_every_run(

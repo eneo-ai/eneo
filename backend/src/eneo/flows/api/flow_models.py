@@ -629,10 +629,20 @@ PAGINATED_FLOW_SPARSE_RESPONSE_EXAMPLE: dict[str, Any] = {
     "count": 1,
 }
 
+FLOW_RUN_STATUS_COUNTS_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "queued": 1,
+    "running": 0,
+    "awaiting_review": 0,
+    "completed": 12,
+    "failed": 2,
+    "cancelled": 0,
+}
+
 PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE: dict[str, Any] = {
     "items": [FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE],
     "has_more": False,
     "count": 1,
+    "status_counts": FLOW_RUN_STATUS_COUNTS_PUBLIC_EXAMPLE,
 }
 
 
@@ -1555,6 +1565,65 @@ class FlowRunSummaryPublic(BaseModel):
     created_at: datetime = Field(description="When the run row was created.")
     updated_at: datetime = Field(
         description="When the run row last changed. It moves on every status change."
+    )
+
+
+_STATUS_COUNT_DESCRIPTION = (
+    "Listed runs with status `{status}`, within `mine` and `search` and before "
+    "any `status` filter."
+)
+
+
+class FlowRunStatusCountsPublic(BaseModel):
+    """How many listed runs have each status, every status included."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUN_STATUS_COUNTS_PUBLIC_EXAMPLE},
+    )
+
+    queued: int = Field(
+        ge=0, description=_STATUS_COUNT_DESCRIPTION.format(status="queued")
+    )
+    running: int = Field(
+        ge=0, description=_STATUS_COUNT_DESCRIPTION.format(status="running")
+    )
+    awaiting_review: int = Field(
+        ge=0, description=_STATUS_COUNT_DESCRIPTION.format(status="awaiting_review")
+    )
+    completed: int = Field(
+        ge=0, description=_STATUS_COUNT_DESCRIPTION.format(status="completed")
+    )
+    failed: int = Field(
+        ge=0, description=_STATUS_COUNT_DESCRIPTION.format(status="failed")
+    )
+    cancelled: int = Field(
+        ge=0, description=_STATUS_COUNT_DESCRIPTION.format(status="cancelled")
+    )
+
+
+class FlowRunListPublic(BaseModel):
+    """One page of a flow's run history."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE},
+    )
+
+    items: list[FlowRunSummaryPublic] = Field(
+        description="The returned page of runs, in the requested order."
+    )
+    count: int = Field(description="Number of runs in `items`, not a total.")
+    has_more: bool = Field(
+        description="Whether another page exists after the returned offset window."
+    )
+    status_counts: FlowRunStatusCountsPublic = Field(
+        description=(
+            "How many runs the caller may list have each status, counted over every "
+            "page within `mine` and `search` and without the `status` filter, so a "
+            "status filter can show what each choice would leave. Counted when the "
+            "page is read; a run can move on before the next read."
+        ),
     )
 
 

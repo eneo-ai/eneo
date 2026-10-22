@@ -2992,12 +2992,12 @@ def test_openapi_flow_pagination_response_shape_is_current(
     openapi_spec: dict,
 ) -> None:
     targets = {
-        "/api/v1/flows/": "OffsetPaginatedResponse_FlowSparsePublic_",
-        "/api/v1/flows/{id}/runs/": ("OffsetPaginatedResponse_FlowRunSummaryPublic_"),
+        "/api/v1/flows/": ("OffsetPaginatedResponse_FlowSparsePublic_", set()),
+        "/api/v1/flows/{id}/runs/": ("FlowRunListPublic", {"status_counts"}),
     }
     schemas = openapi_spec.get("components", {}).get("schemas", {})
 
-    for path, expected_component in targets.items():
+    for path, (expected_component, extra_fields) in targets.items():
         operation = _get_operation(openapi_spec, path, "get")
         response_schema = (
             operation.get("responses", {})
@@ -3014,11 +3014,13 @@ def test_openapi_flow_pagination_response_shape_is_current(
             "items",
             "count",
             "has_more",
+            *extra_fields,
         }
         assert set(component.get("required", [])) == {
             "items",
             "count",
             "has_more",
+            *extra_fields,
         }
 
     assert "PaginatedResponse_FlowSparsePublic_" not in schemas

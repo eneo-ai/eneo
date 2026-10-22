@@ -98,6 +98,7 @@ FORWARDERS: frozenset[tuple[str, str]] = frozenset(
         ("flows/application/flow_run_service.py", f"FlowRunService.{name}")
         for name in (
             "_lists_every_run",
+            "count_run_statuses",
             "get_run",
             "get_run_detail_with_result_files_and_usage",
             "get_run_status",

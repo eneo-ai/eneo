@@ -59,6 +59,7 @@ from eneo.flows.domain.flow import (
     FlowRunStatus,
     FlowStepResultAnnotation,
 )
+from eneo.flows.domain.flow_run_listing import FlowRunListing
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
@@ -787,6 +788,7 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     )
     run_service = AsyncMock()
     run_service.list_run_statuses.return_value = [run]
+    run_service.count_run_statuses.return_value = dict.fromkeys(FlowRunStatus, 0)
     run_service.get_run_detail_with_result_files_and_usage.return_value = (
         FlowRunDetailView(
             run=run,
@@ -884,7 +886,16 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     assert {call.kwargs["include_retired"] for call in gate.await_args_list} == {True}
     assert flow_service.get_flow.await_count == 0
     run_service.list_run_statuses.assert_awaited_once_with(
-        flow_id=flow_id, statuses=None, mine=False, limit=21, offset=2, history=True
+        flow_id=flow_id,
+        statuses=None,
+        mine=False,
+        limit=21,
+        offset=2,
+        history=True,
+        listing=FlowRunListing(),
+    )
+    run_service.count_run_statuses.assert_awaited_once_with(
+        flow_id=flow_id, mine=False, history=True, search=None
     )
     run_service.get_run_detail_with_result_files_and_usage.assert_awaited_once_with(
         run_id=run.id, flow_id=flow_id, history=True

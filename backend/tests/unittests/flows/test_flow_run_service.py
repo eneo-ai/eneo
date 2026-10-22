@@ -2182,6 +2182,7 @@ async def test_list_runs_delegates_to_repo(user):
         principal_service_id=None,
         limit=None,
         offset=None,
+        listing=None,
     )
 
 
@@ -2219,6 +2220,7 @@ async def test_list_runs_delegates_status_filter_to_repo(user):
         principal_service_id=None,
         limit=None,
         offset=None,
+        listing=None,
     )
 
 
@@ -2254,6 +2256,7 @@ async def test_list_runs_allows_tenant_admin_to_see_all_runs(user):
         principal_service_id=None,
         limit=None,
         offset=None,
+        listing=None,
     )
 
 
@@ -2297,6 +2300,7 @@ async def test_list_runs_filters_service_key_runs_by_service_principal(user):
         principal_service_id=service_user.active_api_key.service_principal_id,
         limit=None,
         offset=None,
+        listing=None,
     )
 
 
@@ -2330,6 +2334,7 @@ async def test_list_runs_keeps_tenant_admin_service_key_scoped_to_service_princi
         principal_service_id=service_user.active_api_key.service_principal_id,
         limit=None,
         offset=None,
+        listing=None,
     )
 
 
@@ -2374,6 +2379,7 @@ async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(us
         principal_service_id=service_user.active_api_key.service_principal_id,
         limit=None,
         offset=None,
+        listing=None,
     )
 
 
@@ -2415,6 +2421,7 @@ async def test_list_runs_space_admin_sees_every_run_of_the_flow_unless_mine(user
         principal_service_id=None,
         limit=None,
         offset=None,
+        listing=None,
     )
 
 
@@ -2444,6 +2451,7 @@ async def test_list_runs_mine_keeps_a_tenant_admin_to_their_own_runs(user):
         principal_service_id=None,
         limit=3,
         offset=1,
+        listing=None,
     )
 
 

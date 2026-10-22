@@ -1,5 +1,7 @@
-"""`GET /api/v1/flows/{id}/runs/?mine=true` narrows the run list to the
-caller's own runs inside the caller's run visibility."""
+"""`GET /api/v1/flows/{id}/runs/` narrows the run list to the caller's own
+runs with `mine=true`, searches run labels and starter names, orders by start
+time, status or duration, and counts the listed runs by status, all inside the
+caller's run visibility."""
 
 from __future__ import annotations
 
@@ -7,13 +9,18 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient
 
 from eneo.database.tables.flow_tables import FlowRuns
+from eneo.database.tables.roles_table import Roles
+from eneo.database.tables.spaces_table import SpacesUsers
+from eneo.database.tables.users_table import users_roles_table
+from eneo.roles.permissions import Permission
+from eneo.spaces.api.space_models import SpaceRoleValue
 from tests.integration.module_session_support import (
     enable_module,
     install_module,
@@ -59,7 +66,9 @@ async def history(
     flow = await create_published_compose_text_flow(client, flow_process_auth_headers)
     async with db_container() as container:
         session = container.session()
-        colleague = await user_factory(session)
+        colleague = await user_factory(
+            session, username="Kim Colleague", email="kim.colleague@example.com"
+        )
         colleague_id = colleague.id
         published = await container.flow_repo().get(
             UUID(flow.flow_id), admin_user.tenant_id
@@ -97,6 +106,31 @@ async def history(
                 sa.update(FlowRuns)
                 .where(FlowRuns.id == UUID(run_id))
                 .values(created_at=started + timedelta(minutes=minutes))
+            )
+        # The oldest run took ten minutes, the colleague's one; the newest
+        # waits in the queue, so it has neither a start nor a duration.
+        for run_id, values in (
+            (
+                oldest_admin_run,
+                {
+                    "run_label": "Case 100% done",
+                    "status": "completed",
+                    "started_at": started,
+                    "finished_at": started + timedelta(minutes=10),
+                },
+            ),
+            (
+                colleague_run,
+                {
+                    "status": "failed",
+                    "started_at": started + timedelta(minutes=1),
+                    "finished_at": started + timedelta(minutes=2),
+                },
+            ),
+            (newest_admin_run, {"run_label": "case 7"}),
+        ):
+            await session.execute(
+                sa.update(FlowRuns).where(FlowRuns.id == UUID(run_id)).values(**values)
             )
     return RunHistory(
         admin_token=flow_process_auth_headers.token,
@@ -158,3 +192,149 @@ async def test_a_module_session_lists_the_humans_own_runs_with_mine(
     assert _ids(await _runs(client, history, headers, mine=True)) == (
         history.admin_run_ids
     )
+
+
+async def test_search_matches_run_labels_and_starter_names_ignoring_case(
+    client: AsyncClient, history: RunHistory
+):
+    headers = {"Authorization": f"Bearer {history.admin_token}"}
+
+    assert _ids(await _runs(client, history, headers, search="CASE")) == (
+        history.admin_run_ids
+    )
+    assert _ids(await _runs(client, history, headers, search=" kim colleague ")) == [
+        history.colleague_run_id
+    ]
+    assert _ids(await _runs(client, history, headers, search="kim.colleague@")) == [
+        history.colleague_run_id
+    ]
+    # Wildcards are literal text.
+    assert _ids(await _runs(client, history, headers, search="100%")) == [
+        history.oldest_admin_run_id
+    ]
+    assert _ids(await _runs(client, history, headers, search="1_0")) == []
+    assert _ids(await _runs(client, history, headers, search="   ")) == (
+        history.all_run_ids
+    )
+
+
+async def test_search_never_reads_run_content(
+    client: AsyncClient, history: RunHistory, db_container
+):
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == UUID(history.colleague_run_id))
+            .values(input_payload_json={"note": "secret needle"})
+        )
+    headers = {"Authorization": f"Bearer {history.admin_token}"}
+
+    assert _ids(await _runs(client, history, headers, search="needle")) == []
+
+
+async def test_runs_sort_by_start_time_status_and_duration(
+    client: AsyncClient, history: RunHistory
+):
+    headers = {"Authorization": f"Bearer {history.admin_token}"}
+
+    # The queued run has not started, so its creation time stands in.
+    assert _ids(await _runs(client, history, headers, sort="started_at")) == (
+        history.all_run_ids
+    )
+    assert _ids(
+        await _runs(client, history, headers, sort="started_at", order="asc")
+    ) == list(reversed(history.all_run_ids))
+    # Status follows the capability table's filter order: completed, failed, ..., queued.
+    assert _ids(await _runs(client, history, headers, sort="status", order="asc")) == [
+        history.oldest_admin_run_id,
+        history.colleague_run_id,
+        history.newest_admin_run_id,
+    ]
+    # A run that has not finished comes last in both directions.
+    assert _ids(await _runs(client, history, headers, sort="duration")) == [
+        history.oldest_admin_run_id,
+        history.colleague_run_id,
+        history.newest_admin_run_id,
+    ]
+    assert _ids(
+        await _runs(client, history, headers, sort="duration", order="asc")
+    ) == [
+        history.colleague_run_id,
+        history.oldest_admin_run_id,
+        history.newest_admin_run_id,
+    ]
+    pages = [
+        await _runs(client, history, headers, sort="duration", limit=1, offset=offset)
+        for offset in (0, 1, 2)
+    ]
+    assert [_ids(page) for page in pages] == [
+        [history.oldest_admin_run_id],
+        [history.colleague_run_id],
+        [history.newest_admin_run_id],
+    ]
+
+
+async def test_status_counts_cover_every_listed_run_without_the_status_filter(
+    client: AsyncClient, history: RunHistory
+):
+    headers = {"Authorization": f"Bearer {history.admin_token}"}
+    zero = dict.fromkeys(
+        ("queued", "running", "awaiting_review", "completed", "failed", "cancelled"),
+        0,
+    )
+
+    page = await _runs(client, history, headers, status="failed", limit=1)
+    assert _ids(page) == [history.colleague_run_id]
+    assert page["status_counts"] == {**zero, "queued": 1, "completed": 1, "failed": 1}
+    assert (await _runs(client, history, headers, mine=True))["status_counts"] == {
+        **zero,
+        "queued": 1,
+        "completed": 1,
+    }
+    assert (await _runs(client, history, headers, search="kim"))["status_counts"] == {
+        **zero,
+        "failed": 1,
+    }
+
+
+async def test_a_member_lists_searches_and_counts_only_their_own_runs(
+    client: AsyncClient, history: RunHistory, db_container, admin_user
+):
+    async with db_container() as container:
+        colleague = await container.user_repo().get_user_by_email(
+            "kim.colleague@example.com"
+        )
+        session = container.session()
+        role = Roles(
+            name=f"Flow runner {uuid4().hex[:8]}",
+            permissions=[Permission.FLOWS.value, Permission.FLOWS_RUN.value],
+            tenant_id=admin_user.tenant_id,
+        )
+        session.add(role)
+        await session.flush()
+        await session.execute(
+            sa.insert(users_roles_table).values(user_id=colleague.id, role_id=role.id)
+        )
+        flow_id = UUID(history.runs_path.split("/")[4])
+        flow = await container.flow_repo().get(flow_id, admin_user.tenant_id)
+        session.add(
+            SpacesUsers(
+                space_id=flow.space_id,
+                user_id=colleague.id,
+                role=SpaceRoleValue.EDITOR,
+            )
+        )
+        await session.flush()
+        colleague = await container.user_repo().get_user_by_email(
+            "kim.colleague@example.com"
+        )
+        token = container.auth_service().create_access_token_for_user(colleague)
+    headers = {"Authorization": f"Bearer {token}"}
+
+    page = await _runs(client, history, headers, search="case")
+    assert _ids(page) == []
+    assert sum(page["status_counts"].values()) == 0
+    page = await _runs(client, history, headers)
+    assert _ids(page) == [history.colleague_run_id]
+    assert page["status_counts"]["failed"] == 1
+    assert sum(page["status_counts"].values()) == 1
