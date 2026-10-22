@@ -123,6 +123,7 @@ from eneo.flows.enums import (
     FlowOutputDelivery as FlowOutputDelivery,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_error_taxonomy import FLOW_ERROR_TAXONOMY
 from eneo.flows.flow_review_policy import (
     FLOW_STEP_REVIEW_POLICY_DESCRIPTION,
     FlowStepReviewMode,
@@ -1746,6 +1747,73 @@ class FlowRunWebhookDeliveryPublic(BaseModel):
     updated_at: datetime
 
 
+FLOW_RUN_ERROR_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "schema_version": 1,
+    "code": "flow_step_timeout",
+    "message": "Step 2 exceeded its execution budget during provider_request.",
+    "source": "executor_failed",
+    "step_order": 2,
+    "retryable": False,
+    "details": {"phase": "provider_request", "provider_work_may_have_completed": True},
+    "user_action": (
+        "Check the run before retrying and ask the flow author to raise the "
+        "step's time budget or reduce the input."
+    ),
+    "consumer_action": (
+        "Do not auto-retry because an in-flight provider request may still "
+        "complete and bill; inspect the run, then raise the step's "
+        "timeout_seconds or reduce the input before a new run."
+    ),
+}
+
+
+class FlowRunErrorPublic(FlowRunError):
+    """A run's terminal error with the Flow error taxonomy's guidance for its code."""
+
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        json_schema_extra={
+            "description": (
+                "Structured terminal run error with the error taxonomy's guidance "
+                "for its code. Clients should branch on `code`, not on the "
+                "human-readable message."
+            ),
+            "examples": [FLOW_RUN_ERROR_PUBLIC_EXAMPLE],
+        },
+    )
+
+    user_action: str | None = Field(
+        description=(
+            "What the person who started or reviews the run can do, from the Flow "
+            "error taxonomy (the errors reference's guidance), in English. A "
+            "localized client shows its own catalog's sentence for `code` and "
+            "falls back to this. Null for a code the taxonomy does not list."
+        ),
+        examples=["Ask an administrator to configure document rendering."],
+    )
+    consumer_action: str | None = Field(
+        description=(
+            "What an API client should do about this error, from the Flow error "
+            "taxonomy, in English. Null for a code the taxonomy does not list."
+        ),
+        examples=[
+            "Configure the shared tool runtime before publishing or starting a run."
+        ],
+    )
+
+    @classmethod
+    def with_guidance(cls, error: FlowRunError) -> "FlowRunErrorPublic":
+        entry = FLOW_ERROR_TAXONOMY.get(FlowApiErrorCode(error.code))
+        return cls.model_validate(
+            {
+                **error.model_dump(),
+                "user_action": entry.user_action if entry else None,
+                "consumer_action": entry.consumer_action if entry else None,
+            }
+        )
+
+
 FLOW_RUN_EVIDENCE_ACCESS_PUBLIC_EXAMPLE: dict[str, Any] = {
     "can_read_evidence": True,
     "can_export_redacted": True,
@@ -1832,6 +1900,16 @@ class FlowRunDetailPublic(FlowRunPublic):
             "HTTP delivery. Eneo has no inbound webhook subscription surface, so this "
             "reports deliveries the flow author configured, never callbacks a client "
             "registered."
+        ),
+    )
+    # The detail narrows the error to its subclass with guidance; responses are
+    # never written to, so the override cannot be misused.
+    error: FlowRunErrorPublic | None = Field(  # pyright: ignore[reportIncompatibleVariableOverride]
+        default=None,
+        description=(
+            "Structured terminal run error, with the error taxonomy's `user_action` "
+            "and `consumer_action` for its code. API consumers should branch on "
+            "`error.code`; null means the run has no terminal run-level error."
         ),
     )
     evidence_access: FlowRunEvidenceAccessPublic = Field(

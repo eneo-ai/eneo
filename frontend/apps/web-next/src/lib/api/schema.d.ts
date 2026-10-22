@@ -21514,8 +21514,8 @@ export interface components {
        * @description Timestamp when this dispatch epoch first became possibly accepted: either the broker confirmed acceptance or a later claim proved an earlier attempt ended without a durable rejection receipt.
        */
       dispatched_at?: string | null;
-      /** @description Structured terminal run error available only through audited detail and evidence reads. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
-      error?: components["schemas"]["FlowRunError"] | null;
+      /** @description Structured terminal run error, with the error taxonomy's `user_action` and `consumer_action` for its code. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
+      error?: components["schemas"]["FlowRunErrorPublic"] | null;
       /** @description What this caller may do with the run's evidence (read the trace, export it redacted or raw), so a client offers only what the evidence routes would allow instead of approximating their rules. Computed for the caller when the detail is read. */
       evidence_access: components["schemas"]["FlowRunEvidenceAccessPublic"];
       /**
@@ -21934,6 +21934,180 @@ export interface components {
        * @description Last observed transcription service stage before the interruption.
        */
       transcription_stage?: string | null;
+    };
+    /**
+     * FlowRunErrorPublic
+     * @description Structured terminal run error with the error taxonomy's guidance for its code. Clients should branch on `code`, not on the human-readable message.
+     * @example {
+     *       "code": "flow_step_timeout",
+     *       "consumer_action": "Do not auto-retry because an in-flight provider request may still complete and bill; inspect the run, then raise the step's timeout_seconds or reduce the input before a new run.",
+     *       "details": {
+     *         "phase": "provider_request",
+     *         "provider_work_may_have_completed": true
+     *       },
+     *       "message": "Step 2 exceeded its execution budget during provider_request.",
+     *       "retryable": false,
+     *       "schema_version": 1,
+     *       "source": "executor_failed",
+     *       "step_order": 2,
+     *       "user_action": "Check the run before retrying and ask the flow author to raise the step's time budget or reduce the input."
+     *     }
+     */
+    FlowRunErrorPublic: {
+      /**
+       * @description Stable machine-readable run error code.
+       * @enum {string}
+       */
+      code:
+        | "flow_assistant_model_provider_required"
+        | "flow_assistant_snapshot_drift"
+        | "flow_assistant_snapshot_republish_required"
+        | "flow_assistant_snapshot_resource_invalid"
+        | "flow_definition_checksum_mismatch"
+        | "flow_definition_flow_id_invalid"
+        | "flow_definition_invalid"
+        | "flow_definition_no_executable_steps"
+        | "flow_definition_schema_version_missing"
+        | "flow_definition_schema_version_unsupported"
+        | "flow_definition_steps_invalid"
+        | "flow_deleted"
+        | "flow_dispatch_failed"
+        | "flow_input_contract_inapplicable"
+        | "flow_llm_output_truncated"
+        | "flow_llm_output_whitespace_abort"
+        | "flow_llm_request_timeout"
+        | "flow_long_material_partial_coverage"
+        | "flow_mapped_provider_call_limit_exceeded"
+        | "flow_missing_principal"
+        | "flow_model_capacity_undeclared"
+        | "flow_provider_call_evidence_persistence_failed"
+        | "flow_provider_rate_limited"
+        | "flow_provider_unavailable"
+        | "flow_review_expired"
+        | "flow_review_open_active_conflict_invariant"
+        | "flow_review_open_multiple_active_checkpoints_invariant"
+        | "flow_review_open_step_result_incomplete_invariant"
+        | "flow_review_policy_invalid"
+        | "flow_review_rejected"
+        | "flow_run_abandoned"
+        | "flow_run_cancelled"
+        | "flow_run_error_payload_invalid"
+        | "flow_run_input_exceeds_limit"
+        | "flow_run_user_cancelled"
+        | "flow_runtime_actor_invalid"
+        | "flow_runtime_input_not_consumed"
+        | "flow_service_principal_disabled"
+        | "flow_step_attempt_start_failed"
+        | "flow_step_execution_failed"
+        | "flow_step_missing"
+        | "flow_step_timeout"
+        | "flow_summarization_non_convergent"
+        | "flow_task_failure"
+        | "flow_task_timeout"
+        | "flow_unsupported_output_mode"
+        | "flow_unsupported_output_type"
+        | "flow_webhook_delivery_failed"
+        | "flow_worker_stalled"
+        | "typed_io_audio_exceeds_limit"
+        | "typed_io_audio_invalid_file_type"
+        | "typed_io_audio_missing_file"
+        | "typed_io_audio_source_unsupported"
+        | "typed_io_audio_too_many_files"
+        | "typed_io_contract_not_checked"
+        | "typed_io_contract_violation"
+        | "typed_io_document_source_unsupported"
+        | "typed_io_empty_extraction"
+        | "typed_io_file_not_found"
+        | "typed_io_file_source_unsupported"
+        | "typed_io_http_connection_error"
+        | "typed_io_http_invalid_config"
+        | "typed_io_http_invalid_url"
+        | "typed_io_http_malformed_response"
+        | "typed_io_http_non_success"
+        | "typed_io_http_response_too_large"
+        | "typed_io_http_ssrf_blocked"
+        | "typed_io_http_timeout"
+        | "typed_io_input_exceeds_model_window"
+        | "typed_io_input_too_large"
+        | "typed_io_invalid_file_type"
+        | "typed_io_invalid_input_source_combination"
+        | "typed_io_invalid_input_source_position"
+        | "typed_io_invalid_json_input"
+        | "typed_io_invalid_output_mode_combination"
+        | "typed_io_invalid_schema"
+        | "typed_io_missing_required_files"
+        | "typed_io_output_parse_failed"
+        | "typed_io_render_failed"
+        | "typed_io_speaker_identification_failed"
+        | "typed_io_speaker_service_unavailable"
+        | "typed_io_structured_output_exceeds_limit"
+        | "typed_io_template_checksum_mismatch"
+        | "typed_io_template_render_failed"
+        | "typed_io_tool_answer_too_large"
+        | "typed_io_tool_changed"
+        | "typed_io_tool_classification_changed"
+        | "typed_io_tool_connection_error"
+        | "typed_io_tool_destination_blocked"
+        | "typed_io_tool_invalid_arguments"
+        | "typed_io_tool_invalid_config"
+        | "typed_io_tool_invalid_schema"
+        | "typed_io_tool_malformed_answer"
+        | "typed_io_tool_not_allowed"
+        | "typed_io_tool_reported_error"
+        | "typed_io_tool_timeout"
+        | "typed_io_transcript_too_large"
+        | "typed_io_transcription_config_invalid"
+        | "typed_io_transcription_empty"
+        | "typed_io_transcription_failed"
+        | "typed_io_transcription_model_missing"
+        | "typed_io_transcription_model_unavailable"
+        | "typed_io_transcription_not_enabled"
+        | "typed_io_unsupported_type"
+        | "typed_io_validation_failed"
+        | "typed_io_variable_resolution_failed";
+      /**
+       * Consumer Action
+       * @description What an API client should do about this error, from the Flow error taxonomy, in English. Null for a code the taxonomy does not list.
+       * @example Configure the shared tool runtime before publishing or starting a run.
+       */
+      consumer_action: string | null;
+      /** @description Small, API-safe context for diagnostics and UI guidance. */
+      details?: components["schemas"]["FlowRunErrorDetails"] | null;
+      /**
+       * Message
+       * @description Human-readable technical detail for logs, support and fallback UI. This text is not a stable client contract.
+       */
+      message: string;
+      /**
+       * Retryable
+       * @description Whether a consumer may submit a new logical run without repeating provider work that was accepted or an external effect. True only for a code the platform lists as such, and false for such a code when `details.tool_call_possible` is true, because a new run calls the tool again. This does not automatically start work.
+       */
+      readonly retryable: boolean;
+      /**
+       * Schema Version
+       * @description Schema version for the structured run error payload.
+       * @default 1
+       * @constant
+       */
+      schema_version?: 1;
+      /** @description Flow runtime lifecycle source that terminalized the run. */
+      source?: components["schemas"]["FlowRunLifecycleSource"] | null;
+      /**
+       * Step Id
+       * @description Step id when the terminal error is tied to one step.
+       */
+      step_id?: string | null;
+      /**
+       * Step Order
+       * @description Step order when the terminal error is tied to one step.
+       */
+      step_order?: number | null;
+      /**
+       * User Action
+       * @description What the person who started or reviews the run can do, from the Flow error taxonomy (the errors reference's guidance), in English. A localized client shows its own catalog's sentence for `code` and falls back to this. Null for a code the taxonomy does not list.
+       * @example Ask an administrator to configure document rendering.
+       */
+      user_action: string | null;
     };
     /**
      * FlowRunEvidenceAccessPublic

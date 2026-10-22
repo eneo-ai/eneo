@@ -30,6 +30,9 @@ from eneo.flows.api import (
 )
 from eneo.flows.domain.flow import FlowStepResult
 from eneo.flows.enums import FlowRunReviewCheckpointState, FlowStepResultStatus
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_error_taxonomy import FLOW_ERROR_TAXONOMY
+from eneo.flows.flow_run_error import FlowRunError, dump_flow_run_error
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.flows.flow_run_step_result_file import FlowStepResultFileReference
 from eneo.flows.principal import FlowPrincipal
@@ -3581,6 +3584,47 @@ async def test_a_refused_run_label_names_the_rule_it_broke(
         )
         assert response.status_code == 201, response.text
         assert response.json()["run_label"] is None
+
+
+async def test_a_failed_runs_detail_carries_the_taxonomys_guidance_for_its_error(
+    client, admin_token, db_container, monkeypatch
+):
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        AsyncMock(),
+    )
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    created = await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/",
+        json={"input_payload_json": {"text": "hello"}},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    run_id = created.json()["id"]
+    error = FlowRunError(
+        code=FlowApiErrorCode.STEP_TIMEOUT,
+        message="Step 1 exceeded its execution budget during provider_request.",
+        step_order=1,
+    )
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == UUID(run_id))
+            .values(status="failed", error_json=dump_flow_run_error(error))
+        )
+
+    detail = await client.get(
+        f"/api/v1/flows/{flow['id']}/runs/{run_id}/", headers=headers
+    )
+
+    assert detail.status_code == 200, detail.text
+    entry = FLOW_ERROR_TAXONOMY[FlowApiErrorCode.STEP_TIMEOUT]
+    assert detail.json()["error"]["code"] == "flow_step_timeout"
+    assert detail.json()["error"]["user_action"] == entry.user_action
+    assert detail.json()["error"]["consumer_action"] == entry.consumer_action
 
 
 @pytest.mark.integration

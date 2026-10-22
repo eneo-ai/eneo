@@ -11,6 +11,7 @@ from eneo.authentication.auth_models import FlowServicePrincipalActorPublic
 from eneo.flows.api.flow_models import (
     FlowPublic,
     FlowRunDetailPublic,
+    FlowRunErrorPublic,
     FlowRunEvidenceAccessPublic,
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
@@ -219,6 +220,11 @@ class FlowAssembler:
                     FlowRunWebhookDeliveryPublic.model_validate(delivery)
                     for delivery in webhook_deliveries
                 ],
+                "error": (
+                    FlowRunErrorPublic.with_guidance(run.error)
+                    if run.error is not None
+                    else None
+                ),
                 "evidence_access": FlowRunEvidenceAccessPublic(
                     can_read_evidence=evidence_access.view_refusal is None,
                     can_export_redacted=evidence_access.redacted_export_refusal is None,
