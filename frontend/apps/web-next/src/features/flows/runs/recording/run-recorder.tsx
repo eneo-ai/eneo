@@ -29,6 +29,7 @@ import {
   type RunContract,
   type RuntimeInput
 } from "../runs-api";
+import { AutoRestart, type RestartOutcome } from "./auto-restart";
 import { LiveTranscript, type LiveSnapshot } from "./live-transcript";
 import {
   contractSnapshot,
@@ -41,17 +42,21 @@ import type { StoredPart } from "./recording-store";
 import { resumeRefusalText, ResumePrompt } from "./resume-prompt";
 import {
   AudioRecorder,
+  MAX_PARTS_AWAITING_UPLOAD,
   recordingSupport,
   browserEnvironment,
+  type MicrophoneHint,
   type RecordedPart,
   type RecorderLimits,
   type RecorderProblem,
   type RecordingEnd
 } from "./recorder";
+import { LastPartPreview, LevelMeter, micHintText } from "./recorder-health";
 import {
   clockText,
   lengthParts,
   recordingLimits,
+  recordingTimeLeftMs,
   recordsInto,
   selectRecordingOptions
 } from "./recording-format";
@@ -105,11 +110,38 @@ function endedText(ended: Exclude<RecordingEnd, "manual">, t: Translator): strin
       return t("flow_transcript_rec_ended_length");
     case "files":
       return t("flow_transcript_rec_ended_files");
+    case "backlog":
+      return t("flow_transcript_rec_ended_backlog");
     case "device_lost":
       return t("flow_transcript_rec_ended_device_lost");
+    case "stall":
+      return t("flow_transcript_rec_ended_stall");
     case "error":
       return t("flow_transcript_rec_ended_error");
   }
+}
+
+/** The ends a recording may start again from by itself: the microphone was lost. */
+const LOST: ReadonlySet<RecordingEnd> = new Set(["device_lost", "stall", "error"]);
+
+function restartingText(ended: RecordingEnd | null, t: Translator): string {
+  switch (ended) {
+    case "stall":
+      return t("flow_transcript_rec_restarting_stall");
+    case "error":
+      return t("flow_transcript_rec_restarting_error");
+    default:
+      return t("flow_transcript_rec_restarting_device_lost");
+  }
+}
+
+/** The step's recorded parts not uploaded yet, a failed part that will be sent again included. */
+function awaitingUpload(entries: readonly UploadEntry[]): number {
+  return entries.filter(
+    (entry) =>
+      entry.recording &&
+      (entry.state === "uploading" || (entry.state === "failed" && entry.retryable))
+  ).length;
 }
 
 /** Why the live text route refused, from its `context.reason`. */
@@ -118,25 +150,30 @@ function refusalReason(error: unknown): string {
   return typeof reason === "string" ? reason : "unavailable";
 }
 
-/** Free file slots of a step: every file that did not fail takes one. */
+/**
+ * Whether a file stays on the form: one that did not fail, or a recorded
+ * part whose upload will be sent again (it exists nowhere else).
+ */
+function stays(entry: UploadEntry): boolean {
+  return entry.state !== "failed" || Boolean(entry.recording && entry.retryable);
+}
+
+/** Free file slots of a step: every file that stays takes one. */
 function filesLeft(input: RuntimeInput, entries: readonly UploadEntry[]): number {
   if (input.max_files == null) return Infinity;
-  return input.max_files - entries.filter((entry) => entry.state !== "failed").length;
+  return input.max_files - entries.filter(stays).length;
 }
 
 /** The recording the step's last recorded part belongs to, which recording again continues. */
 function latestSession(entries: readonly UploadEntry[]): string | null {
-  return (
-    entries.findLast((entry) => entry.recording && entry.state !== "failed")?.recording
-      ?.sessionId ?? null
-  );
+  return entries.findLast((entry) => entry.recording && stays(entry))?.recording?.sessionId ?? null;
 }
 
 /** The parts of a recording still on the form, in order. */
 function partsOf(sessionId: string | null, entries: readonly UploadEntry[]) {
   if (!sessionId) return [];
   return entries.flatMap((entry) =>
-    entry.recording?.sessionId === sessionId && entry.state !== "failed" ? [entry.recording] : []
+    entry.recording?.sessionId === sessionId && stays(entry) ? [entry.recording] : []
   );
 }
 
@@ -275,6 +312,24 @@ export function RunRecorder({
   );
   const [recorder] = useState(() => new AudioRecorder(options));
   const liveWanted = liveAvailable && liveOn;
+  const translate = useRef(t);
+  useEffect(() => {
+    translate.current = t;
+  });
+  /** The part recorded last, playable before it has uploaded. */
+  const [lastPart, setLastPart] = useState<{ key: string; url: string } | null>(null);
+  const lastPartUrl = useRef<string | null>(null);
+  useEffect(() => {
+    lastPartUrl.current = lastPart?.url ?? null;
+  });
+  /** A start the automatic restart made, which is announced as one. */
+  const automatic = useRef(false);
+  const [restart] = useState(() => new AutoRestart());
+  const restartState = useSyncExternalStore(
+    restart.subscribe,
+    restart.getSnapshot,
+    restart.getSnapshot
+  );
 
   const stepId = input.step_id;
   const snapshotOfContract = () => contractSnapshot(input, publishedFlowVersion);
@@ -295,12 +350,18 @@ export function RunRecorder({
           capturedAt: part.capturedAt,
           contract: snapshotOfContract()
         });
+        const label = partLabel(part.index, part.durationMs);
         const key = onPart(
           part.file,
           { sessionId: part.sessionId, index: part.index, durationMs: part.durationMs },
-          partLabel(part.index, part.durationMs)
+          label
         );
         liveEntry.current = key ?? null;
+        // The part can be heard here at once, before its upload is done.
+        setLastPart((previous) => {
+          if (previous) URL.revokeObjectURL(previous.url);
+          return key ? { key, url: URL.createObjectURL(part.file) } : null;
+        });
       },
       journal: keeper.journalFor(stepId, snapshotOfContract),
       onAudioGraph: (graph, signal) => {
@@ -329,26 +390,36 @@ export function RunRecorder({
 
   useEffect(
     () => () => {
+      restart.cancel();
       recorder.dispose();
       live.discard();
+      if (lastPartUrl.current) URL.revokeObjectURL(lastPartUrl.current);
     },
-    [recorder, live]
+    [recorder, live, restart]
   );
 
-  const translate = useRef(t);
-  useEffect(() => {
-    translate.current = t;
-  });
-
-  // Status changes are announced politely; the clock and the words are not.
+  // Status changes are announced politely; the clock, the meter and the words are not.
   useEffect(() => {
     let phase = recorder.getSnapshot().phase;
     let status = live.getSnapshot().status;
+    let hint: MicrophoneHint | null = null;
+    let quietTold = false;
     const offRecorder = recorder.subscribe(() => {
       const next = recorder.getSnapshot();
+      if (next.micHint !== hint) {
+        hint = next.micHint;
+        // Each hint once as it appears; "quiet" once per recording, as meetings have pauses.
+        if (hint && (hint !== "silent" || !quietTold)) {
+          quietTold ||= hint === "silent";
+          announce(micHintText(hint, translate.current));
+        }
+      }
       if (next.phase === phase) return;
-      const message =
-        next.phase === "recording"
+      const restarted = automatic.current && next.phase === "recording";
+      if (next.phase === "recording" && phase !== "paused") quietTold = false;
+      const message = restarted
+        ? null
+        : next.phase === "recording"
           ? phase === "paused"
             ? "flow_transcript_rec_resumed_announce"
             : "flow_transcript_rec_started_announce"
@@ -357,8 +428,20 @@ export function RunRecorder({
             : next.phase === "stopping"
               ? "flow_transcript_rec_stopped_announce"
               : null;
+      const lost =
+        phase === "stopping" && next.phase === "idle" && next.ended && LOST.has(next.ended);
       phase = next.phase;
+      if (next.phase !== "starting") automatic.current = false;
       if (message) announce(translate.current(message));
+      if (lost) {
+        announce(translate.current("flow_transcript_rec_restarting_announce"));
+        restart.lost();
+      }
+    });
+    const offRestart = restart.subscribe(() => {
+      if (restart.getSnapshot().phase === "failed") {
+        announce(translate.current("flow_transcript_rec_restart_failed_title"));
+      }
     });
     const offLive = live.subscribe(() => {
       const next = live.getSnapshot().status;
@@ -377,8 +460,9 @@ export function RunRecorder({
     return () => {
       offRecorder();
       offLive();
+      offRestart();
     };
-  }, [recorder, live, announce]);
+  }, [recorder, live, restart, announce]);
 
   useImperativeHandle(
     handleRef,
@@ -485,34 +569,69 @@ export function RunRecorder({
 
   const laterId = useId();
   const [filesFull, setFilesFull] = useState(false);
+  const [backlogFull, setBacklogFull] = useState(false);
   const limits = recordingLimits(input, options.audioBitsPerSecond);
 
-  function start() {
-    if (snapshot.phase !== "idle") return;
-    const left = filesLeft(input, entries);
-    if (left < 1) {
+  /**
+   * Starts recording, continuing the recording whose parts are on the form;
+   * null when the step refuses another part now (no file slot, parts
+   * waiting for their upload, or, for an automatic start, no time left).
+   */
+  function start({ automatic: byItself = false } = {}): Promise<void> | null {
+    if (recorder.getSnapshot().phase !== "idle") return null;
+    if (!byItself) restart.cancel();
+    const now = latestEntries.current;
+    if (filesLeft(input, now) < 1) {
       setFilesFull(true);
-      return;
+      return null;
     }
     setFilesFull(false);
-    const current = session ?? latestSession(entries);
-    const before = partsOf(current, entries);
+    if (awaitingUpload(now) >= MAX_PARTS_AWAITING_UPLOAD) {
+      setBacklogFull(true);
+      return null;
+    }
+    setBacklogFull(false);
+    const current = session ?? latestSession(now);
+    const before = partsOf(current, now);
     // Recording again while the last recording's parts are on the form goes on with it.
     const sessionId = before.length > 0 && current ? current : crypto.randomUUID();
-    setSession(sessionId);
     const firstIndex = before.reduce((next, part) => Math.max(next, part.index + 1), 0);
     const recordedBeforeMs = before.reduce((sum, part) => sum + part.durationMs, 0);
-    void recorder.start({
+    if (
+      byItself &&
+      recordingTimeLeftMs(limits.maxRecordingMs, before.length + 1, recordedBeforeMs) <= 0
+    ) {
+      return null;
+    }
+    setSession(sessionId);
+    automatic.current = byItself;
+    return recorder.start({
       sessionId,
       firstIndex,
       limits: (): RecorderLimits => ({
         ...limits,
         recordedBeforeMs,
         partsBefore: before.length,
-        filesLeft: filesLeft(input, latestEntries.current)
+        filesLeft: filesLeft(input, latestEntries.current),
+        awaitingUpload: awaitingUpload(latestEntries.current)
       })
     });
   }
+
+  useEffect(() => {
+    restart.setHandlers({
+      attempt: async (): Promise<RestartOutcome> => {
+        const started = start({ automatic: true });
+        if (!started) return "refused";
+        await started;
+        const { phase, problem } = recorder.getSnapshot();
+        if (phase === "recording" || phase === "paused") return "started";
+        // A microphone the person or the browser refused stays refused.
+        return problem === "permission_denied" ? "refused" : "failed";
+      },
+      onStarted: () => announce(t("flow_transcript_rec_restarted_announce"))
+    });
+  });
 
   if (!recordsInto(input, options.mimeType)) {
     return (
@@ -624,7 +743,29 @@ export function RunRecorder({
           collapsible={false}
         />
       ) : null}
-      {ended && ended !== "manual" && phase === "idle" ? (
+      {backlogFull ? (
+        <QuietBanner
+          status="warning"
+          title={t("flow_transcript_rec_problem_title")}
+          description={t("flow_transcript_rec_backlog_full")}
+          collapsible={false}
+        />
+      ) : null}
+      {restartState.phase === "waiting" ? (
+        <QuietBanner
+          status="warning"
+          title={t("flow_transcript_rec_restarting_title")}
+          description={restartingText(ended, t)}
+          collapsible={false}
+        />
+      ) : restartState.phase === "failed" ? (
+        <QuietBanner
+          status="error"
+          title={t("flow_transcript_rec_restart_failed_title")}
+          description={t("flow_transcript_rec_restart_failed")}
+          collapsible={false}
+        />
+      ) : ended && ended !== "manual" && phase === "idle" ? (
         <QuietBanner
           status="warning"
           title={t("flow_transcript_rec_ended_title")}
@@ -652,7 +793,7 @@ export function RunRecorder({
             variant="primary"
             isLoading={phase === "starting"}
             isInterruptible
-            onClick={start}
+            onClick={() => void start()}
           />
         ) : null}
         {phase === "recording" ? (
@@ -731,6 +872,11 @@ export function RunRecorder({
             {laterBlocked ?? t("flow_transcript_save_later_hint")}
           </Text>
         </div>
+      ) : null}
+
+      {running ? <LevelMeter recorder={recorder} hint={snapshot.micHint} /> : null}
+      {phase === "idle" && lastPart && entries.some((entry) => entry.key === lastPart.key) ? (
+        <LastPartPreview url={lastPart.url} />
       ) : null}
 
       <LiveText snapshot={text} />

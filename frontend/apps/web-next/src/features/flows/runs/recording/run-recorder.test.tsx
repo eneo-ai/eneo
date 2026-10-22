@@ -42,6 +42,7 @@ const LIVE = "POST /api/v1/flows/{id}/steps/{step_id}/live-transcription-session
 class FakeUpload {
   static sent: File[] = [];
   static failNext = false;
+  static failAll = false;
   status = 0;
   responseText = "";
   upload = { onprogress: null as ((event: ProgressEvent) => void) | null };
@@ -57,7 +58,7 @@ class FakeUpload {
   send(body: FormData) {
     const file = body.get("upload_file") as File;
     queueMicrotask(() => {
-      if (FakeUpload.failNext) {
+      if (FakeUpload.failNext || FakeUpload.failAll) {
         FakeUpload.failNext = false;
         this.onerror?.();
         return;
@@ -92,6 +93,9 @@ class FakeMediaRecorder {
   resume() {
     this.state = "recording";
   }
+  requestData() {
+    this.ondataavailable?.({ data: new Blob(["audio"], { type: "audio/webm" }) });
+  }
   stop() {
     this.ondataavailable?.({ data: new Blob(["audio"], { type: "audio/webm" }) });
     this.state = "inactive";
@@ -106,6 +110,9 @@ class FakeAudioContext extends EventTarget {
   createMediaStreamSource() {
     return { connect: vi.fn(), disconnect: vi.fn() };
   }
+  createAnalyser() {
+    return { fftSize: 4, getFloatTimeDomainData: (buffer: Float32Array) => buffer.fill(0.05) };
+  }
   close() {
     return Promise.resolve();
   }
@@ -119,6 +126,7 @@ function grantMicrophone() {
     getTracks: () => [track],
     getAudioTracks: () => [track]
   } as unknown as MediaStream);
+  return track;
 }
 
 function installBrowser({ recorder = true, live = false } = {}) {
@@ -234,6 +242,7 @@ beforeEach(() => {
   api.routes = {};
   FakeUpload.sent = [];
   FakeUpload.failNext = false;
+  FakeUpload.failAll = false;
   FakeSocket.instances = [];
   FakeNode.instances = [];
   microphone.mockReset();
@@ -411,6 +420,82 @@ describe("RunRecorder in the start dialog", () => {
     expect(startBody()?.step_inputs).toEqual({
       "step-1": { file_ids: ["file-1"], live_transcript_id: "tr-1" }
     });
+  });
+});
+
+describe("The recording's health", () => {
+  it("shows the microphone's level while recording, and the part recorded last after", async () => {
+    installBrowser({ live: true });
+    grantMicrophone();
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
+    expect(await within(dialog).findByText(messages.flow_transcript_rec_mic_label)).toBeTruthy();
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+    await within(dialog).findByText(/^Inspelning, del 1/);
+    expect(within(dialog).queryByText(messages.flow_transcript_rec_mic_label)).toBeNull();
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_last_part));
+    await waitFor(() => expect(play).toHaveBeenCalled());
+    expect(
+      await within(dialog).findByRole("button", {
+        name: messages.flow_transcript_rec_last_part_stop
+      })
+    ).toBeTruthy();
+    await expectNoAxeViolations(document.body);
+    play.mockRestore();
+  });
+
+  it("starts again by itself after the microphone went away, in the same recording", async () => {
+    installBrowser();
+    const track = grantMicrophone();
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+
+    track.dispatchEvent(new Event("ended"));
+    expect(
+      await within(dialog).findByText(messages.flow_transcript_rec_restarting_device_lost)
+    ).toBeTruthy();
+    await within(dialog).findByText(/^Inspelning, del 1/);
+    // A second later the microphone is asked again, without a click.
+    await waitFor(() => expect(microphone).toHaveBeenCalledTimes(2), { timeout: 3_000 });
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+    expect(within(dialog).queryByText(messages.flow_transcript_rec_restarting_title)).toBeNull();
+
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+    await within(dialog).findByText(/^Inspelning, del 2/);
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(2));
+    const [first, second] = FakeUpload.sent.map((file) => file.name.split("-seg")[0]);
+    expect(second).toBe(first);
+    expect(FakeUpload.sent[1]!.name).toMatch(/-seg01-/);
+  });
+
+  it("does not record more while earlier parts wait for their upload", async () => {
+    installBrowser();
+    grantMicrophone();
+    FakeUpload.failAll = true;
+    const { dialog } = await openDialog(audioContract());
+    for (let part = 1; part <= 3; part += 1) {
+      fireEvent.click(
+        button(
+          dialog,
+          part === 1 ? messages.flow_transcript_rec_start : messages.flow_transcript_rec_continue
+        )
+      );
+      await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+      fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+      await within(dialog).findByText(new RegExp(`^Inspelning, del ${part}`));
+      await waitFor(() =>
+        expect(
+          within(dialog).getAllByText(messages.flow_transcript_upload_offline_hint)
+        ).toHaveLength(part)
+      );
+    }
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    expect(await within(dialog).findByText(messages.flow_transcript_rec_backlog_full)).toBeTruthy();
+    expect(microphone).toHaveBeenCalledTimes(3);
   });
 });
 
