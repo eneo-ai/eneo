@@ -5,7 +5,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useId, useRef, useState } from "react";
@@ -22,7 +22,9 @@ import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/s
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
 import { useSpace } from "@/features/spaces/use-space";
 import { AddStepDialog } from "./editor/add-step-dialog";
+import { insertionKindsQueryOptions } from "./editor/editor-api";
 import { FlowStepEditor } from "./editor/flow-step-editor";
+import type { StepKindOption } from "./editor/step-kinds";
 import {
   flowKeys,
   flowQueryOptions,
@@ -45,7 +47,7 @@ import { FlowSettings } from "./flow-settings";
 import { FlowStatusBadge } from "./flow-status";
 import { FlowStepList, stepControlId } from "./flow-step-list";
 import { orderWithMove, orderWithout, stepsInOrder } from "./flow-steps";
-import { speakerStepOffer, speakerStepUpdate } from "./speaker-step-offer";
+import { speakerStepCandidate, speakerStepOption, speakerStepUpdate } from "./speaker-step-offer";
 import { runKeys } from "./runs/runs-api";
 import { FlowRunsList, runHref } from "./runs/runs-list";
 import { StartRunDialog } from "./runs/start-run-dialog";
@@ -254,9 +256,9 @@ export function FlowPage({ flowId }: { flowId: string }) {
   }
 
   /** Adds the step that names the speakers after `after`; focus goes to the new step. */
-  function addSpeakerStep(after: FlowStep) {
+  function addSpeakerStep(after: FlowStep, option: StepKindOption) {
     if (edit.isPending) return;
-    const update = speakerStepUpdate(flow, after, {
+    const update = speakerStepUpdate(flow, after, option, {
       step: t("flows_speaker_step_name"),
       fieldLabel: t("flows_speaker_participants_label"),
       fieldName: t("flows_speaker_participants_name")
@@ -305,9 +307,19 @@ export function FlowPage({ flowId }: { flowId: string }) {
   }
 
   const openedStep = openStepId ? steps.find((step) => step.id === openStepId) : undefined;
-  const speakerOfferStep = canEdit
-    ? speakerStepOffer(flow, space.transcription_services ?? [])
+  const speakerCandidate = canEdit
+    ? speakerStepCandidate(flow, space.transcription_services ?? [])
     : null;
+  // The core decides whether the speaker step may follow the candidate.
+  const speakerKinds = useQuery({
+    ...insertionKindsQueryOptions(
+      flow.id,
+      flow.draft_revision,
+      (speakerCandidate?.step_order ?? 0) + 1
+    ),
+    enabled: speakerCandidate !== null
+  });
+  const speakerOption = speakerCandidate ? speakerStepOption(speakerKinds.data) : null;
 
   const actions =
     canManage || canRun ? (
@@ -480,11 +492,11 @@ export function FlowPage({ flowId }: { flowId: string }) {
                   onRemove={removeStep}
                   onAdd={(position) => setAddAt(position)}
                   speakerOffer={
-                    speakerOfferStep?.id
+                    speakerCandidate?.id && speakerOption
                       ? {
-                          stepId: speakerOfferStep.id,
+                          stepId: speakerCandidate.id,
                           pending: edit.isPending,
-                          onAccept: () => addSpeakerStep(speakerOfferStep)
+                          onAccept: () => addSpeakerStep(speakerCandidate, speakerOption)
                         }
                       : null
                   }

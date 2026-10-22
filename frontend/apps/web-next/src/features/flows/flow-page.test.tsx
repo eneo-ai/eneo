@@ -6,6 +6,7 @@ import { expectNoAxeViolations } from "@/test/axe";
 import type { Permission } from "@/lib/auth/permissions";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
+import { makeKindOption, makeKindPlace } from "./editor/testing/fixtures";
 import { makeFlow, makeStep } from "./flow-fixtures";
 import { flowKeys, type FlowPublic } from "./flows-api";
 import { FlowPage } from "./flow-page";
@@ -26,13 +27,15 @@ const state = vi.hoisted(() => ({
   publish: null as unknown,
   runs: null as unknown,
   unpublish: null as unknown,
-  mode: null as unknown
+  mode: null as unknown,
+  kinds: null as unknown
 }));
 
 const api = vi.hoisted(() => ({
   GET: vi.fn(async (path: string) => {
     if (path === "/api/v1/flows/{id}/") return state.flow;
     if (path === "/api/v1/flows/{id}/runs/") return state.runs;
+    if (path === "/api/v1/flows/{id}/step-kinds/") return state.kinds;
     if (path === "/api/v1/assistants/{id}/") {
       return {
         data: { id: "assistant-chat", name: "Medborgarbrev", mcp_servers: [] },
@@ -229,9 +232,27 @@ describe("FlowPage", () => {
         ]
       }
     });
+    // The core allows the speaker step after the transcription, configured to read it.
+    const speakers = makeKindOption("speakers", {
+      configuration: {
+        output_mode: "speaker_mapping",
+        output_type: "json",
+        review_policy: { mode: "edit" },
+        output_config: { speaker_mapping: { participants_field: null } }
+      }
+    });
+    state.kinds = ok({
+      flow_id: "flow-1",
+      draft_revision: 4,
+      insertions: [makeKindPlace(2, [speakers])],
+      steps: []
+    });
     renderPage(flow, undefined, space);
 
-    expect(screen.getByText("Vill du granska transkriptet?")).toBeTruthy();
+    expect(await screen.findByText("Vill du granska transkriptet?")).toBeTruthy();
+    expect(api.GET).toHaveBeenCalledWith("/api/v1/flows/{id}/step-kinds/", {
+      params: { path: { id: "flow-1" }, query: { position: 2 } }
+    });
     fireEvent.click(
       screen.getByRole("button", {
         name: "Lägg till ett steg som granskar transkriptet efter Steg 1: Transkribera"
