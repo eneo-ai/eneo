@@ -168,6 +168,10 @@ describe("flow settings page", { timeout: 20_000 }, () => {
   it("shows a refused default model at its field and moves focus there", async () => {
     await show();
     fireEvent.click(await screen.findByRole("button", { name: /^Modell för flödesassistenten: / }));
+    // The open list moves focus to its search a frame later; choose after that,
+    // as a person does, so only the refusal decides where focus goes next.
+    const search = await screen.findByRole("combobox", { name: "Sökalternativ" });
+    await waitFor(() => expect(document.activeElement).toBe(search));
     fireEvent.click(await screen.findByRole("option", { name: /Stark modell/ }));
     api.PATCH.mockImplementation(() =>
       refused(400, {
