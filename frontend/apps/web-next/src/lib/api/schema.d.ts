@@ -20571,7 +20571,7 @@ export interface components {
       autocut_cutoff?: number | null;
       /**
        * Rerank
-       * @description Rerank the candidates with the installation's default rerank model. Reranked results carry the reranker's scores and autocut_cutoff is ignored; without a usable rerank model the search runs as without this flag.
+       * @description Rerank the candidates with the installation's default rerank model. Reranked results carry the reranker's scores, chunks beyond the model's max_candidates follow in vector order, and autocut_cutoff is ignored; without a usable rerank model the search runs as without this flag.
        * @default false
        */
       rerank?: boolean;
@@ -23086,7 +23086,7 @@ export interface components {
       candidate_factor?: number;
       /**
        * Max Candidates
-       * @description Most candidates scored and returned per search; higher adds latency and cost.
+       * @description Most candidates sorted per search; requested chunks beyond it follow unsorted. Higher adds latency and cost.
        * @default 100
        */
       max_candidates?: number;
@@ -23132,7 +23132,7 @@ export interface components {
       candidate_factor?: number | null;
       /**
        * Max Candidates
-       * @description Most candidates scored and returned per search; higher adds latency and cost.
+       * @description Most candidates sorted per search; requested chunks beyond it follow unsorted. Higher adds latency and cost.
        */
       max_candidates?: number | null;
     };

@@ -34,7 +34,8 @@ _CANDIDATE_FACTOR_DESCRIPTION = (
     "Candidates scored per requested chunk, up to max_candidates."
 )
 _MAX_CANDIDATES_DESCRIPTION = (
-    "Most candidates scored and returned per search; higher adds latency and cost."
+    "Most candidates sorted per search; requested chunks beyond it follow"
+    " unsorted. Higher adds latency and cost."
 )
 
 
