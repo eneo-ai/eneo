@@ -7,6 +7,7 @@ import {
   progressSignature,
   runStepProgress,
   runStepViews,
+  stepNeverRan,
   tokenTotal
 } from "./run-progress";
 
@@ -96,5 +97,29 @@ describe("nextStepOrder", () => {
     expect(nextStepOrder(steps("awaiting_review", "pending"))).toBeNull();
     expect(nextStepOrder(steps("failed", "pending"))).toBeNull();
     expect(nextStepOrder(steps("completed", "completed"))).toBeNull();
+  });
+});
+
+describe("stepNeverRan", () => {
+  const unstarted = makeRunStep(3, { status: "failed", started_at: null, finished_at: null });
+
+  it("is a step of an ended run that did not complete and never started", () => {
+    expect(stepNeverRan({ status: "failed", result: unstarted }, "failed")).toBe(true);
+    expect(stepNeverRan({ status: null, result: null }, "cancelled")).toBe(true);
+    expect(stepNeverRan({ status: "pending", result: null }, "completed")).toBe(true);
+  });
+
+  it("is not a step that started, completed, or belongs to a run still going", () => {
+    expect(
+      stepNeverRan({ status: "failed", result: makeRunStep(2, { status: "failed" }) }, "failed")
+    ).toBe(false);
+    expect(
+      stepNeverRan(
+        { status: "completed", result: { ...unstarted, status: "completed" } },
+        "completed"
+      )
+    ).toBe(false);
+    expect(stepNeverRan({ status: "pending", result: null }, "running")).toBe(false);
+    expect(stepNeverRan({ status: "pending", result: null }, null)).toBe(false);
   });
 });

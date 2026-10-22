@@ -55,9 +55,28 @@ function AttemptRow({ attempt }: { attempt: Attempt }) {
 }
 
 /**
- * Every attempt each step made in this run, in order: how it ended, how
- * long it took, the model that answered, the tokens it used and why the
- * model stopped. A step tried more than once shows each try.
+ * The attempts one step made, in order: how each ended, how long it took,
+ * the model that answered, the tokens it used and why the model stopped.
+ */
+export function StepAttemptList({
+  attempts,
+  label
+}: {
+  attempts: readonly Attempt[];
+  label: string;
+}) {
+  return (
+    <ol className="m-0 flex flex-col p-0" aria-label={label}>
+      {attempts.map((attempt) => (
+        <AttemptRow key={attempt.id} attempt={attempt} />
+      ))}
+    </ol>
+  );
+}
+
+/**
+ * Every attempt each step made in this run, in order. A step tried more
+ * than once shows each try.
  */
 export function RunTraceAttempts({
   attempts,
@@ -76,11 +95,7 @@ export function RunTraceAttempts({
       {grouped.map(([order, items]) => (
         <div key={order} className="flex flex-col gap-1">
           <h4 className="text-ax-text text-sm font-semibold">{stepName(order)}</h4>
-          <ol className="m-0 flex flex-col p-0" aria-label={stepName(order)}>
-            {items.map((attempt) => (
-              <AttemptRow key={attempt.id} attempt={attempt} />
-            ))}
-          </ol>
+          <StepAttemptList attempts={items} label={stepName(order)} />
         </div>
       ))}
     </div>

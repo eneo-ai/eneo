@@ -23,6 +23,7 @@ import type { TranscriptTarget } from "./transcript";
 import type { TranscriptDraftHandle } from "./transcript-review-draft";
 import { isStaleRefusal, refusalText } from "./run-messages";
 import {
+  changedFields,
   draftChanged,
   editedValueOf,
   REJECT_REASON_MAX_LENGTH,
@@ -37,7 +38,8 @@ import {
 } from "./review-draft";
 import { ReviewApproveOnly } from "./review-approve-only";
 import { ReviewHistory } from "./review-history";
-import { StructuredReviewEditor } from "./review-structured-editor";
+import { ChangedMarker, StructuredReviewEditor } from "./review-structured-editor";
+import { isReviewObject, isReviewValue } from "./review-structured";
 import {
   approveAndContinue,
   editReview,
@@ -65,57 +67,95 @@ function fieldAnchor(baseId: string, name: string) {
   return `${baseId}-field-${name.replace(/[^A-Za-z0-9_-]/g, "_")}`;
 }
 
+/**
+ * A flat JSON output field by field. A field that differs from `original`
+ * (the step's own output, before any review changed it) is marked, with its
+ * previous value behind a disclosure, and "Visa original" shows that output
+ * read-only, as the contract form does. A problem at a field brings the
+ * fields back.
+ */
 function FieldsEditor({
   baseId,
   fields,
+  original,
   problem,
   onChange
 }: {
   baseId: string;
   fields: DraftField[];
+  original: unknown;
   problem: Problem | null;
   onChange: (fields: DraftField[]) => void;
 }) {
   const t = useTranslations();
+  const [showOriginal, setShowOriginal] = useState(false);
+  const before = isReviewValue(original) && isReviewObject(original) ? original : null;
+  const changed = before ? changedFields(fields, before) : null;
+  const viewingOriginal = before !== null && showOriginal && !problem?.field;
   const set = (name: string, value: string) =>
     onChange(fields.map((field) => (field.name === name ? { ...field, value } : field)));
   return (
     <div className="flex flex-col gap-3">
-      {fields.map((field) => {
-        const message = problem?.field === field.name ? problem.message : null;
-        const status = message ? ({ type: "error", message } as const) : undefined;
-        return (
-          <div key={field.name} id={fieldAnchor(baseId, field.name)}>
-            {field.kind === "boolean" ? (
-              <CheckboxInput
-                label={field.name}
-                value={field.value === "true"}
-                onChange={(on) => set(field.name, on ? "true" : "false")}
-              />
-            ) : field.kind === "string" && field.value.length > 80 ? (
-              <TextArea
-                label={field.name}
-                value={field.value}
-                onChange={(value) => set(field.name, value)}
-                rows={4}
-                status={status}
-                width="100%"
-              />
-            ) : (
-              <TextInput
-                label={field.name}
-                value={field.value}
-                onChange={(value) => set(field.name, value)}
-                description={
-                  field.kind === "number" ? t("flow_runs_review_number_hint") : undefined
-                }
-                status={status}
-                width="100%"
-              />
-            )}
-          </div>
-        );
-      })}
+      {before ? (
+        <div>
+          <Button
+            label={
+              viewingOriginal
+                ? t("flow_run_review_back_to_edit")
+                : t("flow_run_review_show_original")
+            }
+            size="sm"
+            onClick={() => setShowOriginal(!viewingOriginal)}
+          />
+        </div>
+      ) : null}
+      {viewingOriginal ? (
+        <>
+          <p className="text-ax-text-secondary text-sm">{t("flow_run_review_original_help")}</p>
+          <JsonValue value={before} />
+        </>
+      ) : (
+        fields.map((field) => {
+          const message = problem?.field === field.name ? problem.message : null;
+          const status = message ? ({ type: "error", message } as const) : undefined;
+          return (
+            <div
+              key={field.name}
+              id={fieldAnchor(baseId, field.name)}
+              className="flex flex-col gap-1"
+            >
+              {field.kind === "boolean" ? (
+                <CheckboxInput
+                  label={field.name}
+                  value={field.value === "true"}
+                  onChange={(on) => set(field.name, on ? "true" : "false")}
+                />
+              ) : field.kind === "string" && field.value.length > 80 ? (
+                <TextArea
+                  label={field.name}
+                  value={field.value}
+                  onChange={(value) => set(field.name, value)}
+                  rows={4}
+                  status={status}
+                  width="100%"
+                />
+              ) : (
+                <TextInput
+                  label={field.name}
+                  value={field.value}
+                  onChange={(value) => set(field.name, value)}
+                  description={
+                    field.kind === "number" ? t("flow_runs_review_number_hint") : undefined
+                  }
+                  status={status}
+                  width="100%"
+                />
+              )}
+              {changed?.has(field.name) ? <ChangedMarker original={before?.[field.name]} /> : null}
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }
@@ -426,6 +466,7 @@ export function ReviewPanel({
         <FieldsEditor
           baseId={baseId}
           fields={draft.fields}
+          original={checkpoint.original_payload_json?.structured}
           problem={problem}
           onChange={(fields) => setDraft({ kind: "fields", fields })}
         />

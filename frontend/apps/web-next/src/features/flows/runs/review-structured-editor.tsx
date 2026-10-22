@@ -51,7 +51,7 @@ type FieldProps = {
 const NO_CHANGES: ReadonlySet<string> = new Set();
 
 /** That a field differs from the original, and what it was, behind a disclosure. */
-function ChangedMarker({ original }: { original: ReviewValue | undefined }) {
+export function ChangedMarker({ original }: { original: ReviewValue | undefined }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   return (

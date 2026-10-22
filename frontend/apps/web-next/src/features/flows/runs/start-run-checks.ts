@@ -1,8 +1,16 @@
-import type { RunCreateRequest, RuntimeInput } from "./runs-api";
+import {
+  isMultiValue,
+  orderedFields,
+  takesFreeText,
+  type FieldValue,
+  type FormValues
+} from "./run-contract";
+import type { RunContract, RunCreateRequest, RuntimeInput } from "./runs-api";
 
 /**
- * Pure rules for the start dialog's extras: the run's own name, and the
- * audio check against the length one file of an input can hold.
+ * Pure rules for the start dialog's extras: the run's own name, the audio
+ * check against the length one file of an input can hold, and the form as a
+ * previous run filled it.
  */
 
 /** The most characters a run's name may have, as the core counts them (code points). */
@@ -56,4 +64,52 @@ export async function screenAudioFiles(
     }
   });
   return { accepted, refused };
+}
+
+/** A value a previous run sent, as the form field holds it now. */
+function reusedValue(multi: boolean, value: unknown): FieldValue {
+  const scalar = (item: unknown) =>
+    typeof item === "string" || typeof item === "number" || typeof item === "boolean";
+  if (multi) {
+    if (Array.isArray(value)) return value.filter(scalar).map(String);
+    return typeof value === "string"
+      ? value
+          .split(",")
+          .map((item) => item.trim())
+          .filter((item) => item.length > 0)
+      : [];
+  }
+  return scalar(value) ? String(value) : "";
+}
+
+/**
+ * The form as a previous run filled it, from that run's accepted input
+ * (`input_payload_json`): every field the form has now gets the value the run
+ * sent for it (a list for a multi-value field) or is left empty, and a
+ * free-text form gets the run's text (`freeText` is null when the run sent
+ * none, so the form keeps what it has). Files are not reused; they are picked
+ * again.
+ */
+export function reusedInput(
+  contract: Pick<RunContract, "form_fields" | "steps_requiring_input">,
+  payload: Record<string, unknown> | null | undefined
+): { values: FormValues; freeText: string | null } {
+  const previous = payload ?? {};
+  const values = Object.fromEntries(
+    orderedFields(contract).map(
+      (field) => [field.name, reusedValue(isMultiValue(field), previous[field.name])] as const
+    )
+  );
+  const text = previous.text;
+  return {
+    values,
+    freeText: takesFreeText(contract) && typeof text === "string" ? text : null
+  };
+}
+
+/** Whether the form has anything a previous run's input could fill: fields, or a free text. */
+export function takesReusableInput(
+  contract: Pick<RunContract, "form_fields" | "steps_requiring_input">
+): boolean {
+  return (contract.form_fields ?? []).length > 0 || takesFreeText(contract);
 }

@@ -3,6 +3,7 @@
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
+import { CopyButton } from "./run-copy";
 import { JsonValue } from "./run-json";
 import type { RunStep } from "./runs-api";
 
@@ -46,7 +47,10 @@ export function StepPromptDetails({
         <div className="flex flex-col gap-3 pt-2">
           {prompt ? (
             <div className="flex flex-col gap-1">
-              <p className="text-ax-text text-sm font-medium">{t("flow_run_extras_prompt")}</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-ax-text text-sm font-medium">{t("flow_run_extras_prompt")}</p>
+                <CopyButton label={t("flow_run_more_copy_prompt")} value={prompt} />
+              </div>
               <pre className="bg-ax-sunken rounded-ax-inner text-ax-text max-h-96 overflow-auto p-2 text-xs break-words whitespace-pre-wrap">
                 {prompt}
               </pre>

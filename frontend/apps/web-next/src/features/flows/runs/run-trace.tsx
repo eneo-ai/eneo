@@ -2,6 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useClipboard } from "@astryxdesign/core/hooks";
+import { Token } from "@astryxdesign/core/Token";
 import { useQuery } from "@tanstack/react-query";
 import { Check, Copy, Download } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -82,6 +83,12 @@ function TraceBody({
   const t = useTranslations();
   return (
     <div className="flex flex-col gap-6">
+      {evidence.debug_export.security.redaction_applied ? (
+        <div className="flex flex-col items-start gap-1">
+          <Token size="sm" label={t("flow_run_more_redacted")} />
+          <p className="text-ax-text-secondary m-0 text-xs">{t("flow_run_more_redacted_hint")}</p>
+        </div>
+      ) : null}
       <EvidenceOmissions summary={evidence.debug_export.run.summary} />
       <Part title={t("flow_run_extras_attempts_heading")}>
         <RunTraceAttempts attempts={evidence.step_attempts} stepName={stepName} />
@@ -102,9 +109,10 @@ function TraceBody({
 }
 
 /**
- * The run's evidence for those the core lets read it: every attempt each
- * step made, the calls to AI services page by page, the content-free
- * diagnostic export, and the evidence export as far as the core allows it.
+ * The run's evidence for those the core lets read it: whether credentials
+ * in it are masked, every attempt each step made, the calls to AI services
+ * page by page, the content-free diagnostic export, and the evidence export
+ * as far as the core allows it.
  * `access` is the run detail's `evidence_access`, decided by the run access
  * policy the evidence routes use; until the detail has been read, and for
  * a caller the core would refuse, the section is not offered. The evidence

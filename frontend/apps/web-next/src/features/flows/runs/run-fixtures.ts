@@ -3,6 +3,7 @@ import type {
   RunContract,
   RunDetail,
   RunGraph,
+  RunResultFile,
   RunStep,
   RunSummary,
   RuntimeInput
@@ -115,6 +116,28 @@ export function makeRunStep(order: number, overrides: Partial<RunStep> = {}): Ru
     output_payload_json: { text: `Resultat från steg ${order}` },
     num_tokens_input: 600,
     num_tokens_output: 150,
+    ...overrides
+  };
+}
+
+export function makeResultFile(overrides: Partial<RunResultFile> = {}): RunResultFile {
+  return {
+    file_id: "file-1",
+    name: "beslut.pdf",
+    mimetype: "application/pdf",
+    size: 2048,
+    file_type: "document",
+    availability: "available",
+    checksum: "sha256:abc",
+    ordinal: 1,
+    attempt_no: 1,
+    source: "generated_output",
+    flow_id: "flow-1",
+    flow_run_id: "run-1",
+    tenant_id: "tenant-1",
+    step_id: "step-1",
+    step_order: 1,
+    step_result_id: "result-1",
     ...overrides
   };
 }

@@ -7,6 +7,7 @@ import {
   listSignature,
   pollDelayMs,
   runDurationMs,
+  runElapsedMs,
   runStatusView,
   shouldPoll,
   statusChanges,
@@ -107,6 +108,15 @@ describe("presentation", () => {
   it("measures a finished run from when it started", () => {
     expect(runDurationMs(makeRunSummary())).toBe(65_000);
     expect(runDurationMs(makeRunSummary({ finished_at: null }))).toBeNull();
+  });
+
+  it("measures a run still going up to now, and an ended one not at all", () => {
+    const now = Date.parse("2026-10-21T08:01:00Z");
+    const running = makeRunSummary({ status: "running", finished_at: null });
+    expect(runElapsedMs(running, now)).toBe(58_000);
+    const queued = makeRunSummary({ status: "queued", started_at: null, finished_at: null });
+    expect(runElapsedMs(queued, now)).toBe(60_000);
+    expect(runElapsedMs(makeRunSummary(), now)).toBeNull();
   });
 });
 

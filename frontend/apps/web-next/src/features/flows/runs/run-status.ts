@@ -75,6 +75,13 @@ const UNKNOWN_VIEW: StatusView = {
   isPulsing: false
 };
 
+/** How a step of an ended run that never ran shows (`stepNeverRan`). */
+export const NOT_RUN_STEP_VIEW: StatusView = {
+  tone: "neutral",
+  labelKey: "flow_run_more_step_not_run",
+  isPulsing: false
+};
+
 /** How a run's status shows: its text (which carries the meaning) and the dot's tone. */
 export function runStatusView(status: string): StatusView {
   return RUN_STATUS_VIEWS[status as RunStatus] ?? UNKNOWN_VIEW;
@@ -118,6 +125,21 @@ export function runDurationMs(
   const end = Date.parse(run.finished_at);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
   return end - start;
+}
+
+/**
+ * How long a run that is still going (queued, running or waiting for
+ * review) has gone on at `now`, from its start or, while it has not
+ * started, its creation; null once it has ended. With several going at
+ * once, how long each has waited is what the list's reader is after.
+ */
+export function runElapsedMs(
+  run: Pick<RunSummary, "status" | "created_at" | "started_at" | "finished_at">,
+  now: number
+): number | null {
+  if (run.finished_at || !shouldPoll(run.status)) return null;
+  const start = Date.parse(run.started_at ?? run.created_at);
+  return Number.isFinite(start) && now >= start ? now - start : null;
 }
 
 /**

@@ -155,6 +155,31 @@ describe("ReviewPanel extras", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("marks the flat fields a review changed, and shows the step's own output", async () => {
+    const { container } = renderPanel(
+      makeCheckpoint({
+        output_type: "json",
+        revision: 2,
+        state: "edited",
+        current_payload_json: { structured: { mottagare: "Bo", antal: 2 } },
+        original_payload_json: { structured: { mottagare: "Anna", antal: 2 } }
+      })
+    );
+    expect(screen.getAllByText(messages.flow_run_review_changed)).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_review_previous_value }));
+    expect(screen.getByText("Anna")).toBeTruthy();
+    await expectNoAxeViolations(container);
+
+    fireEvent.change(screen.getByLabelText(/^antal/), { target: { value: "3" } });
+    expect(screen.getAllByText(messages.flow_run_review_changed)).toHaveLength(2);
+
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_review_show_original }));
+    expect(screen.getByText(messages.flow_run_review_original_help)).toBeTruthy();
+    expect(screen.queryByLabelText(/^mottagare/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_review_back_to_edit }));
+    expect((screen.getByLabelText(/^antal/) as HTMLInputElement).value).toBe("3");
+  });
+
   it("edits nested JSON as a form built from the output contract", async () => {
     state.routes[EDIT] = () => ({ body: makeCheckpoint({ revision: 2, state: "edited" }) });
     const contract = {
