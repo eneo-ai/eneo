@@ -40,6 +40,7 @@ import {
   listNeedsPolling,
   listSignature,
   runDurationMs,
+  runElapsedMs,
   runStatusView,
   statusChanges
 } from "./run-status";
@@ -159,7 +160,8 @@ function isSortKey(value: string): value is RunsSort["key"] {
  * it, how long it took and which version ran. The list endpoint searches
  * (name and starter), sorts (start, status, duration), narrows to one status
  * or to the caller's own runs, and counts the runs per status for the status
- * filter. The list keeps itself current while a run in it is queued, running
+ * filter (a run still going shows how long it has gone on so far). The list
+ * keeps itself current while a run in it is queued, running
  * or waiting for review, on the cadence the run API asks for, and stops once
  * all of them have ended. A run that moves on is announced. A queued run
  * whose start is due or gave up can be sent again from its row, and a run
@@ -270,7 +272,12 @@ export function FlowRunsList({
       sortable: true,
       renderCell: (run) => {
         const ms = runDurationMs(run);
-        return ms === null ? "–" : formatSeconds(ms / 1000, t);
+        if (ms !== null) return formatSeconds(ms / 1000, t);
+        // A run still going: how long so far, as of the list's last read.
+        const elapsed = runElapsedMs(run, runs.dataUpdatedAt);
+        return elapsed === null
+          ? "–"
+          : t("flow_run_more_elapsed", { time: formatSeconds(elapsed / 1000, t) });
       }
     },
     {

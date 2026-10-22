@@ -224,6 +224,20 @@ describe("FlowRunsList", () => {
     expect(listCalls()).toHaveLength(2);
   });
 
+  it("says how long a run still going has gone on so far", async () => {
+    answerList([
+      makeRunSummary({
+        status: "running",
+        started_at: new Date(Date.now() - 65_000).toISOString(),
+        finished_at: null
+      })
+    ]);
+    renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" />);
+    const table = await screen.findByRole("table");
+    const so = messages.flow_run_more_elapsed.replace("{time}", "");
+    expect(within(table).getByText(new RegExp(`^1 min [56] s${so}$`))).toBeTruthy();
+  });
+
   it("does not poll a list where every run has ended", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     answerList([makeRunSummary({ status: "completed" })]);

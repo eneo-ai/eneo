@@ -10782,5 +10782,6 @@
   "flow_run_more_attempts_of": "Försök i {step}",
   "flow_run_more_attempts_loading": "Läser stegets försök",
   "flow_run_more_attempts_failed": "Stegets försök kunde inte läsas",
-  "flow_run_more_attempts_none": "Steget har inga registrerade försök."
+  "flow_run_more_attempts_none": "Steget har inga registrerade försök.",
+  "flow_run_more_elapsed": "{time} hittills"
 }

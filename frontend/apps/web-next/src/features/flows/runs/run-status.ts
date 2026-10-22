@@ -128,6 +128,21 @@ export function runDurationMs(
 }
 
 /**
+ * How long a run that is still going (queued, running or waiting for
+ * review) has gone on at `now`, from its start or, while it has not
+ * started, its creation; null once it has ended. With several going at
+ * once, how long each has waited is what the list's reader is after.
+ */
+export function runElapsedMs(
+  run: Pick<RunSummary, "status" | "created_at" | "started_at" | "finished_at">,
+  now: number
+): number | null {
+  if (run.finished_at || !shouldPoll(run.status)) return null;
+  const start = Date.parse(run.started_at ?? run.created_at);
+  return Number.isFinite(start) && now >= start ? now - start : null;
+}
+
+/**
  * The runs whose status moved since the list was last seen, in list order,
  * so their new state can be announced. A run the list did not show before
  * (a new run, a newly loaded page) is not a change.

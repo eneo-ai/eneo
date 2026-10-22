@@ -10782,5 +10782,6 @@
   "flow_run_more_attempts_of": "Attempts in {step}",
   "flow_run_more_attempts_loading": "Reading the step's attempts",
   "flow_run_more_attempts_failed": "The step's attempts could not be read",
-  "flow_run_more_attempts_none": "The step has no recorded attempts."
+  "flow_run_more_attempts_none": "The step has no recorded attempts.",
+  "flow_run_more_elapsed": "{time} so far"
 }
