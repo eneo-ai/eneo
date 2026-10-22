@@ -8,13 +8,16 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Token } from "@astryxdesign/core/Token";
 import { ArrowDown, ArrowUp, Ellipsis, Plus, Workflow } from "lucide-react";
+import { useQueries } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
+import { flowAssistantQueryOptions } from "./editor/editor-api";
+import { stepUsesModel } from "./editor/step-rules";
 import type { FlowStep } from "./flows-api";
 import { inputTypeLabel, producesLabel, readLabel, stepLabel } from "./flow-labels";
-import { stepName, stepReaders, stepReads } from "./flow-steps";
+import { stepName, stepReaders, stepReads, type StepPrompts } from "./flow-steps";
 
 /** The id of a step's control, so focus can be put back on it after the list re-renders. */
 export function stepControlId(stepId: string, control: "open" | "up" | "down"): string {
@@ -33,12 +36,14 @@ type StepActions = {
 function StepCard({
   step,
   steps,
+  prompts,
   index,
   canEdit,
   actions
 }: {
   step: FlowStep;
   steps: readonly FlowStep[];
+  prompts: StepPrompts;
   index: number;
   canEdit: boolean;
   actions: StepActions & { onAskRemove: (step: FlowStep) => void };
@@ -47,7 +52,7 @@ function StepCard({
   const titleId = useId();
   const id = step.id ?? "";
   const label = stepLabel(step, t);
-  const reads = stepReads(step, steps);
+  const reads = stepReads(step, steps, prompts);
   const review = step.review_policy?.mode;
 
   return (
@@ -163,18 +168,34 @@ function StepCard({
   );
 }
 
+/** The prompts of the flow's AI steps, read through the step assistants as they arrive. */
+function useStepPrompts(flowId: string, steps: readonly FlowStep[]): StepPrompts {
+  const assistants = useQueries({
+    queries: steps
+      .filter((step) => stepUsesModel(step))
+      .map((step) => flowAssistantQueryOptions(flowId, step.assistant_id))
+  });
+  return new Map(
+    assistants.flatMap((query) =>
+      query.data ? [[query.data.id, query.data.prompt?.text ?? ""] as [string, string]] : []
+    )
+  );
+}
+
 /**
- * The flow's steps in run order, each with what it reads, what it takes and
- * what it produces. Editors open a step, move it up or down with buttons
+ * The flow's steps in run order, each with what it reads (its material and
+ * its prompt), what it takes and what it produces. Editors open a step, move it up or down with buttons
  * (there is no drag), add a step before or after it and remove it after a
  * confirmation that names the steps that read it.
  */
 export function FlowStepList({
+  flowId,
   steps,
   canEdit,
   headingRef,
   ...actions
 }: StepActions & {
+  flowId: string;
   steps: readonly FlowStep[];
   canEdit: boolean;
   headingRef: React.Ref<HTMLHeadingElement>;
@@ -183,7 +204,8 @@ export function FlowStepList({
   const headingId = useId();
   const [removing, setRemoving] = useState<FlowStep | null>(null);
   const [removePending, setRemovePending] = useState(false);
-  const readers = removing ? stepReaders(removing, steps) : [];
+  const prompts = useStepPrompts(flowId, steps);
+  const readers = removing ? stepReaders(removing, steps, prompts) : [];
 
   const addButton = (
     <Button
@@ -226,6 +248,7 @@ export function FlowStepList({
               <StepCard
                 step={step}
                 steps={steps}
+                prompts={prompts}
                 index={index}
                 canEdit={canEdit}
                 actions={{ ...actions, onAskRemove: setRemoving }}

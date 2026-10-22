@@ -1,10 +1,10 @@
 /**
  * What a flow's steps read and the orders the editor sends, derived from the
- * definition alone (pure, unit-tested). The core is the authority on reads:
- * this mirrors the reference editor's reading of a step's bindings and input
- * source (`flowInputBindings.ts`, `flowStepMaterial.ts` in apps/web) for
- * display. Reads written in a step's prompt live on its assistant and are
- * not shown here; the core still guards them when steps move.
+ * definition and, for an AI step, its assistant's prompt (pure,
+ * unit-tested). The core is the authority on reads: this mirrors the
+ * reference editor's reading of a step's bindings, input source and prompt
+ * (`flowInputBindings.ts`, `flowStepMaterial.ts` in apps/web) for display.
+ * The prompt lives on the step assistant, so the caller passes it in.
  */
 import type { FlowPublic, FlowStep, FlowStepSlot } from "./flows-api";
 
@@ -132,7 +132,10 @@ type ReadFacts = {
   extra: StepRead[];
 };
 
-function readFacts(step: FlowStep, steps: readonly FlowStep[]): ReadFacts {
+/** A step's prompt by its assistant id, for the steps whose assistant has been read. */
+export type StepPrompts = ReadonlyMap<string, string>;
+
+function readFacts(step: FlowStep, steps: readonly FlowStep[], prompt = ""): ReadFacts {
   const earlier = steps
     .filter((candidate) => candidate.step_order < step.step_order)
     .sort((a, b) => a.step_order - b.step_order);
@@ -167,6 +170,8 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[]): ReadFacts {
     }
   };
 
+  // The prompt is read whatever the step's material is.
+  tokensOf(prompt).forEach(readToken);
   const { question, refs } = bindingsOf(step);
   if (question.trim() || refs.length > 0) {
     tokensOf(question).forEach(readToken);
@@ -198,10 +203,15 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[]): ReadFacts {
 /**
  * What a step reads, each source once: earlier steps in run order first,
  * then the run's input, the web or a tool. Bindings, when the step has
- * any, decide alone; otherwise its input source does.
+ * any, decide its material alone; otherwise its input source does. What
+ * its prompt reads (`prompts`, by assistant id) comes on top.
  */
-export function stepReads(step: FlowStep, steps: readonly FlowStep[]): StepRead[] {
-  const facts = readFacts(step, steps);
+export function stepReads(
+  step: FlowStep,
+  steps: readonly FlowStep[],
+  prompts: StepPrompts = new Map()
+): StepRead[] {
+  const facts = readFacts(step, steps, prompts.get(step.assistant_id));
   const orders = new Set([...facts.named, ...facts.implicit]);
   const reads: StepRead[] = [
     ...[...orders].map((order) => ({
@@ -219,14 +229,20 @@ export function stepReads(step: FlowStep, steps: readonly FlowStep[]): StepRead[
 }
 
 /**
- * The later steps that name a step in their bindings or tool arguments, in
- * run order: removing the step leaves them without it. A step that reads
+ * The later steps that name a step in their bindings, tool arguments or
+ * prompt, in run order: removing the step leaves them without it. A step that reads
  * "the previous step" reads whichever step comes before it after a change.
  */
-export function stepReaders(step: FlowStep, steps: readonly FlowStep[]): FlowStep[] {
+export function stepReaders(
+  step: FlowStep,
+  steps: readonly FlowStep[],
+  prompts: StepPrompts = new Map()
+): FlowStep[] {
   return steps
     .filter((later) => later.step_order > step.step_order)
-    .filter((later) => readFacts(later, steps).named.has(step.step_order))
+    .filter((later) =>
+      readFacts(later, steps, prompts.get(later.assistant_id)).named.has(step.step_order)
+    )
     .sort((a, b) => a.step_order - b.step_order);
 }
 

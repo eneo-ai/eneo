@@ -112,6 +112,24 @@ describe("step orders", () => {
   });
 });
 
+describe("prompt reads", () => {
+  const steps = [
+    makeStep(1, { user_description: "Sammanfatta" }),
+    makeStep(2, { user_description: "Granska" }),
+    makeStep(3, { input_bindings: { question: "{{step_1}}" } })
+  ];
+  const prompts = new Map([["assistant-3", "Väg in {{Granska}} och {{step_4.output.text}}."]]);
+
+  it("adds what the prompt reads to what the material reads", () => {
+    expect(stepReads(steps[2]!, steps, prompts)).toEqual([
+      { kind: "step", order: 1, step: steps[0] },
+      { kind: "step", order: 2, step: steps[1] }
+    ]);
+    expect(stepReaders(steps[1]!, steps, prompts)).toEqual([steps[2]]);
+    expect(stepReaders(steps[1]!, steps)).toEqual([]);
+  });
+});
+
 describe("the reference grammar", () => {
   const steps = [makeStep(1, { user_description: "Sammanfatta" }), makeStep(2)];
 

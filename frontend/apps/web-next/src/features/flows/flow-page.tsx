@@ -425,6 +425,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                   />
                 ) : null}
                 <FlowStepList
+                  flowId={flow.id}
                   steps={steps}
                   canEdit={canEdit}
                   headingRef={stepsHeadingRef}
