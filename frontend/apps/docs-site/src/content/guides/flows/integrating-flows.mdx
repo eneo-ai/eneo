@@ -1391,7 +1391,7 @@ Send the flag only when the run contract's `transcription.single_recording` is `
 
 A recorder reads the recording's length from the audio step in `steps_requiring_input`:
 
-- `max_recording_seconds`: the longest recording the step takes as the parts of one recording, overlaps included. A tenant admin sets it on the flow-settings page (Longest recording), within a ceiling the deployment sets. Stop recording before it.
+- `max_recording_seconds`: the longest recording the step takes as the parts of one recording, overlaps included. A tenant admin sets it in the new web app's flow administration (**Admin → Flows**, Longest recording), within a ceiling the deployment sets. Stop recording before it.
 - `recording_part_seconds`: the part length at which the step's `max_files` slots hold a recording of `max_recording_seconds`. Start a new part at this length, or earlier when a part nears `max_duration_seconds` (one file) or `max_file_size_bytes`.
 
 Contracts from older Eneo versions lack both fields. There, treat `max_duration_seconds` as the limit for the parts of one recording together.

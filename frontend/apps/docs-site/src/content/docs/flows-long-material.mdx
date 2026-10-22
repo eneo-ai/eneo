@@ -58,12 +58,12 @@ candidate. If the answer depends on seeing the whole text at once, it is not.
 4. Write the instruction as if the AI reads one part of the material at a time:
    "register every statement about ..." rather than "summarize the meeting".
 
-The choice is visible only where it can apply: an AI step that passes its answer
-on in a fixed format, without running per file or per record. In **Enkel** mode
-the row is hidden on other steps; in **Avancerad** mode it is shown greyed out
-with the reason.
+The choice is shown only where it can apply: an AI step that passes its answer
+on in a fixed format, without running per file or per record. Other steps leave
+the row out; a step that already has a choice keeps the row and greys out the
+other choices with the reason.
 
-**Avancerad** also offers **Sammanfatta stegvis**, which summarizes each
+The row also offers **Sammanfatta stegvis**, which summarizes each
 section and then merges the summaries. Use it only when the step must produce
 one record from material that does not fit, and the loss of detail is acceptable.
 
@@ -116,11 +116,9 @@ A single very long line without breaks can still be split mid-sentence.
 
 ## Check the result
 
-After a run, open the run in **Historik** and expand the step. Its result says
-how many sections the step read. In **Avancerad** mode it also shows where each
-section sits in the material, in percent, so a missing item can be traced to the
-section that should have produced it. The list of section entries is the step's
-result, in the order of the material.
+After a run, open it under **Körningar** and look at the step. Its result is
+the list of section entries, in the order of the material, so it shows how many
+sections the step read and which section should have produced a missing item.
 
 If a section's answer still exceeds what the model may write in one reply, the
 step fails instead of returning a partial answer. The usual causes are an
