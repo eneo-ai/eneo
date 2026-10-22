@@ -646,6 +646,9 @@ class _AuditEntries:
     def add(self, **entry: Any) -> None:
         self._entries.append(entry)
 
+    def __bool__(self) -> bool:
+        return bool(self._entries)
+
     async def log(self) -> None:
         audit_service = self._container.audit_service()
         entries, self._entries = self._entries, []
@@ -666,13 +669,18 @@ async def authoring_transaction(container: Container) -> AsyncGenerator[None]:
     rolled back, logs none."""
 
     entries = _AuditEntries(container)
+    session = cast(AsyncSession, container.session())
     token = _HELD_AUDIT.set(entries)
     try:
-        async with cast(AsyncSession, container.session()).begin():
+        async with session.begin():
             yield
     finally:
         _HELD_AUDIT.reset(token)
-    await entries.log()
+    if entries:
+        # Whether the tenant logs an action is read from the database, in a
+        # transaction of its own: the session does not begin one by itself.
+        async with session.begin():
+            await entries.log()
 
 
 def _change_audit(container: Container) -> tuple[_AuditEntries, bool]:

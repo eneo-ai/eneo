@@ -124,7 +124,8 @@ async def test_a_saved_change_is_audited_after_its_commit(monkeypatch):
 
     result = await flows._call(MagicMock(), operation, editing=True)
     assert result.isError is not True
-    assert order == ["write", "commit", "audit"]
+    # The tenant's audit settings are read in a transaction of their own.
+    assert order == ["write", "commit", "audit", "commit"]
 
 
 async def test_unbound_token_cannot_read_or_write_any_flow(monkeypatch):
