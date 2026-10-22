@@ -922,6 +922,68 @@ describe("FlowRunPage", () => {
       expect(within(lines).queryByText(messages.flow_transcript_speaker_unresolved)).toBeNull();
     });
 
+    it("corrects the transcript inside a review of it, before approving", async () => {
+      answerAudioRun();
+      const waiting = makeRunSummary({ status: "awaiting_review", finished_at: null });
+      state.routes[STATUS] = () => ({ body: waiting });
+      state.routes[DETAIL] = () => ({ body: makeRunDetail({ ...waiting, result: null }) });
+      state.routes[REVIEW] = () => ({
+        body: makeCheckpoint({
+          step_id: "step-1",
+          step_order: 1,
+          step_label: "Transkribera",
+          current_payload_json: { text: "Välkomna. Tack." },
+          original_payload_json: { text: "Välkomna. Tack." }
+        })
+      });
+      state.routes[EDIT] = (init: { body: Record<string, unknown> }) => ({
+        body: {
+          flow_run_id: "run-1",
+          step_id: "step-1",
+          created_at: "2026-10-21T09:00:00Z",
+          updated_at: "2026-10-21T09:00:00Z",
+          edited_by_principal_type: "user",
+          schema_version: 3,
+          segments_hash: "hash-1",
+          stale: false,
+          revision: 1,
+          occurrences: init.body.occurrences,
+          speaker_edits: init.body.speaker_edits,
+          speaker_names: init.body.speaker_names ?? {}
+        }
+      });
+      const { container } = renderRun(["flows_view", "flows_manage"]);
+
+      const panel = await screen.findByRole("region", { name: "Granska steg 1: Transkribera" });
+      const lines = await within(panel).findByRole("list", {
+        name: messages.flow_runs_transcript_lines
+      });
+      // The transcript shows once, in the review.
+      expect(
+        screen.getAllByRole("list", { name: messages.flow_runs_transcript_lines })
+      ).toHaveLength(1);
+      await expectNoAxeViolations(container);
+
+      fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
+      fireEvent.change(within(lines).getByLabelText("Texten på raden 1:05"), {
+        target: { value: "Tackar." }
+      });
+      fireEvent.click(
+        within(lines).getByRole("button", { name: messages.flow_transcript_line_save })
+      );
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_line_saved)
+      );
+      expect(calls(EDIT)[0]?.init.body).toMatchObject({
+        occurrences: [
+          { segment_index: 1, char_start: 4, char_end: 5, original: ".", corrected: "ar." }
+        ]
+      });
+      expect(
+        within(panel).getByRole("button", { name: messages.flow_runs_review_approve })
+      ).toBeTruthy();
+    });
+
     it("lets only someone who may review name the speakers", async () => {
       answerAudioRun();
       renderRun(["flows_view", "flows_run"]);

@@ -145,7 +145,8 @@ function StepTranscript({
   corrections,
   mayEdit,
   runCompleted,
-  runRevision
+  runRevision,
+  review = false
 }: {
   flowId: string;
   runId: string;
@@ -154,6 +155,8 @@ function StepTranscript({
   mayEdit: boolean;
   runCompleted: boolean;
   runRevision: number | null;
+  /** Shown in a review checkpoint: the lines can be corrected before the run goes on. */
+  review?: boolean;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -199,7 +202,7 @@ function StepTranscript({
   const labels = speakerLabels(shown);
   const multiFile = new Set(shown.map((segment) => segment.fileIndex)).size > 1;
   const sourceHash = source.data.sourceHash;
-  const editable = mayEdit && runCompleted && !corrections?.stale;
+  const editable = mayEdit && (runCompleted || review) && !corrections?.stale;
   return (
     <TranscriptLines
       flowId={flowId}
@@ -239,7 +242,7 @@ function StepTranscript({
           collapsible={false}
         />
       ) : null}
-      {mayEdit && runCompleted && corrections && !corrections.stale ? (
+      {mayEdit && runCompleted && !review && corrections && !corrections.stale ? (
         <div className="flex flex-col gap-3">
           <CorrectionHistory flowId={flowId} runId={runId} stepId={target.stepId} userId={userId} />
           {runRevision !== null ? (
@@ -255,7 +258,7 @@ function StepTranscript({
           ) : null}
         </div>
       ) : null}
-      {mayEdit && runCompleted && labels.length > 0 ? (
+      {mayEdit && runCompleted && !review && labels.length > 0 ? (
         <SpeakerNames
           key={`${corrections?.revision ?? 0}`}
           flowId={flowId}
@@ -330,5 +333,49 @@ export function RunTranscripts({
         </section>
       ))}
     </div>
+  );
+}
+
+/**
+ * The transcript a review checkpoint is about, inside the review: someone
+ * who may decide the review corrects its lines and speakers before
+ * approving, and the corrections are saved with the run, so they hold for
+ * the steps after the review and for the finished run.
+ */
+export function ReviewTranscript({
+  flowId,
+  runId,
+  target,
+  mayEdit
+}: {
+  flowId: string;
+  runId: string;
+  target: TranscriptTarget;
+  mayEdit: boolean;
+}) {
+  const t = useTranslations();
+  const corrections = useQuery(transcriptCorrectionsQueryOptions(flowId, runId));
+  if (corrections.isPending) return <LoadingState rows={2} />;
+  if (corrections.isError) {
+    return (
+      <ListError
+        error={corrections.error}
+        title={t("flow_runs_transcript_failed")}
+        onRetry={() => void corrections.refetch()}
+        isRetrying={corrections.isFetching}
+      />
+    );
+  }
+  return (
+    <StepTranscript
+      flowId={flowId}
+      runId={runId}
+      target={target}
+      corrections={corrections.data.find((item) => item.step_id === target.stepId) ?? null}
+      mayEdit={mayEdit}
+      runCompleted={false}
+      runRevision={null}
+      review
+    />
   );
 }

@@ -1,5 +1,5 @@
 import type { Schema } from "@/lib/api/models";
-import type { RunStep } from "./runs-api";
+import type { ReviewCheckpoint, RunStep } from "./runs-api";
 import {
   applicableOccurrences,
   correctionSet,
@@ -95,6 +95,23 @@ export function transcriptTargets(
       ];
     })
     .sort((a, b) => a.stepOrder - b.stepOrder);
+}
+
+/**
+ * The transcript a review checkpoint is about: its own step's when the step
+ * transcribed, or, for a speaker mapping, the transcription before it. Null
+ * when the review is about something else.
+ */
+export function reviewTranscriptTarget(
+  checkpoint: Pick<ReviewCheckpoint, "step_id" | "step_order">,
+  speakerMapping: boolean,
+  steps: readonly RunStep[] | null | undefined
+): TranscriptTarget | null {
+  const targets = transcriptTargets(steps);
+  const own = targets.find((target) => target.stepId === checkpoint.step_id);
+  if (own) return own;
+  if (!speakerMapping) return null;
+  return targets.filter((target) => target.stepOrder < checkpoint.step_order).at(-1) ?? null;
 }
 
 /**

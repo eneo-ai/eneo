@@ -3,6 +3,7 @@ import { makeRunStep } from "./run-fixtures";
 import {
   clockTime,
   parseSegments,
+  reviewTranscriptTarget,
   shownSegments,
   speakerLabels,
   speakerNamesRequest,
@@ -62,6 +63,27 @@ describe("transcriptTargets", () => {
     expect(transcriptTargets(steps)).toEqual([
       { stepId: "step-1", stepOrder: 1, attemptNo: 2, fileIds: ["f1"] }
     ]);
+  });
+});
+
+describe("reviewTranscriptTarget", () => {
+  const steps = [
+    makeRunStep(1, {
+      step_id: "step-1",
+      input_payload_json: { transcription: { file_ids: ["f1"], source: { attempt_no: 1 } } }
+    }),
+    makeRunStep(2, { step_id: "step-2" }),
+    makeRunStep(3, { step_id: "step-3" })
+  ];
+
+  it("finds the transcript a review is about: its own step's, or the one before a speaker mapping", () => {
+    expect(reviewTranscriptTarget({ step_id: "step-1", step_order: 1 }, false, steps)?.stepId).toBe(
+      "step-1"
+    );
+    expect(reviewTranscriptTarget({ step_id: "step-2", step_order: 2 }, true, steps)?.stepId).toBe(
+      "step-1"
+    );
+    expect(reviewTranscriptTarget({ step_id: "step-3", step_order: 3 }, false, steps)).toBeNull();
   });
 });
 

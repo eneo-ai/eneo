@@ -37,7 +37,8 @@ import { RunKnowledge } from "./run-knowledge";
 import { startedByUser, starterName } from "./run-starter";
 import { RunSteps, stepTitle } from "./run-steps";
 import { RunTranscripts } from "./run-transcript";
-import { transcriptTargets } from "./transcript";
+import { reviewTranscriptTarget, transcriptTargets } from "./transcript";
+import { reviewDraftOf } from "./review-draft";
 import {
   canRedispatch,
   createPollClock,
@@ -278,6 +279,15 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
 
   const summary: RunSummary | undefined = progress.data?.status;
   const status = summary?.status ?? null;
+  // A review of a transcript shows it, correctable, in the review itself.
+  const reviewTranscript =
+    awaitingReview && review.data
+      ? reviewTranscriptTarget(
+          review.data,
+          reviewDraftOf(review.data).kind === "speakers",
+          steps.data
+        )
+      : null;
 
   // Announces a status the run moved to while the page is open.
   useEffect(() => {
@@ -496,6 +506,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
               <ReviewPanel
                 key={`${review.data.id}:${review.data.revision}`}
                 checkpoint={review.data}
+                transcript={reviewTranscript}
                 mayReview={can("flows_manage")}
                 now={progress.data.checkedAt}
                 onStale={(message) =>
@@ -537,7 +548,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 />
               )}
             </Section>
-            {transcriptTargets(steps.data).length > 0 ? (
+            {transcriptTargets(steps.data).length > 0 && !reviewTranscript ? (
               <Section title={t("flow_runs_transcript_heading")}>
                 <RunTranscripts
                   flowId={flowId}
