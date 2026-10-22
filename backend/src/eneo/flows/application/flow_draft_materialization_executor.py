@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, assert_never
 from uuid import UUID, uuid4
 
@@ -10,25 +10,17 @@ from eneo.flows.application.flow_authoring_refusal import (
     FlowAuthoringRefusalException,
 )
 from eneo.flows.application.flow_draft_materialization import (
-    ALL_ASSISTANT_FIELDS,
-    AssistantField,
-    FlowDraftAssistantToUpdate,
     FlowDraftChangeSet,
     FlowDraftCompiledStep,
-    FlowDraftMaterializationProgress,
     FlowDraftMaterializationResult,
-    FlowDraftMaterializationStage,
-    FlowDraftStepChangeKind,
 )
 from eneo.flows.application.flow_service import FlowService
-from eneo.flows.application.flow_template_attachment_materialization import (
-    materialize_template_attachment,
+from eneo.flows.application.flow_template_import_materialization import (
     materialize_template_imports,
 )
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_name import flow_name_family, normalize_flow_name
 from eneo.flows.flow_authoring_spec import AssistantSpec
-from eneo.flows.flow_authoring_variable_rewriting import renumber_step_aliases
 from eneo.flows.flow_capability_manifest import requires_completion_model
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingResolutionError,
@@ -42,25 +34,19 @@ from eneo.flows.flow_resource_bindings import (
     local_resource_kinds_for_slot_kind,
     resolve_local_resource_ref,
 )
-from eneo.flows.infrastructure.flow_repo import (
-    DraftRevisionReservation,
-    StoredAssistantPrompt,
-)
+from eneo.flows.infrastructure.flow_repo import DraftRevisionReservation
 from eneo.main.exceptions import BadRequestException
 from eneo.prompts.api.prompt_models import PromptCreate
 
 if TYPE_CHECKING:
-    from eneo.flows.application.flow_authoring_command import (
-        TemplateAttachmentIntent,
-        TemplateImportIntent,
-    )
+    from eneo.flows.application.flow_authoring_command import TemplateImportIntent
     from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 
 _MODEL_LOCAL_KINDS = frozenset({LocalResourceKind.COMPLETION_MODEL})
 
 
 class FlowDraftMaterializer:
-    """Executes a compiled FlowDraftChangeSet against a draft Flow."""
+    """Creates the draft flow a compiled FlowDraftChangeSet describes."""
 
     async def execute(
         self,
@@ -68,24 +54,14 @@ class FlowDraftMaterializer:
         changeset: FlowDraftChangeSet,
         flow_service: FlowService,
         space_id: UUID,
-        flow_id: UUID | None,
-        expected_revision: int | None = None,
         resource_bindings: tuple[LocalResourceBinding, ...] = tuple(),
         binding_source: FlowResourceBindingSource,
-        template_attachment_intent: "TemplateAttachmentIntent | None" = None,
         template_asset_service: "FlowTemplateAssetService | None" = None,
         template_imports: tuple[TemplateImportIntent, ...] = (),
-        progress_callback: Callable[[FlowDraftMaterializationProgress], None]
-        | None = None,
     ) -> FlowDraftMaterializationResult:
-        is_create = flow_id is None
-        progress = _MaterializationProgressAccumulator(callback=progress_callback)
-
-        if (
-            template_attachment_intent is not None or template_imports
-        ) and template_asset_service is None:
+        if template_imports and template_asset_service is None:
             raise RuntimeError(
-                "Template attachment materialization requires a template asset service."
+                "Template import materialization requires a template asset service."
             )
 
         resource_bindings_by_slot_ref = index_and_validate_changeset_resource_bindings(
@@ -97,30 +73,19 @@ class FlowDraftMaterializer:
         completion_required_by_plan_ref = _completion_required_by_plan_ref(
             changeset.compiled_steps
         )
-        completion_required_by_assistant_id = _completion_required_by_assistant_id(
-            changeset.compiled_steps
+        flow_name = await _deduplicate_flow_name(
+            flow_service=flow_service,
+            space_id=space_id,
+            desired_name=changeset.flow_name,
         )
-        flow_name = changeset.flow_name
-
-        if is_create:
-            flow_name = await _deduplicate_flow_name(
-                flow_service=flow_service,
-                space_id=space_id,
-                desired_name=changeset.flow_name,
-            )
-            temp_flow = await flow_service.create_flow(
-                space_id=space_id,
-                name=flow_name,
-                description=changeset.flow_description,
-                steps=[],
-                metadata_json=changeset.metadata_json,
-            )
-            flow_id = temp_flow.id
-            progress.flow_created = True
-            progress.emit(FlowDraftMaterializationStage.FLOW_CREATED)
-
-        if flow_id is None:
-            raise BadRequestException("Flow id missing while executing changeset.")
+        created_flow = await flow_service.create_flow(
+            space_id=space_id,
+            name=flow_name,
+            description=changeset.flow_description,
+            steps=[],
+            metadata_json=changeset.metadata_json,
+        )
+        flow_id = created_flow.require_persisted_id()
 
         if template_imports:
             assert template_asset_service is not None
@@ -137,32 +102,10 @@ class FlowDraftMaterializer:
                 )
             )
 
-        if template_attachment_intent is not None:
-            assert template_asset_service is not None
-            resolved_template = await materialize_template_attachment(
-                intent=template_attachment_intent,
-                changeset=changeset,
-                flow_id=flow_id,
-                template_asset_service=template_asset_service,
-            )
-            changeset = resolved_template.changeset
-            resource_bindings = (*resource_bindings, resolved_template.binding)
-            resource_bindings_by_slot_ref = (
-                index_and_validate_changeset_resource_bindings(
-                    changeset=changeset,
-                    resource_bindings=resource_bindings,
-                )
-            )
-
-        # Before any assistant is written: a direct edit committed since the
-        # plan was prepared refuses the apply here (rolling back a template
-        # asset created above), and the flow row is locked ahead of its
-        # assistants, the order every writer of both follows. After the
-        # template, whose bytes come from object storage: other writers of
-        # the draft do not wait on that read.
+        # The flow row is locked ahead of its assistants, the order every
+        # writer of both follows.
         reservation = await flow_service.reserve_draft_revision(
-            flow_id=flow_id,
-            expected_revision=expected_revision,
+            flow_id=flow_id, expected_revision=None
         )
 
         for assistant_to_create in changeset.assistants_to_create:
@@ -171,9 +114,6 @@ class FlowDraftMaterializer:
                 name=assistant_to_create.plan_step_ref,
             )
             ref_to_assistant_id[assistant_to_create.plan_step_ref] = assistant.id
-            progress.assistants_created += 1
-            progress.emit(FlowDraftMaterializationStage.ASSISTANTS_CREATED)
-
             await _configure_assistant(
                 flow_service=flow_service,
                 reservation=reservation,
@@ -184,79 +124,16 @@ class FlowDraftMaterializer:
                     completion_required_by_plan_ref=completion_required_by_plan_ref,
                 ),
                 resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
-                fields=ALL_ASSISTANT_FIELDS,
-                new_assistant=True,
-                prompt_alias_renumbering={},
-                stored_prompt=None,
             )
-            progress.assistants_configured += 1
-            progress.emit(FlowDraftMaterializationStage.ASSISTANTS_CONFIGURED)
 
-        stored_prompts = await _stored_prompts(
-            flow_service=flow_service,
+        materialized_flow = await flow_service.update_flow(
             flow_id=flow_id,
-            assistants_to_update=changeset.assistants_to_update,
+            steps=build_flow_steps(
+                compiled_steps=changeset.compiled_steps,
+                ref_to_assistant_id=ref_to_assistant_id,
+            ),
+            expected_revision=reservation.revision,
         )
-        for assistant_to_update in changeset.assistants_to_update:
-            if assistant_to_update.existing_assistant_id is None:
-                raise BadRequestException(
-                    "Existing assistant id missing while applying changeset."
-                )
-            written = await _configure_assistant(
-                flow_service=flow_service,
-                reservation=reservation,
-                assistant_id=assistant_to_update.existing_assistant_id,
-                assistant_spec=assistant_to_update.assistant_spec,
-                requires_completion_model_for_step=_completion_required_for_assistant_id(
-                    assistant_id=assistant_to_update.existing_assistant_id,
-                    completion_required_by_assistant_id=completion_required_by_assistant_id,
-                ),
-                resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
-                fields=assistant_to_update.fields,
-                new_assistant=False,
-                prompt_alias_renumbering=assistant_to_update.prompt_alias_renumbering,
-                stored_prompt=stored_prompts.get(
-                    assistant_to_update.existing_assistant_id
-                ),
-            )
-            if not written:
-                continue
-            progress.assistants_updated += 1
-            progress.emit(FlowDraftMaterializationStage.ASSISTANTS_UPDATED)
-
-        final_steps = build_flow_steps(
-            compiled_steps=changeset.compiled_steps,
-            ref_to_assistant_id=ref_to_assistant_id,
-        )
-
-        if is_create:
-            materialized_flow = await flow_service.update_flow(
-                flow_id=flow_id,
-                steps=final_steps,
-                expected_revision=reservation.revision,
-            )
-        else:
-            materialized_flow = await flow_service.update_flow(
-                flow_id=flow_id,
-                name=changeset.flow_name,
-                description=changeset.flow_description,
-                steps=final_steps,
-                metadata_json=changeset.metadata_json,
-                expected_revision=reservation.revision,
-                unchanged_step_ids=frozenset(
-                    compiled.saved_step.id
-                    for compiled in changeset.compiled_steps
-                    if compiled.change_kind is FlowDraftStepChangeKind.UNCHANGED
-                    and compiled.saved_step is not None
-                    and compiled.saved_step.id is not None
-                ),
-                # The changeset reads the saved form normalized; a field it
-                # carries is stored as saved, not rewritten to that reading.
-                keep_saved_form_fields=True,
-            )
-        progress.flow_updated = True
-        progress.emit(FlowDraftMaterializationStage.FLOW_UPDATED)
-
         await flow_service.replace_resource_bindings(
             flow_id=flow_id,
             bindings=resource_bindings,
@@ -267,45 +144,7 @@ class FlowDraftMaterializer:
             flow_id=flow_id,
             flow_name=flow_name,
             draft_revision=materialized_flow.draft_revision,
-            steps_created=sum(
-                1
-                for step in changeset.compiled_steps
-                if step.change_kind == FlowDraftStepChangeKind.ADDED
-            ),
-            steps_updated=sum(
-                1
-                for step in changeset.compiled_steps
-                if step.change_kind == FlowDraftStepChangeKind.MODIFIED
-            ),
-            steps_removed=len(changeset.removed_existing_step_refs),
-        )
-
-
-class _MaterializationProgressAccumulator:
-    def __init__(
-        self,
-        *,
-        callback: Callable[[FlowDraftMaterializationProgress], None] | None,
-    ) -> None:
-        self._callback = callback
-        self.assistants_created = 0
-        self.assistants_configured = 0
-        self.assistants_updated = 0
-        self.flow_created = False
-        self.flow_updated = False
-
-    def emit(self, stage: FlowDraftMaterializationStage) -> None:
-        if self._callback is None:
-            return
-        self._callback(
-            FlowDraftMaterializationProgress(
-                stage=stage,
-                assistants_created=self.assistants_created,
-                assistants_configured=self.assistants_configured,
-                assistants_updated=self.assistants_updated,
-                flow_created=self.flow_created,
-                flow_updated=self.flow_updated,
-            )
+            steps_created=len(changeset.compiled_steps),
         )
 
 
@@ -322,10 +161,6 @@ def index_and_validate_changeset_resource_bindings(
     completion_required_by_plan_ref = _completion_required_by_plan_ref(
         changeset.compiled_steps
     )
-    completion_required_by_assistant_id = _completion_required_by_assistant_id(
-        changeset.compiled_steps
-    )
-
     for assistant_to_create in changeset.assistants_to_create:
         _resolve_assistant_resource_update_fields(
             assistant_spec=assistant_to_create.assistant_spec,
@@ -334,24 +169,7 @@ def index_and_validate_changeset_resource_bindings(
                 completion_required_by_plan_ref=completion_required_by_plan_ref,
             ),
             resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
-            fields=ALL_ASSISTANT_FIELDS,
-            new_assistant=True,
         )
-
-    for assistant_to_update in changeset.assistants_to_update:
-        if assistant_to_update.existing_assistant_id is None:
-            continue
-        _resolve_assistant_resource_update_fields(
-            assistant_spec=assistant_to_update.assistant_spec,
-            requires_completion_model_for_step=_completion_required_for_assistant_id(
-                assistant_id=assistant_to_update.existing_assistant_id,
-                completion_required_by_assistant_id=completion_required_by_assistant_id,
-            ),
-            resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
-            fields=assistant_to_update.fields,
-            new_assistant=False,
-        )
-
     return resource_bindings_by_slot_ref
 
 
@@ -362,22 +180,15 @@ def build_flow_steps(
 ) -> list[FlowStep]:
     final_steps: list[FlowStep] = []
     for compiled in compiled_steps:
-        assistant_id = compiled.assistant_id or ref_to_assistant_id.get(
-            compiled.plan_step_ref
-        )
+        assistant_id = ref_to_assistant_id.get(compiled.plan_step_ref)
         if assistant_id is None:
             raise BadRequestException(
                 "Assistant id missing while building materialized flow steps.",
                 context={"plan_step_ref": compiled.plan_step_ref},
             )
-        # A retained step is its saved row with the authored columns laid over
-        # it: its id and every column the spec has no field for stay, so the
-        # repository patches the row instead of replacing it.
-        saved = {} if compiled.saved_step is None else compiled.saved_step.model_dump()
         final_steps.append(
             FlowStep.model_validate(
                 {
-                    **saved,
                     "assistant_id": assistant_id,
                     "step_order": compiled.step_order,
                     "user_description": compiled.user_description,
@@ -406,16 +217,6 @@ def _completion_required_by_plan_ref(
     }
 
 
-def _completion_required_by_assistant_id(
-    compiled_steps: list[FlowDraftCompiledStep],
-) -> dict[UUID, bool]:
-    return {
-        step.assistant_id: requires_completion_model(step.output_mode)
-        for step in compiled_steps
-        if step.assistant_id is not None
-    }
-
-
 def _completion_required_for_plan_ref(
     *,
     plan_step_ref: str,
@@ -429,19 +230,6 @@ def _completion_required_for_plan_ref(
         ) from exc
 
 
-def _completion_required_for_assistant_id(
-    *,
-    assistant_id: UUID,
-    completion_required_by_assistant_id: Mapping[UUID, bool],
-) -> bool:
-    try:
-        return completion_required_by_assistant_id[assistant_id]
-    except KeyError as exc:
-        raise RuntimeError(
-            f"Compiled step missing for assistant update operation: {assistant_id}"
-        ) from exc
-
-
 async def _configure_assistant(
     *,
     flow_service: FlowService,
@@ -450,77 +238,26 @@ async def _configure_assistant(
     assistant_spec: AssistantSpec,
     requires_completion_model_for_step: bool,
     resource_bindings_by_slot_ref: Mapping[str, LocalResourceBinding],
-    fields: frozenset[AssistantField],
-    new_assistant: bool,
-    prompt_alias_renumbering: Mapping[int, int],
-    stored_prompt: StoredAssistantPrompt | None,
-) -> bool:
-    """Write `fields` of the assistant and nothing else: a field the update
-    does not name is not in the command, so the assistant keeps it. A new
-    assistant is given every field and is configured in full. A prompt is
-    written with the description of the one the assistant held when the apply
-    began (`stored_prompt`). When the update does not write `instructions` but
-    steps moved, that stored prompt is written with the aliases of moved steps
-    renumbered, and only when that changes it. Returns whether the assistant
-    was written."""
+) -> None:
+    """Configure a new step assistant in full: its prompt, model and
+    knowledge."""
 
-    command_fields: dict[str, object] = {}
-    if "instructions" in fields:
-        # A prompt is written whole: the stored description goes with it.
-        command_fields["prompt"] = PromptCreate(
-            text=assistant_spec.instructions,
-            description=None if stored_prompt is None else stored_prompt.description,
-        )
-    elif prompt_alias_renumbering and stored_prompt is not None:
-        renumbered = renumber_step_aliases(stored_prompt.text, prompt_alias_renumbering)
-        if renumbered != stored_prompt.text:
-            # A prompt is written whole: the description goes with it as stored.
-            command_fields["prompt"] = PromptCreate(
-                text=renumbered, description=stored_prompt.description
-            )
-    command_fields.update(
-        _resolve_assistant_resource_update_fields(
+    command_fields: dict[str, object] = {
+        "prompt": PromptCreate(text=assistant_spec.instructions, description=None),
+        **_resolve_assistant_resource_update_fields(
             assistant_spec=assistant_spec,
             requires_completion_model_for_step=requires_completion_model_for_step,
             resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
-            fields=fields,
-            new_assistant=new_assistant,
-        )
-    )
-    if not command_fields:
-        return False
-
+        ),
+    }
     # The steps are saved after the assistants, by update_flow in the same
-    # transaction, which judges the classification of the flow as saved: a
-    # prompt written for the new step positions is judged against them. That
+    # transaction, which judges the classification of the flow as saved. That
     # save also advances the draft revision, once for the whole apply.
     await flow_service.update_reserved_flow_assistant(
         reservation=reservation,
         assistant_id=assistant_id,
         update=AssistantUpdateCommand.model_validate(command_fields),
         classification_judged_by_flow_update=True,
-    )
-    return True
-
-
-async def _stored_prompts(
-    *,
-    flow_service: FlowService,
-    flow_id: UUID,
-    assistants_to_update: Sequence[FlowDraftAssistantToUpdate],
-) -> dict[UUID, StoredAssistantPrompt]:
-    """The prompts the assistants hold now, as stored and read once, for the
-    updates that write a prompt: the plan's instructions keep the stored
-    description, and a renumbered prompt is the stored one. Empty when no
-    update writes a prompt."""
-
-    if not any(
-        "instructions" in update.fields or update.prompt_alias_renumbering
-        for update in assistants_to_update
-    ):
-        return {}
-    return await flow_service.get_flow_assistant_prompts(
-        await flow_service.get_flow(flow_id)
     )
 
 
@@ -529,49 +266,27 @@ def _resolve_assistant_resource_update_fields(
     assistant_spec: AssistantSpec,
     requires_completion_model_for_step: bool,
     resource_bindings_by_slot_ref: Mapping[str, LocalResourceBinding],
-    fields: frozenset[AssistantField],
-    new_assistant: bool,
 ) -> dict[str, object]:
     command_fields: dict[str, object] = {}
-    if new_assistant:
-        if not requires_completion_model_for_step:
-            command_fields["completion_model_id"] = None
-        elif assistant_spec.model_ref is not None:
-            command_fields["completion_model_id"] = _resolve_materializer_resource_ref(
-                assistant_spec.model_ref,
-                expected_slot_kind=ResourceSlotKind.MODEL,
-                allowed_local_kinds=_MODEL_LOCAL_KINDS,
-                resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
-                invalid_code=FlowAuthoringRefusalCode.INVALID_MODEL_REF,
-                invalid_message=f"Invalid model reference '{assistant_spec.model_ref}'.",
-                invalid_context={"model_ref": assistant_spec.model_ref},
-            )
-    elif "model_ref" in fields:
-        # An edit never picks another model for a step; the one change to a
-        # model is that a step turned into one that runs no completion model
-        # has none. Anything else named here could not be carried out.
-        if requires_completion_model_for_step:
-            raise BadRequestException(
-                "An edit does not choose the model of a step that runs one; "
-                "change it in the step's model picker."
-            )
+    if not requires_completion_model_for_step:
         command_fields["completion_model_id"] = None
-
-    if "knowledge_refs" in fields:
-        groups, websites, integration_knowledge_ids = _resolve_knowledge_refs(
-            knowledge_refs=assistant_spec.knowledge_refs,
+    elif assistant_spec.model_ref is not None:
+        command_fields["completion_model_id"] = _resolve_materializer_resource_ref(
+            assistant_spec.model_ref,
+            expected_slot_kind=ResourceSlotKind.MODEL,
+            allowed_local_kinds=_MODEL_LOCAL_KINDS,
             resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
+            invalid_code=FlowAuthoringRefusalCode.INVALID_MODEL_REF,
+            invalid_message=f"Invalid model reference '{assistant_spec.model_ref}'.",
+            invalid_context={"model_ref": assistant_spec.model_ref},
         )
-        command_fields["groups"] = groups
-        # A new assistant is configured in full. An existing one is listed only
-        # by collections in the spec: a website or integration knowledge it has
-        # is not in it, and absence is not a request to clear, so they are
-        # written only when the spec names some.
-        if new_assistant or websites:
-            command_fields["websites"] = websites
-        if new_assistant or integration_knowledge_ids:
-            command_fields["integration_knowledge_ids"] = integration_knowledge_ids
-
+    groups, websites, integration_knowledge_ids = _resolve_knowledge_refs(
+        knowledge_refs=assistant_spec.knowledge_refs,
+        resource_bindings_by_slot_ref=resource_bindings_by_slot_ref,
+    )
+    command_fields["groups"] = groups
+    command_fields["websites"] = websites
+    command_fields["integration_knowledge_ids"] = integration_knowledge_ids
     return command_fields
 
 

@@ -222,7 +222,6 @@ def _validate_installable_draft(
     metadata_json = build_flow_draft_metadata_json(
         spec=spec,
         steps=spec.steps,
-        current_flow=None,
         default_transcription_model_id=default_transcription_model_id,
     )
     try:

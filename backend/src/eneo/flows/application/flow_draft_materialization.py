@@ -1,9 +1,10 @@
+"""Compile an authoring spec into the steps and assistants of a new draft
+flow. A flow package installs as a new draft through this changeset."""
+
 from __future__ import annotations
 
-import enum
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, cast, get_args
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -12,17 +13,13 @@ from eneo.flows.application.flow_authoring_refusal import (
     FlowAuthoringRefusalCode,
     FlowAuthoringRefusalException,
 )
-from eneo.flows.application.flow_authoring_snapshot import flow_step_to_authoring_spec
-from eneo.flows.domain.canonical_json_hash import json_values_differ
-from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
+from eneo.flows.domain.flow import FlowPersistedJsonObject
 from eneo.flows.enums import FlowInputSource, FlowInputType, FlowOutputMode
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
     OutputType,
     StepSpec,
-    authoring_form_field,
-    authoring_form_field_payload,
     metadata_json_from_authoring_form_fields,
 )
 from eneo.flows.flow_authoring_transcription import (
@@ -30,93 +27,13 @@ from eneo.flows.flow_authoring_transcription import (
     apply_audio_transcription_defaults,
 )
 from eneo.flows.flow_authoring_variable_rewriting import (
-    StepAliasRead,
     build_ref_to_order,
-    config_alias_reads,
-    input_binding_alias_reads,
-    renumber_config_aliases,
-    renumber_input_binding_aliases,
     rewrite_step_spec_variables,
 )
-from eneo.flows.flow_metadata import (
-    form_fields_in_display_order,
-    is_form_field_order,
-    normalize_persisted_flow_metadata,
-)
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
-from eneo.flows.http_transport import redact_persisted_config
-from eneo.flows.step_lineage import (
-    ConfigChannel,
-    ConfigColumn,
-    config_channel,
-    existing_step_order_from_ref,
-    existing_step_ref_for_order,
-)
-from eneo.main.exceptions import BadRequestException
-
-# The rule an invalid existing-step ref broke. The error's code says the ref
-# was invalid; this says why, in the error's context under "reason".
-InvalidExistingStepRefReason = Literal[
-    "invalid_updated_existing_step_refs",
-    "create_cannot_remove_existing_step_refs",
-    "create_cannot_use_existing_step_ref",
-    "duplicate_existing_step_ref",
-    "unknown_existing_step_ref",
-    "unknown_removed_existing_step_ref",
-    "preserved_and_removed_existing_step_ref",
-    "missing_existing_step_ref",
-    "kept_read_lost_its_producer",
-    "dangling_read_now_bound",
-]
-_INVALID_EXISTING_STEP_REF_REASONS: tuple[InvalidExistingStepRefReason, ...] = get_args(
-    InvalidExistingStepRefReason
-)
-
-
-# What an edit may change on a step's assistant: the assistant fields the
-# authoring spec carries. A step whose changes name none of them makes no
-# assistant update at all.
-AssistantField = Literal["instructions", "model_ref", "knowledge_refs"]
-ALL_ASSISTANT_FIELDS: frozenset[AssistantField] = frozenset(get_args(AssistantField))
-
-
-# The columns of a step's row an edit writes. A step the edit names is written
-# in the columns it names, from the spec, and is its saved row in every other
-# one; a column the spec has no field for (a timeout, a classification
-# override) is never written by an edit.
-StepColumn = Literal[
-    "user_description",
-    "input_source",
-    "input_type",
-    "input_bindings",
-    "input_contract",
-    "input_config",
-    "output_mode",
-    "output_type",
-    "output_contract",
-    "output_config",
-    "review_policy",
-]
-ALL_STEP_COLUMNS: frozenset[StepColumn] = frozenset(get_args(StepColumn))
-
-
-# The columns of a step a read of another step by alias can be saved in.
-StepReadColumn = Literal["input_bindings", "input_config", "output_config"]
-ALL_STEP_READ_COLUMNS: frozenset[StepReadColumn] = frozenset(get_args(StepReadColumn))
-
-
-class FlowDraftStepChangeKind(str, enum.Enum):
-    ADDED = "added"
-    MODIFIED = "modified"
-    REMOVED = "removed"
-    UNCHANGED = "unchanged"
 
 
 def _default_assistants_to_create() -> list[FlowDraftAssistantToCreate]:
-    return []
-
-
-def _default_assistants_to_update() -> list[FlowDraftAssistantToUpdate]:
     return []
 
 
@@ -129,38 +46,14 @@ class FlowDraftAssistantToCreate(BaseModel):
     assistant_spec: AssistantSpec
 
 
-class FlowDraftAssistantToUpdate(BaseModel):
-    existing_step_ref: str | None = None
-    existing_assistant_id: UUID | None = None
-    assistant_spec: AssistantSpec
-    # The assistant fields this update writes; every other field, and every
-    # kind of attachment the spec does not name, stays as the assistant has it.
-    fields: frozenset[AssistantField]
-    # Where the steps the prompt may read by alias moved, saved position to
-    # new, when the update does not write `instructions`: the prompt the
-    # assistant holds at apply is written with those aliases renumbered, and
-    # with nothing else changed. Empty when no step moved.
-    prompt_alias_renumbering: dict[int, int]
-
-
 class FlowDraftCompiledStep(BaseModel):
     plan_step_ref: str
-    change_kind: FlowDraftStepChangeKind
     step_order: int
     user_description: str | None
     input_source: FlowInputSource
     input_type: FlowInputType
     output_mode: FlowOutputMode
     output_type: OutputType
-    assistant_id: UUID | None = None
-    existing_step_ref: str | None = None
-    # The saved row this step is, read when the changeset was compiled: it
-    # keeps the row's id and every column the authoring spec has no field for
-    # (a timeout, a classification override), so the write patches the row.
-    saved_step: FlowStep | None = None
-    # The columns that are the saved row's own, with only the aliases of moved
-    # steps renumbered: their reads are the saved ones and keep their producer.
-    carried_columns: frozenset[StepReadColumn] = frozenset()
     input_bindings: FlowPersistedJsonObject | None = None
     input_contract: FlowPersistedJsonObject | None = None
     output_contract: FlowPersistedJsonObject | None = None
@@ -175,34 +68,10 @@ class FlowDraftChangeSet(BaseModel):
     assistants_to_create: list[FlowDraftAssistantToCreate] = Field(
         default_factory=_default_assistants_to_create
     )
-    assistants_to_update: list[FlowDraftAssistantToUpdate] = Field(
-        default_factory=_default_assistants_to_update
-    )
-    # The flow update deletes these steps, and with them every flow-managed
-    # assistant no remaining step references; the executor deletes nothing.
-    removed_existing_step_refs: frozenset[str] = Field(default_factory=frozenset)
     compiled_steps: list[FlowDraftCompiledStep] = Field(
         default_factory=_default_compiled_steps
     )
     metadata_json: FlowPersistedJsonObject | None = None
-
-
-class FlowDraftMaterializationStage(str, enum.Enum):
-    FLOW_CREATED = "flow_created"
-    ASSISTANTS_CREATED = "assistants_created"
-    ASSISTANTS_CONFIGURED = "assistants_configured"
-    ASSISTANTS_UPDATED = "assistants_updated"
-    FLOW_UPDATED = "flow_updated"
-
-
-@dataclass(frozen=True, slots=True)
-class FlowDraftMaterializationProgress:
-    stage: FlowDraftMaterializationStage
-    assistants_created: int = 0
-    assistants_configured: int = 0
-    assistants_updated: int = 0
-    flow_created: bool = False
-    flow_updated: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -211,111 +80,34 @@ class FlowDraftMaterializationResult:
     flow_name: str
     draft_revision: int
     steps_created: int
-    steps_updated: int
-    steps_removed: int
 
 
 def compile_flow_draft_changeset(
     spec: FlowDraftSpecCore,
-    current_flow: Flow | None,
     *,
-    removed_existing_step_refs: frozenset[str] = frozenset(),
-    updated_existing_step_refs: frozenset[str] | None = None,
-    updated_assistant_fields: Mapping[str, frozenset[AssistantField]] | None = None,
-    updated_step_fields: Mapping[str, frozenset[StepColumn]] | None = None,
     default_transcription_model_id: UUID | None = None,
 ) -> FlowDraftChangeSet:
-    """`updated_step_fields`: per updated step, the columns the edit writes;
-    None writes every column of an updated step from the spec (a caller that
-    names none, as a create does)."""
+    """The new draft ``spec`` describes: one new assistant per step, and the
+    steps reading each other by their runtime aliases."""
 
-    existing_by_ref: dict[str, FlowStep] = {}
-    if current_flow:
-        for step in current_flow.steps:
-            existing_by_ref[existing_step_ref_for_order(step.step_order)] = step
-    _validate_existing_step_ref_coverage(
-        spec=spec,
-        existing_by_ref=existing_by_ref,
-        removed_existing_step_refs=removed_existing_step_refs,
+    referenced = next(
+        (step.existing_step_ref for step in spec.steps if step.existing_step_ref),
+        None,
     )
-    _validate_updated_existing_step_refs(
-        existing_by_ref=existing_by_ref,
-        removed_existing_step_refs=removed_existing_step_refs,
-        updated_existing_step_refs=updated_existing_step_refs,
-        named_refs={*(updated_assistant_fields or {}), *(updated_step_fields or {})},
-    )
+    if referenced is not None:
+        raise FlowAuthoringRefusalException(
+            "Create flow commands cannot reference existing steps.",
+            code=FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF,
+            context={
+                "reason": "create_cannot_use_existing_step_ref",
+                "existing_step_ref": referenced,
+            },
+        )
     ref_to_order = build_ref_to_order(spec.steps)
-    # Where each kept step's alias changes: a step that reads it by alias is
-    # written with the new one.
-    alias_renumbering = {
-        saved_order: index + 1
-        for index, step in enumerate(spec.steps)
-        if (saved_order := existing_step_order_from_ref(step.existing_step_ref))
-        is not None
-        and saved_order != index + 1
-    }
-    runtime_aliases = {f"step_{order}": order for order in ref_to_order.values()}
     assistants_to_create: list[FlowDraftAssistantToCreate] = []
-    assistants_to_update: list[FlowDraftAssistantToUpdate] = []
     compiled_steps: list[FlowDraftCompiledStep] = []
-
     for index, step_spec in enumerate(spec.steps):
-        step_order = index + 1
-        existing_step = _resolve_existing_step(step_spec, existing_by_ref)
         rewritten_spec = rewrite_step_spec_variables(step_spec, ref_to_order)
-
-        if existing_step is not None:
-            existing_ref = rewritten_spec.existing_step_ref
-            updates_step = (
-                updated_existing_step_refs is None
-                or existing_ref in updated_existing_step_refs
-            )
-            named_fields: frozenset[AssistantField] = frozenset()
-            named_columns: frozenset[StepColumn] = frozenset()
-            if updates_step:
-                named_fields = (
-                    ALL_ASSISTANT_FIELDS
-                    if updated_assistant_fields is None
-                    else updated_assistant_fields.get(existing_ref or "", frozenset())
-                )
-                named_columns = (
-                    _columns_a_full_write_names(rewritten_spec, existing_step)
-                    if updated_step_fields is None
-                    else updated_step_fields.get(existing_ref or "", frozenset())
-                )
-            # A step whose instructions the edit does not write still reads its
-            # producers by alias: when any step moved, the prompt it holds is
-            # renumbered at apply, never replaced with the plan's copy of it.
-            prompt_alias_renumbering = (
-                {} if "instructions" in named_fields else alias_renumbering
-            )
-            if named_fields or prompt_alias_renumbering:
-                assistants_to_update.append(
-                    FlowDraftAssistantToUpdate(
-                        existing_step_ref=existing_ref,
-                        existing_assistant_id=existing_step.assistant_id,
-                        assistant_spec=rewritten_spec.assistant_spec,
-                        fields=named_fields,
-                        prompt_alias_renumbering=dict(prompt_alias_renumbering),
-                    )
-                )
-            compiled_steps.append(
-                _compile_existing_step(
-                    step_spec=rewritten_spec,
-                    existing_step=existing_step,
-                    step_order=step_order,
-                    alias_renumbering=alias_renumbering,
-                    runtime_aliases=runtime_aliases,
-                    change_kind=(
-                        FlowDraftStepChangeKind.MODIFIED
-                        if updates_step
-                        else FlowDraftStepChangeKind.UNCHANGED
-                    ),
-                    named_columns=named_columns,
-                )
-            )
-            continue
-
         assistants_to_create.append(
             FlowDraftAssistantToCreate(
                 plan_step_ref=step_spec.plan_step_ref,
@@ -323,345 +115,18 @@ def compile_flow_draft_changeset(
             )
         )
         compiled_steps.append(
-            _compile_new_step(
-                step_spec=rewritten_spec,
-                step_order=step_order,
-            )
+            _compile_new_step(step_spec=rewritten_spec, step_order=index + 1)
         )
-
-    changeset = FlowDraftChangeSet(
+    return FlowDraftChangeSet(
         flow_name=spec.flow_name,
         flow_description=spec.flow_description,
         assistants_to_create=assistants_to_create,
-        assistants_to_update=_one_update_per_assistant(
-            assistants_to_update, compiled_steps
-        ),
-        removed_existing_step_refs=removed_existing_step_refs,
         compiled_steps=compiled_steps,
         metadata_json=build_flow_draft_metadata_json(
             spec=spec,
             steps=compiled_steps,
-            current_flow=current_flow,
             default_transcription_model_id=default_transcription_model_id,
         ),
-    )
-    # The one check of the changeset that is written: after every step is
-    # compiled, before it is returned for the writes that follow.
-    _refuse_carried_reads_that_lost_their_producer(changeset)
-    return changeset
-
-
-def _refuse_carried_reads_that_lost_their_producer(
-    changeset: FlowDraftChangeSet,
-) -> None:
-    """A step the edit keeps reads, in the columns it carries from its saved
-    row, the same steps it read there or the edit is refused. The alias is the
-    producer's saved position, so the write renumbers it with the producer; a
-    producer the edit removes, or moves to where the reader cannot see it, has
-    no such position. A read that was not valid where it was saved (a forward
-    or dangling one) stays editable while it stays invalid, and is refused when
-    the edit makes it name a step that is not its saved producer."""
-
-    kept_position = {
-        step.saved_step.step_order: step.step_order
-        for step in changeset.compiled_steps
-        if step.saved_step is not None
-    }
-    for step in changeset.compiled_steps:
-        saved = step.saved_step
-        if saved is None:
-            continue
-        for column in sorted(step.carried_columns):
-            saved_reads = _column_alias_reads(column, saved, saved.step_order)
-            final_reads = _column_alias_reads(column, step, step.step_order)
-            if len(saved_reads) != len(final_reads):
-                raise _lost_producer(saved, (saved_reads + final_reads)[0], _NOT_MOVED)
-            for was, now in zip(saved_reads, final_reads, strict=True):
-                if not 1 <= was.order < was.visible_below:
-                    if (
-                        1 <= now.order < now.visible_below
-                        and now.order != kept_position.get(was.order)
-                    ):
-                        raise _dangling_read_now_bound(saved, was, now)
-                    continue
-                position = kept_position.get(was.order)
-                if position is None:
-                    fate = "removes that step"
-                elif now.order != position:
-                    fate = _NOT_MOVED
-                elif position >= now.visible_below:
-                    fate = "moves that step to where this step cannot read it"
-                else:
-                    continue
-                raise _lost_producer(saved, was, fate)
-
-
-def _column_alias_reads(
-    column: StepReadColumn, step: FlowStep | FlowDraftCompiledStep, step_order: int
-) -> list[StepAliasRead]:
-    if column == "input_bindings":
-        return input_binding_alias_reads(step.input_bindings, step_order=step_order)
-    return config_alias_reads(
-        config_channel(
-            column=column,
-            config=step.input_config
-            if column == "input_config"
-            else step.output_config,
-            input_source=FlowInputSource(step.input_source),
-            output_mode=FlowOutputMode(step.output_mode),
-            step_order=step_order,
-        )
-    )
-
-
-_NOT_MOVED = "does not move the read with that step"
-
-
-def _dangling_read_now_bound(
-    saved: FlowStep, was: StepAliasRead, now: StepAliasRead
-) -> BadRequestException:
-    return _invalid_existing_step_ref(
-        f"Step {saved.step_order} reads the result of step {was.order} in its "
-        f"{was.site}, which no step it could read was when it was saved, and "
-        f"this edit makes step {now.order} a step that can be read, so the read "
-        "would name a step nobody chose. Change the read, or keep the steps "
-        "before this one as they are.",
-        reason="dangling_read_now_bound",
-        reader_ref=existing_step_ref_for_order(saved.step_order),
-        site=was.site,
-        producer_ref=existing_step_ref_for_order(was.order),
-    )
-
-
-def _lost_producer(
-    saved: FlowStep, read: StepAliasRead, fate: str
-) -> BadRequestException:
-    reader_ref = existing_step_ref_for_order(saved.step_order)
-    producer_ref = existing_step_ref_for_order(read.order)
-    return _invalid_existing_step_ref(
-        f"Step {saved.step_order} reads the result of step {read.order} in its "
-        f"{read.site}, and this edit {fate}, so the read would name another "
-        "step. Keep each step before the steps that read it, or change the read.",
-        reason="kept_read_lost_its_producer",
-        reader_ref=reader_ref,
-        site=read.site,
-        producer_ref=producer_ref,
-    )
-
-
-def _one_update_per_assistant(
-    updates: list[FlowDraftAssistantToUpdate],
-    compiled_steps: list[FlowDraftCompiledStep],
-) -> list[FlowDraftAssistantToUpdate]:
-    """One update per assistant. Steps can share an assistant, and an update is
-    written to the assistant, so it changes every step that uses it: it is
-    kept only when each of those steps asks for that same update (the same
-    fields and text, or the same renumbering), and refused otherwise, before
-    anything is written."""
-
-    sharing: dict[UUID, list[str]] = {}
-    for step in compiled_steps:
-        if step.saved_step is not None and step.assistant_id is not None:
-            sharing.setdefault(step.assistant_id, []).append(
-                existing_step_ref_for_order(step.saved_step.step_order)
-            )
-    by_ref = {update.existing_step_ref: update for update in updates}
-    kept: list[FlowDraftAssistantToUpdate] = []
-    written: set[UUID | None] = set()
-    for update in updates:
-        if update.existing_assistant_id in written:
-            continue
-        written.add(update.existing_assistant_id)
-        refs = (
-            sharing.get(update.existing_assistant_id, [])
-            if update.existing_assistant_id is not None
-            else []
-        )
-        if any(_update_key(by_ref.get(ref)) != _update_key(update) for ref in refs):
-            raise FlowAuthoringRefusalException(
-                "This change is to an assistant another step of the flow also "
-                "uses, so it would change that step too. Ask the Builder again "
-                "for the change.",
-                code=FlowAuthoringRefusalCode.ASSISTANT_SHARED_BY_STEPS,
-                context={"shared_by": sorted(refs)},
-            )
-        kept.append(update)
-    return kept
-
-
-def _update_key(update: FlowDraftAssistantToUpdate | None) -> object:
-    if update is None:
-        return None
-    return (
-        update.fields,
-        update.prompt_alias_renumbering,
-        update.assistant_spec if update.fields else None,
-    )
-
-
-def _validate_existing_step_ref_coverage(
-    *,
-    spec: FlowDraftSpecCore,
-    existing_by_ref: dict[str, FlowStep],
-    removed_existing_step_refs: frozenset[str],
-) -> None:
-    preserved_refs = [
-        step.existing_step_ref
-        for step in spec.steps
-        if step.existing_step_ref is not None
-    ]
-    validate_existing_step_ref_coverage(
-        current_refs=set(existing_by_ref),
-        preserved_refs=preserved_refs,
-        removed_existing_step_refs=removed_existing_step_refs,
-    )
-
-
-def _validate_updated_existing_step_refs(
-    *,
-    existing_by_ref: dict[str, FlowStep],
-    removed_existing_step_refs: frozenset[str],
-    updated_existing_step_refs: frozenset[str] | None,
-    named_refs: set[str],
-) -> None:
-    if updated_existing_step_refs is None:
-        return
-    invalid_refs = sorted(
-        (updated_existing_step_refs - set(existing_by_ref))
-        | (updated_existing_step_refs & removed_existing_step_refs)
-        | (named_refs - updated_existing_step_refs)
-    )
-    if not invalid_refs:
-        return
-    raise _invalid_existing_step_ref(
-        "Updated step references must identify preserved existing steps.",
-        reason="invalid_updated_existing_step_refs",
-        invalid_refs=invalid_refs,
-    )
-
-
-def validate_existing_step_ref_coverage(
-    *,
-    current_refs: set[str],
-    preserved_refs: list[str],
-    removed_existing_step_refs: frozenset[str],
-) -> None:
-    if not current_refs:
-        if removed_existing_step_refs:
-            raise _invalid_existing_step_ref(
-                "Create flow commands cannot remove existing steps.",
-                reason="create_cannot_remove_existing_step_refs",
-                removed_refs=sorted(removed_existing_step_refs),
-            )
-        if preserved_refs:
-            raise _invalid_existing_step_ref(
-                "Create flow commands cannot reference existing steps.",
-                reason="create_cannot_use_existing_step_ref",
-                existing_step_ref=preserved_refs[0],
-            )
-        return
-
-    preserved_ref_set = set(preserved_refs)
-    duplicate_refs = sorted(
-        ref for ref in preserved_ref_set if preserved_refs.count(ref) > 1
-    )
-    if duplicate_refs:
-        raise _invalid_existing_step_ref(
-            "Each existing step can be preserved or updated at most once.",
-            reason="duplicate_existing_step_ref",
-            duplicate_refs=duplicate_refs,
-        )
-
-    unknown_preserved_refs = sorted(preserved_ref_set - current_refs)
-    if unknown_preserved_refs:
-        raise _invalid_existing_step_ref(
-            f"Spec references unknown existing steps: {unknown_preserved_refs}.",
-            reason="unknown_existing_step_ref",
-            unknown_refs=unknown_preserved_refs,
-            valid_refs=sorted(current_refs),
-        )
-
-    unknown_removed_refs = sorted(removed_existing_step_refs - current_refs)
-    if unknown_removed_refs:
-        raise _invalid_existing_step_ref(
-            "Removal list references unknown existing steps.",
-            reason="unknown_removed_existing_step_ref",
-            unknown_refs=unknown_removed_refs,
-        )
-
-    overlap_refs = sorted(preserved_ref_set & removed_existing_step_refs)
-    if overlap_refs:
-        raise _invalid_existing_step_ref(
-            "An existing step cannot be both preserved and removed.",
-            reason="preserved_and_removed_existing_step_ref",
-            overlap_refs=overlap_refs,
-        )
-
-    missing_refs = sorted(current_refs - preserved_ref_set - removed_existing_step_refs)
-    if missing_refs:
-        raise _invalid_existing_step_ref(
-            "Every existing step must be preserved or explicitly removed.",
-            reason="missing_existing_step_ref",
-            missing_refs=missing_refs,
-        )
-
-
-def _keeps_saved_output_config(step_spec: StepSpec, existing_step: FlowStep) -> bool:
-    """A step the spec gives no output config keeps its saved one, while its
-    output mode and type are the saved ones."""
-
-    return (
-        step_spec.output_config is None
-        and step_spec.output_mode.value == existing_step.output_mode
-        and step_spec.output_type.value == existing_step.output_type
-    )
-
-
-def _columns_a_full_write_names(
-    step_spec: StepSpec, existing_step: FlowStep
-) -> frozenset[StepColumn]:
-    """The columns a caller that names none writes on a step it updates: every
-    one, except an output config the spec leaves None while the step keeps its
-    output mode and type, which stays as saved."""
-
-    if _keeps_saved_output_config(step_spec, existing_step):
-        return ALL_STEP_COLUMNS - {"output_config"}
-    return ALL_STEP_COLUMNS
-
-
-def _carried_config(
-    config: FlowPersistedJsonObject | None,
-    column: ConfigColumn,
-    existing_step: FlowStep,
-    alias_renumbering: Mapping[int, int],
-) -> FlowPersistedJsonObject | None:
-    """`config`, a saved column of `existing_step`, with the aliases of moved
-    steps renumbered where the step's modes make it read them."""
-
-    return renumber_config_aliases(
-        config,
-        _saved_channel(column, config, existing_step),
-        alias_renumbering,
-    )
-
-
-def _saved_channel(
-    column: ConfigColumn,
-    config: FlowPersistedJsonObject | None,
-    existing_step: FlowStep,
-    *,
-    input_source: FlowInputSource | None = None,
-    output_mode: FlowOutputMode | None = None,
-) -> ConfigChannel | None:
-    """The channel `config`, a saved column of `existing_step`, is read
-    through: under the step's saved modes, or under the modes given."""
-
-    return config_channel(
-        column=column,
-        config=config,
-        input_source=input_source or FlowInputSource(existing_step.input_source),
-        output_mode=output_mode or FlowOutputMode(existing_step.output_mode),
-        step_order=existing_step.step_order,
     )
 
 
@@ -669,20 +134,12 @@ def build_flow_draft_metadata_json(
     *,
     spec: FlowDraftSpecCore,
     steps: Sequence[AudioInputStep],
-    current_flow: Flow | None,
     default_transcription_model_id: UUID | None = None,
 ) -> FlowPersistedJsonObject | None:
     metadata: FlowPersistedJsonObject = {}
-    if current_flow and current_flow.metadata_json:
-        metadata = normalize_persisted_flow_metadata(current_flow.metadata_json) or {}
-
     form_metadata = metadata_json_from_authoring_form_fields(spec.form_fields)
     if form_metadata is not None:
-        metadata["form_schema"] = _keep_unauthored_form_keys(
-            cast(FlowPersistedJsonObject, form_metadata["form_schema"]),
-            saved=metadata.get("form_schema"),
-        )
-
+        metadata["form_schema"] = form_metadata["form_schema"]
     metadata = (
         apply_audio_transcription_defaults(
             metadata=metadata if metadata else None,
@@ -694,120 +151,6 @@ def build_flow_draft_metadata_json(
     return metadata if metadata else None
 
 
-def _keep_unauthored_form_keys(
-    authored: FlowPersistedJsonObject, *, saved: object
-) -> FlowPersistedJsonObject:
-    """An edit changes only what it authored. A saved field whose authoring view
-    the edit left as it was stays exactly as saved; a changed field takes only
-    the changed values; `order` is renumbered only when the sequence changed,
-    so an untouched form stays exactly as saved."""
-
-    if not isinstance(saved, dict):
-        return authored
-    saved_schema = cast(FlowPersistedJsonObject, saved)
-    raw_fields = saved_schema.get("fields")
-    if not isinstance(raw_fields, list):
-        return authored
-    saved_fields: list[FlowPersistedJsonObject] = []
-    saved_by_name: dict[
-        str, tuple[FlowPersistedJsonObject, FlowPersistedJsonObject]
-    ] = {}
-    for index, raw_field in enumerate(cast(list[object], raw_fields)):
-        if not isinstance(raw_field, dict):
-            continue
-        field = cast(FlowPersistedJsonObject, raw_field)
-        saved_fields.append(field)
-        view = authoring_form_field(field, index=index)
-        if view is not None:
-            saved_by_name[view.name] = (field, authoring_form_field_payload(view))
-    authored_fields = cast(list[FlowPersistedJsonObject], authored["fields"])
-    sequence_kept = [field["name"] for field in authored_fields] == [
-        field.get("name") for field in form_fields_in_display_order(saved_fields)
-    ]
-    saved_orders = [field["order"] for field in saved_fields if "order" in field]
-    # An absent order is writable; a present one a persisted read tolerated
-    # (not a whole number from 1, or repeated) is not, so it is renumbered.
-    renumber = bool(saved_orders) and not (
-        sequence_kept
-        and all(is_form_field_order(order) for order in saved_orders)
-        and len(set(saved_orders)) == len(saved_orders)
-    )
-    fields: list[FlowPersistedJsonObject] = []
-    for position, field in enumerate(authored_fields, start=1):
-        saved_field, saved_view = saved_by_name.get(field["name"], ({}, {}))
-        patched = dict(saved_field)
-        for key in [*field, *(key for key in saved_view if key not in field)]:
-            if field.get(key) == saved_view.get(key):
-                continue
-            if key in field:
-                patched[key] = field[key]
-            else:
-                patched.pop(key, None)
-        if renumber:
-            patched["order"] = position
-        fields.append(patched)
-    if (
-        sequence_kept
-        and not renumber
-        and all(
-            field == saved_by_name.get(field["name"], ({}, {}))[0] for field in fields
-        )
-    ):
-        return saved_schema
-    return {**saved_schema, "fields": fields}
-
-
-def _resolve_existing_step(
-    step_spec: StepSpec,
-    existing_by_ref: dict[str, FlowStep],
-) -> FlowStep | None:
-    if step_spec.existing_step_ref is None:
-        return None
-    resolved = existing_by_ref.get(step_spec.existing_step_ref)
-    if resolved is None:
-        valid_refs = sorted(existing_by_ref.keys())
-        raise FlowAuthoringRefusalException(
-            (
-                f"existing_step_ref '{step_spec.existing_step_ref}' does not match "
-                f"any existing step. Valid refs: {valid_refs}"
-            ),
-            code=FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF,
-            context={
-                "existing_step_ref": step_spec.existing_step_ref,
-                "valid_refs": valid_refs,
-            },
-        )
-    return resolved
-
-
-def _invalid_existing_step_ref(
-    message: str,
-    *,
-    reason: InvalidExistingStepRefReason,
-    **context: object,
-) -> FlowAuthoringRefusalException:
-    return FlowAuthoringRefusalException(
-        message,
-        code=FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF,
-        context={"reason": reason, **context},
-    )
-
-
-def invalid_existing_step_ref_reason(
-    error: BadRequestException,
-) -> InvalidExistingStepRefReason | None:
-    """Which rule ``error`` says was broken, when it is an invalid
-    existing-step ref raised here with a reason; None for anything else."""
-
-    if error.code != FlowAuthoringRefusalCode.INVALID_EXISTING_STEP_REF:
-        return None
-    reason = (error.context or {}).get("reason")
-    for known in _INVALID_EXISTING_STEP_REF_REASONS:
-        if reason == known:
-            return known
-    return None
-
-
 def _compile_new_step(
     *,
     step_spec: StepSpec,
@@ -815,10 +158,8 @@ def _compile_new_step(
 ) -> FlowDraftCompiledStep:
     return FlowDraftCompiledStep(
         plan_step_ref=step_spec.plan_step_ref,
-        change_kind=FlowDraftStepChangeKind.ADDED,
         step_order=step_order,
         user_description=step_spec.name,
-        assistant_id=None,
         input_source=FlowInputSource(step_spec.input_source.value),
         input_type=FlowInputType(step_spec.input_type.value),
         output_mode=FlowOutputMode(step_spec.output_mode.value),
@@ -829,167 +170,4 @@ def _compile_new_step(
         input_config=step_spec.input_config,
         output_config=step_spec.output_config,
         review_policy=step_spec.review_policy,
-    )
-
-
-def _same_authored_value(left: object, right: object) -> bool:
-    return not json_values_differ(left, right)
-
-
-def _saved_where_unchanged(
-    step_spec: StepSpec,
-    existing_step: FlowStep,
-    *,
-    alias_renumbering: Mapping[int, int],
-    runtime_aliases: Mapping[str, int],
-) -> frozenset[StepColumn]:
-    """Which of the description and the input bindings the spec states as the
-    saved row has them: the two columns the spec shows in a form its
-    validators change (a padded question is stripped, a step saved without a
-    description is named "Step N", a template is written `{{ step_N.x }}`).
-    Each is judged by reading the saved value through the same validators and
-    rewriting as the spec's; when the two are equal the row keeps what was
-    saved, and is not rewritten to what the spec shows."""
-
-    saved_bindings = renumber_input_binding_aliases(
-        existing_step.input_bindings, alias_renumbering
-    )
-    try:
-        saved_view = rewrite_step_spec_variables(
-            flow_step_to_authoring_spec(
-                existing_step.model_copy(update={"input_bindings": saved_bindings}),
-                plan_ref=step_spec.plan_step_ref,
-            ),
-            dict(runtime_aliases),
-        )
-    except ValueError:
-        # A step in a mode authoring cannot express (an HTTP step) has no
-        # view to compare with: what the edit names is written as the spec has it.
-        return frozenset()
-    kept: set[StepColumn] = set()
-    if _same_authored_value(step_spec.name, saved_view.name):
-        kept.add("user_description")
-    if _same_authored_value(step_spec.input_bindings, saved_view.input_bindings):
-        kept.add("input_bindings")
-    return frozenset(kept)
-
-
-def _authored_column(step_spec: StepSpec, column: StepColumn) -> object:
-    if column == "user_description":
-        return step_spec.name
-    return getattr(step_spec, column)
-
-
-def _saved_column(
-    existing_step: FlowStep,
-    column: StepColumn,
-    *,
-    alias_renumbering: Mapping[int, int],
-    written: bool,
-) -> object:
-    """`column` as the saved row holds it, with only the aliases of moved
-    steps renumbered where the step's saved modes read them. A row the edit
-    writes hands its configurations' stored credentials back as sentinels,
-    which the flow update resolves to the stored ciphertext; a row it does not
-    write is handed back as saved, and the flow update keeps it as it is."""
-
-    if column == "input_bindings":
-        return renumber_input_binding_aliases(
-            existing_step.input_bindings, alias_renumbering
-        )
-    if column == "input_config" or column == "output_config":
-        config = getattr(existing_step, column)
-        return _carried_config(
-            redact_persisted_config(config) if written else config,
-            column,
-            existing_step,
-            alias_renumbering,
-        )
-    return getattr(existing_step, column)
-
-
-def _compile_existing_step(
-    *,
-    step_spec: StepSpec,
-    existing_step: FlowStep,
-    step_order: int,
-    alias_renumbering: Mapping[int, int],
-    runtime_aliases: Mapping[str, int],
-    change_kind: FlowDraftStepChangeKind,
-    named_columns: frozenset[StepColumn],
-) -> FlowDraftCompiledStep:
-    """A saved step as the edit leaves it, the one carry of saved columns: the
-    columns the edit names are written from the spec, and every other column
-    is the saved row's (a step no admitted change names is its saved row,
-    whatever the spec and the origin's policy derived for it)."""
-
-    authored = named_columns
-    if authored & {"user_description", "input_bindings"}:
-        authored = authored - _saved_where_unchanged(
-            step_spec,
-            existing_step,
-            alias_renumbering=alias_renumbering,
-            runtime_aliases=runtime_aliases,
-        )
-    columns = {
-        column: (
-            _authored_column(step_spec, column)
-            if column in authored
-            else _saved_column(
-                existing_step,
-                column,
-                alias_renumbering=alias_renumbering,
-                written=change_kind is not FlowDraftStepChangeKind.UNCHANGED,
-            )
-        )
-        for column in ALL_STEP_COLUMNS
-    }
-    final_source = FlowInputSource(columns["input_source"])
-    final_mode = FlowOutputMode(columns["output_mode"])
-    carried = frozenset(
-        column
-        for column in ALL_STEP_READ_COLUMNS - authored
-        if column == "input_bindings"
-        or _read_through_the_saved_channel(
-            column, existing_step, input_source=final_source, output_mode=final_mode
-        )
-    )
-    return FlowDraftCompiledStep.model_validate(
-        {
-            **columns,
-            "plan_step_ref": step_spec.plan_step_ref,
-            "change_kind": change_kind,
-            "step_order": step_order,
-            "assistant_id": existing_step.assistant_id,
-            "saved_step": existing_step,
-            "carried_columns": carried,
-        }
-    )
-
-
-def _read_through_the_saved_channel(
-    column: ConfigColumn,
-    existing_step: FlowStep,
-    *,
-    input_source: FlowInputSource,
-    output_mode: FlowOutputMode,
-) -> bool:
-    """Whether the step, run in the modes given, reads its saved `column` at
-    the sites it read when saved. Only then are the column's reads the saved
-    ones; under a mode the step leaves, it is configuration of a mode the step
-    does not run."""
-
-    config = getattr(existing_step, column)
-    saved, final = (
-        _saved_channel(column, config, existing_step),
-        _saved_channel(
-            column,
-            config,
-            existing_step,
-            input_source=input_source,
-            output_mode=output_mode,
-        ),
-    )
-    return (None if saved is None else saved.sites) == (
-        None if final is None else final.sites
     )

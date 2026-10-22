@@ -7,18 +7,17 @@ import pytest
 
 from eneo.flows.application.flow_authoring_command import (
     CreateFlowAuthoringCommand,
-    EditFlowAuthoringCommand,
     FlowAuthoringCommandService,
     FlowPackageAuthoringOrigin,
 )
 from eneo.flows.application.flow_draft_materialization import (
+    FlowDraftChangeSet,
     FlowDraftMaterializationResult,
     compile_flow_draft_changeset,
 )
 from eneo.flows.application.flow_draft_materialization_executor import (
     FlowDraftMaterializer,
 )
-from eneo.flows.domain.flow import Flow, FlowStep
 from eneo.flows.flow_authoring_spec import (
     MAX_FLOW_AUTHORING_STEPS,
     AssistantSpec,
@@ -64,18 +63,10 @@ async def test_apply_uses_origin_binding_source() -> None:
 
 
 @pytest.mark.anyio
-async def test_prepare_rejects_create_command_with_existing_step_ref() -> None:
+async def test_a_create_naming_an_existing_step_is_refused_before_any_write() -> None:
     with pytest.raises(BadRequestException) as exc_info:
-        await FlowAuthoringCommandService().prepare(
-            command=CreateFlowAuthoringCommand(
-                space_id=uuid4(),
-                spec=_spec(existing_step_ref="existing_step_1"),
-                origin=FlowPackageAuthoringOrigin(
-                    package_id="se.demo.flow",
-                    package_version="1.0.0",
-                    content_checksum="sha256:abc",
-                ),
-            ),
+        await FlowAuthoringCommandService(materializer=_RecordingMaterializer()).apply(
+            command=_command(_spec(existing_step_ref="existing_step_1")),
             flow_service=SimpleNamespace(),
         )
 
@@ -99,21 +90,13 @@ async def test_prepare_rejects_create_command_with_existing_step_ref() -> None:
         ),
     ],
 )
-async def test_prepare_rejects_unresolved_canonical_resource_refs(
+async def test_unresolved_canonical_resource_refs_are_refused_before_any_write(
     assistant_spec: AssistantSpec,
     expected_slot_ref: str,
 ) -> None:
     with pytest.raises(BadRequestException) as exc_info:
-        await FlowAuthoringCommandService().prepare(
-            command=CreateFlowAuthoringCommand(
-                space_id=uuid4(),
-                spec=_spec(assistant_spec=assistant_spec),
-                origin=FlowPackageAuthoringOrigin(
-                    package_id="se.demo.flow",
-                    package_version="1.0.0",
-                    content_checksum="sha256:abc",
-                ),
-            ),
+        await FlowAuthoringCommandService(materializer=_RecordingMaterializer()).apply(
+            command=_command(_spec(assistant_spec=assistant_spec)),
             flow_service=SimpleNamespace(),
         )
 
@@ -122,28 +105,25 @@ async def test_prepare_rejects_unresolved_canonical_resource_refs(
 
 
 @pytest.mark.anyio
-async def test_prepare_accepts_bound_canonical_resource_refs() -> None:
-    prepared = await FlowAuthoringCommandService().prepare(
-        command=CreateFlowAuthoringCommand(
-            space_id=uuid4(),
-            spec=_spec(
+async def test_bound_canonical_resource_refs_are_handed_to_the_materializer() -> None:
+    materializer = _RecordingMaterializer()
+    binding = _resource_binding()
+
+    await FlowAuthoringCommandService(materializer=materializer).apply(
+        command=_command(
+            _spec(
                 assistant_spec=AssistantSpec(
                     instructions="Use model.",
                     model_ref="model.default",
                 )
             ),
-            origin=FlowPackageAuthoringOrigin(
-                package_id="se.demo.flow",
-                package_version="1.0.0",
-                content_checksum="sha256:abc",
-            ),
-            resource_bindings=(_resource_binding(),),
+            resource_bindings=(binding,),
         ),
-        flow_service=SimpleNamespace(),
+        flow_service=_flow_service_with_transaction(active=True),
     )
 
-    assert prepared.preview.resource_bindings_count == 1
-    assert prepared.preview.assistants_to_create == 1
+    assert materializer.kwargs["resource_bindings"] == (binding,)
+    assert len(materializer.changeset.assistants_to_create) == 1
 
 
 def _spec_with_steps(count: int) -> FlowDraftSpecCore:
@@ -164,26 +144,17 @@ def _spec_with_steps(count: int) -> FlowDraftSpecCore:
 
 
 @pytest.mark.anyio
-async def test_prepare_refuses_a_spec_over_the_step_limit_before_any_write() -> None:
-    def command(count: int) -> CreateFlowAuthoringCommand:
-        return CreateFlowAuthoringCommand(
-            space_id=uuid4(),
-            spec=_spec_with_steps(count),
-            origin=FlowPackageAuthoringOrigin(
-                package_id="se.demo.flow",
-                package_version="1.0.0",
-                content_checksum="sha256:abc",
-            ),
-        )
-
-    prepared = await FlowAuthoringCommandService().prepare(
-        command=command(MAX_FLOW_AUTHORING_STEPS), flow_service=SimpleNamespace()
+async def test_a_spec_over_the_step_limit_is_refused_before_any_write() -> None:
+    materializer = _RecordingMaterializer()
+    await FlowAuthoringCommandService(materializer=materializer).apply(
+        command=_command(_spec_with_steps(MAX_FLOW_AUTHORING_STEPS)),
+        flow_service=_flow_service_with_transaction(active=True),
     )
-    assert prepared.preview.steps_created == MAX_FLOW_AUTHORING_STEPS
+    assert len(materializer.changeset.compiled_steps) == MAX_FLOW_AUTHORING_STEPS
 
     with pytest.raises(BadRequestException) as exc_info:
-        await FlowAuthoringCommandService().prepare(
-            command=command(MAX_FLOW_AUTHORING_STEPS + 1),
+        await FlowAuthoringCommandService(materializer=_RecordingMaterializer()).apply(
+            command=_command(_spec_with_steps(MAX_FLOW_AUTHORING_STEPS + 1)),
             flow_service=SimpleNamespace(),
         )
 
@@ -191,128 +162,54 @@ async def test_prepare_refuses_a_spec_over_the_step_limit_before_any_write() -> 
 
 
 @pytest.mark.anyio
-async def test_prepare_counts_a_removed_step_without_claiming_its_shared_assistant() -> (
-    None
-):
-    shared_assistant_id = uuid4()
-    flow = Flow(
-        id=uuid4(),
-        tenant_id=uuid4(),
-        space_id=uuid4(),
-        name="Flow",
-        description="",
-        steps=[
-            FlowStep(
-                id=uuid4(),
-                flow_id=uuid4(),
-                tenant_id=uuid4(),
-                assistant_id=shared_assistant_id,
-                step_order=order,
-                user_description=f"Step {order}",
-                input_source="flow_input",
-                input_type="text",
-                output_mode="pass_through",
-                output_type="text",
-            )
-            for order in (1, 2)
-        ],
-    )
+async def test_a_transcription_step_is_created_without_its_model_ref() -> None:
+    materializer = _RecordingMaterializer()
 
-    async def get_flow(flow_id: UUID) -> Flow:
-        assert flow_id == flow.id
-        return flow
-
-    prepared = await FlowAuthoringCommandService().prepare(
-        command=EditFlowAuthoringCommand(
-            space_id=flow.space_id,
-            flow_id=flow.id,
-            expected_revision=flow.draft_revision,
-            spec=_spec(existing_step_ref="existing_step_1"),
-            removed_existing_step_refs=frozenset({"existing_step_2"}),
-            updated_existing_step_refs=frozenset(),
-            updated_assistant_fields={},
-            updated_step_fields={},
-            origin=FlowPackageAuthoringOrigin(
-                package_id="se.demo.flow",
-                package_version="1.0.0",
-                content_checksum="sha256:abc",
-            ),
-        ),
-        flow_service=SimpleNamespace(get_flow=get_flow),
-    )
-
-    # The removed step's assistant stays because step 1 still uses it, so no
-    # count may claim an assistant deletion.
-    preview = prepared.preview
-    assert (
-        preview.steps_created,
-        preview.steps_updated,
-        preview.steps_removed,
-        preview.assistants_to_create,
-        preview.assistants_to_update,
-    ) == (0, 0, 1, 0, 0)
-
-
-@pytest.mark.anyio
-async def test_prepare_allows_transcribe_only_after_model_ref_normalization() -> None:
-    prepared = await FlowAuthoringCommandService().prepare(
-        command=CreateFlowAuthoringCommand(
-            space_id=uuid4(),
-            spec=_spec(
+    await FlowAuthoringCommandService(materializer=materializer).apply(
+        command=_command(
+            _spec(
                 assistant_spec=AssistantSpec(
                     instructions="Transcribe.",
                     model_ref="model.default",
                 ),
                 input_type=InputType.AUDIO,
                 output_mode=OutputMode.TRANSCRIBE_ONLY,
-            ),
-            origin=FlowPackageAuthoringOrigin(
-                package_id="se.demo.flow",
-                package_version="1.0.0",
-                content_checksum="sha256:abc",
-            ),
+            )
         ),
-        flow_service=SimpleNamespace(),
+        flow_service=_flow_service_with_transaction(active=True),
     )
 
-    assert prepared.spec.steps[0].assistant_spec.model_ref is None
-    assert prepared.preview.steps_created == 1
+    (created,) = materializer.changeset.assistants_to_create
+    assert created.assistant_spec.model_ref is None
 
 
 @pytest.mark.anyio
-async def test_prepare_and_materializer_use_same_unresolved_resource_error() -> None:
-    command = CreateFlowAuthoringCommand(
-        space_id=uuid4(),
-        spec=_spec(
+async def test_apply_and_materializer_use_same_unresolved_resource_error() -> None:
+    command = _command(
+        _spec(
             assistant_spec=AssistantSpec(
                 instructions="Use model.",
                 model_ref="model.default",
             )
-        ),
-        origin=FlowPackageAuthoringOrigin(
-            package_id="se.demo.flow",
-            package_version="1.0.0",
-            content_checksum="sha256:abc",
-        ),
+        )
     )
 
-    with pytest.raises(BadRequestException) as prepare_error:
-        await FlowAuthoringCommandService().prepare(
+    with pytest.raises(BadRequestException) as apply_error:
+        await FlowAuthoringCommandService(materializer=_RecordingMaterializer()).apply(
             command=command,
             flow_service=SimpleNamespace(),
         )
 
     with pytest.raises(BadRequestException) as materializer_error:
         await FlowDraftMaterializer().execute(
-            changeset=compile_flow_draft_changeset(command.spec, None),
+            changeset=compile_flow_draft_changeset(command.spec),
             flow_service=SimpleNamespace(),
             space_id=command.space_id,
-            flow_id=None,
             binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
         )
 
-    assert prepare_error.value.code == materializer_error.value.code
-    assert prepare_error.value.context == materializer_error.value.context
+    assert apply_error.value.code == materializer_error.value.code
+    assert apply_error.value.context == materializer_error.value.context
 
 
 @pytest.mark.anyio
@@ -403,14 +300,39 @@ class _RecordingMaterializer:
     def __init__(self, *, flow_id: UUID | None = None) -> None:
         self.flow_id = flow_id or uuid4()
         self.binding_source: FlowResourceBindingSource | None = None
+        self.kwargs: dict[str, object] = {}
+
+    @property
+    def changeset(self) -> FlowDraftChangeSet:
+        changeset = self.kwargs["changeset"]
+        assert isinstance(changeset, FlowDraftChangeSet)
+        return changeset
 
     async def execute(self, **kwargs: object) -> FlowDraftMaterializationResult:
-        self.binding_source = kwargs["binding_source"]
+        self.kwargs = kwargs
+        binding_source = kwargs["binding_source"]
+        assert isinstance(binding_source, FlowResourceBindingSource)
+        self.binding_source = binding_source
         return FlowDraftMaterializationResult(
             flow_id=self.flow_id,
             flow_name="Flow",
             draft_revision=1,
             steps_created=1,
-            steps_updated=0,
-            steps_removed=0,
         )
+
+
+def _command(
+    spec: FlowDraftSpecCore,
+    *,
+    resource_bindings: tuple[LocalResourceBinding, ...] = (),
+) -> CreateFlowAuthoringCommand:
+    return CreateFlowAuthoringCommand(
+        space_id=uuid4(),
+        spec=spec,
+        origin=FlowPackageAuthoringOrigin(
+            package_id="se.demo.flow",
+            package_version="1.0.0",
+            content_checksum="sha256:abc",
+        ),
+        resource_bindings=resource_bindings,
+    )

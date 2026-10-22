@@ -1,7 +1,6 @@
 """What each way of writing a draft Flow does with the values it does not state.
 
-A sparse edit (the authoring command) writes the step columns it names and
-carries every other column from the saved row. A full replace (create) gives an
+A create through the authoring command (a flow package install) gives an
 omitted column its default. A manual update (`PATCH /api/v1/flows/{id}/`)
 replaces the steps it sends and keeps what it omits at the flow level. Each
 case writes against a real database and reads the rows back with plain SQL.
@@ -15,7 +14,6 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
-from pydantic import ValidationError
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.audit.application.audit_service import AuditService
@@ -28,7 +26,6 @@ from eneo.database.tables.transcription_services_table import (
 from eneo.flows.application import flow_authoring_operations
 from eneo.flows.application.flow_authoring_command import (
     CreateFlowAuthoringCommand,
-    EditFlowAuthoringCommand,
     FlowAuthoringCommandService,
     FlowPackageAuthoringOrigin,
 )
@@ -36,32 +33,22 @@ from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_authoring_spec import (
     AssistantSpec,
     FlowDraftSpecCore,
-    FormFieldSpec,
     InputSource,
     InputType,
     OutputMode,
     OutputType,
     StepSpec,
 )
-from eneo.json_types import JsonValue
 from eneo.main.models import ModelId
 from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
-from eneo.settings.encryption_service import EncryptionService
 from eneo.users.user import UserUpdate
 from tests.integration.flows.flow_seed_support import (
-    ENCRYPTION_KEY,
     ROW_COLUMNS,
     Row,
-    flow_service_encryption,
-    flow_space,
-    saved_three_step_flow,
     set_step_columns,
     step_rows,
-)
-from tests.integration.flows.flow_seed_support import (
-    Saved as _RowsSaved,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -171,21 +158,6 @@ _SAVED_TWO: dict[str, Any] = {
     "output_config": {"citation_mode": "off"},
     "review_policy": {"mode": "view", "expires_after_seconds": 3600},
 }
-# A value an edit may write in each column of step 2. The input contract can
-# only be the projection of the read, so its written value is the saved one.
-_WRITTEN: dict[str, Any] = {
-    "user_description": "Granska",
-    "input_bindings": _reads_answer("Svaret"),
-    "input_contract": _READ_ANSWER,
-    "output_contract": {
-        "type": "object",
-        "properties": {"svar": {"type": "string"}, "motivering": {"type": "string"}},
-        "required": ["svar"],
-    },
-    "input_config": {"retrieval": {"top_k": 5}},
-    "output_config": {"citation_mode": "off", "anteckning": "ny"},
-    "review_policy": {"mode": "edit", "expires_after_seconds": 7200},
-}
 _NULLABLE = (
     "input_bindings",
     "input_contract",
@@ -229,391 +201,14 @@ async def typed(client, db_container, admin_user, patch_auth_service_jwt) -> Sav
     )
 
 
-def _spec_step(order: int, **columns: Any) -> StepSpec:
-    """A saved step as a sparse caller states it: its ref, and only what the
-    caller chose to put in each column."""
-
-    columns.setdefault(
-        "input_source",
-        InputSource.FLOW_INPUT if order == 1 else InputSource.PREVIOUS_STEP,
-    )
-    return StepSpec(
-        plan_step_ref=f"p{order}",
-        existing_step_ref=f"existing_step_{order}",
-        name=columns.pop("name", f"Steg {order}"),
-        assistant_spec=AssistantSpec(instructions="Gör uppgiften."),
-        **columns,
-    )
-
-
-def _typed_spec(step_two: StepSpec) -> FlowDraftSpecCore:
-    return FlowDraftSpecCore(
-        flow_name="Skrivregler",
-        flow_description="Läser, bedömer, skriver.",
-        steps=[
-            _spec_step(1, output_type=OutputType.JSON),
-            step_two,
-            _spec_step(3, input_source=InputSource.PREVIOUS_STEP),
-        ],
-    )
-
-
 def _origin() -> FlowPackageAuthoringOrigin:
     return FlowPackageAuthoringOrigin(
         package_id="paket", package_version="1", content_checksum="0" * 64
     )
 
 
-def _edit_command(
-    saved: Saved,
-    spec: FlowDraftSpecCore,
-    step_fields: dict[str, set[str]],
-    assistant_fields: dict[str, set[str]] | None = None,
-) -> EditFlowAuthoringCommand:
-    """The command a sparse caller sends: the steps it changes, and per step
-    the columns and assistant fields it writes."""
-
-    return EditFlowAuthoringCommand.model_validate(
-        {
-            "space_id": saved.space_id,
-            "flow_id": saved.flow_id,
-            "expected_revision": saved.revision,
-            "spec": spec,
-            "removed_existing_step_refs": frozenset(),
-            "updated_existing_step_refs": frozenset(
-                {*step_fields, *(assistant_fields or {})}
-            ),
-            "updated_assistant_fields": {
-                ref: frozenset(fields)
-                for ref, fields in (assistant_fields or {}).items()
-            },
-            "updated_step_fields": {
-                ref: frozenset(fields) for ref, fields in step_fields.items()
-            },
-            "origin": _origin(),
-        }
-    )
-
-
-async def _apply(db_container, command: EditFlowAuthoringCommand) -> None:
-    async with db_container() as container:
-        await FlowAuthoringCommandService().apply(
-            command=command,
-            flow_service=container.flow_service(),
-        )
-
-
 def _differing(before: Row, after: Row) -> set[str]:
     return {column for column in ROW_COLUMNS if before[column] != after[column]}
-
-
-def _step_two(column: str, fill: str) -> StepSpec:
-    """Step 2 naming `column` with its written value; every other column holds
-    None (`fill="none"`) or a written value of its own (`fill="other"`)."""
-
-    unnamed = (lambda c: _WRITTEN[c]) if fill == "other" else (lambda c: None)
-    values = {c: _WRITTEN[c] if c == column else unnamed(c) for c in _NULLABLE}
-    name = (
-        _WRITTEN["user_description"]
-        if column == "user_description" or fill == "other"
-        else "Ett annat namn"
-    )
-    return _spec_step(
-        2,
-        name=name,
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.JSON,
-        output_type=OutputType.JSON,
-        **values,
-    )
-
-
-@pytest.mark.parametrize("fill", ["none", "other"])
-@pytest.mark.parametrize("column", ["user_description", *_NULLABLE])
-async def test_a_sparse_edit_writes_only_the_column_it_names(
-    db_container, typed: Saved, column: str, fill: str
-) -> None:
-    before = await step_rows(db_container, typed.flow_id)
-
-    await _apply(
-        db_container,
-        _edit_command(
-            typed,
-            _typed_spec(_step_two(column, fill)),
-            {"existing_step_2": {column}},
-        ),
-    )
-    after = await step_rows(db_container, typed.flow_id)
-
-    assert after[0] == before[0] and after[2] == before[2]
-    written = column if before[1][column] != _WRITTEN[column] else None
-    differing = _differing(before[1], after[1])
-    assert differing - {"updated_at"} == ({written} if written else set())
-    assert ("updated_at" in differing) == bool(written)
-    if written:
-        assert after[1][column] == _WRITTEN[column]
-
-
-# A structured read and its contract stand or fall together, so they are
-# cleared together; every other nullable column is cleared alone.
-_CLEARS = [
-    ("input_bindings", "input_contract"),
-    ("output_contract",),
-    ("input_config",),
-    ("output_config",),
-    ("review_policy",),
-]
-
-
-@pytest.mark.parametrize("columns", _CLEARS, ids=["+".join(c) for c in _CLEARS])
-async def test_naming_a_nullable_column_with_null_clears_it(
-    db_container, typed: Saved, columns: tuple[str, ...]
-) -> None:
-    """Every other column holds its saved value in the spec, as a caller that
-    starts from the saved flow sends it. The output config keeps its mode and
-    type, so nothing but the named null can clear it."""
-
-    before = await step_rows(db_container, typed.flow_id)
-    named = set(columns)
-    values = {c: None if c in named else _SAVED_TWO[c] for c in _NULLABLE}
-    step_two = _spec_step(
-        2,
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.JSON,
-        output_type=OutputType.JSON,
-        **values,
-    )
-
-    await _apply(
-        db_container,
-        _edit_command(typed, _typed_spec(step_two), {"existing_step_2": named}),
-    )
-    after = await step_rows(db_container, typed.flow_id)
-
-    assert {c: after[1][c] for c in named} == dict.fromkeys(named)
-    assert _differing(before[1], after[1]) == named | {"updated_at"}
-    assert after[0] == before[0] and after[2] == before[2]
-
-
-_UPLOAD_OUTPUT = {
-    "audio": ("transcribe_only", "text"),
-    "document": ("pass_through", "text"),
-    "file": ("pass_through", "text"),
-}
-
-
-async def test_an_edit_naming_only_assistant_fields_writes_no_step_row(
-    db_container, typed: Saved
-) -> None:
-    before = await step_rows(db_container, typed.flow_id)
-    step_two = _spec_step(
-        2,
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.JSON,
-        output_type=OutputType.JSON,
-    ).model_copy(
-        update={"assistant_spec": AssistantSpec(instructions="Bedöm svaret noga.")}
-    )
-
-    await _apply(
-        db_container,
-        _edit_command(
-            typed,
-            _typed_spec(step_two),
-            {},
-            assistant_fields={"existing_step_2": {"instructions"}},
-        ),
-    )
-
-    assert await step_rows(db_container, typed.flow_id) == before
-    async with db_container() as container:
-        service = container.flow_service()
-        flow = await service.get_flow(typed.flow_id)
-        snapshots = await service.get_flow_assistant_snapshots(flow)
-    assert snapshots[flow.steps[1].assistant_id].instructions == "Bedöm svaret noga."
-
-
-async def test_a_command_naming_a_column_no_layer_owns_is_refused_before_any_write(
-    db_container, typed: Saved
-) -> None:
-    """`timeout_seconds` is a column of the row, but not one an edit writes:
-    no assistant field and no step column, so the command does not exist."""
-
-    before = await step_rows(db_container, typed.flow_id)
-    step_two = _spec_step(
-        2,
-        input_source=InputSource.PREVIOUS_STEP,
-        input_type=InputType.JSON,
-        output_type=OutputType.JSON,
-    )
-
-    with pytest.raises(ValidationError, match="updated_step_fields"):
-        _edit_command(
-            typed, _typed_spec(step_two), {"existing_step_2": {"timeout_seconds"}}
-        )
-
-    assert await step_rows(db_container, typed.flow_id) == before
-    async with db_container() as container:
-        flow = await container.flow_service().get_flow(typed.flow_id)
-    assert flow.draft_revision == typed.revision
-
-
-async def test_a_sparse_edit_keeps_a_manual_only_speaker_mapping_step(
-    client, db_container, admin_user, patch_auth_service_jwt
-) -> None:
-    """Speaker mapping is authored by hand; an edit that renames the step
-    keeps its configuration and its required review as saved."""
-
-    space_id, headers = await _space(client, db_container, admin_user)
-    saved = await _flow(
-        db_container,
-        space_id,
-        headers,
-        [
-            {
-                "input_source": "flow_input",
-                "input_type": "text",
-                "output_mode": "pass_through",
-                "output_type": "text",
-            },
-            {
-                "input_source": "previous_step",
-                "input_type": "text",
-                "output_mode": "speaker_mapping",
-                "output_type": "json",
-                "output_config": {"speaker_mapping": {"infer_names": True}},
-                "review_policy": {"mode": "edit"},
-            },
-        ],
-    )
-    before = await step_rows(db_container, saved.flow_id)
-    spec = FlowDraftSpecCore(
-        flow_name="Skrivregler",
-        flow_description="Läser, bedömer, skriver.",
-        steps=[
-            _spec_step(1),
-            _spec_step(
-                2,
-                name="Talare",
-                input_source=InputSource.PREVIOUS_STEP,
-                output_mode=OutputMode.SPEAKER_MAPPING,
-                output_type=OutputType.JSON,
-            ),
-        ],
-    )
-
-    await _apply(
-        db_container,
-        _edit_command(saved, spec, {"existing_step_2": {"user_description"}}),
-    )
-    after = await step_rows(db_container, saved.flow_id)
-
-    assert _differing(before[1], after[1]) == {"user_description", "updated_at"}
-    assert after[0] == before[0]
-
-
-@pytest.mark.parametrize(
-    "active", [True, False], ids=["encryption on", "encryption off"]
-)
-async def test_a_sparse_edit_keeps_the_stored_credential_of_the_step_it_names(
-    db_container, typed: Saved, active: bool
-) -> None:
-    """Step 3 delivers its answer over HTTP with a stored token. The edit
-    renames it: the token is the stored ciphertext, byte for byte, neither
-    encrypted again nor refused as newly typed."""
-
-    with flow_service_encryption(True):
-        async with db_container() as container:
-            service = container.flow_service()
-            flow = await service.get_flow(typed.flow_id)
-            steps = list(flow.steps)
-            steps[2] = steps[2].model_copy(
-                update={
-                    "output_mode": "http_post",
-                    "output_config": {
-                        "url": "https://example.test/svar",
-                        "auth": {"mode": "bearer_token", "token": "lagrad-hemlighet"},
-                        "timeout_seconds": 30,
-                    },
-                }
-            )
-            flow = await service.update_flow(
-                flow_id=flow.id, steps=steps, expected_revision=flow.draft_revision
-            )
-    typed.revision = flow.draft_revision
-    before = await step_rows(db_container, typed.flow_id)
-    stored = before[2]["output_config"]["auth"]["token"]
-    assert EncryptionService(ENCRYPTION_KEY).decrypt(stored) == "lagrad-hemlighet"
-    spec = _typed_spec(
-        _spec_step(
-            2,
-            input_source=InputSource.PREVIOUS_STEP,
-            input_type=InputType.JSON,
-            output_type=OutputType.JSON,
-        )
-    )
-    steps = list(spec.steps)
-    steps[2] = _spec_step(3, name="Skicka", input_source=InputSource.PREVIOUS_STEP)
-    spec = spec.model_copy(update={"steps": steps})
-
-    with flow_service_encryption(active):
-        await _apply(
-            db_container,
-            _edit_command(typed, spec, {"existing_step_3": {"user_description"}}),
-        )
-    after = await step_rows(db_container, typed.flow_id)
-
-    assert after[2]["output_config"]["auth"]["token"] == stored
-    assert after[2]["output_config"] == before[2]["output_config"]
-    assert _differing(before[2], after[2]) == {"user_description", "updated_at"}
-    assert after[:2] == before[:2]
-
-
-@pytest.fixture
-async def three_steps(client, db_container, admin_user, patch_auth_service_jwt):
-    return await saved_three_step_flow(
-        db_container, await flow_space(client, db_container, admin_user)
-    )
-
-
-_LEGACY_FORM = {
-    "fields": [
-        {"name": "epost", "type": "email", "label": "E-post", "required": True},
-        {"name": "namn", "type": "string", "label": "Namn", "order": 2},
-        {"name": "beskrivning", "type": "textarea"},
-    ]
-}
-
-
-async def _saved_metadata(db_container, flow_id: UUID) -> dict[str, JsonValue] | None:
-    async with db_container() as container:
-        return await container.session().scalar(
-            sa.select(Flows.metadata_json).where(Flows.id == flow_id)
-        )
-
-
-_EPOST = FormFieldSpec(name="epost", type="text", label="E-post", required=True)
-_NAMN = FormFieldSpec(name="namn", type="text", label="Namn")
-_BESKRIVNING = FormFieldSpec(name="beskrivning", type="text", label="Beskrivning")
-_LABELLED_LEGACY_FORM = {
-    "fields": [
-        {
-            "name": "epost",
-            "type": "email",
-            "label": "E-post",
-            "required": True,
-            "order": 1,
-        },
-        {
-            "name": "namn",
-            "type": "string",
-            "label": "Namn",
-            "required": False,
-            "order": 2,
-        },
-        {"name": "beskrivning", "type": "textarea", "label": "Beskrivning", "order": 3},
-    ]
-}
 
 
 # A full replace gives every column it omits its default.
@@ -664,8 +259,8 @@ async def test_a_create_persists_the_default_of_every_column_it_omits(
 async def test_an_audio_flow_a_command_creates_gets_the_default_speaker_service(
     client, db_container, admin_user, patch_auth_service_jwt
 ) -> None:
-    """The AI Builder's draft and an installed package go through the same
-    draft write as the editor, so they get the organisation's default too."""
+    """An installed package goes through the same draft write as the editor,
+    so it gets the organisation's default too."""
     space_id, _ = await _space(client, db_container, admin_user)
     async with db_container() as container:
         session = container.session()
@@ -922,63 +517,6 @@ async def test_a_patch_without_a_revision_is_fenced_on_the_revision_it_was_autho
     columns = await _flow_columns(db_container, typed.flow_id)
     assert columns["metadata_json"]["evidence_policy"] == {"allow_export": True}
     assert columns["description"] == "Läser, bedömer, skriver."
-
-
-async def test_a_named_step_whose_producer_moves_keeps_its_credential_beside_the_new_alias(
-    db_container, three_steps: _RowsSaved
-) -> None:
-    """Step 3 delivers over HTTP to a URL that reads step 2. The edit adds a
-    step before step 2 and renames step 3: its config is carried with the alias
-    renumbered, so it is no longer the stored one, and its token is still the
-    stored credential, not encrypted a second time."""
-
-    with flow_service_encryption(True) as encryption:
-        async with db_container() as container:
-            service = container.flow_service()
-            flow = await service.get_flow(three_steps.flow_id)
-            steps = list(flow.steps)
-            steps[2] = steps[2].model_copy(
-                update={
-                    "output_mode": "http_post",
-                    "output_config": {
-                        "url": "https://example.test/{{step_2.output.text}}",
-                        "auth": {"mode": "bearer_token", "token": "lagrad-hemlighet"},
-                        "timeout_seconds": 30,
-                    },
-                }
-            )
-            flow = await service.update_flow(
-                flow_id=flow.id, steps=steps, expected_revision=flow.draft_revision
-            )
-        stored = (await step_rows(db_container, three_steps.flow_id))[2][
-            "output_config"
-        ]
-        spec = FlowDraftSpecCore(
-            flow_name="Tre steg",
-            flow_description="Läser, bedömer, skriver.",
-            steps=[
-                _spec_step(1),
-                _new_step_spec("ny", input_source=InputSource.PREVIOUS_STEP),
-                _spec_step(2),
-                _spec_step(3, name="Skicka"),
-            ],
-        )
-        await _apply(
-            db_container,
-            _edit_command(
-                Saved(
-                    three_steps.space_id, three_steps.flow_id, flow.draft_revision, {}
-                ),
-                spec,
-                {"existing_step_3": {"user_description"}},
-            ),
-        )
-    written = (await step_rows(db_container, three_steps.flow_id))[3]["output_config"]
-
-    assert encryption is not None
-    assert written["auth"]["token"] == stored["auth"]["token"]
-    assert encryption.decrypt(written["auth"]["token"]) == "lagrad-hemlighet"
-    assert written["url"] == "https://example.test/{{step_3.output.text}}"
 
 
 # Reads keep their meaning through a full replacement, renames and form changes.

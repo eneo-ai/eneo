@@ -253,6 +253,16 @@ grants the permissions to Owner roles again. Audit action types and the
 `ai_builder` resource binding source stay for the rows already written;
 `metadata_json.ai_builder` is dropped when a flow is read and refused on write.
 
+What only the builder used went after it: the edit path of the authoring
+command (it now only creates a draft, as a flow package install does), the
+edit compilation and saved-step carrying of the draft materialization, the
+authoring snapshot, the template attachment (a package's template imports
+stay, in `flow_template_import_materialization.py`), the origin policy, the
+capability manifest's `proposable_new` projection and the unused
+`observability/failure_events.py`. The template asset service's
+`create_from_existing_attached_file` has no production caller left; tests
+still use it to make an asset from a saved file.
+
 ## Documents
 
 The tool runtime renders Markdown to Word and PDF and fills Word templates; the

@@ -1,20 +1,16 @@
-# Pre-merge cleanup (refactor/flows-tidy-ai-builder → develop)
+# Pre-merge cleanup (feat/flows-core-integration → develop)
 
-This branch carries program and measurement material that helped build the Flow AI Builder but does not belong
-in `develop` as-is. Before opening the merge PR, resolve every row below: remove it, or record the decision to
-keep it (and where it moves). Agents: flag any PR from this branch that still contains a "Remove" path.
+This branch still carries program material from building the flow core that does not belong in `develop` as-is.
+Before opening the merge PR, resolve every row below: remove it, or record the decision to keep it (and where it
+moves). The AI Builder, its benchmark tooling, its goal notes and its handoff note are already gone.
 
 Check what is still present:
 
 ```bash
-git ls-files -- PRE_MERGE_CLEANUP.md .beads docs/goals VERIFICATION-HANDOFF.md \
-  'backend/scripts/ai_builder_*' backend/scripts/fixtures/ai_builder_battle \
-  backend/scripts/check_flow_run_evidence_acceptance.py scripts/gate-local \
-  'backend/tests/unittests/flows/ai_builder/test_ai_builder_api_battle_harness.py' \
-  'backend/tests/unittests/flows/ai_builder/test_ai_builder_battle_*' \
-  'backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_capability.py' \
-  'backend/tests/unittests/flows/ai_builder/test_ai_builder_edit_expectation.py' \
-  'backend/tests/unittests/flows/ai_builder/test_ai_builder_release_gate.py' | awk -F/ '{print $1"/"$2"/"$3}' | sort | uniq -c
+git ls-files -- PRE_MERGE_CLEANUP.md .beads docs/goals \
+  backend/scripts/check_flow_run_evidence_acceptance.py \
+  backend/tests/unittests/flows/test_flow_run_evidence_acceptance_script.py \
+  | awk -F/ '{print $1"/"$2"/"$3}' | sort | uniq -c
 ```
 
 ## Remove (program tracking, not product)
@@ -23,27 +19,13 @@ git ls-files -- PRE_MERGE_CLEANUP.md .beads docs/goals VERIFICATION-HANDOFF.md \
 |---|---|
 | `PRE_MERGE_CLEANUP.md` | This file. |
 | `.beads/` | The Beads issue board used to run the program. |
-| `docs/goals/` (`eneo-flows-and-builder-9-of-10/`, `flows-scale/`) | Program goals, state and measurement receipts. |
-| `VERIFICATION-HANDOFF.md` | A session handoff note. |
-| `backend/scripts/ai_builder_release_matrix_state.json`, `backend/scripts/ai_builder_token_baseline_r17.json` | Stored measurement state. |
-| `scripts/gate-local/` | Local gate helpers for the program. |
+| `docs/goals/flows-scale/` | A measurement receipt of the flow scale work. |
 
-## Decide: the Builder benchmark (measurement tooling)
-
-The benchmark measures the Builder end to end against a live stack (create and edit cases, executed output,
-preservation). It found real product defects on 2026-09-26. Either keep it as supported dev tooling, moved under
-one directory (for example `backend/tools/builder_benchmark/`) with a README, or remove it and keep it in a
-separate repository.
+## Decide: the evidence acceptance checker
 
 | Path | Notes |
 |---|---|
-| `backend/scripts/ai_builder_api_battle_test.py`, `ai_builder_receipt.py`, `ai_builder_release_gate.py`, `ai_builder_battle_compare.py`, `ai_builder_edit_expectation.py`, `ai_builder_edit_capability.py` (+ `_manifest.json`) | The harness and its gates. |
-| `backend/scripts/ai_builder_*_cases.json`, `backend/scripts/fixtures/ai_builder_battle/` | Case corpora and fixtures. |
-| `backend/scripts/ai_builder_corpus_coverage.py`, `ai_builder_municipal_policy.json`, `ai_builder_municipal_sources.json` (+ `test_ai_builder_corpus_coverage.py`) | Tier coverage validator, the municipal policy, and pinned real-world sources. |
-| `backend/scripts/ai_builder_fixture_render.py`, `generate_battle_fixtures.py`, `fixtures/ai_builder_battle/specs/` and the documents rendered from those specs (+ `test_ai_builder_battle_fixture_specs.py`), and the `.gitignore` exception that tracks that `specs/` directory | Fixture content specs, one renderer per format, and the read-only drift check (`generate_battle_fixtures.py --check`). |
-| `backend/scripts/ai_builder_failure_summary.py` | Referenced by the docs-site `ai-builder.mdx`; update the page if it goes. |
-| `backend/scripts/check_flow_run_evidence_acceptance.py` | Evidence acceptance checker. |
-| `backend/tests/unittests/flows/ai_builder/test_ai_builder_api_battle_harness.py`, `test_ai_builder_battle_*`, `test_ai_builder_edit_capability.py`, `test_ai_builder_edit_expectation.py`, `test_ai_builder_release_gate.py` | Tests of the tooling; they follow the tooling's decision. |
+| `backend/scripts/check_flow_run_evidence_acceptance.py` (+ `backend/tests/unittests/flows/test_flow_run_evidence_acceptance_script.py`) | Checks a run's evidence export against the acceptance rules. Keep it as supported dev tooling with a note in `docs/flows/`, or remove it with its test. |
 
 ## Keep (product tooling; verify, then delete this section)
 
@@ -53,8 +35,8 @@ check) and `build_standard_docx_templates.py` (documented in `docs/flows/flow-de
 
 ## Review, probably keep
 
-`docs/engineering/*`, `docs/flows/*`, `docs/design/ai-builder/*`, `docs/adr/*`, `docs/runbooks/flows.md` and the
-docs-site pages: product and engineering documentation, reviewed with the usual docs rules in `AGENTS.md`.
+`docs/engineering/*`, `docs/flows/*`, `docs/adr/*`, `docs/runbooks/flows.md` and the docs-site pages: product and
+engineering documentation, reviewed with the usual docs rules in `AGENTS.md`.
 
 ## Never in any PR (outside the repository)
 

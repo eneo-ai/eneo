@@ -292,7 +292,7 @@ async def _create_review_pause_runtime_context(
                     )
                     for step in build_flow_steps(
                         compiled_steps=compile_flow_draft_changeset(
-                            compiled_spec, None
+                            compiled_spec
                         ).compiled_steps,
                         ref_to_assistant_id={
                             step.plan_step_ref: assistant.id

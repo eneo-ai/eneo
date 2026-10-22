@@ -6,6 +6,13 @@
 > is summarized in [Flow architecture](../flows/architecture.md). The remaining
 > decisions explain historical intent and must not override the shipped
 > implementation.
+>
+> The Flow AI Builder has been removed: flows are authored in the editor, in a
+> chat over the loopback `flows` MCP tools, and through flow packages
+> ([core integration](../flows/core-integration.md#ai-builder-removed)).
+> Migration `202610212200` drops its tables. Decisions 5, 6, 9 and 10, and
+> every other mention of the Builder, its sessions, plans, attachments and
+> apply lifecycle, describe a surface that no longer exists.
 
 - **Status:** Accepted
 - **Date:** 2026-07-11
