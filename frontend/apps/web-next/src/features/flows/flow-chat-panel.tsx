@@ -5,7 +5,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { Switch } from "@/components/astryx/switch";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -21,6 +21,7 @@ import { partnerCompletionModel } from "@/features/chat/partner-model";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
 import { useSpace } from "@/features/spaces/use-space";
 import { useSpaceDisplayName } from "@/features/spaces/frame/space-header";
+import { FlowChatModelPickers, NewConversationButton } from "./flow-chat-controls";
 import {
   authoringChatQueryOptions,
   flowKeys,
@@ -49,6 +50,8 @@ type ChatPanelProps = {
  * The switch between reading and editing. In edit mode the chat's tools may
  * change the draft; it is fenced on the revision on screen, so a switch made
  * while the flow had changed is refused and the page reloads the flow.
+ * Turning it on after a pause may start a new conversation: the panel then
+ * switches to it and says so.
  */
 function EditModeSwitch({
   chat,
@@ -60,23 +63,34 @@ function EditModeSwitch({
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
+  const chatKey = flowKeys.authoringChat(chat.flow_id);
+  // Whether the last saved switch started a new conversation.
+  const restarted = useRef(false);
   const [editing, setEditing] = useSettingSwitch(
-    `flow-authoring-mode:${chat.session_id}`,
+    `flow-authoring-mode:${chat.flow_id}`,
     chat.editing,
-    (enabled) =>
-      setAuthoringMode(chat, {
+    async (enabled) => {
+      // A press queued behind a save that started a new conversation uses it.
+      const current = queryClient.getQueryData<FlowAuthoringChat>(chatKey) ?? chat;
+      const updated = await setAuthoringMode(current, {
         editing: enabled,
         // The revision on screen when the switch was pressed, not one fetched later.
         expectedRevision:
           queryClient.getQueryData<FlowPublic>(flowKeys.flow(chat.flow_id))?.draft_revision ?? 0
-      }),
+      });
+      restarted.current = updated.session_id !== current.session_id;
+      queryClient.setQueryData(chatKey, updated);
+      return updated;
+    },
     {
       onSaved: (enabled) => {
-        queryClient.setQueryData<FlowAuthoringChat>(
-          flowKeys.authoringChat(chat.flow_id),
-          (current) => (current ? { ...current, editing: enabled } : current)
+        announce(
+          restarted.current
+            ? t("flows_chat_new_conversation_after_pause")
+            : enabled
+              ? t("flows_chat_editing_on")
+              : t("flows_chat_editing_off")
         );
-        announce(enabled ? t("flows_chat_editing_on") : t("flows_chat_editing_off"));
       },
       onError: (error) => onRefused(error, t("flows_notice_mode_not_changed"))
     }
@@ -230,7 +244,15 @@ export function FlowChatPanel({ flow, onFlowMayHaveChanged, onRefused }: ChatPan
             {t("flows_chat_intro")}
           </Text>
         </div>
-        {chat.data ? <EditModeSwitch chat={chat.data} onRefused={onRefused} /> : null}
+        {chat.data ? (
+          <>
+            <EditModeSwitch chat={chat.data} onRefused={onRefused} />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <FlowChatModelPickers chat={chat.data} onRefused={onRefused} />
+              <NewConversationButton chat={chat.data} onRefused={onRefused} />
+            </div>
+          </>
+        ) : null}
       </div>
       {chat.data ? (
         <AuthoringConversation chat={chat.data} onFlowMayHaveChanged={onFlowMayHaveChanged} />

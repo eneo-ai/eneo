@@ -41,6 +41,8 @@ import {
 import type { FieldKit } from "./flow-settings-fields";
 import { problemMessage, refusalMessage } from "./flow-settings-format";
 import {
+  AUTHORING_CHAT_MODEL_FIELD_ID,
+  AuthoringChatSection,
   DocumentSection,
   EvidenceTextSection,
   ExportSection,
@@ -99,6 +101,13 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
     setDraft((current) => ({ ...current, [key]: value }));
     setStatus(null);
     if (refusal?.field === key) setRefusal({ ...refusal, field: null });
+  }
+
+  /** Focus a field; the model picker's trigger is a button, not an input. */
+  function focusField(key: FieldKey) {
+    if (focus.focus(key)) return;
+    if (key === "completion_model_id")
+      document.getElementById(AUTHORING_CHAT_MODEL_FIELD_ID)?.focus();
   }
 
   const kit: FieldKit = {
@@ -166,7 +175,7 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
       setBusy(null);
       setRefusal({ field, message: refusalMessage(error, t), partial: savedSections.length > 0 });
     });
-    if (field) focus.focus(field);
+    if (field) focusField(field);
   }
 
   async function runAction<Section extends FlowSettingsSection>(
@@ -270,6 +279,7 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
       <EvidenceTextSection kit={kit} />
       <DocumentSection kit={kit} isPinnedOpen={changedOrWrong(DOCUMENT_RENDER_KEYS)} />
       <ExportSection kit={kit} />
+      <AuthoringChatSection kit={kit} />
 
       <div className="bg-ax-card border-ax-border rounded-ax-container shadow-ax-high sticky bottom-4 z-20 flex flex-col gap-3 border p-4">
         {refusal ? (

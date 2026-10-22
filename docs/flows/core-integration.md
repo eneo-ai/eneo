@@ -123,6 +123,37 @@ Changing a published flow or one of its step assistants is refused with
 `flow_unpublish_required`, unpublishing a flow that is not published with
 `flow_not_published`.
 
+### The authoring chat's model and conversations
+
+`flow_authoring_chats` keeps the person's own `completion_model_id` and
+`reasoning_effort` (migration `202610221100`; null follows the default) and
+`mode_changed_at`. `PATCH /flows/{id}/authoring-chat/{session_id}/` (operation
+`update_flow_authoring_chat`) takes them next to `editing`; the model is
+refused unless the space allows it the way it allows an assistant's model
+(`space.is_completion_model_available`, the space's classification split) and
+it supports tool calling, with `flow_authoring_model_not_in_space`,
+`flow_authoring_model_below_classification`,
+`flow_authoring_model_without_tools` and
+`flow_authoring_reasoning_effort_unsupported`. The organisation default lives in
+`tenants.flow_settings["authoring_chat"]` (`/settings/flow-authoring-chat-policy`,
+refused without tool calling). `_sync_assistant` runs when a chat is opened and
+after every PATCH: the hidden assistant gets the core's instructions, the model
+in force (own choice, else the organisation default where the space allows it,
+else `space.select_default_completion_model` over the space's tool models) and
+the reasoning effort when that model offers it, and only what differs is
+written.
+
+The row points at the chat's current session. Entering edit mode after
+`FLOW_AUTHORING_CHAT_IDLE_MINUTES` without a question in the current session or
+a mode change, and `POST .../conversations/`, point it at a new session of the
+same hidden assistant (audited as `flow_authoring_conversation_started`). An
+empty conversation is never replaced by the pause rule. Earlier sessions stay
+linked by the assistant; `load_authoring_chat` admits only the current one, so
+the ask path and the loopback tools refuse an old session and it never reaches
+the model. web-next does not list earlier conversations (decision 2026-10-22):
+the flow, its revisions and the audit log are the record, and an old
+conversation's suggestions may no longer match the flow.
+
 ### Caller permissions on a flow
 
 `FlowPublic` and `FlowSparsePublic` carry `permissions` (`can_edit`,

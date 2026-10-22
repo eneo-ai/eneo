@@ -459,6 +459,12 @@ value and a comment.
     the same limit as an uploaded recording. To set up a model for live
     transcription, see [Set up live transcription](/guides/transcription#set-up-live-transcription).
 
+    **Flows authoring chat:**
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `FLOW_AUTHORING_CHAT_IDLE_MINUTES` | `45` | Minutes without a question or an edit mode change after which turning on a flow chat's edit mode starts a new conversation. Earlier conversations are kept but no longer answered. Must be greater than zero |
+
     **Flows HTTP destinations:**
 
     | Variable | Default | Description |

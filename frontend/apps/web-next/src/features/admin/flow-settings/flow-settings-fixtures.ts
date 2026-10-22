@@ -1,6 +1,6 @@
 import type { FlowSettings } from "./flow-settings";
 
-/** Test-only: resolved flow settings as the six endpoints answer them. */
+/** Test-only: resolved flow settings as the seven endpoints answer them. */
 export function flowSettingsFixture(overrides: Partial<FlowSettings> = {}): FlowSettings {
   return {
     inputLimits: {
@@ -52,6 +52,7 @@ export function flowSettingsFixture(overrides: Partial<FlowSettings> = {}): Flow
       allow_run_owner_raw_export_class3: false,
       allow_service_key_raw_export_class3: false
     },
+    authoringChat: { completion_model_id: null },
     ...overrides
   };
 }

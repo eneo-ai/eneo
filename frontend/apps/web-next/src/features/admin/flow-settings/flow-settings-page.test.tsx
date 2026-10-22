@@ -18,7 +18,33 @@ const PATHS: Record<string, keyof FlowSettings> = {
   "/api/v1/settings/flow-mapped-execution-policy": "mapped",
   "/api/v1/settings/flow-rag-evidence-policy": "ragEvidence",
   "/api/v1/settings/flow-document-render-limits": "documentRender",
-  "/api/v1/settings/flow-evidence-policy": "evidence"
+  "/api/v1/settings/flow-evidence-policy": "evidence",
+  "/api/v1/settings/flow-authoring-chat-policy": "authoringChat"
+};
+
+const MODELS_PATH = "/api/v1/ai-models/";
+const catalogModel = (id: string, nickname: string, tools: boolean) => ({
+  id,
+  name: id,
+  nickname,
+  org: "OpenAI",
+  max_input_tokens: 128_000,
+  max_output_tokens: 4096,
+  is_deprecated: false,
+  is_org_enabled: true,
+  can_access: true,
+  vision: false,
+  reasoning: false,
+  supports_tool_calling: tools
+});
+const CATALOG = {
+  completion_models: [
+    catalogModel("gpt-strong", "Stark modell", true),
+    catalogModel("gpt-plain", "Utan verktyg", false)
+  ],
+  embedding_models: [],
+  transcription_models: [],
+  image_models: []
 };
 
 const ok = (data: unknown) => Promise.resolve({ data, response: new Response("{}") });
@@ -29,7 +55,9 @@ let current: FlowSettings;
 
 function serve(settings: FlowSettings) {
   current = settings;
-  api.GET.mockImplementation((path: string) => ok(current[PATHS[path]!]));
+  api.GET.mockImplementation((path: string) =>
+    ok(path === MODELS_PATH ? CATALOG : current[PATHS[path]!])
+  );
   // Answers a PATCH with the section and the body applied, as the backend resolves it.
   api.PATCH.mockImplementation((path: string, { body }: { body: Record<string, unknown> }) => {
     const section = PATHS[path]!;
@@ -74,7 +102,8 @@ describe("flow settings page", { timeout: 20_000 }, () => {
       "Steg som körs en gång per fil",
       "Sparad källtext",
       "Genererade dokument",
-      "Bevisunderlag från känsliga ytor"
+      "Bevisunderlag från känsliga ytor",
+      "Flödesassistenten"
     ]) {
       expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
     }
@@ -110,6 +139,51 @@ describe("flow settings page", { timeout: 20_000 }, () => {
     ]);
     // Said in the save bar and announced politely.
     expect(await screen.findAllByText("Flödesinställningarna är sparade.")).not.toHaveLength(0);
+  });
+
+  it("saves the flow chat's default model from the models that can use tools", async () => {
+    await show();
+    const picker = await screen.findByRole("button", {
+      name: "Modell för flödesassistenten: Ytans standardmodell"
+    });
+    fireEvent.click(picker);
+    const options = await screen.findAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      expect.stringContaining("Ytans standardmodell"),
+      expect.stringContaining("Stark modell")
+    ]);
+    fireEvent.click(screen.getByRole("option", { name: /Stark modell/ }));
+    expect(screen.getByText("1 osparad ändring")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Spara ändringar" }));
+
+    await waitFor(() =>
+      expect(api.PATCH).toHaveBeenCalledWith("/api/v1/settings/flow-authoring-chat-policy", {
+        body: { completion_model_id: "gpt-strong" }
+      })
+    );
+    expect(await screen.findAllByText("Flödesinställningarna är sparade.")).not.toHaveLength(0);
+  });
+
+  it("shows a refused default model at its field and moves focus there", async () => {
+    await show();
+    fireEvent.click(await screen.findByRole("button", { name: /^Modell för flödesassistenten: / }));
+    fireEvent.click(await screen.findByRole("option", { name: /Stark modell/ }));
+    api.PATCH.mockImplementation(() =>
+      refused(400, {
+        message: "The flow chat needs a model that supports tools.",
+        code: "flow_authoring_model_without_tools"
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Spara ändringar" }));
+
+    const picker = await screen.findByRole("button", {
+      name: "Modell för flödesassistenten: Stark modell"
+    });
+    await waitFor(() => expect(document.activeElement).toBe(picker));
+    expect(screen.getAllByText(/Modellen kan inte använda verktyg/).length).toBeGreaterThan(0);
+    await expectNoAxeViolations(document.body);
   });
 
   it("asks before a link in the app leaves unsaved changes behind", async () => {
