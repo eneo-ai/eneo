@@ -56,6 +56,12 @@ export function makeRunSummary(overrides: Partial<RunSummary> = {}): RunSummary 
     status: "completed",
     purpose: "production",
     principal_type: "user",
+    started_by: {
+      principal_type: "user",
+      id: "user-1",
+      display_name: "Anna Lind",
+      email: "anna.lind@example.se"
+    },
     revision: 3,
     dispatch_attempt_count: 1,
     created_at: "2026-10-21T08:00:00Z",

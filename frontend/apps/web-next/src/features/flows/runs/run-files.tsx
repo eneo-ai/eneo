@@ -7,6 +7,7 @@ import { useState } from "react";
 import { EneoApiError } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import { toast } from "@/lib/toast";
+import type { StepInputFile } from "./run-format";
 import { refusalText } from "./run-messages";
 import { artifactDownloadPath, inputFileDownloadPath, type RunResultFile } from "./runs-api";
 
@@ -115,30 +116,47 @@ export function RunFiles({
 }
 
 /**
- * The files a step received. The step result carries only their ids, so
- * they are numbered; the download keeps each file's own name.
+ * The files a step received, by name and type, each with a download. A file
+ * the step result does not name is numbered instead.
  */
 export function RunInputFiles({
   flowId,
   runId,
-  fileIds,
+  files,
   label
 }: {
   flowId: string;
   runId: string;
-  fileIds: readonly string[];
+  files: readonly StepInputFile[];
   label: string;
 }) {
   const t = useTranslations();
-  if (fileIds.length === 0) return null;
+  if (files.length === 0) return null;
   return (
-    <ul aria-label={label} className="m-0 flex flex-wrap gap-2 p-0">
-      {fileIds.map((fileId, index) => (
-        <li key={fileId} className="list-none">
+    <ul aria-label={label} className="m-0 flex flex-col p-0">
+      {files.map((file, index) => (
+        <li
+          key={file.fileId}
+          className="border-ax-border flex flex-wrap items-center gap-3 border-t py-2 first:border-t-0"
+        >
+          <FileText className="text-ax-text-secondary size-4 shrink-0" aria-hidden="true" />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="text-ax-text text-sm break-words">
+              {file.name ?? t("flow_runs_input_file_short", { number: index + 1 })}
+            </span>
+            {file.typeName ? (
+              <span className="text-ax-text-secondary text-xs">{file.typeName}</span>
+            ) : null}
+          </span>
           <DownloadButton
-            label={t("flow_runs_input_file_download", { number: index + 1 })}
-            visible={t("flow_runs_input_file_short", { number: index + 1 })}
-            getPath={() => inputFileDownloadPath(flowId, runId, fileId)}
+            label={
+              file.name
+                ? t("flow_runs_file_download", { name: file.name })
+                : t("flow_runs_input_file_download", { number: index + 1 })
+            }
+            visible={t("flow_runs_file_download_short")}
+            getPath={() => inputFileDownloadPath(flowId, runId, file.fileId)}
+            name={file.name ?? undefined}
           />
         </li>
       ))}

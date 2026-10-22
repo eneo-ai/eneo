@@ -228,6 +228,7 @@ async def list_flow_run_steps(
                 assembler.to_step_public(
                     view.step_result,
                     runtime_input_file_ids=view.runtime_input_file_ids,
+                    runtime_input_files=view.runtime_input_files,
                     runtime_input_single_recording=view.step_result.step_id
                     in single_recording_steps,
                     result_files=view.result_files,

@@ -77,6 +77,7 @@ from eneo.flows.application.flow_run_evidence_export_summary import (
     EvidenceExportSummary,
 )
 from eneo.flows.assistant_execution_snapshot import assistant_execution_surface_hash
+from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import (
     FlowRunReviewCheckpointEdit,
     FlowStepRetrievalPolicy,
@@ -98,6 +99,10 @@ from eneo.flows.domain.provider_call import (
 from eneo.flows.domain.rag_evidence import (
     RecordedPassageContent,
     RetrievedSource,
+)
+from eneo.flows.domain.review_reject_reason import (
+    FLOW_REVIEW_REJECT_REASON_MAX_LENGTH,
+    normalize_review_reject_reason,
 )
 from eneo.flows.domain.step_output import StepMaterialReference, parse_step_text_aliases
 from eneo.flows.domain.text_processing import TextProcessingConfig
@@ -358,12 +363,20 @@ FLOW_PUBLIC_EXAMPLE: dict[str, Any] = {
 }
 
 
+FLOW_RUN_STARTED_BY_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "principal_type": "user",
+    "id": "00000000-0000-0000-0000-000000000030",
+    "display_name": "Alex Example",
+    "email": "alex.example@example.com",
+}
+
 FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE: dict[str, Any] = {
     "id": "00000000-0000-0000-0000-000000000301",
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "flow_version": 3,
     "purpose": "production",
-    "principal_type": None,
+    "principal_type": "user",
+    "started_by": FLOW_RUN_STARTED_BY_PUBLIC_EXAMPLE,
     "tenant_id": "00000000-0000-0000-0000-000000000010",
     "trace_id": "00000000-0000-0000-0000-000000000302",
     "revision": 1,
@@ -440,6 +453,13 @@ FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
     "input_text_aliases": [],
     "effective_prompt_truncated": False,
     "runtime_input_file_ids": ["00000000-0000-0000-0000-000000000701"],
+    "runtime_input_files": [
+        {
+            "file_id": "00000000-0000-0000-0000-000000000701",
+            "name": "annual-review.mp3",
+            "mimetype": "audio/mpeg",
+        }
+    ],
     "output_payload_json": {"text": "Hello and welcome to the annual review..."},
     "result_files": [],
     "current_attempt_no": 1,
@@ -459,6 +479,15 @@ FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
     "created_at": "2026-03-17T10:05:05Z",
     "updated_at": "2026-03-17T10:05:30Z",
 }
+
+# Evidence step records name their input files inside
+# `input_payload_json.runtime_input.files` instead.
+FLOW_RUN_EVIDENCE_STEP_EXAMPLE: dict[str, Any] = {
+    key: value
+    for key, value in FLOW_RUN_STEP_PUBLIC_EXAMPLE.items()
+    if key != "runtime_input_files"
+}
+
 
 FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE: dict[str, Any] = {
     "run": FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE,
@@ -1352,6 +1381,51 @@ class FlowRunTranscriptionUsagePublic(BaseModel):
     )
 
 
+class FlowRunStartedByPublic(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": FLOW_RUN_STARTED_BY_PUBLIC_EXAMPLE,
+            "examples": [
+                FLOW_RUN_STARTED_BY_PUBLIC_EXAMPLE,
+                {
+                    "principal_type": "service_key",
+                    "id": "00000000-0000-0000-0000-000000000040",
+                    "display_name": "Case intake integration",
+                    "email": None,
+                },
+            ],
+        },
+    )
+
+    principal_type: PrincipalType = Field(
+        description=(
+            "Who started the run: `user` for a person (also through a module "
+            "session or a personal API key) or `service_key` for a service key."
+        ),
+    )
+    id: UUID = Field(
+        description=(
+            "For `user`, the user's id. For `service_key`, the id of the "
+            "service principal behind the key, which stays the same when the "
+            "key is rotated. Compare it with your own id to tell whether you "
+            "started the run: retrying a failed run requires the principal "
+            "that started it."
+        ),
+    )
+    display_name: str | None = Field(
+        description=(
+            "Name to show for the starter: the user's username, else their "
+            "email, or the service key's name. Null when the account can no "
+            "longer be read."
+        ),
+    )
+    email: str | None = Field(
+        default=None,
+        description="The user's email. Always null for a service key.",
+    )
+
+
 class FlowRunSummaryPublic(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
@@ -1377,6 +1451,16 @@ class FlowRunSummaryPublic(BaseModel):
         description=(
             "Principal kind that created the run, once resolved. Service-key "
             "callers only see runs their own key created."
+        ),
+    )
+    started_by: FlowRunStartedByPublic | None = Field(
+        default=None,
+        description=(
+            "Who started the run, by id and name. It is shown to every caller "
+            "who may see the run: the starter, tenant admins, and admins and "
+            "owners of the flow's space. A service key sees only runs it "
+            "started, so only its own name. Null when the run has no resolved "
+            "principal."
         ),
     )
     tenant_id: UUID = Field(description="Tenant that owns the run and its data.")
@@ -1778,13 +1862,28 @@ class FlowRunReviewCheckpointRejectRequest(BaseModel):
         ),
     )
     reason: str = Field(
+        min_length=1,
+        max_length=FLOW_REVIEW_REJECT_REASON_MAX_LENGTH,
         description=(
             "Human-readable rejection reason stored with the run audit trail. "
-            "Blank reasons return `400` with code `flow_review_reject_reason_required`; "
-            "reasons longer than 1024 characters return `400` with code "
-            "`flow_review_reject_reason_too_long`."
+            "Surrounding whitespace is trimmed before the reason is checked and "
+            "stored. Blank reasons return `400` with code "
+            "`flow_review_reject_reason_required`; reasons longer than 1024 "
+            "characters (Unicode code points) after trimming return `400` with "
+            "code `flow_review_reject_reason_too_long` and "
+            "`context.max_length`."
         ),
+        examples=["The summary names the wrong case number."],
     )
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def _normalize_reason(cls, value: object) -> object:
+        # Before the length constraints, so a refusal keeps the flow's own
+        # `400` codes instead of a generic validation error.
+        if isinstance(value, str):
+            return normalize_review_reject_reason(value)
+        return value
 
 
 class FlowRunReviewCheckpointResumeRequest(BaseModel):
@@ -1839,6 +1938,30 @@ def _empty_runtime_input_file_ids() -> list[UUID]:
     return []
 
 
+class FlowRunStepInputFilePublic(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "file_id": "00000000-0000-0000-0000-000000000701",
+                "name": "annual-review.mp3",
+                "mimetype": "audio/mpeg",
+            }
+        },
+    )
+
+    file_id: UUID = Field(
+        description=(
+            "The file's id, as listed in `runtime_input_file_ids`. Download it "
+            "with the run's input-file signed URL endpoint."
+        ),
+    )
+    name: str = Field(description="The file's name as it was uploaded.")
+    mimetype: str | None = Field(
+        description="The file's MIME type, or null when none was recorded.",
+    )
+
+
 class FlowRunStepPublic(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
@@ -1858,6 +1981,15 @@ class FlowRunStepPublic(BaseModel):
         default_factory=_empty_runtime_input_file_ids,
         description=(
             "File ids submitted as runtime input for the current attempt of this step result."
+        ),
+    )
+    runtime_input_files: list[FlowRunStepInputFilePublic] | None = Field(
+        default=None,
+        description=(
+            "Name and MIME type of each file in `runtime_input_file_ids`, in the "
+            "same order, for files in the run's tenant. Read by the step outputs "
+            "endpoint; null in evidence reads, which carry the same names in "
+            "`input_payload_json.runtime_input.files`."
         ),
     )
     runtime_input_single_recording: bool = Field(
@@ -2714,7 +2846,7 @@ class FlowRunEvidenceResponse(BaseModel):
                     "current_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
                 },
                 "definition_snapshot": FLOW_PUBLISHED_DEFINITION_EXAMPLE,
-                "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
+                "step_results": [FLOW_RUN_EVIDENCE_STEP_EXAMPLE],
                 "step_attempts": [],
                 "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
                 "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
@@ -2747,13 +2879,57 @@ class FlowRunEvidenceResponse(BaseModel):
     )
 
 
+FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE: dict[str, Any] = {
+    # The bundle carries the persisted run, which names its
+    # principal by id only.
+    "run": {
+        key: value
+        for key, value in FLOW_RUN_PUBLIC_EXAMPLE.items()
+        if key != "started_by"
+    },
+    "definition_integrity": {
+        "status": "verified",
+        "expected_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
+        "current_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
+    },
+    "definition_snapshot": FLOW_PUBLISHED_DEFINITION_EXAMPLE,
+    "step_results": [FLOW_RUN_EVIDENCE_STEP_EXAMPLE],
+    "step_attempts": [],
+    "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
+    "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
+    "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
+    "provider_calls": PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
+    "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
+}
+
+
+def _without_null_members(value: object) -> object:
+    if isinstance(value, Mapping):
+        members = cast(Mapping[str, object], value)
+        return {
+            key: _without_null_members(item)
+            for key, item in members.items()
+            if item is not None
+        }
+    if isinstance(value, list):
+        return [_without_null_members(item) for item in cast(list[object], value)]
+    return value
+
+
+# The published OpenAPI document drops null members from examples, so the
+# example hash covers the bundle as a reader of the document sees it.
+FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE_CONTENT_HASH = canonical_json_hash(
+    _without_null_members(FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE)
+)
+
+
 class FlowRunEvidenceExportResponse(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
                 "schema_version": "flow-evidence-export.v18",
                 "generated_at": "2026-03-31T12:00:00Z",
-                "content_hash": "e66736c443a4e643e6c96219794d20973c17376047c8754bf57b7bd48e255cb7",
+                "content_hash": FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE_CONTENT_HASH,
                 "manifest": {
                     "schema_version": "flow-evidence-export.v18",
                     "app_version": "DEV",
@@ -2765,7 +2941,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "flow_id": "f6f2d8fa-2d47-4d08-a7a9-2fef0b37c5ec",
                     "trace_id": "52907745-7678-40a8-9d1c-18af6b1a9fd8",
                     "flow_version": 3,
-                    "content_hash": "e66736c443a4e643e6c96219794d20973c17376047c8754bf57b7bd48e255cb7",
+                    "content_hash": FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE_CONTENT_HASH,
                     "content_hash_input": "redacted",
                     "exported_at": "2026-03-31T12:00:00Z",
                     "actor": {
@@ -3105,22 +3281,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                         }
                     ],
                 },
-                "bundle": {
-                    "run": FLOW_RUN_PUBLIC_EXAMPLE,
-                    "definition_integrity": {
-                        "status": "verified",
-                        "expected_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
-                        "current_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
-                    },
-                    "definition_snapshot": FLOW_PUBLISHED_DEFINITION_EXAMPLE,
-                    "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
-                    "step_attempts": [],
-                    "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
-                    "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
-                    "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
-                    "provider_calls": PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
-                    "debug_export": FLOW_RUN_DEBUG_EXPORT_EXAMPLE,
-                },
+                "bundle": FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE,
             }
         }
     )
@@ -3458,8 +3619,21 @@ class TranscriptWordPublic(BaseModel):
 
 
 class TranscriptSegmentWordsPublic(BaseModel):
-    speaker_attribution: str | None = None
-    overlap_ids: list[str] = Field(default_factory=list)
+    speaker_attribution: str | None = Field(
+        default=None,
+        description=(
+            "The segment's `speaker_attribution` from the transcript source "
+            "(`provisional` when overlapping speech made the speaker uncertain), "
+            "or null when the speaker service did not mark it."
+        ),
+    )
+    overlap_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The segment's `overlap_ids` from the transcript source: overlaps "
+            "in its speaker review the segment falls in."
+        ),
+    )
 
     segment_index: int = Field(
         ge=0,

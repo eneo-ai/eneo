@@ -7,19 +7,28 @@ import {
   speakerLabels,
   speakerNamesRequest,
   transcriptTargets,
-  type TranscriptCorrections
+  type TranscriptCorrections,
+  type TranscriptSourceSegment
 } from "./transcript";
 
-const raw = [
-  { segment_index: 0, start: 0, end: 4.2, speaker: "SPEAKER_00", text: "Välkomna till mötet." },
+const raw: TranscriptSourceSegment[] = [
+  {
+    segment_index: 0,
+    file_index: 0,
+    start: 0,
+    end: 4.2,
+    speaker: "SPEAKER_00",
+    text: "Välkomna till mötet."
+  },
   {
     segment_index: 1,
+    file_index: 0,
     start: 4.2,
     end: 9,
     speaker: "SPEAKER_01",
     text: "Tack, vi börjar med budgeten."
   },
-  { segment_index: 2, start: 9, end: 12, speaker: "SPEAKER_00", text: "Bra." }
+  { segment_index: 2, file_index: 0, start: 9, end: 12, speaker: "SPEAKER_00", text: "Bra." }
 ];
 
 function corrections(overrides: Partial<TranscriptCorrections> = {}): TranscriptCorrections {
@@ -56,7 +65,7 @@ describe("transcriptTargets", () => {
 
 describe("parseSegments", () => {
   it("reads lines with times, speaker and text", () => {
-    expect(parseSegments(raw)?.[1]).toEqual({
+    expect(parseSegments(raw)[1]).toEqual({
       index: 1,
       fileIndex: 0,
       start: 4.2,
@@ -66,13 +75,17 @@ describe("parseSegments", () => {
     });
   });
 
-  it("refuses a source with a line it cannot place", () => {
-    expect(parseSegments([...raw, { segment_index: 3, text: "Utan tid" }])).toBeNull();
+  it("keeps the file a line belongs to, and reads an end before the start as the start", () => {
+    expect(
+      parseSegments([
+        { segment_index: 3, file_index: 1, start: 5, end: 4, speaker: "", text: "Kort." }
+      ])
+    ).toEqual([{ index: 3, fileIndex: 1, start: 5, end: 5, speaker: null, text: "Kort." }]);
   });
 });
 
 describe("shownSegments", () => {
-  const segments = parseSegments(raw) ?? [];
+  const segments = parseSegments(raw);
 
   it("applies text corrections, whole-line speaker edits and names", () => {
     const shown = shownSegments(

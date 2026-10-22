@@ -55,6 +55,14 @@ from tests.unittests.flows.test_flow_router import (
 )
 
 
+def _stub_run_starters(container: MagicMock) -> None:
+    """The runs in these tests name no starter: no user or key resolves."""
+    starters = AsyncMock()
+    starters.list_users.return_value = {}
+    starters.list_service_principals.return_value = {}
+    container.flow_run_starter_repo.return_value = starters
+
+
 def _record_review_checkpoint_public(monkeypatch, events: list[str]):
     async def _present_review_checkpoint(*, container, checkpoint):
         events.append("present_review_checkpoint")
@@ -274,6 +282,7 @@ async def test_edit_response_marks_citation_summary_stale_without_refetch(monkey
 @pytest.mark.asyncio
 async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypatch):
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     step_id = uuid4()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
@@ -344,6 +353,7 @@ async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypa
 
 def _approve_and_continue_context(monkeypatch, *, accepted: bool):
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(

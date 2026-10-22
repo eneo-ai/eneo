@@ -73,6 +73,14 @@ from tests.unittests.flows.test_flow_router import (
 )
 
 
+def _stub_run_starters(container: MagicMock) -> None:
+    """The runs in these tests name no starter: no user or key resolves."""
+    starters = AsyncMock()
+    starters.list_users.return_value = {}
+    starters.list_service_principals.return_value = {}
+    container.flow_run_starter_repo.return_value = starters
+
+
 @pytest.mark.asyncio
 async def test_get_flow_graph_rejects_scope_mismatch(monkeypatch):
     container = MagicMock()
@@ -999,6 +1007,7 @@ async def test_create_flow_run_rejects_without_tenant_run_permission(monkeypatch
 async def test_tenant_scoped_user_api_key_loads_space_membership_check(monkeypatch):
     """Tenant-scoped user-owned API keys should still respect space visibility rules."""
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     flow = _flow(flow_id)
     run = _run(flow_id=flow_id, tenant_id=flow.tenant_id).model_copy(
@@ -1084,6 +1093,7 @@ async def test_space_scoped_api_key_rejects_wrong_space(monkeypatch):
 async def test_space_scoped_api_key_matching_space_succeeds(monkeypatch):
     """User-owned space-scoped API keys should still load actor context for flow visibility."""
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     flow = _flow(flow_id)
     run = _run(flow_id=flow_id, tenant_id=flow.tenant_id).model_copy(

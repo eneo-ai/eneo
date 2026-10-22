@@ -24,6 +24,7 @@ from eneo.flows.api.flow_models import FLOW_RUN_PUBLIC_EXAMPLE, FlowRunPublic
 from eneo.flows.api.flow_run_concurrency_response import (
     flow_run_concurrency_limit_response,
 )
+from eneo.flows.api.flow_run_started_by import started_by_for_run
 from eneo.flows.api.flow_runtime_paths import FLOW_RUN_TRANSCRIPT_REGENERATION_PATH
 from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
@@ -199,7 +200,10 @@ async def regenerate_flow_run_transcript(
                 TRANSCRIPT_REGENERATION_KEY
             ]
             public = FlowTranscriptRegenerationPublic(
-                run=FlowAssembler().to_run_public(result.run),
+                run=FlowAssembler().to_run_public(
+                    result.run,
+                    started_by=await started_by_for_run(container, result.run),
+                ),
                 created=result.created,
                 source_run_id=provenance["source_run_id"],
                 correction_revision=provenance["correction_revision"],

@@ -102,6 +102,7 @@ describe("FlowRunPage", () => {
     expect(within(first).getByText("Resultat från steg 1")).toBeTruthy();
     expect(within(first).getByText(messages.flow_runs_step_status_completed)).toBeTruthy();
     expect(screen.getByText(/^1\s500 totalt \(1\s200 in, 300 ut\)/)).toBeTruthy();
+    expect(screen.getByText("Startad av Anna Lind")).toBeTruthy();
     expect(screen.queryByRole("button", { name: messages.flow_runs_cancel })).toBeNull();
     await expectNoAxeViolations(container);
   });
@@ -147,6 +148,55 @@ describe("FlowRunPage", () => {
         "Idempotency-Key"
       ]
     ).toBeTruthy();
+  });
+
+  it("names the files a step received, with a download for each", async () => {
+    answerRun(makeRunSummary());
+    state.routes[STEPS] = () => ({
+      body: [
+        makeRunStep(1, {
+          runtime_input_file_ids: ["file-a", "file-b"],
+          runtime_input_files: [
+            { file_id: "file-a", name: "underlag.pdf", mimetype: "application/pdf" }
+          ]
+        }),
+        makeRunStep(2)
+      ]
+    });
+    const { container } = renderRun();
+
+    const first = await screen.findByRole("article", { name: "Steg 1: Sammanfatta" });
+    const files = await within(first).findByRole("list", {
+      name: messages.flow_runs_step_input_files
+    });
+    expect(within(files).getByText("underlag.pdf")).toBeTruthy();
+    expect(within(files).getByText("PDF")).toBeTruthy();
+    expect(within(files).getByText("Fil 2")).toBeTruthy();
+    expect(within(files).getByRole("button", { name: "Ladda ned underlag.pdf" })).toBeTruthy();
+    expect(within(files).getByRole("button", { name: "Ladda ned fil 2" })).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
+  it("says up front that only the one who started a failed run can run it again", async () => {
+    answerRun(
+      makeRunSummary({
+        status: "failed",
+        started_by: {
+          principal_type: "user",
+          id: "user-2",
+          display_name: "Erik Berg",
+          email: "erik.berg@example.se"
+        }
+      })
+    );
+    const { container } = renderRun();
+
+    expect(
+      await screen.findByText(messages.flow_runs_retry_starter_only.replace("{name}", "Erik Berg"))
+    ).toBeTruthy();
+    expect(screen.getByText("Startad av Erik Berg")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: messages.flow_runs_retry })).toBeNull();
+    await expectNoAxeViolations(container);
   });
 
   it("does not offer a retry of a run of an earlier version, and says why", async () => {
@@ -358,6 +408,21 @@ describe("FlowRunPage", () => {
       ).toBeTruthy();
       expect(document.activeElement).toBe(within(panel).getByLabelText(/^Varför avvisar du/));
 
+      // Over the limit is said at the field, without asking the core.
+      fireEvent.change(within(panel).getByLabelText(/^Varför avvisar du/), {
+        target: { value: "x".repeat(1025) }
+      });
+      fireEvent.click(confirm);
+      expect(
+        await within(panel).findByText(
+          messages.flow_runs_review_reject_reason_too_long.replace("{max}", "1024")
+        )
+      ).toBeTruthy();
+      expect(
+        calls("POST /api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/")
+      ).toHaveLength(0);
+      await expectNoAxeViolations(panel);
+
       fireEvent.change(within(panel).getByLabelText(/^Varför avvisar du/), {
         target: { value: "Fel mottagare" }
       });
@@ -419,8 +484,22 @@ describe("FlowRunPage", () => {
           max_response_bytes: 1000000,
           next_segment_index: null,
           segments: [
-            { segment_index: 0, start: 0, end: 3, speaker: "SPEAKER_00", text: "Välkomna." },
-            { segment_index: 1, start: 65, end: 70, speaker: "SPEAKER_01", text: "Tack." }
+            {
+              segment_index: 0,
+              file_index: 0,
+              start: 0,
+              end: 3,
+              speaker: "SPEAKER_00",
+              text: "Välkomna."
+            },
+            {
+              segment_index: 1,
+              file_index: 0,
+              start: 65,
+              end: 70,
+              speaker: "SPEAKER_01",
+              text: "Tack."
+            }
           ]
         }
       });
@@ -458,6 +537,26 @@ describe("FlowRunPage", () => {
       renderRun(["flows_view", "flows_run"]);
       await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
       expect(screen.queryByLabelText("Namn för SPEAKER_00")).toBeNull();
+    });
+
+    it.each([
+      [1, messages.flow_runs_transcript_omitted],
+      [2, messages.flow_runs_transcript_unavailable]
+    ])("says why an omitted transcript (reason %i) has no lines", async (reason, text) => {
+      answerAudioRun();
+      state.routes[SOURCE] = () => ({
+        body: {
+          status: "omitted",
+          run_id: "run-1",
+          step_id: "step-1",
+          attempt_no: 1,
+          reason,
+          bounds: { segments_bytes: 0, detail_bytes: 0, words_bytes: 0, segments_count: 0 }
+        }
+      });
+      renderRun();
+      expect(await screen.findByText(text)).toBeTruthy();
+      expect(screen.queryByRole("list", { name: messages.flow_runs_transcript_lines })).toBeNull();
     });
   });
 });

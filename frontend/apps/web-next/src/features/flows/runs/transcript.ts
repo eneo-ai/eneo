@@ -9,6 +9,17 @@ import type { RunStep } from "./runs-api";
  */
 
 export type TranscriptCorrections = Schema<"FlowTranscriptCorrectionsPublic">;
+export type TranscriptSourceSegment = Schema<"TranscriptSourceSegmentPublic">;
+
+/**
+ * `TranscriptSourceOmissionReason` by name. The wire carries the numbers; the
+ * names are the ones the API documents for them.
+ */
+export const OMISSION_REASON = {
+  TOO_LARGE: 1,
+  NO_SEGMENTS: 2,
+  SEGMENTS_UNAVAILABLE: 3
+} as const satisfies Record<string, Schema<"TranscriptSourceOmissionReason">>;
 
 /** A transcription step of the run and the attempt that owns its transcript. */
 export type TranscriptTarget = { stepId: string; stepOrder: number; attemptNo: number };
@@ -61,28 +72,18 @@ export function transcriptTargets(
 }
 
 /**
- * The structured lines of a transcript source page. The core declares only
- * `segment_index` on a line; the rest (times, speaker, text) is read
- * defensively, and a line without times or text makes the whole source
- * unreadable rather than half shown.
+ * The structured lines of a transcript source page, as the screens read them.
+ * An end before the start is read as the start.
  */
-export function parseSegments(raw: readonly unknown[]): TranscriptSegment[] | null {
-  const segments: TranscriptSegment[] = [];
-  for (const [position, item] of raw.entries()) {
-    if (!isRecord(item)) return null;
-    const start = finite(item.start);
-    const end = finite(item.end);
-    if (start === null || end === null || typeof item.text !== "string") return null;
-    segments.push({
-      index: finite(item.segment_index) ?? position,
-      fileIndex: finite(item.file_index) ?? 0,
-      start,
-      end: Math.max(start, end),
-      speaker: typeof item.speaker === "string" && item.speaker ? item.speaker : null,
-      text: item.text
-    });
-  }
-  return segments;
+export function parseSegments(raw: readonly TranscriptSourceSegment[]): TranscriptSegment[] {
+  return raw.map((item) => ({
+    index: item.segment_index,
+    fileIndex: item.file_index,
+    start: item.start,
+    end: Math.max(item.start, item.end),
+    speaker: item.speaker || null,
+    text: item.text
+  }));
 }
 
 /** A line with the saved corrections applied, and its speaker's shown name. */
