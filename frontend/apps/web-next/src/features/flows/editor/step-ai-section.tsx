@@ -33,13 +33,8 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { formatBytes } from "@/lib/format";
-import {
-  Anchor,
-  EditorSection,
-  FieldMessage,
-  problemStatus,
-  TemplateTextArea
-} from "./editor-fields";
+import { Anchor, EditorSection, FieldMessage, problemStatus } from "./editor-fields";
+import { TemplateTextArea } from "./reference-text-area";
 import { useRecordUpload } from "./editor-uploads";
 import type { FieldProblems } from "./field-problems";
 import {

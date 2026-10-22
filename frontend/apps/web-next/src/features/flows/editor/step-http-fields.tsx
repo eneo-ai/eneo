@@ -15,7 +15,8 @@ import { useId, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { isJsonObject } from "./step-types";
 import { testHttp, type HttpTestResponse } from "./editor-api";
-import { FieldMessage, problemStatus, TemplateTextArea, VariablePicker } from "./editor-fields";
+import { FieldMessage, problemStatus, VariablePicker } from "./editor-fields";
+import { TemplateTextArea } from "./reference-text-area";
 import { describeSaveError } from "./field-problems";
 import {
   httpUrlProblem,

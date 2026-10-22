@@ -1,6 +1,8 @@
+import type { ReadMeaning } from "./request-preview";
 import type { ReviewChoice } from "./step-configs";
 import type { ChainIssue, OutputModeIssue } from "./step-rules";
-import type { InputSource, InputType, OutputMode, OutputType } from "./step-types";
+import type { FlowPublic, InputSource, InputType, OutputMode, OutputType } from "./step-types";
+import type { VariableEntry, VariableGroup } from "./step-variables";
 
 /**
  * Reader-facing names for the core's step values. The enum names reuse the
@@ -81,4 +83,75 @@ export function stepLabel(order: number, name: string | null | undefined, t: T):
   return trimmed
     ? t("flow_step_editor_step_named", { order, name: trimmed })
     : t("flow_step_editor_step_number", { order });
+}
+
+/** What a reference in a template reads, as a chip names it ("Steg 1: Sammanfatta: svaret"). */
+export function meaningLabel(
+  meaning: ReadMeaning,
+  token: string,
+  flow: Pick<FlowPublic, "steps">,
+  t: T
+): string {
+  const step = (order: number) =>
+    stepLabel(order, flow.steps.find((item) => item.step_order === order)?.user_description, t);
+  switch (meaning.kind) {
+    case "form_field":
+      return meaning.label;
+    case "flow_input":
+      return t("flow_editor_tools_preview_read_flow_input");
+    case "upload":
+      return t("flow_step_editor_variable_upload");
+    case "transcription":
+      return t("flow_step_editor_variable_transcription");
+    case "date":
+      return t("flow_step_editor_variable_date");
+    case "step_answer":
+      return t("flow_editor_tools_preview_read_step", {
+        step: step(meaning.order),
+        what: t("flow_step_editor_variable_step_text")
+      });
+    case "step_structured":
+      return t("flow_editor_tools_preview_read_step", {
+        step: step(meaning.order),
+        what: t("flow_step_editor_variable_step_structured")
+      });
+    case "step_field":
+      return t("flow_editor_tools_preview_read_step", {
+        step: step(meaning.order),
+        what: t("flow_step_editor_variable_step_field", { field: meaning.field })
+      });
+    case "missing":
+      return t("flow_editor_tools_preview_read_missing", { order: meaning.order });
+    case "other":
+      return token;
+  }
+}
+
+/** What one reference a step can insert is, as the reference menus name it. */
+export function variableEntryLabel(entry: VariableEntry, t: T): string {
+  switch (entry.kind.type) {
+    case "field":
+      return entry.kind.label;
+    case "upload":
+      return t("flow_step_editor_variable_upload");
+    case "transcription":
+      return t("flow_step_editor_variable_transcription");
+    case "date":
+      return t("flow_step_editor_variable_date");
+    case "previous_step":
+      return t("flow_step_editor_variable_previous_step");
+    case "step_text":
+      return t("flow_step_editor_variable_step_text");
+    case "step_structured":
+      return t("flow_step_editor_variable_step_structured");
+    case "step_field":
+      return t("flow_step_editor_variable_step_field", { field: entry.kind.field });
+  }
+}
+
+/** The heading a group of insertable references has in the reference menus. */
+export function variableGroupTitle(group: VariableGroup, t: T): string {
+  if (group.type === "fields") return t("flow_step_editor_variables_fields");
+  if (group.type === "run") return t("flow_step_editor_variables_run");
+  return stepLabel(group.stepOrder, group.stepName, t);
 }

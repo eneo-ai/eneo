@@ -10,13 +10,8 @@ import { Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Switch } from "@/components/astryx/switch";
 import { TextInput } from "@/components/astryx/text-input";
-import {
-  Anchor,
-  EditorSection,
-  FieldMessage,
-  problemStatus,
-  TemplateTextArea
-} from "./editor-fields";
+import { Anchor, EditorSection, FieldMessage, problemStatus } from "./editor-fields";
+import { TemplateTextArea } from "./reference-text-area";
 import type { FieldProblems } from "./field-problems";
 import { transcriptionEnabled } from "./step-draft";
 import {
