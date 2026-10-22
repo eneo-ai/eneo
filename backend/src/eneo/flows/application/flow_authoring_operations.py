@@ -593,8 +593,12 @@ async def _give_steps_their_copies(
     steps = list(structure.steps)
     for change in copies:
         index = next(
-            index for index, step in enumerate(steps) if step.id == change.step_id
+            (index for index, step in enumerate(steps) if step.id == change.step_id),
+            None,
         )
+        if index is None:
+            # The same edit removes the step.
+            raise NotFoundException("Step not found.")
         copy, _ = await service.copy_reserved_flow_assistant(
             reservation=reservation, assistant_id=change.assistant_id
         )
