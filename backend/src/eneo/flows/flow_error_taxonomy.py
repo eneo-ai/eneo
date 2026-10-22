@@ -1269,9 +1269,9 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     FlowApiErrorCode.LONG_MATERIAL_PARTIAL_COVERAGE: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
-        cause="A step that digests long material read only part of it: time ran out, provider calls failed, notes were cut, or notes did not fit the final call.",
-        consumer_action="Read the long_material record in the failed step's input for the reasons and the sources and segments left out; raise the step's timeout, use a larger-context model or reduce the input before starting a new run.",
-        user_action="Use less material, or ask a flow editor to raise the step's time limit or choose a larger-context model.",
+        cause="A step that read long material in parts covered only part of it: time ran out, calls failed or met a ceiling, or notes were cut.",
+        consumer_action="Read the long_material record in the failed step's input payload for the reasons and the sources left out before changing the timeout, model or input.",
+        user_action="Use less material, or ask a flow editor to raise the step's time limit, choose a larger-context model or add a review.",
     ),
     FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED: _entry(
         category="Typed input/output",

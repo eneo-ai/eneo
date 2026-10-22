@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from eneo.flows.domain.flow import FlowRun
+from eneo.flows.domain.long_material import long_material_config
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     resolve_flow_mapped_execution_policy,
@@ -23,6 +24,9 @@ from eneo.flows.runtime.step_handlers.base import (
     ListStepInputFileIdsFn,
     PrepareAssistantStepFn,
     PreviewAssistantStepFn,
+)
+from eneo.flows.runtime.step_handlers.long_material import (
+    complete_with_long_material,
 )
 from eneo.flows.runtime.step_handlers.mapped_completion import (
     execute_section_completion,
@@ -150,11 +154,20 @@ class PassThroughStepHandler:
             version_metadata=version_metadata,
             attempt_no=attempt_no,
         )
-        output = await complete_step_execution(
-            step=step,
-            run=run,
-            state=state,
-            prepared=prepared_step.prepared,
-            deps=prepared_step.deps,
-        )
+        if long_material_config(step.input_config) is not None:
+            output = await complete_with_long_material(
+                step=step,
+                run=run,
+                state=state,
+                prepared_step=prepared_step,
+                mapped_execution_policy=self.mapped_execution_policy,
+            )
+        else:
+            output = await complete_step_execution(
+                step=step,
+                run=run,
+                state=state,
+                prepared=prepared_step.prepared,
+                deps=prepared_step.deps,
+            )
         return StepExecutionResult(output=output)

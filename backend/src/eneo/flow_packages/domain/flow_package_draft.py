@@ -22,6 +22,7 @@ from eneo.flows.domain.flow import (
     FlowRuntimeInputConfig,
     FlowStepRetrievalPolicy,
 )
+from eneo.flows.domain.long_material import LongMaterialMode
 from eneo.flows.domain.text_processing import TextProcessingMode
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, StepSpec
 
@@ -45,14 +46,23 @@ class FlowPackageTextProcessingConfig(BaseModel):
     mode: TextProcessingMode
 
 
+class FlowPackageLongMaterialConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    mode: LongMaterialMode
+
+
 class FlowPackageStepInputConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     runtime_input: FlowPackageRuntimeInputConfig | None = None
     item_map: FlowPackageItemMapConfig | None = None
     text_processing: FlowPackageTextProcessingConfig | None = None
+    long_material: FlowPackageLongMaterialConfig | None = None
 
-    @field_validator("runtime_input", "item_map", "text_processing", mode="before")
+    @field_validator(
+        "runtime_input", "item_map", "text_processing", "long_material", mode="before"
+    )
     @classmethod
     def normalize_disabled_literal(cls, value: object) -> object:
         return None if value is False else value

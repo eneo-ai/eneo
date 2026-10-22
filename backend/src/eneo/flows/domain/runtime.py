@@ -159,6 +159,8 @@ class StepExecutionOutput:
     raw_completion_text: str | None = None
     materials: tuple[ResolvedStepMaterial, ...] = ()
     max_inline_text_bytes: int = 0
+    # The coverage record of a step that digested long material.
+    long_material: dict[str, Any] | None = None
 
 
 @dataclass

@@ -89,6 +89,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     attempt_tool_call_state,
     parse_flow_step_attempt_input,
 )
+from eneo.flows.domain.long_material import LongMaterialConfig, LongMaterialCoverage
 from eneo.flows.domain.one_line_text import ONE_LINE_TEXT_MAX_CHARS
 from eneo.flows.domain.provider_call import (
     PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE,
@@ -610,6 +611,14 @@ class FlowStepInputConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     text_processing: TextProcessingConfig | None = None
+    long_material: LongMaterialConfig | None = Field(
+        default=None,
+        description=(
+            "How the step reads input larger than its model's input capacity. "
+            "Unset, such input fails the step with "
+            "`typed_io_input_exceeds_model_window`."
+        ),
+    )
 
 
 def _validate_step_input_config(value: object) -> dict[str, Any]:
@@ -1853,6 +1862,20 @@ class FlowRunStepPublic(BaseModel):
         ),
     )
     model_parameters_json: dict[str, Any] | None = None
+    long_material: LongMaterialCoverage | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "long_material",
+            AliasPath("input_payload_json", "long_material"),
+        ),
+        description=(
+            "Set when the step read input larger than its model's capacity in "
+            "parts (`input_config.long_material`): what the digest covered, why "
+            "anything was left out and which sources. Partial coverage either "
+            "failed the step or, on a step with a review, is the reviewer's to "
+            "judge. Token counts of the step include every digest call."
+        ),
+    )
     num_tokens_input: int | None = None
     num_tokens_output: int | None = None
     error_code: NullablePublicTerminalErrorCode = Field(

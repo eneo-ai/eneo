@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from hashlib import sha256
 from typing import Any, Final, Literal
@@ -31,8 +31,9 @@ from eneo.completion_models.application.map_reduce import (
     DigestItem,
     DigestPlan,
     DigestResult,
+    map_prompt,
 )
-from eneo.flows.domain.provider_call import DigestCallInput, DigestCallStage
+from eneo.flows.domain.provider_call import DigestCallInput
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_provenance import sum_complete_token_counts
 from eneo.main.exceptions import TypedIOValidationException
@@ -44,21 +45,26 @@ class LongMaterialMode(StrEnum):
     DIGEST = "digest"
 
 
+LONG_MATERIAL_MODE_DESCRIPTION: Final = (
+    "`digest`: when the step's input exceeds its model's input capacity, read "
+    "it in segments with the step's own model and assistant, merge the notes, "
+    "and write the answer over them under the step's output contract. The "
+    "step result records the coverage in `input_payload_json.long_material`. "
+    "Partial coverage fails the step with `flow_long_material_partial_coverage`, "
+    "or, on a step with a review policy, completes with a warning for the "
+    "reviewer. Input that fits is sent unchanged. Needs a completion step "
+    "(`pass_through` or `http_post`) without `text_processing`, `item_map` or "
+    "per-source runtime input, and the organization's mapped provider-call "
+    "ceiling bounds the calls."
+)
+
+
 class LongMaterialConfig(BaseModel):
     """How a step reads input that does not fit its model in one request."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    mode: LongMaterialMode = Field(
-        description=(
-            "`digest`: when the step's input exceeds the model's input capacity, "
-            "read it in segments with the step's own model, merge the notes, and "
-            "answer over them under the step's output contract. Coverage is "
-            "recorded on the step; partial coverage fails the step with "
-            "`flow_long_material_partial_coverage`, or goes to the step's review "
-            "when it has one. Input that fits is sent unchanged."
-        )
-    )
+    mode: LongMaterialMode = Field(description=LONG_MATERIAL_MODE_DESCRIPTION)
 
 
 def long_material_config(
@@ -131,11 +137,11 @@ def partition_digest_sources(
 ) -> tuple[DigestSource, ...]:
     """Split the step input into the sources it was assembled from.
 
-    Each candidate's text is looked up in order; the text before it (a source
-    header, framing) belongs to it, and non-blank text after the last one is a
-    source of its own. The sources concatenate to exactly the input. When a
-    candidate is not found verbatim (a template rewrote it), the whole input is
-    one source.
+    Candidates are taken in the order their text first appears in the input.
+    The text before a candidate (a source header, framing) belongs to it, and
+    non-blank text after the last one is a source of its own, so the sources
+    concatenate to exactly the input. When a candidate is not found verbatim
+    (a template rewrote it), the whole input is one source.
     """
     whole = (
         DigestSource(
@@ -146,11 +152,19 @@ def partition_digest_sources(
             reference=text_reference("step_input", question),
         ),
     )
+    readable = [candidate for candidate in candidates if candidate.text.strip()]
+    positions = [question.find(candidate.text) for candidate in readable]
+    if any(position < 0 for position in positions):
+        return whole
+    ordered = [
+        candidate
+        for _, _, candidate in sorted(
+            zip(positions, range(len(readable)), readable, strict=True)
+        )
+    ]
     spans: list[tuple[str, int, int, dict[str, JsonValue]]] = []
     cursor = 0
-    for candidate in candidates:
-        if not candidate.text.strip():
-            continue
+    for candidate in ordered:
         found = question.find(candidate.text, cursor)
         if found < 0:
             return whole
@@ -185,6 +199,52 @@ def partition_digest_sources(
 
 
 # --------------------------------------------------------------------------- #
+# Instruction and the final call's input
+# --------------------------------------------------------------------------- #
+DEFAULT_INSTRUCTION: Final = "Keep every fact the material states."
+NOTES_PREAMBLE: Final = (
+    "The step input was too long to read in one request. It was read in parts, "
+    "and the notes below were taken from it for these instructions. Notes cite "
+    "their source by its key in square brackets."
+)
+NOTHING_RELEVANT: Final = (
+    "The step input was too long to read in one request, so it was read in "
+    "parts. All of it was read, and no part of it was relevant to these "
+    "instructions."
+)
+
+
+def digest_instruction(prompt: str, format_instructions: Sequence[str]) -> str:
+    """The step's instructions for the notes, without its output format.
+
+    The notes are free text; the output format (JSON rules, the schema) only
+    applies to the step's own final call.
+    """
+    suffix = "\n".join(format_instructions)
+    instruction = prompt
+    if suffix:
+        if instruction == suffix:
+            instruction = ""
+        else:
+            instruction = instruction.removesuffix(f"\n\n{suffix}")
+    return instruction.strip() or DEFAULT_INSTRUCTION
+
+
+def final_question_frame(sources: Sequence[DigestSource]) -> str:
+    """The text the final call's input carries before the notes."""
+    listing = "\n".join(f"[{source.key}] {source.title}" for source in sources)
+    return f"{NOTES_PREAMBLE}\n\nSources:\n{listing}\n\n"
+
+
+def final_question(*, sources: Sequence[DigestSource], notes: str) -> str:
+    """What the step's own call reads instead of the input: the source list
+    and the merged notes, or the statement that nothing was relevant."""
+    if not notes.strip():
+        return NOTHING_RELEVANT
+    return f"{final_question_frame(sources)}{notes.strip()}"
+
+
+# --------------------------------------------------------------------------- #
 # Budgets and admission
 # --------------------------------------------------------------------------- #
 MIN_SEGMENT_TOKENS: Final = 200
@@ -193,59 +253,129 @@ MAX_SEGMENT_TOKENS: Final = 12_000
 MAX_REDUCE_INPUT_TOKENS: Final = 60_000
 # The planner counts text alone; the provider counts messages and framing.
 COUNT_MARGIN: Final = 0.9
+# Word caps and output reserves of every stage, before the rooms are known.
+STAGE_DEFAULTS: Final = DigestBudgets(segment_tokens=1, reduce_input_tokens=1)
 
 
-def digest_budgets(*, map_room: int, reduce_room: int) -> DigestBudgets | None:
-    """Budgets from the measured room of a map call and of a reduce call.
+def digest_budgets(
+    *, map_room: int, reduce_room: int, final_room: int
+) -> DigestBudgets | None:
+    """Budgets from the measured room of a map, a merge and the final call.
 
     A room is the model's input allowance with the stage's output reserve,
     minus the measured overhead of that stage's request (prompt, assistant
     attachments, framing). Segments take a quarter of the map room, as the
-    digest tools size them, so a segment's notes keep its detail. None when
-    the model cannot hold a useful segment or a useful merge.
+    digest tools size them, so a segment's notes keep its detail. Merged
+    notes must fit both a merge and the step's final call. None when the
+    model cannot hold a useful segment or a useful merge.
     """
     usable_map = int(map_room * COUNT_MARGIN)
-    usable_reduce = int(reduce_room * COUNT_MARGIN)
+    usable_reduce = int(min(reduce_room, final_room) * COUNT_MARGIN)
     segment_tokens = min(MAX_SEGMENT_TOKENS, max(map_room // 4, MIN_SEGMENT_TOKENS))
     if segment_tokens > usable_map or usable_reduce < MIN_REDUCE_INPUT_TOKENS:
         return None
-    return DigestBudgets(
+    return replace(
+        STAGE_DEFAULTS,
         segment_tokens=segment_tokens,
         reduce_input_tokens=min(MAX_REDUCE_INPUT_TOKENS, usable_reduce),
     )
 
 
-def minimum_digest_calls(plan: DigestPlan) -> int:
+def without_direct_path(plan: DigestPlan) -> DigestPlan:
+    """The plan with its single-call path closed.
+
+    The step's own request already did not fit, so the material is read in
+    segments even when the merge budget alone could hold it.
+    """
+    return replace(plan, direct_fits=False)
+
+
+def minimum_digest_calls(plan: DigestPlan, *, fallback_call_possible: bool) -> int:
     """The fewest provider calls the plan needs: a note per segment, a merge
-    per source with several segments, and the step's own final call."""
+    per source with several segments, the step's own final call and, when
+    the step may retry without native JSON, that retry."""
     merges = sum(1 for planned in plan.items if len(planned.segments) > 1)
-    return plan.total_segments + merges + 1
+    return plan.total_segments + merges + 1 + int(fallback_call_possible)
 
 
-def refuse_over_call_ceiling(
-    *, step_order: int, needed: int, ceiling: int | None
+def minimum_digest_input_tokens(plan: DigestPlan, *, map_overhead_tokens: int) -> int:
+    """The fewest input tokens the plan sends: every segment once, each with
+    the map request's overhead."""
+    return plan.total_tokens + plan.total_segments * map_overhead_tokens
+
+
+def admit_digest(
+    *,
+    step_order: int,
+    needed_calls: int,
+    needed_input_tokens: int,
+    call_ceiling: int | None,
+    token_ceiling: int | None,
 ) -> None:
-    if ceiling is None:
+    """Refuse a digest the organization's mapped-execution policy cannot hold,
+    with the codes a mapped step gets for the same limits."""
+    if call_ceiling is None:
         raise TypedIOValidationException(
             f"Step {step_order}: the input exceeds the model's input capacity, "
             "and reading it in parts needs mapped provider calls, which the "
             "organization has turned off.",
             code=FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED.value,
         )
-    if needed > ceiling:
+    if needed_calls > call_ceiling:
         raise TypedIOValidationException(
             f"Step {step_order}: reading the input in parts needs at least "
-            f"{needed} provider calls, exceeding the organization ceiling of "
-            f"{ceiling} calls.",
+            f"{needed_calls} provider calls, exceeding the organization ceiling "
+            f"of {call_ceiling} calls.",
             code=FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED.value,
         )
+    if token_ceiling is not None and needed_input_tokens > token_ceiling:
+        raise TypedIOValidationException(
+            f"Step {step_order}: reading the input in parts sends at least about "
+            f"{needed_input_tokens} input tokens, exceeding the organization "
+            f"ceiling of {token_ceiling} tokens.",
+            code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+        )
+
+
+CALL_CEILING_REASON: Final = "call ceiling"
+TOKEN_CEILING_REASON: Final = "token ceiling"
+
+
+@dataclass
+class DigestCallLimits:
+    """The organization's ceilings, spent call by call during a digest.
+
+    ``reserved_calls`` stay for the step's own final call (and its possible
+    retry without native JSON), so the digest never takes them.
+    """
+
+    call_ceiling: int
+    token_ceiling: int | None
+    reserved_calls: int
+    calls: int = 0
+    input_tokens: int = 0
+    refused: str | None = None
+
+    def admit(self, input_tokens: int) -> bool:
+        if self.calls + 1 + self.reserved_calls > self.call_ceiling:
+            self.refused = self.refused or CALL_CEILING_REASON
+            return False
+        if (
+            self.token_ceiling is not None
+            and self.input_tokens + input_tokens > self.token_ceiling
+        ):
+            self.refused = self.refused or TOKEN_CEILING_REASON
+            return False
+        self.calls += 1
+        self.input_tokens += input_tokens
+        return True
 
 
 # --------------------------------------------------------------------------- #
 # Time
 # --------------------------------------------------------------------------- #
 # The step's own final call over the notes keeps this share of the step's
-# budget; no digest call starts inside it.
+# budget; no digest call starts inside it, and none runs into it.
 FINAL_CALL_RESERVE_SHARE: Final = 0.25
 # Of the time left to the digest, map admission stops when this share remains,
 # so the merges get their turn.
@@ -263,10 +393,9 @@ def digest_time_limits(
 ) -> DigestTimeLimits:
     """When the digest stops, on the step deadline's clock.
 
-    ``deadline`` is the moment after which no digest call starts: the step's
-    expiry less the final call's reserve. A digest that reaches it ends with
-    partial coverage; a call in flight past the step's own expiry ends the
-    step like any other timed-out provider request.
+    ``deadline`` is the step's expiry less the final call's reserve: no digest
+    call starts after it, and a call still running then is cancelled, so the
+    digest ends with partial coverage and the final call keeps its time.
     """
     deadline = expires_at - budget_seconds * FINAL_CALL_RESERVE_SHARE
     window = max(0.0, deadline - now)
@@ -279,19 +408,16 @@ def digest_time_limits(
 # What each call read
 # --------------------------------------------------------------------------- #
 _MAP_HEADER = re.compile(r"^\[(S\d+)\] .*\(segment (\d+) of (\d+)\)$")
-_KEY = re.compile(r"\[(S\d+)\]")
+_BRACKETED = re.compile(r"\[([^\[\]\n]{1,200})\]")
+_KEY = re.compile(r"\bS\d+\b")
 
 CallOutcome = Literal["ok", "cut", "failed"]
 
 
-@dataclass(frozen=True, slots=True)
-class DigestCallRecord:
-    """One provider call the digest sent, and what came of it."""
-
-    call: DigestCallInput
-    outcome: CallOutcome
-    num_tokens_input: int | None = None
-    num_tokens_output: int | None = None
+def is_map_call(system: str, *, instruction: str, budgets: DigestBudgets) -> bool:
+    """Whether a call the core routes to its map function takes segment notes
+    (the other kind merges one source's segment notes)."""
+    return system == map_prompt(instruction, budgets.map_words)
 
 
 def map_call_target(user: str, keys: dict[str, int]) -> DigestCallInput | None:
@@ -308,13 +434,33 @@ def map_call_target(user: str, keys: dict[str, int]) -> DigestCallInput | None:
 
 
 def cited_sources(text: str, keys: dict[str, int]) -> tuple[int, ...]:
-    """Indexes of the sources whose keys a merge or final input carries."""
-    return tuple(sorted({keys[key] for key in _KEY.findall(text) if key in keys}))
+    """Indexes of the sources whose keys the notes cite in square brackets,
+    alone (``[S2]``) or listed (``[S1, S3]``)."""
+    cited = {
+        keys[key]
+        for group in _BRACKETED.findall(text)
+        for key in _KEY.findall(group)
+        if key in keys
+    }
+    return tuple(sorted(cited))
 
 
 def reduce_call(text: str, keys: dict[str, int]) -> DigestCallInput:
-    stage: DigestCallStage = "reduce"
-    return DigestCallInput(stage=stage, source_indexes=cited_sources(text, keys))
+    return DigestCallInput(stage="reduce", source_indexes=cited_sources(text, keys))
+
+
+def final_call(text: str, keys: dict[str, int]) -> DigestCallInput:
+    return DigestCallInput(stage="final", source_indexes=cited_sources(text, keys))
+
+
+@dataclass(frozen=True, slots=True)
+class DigestCallRecord:
+    """One provider call the digest sent, and what came of it."""
+
+    call: DigestCallInput
+    outcome: CallOutcome
+    num_tokens_input: int | None = None
+    num_tokens_output: int | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -323,25 +469,35 @@ def reduce_call(text: str, keys: dict[str, int]) -> DigestCallInput:
 class LongMaterialSourceCoverage(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    key: str
+    key: str = Field(description="The key the notes cite the source by.")
     index: int = Field(ge=1)
     title: str
-    reference: dict[str, JsonValue]
+    reference: dict[str, JsonValue] = Field(
+        description="What the source is: its kind and the SHA-256 and size of its text."
+    )
     start_char: int = Field(ge=0, description="Start of the source in the input.")
-    end_char: int = Field(ge=0)
+    end_char: int = Field(ge=0, description="End of the source in the input.")
     segments_planned: int = Field(ge=0)
     segments_read: tuple[int, ...] = Field(
         description="1-based segments whose notes came back."
     )
-    segments_failed: tuple[int, ...] = ()
+    segments_failed: tuple[int, ...] = Field(
+        default=(), description="Segments sent whose notes did not come back."
+    )
     segments_cut: tuple[int, ...] = Field(
         default=(), description="Segments whose notes the provider cut short."
     )
     segments_not_read: tuple[int, ...] = Field(
-        default=(), description="Segments never sent: time ran out or the run stopped."
+        default=(),
+        description="Segments never sent: time, a ceiling or the run stopped them.",
     )
-    not_relevant: bool = False
-    excluded_at_reduce: bool = False
+    not_relevant: bool = Field(
+        default=False, description="Read in full; nothing in it was relevant."
+    )
+    excluded_at_reduce: bool = Field(
+        default=False,
+        description="Its notes, or part of them, did not fit the final request.",
+    )
     complete: bool
 
 
@@ -351,29 +507,49 @@ class LongMaterialCoverage(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     mode: Literal["digest"] = "digest"
-    coverage: Literal["complete", "partial", "cancelled"]
+    coverage: Literal["complete", "partial", "cancelled"] = Field(
+        description=(
+            "`complete`: every segment was read and every source's notes reached "
+            "the final call. `partial`: something was left out; `reasons` says "
+            "why and `left_out` names the sources."
+        )
+    )
     reasons: tuple[str, ...] = ()
     left_out: tuple[str, ...] = Field(
         default=(), description="Keys of the sources not fully represented."
     )
     sources: tuple[LongMaterialSourceCoverage, ...]
-    input_tokens_estimate: int = Field(ge=0)
-    refused_input_tokens: int | None = None
-    max_input_tokens: int | None = None
+    input_tokens_estimate: int = Field(
+        ge=0, description="The input's size as the planner counted it."
+    )
+    refused_input_tokens: int | None = Field(
+        default=None, description="The size of the step's own request that did not fit."
+    )
+    max_input_tokens: int | None = Field(
+        default=None, description="The input allowance that request had."
+    )
     segment_tokens: int = Field(ge=1)
     reduce_input_tokens: int = Field(ge=1)
     reduce_levels: int = Field(ge=0)
     map_calls: int = Field(ge=0)
     reduce_calls: int = Field(ge=0)
     failed_calls: int = Field(ge=0)
-    num_tokens_input: int | None = None
+    num_tokens_input: int | None = Field(
+        default=None, description="Input tokens of the digest calls that completed."
+    )
     num_tokens_output: int | None = None
-    notes_sha256: str | None = None
+    notes_sha256: str | None = Field(
+        default=None, description="SHA-256 of the notes the final call read."
+    )
     notes_bytes: int | None = None
 
     @property
     def segments_read(self) -> int:
         return sum(len(source.segments_read) for source in self.sources)
+
+    @property
+    def segments_planned(self) -> int:
+        return sum(source.segments_planned for source in self.sources)
 
 
 def build_coverage(
@@ -392,8 +568,8 @@ def build_coverage(
     calls actually sent.
 
     The core's coverage is the floor: anything it calls partial stays partial,
-    and a reason of this runtime's own (a call ceiling) makes complete
-    coverage partial.
+    and a reason of this runtime's own (a ceiling) or a segment without notes
+    makes complete coverage partial.
     """
     records = list(calls)
     map_outcomes: dict[tuple[int, int], CallOutcome] = {}
@@ -442,6 +618,7 @@ def build_coverage(
     ):
         coverage = "partial"
     left_out = tuple(source.key for source in source_records if not source.complete)
+    completed = [record for record in records if record.outcome != "failed"]
     notes_bytes = notes.encode("utf-8") if notes is not None else None
     return LongMaterialCoverage(
         coverage=coverage,
@@ -456,12 +633,12 @@ def build_coverage(
         reduce_levels=result.levels,
         map_calls=sum(1 for record in records if record.call.stage == "map"),
         reduce_calls=sum(1 for record in records if record.call.stage == "reduce"),
-        failed_calls=sum(1 for record in records if record.outcome == "failed"),
+        failed_calls=len(records) - len(completed),
         num_tokens_input=sum_complete_token_counts(
-            record.num_tokens_input for record in records
+            record.num_tokens_input for record in completed
         ),
         num_tokens_output=sum_complete_token_counts(
-            record.num_tokens_output for record in records
+            record.num_tokens_output for record in completed
         ),
         notes_sha256=sha256(notes_bytes).hexdigest()
         if notes_bytes is not None
@@ -474,6 +651,8 @@ def build_coverage(
 # Partial coverage
 # --------------------------------------------------------------------------- #
 PartialCoverageOutcome = Literal["accept", "review", "fail"]
+DIGEST_DIAGNOSTIC_CODE: Final = "long_material_digest"
+PARTIAL_COVERAGE_DIAGNOSTIC_CODE: Final = "long_material_partial_coverage"
 
 
 def partial_coverage_outcome(
@@ -539,43 +718,43 @@ def partial_coverage_error(
     return TypedIOValidationException(
         f"Step {step_order}: the input was too long for the model and was read "
         f"in parts, but only partly ({reasons}). Left out: {left_out or 'none'}. "
-        "Raise the step's timeout_seconds, choose a larger-context model, or "
-        "reduce the input.",
+        "Raise the step's timeout_seconds, choose a larger-context model, "
+        "reduce the input, or add a review to the step to judge partial answers.",
         code=FlowApiErrorCode.LONG_MATERIAL_PARTIAL_COVERAGE.value,
         context={
-            "long_material_coverage": coverage.coverage,
-            "long_material_reasons": list(coverage.reasons),
-            "long_material_left_out": list(coverage.left_out),
+            "completed_items": coverage.segments_read,
+            "total_items": coverage.segments_planned,
         },
     )
 
 
-# --------------------------------------------------------------------------- #
-# The final call's input
-# --------------------------------------------------------------------------- #
-NOTES_PREAMBLE: Final = (
-    "The step input was too long to read in one request. It was read in parts, "
-    "and the notes below were taken from it for these instructions. Notes cite "
-    "their source by its key in square brackets."
-)
-NOTHING_RELEVANT: Final = (
-    "The step input was too long to read in one request, so it was read in "
-    "parts. All of it was read, and no part of it was relevant to these "
-    "instructions."
-)
+def partial_coverage_message(*, step_order: int, coverage: LongMaterialCoverage) -> str:
+    reasons = ", ".join(coverage.reasons) or "unknown"
+    return (
+        f"Step {step_order}: the input was too long for the model and was read "
+        f"in parts, but only partly ({reasons}). The answer leaves out "
+        f"{describe_left_out(coverage) or 'nothing listed'}."
+    )
 
 
-def final_question(*, sources: Sequence[DigestSource], notes: str) -> str:
-    """What the step's own call reads instead of the input: the source list
-    and the merged notes, or the statement that nothing was relevant."""
-    if not notes.strip():
-        return NOTHING_RELEVANT
-    listing = "\n".join(f"[{source.key}] {source.title}" for source in sources)
-    return f"{NOTES_PREAMBLE}\n\nSources:\n{listing}\n\n{notes.strip()}"
+def digest_message(*, step_order: int, coverage: LongMaterialCoverage) -> str:
+    return (
+        f"Step {step_order}: the input (about {coverage.input_tokens_estimate} "
+        "tokens) exceeded the model's input capacity and was read in "
+        f"{coverage.segments_planned} segments from {len(coverage.sources)} "
+        f"sources with {coverage.map_calls + coverage.reduce_calls} provider "
+        "calls; the answer was written over the merged notes."
+    )
 
 
 __all__ = [
+    "CALL_CEILING_REASON",
+    "DIGEST_DIAGNOSTIC_CODE",
     "LONG_MATERIAL_KEY",
+    "PARTIAL_COVERAGE_DIAGNOSTIC_CODE",
+    "STAGE_DEFAULTS",
+    "TOKEN_CEILING_REASON",
+    "DigestCallLimits",
     "DigestCallRecord",
     "DigestSource",
     "DigestTimeLimits",
@@ -584,20 +763,28 @@ __all__ = [
     "LongMaterialMode",
     "LongMaterialSourceCoverage",
     "SourceCandidate",
+    "admit_digest",
     "build_coverage",
     "cited_sources",
     "describe_left_out",
     "digest_budgets",
+    "digest_instruction",
+    "digest_message",
     "digest_time_limits",
+    "final_call",
     "final_question",
+    "final_question_frame",
+    "is_map_call",
     "long_material_config",
     "map_call_target",
     "minimum_digest_calls",
+    "minimum_digest_input_tokens",
     "partial_coverage_error",
+    "partial_coverage_message",
     "partial_coverage_outcome",
     "partition_digest_sources",
     "reduce_call",
-    "refuse_over_call_ceiling",
     "source_key",
     "text_reference",
+    "without_direct_path",
 ]

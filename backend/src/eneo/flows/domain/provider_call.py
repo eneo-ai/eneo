@@ -161,16 +161,21 @@ class DigestCallInput(BaseModel):
     """The part of a long-material digest one provider call performed.
 
     ``map`` reads one segment of one source and takes notes; ``reduce``
-    merges notes taken from the sources it lists; ``final`` is the step's own
-    call over the merged notes. Source indexes are the 1-based positions of
-    the step's sources in its ``long_material`` coverage record.
+    merges notes; ``final`` is the step's own call over the merged notes.
+    Source indexes are the 1-based positions of the step's sources in its
+    ``long_material`` coverage record. A map call names the source it read;
+    a reduce or final call names the sources its notes cite, which is empty
+    when the notes cite none.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     stage: DigestCallStage
     source_indexes: tuple[Annotated[int, Field(strict=True, ge=1)], ...] = Field(
-        description="Sources whose text or notes the call read, ascending."
+        description=(
+            "Sources the call read, ascending: the source of a map call, the "
+            "sources cited by the notes a reduce or final call read."
+        )
     )
     segment_index: int | None = Field(default=None, strict=True, ge=1)
     segment_count: int | None = Field(default=None, strict=True, ge=1)
@@ -190,8 +195,6 @@ class DigestCallInput(BaseModel):
                 raise ValueError("A map call names its segment within the source.")
         elif self.segment_index is not None or self.segment_count is not None:
             raise ValueError("Only a map call reads a segment.")
-        elif self.stage == "reduce" and not self.source_indexes:
-            raise ValueError("A reduce call merges notes of at least one source.")
         return self
 
 
