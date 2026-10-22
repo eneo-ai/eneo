@@ -3,9 +3,9 @@ import { expect, test, type Page } from "@playwright/test";
 // The shared page header (Page/Header + Page/Tabbar + Page/Title) once positioned the
 // tab strip outside the flow and centred it across the header. On pages with long
 // Swedish labels the strip painted over the page description, and the labels wrapped
-// to a second line inside a row that is only tall enough for one. Flow settings has
-// the longest labels in the app, so it is the page that shows the regression first.
-const LONGEST_LABEL_PAGE = "/admin/flow-settings";
+// to a second line inside a row that is only tall enough for one. Model administration
+// has six tabs with long labels, so it is the page that shows the regression first.
+const LONGEST_LABEL_PAGE = "/admin/models";
 
 async function headerGeometry(page: Page) {
   return page.evaluate(() => {

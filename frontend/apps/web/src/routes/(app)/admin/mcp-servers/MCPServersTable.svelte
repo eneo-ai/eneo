@@ -142,6 +142,7 @@
                 aria-label={`${expanded ? m.governance_mcp_hide_tools() : m.governance_mcp_show_tools()}: ${server.name}`}
                 aria-expanded={expanded}
                 onclick={() => toggleExpanded(server.mcp_server_id)}
+                disabled={!hasTools}
               >
                 <ChevronRight
                   class="h-4 w-4 transition-transform duration-200 {expanded ? 'rotate-90' : ''}"
