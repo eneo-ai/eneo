@@ -291,9 +291,10 @@ def without_direct_path(plan: DigestPlan) -> DigestPlan:
 
 
 def minimum_digest_calls(plan: DigestPlan, *, fallback_call_possible: bool) -> int:
-    """The fewest provider calls the plan needs: a note per segment, a merge
-    per source with several segments, the step's own final call and, when
-    the step may retry without native JSON, that retry."""
+    """The provider calls the plan needs before any merge level: a note per
+    segment, a merge per source with several segments, the step's own final
+    call and, when the step may retry without native JSON, that retry. Fewer
+    are sent only when segments hold nothing relevant."""
     merges = sum(1 for planned in plan.items if len(planned.segments) > 1)
     return plan.total_segments + merges + 1 + int(fallback_call_possible)
 

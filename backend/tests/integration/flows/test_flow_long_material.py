@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from collections.abc import Awaitable, Callable
 from contextlib import nullcontext
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -109,12 +110,14 @@ class _SmallWindowAssistant(_RuntimeAssistant):
         json_answer: bool = False,
         failing_facts: frozenset[str] = frozenset(),
         call_seconds: float = 0.0,
+        after_call: Callable[[int], Awaitable[None]] | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.json_answer = json_answer
         self.failing_facts = failing_facts
         self.call_seconds = call_seconds
+        self.after_call = after_call
         self.questions: list[str] = []
 
     def _package(
@@ -248,6 +251,8 @@ class _SmallWindowAssistant(_RuntimeAssistant):
                 num_tokens_output=output_tokens,
             ),
         )
+        if self.after_call is not None:
+            await self.after_call(len(self.questions))
         return SimpleNamespace(
             completion=Completion(text=text, finish_reason="stop"),
             total_token_count=size + output_tokens,
@@ -659,3 +664,43 @@ async def test_a_digest_stops_at_the_step_deadline_and_reports_what_it_left_out(
     # No digest call ran into the final call's share of the step's four seconds.
     assert elapsed < 4
     assert "final" not in _stages(receipts)
+
+
+async def test_a_run_cancelled_mid_digest_ends_like_any_cancelled_step(
+    setup_database,
+    db_container,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    material, _ = long_material()
+    ids: dict[str, UUID] = {}
+
+    async def cancel_after_third_call(calls: int) -> None:
+        if calls == 3:
+            async with db_container() as container:
+                await container.flow_run_service().cancel_run(
+                    run_id=ids["run"], flow_id=ids["flow"]
+                )
+
+    async with sessionmanager.session() as session:
+        context = await _context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            material=material,
+            assistant_options={"after_call": cancel_after_third_call},
+        )
+        ids.update(run=context.run_id, flow=context.flow_id)
+        result = await _execute(context)
+
+    assert result == {"status": "skipped", "reason": "run_cancelled"}
+    _, attempt, receipts, _ = await _step_state(context.run_id)
+    assert attempt.status == "cancelled"
+    # The call in flight when the run was cancelled finished; no other started.
+    assert _stages(receipts) == ["map", "map", "map"]
