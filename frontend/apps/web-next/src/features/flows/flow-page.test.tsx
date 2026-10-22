@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import type { Permission } from "@/lib/auth/permissions";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { makeFlow, makeStep } from "./flow-fixtures";
@@ -23,6 +24,7 @@ const state = vi.hoisted(() => ({
   chat: null as unknown,
   editor: null as unknown,
   publish: null as unknown,
+  runs: null as unknown,
   unpublish: null as unknown,
   mode: null as unknown
 }));
@@ -30,6 +32,7 @@ const state = vi.hoisted(() => ({
 const api = vi.hoisted(() => ({
   GET: vi.fn(async (path: string) => {
     if (path === "/api/v1/flows/{id}/") return state.flow;
+    if (path === "/api/v1/flows/{id}/runs/") return state.runs;
     if (path === "/api/v1/assistants/{id}/") {
       return {
         data: { id: "assistant-chat", name: "Medborgarbrev", mcp_servers: [] },
@@ -106,7 +109,10 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function renderPage(flow: FlowPublic = makeFlow({ steps })) {
+function renderPage(
+  flow: FlowPublic = makeFlow({ steps }),
+  permissions: Permission[] = ["flows_view", "flows_manage"]
+) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(flowKeys.flow(flow.id), flow);
   queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
@@ -116,7 +122,7 @@ function renderPage(flow: FlowPublic = makeFlow({ steps })) {
     </Suspense>,
     {
       queryClient,
-      appContext: testAppContext({ permissions: ["flows_view", "flows_manage"] })
+      appContext: testAppContext({ permissions })
     }
   );
 }
@@ -131,7 +137,8 @@ describe("FlowPage", () => {
     const { container } = renderPage();
     expect(screen.getByRole("heading", { level: 1, name: "Medborgarbrev" })).toBeTruthy();
     expect(screen.getByText("Utkast")).toBeTruthy();
-    expect(screen.getByRole("region", { name: "Flödets definition" })).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Flödet" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Definition", selected: true })).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: "Steg" })).toBeTruthy();
     expect(await screen.findByText("Chatten är inte tillgänglig")).toBeTruthy();
     await expectNoAxeViolations(container);
@@ -233,6 +240,52 @@ describe("FlowPage", () => {
     expect(
       await screen.findByRole("button", { name: "Flytta ner Steg 1: Sammanfatta" })
     ).toBeTruthy();
+  });
+
+  it("offers a run of a published flow to someone who may run it", async () => {
+    const published = makeFlow({ steps, published_version: 3 });
+    renderPage(published, ["flows_view", "flows_run"]);
+    fireEvent.click(screen.getByRole("button", { name: "Kör flödet" }));
+    expect(await screen.findByRole("dialog", { name: "Kör Medborgarbrev" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Avpublicera" })).toBeNull();
+  });
+
+  it("offers no run of a draft, nor to someone who may not run flows", () => {
+    renderPage(makeFlow({ steps }), ["flows_view", "flows_manage", "flows_run"]);
+    expect(screen.queryByRole("button", { name: "Kör flödet" })).toBeNull();
+    cleanup();
+    renderPage(makeFlow({ steps, published_version: 3 }), ["flows_view", "flows_manage"]);
+    expect(screen.queryByRole("button", { name: "Kör flödet" })).toBeNull();
+  });
+
+  it("lists the flow's runs in their own tab and remembers it in the address", async () => {
+    const run = {
+      id: "run-1",
+      flow_id: "flow-1",
+      flow_version: 3,
+      tenant_id: "tenant-1",
+      trace_id: "trace-1",
+      status: "completed",
+      purpose: "production",
+      principal_type: "user",
+      revision: 3,
+      dispatch_attempt_count: 1,
+      created_at: "2026-10-21T08:00:00Z",
+      started_at: "2026-10-21T08:00:02Z",
+      finished_at: "2026-10-21T08:01:07Z",
+      updated_at: "2026-10-21T08:01:07Z"
+    };
+    state.runs = ok({ count: 1, items: [run], has_more: false });
+    const { container } = renderPage(makeFlow({ steps, published_version: 3 }));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Körningar" }));
+
+    expect(screen.getByRole("tab", { name: "Körningar", selected: true })).toBeTruthy();
+    expect(await screen.findByRole("table", { name: "Körningar" })).toBeTruthy();
+    expect(screen.getByText("Klar")).toBeTruthy();
+    expect(window.location.search).toBe("?tab=runs");
+    await expectNoAxeViolations(container);
+    window.history.replaceState(null, "", "/");
   });
 
   it("shows what the chat's tools changed and says so", async () => {

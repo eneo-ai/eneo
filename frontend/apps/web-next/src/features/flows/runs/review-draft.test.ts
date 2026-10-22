@@ -1,0 +1,154 @@
+import { describe, expect, it } from "vitest";
+import { makeCheckpoint } from "./run-fixtures";
+import {
+  draftChanged,
+  editedValueOf,
+  reviewDraftOf,
+  reviewExpired,
+  reviewOptions
+} from "./review-draft";
+
+const NOW = Date.parse("2026-10-22T08:00:00Z");
+
+describe("reviewDraftOf", () => {
+  it("edits a text step as text", () => {
+    expect(reviewDraftOf(makeCheckpoint())).toEqual({
+      kind: "text",
+      text: "Hej Anna, tack för ditt brev."
+    });
+  });
+
+  it("edits a flat JSON object field by field, and other JSON as JSON text", () => {
+    const flat = makeCheckpoint({
+      output_type: "json",
+      current_payload_json: { structured: { titel: "Svar", antal: 3, klar: false, not: null } }
+    });
+    expect(reviewDraftOf(flat)).toEqual({
+      kind: "fields",
+      fields: [
+        { name: "titel", kind: "string", value: "Svar" },
+        { name: "antal", kind: "number", value: "3" },
+        { name: "klar", kind: "boolean", value: "false" },
+        { name: "not", kind: "null", value: "" }
+      ]
+    });
+    const nested = makeCheckpoint({
+      output_type: "json",
+      current_payload_json: { structured: { punkter: ["a", "b"] } }
+    });
+    expect(reviewDraftOf(nested).kind).toBe("json");
+  });
+
+  it("names the speakers of a speaker mapping one by one, keeping what else the step proposed", () => {
+    const checkpoint = makeCheckpoint({
+      output_type: "json",
+      current_payload_json: {
+        structured: {
+          speakers: [
+            { label: "SPEAKER_00", name: "Anna", confidence: "high", evidence: "Säger sitt namn" },
+            { label: "SPEAKER_01", name: null, confidence: "low", evidence: "" }
+          ]
+        }
+      }
+    });
+    const draft = reviewDraftOf(checkpoint);
+    expect(draft).toMatchObject({
+      kind: "speakers",
+      speakers: [
+        { label: "SPEAKER_00", name: "Anna" },
+        { label: "SPEAKER_01", name: "" }
+      ]
+    });
+    if (draft.kind !== "speakers") return;
+    const edited = editedValueOf({
+      ...draft,
+      speakers: draft.speakers.map((speaker) => ({ ...speaker, name: speaker.name || " Bo " }))
+    });
+    expect(edited).toEqual({
+      ok: true,
+      value: {
+        speakers: [
+          { label: "SPEAKER_00", name: "Anna", confidence: "high", evidence: "Säger sitt namn" },
+          { label: "SPEAKER_01", name: "Bo", confidence: "low", evidence: "" }
+        ]
+      }
+    });
+  });
+
+  it("reviews a document step as its file", () => {
+    expect(reviewDraftOf(makeCheckpoint({ output_type: "pdf" })).kind).toBe("file");
+  });
+});
+
+describe("editedValueOf", () => {
+  it("sends a text step's string and a JSON step's value with its types back", () => {
+    expect(editedValueOf({ kind: "text", text: "Ny text" })).toEqual({
+      ok: true,
+      value: "Ny text"
+    });
+    expect(
+      editedValueOf({
+        kind: "fields",
+        fields: [
+          { name: "antal", kind: "number", value: " 4 " },
+          { name: "klar", kind: "boolean", value: "true" },
+          { name: "not", kind: "null", value: "" }
+        ]
+      })
+    ).toEqual({ ok: true, value: { antal: 4, klar: true, not: null } });
+    expect(editedValueOf({ kind: "json", text: '["a"]' })).toEqual({ ok: true, value: ["a"] });
+  });
+
+  it("names the field that is not a number, and JSON text that is not an object or list", () => {
+    expect(
+      editedValueOf({ kind: "fields", fields: [{ name: "antal", kind: "number", value: "fyra" }] })
+    ).toEqual({ ok: false, problem: { field: "antal", reason: "number" } });
+    expect(editedValueOf({ kind: "json", text: "{" })).toEqual({
+      ok: false,
+      problem: { field: null, reason: "json" }
+    });
+    expect(editedValueOf({ kind: "json", text: "12" })).toEqual({
+      ok: false,
+      problem: { field: null, reason: "json_kind" }
+    });
+  });
+});
+
+describe("draftChanged", () => {
+  it("sees a change only when the reviewer made one", () => {
+    const checkpoint = makeCheckpoint();
+    expect(draftChanged(reviewDraftOf(checkpoint), checkpoint)).toBe(false);
+    expect(draftChanged({ kind: "text", text: "Annat" }, checkpoint)).toBe(true);
+  });
+});
+
+describe("reviewOptions", () => {
+  it("lets a reviewer decide and edit an open checkpoint in edit mode before its deadline", () => {
+    expect(reviewOptions(makeCheckpoint(), true, NOW)).toEqual({
+      canDecide: true,
+      canEdit: true,
+      canResume: false,
+      expired: false
+    });
+  });
+
+  it("decides without editing in view mode, and neither without the permission", () => {
+    expect(reviewOptions(makeCheckpoint({ review_mode: "view" }), true, NOW).canEdit).toBe(false);
+    expect(reviewOptions(makeCheckpoint(), false, NOW).canDecide).toBe(false);
+  });
+
+  it("closes the decision at the deadline but still resumes an approval made in time", () => {
+    const late = Date.parse("2026-10-29T00:00:00Z");
+    expect(reviewExpired(makeCheckpoint(), late)).toBe(true);
+    expect(reviewOptions(makeCheckpoint(), true, late).canDecide).toBe(false);
+    const approved = makeCheckpoint({ state: "approved", approved_at: "2026-10-27T08:00:00Z" });
+    expect(reviewOptions(approved, true, late)).toMatchObject({
+      canDecide: false,
+      canResume: true
+    });
+  });
+
+  it("treats a checkpoint the core marked expired as expired whatever the clock says", () => {
+    expect(reviewExpired(makeCheckpoint({ state: "expired" }), NOW)).toBe(true);
+  });
+});
