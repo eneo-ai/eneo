@@ -54,7 +54,7 @@ router = APIRouter()
 
 # Mutations commit before the response is sent. With the default request scope
 # the transaction closes after the body has gone out, so a client that creates
-# a flow and immediately addresses it (the editor, the AI Builder harness) can
+# a flow and immediately addresses it (the editor, the authoring chat) can
 # be told the flow does not exist.
 _MUTATING_CONTAINER = get_container(
     with_user=True, with_module_user=True, transaction_scope="function"
@@ -88,7 +88,7 @@ _FLOW_SERVICE_KEY_DISCOVERY_DESCRIPTION = (
     "their scoped space, and must send its `space_id`: a key has no space memberships "
     "to list. Service-key webapps should use the returned ids with "
     "`GET /api/v1/flows/{id}/published/` and the runtime paths from that response; "
-    "draft authoring and AI Builder still require a user principal."
+    "draft authoring still requires a user principal."
 )
 
 _FLOW_PUBLISHED_RUNTIME_DESCRIPTION = (

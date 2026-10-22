@@ -33,8 +33,8 @@ def source_ref_step_order(
     number after `step_` as it reads any decimal numeral (leading zeros and
     other scripts included: `step_02`, `step_\u0662`), and otherwise takes the
     order of the step `named` gives that name. The one reader of a source
-    ref's step: input resolution, validation, the Builder and materialization
-    all call it, so none of them can read a ref as another step."""
+    ref's step: input resolution, validation and materialization all call
+    it, so none of them can read a ref as another step."""
 
     raw = step_ref.removeprefix("step_")
     if raw != step_ref and raw.isdecimal():

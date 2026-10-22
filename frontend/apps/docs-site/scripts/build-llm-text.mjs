@@ -21,8 +21,8 @@ import { fileURLToPath } from "node:url";
 const appDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const siteUrl = "https://docs.eneo.ai";
 
-// Reading order for the Flows-only bundle: product, API guide, developer pages,
-// then the Builder. Routes not listed here are excluded from llms-flows.txt.
+// Reading order for the Flows-only bundle: product, API guide, then developer
+// pages. Routes not listed here are excluded from llms-flows.txt.
 export const FLOWS_BUNDLE_ROUTES = [
   "docs/flows",
   "guides/flows",
@@ -39,7 +39,6 @@ export const FLOWS_BUNDLE_ROUTES = [
   "docs/flows-for-developers/when-things-fail",
   "docs/flows-for-developers/key-decisions",
   "docs/flows-for-developers/reviewing-flows-code",
-  "docs/ai-builder",
 ];
 
 const SECTION_TITLES = {
@@ -201,7 +200,7 @@ export async function buildLlmText(app = appDir) {
     "available as a single document at /llms-full.txt.",
     ...(hasFlows
       ? [
-          "The Flows pages alone (product guide, API guide, developer pages, AI Builder) are at",
+          "The Flows pages alone (product guide, API guide, developer pages) are at",
           "/llms-flows.txt.",
         ]
       : []),
@@ -242,7 +241,7 @@ export async function buildLlmText(app = appDir) {
       `${[
         "# Eneo Flows documentation",
         "",
-        "Product guide, API guide, developer pages, and AI Builder, in reading order. Each part",
+        "Product guide, API guide, and developer pages, in reading order. Each part",
         "names its source page; the same pages are listed in /llms.txt.",
         ...flowsParts,
       ].join("\n\n---\n\n")}\n`,

@@ -1407,37 +1407,6 @@ async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
     assert retained.text == ("x" * 1023 if len(rejected_text) > 1024 else rejected_text)
     assert retained.truncated_by_runtime is (len(rejected_text.encode("utf-8")) > 1024)
     assert attempt_rows[0].output_payload_json == step_result_row.output_payload_json
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-            tenant=providers.Object(test_tenant),
-        )
-        flow = await container.flow_repo().get(
-            flow_id=context.flow_id, tenant_id=context.tenant_id
-        )
-        service = container.ai_builder_flow_review_service()
-        reference = await service.build_failure_reference(
-            flow_id=context.flow_id,
-            space_id=flow.space_id,
-            run_id=context.run_id,
-            step_order=1,
-        )
-        evidence = await service.resolve_failure_evidence(
-            flow_id=context.flow_id,
-            space_id=flow.space_id,
-            reference=reference,
-            audit=AsyncMock(),
-        )
-        assert evidence.failure is not None
-        assert evidence.failure.attempt_no == 1
-        assert evidence.failure.rejected_output == retained
-        assert evidence.failure.effective_prompt == step_result_row.effective_prompt
-        assert (
-            evidence.evidence_classification_level
-            == run_row.evidence_classification_level
-        )
     assert completion_service.get_response.await_count == 1
 
 
@@ -1676,56 +1645,16 @@ async def test_truncated_completion_retains_bounded_evidence_for_fresh_sessions(
             user=providers.Object(admin_user),
             tenant=providers.Object(test_tenant),
         )
-        flow = await container.flow_repo().get(
-            flow_id=context.flow_id, tenant_id=context.tenant_id
-        )
         exported = await container.flow_run_evidence_service().export_evidence_json(
             run_id=context.run_id
         )
         exported_output = exported["bundle"]["step_attempts"][0]["output_payload_json"]
         assert exported_output["rejection_evidence"]["sha256"] == evidence["sha256"]
-        service = container.ai_builder_flow_review_service()
-        reference = await service.build_failure_reference(
-            flow_id=context.flow_id,
-            space_id=flow.space_id,
-            run_id=context.run_id,
-            step_order=1,
-        )
         if text is not None and "password=" in text:
-            from eneo.flows.ai_builder.ai_builder_error_contract import (
-                AIBuilderBadRequestException,
-            )
-
             assert "secret-head" not in json.dumps(exported)
             assert "secret-tail" not in json.dumps(exported)
             assert "boundary-credential" not in json.dumps(exported)
             assert evidence["redaction_applied"] is True
-            with pytest.raises(AIBuilderBadRequestException) as caught:
-                await service.resolve_failure_evidence(
-                    flow_id=context.flow_id,
-                    space_id=flow.space_id,
-                    reference=reference,
-                    audit=AsyncMock(),
-                )
-            assert caught.value.context["reason"] == "output_masked"
-        else:
-            from eneo.flows.ai_builder.ai_builder_flow_review import (
-                render_review_evidence,
-            )
-
-            review = await service.resolve_failure_evidence(
-                flow_id=context.flow_id,
-                space_id=flow.space_id,
-                reference=reference,
-                audit=AsyncMock(),
-            )
-            assert review.failure is not None
-            assert review.failure.rejected_output is not None
-            assert review.failure.rejected_output.to_payload() == exported_output
-            rendered = render_review_evidence(review)
-            if text and text.startswith("start å "):
-                assert "start å " in rendered
-                assert " end ö" in rendered
 
 
 @pytest.mark.asyncio
@@ -1945,177 +1874,6 @@ async def test_webhook_output_enqueues_delivery_for_fresh_sessions(
     assert len(attempt_rows) == 1
     assert attempt_rows[0].status == FlowStepAttemptStatus.COMPLETED.value
     assert outbox_rows == []
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-@pytest.mark.parametrize(
-    "latest_status", [FlowStepAttemptStatus.COMPLETED, FlowStepAttemptStatus.FAILED]
-)
-async def test_seeded_attempt_history_repairs_only_the_latest_failed_attempt(
-    setup_database,
-    admin_user,
-    test_tenant,
-    completion_model_factory,
-    space_factory,
-    assistant_factory,
-    latest_status,
-):
-    from eneo.flows.ai_builder.ai_builder_error_contract import (
-        AIBuilderBadRequestException,
-    )
-    from eneo.flows.domain.step_output import build_rejected_output_payload
-    from eneo.flows.flow_run_provenance import FlowAttemptProvenance
-
-    completion_service = SimpleNamespace(get_response=AsyncMock())
-    async with sessionmanager.session() as session:
-        context = await _create_runtime_worker_context(
-            session=session,
-            admin_user=admin_user,
-            test_tenant=test_tenant,
-            completion_model_factory=completion_model_factory,
-            space_factory=space_factory,
-            assistant_factory=assistant_factory,
-            completion_service=completion_service,
-            output_type="json",
-        )
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-            tenant=providers.Object(test_tenant),
-        )
-        repo = container.flow_run_repo()
-        flow = await container.flow_repo().get(
-            flow_id=context.flow_id, tenant_id=context.tenant_id
-        )
-        assert await repo.mark_running_if_claimable(
-            run_id=context.run_id,
-            tenant_id=context.tenant_id,
-            expected_revision=context.run_revision,
-        )
-        await repo.record_evidence_classification_level(
-            run_id=context.run_id,
-            tenant_id=context.tenant_id,
-            level=0,
-            has_completed_steps=False,
-        )
-        first_status = (
-            FlowStepAttemptStatus.COMPLETED
-            if latest_status == FlowStepAttemptStatus.FAILED
-            else FlowStepAttemptStatus.FAILED
-        )
-        for attempt_no, status in enumerate((first_status, latest_status), start=1):
-            await repo.create_or_get_attempt_started(
-                run_id=context.run_id,
-                flow_id=context.flow_id,
-                tenant_id=context.tenant_id,
-                step_id=flow.steps[0].id,
-                step_order=1,
-                attempt_no=attempt_no,
-                dispatch_task_id=None,
-            )
-            await repo.finish_attempt(
-                run_id=context.run_id,
-                step_id=flow.steps[0].id,
-                tenant_id=context.tenant_id,
-                attempt_no=attempt_no,
-                status=status,
-                error_code="typed_io_output_parse_failed"
-                if status == FlowStepAttemptStatus.FAILED
-                else None,
-                provenance_json=FlowAttemptProvenance(llm=None, rag=None).model_dump(
-                    mode="json"
-                ),
-                output_payload_json=build_rejected_output_payload(
-                    f"rejected attempt {attempt_no}", max_inline_bytes=100
-                )
-                if status == FlowStepAttemptStatus.FAILED
-                else {"text": "completed"},
-            )
-        await container.flow_run_terminalizer().terminalize_run(
-            run_id=context.run_id,
-            tenant_id=context.tenant_id,
-            target_status=FlowRunStatus.FAILED,
-            source=FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
-            error=FlowRunError.from_source(
-                FlowRunLifecycleSource.STALE_RUNNING_RECONCILER,
-                code=FlowApiErrorCode.RUN_WORKER_STALLED,
-                message="Seeded terminal run",
-            ),
-        )
-        await session.commit()
-    async with sessionmanager.session() as session:
-        enable_autobegin_for_flow_task_session(session)
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(admin_user),
-            tenant=providers.Object(test_tenant),
-        )
-        service = container.ai_builder_flow_review_service()
-        reference = await service.build_failure_reference(
-            flow_id=context.flow_id,
-            space_id=flow.space_id,
-            run_id=context.run_id,
-            step_order=1,
-        )
-        if latest_status == FlowStepAttemptStatus.COMPLETED:
-            with pytest.raises(AIBuilderBadRequestException) as caught:
-                await service.resolve_failure_evidence(
-                    flow_id=context.flow_id,
-                    space_id=flow.space_id,
-                    reference=reference,
-                    audit=AsyncMock(),
-                )
-            assert caught.value.context["reason"] == "no_failed_attempt"
-        else:
-            evidence = await service.resolve_failure_evidence(
-                flow_id=context.flow_id,
-                space_id=flow.space_id,
-                reference=reference,
-                audit=AsyncMock(),
-            )
-            assert evidence.failure is not None
-            assert evidence.failure.attempt_no == 2
-            assert evidence.failure.rejected_output.text == "rejected attempt 2"
-    completion_service.get_response.assert_not_called()
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_failure_launch_denial_writes_no_audit_row(
-    setup_database, admin_user, test_tenant
-):
-    from starlette.requests import Request
-
-    from eneo.database.tables.audit_log_table import AuditLog
-    from eneo.flows.api.flow_ai_builder_router import get_run_failure_launch
-    from eneo.main.exceptions import UnauthorizedException
-
-    run_id = uuid4()
-    denied_user = admin_user.model_copy(update={"roles": []})
-    async with sessionmanager.session() as session:
-        container = Container(
-            session=providers.Object(session),
-            user=providers.Object(denied_user),
-            tenant=providers.Object(test_tenant),
-        )
-        with pytest.raises(UnauthorizedException) as caught:
-            await get_run_failure_launch(
-                request=Request({"type": "http"}),
-                flow_id=uuid4(),
-                run_id=run_id,
-                step_order=1,
-                space_id=uuid4(),
-                container=container,
-            )
-        assert caught.value.code == "insufficient_tenant_permission"
-    async with sessionmanager.session() as session, session.begin():
-        count = await session.scalar(
-            sa.select(sa.func.count())
-            .select_from(AuditLog)
-            .where(AuditLog.entity_id == run_id)
-        )
-        assert count == 0
 
 
 @pytest.mark.asyncio

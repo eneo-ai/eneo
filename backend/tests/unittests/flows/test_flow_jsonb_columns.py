@@ -14,11 +14,6 @@ from eneo.database.tables.tenant_table import Tenants
 
 _REVIEWED_JSONB_COLUMNS = frozenset(
     """
-    builder_plans.proposal_json
-    builder_sessions.conversation
-    builder_sessions.latest_turn_error_jsonb
-    builder_sessions.latest_turn_request_jsonb
-    builder_sessions.planning_state_jsonb
     flow_live_transcripts.segments
     flow_package_imports.failure_json
     flow_package_imports.import_plan_json

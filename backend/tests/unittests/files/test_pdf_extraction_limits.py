@@ -471,10 +471,7 @@ async def test_pdf_child_crash_is_an_extraction_error_and_is_reaped(
 @pytest.mark.asyncio
 @pytest.mark.parametrize("bounded", [False, True])
 async def test_pdf_fixture_preserves_golden_text(bounded):
-    fixture = (
-        Path(__file__).resolve().parents[3]
-        / "scripts/fixtures/ai_builder_battle/06_tidigare_beslut.pdf"
-    )
+    fixture = Path(__file__).resolve().parents[2] / "fixtures/tidigare_beslut.pdf"
     result = (
         await TextExtractor.extract_from_pdf_async(fixture, limits=_LIMITS)
         if bounded

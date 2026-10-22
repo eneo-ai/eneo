@@ -36,23 +36,6 @@ def _service_key_user(*permissions: Permission):
     )
 
 
-_BUILDER_ACTIONS = (
-    FlowApiAction.BUILDER_SESSION_CREATE,
-    FlowApiAction.BUILDER_SESSION_LIST,
-    FlowApiAction.BUILDER_MESSAGE_SEND,
-    FlowApiAction.BUILDER_SESSION_READ,
-    FlowApiAction.BUILDER_ATTACHMENT_DETACH,
-    FlowApiAction.BUILDER_MODELS_LIST,
-    FlowApiAction.BUILDER_TOOLS_LIST,
-    FlowApiAction.BUILDER_PLAN_READ,
-    FlowApiAction.BUILDER_PLAN_LIST,
-    FlowApiAction.BUILDER_SESSION_CANCEL,
-    FlowApiAction.BUILDER_PLAN_APPROVE,
-    FlowApiAction.BUILDER_PLAN_APPLY,
-    FlowApiAction.BUILDER_PLAN_REVISE,
-)
-
-
 @pytest.mark.parametrize(
     ("action", "permissions"),
     [
@@ -71,19 +54,6 @@ def test_policy_accepts_explicit_permissions_for_shipped_actions(
     action: FlowApiAction, permissions: list[Permission]
 ) -> None:
     assert user_can_perform_flow_action(_user(*permissions), action) is True
-
-
-@pytest.mark.parametrize("action", _BUILDER_ACTIONS)
-def test_builder_actions_accept_explicit_builder_permissions(
-    action: FlowApiAction,
-) -> None:
-    assert (
-        user_can_perform_flow_action(
-            _user(Permission.FLOWS_MANAGE, Permission.FLOWS_AI_BUILDER),
-            action,
-        )
-        is True
-    )
 
 
 @pytest.mark.parametrize(
@@ -114,7 +84,6 @@ def test_coarse_permissions_do_not_grant_unimplemented_actions(
         FlowApiAction.EDIT,
         FlowApiAction.REVIEW,
         FlowApiAction.RESUME,
-        *_BUILDER_ACTIONS,
         FlowApiAction.TRACE_VIEW,
     ],
 )
@@ -158,84 +127,6 @@ def test_review_mutations_require_explicit_service_key_opt_in(
         service_key_user,
         action,
         allow_service_key_principals=True,
-    )
-
-
-@pytest.mark.parametrize("action", _BUILDER_ACTIONS)
-def test_builder_actions_require_edit_and_builder_permissions(
-    action: FlowApiAction,
-) -> None:
-    user = _user(Permission.FLOWS_MANAGE)
-
-    with pytest.raises(UnauthorizedException, match="Flow AI Builder"):
-        require_flow_action(user, action)
-
-
-@pytest.mark.parametrize("action", _BUILDER_ACTIONS)
-def test_builder_actions_reject_service_key_principals(
-    action: FlowApiAction,
-) -> None:
-    service_key_user = _service_key_user(
-        Permission.FLOWS_MANAGE,
-        Permission.FLOWS_AI_BUILDER,
-    )
-
-    with pytest.raises(UnauthorizedException) as exc_info:
-        require_flow_action(service_key_user, action)
-
-    assert (
-        exc_info.value.code
-        == FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED.value
-    )
-    assert exc_info.value.context == {
-        "auth_layer": "service_key_principal",
-        "capability": "ai_builder",
-    }
-
-
-_REVIEW_PERMISSIONS = (
-    Permission.FLOWS_MANAGE,
-    Permission.FLOWS_AI_BUILDER,
-    Permission.FLOWS_AI_BUILDER_REVIEW,
-)
-
-
-def test_builder_review_accepts_the_three_explicit_permissions() -> None:
-    assert (
-        user_can_perform_flow_action(
-            _user(*_REVIEW_PERMISSIONS), FlowApiAction.BUILDER_REVIEW
-        )
-        is True
-    )
-
-
-def test_builder_review_is_a_feature_the_builder_permissions_do_not_imply() -> None:
-    with pytest.raises(UnauthorizedException, match="review flow runs"):
-        require_flow_action(
-            _user(Permission.FLOWS_MANAGE, Permission.FLOWS_AI_BUILDER),
-            FlowApiAction.BUILDER_REVIEW,
-        )
-
-
-def test_legacy_flows_alias_does_not_grant_builder_review() -> None:
-    """An organisation turns the review on per role; an older coarse grant
-    never switches it on by itself."""
-    assert (
-        user_can_perform_flow_action(
-            _user(Permission.FLOWS), FlowApiAction.BUILDER_REVIEW
-        )
-        is False
-    )
-
-
-def test_builder_review_rejects_service_key_principals() -> None:
-    with pytest.raises(UnauthorizedException) as exc_info:
-        require_flow_action(
-            _service_key_user(*_REVIEW_PERMISSIONS), FlowApiAction.BUILDER_REVIEW
-        )
-    assert (
-        exc_info.value.code
-        == FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED.value
     )
 
 

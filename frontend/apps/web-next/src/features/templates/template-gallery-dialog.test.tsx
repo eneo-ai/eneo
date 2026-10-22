@@ -43,9 +43,7 @@ async function show(onCreate: () => Promise<void> = async () => {}) {
           attachments: {
             formats: [
               { mimetype: "application/pdf", size: 10000, extensions: ["pdf"], vision: false }
-            ],
-            ai_builder_max_count: 10,
-            ai_builder_max_message_chars: 4000
+            ]
           }
         }
       })

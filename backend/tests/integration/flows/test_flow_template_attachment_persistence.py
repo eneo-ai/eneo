@@ -18,8 +18,6 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
-    BuilderSessionFiles,
-    BuilderSessions,
     Flows,
     FlowTemplateAssets,
     FlowVersions,
@@ -27,8 +25,6 @@ from eneo.database.tables.flow_tables import (
 from eneo.database.tables.spaces_table import Spaces
 from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
-from eneo.flows.ai_builder.ai_builder_domain_models import TargetKind
-from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
 from eneo.flows.application.flow_authoring_command import TemplateAttachmentIntent
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftChangeSet,
@@ -477,36 +473,19 @@ async def test_template_download_hides_cross_tenant_asset_without_audit(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_promoted_template_survives_builder_session_deletion_and_fences_file(
+async def test_promoted_template_fences_its_file(
     db_container,
 ) -> None:
     async with db_container() as setup_container:
-        user, space, flow, file = await _create_flow_and_file(
+        user, _space, flow, file = await _create_flow_and_file(
             setup_container,
             placeholder="case_id",
-        )
-        repo = AIBuilderRepository(setup_container.session())
-        builder_session = await repo.create_session(
-            tenant_id=user.tenant_id,
-            space_id=space.id,
-            actor_user_id=user.id,
-            target_kind=TargetKind.CREATE,
-        )
-        await setup_container.session().execute(
-            sa.insert(BuilderSessionFiles).values(
-                session_id=builder_session.id,
-                file_id=file.id,
-                tenant_id=user.tenant_id,
-            )
         )
 
     async with db_container(user=user) as container:
         asset = await container.flow_template_asset_service().create_from_existing_attached_file(
             flow_id=flow.id,
             file_id=file.id,
-        )
-        await container.session().execute(
-            sa.delete(BuilderSessions).where(BuilderSessions.id == builder_session.id)
         )
         await container.session().flush()
 

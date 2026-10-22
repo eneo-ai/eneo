@@ -18,7 +18,7 @@ abstraction.
 | Evidence/export | evidence service, redaction owner, API adapter | tenant scope, same redaction policy, honest missing evidence, audit-before-response |
 | Retention eligibility or purge | Flow retention projection/resolver, administrator purge service, and purge repository; [retention contract](/guides/flows/retention-policy) | Flow → Space → Organization override resolution, preview non-mutation, authorization/audit, blockers, bounded whole-run purge |
 | Package portability | `eneo.flow_packages` plus the Flow adapter | archive safety, checksums, explicit mapping, unpublished target draft |
-| Builder behavior | `eneo.flows.ai_builder` | permission/budget/lease/commit boundaries and normal core draft validation |
+| Authoring chat and flow tools | `flows/application/flow_authoring_operations.py`, `flow_authoring_chat.py`, `internal_mcp/flows.py` | the same editor update, validation, permissions and audit as the editor; edit mode and revision fencing |
 
 ## Non-negotiable review checks
 

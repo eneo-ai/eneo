@@ -41,7 +41,7 @@ async def start_persistence() -> None:
     The database session manager and the durable object-content runtime are
     process singletons, and the container hands out services that need both.
     The API's lifespan and every other process that builds a container (the
-    workers, the Flow AI Builder measurement harness) start them here.
+    workers) start them here.
 
     A second start while persistence is running is refused before anything is
     touched: the running owner keeps its engine and runtime. A failed start

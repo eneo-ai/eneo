@@ -37,7 +37,6 @@ def test_every_declared_usage_column_is_derived_in_kind_order() -> None:
         (FileUsageKind.FLOW_RUNTIME, "flow_run_step_input_files.file_id"),
         (FileUsageKind.FLOW_RUNTIME, "flow_run_step_result_files.file_id"),
         (FileUsageKind.FLOW_RUNTIME, "flow_runtime_uploaded_files.file_id"),
-        (FileUsageKind.FLOW_BUILDER_SESSION, "builder_session_files.file_id"),
     ]
 
 

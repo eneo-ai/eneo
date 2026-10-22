@@ -142,72 +142,6 @@ Most log aggregation systems separate fields that are indexed for fast filtering
 
 How this is configured is an infrastructure concern, but the NDJSON format is designed to make the mapping natural: the `resource` block is low-cardinality metadata; `attributes` carries the high-cardinality, request-specific data.
 
-### AI Builder provider-failure events
-
-After an AI Builder provider call has started, a caught failure emits exactly one
-`failure_event` log row with `attributes.event` set to
-`ai_builder.provider.failure`. Typed provider rejections, including rate limits,
-commit a replayable public error on the turn. An identical same-key request
-replays that error without another provider call; retrying provider work requires
-a new turn and does not require duplicate-spend acknowledgement. Rate-limit
-errors expose `provider_exception_class=rate_limit`, not an invented retry delay.
-
-Timeouts, connection failures, typed API `5xx` failures, and unclassified
-exceptions remain `provider_outcome_unknown`. They require explicit
-duplicate-spend acknowledgement before the exact same turn can call the provider
-again. Neither disposition enables automatic retry.
-
-When one of Eneo's own timers ended the call, the public error's `details` also
-carry `local_deadline` (`silence` or `ceiling`) and `deadline_seconds` (the limit
-that fired), and its message starts with "The AI model did not answer within N
-seconds." (silence) or "The AI model did not finish within N seconds."
-(ceiling). No other failure carries these two keys; an SDK or gateway timeout does
-not say which limit applied. The `details` stay the bounded scalar map described
-in the error contract, so the keys are not a separately typed schema.
-
-The bounded fields are:
-
-| Field | Allowed values or shape | Aggregation guidance |
-|---|---|---|
-| `operation` | `proposal_completion`, `slot_classification` | Low cardinality; safe to index. |
-| `failure_kind` | `rejected`, `rate_limited`, `timeout`, `transport_ambiguous`, `unknown` | Low cardinality; safe to index. |
-| `failure_code` | HTTP status class such as `4xx`, or `null` | Low cardinality; safe to index. |
-| `safe_detail.provider_status_code` | Integer `100`–`599`, only from a recognized typed provider status/timeout exception | Medium cardinality; parse on demand unless an operator has a specific status dashboard. |
-| `safe_detail.provider_status_class` | Same bounded status class as `failure_code` | Low cardinality; safe to index. |
-| `failure_fingerprint` | Stable 12-character hash of the fixed component, stage, class, and safely exposed status | Parse on demand. It clusters equivalent failures; it is not a replay-safety signal. |
-| `request_id`, `tenant_id` | Present when that boundary owns the correlation value; otherwise `null` | High cardinality; do not pre-index. |
-| `safe_detail.provider_elapsed_ms`, `safe_detail.deadline_reached`, `safe_detail.local_deadline` | Elapsed time in ms of the request the call ended on; whether Eneo's own timer expired; `silence` or `ceiling` when it did. `provider_elapsed_ms` and `deadline_reached` are `null` when the failure came before the call was timed | Parse on demand. The timer is decided by the provider-failure classifier, once per failure. |
-
-Only recognized adapter exception types can supply a status. An exception that
-merely resembles an adapter error—for example, an arbitrary object with a
-`status_code` attribute—fails closed to `unknown` with no status. Timeout and
-transport ambiguity remain provider-outcome-unknown even when their internal
-class is known. The public error details distinguish `known_rejection` with
-`retry_scope=new_turn` from `provider_outcome_unknown` with
-`retry_scope=acknowledged_same_turn`; both set `another_call_permitted=false` for
-the current disposition.
-
-These events never contain prompts, user messages, model or provider names,
-request/response bodies, raw provider responses, exception text or tracebacks,
-headers, credentials, DSNs, or local file paths. The proposal-attempt metadata
-that can be persisted with a conversation retains only its existing coarse
-`provider_error` value; the internal class, status, and fingerprint stay in the
-failure-event log. When the turn ends with an assistant message, the failed
-call's record in that message's telemetry carries the bounded disposition (`provider_failure_kind`,
-status class, turn state), `local_deadline`, and the call's chunk timing, never
-its content. A terminal turn without an assistant message (for example a known
-provider rejection) leaves only the failure-event log; a persisted snapshot for
-those turns is V0.2c. A turn the server itself ends in an error after it made
-provider calls (an unsupported architecture, an unrenderable question) is the
-exception: it stores its telemetry record on the user message it kept. A refusal
-that made no call stores none.
-
-Example query:
-
-```
-{service="eneo"} | json | event = "ai_builder.provider.failure" | failure_kind = "rate_limited"
-```
-
 ---
 
 ## 5. ID Contract
@@ -300,10 +234,11 @@ output exhaustion from an invalid structured answer before deciding how to recov
 surface. Credential masking does not remove personal or case data from that
 evidence. Its `knowledge_traces` field contains the current attempt's source
 review details, subject to the existing passage-disclosure policy; the diagnostic
-export carries counts only. The AI Builder's existing instruction-repair path
-reads the authorized failed attempt and published definition directly. A metadata
-export alone cannot establish whether an answer is factually correct or supply
-the content needed to repair its instructions.
+export carries counts only. Repairing a step's instructions needs the authorized
+run and the flow definition themselves, which the flow's authoring chat reads
+through its `read_run` and `read_flow` tools. A metadata export alone cannot
+establish whether an answer is factually correct or supply the content needed to
+repair its instructions.
 
 Evidence exports use `flow-evidence-export.v18` for this layout: current-attempt
 source review moves from `bundle.debug_export.steps[].rag` to

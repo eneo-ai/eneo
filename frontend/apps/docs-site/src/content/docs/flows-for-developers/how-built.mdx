@@ -48,15 +48,11 @@ The generated Eneo SDK owns API types. `src/lib/features/flows` owns Flow
 state/presentation helpers and components. SvelteKit routes assemble those
 components for manual authoring and run/review views.
 
-Builder frontend owners include:
-
-- `src/lib/features/flows/ai-builder`;
-- the `flows/ai-builder` route subtree;
-- Builder settings and permission controls, translations, and tests.
-
-Builder applies compiled proposals through `FlowAuthoringCommandService`, which
-prepares and materializes normal Flow drafts. Package installation uses the
-same command service.
+Conversational authoring is an ordinary assistant chat bound to one flow. Its
+loopback flow tools call the same authoring operations as the editor update
+(`flows/application/flow_authoring_operations.py`), so validation, permissions,
+classification and audit stay one path. Package installation materializes
+drafts through `FlowAuthoringCommandService`.
 
 ## Persistence boundaries
 
@@ -81,8 +77,7 @@ saturation cannot consume maintenance capacity.
 ## Source guards
 
 Import contracts in `backend/.importlinter` keep engine and package modules
-independent of Builder internals; `flow_ai_builder_router` is the explicit
-exception for Builder imports. Runtime ownership guards keep webhook delivery out of
+independent of each other. Runtime ownership guards keep webhook delivery out of
 the executor. These checks protect dependencies and behavior, rather than a
 historical branch split or generated developer prose.
 

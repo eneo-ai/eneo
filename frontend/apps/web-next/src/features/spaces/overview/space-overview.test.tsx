@@ -54,7 +54,7 @@ const appContext = testAppContext({
   permissions: ["admin"],
   settings: { using_templates: true },
   limits: {
-    attachments: { formats: [], ai_builder_max_count: 10, ai_builder_max_message_chars: 4000 },
+    attachments: { formats: [] },
     info_blobs: {
       formats: [
         { mimetype: "application/pdf", extensions: ["pdf"], size: 10_000_000, vision: false }

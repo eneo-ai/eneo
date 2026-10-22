@@ -62,8 +62,6 @@
     readToolInputConfig,
     withToolInputConfig
   } from "./tool/toolInputConfig";
-  import FlowStepAIMenu from "./FlowStepAIMenu.svelte";
-  import type { AIBuilderStepIntent } from "$lib/features/flows/ai-builder/protocol";
   import FlowStepRequestPreview from "./FlowStepRequestPreview.svelte";
   import { buildContext } from "./flowPromptVariables";
   import Eye from "@lucide/svelte/icons/eye";
@@ -162,9 +160,7 @@
     onJsonValidationChanged,
     onOpenTranscriptionSettings,
     speakerMappingStepOffered = false,
-    onAddSpeakerMappingStep,
-    onBuildFlowWithAI,
-    onEditStepWithAI
+    onAddSpeakerMappingStep
   }: {
     steps: FlowStep[];
     activeStepId: string | null;
@@ -190,9 +186,6 @@
     /** Diarization is on and no step after this one names the speakers yet. */
     speakerMappingStepOffered?: boolean;
     onAddSpeakerMappingStep?: () => void;
-    onBuildFlowWithAI?: () => void;
-    /** Opens the AI Builder on a step, optionally with a request waiting in the composer. */
-    onEditStepWithAI?: (step: FlowStep, request?: string, intent?: AIBuilderStepIntent) => void;
   } = $props();
 
   // ---------------------------------------------------------------------------
@@ -948,23 +941,12 @@
           <IconWorkflow />
         </Empty.Media>
         <Empty.Title>{m.flow_no_steps_welcome_title()}</Empty.Title>
-        <Empty.Description>
-          {onBuildFlowWithAI
-            ? m.flow_no_steps_welcome_description_ai()
-            : m.flow_no_steps_welcome_description()}
-        </Empty.Description>
+        <Empty.Description>{m.flow_no_steps_welcome_description()}</Empty.Description>
       </Empty.Header>
       {#if !isPublished}
         <Empty.Content>
-          <!-- AI first: the Builder is the main way in; manual steps stay one click away. -->
           <div class="flex flex-wrap items-center justify-center gap-2">
-            {#if onBuildFlowWithAI}
-              <Button onclick={onBuildFlowWithAI}>{m.ai_builder_empty_state_cta()}</Button>
-            {/if}
-            <Button
-              variant={onBuildFlowWithAI ? "outline" : "default"}
-              onclick={() => flowEditor.addStep()}
-            >
+            <Button onclick={() => flowEditor.addStep()}>
               {m.flow_empty_add_step()}
             </Button>
             <Button variant="outline" onclick={() => flowEditor.createDraftingChainStarter()}>
@@ -1036,9 +1018,6 @@
               </h2>
             {/if}
           </div>
-          <!-- A published flow can be changed here too: the Builder proposes, and
-               approving unpublishes the flow until it is published again. Hiding
-               this hid the feature from the people whose flows are published. -->
           <div class="flex shrink-0 flex-wrap items-center justify-end gap-2">
             {#if requestPreviewAvailable}
               <!-- What the AI will actually get: instruction, material and the
@@ -1052,13 +1031,6 @@
                 <Eye data-icon="inline-start" aria-hidden="true" />
                 {m.flow_request_preview_open()}
               </Button>
-            {/if}
-            {#if onEditStepWithAI && activeStep.id}
-              <FlowStepAIMenu
-                usesAI={stepUsesAI}
-                hasInstruction={instructionText.trim().length > 0}
-                onRequest={(request, intent) => onEditStepWithAI?.(activeStep, request, intent)}
-              />
             {/if}
           </div>
         </div>
@@ -1132,9 +1104,6 @@
               assistantLoading={assistantState.loading}
               assistantLoadFailed={assistantState.loadFailed}
               onRetryAssistantLoad={() => assistantState.retryLoad()}
-              onImproveInstructionWithAI={onEditStepWithAI && activeStep.id
-                ? (request) => onEditStepWithAI?.(activeStep, request, "instruction")
-                : undefined}
               availableModels={$currentSpace.completion_models}
               {steps}
               {formSchema}
@@ -1212,9 +1181,6 @@
               instructionMissing={stepAiWork?.missing ?? false}
               assistant={assistantState.assistant}
               assistantLoading={assistantState.loading}
-              onImproveInstructionWithAI={onEditStepWithAI && activeStep.id
-                ? (request) => onEditStepWithAI?.(activeStep, request, "instruction")
-                : undefined}
               availableModels={$currentSpace.completion_models}
               {steps}
               {formSchema}

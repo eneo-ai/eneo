@@ -27,16 +27,6 @@ from eneo.database.tables.flow_tables import (
     FlowStepResults,
     FlowSteps,
 )
-from eneo.flows.ai_builder.ai_builder_create_compile_context import (
-    CreateCompileContext,
-)
-from eneo.flows.ai_builder.ai_builder_create_compiler import (
-    compile_create_intent_to_spec,
-)
-from eneo.flows.ai_builder.ai_builder_proposal_intent import (
-    parse_create_flow_intent_arguments,
-)
-from eneo.flows.ai_builder.planning_state import CheckpointIntent
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.application.flow_draft_materialization import (
     compile_flow_draft_changeset,
@@ -64,7 +54,7 @@ from eneo.flows.enums import (
     FlowRunReviewCheckpointState,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, InputType, OutputType
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.infrastructure.flow_repo import FlowRepository
@@ -1382,54 +1372,7 @@ async def test_an_edit_of_the_compiled_earlier_result_reaches_delivery(
     sits on the comparison, and a schema-valid edit of it is what the decision
     and the delivered letter are derived from."""
 
-    spec = compile_create_intent_to_spec(
-        parse_create_flow_intent_arguments(
-            {
-                "flow_name": "Grant decision",
-                "plan_rationale": "Compare, decide, write.",
-                "steps": [
-                    {
-                        "name": "Compare offers",
-                        "instructions": "Compare the offers.",
-                        "output_fields": [
-                            {
-                                "name": "comparison",
-                                "field_type": "string",
-                                "description": "Offer comparison.",
-                            }
-                        ],
-                        "review_mode": "edit",
-                    },
-                    {
-                        "name": "Decide grant",
-                        "instructions": "Decide the grant.",
-                        "output_fields": [
-                            {
-                                "name": "decision",
-                                "field_type": "string",
-                                "description": "The decision.",
-                            }
-                        ],
-                    },
-                    {"name": "Write letter", "instructions": "Write the letter."},
-                ],
-            }
-        ),
-        context=CreateCompileContext(
-            runtime_input_type=InputType.TEXT,
-            final_output_type=OutputType.TEXT,
-            checkpoint_intents=(
-                CheckpointIntent(
-                    evidence_level="explicit",
-                    producer_kind="structured_result",
-                    operation="set",
-                    mode=FlowStepReviewMode.EDIT,
-                    confidence="high",
-                    evidence=["quote:user_message:1:Let me correct the comparison."],
-                ),
-            ),
-        ),
-    )
+    spec = _grant_decision_spec(("comparison", "Offer comparison."))
     sentinel = "Offer B is cheapest at 12 500 kr (edited)."
 
     async def derive(**kwargs: object) -> SimpleNamespace:
@@ -1528,62 +1471,91 @@ async def test_an_edit_of_the_compiled_earlier_result_reaches_delivery(
     assert sentinel in delivered
 
 
-def _compiled_price_review_spec() -> FlowDraftSpecCore:
-    """Compare (reviewed) -> decide -> letter; the comparison states the price
-    twice, so a decision step can re-derive an edited price from its sibling."""
+def _grant_decision_spec(*fields: tuple[str, str]) -> FlowDraftSpecCore:
+    """Compare (reviewed for edits) -> decide -> letter. The comparison's
+    fields reach the decision as its JSON input and the letter, beside the
+    decision, as source refs."""
 
-    return compile_create_intent_to_spec(
-        parse_create_flow_intent_arguments(
-            {
-                "flow_name": "Grant decision",
-                "plan_rationale": "Compare, decide, write.",
-                "steps": [
-                    {
-                        "name": "Compare offers",
-                        "instructions": "Compare the offers.",
-                        "output_fields": [
-                            {
-                                "name": "price",
-                                "field_type": "string",
-                                "description": "Cheapest price.",
-                            },
-                            {
-                                "name": "comparison",
-                                "field_type": "string",
-                                "description": "Offer comparison.",
-                            },
-                        ],
-                        "review_mode": "edit",
+    def contract(entries: tuple[tuple[str, str], ...]) -> dict[str, object]:
+        return {
+            "type": "object",
+            "properties": {
+                name: {
+                    "type": "string",
+                    "title": name.capitalize(),
+                    "description": description,
+                }
+                for name, description in entries
+            },
+            "additionalProperties": False,
+            "required": [name for name, _ in entries],
+        }
+
+    def instructions(task: str, entries: tuple[tuple[str, str], ...]) -> str:
+        listed = "\n".join(f"- {name}: {description}" for name, description in entries)
+        return f"{task}\n\nRequired JSON fields:\n{listed}"
+
+    decision = (("decision", "The decision."),)
+    return FlowDraftSpecCore.model_validate(
+        {
+            "flow_name": "Grant decision",
+            "steps": [
+                {
+                    "plan_step_ref": "step_a",
+                    "name": "Compare offers",
+                    "assistant_spec": {
+                        "instructions": instructions("Compare the offers.", fields)
                     },
-                    {
-                        "name": "Decide grant",
-                        "instructions": "Decide the grant.",
-                        "output_fields": [
+                    "input_source": "flow_input",
+                    "output_type": "json",
+                    "input_bindings": {"question": "{{ indata_text }}"},
+                    "output_contract": contract(fields),
+                    "review_policy": {"mode": "edit"},
+                },
+                {
+                    "plan_step_ref": "step_b",
+                    "name": "Decide grant",
+                    "assistant_spec": {
+                        "instructions": instructions("Decide the grant.", decision)
+                    },
+                    "input_source": "previous_step",
+                    "input_type": "json",
+                    "output_type": "json",
+                    "input_contract": contract(fields),
+                    "output_contract": contract(decision),
+                },
+                {
+                    "plan_step_ref": "step_c",
+                    "name": "Write letter",
+                    "assistant_spec": {"instructions": "Write the letter."},
+                    "input_source": "previous_step",
+                    "input_bindings": {
+                        "source_refs": [
                             {
-                                "name": "decision",
-                                "field_type": "string",
-                                "description": "The decision.",
+                                "step_ref": step_ref,
+                                "output": "structured",
+                                "field_path": name,
+                                "label": name,
                             }
-                        ],
+                            for step_ref, entries in (
+                                ("step_a", fields),
+                                ("step_b", decision),
+                            )
+                            for name, _ in entries
+                        ]
                     },
-                    {"name": "Write letter", "instructions": "Write the letter."},
-                ],
-            }
-        ),
-        context=CreateCompileContext(
-            runtime_input_type=InputType.TEXT,
-            final_output_type=OutputType.TEXT,
-            checkpoint_intents=(
-                CheckpointIntent(
-                    evidence_level="explicit",
-                    producer_kind="structured_result",
-                    operation="set",
-                    mode=FlowStepReviewMode.EDIT,
-                    confidence="high",
-                    evidence=["quote:user_message:1:Let me correct the price."],
-                ),
-            ),
-        ),
+                },
+            ],
+        }
+    )
+
+
+def _compiled_price_review_spec() -> FlowDraftSpecCore:
+    """The comparison states the price twice, so a decision step can
+    re-derive an edited price from its sibling."""
+
+    return _grant_decision_spec(
+        ("price", "Cheapest price."), ("comparison", "Offer comparison.")
     )
 
 

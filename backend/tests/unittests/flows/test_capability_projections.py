@@ -12,9 +12,7 @@ from __future__ import annotations
 from itertools import product
 
 import pytest
-from pydantic import ValidationError
 
-from eneo.flows.ai_builder.planning_state import PlanningState, StepTriple
 from eneo.flows.enums import (
     FlowAuthoringInputSource,
     FlowAuthoringInputType,
@@ -26,7 +24,6 @@ from eneo.flows.enums import (
 )
 from eneo.flows.flow_capability_manifest import (
     CAPABILITY_REGISTRY,
-    FCM_VERSION,
     CapabilityProjection,
     coverage_report,
     projection_cells,
@@ -379,31 +376,3 @@ def test_http_cells_no_longer_resolve() -> None:
             )
             is None
         )
-
-
-@pytest.mark.parametrize(
-    "output_mode",
-    projection_values(CapabilityProjection.PROPOSABLE_NEW, "output_mode"),
-)
-def test_step_triple_accepts_every_proposable_mode(output_mode: str) -> None:
-    triple = StepTriple.model_validate(
-        {"input_type": "text", "output_type": "text", "output_mode": output_mode}
-    )
-    assert triple.output_mode.value == output_mode
-
-
-@pytest.mark.parametrize("output_mode", ["speaker_mapping", "http_post"])
-def test_step_triple_refuses_modes_the_builder_cannot_propose(output_mode: str) -> None:
-    with pytest.raises(ValidationError):
-        StepTriple.model_validate(
-            {"input_type": "text", "output_type": "json", "output_mode": output_mode}
-        )
-
-
-def test_planning_state_stamps_the_manifest_version_and_loads_older_stamps() -> None:
-    assert FCM_VERSION == 13
-    assert PlanningState.empty().fcm_version == 13
-    restored = PlanningState.model_validate(
-        {**PlanningState.empty().model_dump(mode="json"), "fcm_version": 9}
-    )
-    assert restored.fcm_version == 9

@@ -342,7 +342,7 @@ For example, if a space is classified as "Confidential" (level 3), only MCP serv
 
 ---
 
-## MCP in Flows and AI Builder
+## MCP in Flows
 
 A Flow step can take its input from the answer of one MCP tool: the step's
 input source is `tool`. See [Flows](/docs/flows) for how the step is
@@ -371,8 +371,8 @@ configured and what it records.
   then fail.
 
 Everything else of MCP stays outside Flows. A step's assistant does not use
-MCP servers or tools in a Flow, AI Builder does not propose tool steps, and a
-flow with a tool step cannot be exported as a Flow package.
+MCP servers or tools in a Flow, and a flow with a tool step cannot be exported
+as a Flow package.
 
 <Callout type="warning">
   Do not configure MCP on an assistant managed by a Flow. Use a step with the

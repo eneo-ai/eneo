@@ -18,7 +18,6 @@
   import { IconChevronDown } from "@eneo/icons/chevron-down";
   import FlowRunEvidence from "./FlowRunEvidence.svelte";
   import FlowRunProgressPanel from "./FlowRunProgressPanel.svelte";
-  import type { FlowRunFailureRepairTarget } from "$lib/features/flows/flowRunFailureRepair";
   import FlowRunReviewCheckpointPanel from "./FlowRunReviewCheckpointPanel.svelte";
   import FlowRunStatusBadge from "./FlowRunStatusBadge.svelte";
   import { getLocale } from "$lib/paraglide/runtime";
@@ -72,9 +71,7 @@
     visible = true,
     optimisticRuns = [],
     reloadTrigger = 0,
-    onOptimisticRunsConfirmed,
-    onreview,
-    onrepair
+    onOptimisticRunsConfirmed
   }: {
     flow: Flow;
     evidenceExportAllowed?: boolean;
@@ -83,10 +80,6 @@
     optimisticRuns?: FlowRun[];
     reloadTrigger?: number;
     onOptimisticRunsConfirmed?: (runIds: string[]) => void;
-    /** Offered when the AI builder can review these runs; opens it. */
-    onreview?: () => void;
-    /** Offered when the AI builder can repair a failed step; opens it on that step. */
-    onrepair?: (target: FlowRunFailureRepairTarget) => void;
   } = $props();
 
   let history = $state(createFlowRunHistoryState());
@@ -394,7 +387,6 @@
       {evidenceExportAllowed}
       {eneo}
       runStatus={run.status}
-      onRepairFailure={onrepair ?? null}
     />
   {/if}
 {/snippet}
@@ -403,8 +395,7 @@
   <header class="flex flex-wrap items-center justify-between gap-3">
     <div class="min-w-0">
       <!-- The selected tab already says "Historik" a few pixels above, so the
-           heading is kept for heading navigation and not repeated on screen.
-           The Builder panel opens the same way, with its summary line first. -->
+           heading is kept for heading navigation and not repeated on screen. -->
       <h2 class="sr-only">{m.flow_history()}</h2>
       <!-- The mode explainer describes what the list shows; with no runs there
            is nothing to explain and the empty state carries the next step. -->
@@ -414,11 +405,6 @@
         </p>
       {/if}
     </div>
-    {#if onreview}
-      <Button variant="outline" size="sm" class="h-9" onclick={() => onreview?.()}>
-        {m.flow_history_review_with_builder()}
-      </Button>
-    {/if}
   </header>
 
   {#if history.loading}

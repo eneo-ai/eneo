@@ -1,7 +1,7 @@
 # Flows documentation
 
-These documents cover Eneo Flows and the Flow AI Builder. Read them in this
-order; each says what it owns, so nothing is documented twice.
+These documents cover Eneo Flows. Read them in this order; each says what it
+owns, so nothing is documented twice.
 
 | Read this | When you need |
 | --- | --- |
@@ -9,7 +9,6 @@ order; each says what it owns, so nothing is documented twice.
 | [Flow architecture](./architecture.md) | Module ownership, runtime journeys, the policy decisions that are settled, and which guard tests enforce them. |
 | [Flow package layout](./package-layout.md) | Where a root-level Flow module belongs. Read before adding or moving one. |
 | [External transcription service](./external-transcription-service.md) | Connecting a speaker identification service (such as Vemsa) for flow audio steps: how it labels a transcript, how it fails, and the speaker review rollout. |
-| [AI-byggaren design](../design/ai-builder/) | What the builder's screens are meant to be, and what the build deliberately does differently. |
 
 ## Current authority
 
@@ -21,14 +20,14 @@ and partial-rerun surfaces.
 
 ## Where the code is
 
-- Backend: `backend/src/eneo/flows` — layered per the package layout page; the
-  AI Builder is `backend/src/eneo/flows/ai_builder`.
-- Frontend: `frontend/apps/web/src/lib/features/flows`, with the builder under
-  `.../flows/ai-builder`.
+- Backend: `backend/src/eneo/flows`, layered per the package layout page.
+- Authoring: the editor (`PATCH /api/v1/flows/{id}/editor/`) and the flow's
+  authoring chat (`flows/application/flow_authoring_chat.py`, with its loopback
+  tools in `backend/src/eneo/internal_mcp/flows.py`) both save through
+  `flows/application/flow_authoring_operations.py`.
+- Frontend: `frontend/apps/web/src/lib/features/flows`.
 - Portable packages: `backend/src/eneo/flow_packages`, deliberately outside
   `eneo.flows`.
-- AI Builder: a stacked extension that compiles into the same core draft model;
-  it does not own a second runtime.
 
 ## Delivery record
 

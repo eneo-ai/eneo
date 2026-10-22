@@ -23,10 +23,6 @@ from eneo.authentication.endpoint_access import (
 from eneo.flow_packages.api.flow_package_models import (
     FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
 )
-from eneo.flows.api.flow_ai_builder_router import (
-    AIBuilderEnvelopedError,
-    ai_builder_enveloped_error_handler,
-)
 from eneo.flows.runtime.flow_runtime_health import (
     FlowRuntimeHealthResponse,
     FlowRuntimeProbe,
@@ -428,25 +424,6 @@ def _normalize_multipart_upload_file_schemas(openapi_schema: dict[str, Any]) -> 
                     property_schema_obj["format"] = "binary"
 
 
-def _retag_flow_ai_builder_operations(openapi_schema: dict[str, Any]) -> None:
-    """Keep AI Builder operations grouped under their dedicated tag in OpenAPI.
-
-    The runtime path stays nested under `/flows`, but from an API consumer perspective
-    these operations read better as one workflow section instead of appearing under
-    both `flows` and `ai-builder`.
-    """
-    paths = _json_obj(openapi_schema.get("paths"))
-
-    for path, operations in paths.items():
-        if not path.startswith("/api/v1/flows/ai-builder"):
-            continue
-        if not isinstance(operations, dict):
-            continue
-        for operation in _json_obj(operations).values():
-            if isinstance(operation, dict):
-                cast(dict[str, Any], operation)["tags"] = ["ai-builder"]
-
-
 def _normalize_request_validation_error_responses(
     openapi_schema: dict[str, Any],
 ) -> None:
@@ -522,12 +499,6 @@ def get_application():
 
     # Add handlers of all errors except 500
     add_exception_handlers(app)
-
-    # AI Builder errors carry a prepared envelope; the route adapter re-raises
-    # them so the request transaction rolls back before this handler responds.
-    app.add_exception_handler(
-        AIBuilderEnvelopedError, ai_builder_enveloped_error_handler
-    )
 
     @app.exception_handler(HTTPException)
     async def http_exception_handler(
@@ -608,7 +579,6 @@ def get_application():
                 _remove_invalid_defaults(cast(dict[str, Any], schema))
 
         _normalize_multipart_upload_file_schemas(openapi_schema)
-        _retag_flow_ai_builder_operations(openapi_schema)
         _normalize_request_validation_error_responses(openapi_schema)
         _restore_stripped_example_nulls(openapi_schema)
 
@@ -617,9 +587,6 @@ def get_application():
         schemas = _json_obj(components.setdefault("schemas", {}))
 
         # Import SSE models and enums
-        from eneo.flows.ai_builder.ai_builder_event_models import (
-            AI_BUILDER_SCHEMA_HOIST_MODELS,
-        )
         from eneo.sessions.session import SSE_MODELS, EneoEventType
 
         # Add EneoEventType enum if not already there
@@ -631,7 +598,7 @@ def get_application():
 
         # Add SSE model schemas, hoisting nested $defs to top-level component schemas
         # so that openapi-typescript can resolve all $ref pointers.
-        for model in (*SSE_MODELS, *AI_BUILDER_SCHEMA_HOIST_MODELS):
+        for model in SSE_MODELS:
             model_name = model.__name__
             if model_name not in schemas:
                 schema = model.model_json_schema(

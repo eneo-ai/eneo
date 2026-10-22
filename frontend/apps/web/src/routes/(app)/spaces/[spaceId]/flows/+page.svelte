@@ -3,23 +3,20 @@
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
   import type { FlowSparse, Eneo } from "@eneo/eneo-js";
-  import type { RecoverableAIBuilderDraftSession } from "$lib/features/flows/ai-builder/protocol";
   import { Page } from "$lib/components/layout";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { initFlowsManager } from "$lib/features/flows/FlowsManager";
   import { getAppContext } from "$lib/core/AppContext";
   import { toast } from "$lib/components/toast";
   import { m } from "$lib/paraglide/messages";
-  import { getFlowRuntimeErrorMessage } from "$lib/features/flows/flowRuntimeErrorMapping";
   import FlowsTable from "./FlowsTable.svelte";
   import CreateFlowDialog from "./CreateFlowDialog.svelte";
   import FlowPackageImportDialog from "$lib/features/flows/components/FlowPackageImportDialog.svelte";
-  import { discardAIBuilderDraft, type AIBuilderDraftsLoad } from "./aiBuilderDrafts";
 
   let {
     data
   }: {
-    data: { flows: FlowSparse[]; eneo: Eneo; aiDrafts: AIBuilderDraftsLoad };
+    data: { flows: FlowSparse[]; eneo: Eneo };
   } = $props();
 
   const {
@@ -42,20 +39,6 @@
 
   const canManage = user.hasPermission("flows_manage");
   let createOpen = $state(false);
-  // Drafts are page-local after load: discarding one removes its row without a reload.
-  // svelte-ignore state_referenced_locally
-  let drafts = $state<RecoverableAIBuilderDraftSession[]>(
-    data.aiDrafts.status === "loaded" ? data.aiDrafts.drafts : []
-  );
-
-  async function discardDraft(sessionId: string) {
-    try {
-      await discardAIBuilderDraft(data.eneo, sessionId);
-      drafts = drafts.filter((draft) => draft.session_id !== sessionId);
-    } catch (error) {
-      toast.error(getFlowRuntimeErrorMessage(error, m.flow_list_discard_draft_failed()));
-    }
-  }
 </script>
 
 <svelte:head>
@@ -76,17 +59,8 @@
           spaceRouteId={$currentSpace.routeId}
           oninstalled={async (result) => {
             await refreshFlows();
-            const flowPath = resolve(`/spaces/${$currentSpace.routeId}/flows/${result.flow_id}`);
-            // The draft is exact; the next thing most people want is to change
-            // it, so the Builder tab is one press away without leaving the row.
-            toast.success(m.flow_package_import_success(), {
-              action: {
-                label: m.flow_package_continue_in_ai_builder(),
-                // eslint-disable-next-line svelte/no-navigation-without-resolve -- resolved route above, with the tab query appended
-                onClick: () => void goto(`${flowPath}?tab=ai-builder`)
-              }
-            });
-            await goto(flowPath);
+            toast.success(m.flow_package_import_success());
+            await goto(resolve(`/spaces/${$currentSpace.routeId}/flows/${result.flow_id}`));
           }}
         />
         <CreateFlowDialog bind:open={createOpen} />
@@ -102,11 +76,8 @@
         refreshFailed={$refreshError !== null}
         refreshing={$refreshing}
         onretry={refreshFlows}
-        {drafts}
-        draftsUnavailable={data.aiDrafts.status === "unavailable"}
         canCreate={canManage}
         oncreate={() => (createOpen = true)}
-        ondiscarddraft={discardDraft}
       />
     </div>
   </Page.Main>

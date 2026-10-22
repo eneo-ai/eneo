@@ -1,23 +1,6 @@
 // Page data for the Flow settings DOM tests: an admin with both retention permissions.
 
-export const BUILDER_BUDGET = {
-  max_attachments: 100,
-  max_message_chars: 50_000,
-  review_evidence_max_input_tokens: null,
-  review_investigation_evidence_max_tokens: 16_000,
-  review_investigation_evidence_ceiling_tokens: 16_000,
-  silence_timeout_seconds: null,
-  silence_timeout_seconds_default: 300,
-  call_ceiling_seconds: null,
-  call_ceiling_seconds_default: 1800,
-  max_attachments_hard_limit: 100,
-  max_message_chars_hard_limit: 50_000
-};
-
-export function pageData(
-  mappedOverrides: Record<string, unknown> = {},
-  builderOverrides: Record<string, unknown> = {}
-) {
+export function pageData(mappedOverrides: Record<string, unknown> = {}) {
   return {
     access: { admin: true, retentionManage: true, retentionHolds: true },
     flowRetentionPolicy: {
@@ -77,7 +60,6 @@ export function pageData(
       deployment_default_max_provider_calls: 100,
       ...mappedOverrides
     },
-    aiBuilderBudgetSettings: { ...BUILDER_BUDGET, ...builderOverrides },
     ragEvidencePolicy: {
       max_sources_with_recorded_passages: 25,
       max_recorded_passages_per_source: 5,

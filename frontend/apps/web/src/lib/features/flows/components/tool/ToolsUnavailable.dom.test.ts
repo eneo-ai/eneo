@@ -3,7 +3,6 @@ import { readable } from "svelte/store";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { m } from "$lib/paraglide/messages";
-import type { UnusableTool } from "$lib/features/flows/flowToolRefusal";
 
 import ToolsUnavailable from "./ToolsUnavailable.svelte";
 
@@ -27,95 +26,38 @@ afterEach(() => {
   space.mayEdit = true;
 });
 
-function unusable(overrides: Partial<UnusableTool>): UnusableTool {
-  return {
-    tool_name: "lookup",
-    server_name: "Records",
-    kind: "refused",
-    refusal: "tool_switched_off_in_space",
-    ...overrides
-  };
-}
-
 const steps = () => screen.queryAllByRole("listitem").map((item) => item.textContent?.trim());
 const settingsLink = () =>
   screen.queryByRole("link", { name: m.flow_tool_options_open_settings() });
 
-describe("ToolsUnavailable in the AI Builder", () => {
-  // Kills: a reason sentence other than the refusal owner's; the steps shown
-  // for a tool no step can fix or in a personal space; the step editor's
-  // "refresh the list" step in the Builder, which has no list.
+describe("ToolsUnavailable in the step editor", () => {
   it.each([
-    {
-      tool: unusable({}),
-      personal: false,
-      reason: () => m.flow_tool_refusal_tool_switched_off_in_space(),
-      showsSteps: true
-    },
-    {
-      tool: unusable({ kind: "input_schema_invalid", refusal: null }),
-      personal: false,
-      reason: () => m.flow_tool_unusable_input_schema_invalid(),
-      showsSteps: false
-    },
-    {
-      tool: unusable({ kind: "input_schema_too_large", refusal: null }),
-      personal: false,
-      reason: () => m.flow_tool_unusable_input_schema_too_large(),
-      showsSteps: false
-    },
-    {
-      tool: unusable({ refusal: "space_is_personal" }),
-      personal: true,
-      reason: () => m.flow_tool_refusal_space_is_personal(),
-      showsSteps: false
-    }
-  ])(
-    "names the tool and says why ($tool.kind, $tool.refusal)",
-    ({ tool, personal, reason, showsSteps }) => {
-      space.personal = personal;
-      render(ToolsUnavailable, { surface: "builder", unusable: tool });
+    { mayEdit: true, owner: () => m.flow_tool_options_empty_editor() },
+    { mayEdit: false, owner: () => m.flow_tool_options_empty_admin() }
+  ])("says how the space gets a tool (editor: $mayEdit)", ({ mayEdit, owner }) => {
+    space.mayEdit = mayEdit;
+    render(ToolsUnavailable);
 
-      expect(
-        screen.getByText(m.flow_tool_unavailable_title({ tool: "lookup", server: "Records" }))
-      ).toBeTruthy();
-      expect(screen.getByText(reason())).toBeTruthy();
-      expect(steps()).toEqual(
-        showsSteps
-          ? [
-              m.flow_tool_options_empty_step_server(),
-              m.flow_tool_options_empty_editor(),
-              m.flow_tool_unavailable_step_ask_again()
-            ]
-          : []
-      );
-    }
-  );
-
-  // Kills: an unresolved request shown as no guidance, as a named tool, or
-  // without the steps by which a tool becomes available.
-  it("names the request it could not match and how a tool becomes available", () => {
-    render(ToolsUnavailable, {
-      surface: "builder",
-      unusable: { kind: "request_unresolved", request_text: "kalendern Bokning" }
-    });
-
-    expect(
-      screen.getByText(m.flow_tool_request_unresolved_title({ request: "kalendern Bokning" }))
-    ).toBeTruthy();
-    expect(screen.getByText(m.flow_tool_request_unresolved_reason())).toBeTruthy();
+    expect(screen.getByText(m.flow_tool_options_empty())).toBeTruthy();
     expect(steps()).toEqual([
       m.flow_tool_options_empty_step_server(),
-      m.flow_tool_options_empty_editor(),
-      m.flow_tool_unavailable_step_ask_again()
+      owner(),
+      m.flow_tool_options_empty_step_listed()
     ]);
   });
 
-  // Kills: the settings link offered to someone who may not edit the space,
-  // or opened in the Builder's own tab.
+  it("says a personal space has no tools and offers no steps", () => {
+    space.personal = true;
+    render(ToolsUnavailable);
+
+    expect(screen.getByText(m.flow_tool_refusal_space_is_personal())).toBeTruthy();
+    expect(steps()).toEqual([]);
+    expect(settingsLink()).toBeNull();
+  });
+
   it.each([true, false])("links the space settings only for a space editor (%s)", (mayEdit) => {
     space.mayEdit = mayEdit;
-    render(ToolsUnavailable, { surface: "builder", unusable: unusable({}) });
+    render(ToolsUnavailable);
 
     expect(settingsLink()?.getAttribute("href") ?? null).toBe(
       mayEdit ? "/spaces/space-1/settings" : null

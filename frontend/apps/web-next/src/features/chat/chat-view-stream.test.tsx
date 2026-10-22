@@ -399,9 +399,7 @@ describe("ChatView when generation fails", () => {
         attachments: {
           formats: [
             { mimetype: "application/pdf", extensions: ["pdf"], size: 10_000_000, vision: false }
-          ],
-          ai_builder_max_count: 10,
-          ai_builder_max_message_chars: 4000
+          ]
         }
       }
     });
@@ -445,9 +443,7 @@ describe("ChatView when generation fails", () => {
         attachments: {
           formats: [
             { mimetype: "application/pdf", extensions: ["pdf"], size: 10_000_000, vision: false }
-          ],
-          ai_builder_max_count: 10,
-          ai_builder_max_message_chars: 4000
+          ]
         }
       }
     });
@@ -489,9 +485,7 @@ describe("ChatView when generation fails", () => {
         attachments: {
           formats: [
             { mimetype: "application/pdf", extensions: ["pdf"], size: 10_000_000, vision: false }
-          ],
-          ai_builder_max_count: 10,
-          ai_builder_max_message_chars: 4000
+          ]
         }
       }
     });

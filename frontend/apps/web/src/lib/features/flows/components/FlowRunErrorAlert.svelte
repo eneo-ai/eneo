@@ -1,8 +1,6 @@
 <script lang="ts">
   import { Badge } from "$lib/components/ui/badge/index.js";
   import * as Alert from "$lib/components/ui/alert/index.js";
-  import { Button } from "$lib/components/ui/button/index.js";
-  import IconWrench from "@lucide/svelte/icons/wrench";
   import { m } from "$lib/paraglide/messages";
   import {
     FLOW_API_ERROR_CODE,
@@ -20,15 +18,12 @@
     error = null,
     errorCode = null,
     message,
-    steps = [],
-    onrepair = null
+    steps = []
   }: {
     error?: FlowRunError | null;
     errorCode?: string | null;
     message: string;
     steps?: readonly FlowReviewPolicyErrorStep[];
-    /** Offered when the AI Builder may be asked to repair this step. */
-    onrepair?: (() => void) | null;
   } = $props();
 
   const isReviewPolicyError = $derived(isReviewPolicyInvalidRunError(error));
@@ -146,24 +141,9 @@
       </div>
     {/if}
 
-    {#if onrepair}
-      <!-- `text-current` put the alert's red on this label, 3.31:1 in dark
-           against the variant's own fill, so the label has its own
-           foreground now. The button carries no destructive colour of its
-           own: the variant sets `dark:border-input`, which outranks a base
-           border, and a `dark:` override is the thing the token lint exists
-           to prevent. The red text it sits inside carries the association. -->
-      <Button variant="outline" size="sm" class="text-foreground w-fit gap-1.5" onclick={onrepair}>
-        <IconWrench class="size-3.5" aria-hidden="true" />
-        {m.flow_run_error_repair_action()}
-      </Button>
-    {/if}
-
     <details class="group">
-      <!-- 15px tall with the repair button 7.5px above it, so the 2.5.8
-           spacing exception could not rescue it. `w-fit` keeps the target on
-           the words rather than spanning the whole card, where a stray click
-           would have toggled it. -->
+      <!-- `w-fit` keeps the target on the words rather than spanning the
+           whole card, where a stray click would have toggled it. -->
       <summary
         class="flex min-h-[24px] w-fit cursor-pointer items-center text-xs font-medium underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:ring-current focus-visible:outline-none"
       >

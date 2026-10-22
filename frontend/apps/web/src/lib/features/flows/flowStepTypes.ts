@@ -13,7 +13,7 @@ export function outputModeUsesCompletionModel(mode: OutputMode): boolean {
 
 /** Whether the step editor shows the underlag section (own text or chosen results).
  *  A transcription and a template fill do not, though an underlag set elsewhere, for
- *  example by the AI builder, still applies to a transcription at run time. */
+ *  example through the API, still applies to a transcription at run time. */
 export function outputModeShowsUnderlagSection(mode: OutputMode): boolean {
   return mode !== "transcribe_only" && mode !== "template_fill";
 }

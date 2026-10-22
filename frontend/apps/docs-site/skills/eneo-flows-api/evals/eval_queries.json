@@ -24,7 +24,7 @@
     "should_trigger": true
   },
   {
-    "query": "Use Flow AI Builder to generate and refine a new flow from a natural-language conversation.",
+    "query": "Draft and refine a new Eneo flow from a natural-language conversation in an assistant chat.",
     "should_trigger": false
   },
   {

@@ -29,8 +29,7 @@ class FlowAuthoringInputSource(str, Enum):
     """Input sources an authoring spec can carry.
 
     A tool step travels with its configuration, which names the tool by the
-    ids of this instance only: the Builder compiles one from a typed tool use
-    or carries a saved one, and flow packages refuse that configuration. HTTP
+    ids of this instance only, so flow packages refuse that configuration. HTTP
     input stays out: its config holds credentials that no spec may carry.
     """
 
@@ -82,7 +81,7 @@ class FlowOutputMode(str, Enum):
     RENDER_VERBATIM = "render_verbatim"
     # An LLM proposes which person each diarized speaker label is; the run then
     # pauses for a reviewer to confirm. Authored by hand and carried by specs
-    # and packages; the AI Builder does not propose it.
+    # and packages.
     SPEAKER_MAPPING = "speaker_mapping"
 
 
@@ -170,7 +169,7 @@ def final_output_delivery(
 class FlowAuthoringOutputMode(str, Enum):
     """Output modes an authoring spec can carry.
 
-    Builder plans, manual edits and flow packages all travel as specs. HTTP
+    Manual edits and flow packages travel as specs. HTTP
     delivery stays out: its config holds credentials that no spec may carry.
     """
 

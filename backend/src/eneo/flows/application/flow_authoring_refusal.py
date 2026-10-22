@@ -22,12 +22,10 @@ class FlowAuthoringRefusalCode(StrEnum):
 class FlowAuthoringRefusalException(BadRequestException):
     """A refusal of the authoring command that no Flows endpoint answers.
 
-    The command has two callers. The package import builds a create with no
-    template attachment, and its reader has by then refused a draft with an
-    existing-step reference or a malformed resource reference, so none of
-    these can reach it. The AI Builder is the other caller and answers under
-    its own codes, which is why these are not in the public Flow error
-    catalogue. Three refuse an edit of an existing flow (published, another
+    The package import builds a create with no template attachment, and its
+    reader has by then refused a draft with an existing-step reference or a
+    malformed resource reference, so none of these can reach it, which is why
+    these are not in the public Flow error catalogue. Three refuse an edit of an existing flow (published, another
     space, a shared assistant); the others can refuse a create as well.
     """
 

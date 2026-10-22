@@ -493,15 +493,6 @@ MCP_CLIENT_CALL_TIMEOUT_SECONDS=60
 # in the process. A stalled lookup keeps its thread until the resolver answers;
 # a lookup with no free thread fails at once and is retried later.
 FLOW_HTTP_DNS_WORKERS=16
-# Provider silence deadline (the longest wait for the next chunk once the model
-# has produced output), not total proposal duration; every Builder call uses it.
-# Before its first output a call that may think (it sends any reasoning effort
-# but "none", or no effort on a route that takes one) may wait up to
-# AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS (default 1800). The default; an admin
-# overrides it, and the call ceiling, in Admin > Flow settings
-# (a positive number of whole seconds). It may not exceed the call ceiling.
-AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS=300
-
 # Platform task worker queue/runtime settings
 TASK_EXECUTION_QUEUE=tasks:execution
 TASK_MAINTENANCE_QUEUE=tasks:maintenance

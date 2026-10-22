@@ -325,18 +325,13 @@ def test_parse_flow_metadata_rejects_unknown_top_level_keys_on_write() -> None:
         )
 
 
-def test_parse_flow_metadata_rejects_unknown_ai_builder_keys_on_write() -> None:
+def test_parse_flow_metadata_refuses_the_retired_ai_builder_origin_on_write() -> None:
     with pytest.raises(
         BadRequestException,
-        match=re.escape("metadata_json.ai_builder contains unknown fields: other"),
+        match=re.escape("metadata_json contains unknown top-level fields: ai_builder"),
     ):
         parse_flow_metadata(
-            {
-                "ai_builder": {
-                    "origin": _ai_builder_origin(),
-                    "other": {"stale": True},
-                },
-            },
+            {"ai_builder": {"origin": _ai_builder_origin()}},
             mode=FlowMetadataParseMode.WRITE,
         )
 
@@ -364,7 +359,6 @@ def test_parse_flow_metadata_persisted_read_drops_unowned_metadata() -> None:
         },
         "care_data_policy": {"sensitive": True},
         "wizard": {"transcription_enabled": True, "custom_ui": "compact"},
-        "ai_builder": {"origin": _ai_builder_origin()},
     }
 
 
