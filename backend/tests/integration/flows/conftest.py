@@ -395,6 +395,7 @@ def create_published_compose_text_flow() -> Callable[
         output_mode: str = "compose_text",
         output_type: str = "text",
         metadata_json: Mapping[str, object] | None = None,
+        review_policy: Mapping[str, object] | None = None,
     ) -> PublishedComposeTextFlow:
         suffix = uuid4().hex[:8]
         name = name or f"Flow process proof {suffix}"
@@ -442,6 +443,11 @@ def create_published_compose_text_flow() -> Callable[
                         "input_type": "text",
                         "output_mode": output_mode,
                         "output_type": output_type,
+                        **(
+                            {}
+                            if review_policy is None
+                            else {"review_policy": dict(review_policy)}
+                        ),
                     }
                 ],
             },

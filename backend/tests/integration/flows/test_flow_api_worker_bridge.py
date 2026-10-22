@@ -520,3 +520,182 @@ async def test_a_rendered_document_is_stored_recorded_and_served_by_a_signed_lin
         )
     tampered = await client.get(signed_url.replace("token=", "token=x", 1))
     assert tampered.status_code != 200
+
+
+async def test_a_run_cancelled_while_queued_starts_no_step_when_its_delivery_arrives(
+    client: AsyncClient,
+    db_container,
+    flow_process_auth_headers: Mapping[str, str],
+    create_published_compose_text_flow,
+    flow_broker_worker_seam: FlowBrokerWorkerSeam,
+) -> None:
+    # The run is cancelled while its delivery waits on the queue. The worker
+    # that takes the delivery afterwards starts no step: the run stays
+    # cancelled, with no attempt and one terminal audit record.
+    flow = await create_published_compose_text_flow(
+        client,
+        flow_process_auth_headers,
+    )
+    create_response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/",
+        json={
+            "expected_flow_version": flow.published_version,
+            "input_payload_json": {"text": "Avbryts innan den startar."},
+        },
+        headers={
+            **flow_process_auth_headers,
+            "Idempotency-Key": f"flow-queued-cancel:{uuid4().hex}",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    run_id = create_response.json()["id"]
+    [queued_job] = await flow_broker_worker_seam.broker_client.zrange(
+        flow_broker_worker_seam.queue_name, 0, -1
+    )
+    task_id = queued_job.decode() if isinstance(queued_job, bytes) else queued_job
+
+    cancel_response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/{run_id}/cancel/",
+        headers=flow_process_auth_headers,
+    )
+    assert cancel_response.status_code == 200, cancel_response.text
+    assert cancel_response.json()["status"] == "cancelled"
+
+    await flow_broker_worker_seam.start_worker()
+    task_result = await flow_broker_worker_seam.wait_for_task_result(
+        task_id=task_id, timeout_seconds=30
+    )
+    assert task_result["status"] == "skipped"
+    assert str(task_result["reason"]).startswith("run_cancelled")
+
+    evidence_response = await client.get(
+        f"/api/v1/flows/{flow.flow_id}/runs/{run_id}/evidence/",
+        headers=flow_process_auth_headers,
+    )
+    assert evidence_response.status_code == 200, evidence_response.text
+    evidence = evidence_response.json()
+    assert evidence["run"]["status"] == "cancelled"
+    assert evidence["run"]["result"] is None
+    assert evidence["step_attempts"] == []
+    assert all(
+        result["output_payload_json"] is None for result in evidence["step_results"]
+    )
+    async with db_container() as container:
+        audit_rows = (
+            await container.session().execute(
+                sa.select(
+                    FlowRunAuditOutbox.action,
+                    FlowRunAuditOutbox.target_status,
+                ).where(FlowRunAuditOutbox.flow_run_id == UUID(run_id))
+            )
+        ).all()
+    assert audit_rows == [("flow_run_cancelled", "cancelled")]
+
+
+@pytest.mark.parametrize("decision", ["edit_and_continue", "reject"])
+async def test_a_review_decided_after_a_worker_restart_ends_the_run_it_paused(
+    client: AsyncClient,
+    flow_process_auth_headers: Mapping[str, str],
+    create_published_compose_text_flow,
+    flow_broker_worker_seam: FlowBrokerWorkerSeam,
+    decision: str,
+) -> None:
+    # The run pauses for review in one worker process, and the decision is
+    # taken after that worker is gone and another has started. An edited
+    # approval continues the run in the new worker with the reviewer's text
+    # and without running the step again; a rejection cancels the run.
+    flow = await create_published_compose_text_flow(
+        client,
+        flow_process_auth_headers,
+        review_policy={"mode": "edit"},
+    )
+    await flow_broker_worker_seam.start_worker()
+    create_response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/",
+        json={
+            "expected_flow_version": flow.published_version,
+            "input_payload_json": {"text": "Utkast till beslut."},
+        },
+        headers={
+            **flow_process_auth_headers,
+            "Idempotency-Key": f"flow-review-restart:{uuid4().hex}",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    run_id = create_response.json()["id"]
+    run_path = f"/api/v1/flows/{flow.flow_id}/runs/{run_id}"
+    await flow_broker_worker_seam.wait_for_public_run_status(
+        client=client,
+        headers=flow_process_auth_headers,
+        flow_id=flow.flow_id,
+        run_id=run_id,
+        expected_status="awaiting_review",
+        timeout_seconds=30,
+    )
+
+    await flow_broker_worker_seam.close()
+    await flow_broker_worker_seam.start_worker()
+
+    active_response = await client.get(
+        f"{run_path}/review-checkpoints/active/",
+        headers=flow_process_auth_headers,
+    )
+    assert active_response.status_code == 200, active_response.text
+    checkpoint = active_response.json()
+    checkpoint_path = f"{run_path}/review-checkpoints/{checkpoint['id']}"
+    if decision == "reject":
+        reject_response = await client.post(
+            f"{checkpoint_path}/reject/",
+            json={
+                "expected_checkpoint_revision": checkpoint["revision"],
+                "reason": "Underlaget saknar beslutsdatum.",
+            },
+            headers=flow_process_auth_headers,
+        )
+        assert reject_response.status_code == 200, reject_response.text
+        ended, _ = await flow_broker_worker_seam.wait_for_public_run_status(
+            client=client,
+            headers=flow_process_auth_headers,
+            flow_id=flow.flow_id,
+            run_id=run_id,
+            expected_status="cancelled",
+            timeout_seconds=30,
+        )
+        assert ended["result"] is None
+        assert ended["error"]["code"] == "flow_review_rejected"
+    else:
+        edit_response = await client.patch(
+            f"{checkpoint_path}/",
+            json={
+                "expected_checkpoint_revision": checkpoint["revision"],
+                "edited_value": "Granskat beslut.",
+            },
+            headers=flow_process_auth_headers,
+        )
+        assert edit_response.status_code == 200, edit_response.text
+        continue_response = await client.post(
+            f"{checkpoint_path}/approve-and-continue/",
+            json={"expected_checkpoint_revision": edit_response.json()["revision"]},
+            headers={
+                **flow_process_auth_headers,
+                "Idempotency-Key": f"flow-review-continue:{uuid4().hex}",
+            },
+        )
+        assert continue_response.status_code == 202, continue_response.text
+        ended, _ = await flow_broker_worker_seam.wait_for_public_run_status(
+            client=client,
+            headers=flow_process_auth_headers,
+            flow_id=flow.flow_id,
+            run_id=run_id,
+            expected_status="completed",
+            timeout_seconds=30,
+        )
+        assert ended["result"] == {"kind": "inline_text", "text": "Granskat beslut."}
+
+    evidence_response = await client.get(
+        f"{run_path}/evidence/", headers=flow_process_auth_headers
+    )
+    assert evidence_response.status_code == 200, evidence_response.text
+    [attempt] = evidence_response.json()["step_attempts"]
+    assert attempt["attempt_no"] == 1
+    assert attempt["status"] == "completed"
