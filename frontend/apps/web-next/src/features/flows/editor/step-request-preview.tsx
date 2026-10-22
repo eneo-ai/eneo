@@ -13,13 +13,7 @@ import { useState } from "react";
 import { modelDisplayName } from "@/features/spaces/space-models";
 import { useSpace } from "@/features/spaces/use-space";
 import { toolOptionsQueryOptions } from "./editor-api";
-import {
-  answerShape,
-  modelParameters,
-  previewParts,
-  type PreviewPart,
-  type ReadMeaning
-} from "./request-preview";
+import { answerShape, modelParameters, previewParts, type PreviewPart } from "./request-preview";
 import {
   argumentText,
   hasHttpConfig,
@@ -30,47 +24,9 @@ import {
   readToolConfig,
   sourceRefStepOrder
 } from "./step-configs";
-import { inputSourceLabel, stepLabel } from "./step-labels";
+import { inputSourceLabel, meaningLabel, stepLabel } from "./step-labels";
 import { stepUsesModel } from "./step-rules";
 import type { AssistantConfig, FlowPublic, StepConfig } from "./step-types";
-
-type Translate = ReturnType<typeof useTranslations>;
-
-function meaningLabel(meaning: ReadMeaning, token: string, flow: FlowPublic, t: Translate): string {
-  const step = (order: number) =>
-    stepLabel(order, flow.steps.find((item) => item.step_order === order)?.user_description, t);
-  switch (meaning.kind) {
-    case "form_field":
-      return meaning.label;
-    case "flow_input":
-      return t("flow_editor_tools_preview_read_flow_input");
-    case "upload":
-      return t("flow_step_editor_variable_upload");
-    case "transcription":
-      return t("flow_step_editor_variable_transcription");
-    case "date":
-      return t("flow_step_editor_variable_date");
-    case "step_answer":
-      return t("flow_editor_tools_preview_read_step", {
-        step: step(meaning.order),
-        what: t("flow_step_editor_variable_step_text")
-      });
-    case "step_structured":
-      return t("flow_editor_tools_preview_read_step", {
-        step: step(meaning.order),
-        what: t("flow_step_editor_variable_step_structured")
-      });
-    case "step_field":
-      return t("flow_editor_tools_preview_read_step", {
-        step: step(meaning.order),
-        what: t("flow_step_editor_variable_step_field", { field: meaning.field })
-      });
-    case "missing":
-      return t("flow_editor_tools_preview_read_missing", { order: meaning.order });
-    case "other":
-      return token;
-  }
-}
 
 /** A text as the step sends it, every reference a chip that says what it reads. */
 function Template({ parts, flow }: { parts: PreviewPart[]; flow: FlowPublic }) {

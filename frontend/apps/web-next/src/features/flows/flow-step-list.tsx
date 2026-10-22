@@ -11,6 +11,7 @@ import { ArrowDown, ArrowUp, Ellipsis, Plus, Workflow } from "lucide-react";
 import { useQueries } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
+import { QuietBanner } from "@/components/astryx/banner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { flowAssistantQueryOptions } from "./editor/editor-api";
@@ -33,12 +34,16 @@ type StepActions = {
   onAdd: (position: number) => void;
 };
 
+/** The shortcut that adds a step naming the speakers after the step that transcribes. */
+export type SpeakerStepOffer = { stepId: string; pending: boolean; onAccept: () => void };
+
 function StepCard({
   step,
   steps,
   prompts,
   index,
   canEdit,
+  speakerOffer,
   actions
 }: {
   step: FlowStep;
@@ -46,6 +51,7 @@ function StepCard({
   prompts: StepPrompts;
   index: number;
   canEdit: boolean;
+  speakerOffer: SpeakerStepOffer | null;
   actions: StepActions & { onAskRemove: (step: FlowStep) => void };
 }) {
   const t = useTranslations();
@@ -164,6 +170,26 @@ function StepCard({
           {producesLabel(step, t)}
         </MetadataListItem>
       </MetadataList>
+      {speakerOffer && speakerOffer.stepId === step.id ? (
+        <QuietBanner
+          status="info"
+          title={t("flows_speaker_offer_title")}
+          description={t("flows_speaker_offer_description")}
+          collapsible={false}
+          endContent={
+            <Button
+              label={t("flows_add_step")}
+              aria-label={t("flows_speaker_offer_add", { step: label })}
+              size="sm"
+              isLoading={speakerOffer.pending}
+              isInterruptible
+              onClick={() => {
+                if (!speakerOffer.pending) speakerOffer.onAccept();
+              }}
+            />
+          }
+        />
+      ) : null}
     </article>
   );
 }
@@ -186,19 +212,22 @@ function useStepPrompts(flowId: string, steps: readonly FlowStep[]): StepPrompts
  * The flow's steps in run order, each with what it reads (its material and
  * its prompt), what it takes and what it produces. Editors open a step, move it up or down with buttons
  * (there is no drag), add a step before or after it and remove it after a
- * confirmation that names the steps that read it.
+ * confirmation that names the steps that read it. After the step that
+ * transcribes, `speakerOffer` offers the step that names the speakers.
  */
 export function FlowStepList({
   flowId,
   steps,
   canEdit,
   headingRef,
+  speakerOffer = null,
   ...actions
 }: StepActions & {
   flowId: string;
   steps: readonly FlowStep[];
   canEdit: boolean;
   headingRef: React.Ref<HTMLHeadingElement>;
+  speakerOffer?: SpeakerStepOffer | null;
 }) {
   const t = useTranslations();
   const headingId = useId();
@@ -219,14 +248,16 @@ export function FlowStepList({
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2
+        <Heading
+          level={2}
           id={headingId}
           ref={headingRef}
           tabIndex={-1}
-          className="text-ax-text focus-visible:outline-ring rounded-ax-inner text-lg font-semibold focus-visible:outline-2 focus-visible:outline-offset-2"
+          weight="semibold"
+          className="focus-visible:outline-ring rounded-ax-inner text-lg focus-visible:outline-2 focus-visible:outline-offset-2"
         >
           {t("flows_steps_heading")}
-        </h2>
+        </Heading>
         {canEdit && steps.length > 0 ? addButton : null}
       </div>
       {steps.length === 0 ? (
@@ -251,6 +282,7 @@ export function FlowStepList({
                 prompts={prompts}
                 index={index}
                 canEdit={canEdit}
+                speakerOffer={speakerOffer}
                 actions={{ ...actions, onAskRemove: setRemoving }}
               />
             </li>

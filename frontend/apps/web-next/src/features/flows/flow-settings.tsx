@@ -5,6 +5,7 @@ import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Selector } from "@astryxdesign/core/Selector";
+import { Heading, Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -323,9 +324,9 @@ export function FlowSettings({
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id={headingId} className="text-ax-text text-lg font-semibold">
+        <Heading level={2} id={headingId} weight="semibold" className="text-lg">
           {t("flows_settings_heading")}
-        </h2>
+        </Heading>
         {canEdit && !editing ? (
           <div ref={editButtonRef}>
             <Button label={t("flows_settings_edit")} size="sm" onClick={startEditing} />
@@ -364,7 +365,9 @@ export function FlowSettings({
             <legend className="text-ax-text mb-1 text-sm font-semibold">
               {t("flows_form_heading")}
             </legend>
-            <p className="text-ax-text-secondary text-sm">{t("flows_form_description")}</p>
+            <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+              {t("flows_form_description")}
+            </Text>
             {fields.map((field, index) => (
               <FormFieldRow
                 key={field.key}

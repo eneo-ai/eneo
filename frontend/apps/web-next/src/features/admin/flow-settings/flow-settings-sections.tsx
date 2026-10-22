@@ -1,13 +1,13 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
 import { Link } from "@astryxdesign/core/Link";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { Text } from "@astryxdesign/core/Text";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { Switch } from "@/components/astryx/switch";
-import { SettingsGroup } from "@/components/composites/settings-rows";
-import { Button } from "@astryxdesign/core/Button";
 import { formatBytes } from "@/lib/format";
 import {
   DOCUMENT_RENDER_KEYS,
@@ -19,6 +19,7 @@ import {
 import {
   AdvancedSettings,
   SettingNumberField,
+  SettingsSection,
   useLimitDescription,
   type FieldKit
 } from "./flow-settings-fields";
@@ -36,7 +37,7 @@ export function UploadSections({ kit }: { kit: FieldKit }) {
 
   return (
     <>
-      <SettingsGroup
+      <SettingsSection
         id="flow-files"
         title={t("flow_admin_files_group")}
         description={t("flow_admin_files_group_description")}
@@ -54,9 +55,9 @@ export function UploadSections({ kit }: { kit: FieldKit }) {
           })}
           placeholder={t("flow_admin_deployment_default")}
         />
-      </SettingsGroup>
+      </SettingsSection>
 
-      <SettingsGroup
+      <SettingsSection
         id="flow-audio"
         title={t("flow_admin_audio_group")}
         description={t("flow_admin_audio_group_description")}
@@ -93,7 +94,7 @@ export function UploadSections({ kit }: { kit: FieldKit }) {
             placeholder={t("flow_admin_deployment_default")}
           />
         </div>
-      </SettingsGroup>
+      </SettingsSection>
     </>
   );
 }
@@ -107,16 +108,20 @@ function StorageLimit({ label, value, note }: { label: string; value: string; no
         <MetadataListItem label={label}>
           <span className="flex flex-col">
             <span className="tabular-nums">{value}</span>
-            {note ? <span className="text-muted-foreground text-sm">{note}</span> : null}
+            {note ? (
+              <Text type="supporting" size="sm">
+                {note}
+              </Text>
+            ) : null}
           </span>
         </MetadataListItem>
       </MetadataList>
-      <p className="text-muted-foreground text-sm">
+      <Text type="supporting" size="sm" as="p" display="block" className="m-0">
         {t("flow_admin_size_from_storage")}{" "}
         <Link href="/admin/storage" hasUnderline>
           {t("flow_admin_manage_storage")}
         </Link>
-      </p>
+      </Text>
     </div>
   );
 }
@@ -146,7 +151,7 @@ export function RunLimitSection({
       : t("flow_admin_max_runs_description", { capacity });
 
   return (
-    <SettingsGroup
+    <SettingsSection
       id="flow-runs"
       title={t("flow_admin_runs_group")}
       description={t("flow_admin_runs_group_description")}
@@ -170,7 +175,7 @@ export function RunLimitSection({
           />
         </div>
       ) : null}
-    </SettingsGroup>
+    </SettingsSection>
   );
 }
 
@@ -192,7 +197,7 @@ export function TimeoutSection({ kit, isPinnedOpen }: { kit: FieldKit; isPinnedO
       .join(" ");
 
   return (
-    <SettingsGroup
+    <SettingsSection
       id="flow-timeouts"
       title={t("flow_admin_timeouts_group")}
       description={t("flow_admin_timeouts_group_description")}
@@ -227,7 +232,7 @@ export function TimeoutSection({ kit, isPinnedOpen }: { kit: FieldKit; isPinnedO
           placeholder={t("flow_admin_deployment_default")}
         />
       </AdvancedSettings>
-    </SettingsGroup>
+    </SettingsSection>
   );
 }
 
@@ -252,7 +257,7 @@ export function MappedSection({
     mapped.max_provider_calls_per_mapped_step ?? deploymentDefault ?? MAPPED_CALLS_SUGGESTION;
 
   return (
-    <SettingsGroup
+    <SettingsSection
       id="flow-mapped"
       title={t("flow_admin_mapped_group")}
       description={t("flow_admin_mapped_group_description")}
@@ -284,11 +289,15 @@ export function MappedSection({
           units={t("flow_admin_unit_calls")}
         />
       ) : (
-        <p className="text-muted-foreground text-sm">{t("flow_admin_mapped_off_status")}</p>
+        <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+          {t("flow_admin_mapped_off_status")}
+        </Text>
       )}
       {mapped.max_provider_calls_source === "deployment_default" ? (
         isDirty ? null : (
-          <p className="text-muted-foreground text-sm">{t("flow_admin_mapped_inherited")}</p>
+          <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+            {t("flow_admin_mapped_inherited")}
+          </Text>
         )
       ) : (
         <div>
@@ -313,7 +322,7 @@ export function MappedSection({
         description={t("flow_admin_mapped_tokens_description")}
         units={t("flow_admin_unit_tokens")}
       />
-    </SettingsGroup>
+    </SettingsSection>
   );
 }
 
@@ -349,7 +358,7 @@ export function EvidenceTextSection({ kit }: { kit: FieldKit }) {
   const total = draft.max_recorded_passage_bytes_per_step;
 
   return (
-    <SettingsGroup
+    <SettingsSection
       id="flow-evidence-text"
       title={t("flow_admin_evidence_group")}
       description={t("flow_admin_evidence_group_description")}
@@ -378,7 +387,7 @@ export function EvidenceTextSection({ kit }: { kit: FieldKit }) {
           );
         })}
       </div>
-      <p className="text-muted-foreground text-sm">
+      <Text type="supporting" size="sm" as="p" display="block" className="m-0">
         {sources === null || passages === null || total === null
           ? t("flow_admin_evidence_summary_pending")
           : t("flow_admin_evidence_summary", {
@@ -386,8 +395,8 @@ export function EvidenceTextSection({ kit }: { kit: FieldKit }) {
               passages: formatNumber(passages, locale),
               total: formatBytes(total, locale)
             })}
-      </p>
-    </SettingsGroup>
+      </Text>
+    </SettingsSection>
   );
 }
 
@@ -398,7 +407,7 @@ export function DocumentSection({ kit, isPinnedOpen }: { kit: FieldKit; isPinned
   const [open, setOpen] = useState(false);
 
   return (
-    <SettingsGroup
+    <SettingsSection
       id="flow-documents"
       title={t("flow_admin_documents_group")}
       description={t("flow_admin_documents_group_description")}
@@ -421,7 +430,7 @@ export function DocumentSection({ kit, isPinnedOpen }: { kit: FieldKit; isPinned
           />
         ))}
       </AdvancedSettings>
-    </SettingsGroup>
+    </SettingsSection>
   );
 }
 
@@ -438,7 +447,7 @@ const EXPORT_SWITCHES: { field: FlagKey; label: string; description?: string }[]
 export function ExportSection({ kit }: { kit: FieldKit }) {
   const t = useTranslations();
   return (
-    <SettingsGroup
+    <SettingsSection
       id="flow-export"
       title={t("flow_admin_export_group")}
       description={t("flow_admin_export_group_description")}
@@ -457,6 +466,6 @@ export function ExportSection({ kit }: { kit: FieldKit }) {
           />
         ))}
       </fieldset>
-    </SettingsGroup>
+    </SettingsSection>
   );
 }

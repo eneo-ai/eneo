@@ -2,13 +2,11 @@
 
 import { DropdownMenu, type DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
 import { Heading, Text } from "@astryxdesign/core/Text";
-import { TextArea } from "@astryxdesign/core/TextArea";
 import { Braces } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useRef } from "react";
 import type { FieldAnchor } from "./field-problems";
-import { stepLabel } from "./step-labels";
-import { insertToken, type VariableEntry, type VariableGroup } from "./step-variables";
+import { variableEntryLabel, variableGroupTitle } from "./step-labels";
+import type { VariableGroup } from "./step-variables";
 
 /** The status an Astryx field takes for a problem, or none. */
 export function problemStatus(message: string | null | undefined) {
@@ -89,27 +87,6 @@ export function EditorSection({
   );
 }
 
-function entryLabel(entry: VariableEntry, t: ReturnType<typeof useTranslations>): string {
-  switch (entry.kind.type) {
-    case "field":
-      return entry.kind.label;
-    case "upload":
-      return t("flow_step_editor_variable_upload");
-    case "transcription":
-      return t("flow_step_editor_variable_transcription");
-    case "date":
-      return t("flow_step_editor_variable_date");
-    case "previous_step":
-      return t("flow_step_editor_variable_previous_step");
-    case "step_text":
-      return t("flow_step_editor_variable_step_text");
-    case "step_structured":
-      return t("flow_step_editor_variable_step_structured");
-    case "step_field":
-      return t("flow_step_editor_variable_step_field", { field: entry.kind.field });
-  }
-}
-
 /** A menu of the references a step can read; choosing one inserts `{{reference}}`. */
 export function VariablePicker({
   groups,
@@ -126,15 +103,10 @@ export function VariablePicker({
   const items: DropdownMenuOption[] = groups.map((group) => ({
     type: "section",
     id: group.type === "step" ? `step-${group.stepOrder}` : group.type,
-    title:
-      group.type === "fields"
-        ? t("flow_step_editor_variables_fields")
-        : group.type === "run"
-          ? t("flow_step_editor_variables_run")
-          : stepLabel(group.stepOrder, group.stepName, t),
+    title: variableGroupTitle(group, t),
     items: group.entries.map((entry) => ({
       id: entry.token,
-      label: entryLabel(entry, t),
+      label: variableEntryLabel(entry, t),
       description: `{{${entry.token}}}`,
       onClick: () => onInsert(entry.token)
     }))
@@ -154,74 +126,5 @@ export function VariablePicker({
       }}
       items={items}
     />
-  );
-}
-
-/**
- * A text with references (an instruction, an underlag, an HTTP body): the
- * field and, below it, the menu that inserts a reference where the caret was.
- */
-export function TemplateTextArea({
-  label,
-  description,
-  value,
-  onChange,
-  groups,
-  rows = 6,
-  status,
-  placeholder,
-  isRequired,
-  isOptional,
-  code = false
-}: {
-  label: string;
-  description?: string;
-  value: string;
-  onChange: (value: string) => void;
-  groups: VariableGroup[];
-  rows?: number;
-  status?: { type: "error" | "warning"; message?: string };
-  placeholder?: string;
-  isRequired?: boolean;
-  isOptional?: boolean;
-  code?: boolean;
-}) {
-  const ref = useRef<HTMLTextAreaElement>(null);
-
-  function insert(token: string) {
-    const area = ref.current;
-    const selection = area ? { start: area.selectionStart, end: area.selectionEnd } : null;
-    const { text, caret } = insertToken(value, token, selection);
-    onChange(text);
-    // The menu hands focus back to its trigger as it closes; then the text
-    // takes it, with the caret after the inserted reference.
-    requestAnimationFrame(() => {
-      const target = ref.current;
-      if (!target) return;
-      target.focus();
-      target.setSelectionRange(caret, caret);
-    });
-  }
-
-  return (
-    <div className="flex flex-col gap-2">
-      <TextArea
-        ref={ref}
-        label={label}
-        description={description}
-        value={value}
-        onChange={onChange}
-        rows={rows}
-        status={status}
-        placeholder={placeholder}
-        isRequired={isRequired}
-        isOptional={isOptional}
-        hasSpellCheck={!code}
-        width="100%"
-      />
-      <div>
-        <VariablePicker groups={groups} onInsert={insert} />
-      </div>
-    </div>
   );
 }

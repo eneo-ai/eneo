@@ -105,6 +105,45 @@ describe("checkDraft", () => {
     ]);
   });
 
+  it("finds a read of a removed step in the underlag, the tool arguments and the prompt", () => {
+    const flow = makeFlow({
+      steps: [
+        makeStep(1, {
+          input_bindings: { source_refs: [{ step_ref: "step_3_deleted", output: "text" }] }
+        }),
+        makeStep(2, {
+          input_source: "tool",
+          input_config: {
+            tool: { mcp_server_id: "s-1", tool_id: "t", arguments: { q: "{{ step_3_deleted }}" } }
+          }
+        }),
+        makeStep(3)
+      ]
+    });
+    const check = checkDraft(flow, {
+      ...none,
+      assistants: new Map([
+        [
+          "assistant-3",
+          makeAssistant({
+            id: "assistant-3",
+            prompt: { text: "Läs {{step_4_deleted.output.text}}", description: null }
+          } as never)
+        ]
+      ])
+    });
+    expect(
+      check.steps.map(({ step, problems }) => [
+        step.step_order,
+        problems.some((problem) => problem.code === "deleted_reference")
+      ])
+    ).toEqual([
+      [1, true],
+      [2, true],
+      [3, true]
+    ]);
+  });
+
   it("asks an audio flow for its transcription model and the service its speakers need", () => {
     const flow = makeFlow({
       steps: [

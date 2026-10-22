@@ -26,6 +26,7 @@ import {
 } from "./editor-api";
 import { Anchor, focusAnchor, problemStatus } from "./editor-fields";
 import { RecordUploadProvider, useEditorUploads } from "./editor-uploads";
+import { TemplateScope } from "./reference-text-area";
 import {
   describeSaveError,
   FIELD_ANCHORS,
@@ -35,7 +36,12 @@ import {
 } from "./field-problems";
 import { StepAdvancedSection, parseContract, type ContractDrafts } from "./step-advanced-section";
 import { StepAiSection } from "./step-ai-section";
-import { httpUrlProblem, readHttpConfig, readToolConfig } from "./step-configs";
+import {
+  httpUrlProblem,
+  readHttpConfig,
+  readTextProcessingMode,
+  readToolConfig
+} from "./step-configs";
 import { StepControlSection } from "./step-control-section";
 import {
   assistantChanges,
@@ -332,6 +338,13 @@ function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel
   const usesModel = stepUsesModel(draft);
   const isLast = isLastStep(flow, { step_order: stepOrder });
   const groups = variableGroups({ flow, stepOrder, inputConfig: draft.input_config });
+  // Only the AI instruction runs once per section, so only it reads the section's number.
+  const promptGroups = variableGroups({
+    flow,
+    stepOrder,
+    inputConfig: draft.input_config,
+    sectionVariables: readTextProcessingMode(draft.input_config) === "process_each_section"
+  });
   const wholeValueGroups = variableGroups({
     flow,
     stepOrder,
@@ -571,95 +584,97 @@ function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel
 
         {/* Remounted per saved revision: local states (a secret being replaced) start over. */}
         <RecordUploadProvider value={uploads.record}>
-          <div key={flow.draft_revision} className="flex flex-col gap-6">
-            <Anchor formId={formId} anchor="user_description">
-              <TextInput
-                label={t("flow_step_name")}
-                description={t("flow_step_editor_name_description")}
-                value={draft.user_description ?? ""}
-                onChange={(value) => changeStep({ ...draft, user_description: value || null })}
-                isRequired
-                autoComplete="off"
-                status={problemStatus(shownProblems.user_description)}
-              />
-            </Anchor>
+          <TemplateScope value={{ flow, stepOrder }}>
+            <div key={flow.draft_revision} className="flex flex-col gap-6">
+              <Anchor formId={formId} anchor="user_description">
+                <TextInput
+                  label={t("flow_step_name")}
+                  description={t("flow_step_editor_name_description")}
+                  value={draft.user_description ?? ""}
+                  onChange={(value) => changeStep({ ...draft, user_description: value || null })}
+                  isRequired
+                  autoComplete="off"
+                  status={problemStatus(shownProblems.user_description)}
+                />
+              </Anchor>
 
-            {usesModel && (
-              <StepAiSection
+              {usesModel && (
+                <StepAiSection
+                  formId={formId}
+                  sectionId={`${formId}-ai`}
+                  draft={draft}
+                  assistant={assistantDraft}
+                  savedAssistant={savedAssistant}
+                  onAssistantChange={changeAssistant}
+                  onStepChange={changeStep}
+                  problems={shownProblems}
+                  groups={promptGroups}
+                  classification={classification}
+                />
+              )}
+
+              <StepInputSection
                 formId={formId}
-                sectionId={`${formId}-ai`}
+                sectionId={`${formId}-input`}
+                flow={flow}
+                stepId={stepId}
+                stepOrder={stepOrder}
                 draft={draft}
-                assistant={assistantDraft}
-                savedAssistant={savedAssistant}
-                onAssistantChange={changeAssistant}
-                onStepChange={changeStep}
+                onChange={changeStep}
                 problems={shownProblems}
                 groups={groups}
-                classification={classification}
+                toolGroups={wholeValueGroups}
+                showUnderlag={
+                  draft.output_mode !== "transcribe_only" && draft.output_mode !== "template_fill"
+                }
               />
-            )}
 
-            <StepInputSection
-              formId={formId}
-              sectionId={`${formId}-input`}
-              flow={flow}
-              stepId={stepId}
-              stepOrder={stepOrder}
-              draft={draft}
-              onChange={changeStep}
-              problems={shownProblems}
-              groups={groups}
-              toolGroups={wholeValueGroups}
-              showUnderlag={
-                draft.output_mode !== "transcribe_only" && draft.output_mode !== "template_fill"
-              }
-            />
+              <StepOutputSection
+                formId={formId}
+                sectionId={`${formId}-output`}
+                flow={flow}
+                stepId={stepId}
+                draft={draft}
+                isLast={isLast}
+                onChange={changeStep}
+                problems={shownProblems}
+                groups={groups}
+                wholeValueGroups={wholeValueGroups}
+                onContractProposed={(contract) => {
+                  // The advanced section shows the accepted contract, not text typed before it.
+                  setContractDrafts((drafts) => ({ ...drafts, output_contract: undefined }));
+                  changeStep({ ...draft, output_contract: contract });
+                  announce(t("flow_editor_tools_contract_example_accepted"));
+                }}
+              />
 
-            <StepOutputSection
-              formId={formId}
-              sectionId={`${formId}-output`}
-              flow={flow}
-              stepId={stepId}
-              draft={draft}
-              isLast={isLast}
-              onChange={changeStep}
-              problems={shownProblems}
-              groups={groups}
-              wholeValueGroups={wholeValueGroups}
-              onContractProposed={(contract) => {
-                // The advanced section shows the accepted contract, not text typed before it.
-                setContractDrafts((drafts) => ({ ...drafts, output_contract: undefined }));
-                changeStep({ ...draft, output_contract: contract });
-                announce(t("flow_editor_tools_contract_example_accepted"));
-              }}
-            />
+              <StepControlSection
+                formId={formId}
+                sectionId={`${formId}-control`}
+                draft={draft}
+                onChange={changeStep}
+                problems={shownProblems}
+                preview={{
+                  data: classification,
+                  isPending: preview.isPending && previewRequest !== null,
+                  error: preview.isError ? preview.error : null
+                }}
+              />
 
-            <StepControlSection
-              formId={formId}
-              sectionId={`${formId}-control`}
-              draft={draft}
-              onChange={changeStep}
-              problems={shownProblems}
-              preview={{
-                data: classification,
-                isPending: preview.isPending && previewRequest !== null,
-                error: preview.isError ? preview.error : null
-              }}
-            />
-
-            <StepAdvancedSection
-              formId={formId}
-              sectionId={`${formId}-advanced`}
-              draft={draft}
-              onChange={changeStep}
-              drafts={contractDrafts}
-              onDraftsChange={(next) => {
-                pin();
-                setContractDrafts(next);
-              }}
-              problems={shownProblems}
-            />
-          </div>
+              <StepAdvancedSection
+                formId={formId}
+                sectionId={`${formId}-advanced`}
+                draft={draft}
+                onChange={changeStep}
+                drafts={contractDrafts}
+                onDraftsChange={(next) => {
+                  pin();
+                  setContractDrafts(next);
+                }}
+                problems={shownProblems}
+              />
+            </div>
+          </TemplateScope>
         </RecordUploadProvider>
       </form>
 

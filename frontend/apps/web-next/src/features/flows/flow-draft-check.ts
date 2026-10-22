@@ -8,11 +8,11 @@
  * the space allows and what they require) and its classification preview.
  * Pure and unit-tested.
  */
+import { removedReads } from "./editor/reference-repair";
 import {
   hasHttpConfig,
   isStructuredTemplateBinding,
   readHttpConfig,
-  readInputBindings,
   readSpeakerMapping,
   readTemplateFill,
   readToolConfig,
@@ -27,6 +27,7 @@ import {
 } from "./editor/step-rules";
 import type { FlowAssistant, StepClassification, ToolOption } from "./editor/step-types";
 import type { FlowPublic, FlowStep } from "./flows-api";
+import { readTarget, tokensOf } from "./flow-steps";
 import {
   speakerServiceState,
   speakersRequired,
@@ -72,25 +73,26 @@ export type DraftFacts = {
   speakerServices: readonly SpeakerServiceLink[];
 };
 
-/** A reference to a step a change removed, as the reference editor marks it. */
-const DELETED_STEP_TOKEN = /\{\{\s*step_\d+_deleted/;
-
-function deletedReference(step: FlowStep, assistant: FlowAssistant | undefined): boolean {
-  const bindings = readInputBindings(step.input_bindings);
-  if (bindings.status === "valid") {
-    if (DELETED_STEP_TOKEN.test(bindings.question)) return true;
-    if (bindings.sourceRefs.some((ref) => /^step_\d+_deleted/.test(ref.stepRef))) return true;
-  }
+/**
+ * The step still reads a step a change removed (`step_2_deleted`), in its
+ * underlag, its tool arguments or its prompt.
+ */
+function deletedReference(
+  step: FlowStep,
+  steps: readonly FlowStep[],
+  assistant: FlowAssistant | undefined
+): boolean {
+  if (removedReads(step, steps).length > 0) return true;
+  const readsRemoved = (text: string) =>
+    tokensOf(text).some((token) => readTarget(token, step, steps).kind === "deleted");
   const tool = readToolConfig(step.input_config);
   if (
     tool &&
-    Object.values(tool.arguments).some(
-      (value) => typeof value === "string" && DELETED_STEP_TOKEN.test(value)
-    )
+    Object.values(tool.arguments).some((value) => typeof value === "string" && readsRemoved(value))
   ) {
     return true;
   }
-  return DELETED_STEP_TOKEN.test(assistant?.prompt?.text ?? "");
+  return readsRemoved(assistant?.prompt?.text ?? "");
 }
 
 function stepProblems(
@@ -183,7 +185,7 @@ function stepProblems(
   if (stepUsesModel(step) && assistant && !assistant.completion_model) {
     problems.push({ code: "model_missing" });
   }
-  if (deletedReference(step, assistant)) problems.push({ code: "deleted_reference" });
+  if (deletedReference(step, ordered, assistant)) problems.push({ code: "deleted_reference" });
 
   const classification =
     facts.classification?.find((item) => item.step_id === step.id) ??

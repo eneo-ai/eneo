@@ -135,9 +135,9 @@ describe("the reference grammar", () => {
 
   it("splits a template into its text and references", () => {
     expect(templateParts("{{a}} och {{ b }}")).toEqual([
-      { kind: "read", token: "a" },
+      { kind: "read", token: "a", raw: "{{a}}" },
       { kind: "text", text: " och " },
-      { kind: "read", token: "b" }
+      { kind: "read", token: "b", raw: "{{ b }}" }
     ]);
   });
 

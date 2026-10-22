@@ -42,7 +42,9 @@ beforeEach(() => {
       : path === "/api/v1/roles/permissions/"
         ? ok([
             { name: "personal_chat", description: "Chat" },
-            { name: "admin", description: "Admin" }
+            { name: "admin", description: "Admin" },
+            { name: "retention_manage", description: "Manage retention" },
+            { name: "retention_holds", description: "Legal holds" }
           ])
         : ok([{ name: "Reader", permissions: ["personal_chat"] }])
   );
@@ -93,6 +95,17 @@ describe("role administration", () => {
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "permission_admin" } });
     expect(screen.getByText("Manager")).toBeTruthy();
     expect(screen.queryByText("Everyone")).toBeNull();
+  });
+
+  it("names the retention permissions with the catalog's wording", async () => {
+    show();
+    await screen.findByText("Everyone");
+    fireEvent.click(screen.getByRole("button", { name: "create_role" }));
+    const dialog = screen.getByRole("dialog");
+    for (const key of ["permission_retention_manage", "permission_retention_holds"]) {
+      expect(within(dialog).getByText(key)).toBeTruthy();
+      expect(within(dialog).getByText(`${key}_description`)).toBeTruthy();
+    }
   });
 
   it("creates a role from selected template permissions", async () => {

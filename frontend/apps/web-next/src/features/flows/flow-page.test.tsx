@@ -111,11 +111,12 @@ afterEach(() => {
 
 function renderPage(
   flow: FlowPublic = makeFlow({ steps }),
-  permissions: Permission[] = ["flows_view", "flows_manage"]
+  permissions: Permission[] = ["flows_view", "flows_manage"],
+  space = makeSpace({})
 ) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(flowKeys.flow(flow.id), flow);
-  queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
+  queryClient.setQueryData(["spaces", "space-1"], space);
   return renderInApp(
     <Suspense>
       <FlowPage flowId={flow.id} />
@@ -167,6 +168,96 @@ describe("FlowPage", () => {
     });
     const firstStep = screen.getAllByRole("article")[0]!;
     expect(within(firstStep).getByText("Skriv svar")).toBeTruthy();
+  });
+
+  it("saves the draft check's repair of a read of a removed step as a step edit", async () => {
+    const broken = {
+      ...steps[1]!,
+      input_bindings: { question: "Om {{step_3_deleted.output.text}}" }
+    };
+    const repaired = { ...steps[1]!, input_bindings: { question: "Om {{step_1.output.text}}" } };
+    state.editor = ok(makeFlow({ draft_revision: 5, steps: [steps[0]!, repaired] }));
+    renderPage(makeFlow({ steps: [steps[0]!, broken] }));
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Välj vad som ska användas i stället för {{step_3_deleted.output.text}} i Steg 2: Skriv svar"
+      })
+    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Steg 1: Sammanfatta/ }));
+
+    await waitFor(() =>
+      expect(state.announce).toHaveBeenCalledWith("Hänvisningen i Steg 2: Skriv svar är ersatt.")
+    );
+    expect(editorBody()).toEqual({
+      step_edits: [
+        {
+          step_id: "step-2",
+          changes: { input_bindings: { question: "Om {{step_1.output.text}}" } }
+        }
+      ],
+      definition: {},
+      expected_revision: 4
+    });
+  });
+
+  it("adds the step that names the speakers from the shortcut after the transcription", async () => {
+    const transcribe = makeStep(1, {
+      user_description: "Transkribera",
+      input_type: "audio",
+      output_mode: "transcribe_only"
+    });
+    const wizard = { transcription_enabled: true, transcription_speaker_service: { id: "svc-1" } };
+    const flow = makeFlow({ steps: [transcribe], metadata_json: { wizard } });
+    state.editor = ok(
+      makeFlow({
+        draft_revision: 5,
+        steps: [transcribe, makeStep(2, { output_mode: "speaker_mapping", output_type: "json" })],
+        metadata_json: { wizard }
+      })
+    );
+    const space = makeSpace({
+      overrides: {
+        transcription_services: [
+          {
+            id: "svc-1",
+            name: "Talare",
+            available: true,
+            meets_security_classification: true,
+            is_default: true
+          }
+        ]
+      }
+    });
+    renderPage(flow, undefined, space);
+
+    expect(screen.getByText("Vill du granska transkriptet?")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Lägg till ett steg som granskar transkriptet efter Steg 1: Transkribera"
+      })
+    );
+
+    await waitFor(() => expect(state.announce).toHaveBeenCalledWith("Steget lades till"));
+    expect(editorBody()).toMatchObject({
+      expected_revision: 4,
+      step_order: [{ step_id: "step-1" }, { new_step: 0 }],
+      new_steps: [
+        {
+          name: "Granska transkript",
+          configuration: {
+            output_mode: "speaker_mapping",
+            output_config: { speaker_mapping: { participants_field: "deltagare" } }
+          }
+        }
+      ],
+      definition: {
+        metadata_json: {
+          form_schema: { fields: [{ name: "deltagare", label: "Deltagare", type: "list" }] }
+        }
+      }
+    });
+    expect(screen.queryByText("Vill du granska transkriptet?")).toBeNull();
   });
 
   it("explains a refused removal by the step that reads the removed one", async () => {

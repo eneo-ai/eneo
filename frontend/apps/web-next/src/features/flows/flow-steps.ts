@@ -41,8 +41,13 @@ export function tokensOf(template: string): string[] {
   return [...template.matchAll(TOKEN)].map((match) => match[1]!.trim());
 }
 
-/** A template as its text and the references in it, in order. */
-export type TemplatePart = { kind: "text"; text: string } | { kind: "read"; token: string };
+/**
+ * A template as its text and the references in it, in order. A reference
+ * keeps the text it was written as (`raw`, `{{ step_2.output.text }}`), so
+ * the parts join back into the template.
+ */
+export type TemplatePart =
+  { kind: "text"; text: string } | { kind: "read"; token: string; raw: string };
 
 export function templateParts(template: string): TemplatePart[] {
   const parts: TemplatePart[] = [];
@@ -50,7 +55,7 @@ export function templateParts(template: string): TemplatePart[] {
   for (const match of template.matchAll(TOKEN)) {
     const start = match.index ?? 0;
     if (start > cursor) parts.push({ kind: "text", text: template.slice(cursor, start) });
-    parts.push({ kind: "read", token: match[1]!.trim() });
+    parts.push({ kind: "read", token: match[1]!.trim(), raw: match[0] });
     cursor = start + match[0].length;
   }
   if (cursor < template.length) parts.push({ kind: "text", text: template.slice(cursor) });

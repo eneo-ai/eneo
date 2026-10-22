@@ -18,7 +18,7 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
-import { FlowStepList } from "./flow-step-list";
+import { FlowStepList, type SpeakerStepOffer } from "./flow-step-list";
 
 afterEach(() => {
   cleanup();
@@ -36,7 +36,7 @@ const steps = [
   makeStep(3, { user_description: "Granska", input_bindings: { question: "{{step_1}}" } })
 ];
 
-function renderList(canEdit = true) {
+function renderList(canEdit = true, speakerOffer: SpeakerStepOffer | null = null) {
   const actions = {
     onOpen: vi.fn(),
     onMove: vi.fn(),
@@ -49,6 +49,7 @@ function renderList(canEdit = true) {
       steps={steps}
       canEdit={canEdit}
       headingRef={createRef()}
+      speakerOffer={speakerOffer}
       {...actions}
     />
   );
@@ -56,6 +57,20 @@ function renderList(canEdit = true) {
 }
 
 describe("FlowStepList", () => {
+  it("offers the step that names the speakers in the card of the step it follows", async () => {
+    const onAccept = vi.fn();
+    const { container } = renderList(true, { stepId: "step-1", pending: false, onAccept });
+    const card = screen.getByRole("article", { name: /Sammanfatta/ });
+    expect(within(card).getByText("Vill du granska transkriptet?")).toBeTruthy();
+    await expectNoAxeViolations(container);
+    fireEvent.click(
+      within(card).getByRole("button", {
+        name: "Lägg till ett steg som granskar transkriptet efter Steg 1: Sammanfatta"
+      })
+    );
+    expect(onAccept).toHaveBeenCalledTimes(1);
+  });
+
   it("lists the steps in order with what each reads, takes and produces", async () => {
     const { container } = renderList();
     const list = screen.getByRole("list");

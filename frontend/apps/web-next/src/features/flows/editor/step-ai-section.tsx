@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { FieldLabel } from "@astryxdesign/core/Field";
 import { FileInput } from "@astryxdesign/core/FileInput";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -32,13 +33,8 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { formatBytes } from "@/lib/format";
-import {
-  Anchor,
-  EditorSection,
-  FieldMessage,
-  problemStatus,
-  TemplateTextArea
-} from "./editor-fields";
+import { Anchor, EditorSection, FieldMessage, problemStatus } from "./editor-fields";
+import { TemplateTextArea } from "./reference-text-area";
 import { useRecordUpload } from "./editor-uploads";
 import type { FieldProblems } from "./field-problems";
 import {
@@ -338,9 +334,7 @@ export function StepAiSection({
       </Anchor>
 
       <Anchor formId={formId} anchor="completion_model" className="flex flex-col gap-2">
-        <label htmlFor={modelSelectorId} className="text-ax-text text-sm font-medium">
-          {t("completion_model")}
-        </label>
+        <FieldLabel label={t("completion_model")} inputID={modelSelectorId} />
         <ModelSelector
           id={modelSelectorId}
           models={space.completion_models}

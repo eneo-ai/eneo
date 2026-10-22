@@ -1,22 +1,41 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { Text } from "@astryxdesign/core/Text";
+import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useId } from "react";
+import { useId, useRef } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import {
   classificationPreviewQueryOptions,
   flowAssistantQueryOptions,
   toolOptionsQueryOptions
 } from "./editor/editor-api";
+import {
+  optionToken,
+  removedReads,
+  repairedBindings,
+  repairOptions,
+  type RemovedRead
+} from "./editor/reference-repair";
 import { savedFlowPreviewRequest } from "./editor/step-draft";
-import { chainIssueText, outputModeIssueText } from "./editor/step-labels";
+import {
+  chainIssueText,
+  outputModeIssueText,
+  stepLabel as stepNumberLabel
+} from "./editor/step-labels";
 import { stepUsesModel } from "./editor/step-rules";
 import { toolRefusalText } from "./editor/step-tool-fields";
-import type { ClassificationPreview, FlowAssistant, ToolOptions } from "./editor/step-types";
+import type {
+  ClassificationPreview,
+  FlowAssistant,
+  JsonObject,
+  ToolOptions
+} from "./editor/step-types";
+import type { MaterialOption } from "./editor/step-variables";
 import type { FlowPublic, FlowStep } from "./flows-api";
 import { stepLabel } from "./flow-labels";
 import {
@@ -116,25 +135,93 @@ function cachedFacts(
   };
 }
 
+function optionLabel(option: MaterialOption, t: Translate): string {
+  const step = stepNumberLabel(option.stepOrder, option.stepName, t);
+  return option.fieldPath
+    ? t("flow_editor_tools_repair_option_field", { step, field: option.fieldPath })
+    : step;
+}
+
+/**
+ * One read of a removed step in a step's underlag, with what can take its
+ * place: choosing one saves the step with it (the reference editor's repair).
+ */
+function RemovedReadRepair({
+  flow,
+  step,
+  read,
+  onRepair
+}: {
+  flow: FlowPublic;
+  step: FlowStep;
+  read: RemovedRead;
+  onRepair: (step: FlowStep, inputBindings: JsonObject | null) => void;
+}) {
+  const t = useTranslations();
+  const options = repairOptions(flow, step, read);
+  const token = `{{${read.token}}}`;
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <Text size="sm" as="p" display="block" className="m-0 break-all">
+        {t("flow_editor_tools_repair_from", { token })}
+      </Text>
+      {options.length > 0 ? (
+        <DropdownMenu
+          placement="below"
+          alignment="start"
+          button={{
+            label: t("flow_editor_tools_repair_choose"),
+            "aria-label": t("flow_editor_tools_repair_choose_named", {
+              token,
+              step: stepLabel(step, t)
+            }),
+            size: "sm",
+            variant: "secondary"
+          }}
+          items={options.map((option) => ({
+            id: option.key,
+            label: optionLabel(option, t),
+            description: `{{${optionToken(option)}}}`,
+            onClick: () => {
+              const bindings = repairedBindings(step, read, option);
+              if (bindings) onRepair(step, bindings);
+            }
+          }))}
+        />
+      ) : (
+        <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+          {t("flow_editor_tools_repair_none")}
+        </Text>
+      )}
+    </div>
+  );
+}
+
 /**
  * "Före publicering": what would stop the draft from being published, per
  * step, worked out again whenever the draft changes. Each step's problems
  * link to the step in the editor; the flow's own (no steps, no transcription
- * model) say where they are fixed.
+ * model) say where they are fixed. A read of a removed step in a step's
+ * underlag can be replaced here in one choice (`onRepair` saves it).
  */
 export function FlowDraftCheck({
   flow,
   speakerServices,
-  onOpenStep
+  onOpenStep,
+  onRepair
 }: {
   flow: FlowPublic;
   speakerServices: readonly SpeakerServiceLink[];
   onOpenStep: (step: FlowStep) => void;
+  /** Saves the step's repaired underlag; resolves to whether it was saved. */
+  onRepair?: (step: FlowStep, inputBindings: JsonObject | null) => Promise<boolean>;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
+  const rescue = useFocusRescue();
   const headingId = useId();
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const modelSteps = flow.steps.filter((step) => stepUsesModel(step) && step.assistant_id);
   const assistants = useQueries({
     queries: modelSteps.map((step) => flowAssistantQueryOptions(flow.id, step.assistant_id))
@@ -180,12 +267,25 @@ export function FlowDraftCheck({
     );
   }
 
+  async function repair(step: FlowStep, inputBindings: JsonObject | null) {
+    if (!onRepair) return;
+    // The repaired read leaves the list with its menu: focus goes to the heading.
+    if (await onRepair(step, inputBindings)) rescue(() => headingRef.current);
+  }
+
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id={headingId} className="text-ax-text text-lg font-semibold">
+        <Heading
+          level={2}
+          id={headingId}
+          ref={headingRef}
+          tabIndex={-1}
+          weight="semibold"
+          className="focus-visible:outline-ring rounded-ax-inner text-lg focus-visible:outline-2 focus-visible:outline-offset-2"
+        >
           {t("flow_editor_tools_check_heading")}
-        </h2>
+        </Heading>
         <Button
           label={t("flow_editor_tools_check_again")}
           size="sm"
@@ -241,6 +341,21 @@ export function FlowDraftCheck({
                       <li key={`${problem.code}-${index}`}>{stepProblemText(problem, t)}</li>
                     ))}
                   </ul>
+                  {onRepair && problems.some((problem) => problem.code === "deleted_reference")
+                    ? removedReads(step, flow.steps).map((read) => (
+                        <RemovedReadRepair
+                          key={
+                            read.location === "question"
+                              ? `question:${read.token}`
+                              : `ref:${read.index}:${read.token}`
+                          }
+                          flow={flow}
+                          step={step}
+                          read={read}
+                          onRepair={(target, bindings) => void repair(target, bindings)}
+                        />
+                      ))
+                    : null}
                 </li>
               );
             })}

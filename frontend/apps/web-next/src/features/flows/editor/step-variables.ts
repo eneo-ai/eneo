@@ -76,6 +76,7 @@ export type VariableEntry = {
     | { type: "upload" }
     | { type: "transcription" }
     | { type: "date" }
+    | { type: "section_index" }
     | { type: "previous_step" }
     | { type: "step_text" }
     | { type: "step_structured" }
@@ -103,8 +104,10 @@ export function variableGroups(params: {
   stepOrder: number;
   inputConfig?: unknown;
   wholeValue?: boolean;
+  /** The text is an AI instruction run once per section: it can read the section's number. */
+  sectionVariables?: boolean;
 }): VariableGroup[] {
-  const { flow, stepOrder, inputConfig, wholeValue = false } = params;
+  const { flow, stepOrder, inputConfig, wholeValue = false, sectionVariables = false } = params;
   const groups: VariableGroup[] = [];
 
   const fields = formFieldsOf(flow)
@@ -129,6 +132,7 @@ export function variableGroups(params: {
     run.push({ token: "transkribering", kind: { type: "transcription" } });
   }
   if (!wholeValue) run.push({ token: "datum", kind: { type: "date" } });
+  if (sectionVariables) run.push({ token: "section_index", kind: { type: "section_index" } });
   if (stepOrder > 1 && !wholeValue) {
     run.push({ token: "föregående_steg", kind: { type: "previous_step" } });
   }
@@ -170,6 +174,8 @@ export type MaterialOption = {
   stepName: string;
   output: "text" | "structured";
   fieldPath: string | null;
+  /** A declared field's JSON Schema type, when it names one. */
+  fieldType: string | null;
 };
 
 /**
@@ -192,7 +198,8 @@ export function materialOptions(
       stepOrder: order,
       stepName,
       output,
-      fieldPath: null
+      fieldPath: null,
+      fieldType: null
     });
     if (output === "structured") {
       for (const field of contractFields(step.output_contract)) {
@@ -201,7 +208,8 @@ export function materialOptions(
           stepOrder: order,
           stepName,
           output: "structured",
-          fieldPath: field.name
+          fieldPath: field.name,
+          fieldType: field.type
         });
       }
     }

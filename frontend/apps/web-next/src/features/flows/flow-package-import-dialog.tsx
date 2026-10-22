@@ -8,7 +8,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Selector } from "@astryxdesign/core/Selector";
-import { Text } from "@astryxdesign/core/Text";
+import { Heading, Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
@@ -201,9 +201,9 @@ function Requirement({
         className="border-ax-border rounded-ax-container flex flex-col gap-3 border p-3"
       >
         <div className="flex flex-wrap items-center gap-2">
-          <h4 id={titleId} className="text-ax-text m-0 text-sm font-semibold break-words">
+          <Heading level={4} id={titleId} weight="semibold" className="text-sm">
             {label}
-          </h4>
+          </Heading>
           <Token size="sm" label={kindLabel(resolution.kind, t)} />
           <Token
             size="sm"
@@ -306,6 +306,7 @@ export function FlowPackageImportDialog({
     const request = ++planRequest.current;
     setLoading(true);
     setFailure(null);
+    announce(t("flow_editor_tools_package_loading_plan"));
     try {
       const next = await createImportPlan(space.id, chosen, Object.values(nextUploads));
       if (request !== planRequest.current) return;
@@ -451,9 +452,6 @@ export function FlowPackageImportDialog({
                   isLoading={loading}
                   status={fileProblem ? { type: "error", message: fileProblem } : undefined}
                 />
-                <p aria-live="polite" className="sr-only">
-                  {loading ? t("flow_editor_tools_package_loading_plan") : ""}
-                </p>
 
                 {plan ? (
                   <>
@@ -541,9 +539,9 @@ export function FlowPackageImportDialog({
 
                     <section className="flex flex-col gap-3">
                       <div className="flex flex-col gap-1">
-                        <h3 className="text-ax-text m-0 text-sm font-semibold">
+                        <Heading level={3} weight="semibold" className="text-sm">
                           {t("flow_editor_tools_package_dependency_mapping")}
-                        </h3>
+                        </Heading>
                         <Text type="supporting" size="sm" as="p" display="block" className="m-0">
                           {resolutions.length === 0
                             ? t("flow_editor_tools_package_no_dependencies")

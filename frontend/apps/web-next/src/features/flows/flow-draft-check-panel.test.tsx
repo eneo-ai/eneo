@@ -61,6 +61,42 @@ describe("FlowDraftCheck", () => {
     );
   });
 
+  it("replaces a read of a removed step with an earlier answer in one choice", async () => {
+    route({
+      "assistant-1": makeAssistant({ id: "assistant-1" }),
+      "assistant-2": makeAssistant({ id: "assistant-2" })
+    });
+    const flow = makeFlow({
+      steps: [
+        makeStep(1, { user_description: "Sammanfatta" }),
+        makeStep(2, {
+          user_description: "Skriv svar",
+          input_bindings: { question: "Svara på {{step_3_deleted.output.text}}" }
+        })
+      ]
+    });
+    const onRepair = vi.fn().mockResolvedValue(true);
+    const { container } = renderInApp(
+      <FlowDraftCheck flow={flow} speakerServices={[]} onOpenStep={vi.fn()} onRepair={onRepair} />
+    );
+
+    expect(
+      await screen.findByText(
+        "Hänvisningen {{step_3_deleted.output.text}} gäller ett steg som inte finns längre."
+      )
+    ).toBeTruthy();
+    await expectNoAxeViolations(container);
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Välj vad som ska användas i stället för {{step_3_deleted.output.text}} i Steg 2: Skriv svar"
+      })
+    );
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Steg 1: Sammanfatta/ }));
+    expect(onRepair).toHaveBeenCalledWith(flow.steps[1], {
+      question: "Svara på {{step_1.output.text}}"
+    });
+  });
+
   it("says nothing stops publishing, and announces it when checked again", async () => {
     route({
       "assistant-1": makeAssistant({ id: "assistant-1" }),

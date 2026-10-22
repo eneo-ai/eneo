@@ -2,19 +2,21 @@
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { useAnnounce } from "@astryxdesign/core/hooks";
+import { Button } from "@astryxdesign/core/Button";
 import { Link } from "@astryxdesign/core/Link";
+import { Text } from "@astryxdesign/core/Text";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { flushSync } from "react-dom";
+import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
-import { Button } from "@astryxdesign/core/Button";
 import { useFieldFocus } from "@/features/admin/models/provider-form-fields";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
+import { useLeaveConfirmation } from "@/lib/hooks/use-leave-confirmation";
 import {
   buildPatches,
   DOCUMENT_RENDER_KEYS,
@@ -85,7 +87,7 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
   const bounds = fieldBounds(settings);
   const dirty = dirtyKeys(draft, baseline);
   const problems = submitted ? validateDraft(draft, baseline, settings) : {};
-  useBeforeUnloadWarning(dirty.length > 0);
+  const leaving = useLeaveConfirmation(dirty.length > 0);
 
   function problem(key: FieldKey): string | null {
     const found = problems[key];
@@ -244,11 +246,11 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
   return (
     // Focused fields stay clear of the sticky save bar (WCAG 2.4.11).
     <div className="flex flex-col gap-6 [&_input]:scroll-mb-32">
-      <p className="text-muted-foreground text-sm">
+      <Text type="supporting" size="sm" as="p" display="block" className="m-0">
         <Link href={AUDIT_HREF} hasUnderline>
           {t("flow_admin_audit_link")}
         </Link>
-      </p>
+      </Text>
       <UploadSections kit={kit} />
       <RunLimitSection
         kit={kit}
@@ -269,7 +271,7 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
       <DocumentSection kit={kit} isPinnedOpen={changedOrWrong(DOCUMENT_RENDER_KEYS)} />
       <ExportSection kit={kit} />
 
-      <div className="bg-card sticky bottom-4 z-20 flex flex-col gap-3 rounded-lg border p-4 shadow-lg">
+      <div className="bg-ax-card border-ax-border rounded-ax-container shadow-ax-high sticky bottom-4 z-20 flex flex-col gap-3 border p-4">
         {refusal ? (
           <Banner
             status="error"
@@ -282,7 +284,9 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
           />
         ) : null}
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-sm font-medium">{statusText}</p>
+          <Text size="sm" weight="medium" as="p" display="block" className="m-0">
+            {statusText}
+          </Text>
           <div className="flex gap-2">
             <Button
               label={t("discard_changes")}
@@ -299,6 +303,17 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
           </div>
         </div>
       </div>
+
+      <ConfirmDialogControlled
+        open={leaving.pendingHref !== null}
+        onOpenChange={(open) => {
+          if (!open) leaving.stay();
+        }}
+        title={t("flow_admin_leave_title")}
+        description={t("flow_admin_leave_description")}
+        confirmLabel={t("flow_admin_leave_confirm")}
+        onConfirm={leaving.leave}
+      />
     </div>
   );
 }
