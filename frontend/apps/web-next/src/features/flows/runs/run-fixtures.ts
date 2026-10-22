@@ -86,6 +86,14 @@ export function makeRunDetail(overrides: Partial<RunDetail> = {}): RunDetail {
       output_completeness: "complete"
     },
     webhook_deliveries: [],
+    evidence_access: {
+      can_read_evidence: true,
+      can_export_redacted: true,
+      can_export_raw: true,
+      read_refusal_code: null,
+      redacted_export_refusal_code: null,
+      raw_export_refusal_code: null
+    },
     ...overrides
   };
 }

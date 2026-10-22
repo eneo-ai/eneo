@@ -2943,5 +2943,10 @@
   "flow_runs_review_speaker_name": "Namn för {label}",
   "flow_runs_started_by_named": "Startad av {name}",
   "flow_runs_retry_starter_only": "Bara den som startade körningen ({name}) kan köra om den från steget som misslyckades.",
-  "flow_runs_review_reject_reason_too_long": "Skälet får vara högst {max} tecken."
+  "flow_runs_review_reject_reason_too_long": "Skälet får vara högst {max} tecken.",
+  "flow_run_journey_column_run": "Körning",
+  "flow_run_journey_search": "Sök körningar",
+  "flow_run_journey_search_hint": "På namn eller vem som startade",
+  "flow_run_journey_search_empty_title": "Inga körningar matchar ”{search}”",
+  "flow_run_journey_search_empty": "Sök på en annan del av namnet, eller töm sökfältet."
 }

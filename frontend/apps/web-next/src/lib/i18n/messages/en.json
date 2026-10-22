@@ -10632,5 +10632,10 @@
   "flow_runs_review_speaker_name": "Name for {label}",
   "flow_runs_started_by_named": "Started by {name}",
   "flow_runs_retry_starter_only": "Only the one who started the run ({name}) can run it again from the failed step.",
-  "flow_runs_review_reject_reason_too_long": "The reason can be at most {max} characters."
+  "flow_runs_review_reject_reason_too_long": "The reason can be at most {max} characters.",
+  "flow_run_journey_column_run": "Run",
+  "flow_run_journey_search": "Search runs",
+  "flow_run_journey_search_hint": "By name or by who started it",
+  "flow_run_journey_search_empty_title": "No runs match “{search}”",
+  "flow_run_journey_search_empty": "Search for another part of the name, or clear the search."
 }
