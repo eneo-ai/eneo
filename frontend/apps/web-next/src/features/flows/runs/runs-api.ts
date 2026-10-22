@@ -477,6 +477,61 @@ export function editTranscriptCorrections(
   );
 }
 
+export type CorrectionRevision = Schema<"FlowTranscriptCorrectionRevisionPublic">;
+export type TranscriptRegeneration = Schema<"FlowTranscriptRegenerationPublic">;
+
+/** Revisions per page of a step's correction history. */
+export const REVISIONS_PAGE_SIZE = 20;
+
+/** Every saved version of a step's transcript corrections, oldest first, a page at a time. */
+export function transcriptRevisionsQueryOptions(flowId: string, runId: string, stepId: string) {
+  return infiniteQueryOptions({
+    queryKey: [...runKeys.run(flowId, runId), "transcript-revisions", stepId],
+    queryFn: ({ pageParam, signal }) =>
+      unwrap(
+        browserApi.GET(
+          "/api/v1/flows/{id}/runs/{run_id}/transcript-corrections/{step_id}/revisions",
+          {
+            params: {
+              path: { id: flowId, run_id: runId, step_id: stepId },
+              query: {
+                limit: REVISIONS_PAGE_SIZE,
+                ...(pageParam !== null ? { after_revision: pageParam } : {})
+              }
+            },
+            signal
+          }
+        )
+      ),
+    initialPageParam: null as number | null,
+    getNextPageParam: (last) => last.next_after_revision
+  });
+}
+
+/**
+ * Starts a new run of the flow from this run's reviewed transcript: the
+ * transcription (and a speaker-mapping step after it) is taken as reviewed,
+ * and every later step runs again. Fenced by the run's and the corrections'
+ * revisions; a retry with the same key answers the run it already started.
+ */
+export function regenerateTranscript(
+  flowId: string,
+  runId: string,
+  stepId: string,
+  body: Schema<"FlowTranscriptRegenerationRequest">,
+  idempotencyKey: string
+): Promise<TranscriptRegeneration> {
+  return unwrap(
+    browserApi.POST("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-regenerations/", {
+      params: {
+        path: { id: flowId, run_id: runId, step_id: stepId },
+        header: { "Idempotency-Key": idempotencyKey }
+      },
+      body
+    })
+  );
+}
+
 export type LiveTranscriptionSession = Schema<"FlowLiveTranscriptionSessionPublic">;
 
 /**

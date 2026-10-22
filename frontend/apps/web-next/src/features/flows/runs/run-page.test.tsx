@@ -746,6 +746,103 @@ describe("FlowRunPage", () => {
       expect(within(lines).getByText("omna.")).toBeTruthy();
     });
 
+    it("shows the corrections' history and starts a run from the reviewed transcript", async () => {
+      answerAudioRun();
+      const saved = {
+        flow_run_id: "run-1",
+        step_id: "step-1",
+        created_at: "2026-10-21T09:00:00Z",
+        updated_at: "2026-10-21T09:00:00Z",
+        edited_by_principal_type: "user",
+        schema_version: 3,
+        segments_hash: "hash-1",
+        stale: false,
+        revision: 2,
+        occurrences: [
+          { segment_index: 1, char_start: 0, char_end: 4, original: "Tack", corrected: "Tackar" }
+        ],
+        speaker_edits: [],
+        speaker_names: { SPEAKER_00: "Anna" }
+      };
+      state.routes[CORRECTIONS] = () => ({ body: [saved] });
+      state.routes[
+        "GET /api/v1/flows/{id}/runs/{run_id}/transcript-corrections/{step_id}/revisions"
+      ] = () => ({
+        body: {
+          baseline: {
+            revision: 0,
+            occurrences_json: [],
+            speaker_edits_json: [],
+            speaker_names: {}
+          },
+          truncated: false,
+          next_after_revision: null,
+          items: [
+            {
+              id: "rev-2",
+              correction_set_id: "set-1",
+              created_at: "2026-10-21T09:00:00Z",
+              edited_by_principal_type: "user",
+              edited_by_user_id: "user-1",
+              edited_by_service_id: null,
+              flow_id: "flow-1",
+              flow_run_id: "run-1",
+              step_id: "step-1",
+              tenant_id: "tenant-1",
+              revision: 2,
+              segments_hash: "hash-1",
+              occurrences_json: [{}],
+              speaker_edits_json: [],
+              speaker_names: { SPEAKER_00: "Anna" }
+            }
+          ]
+        }
+      });
+      const REGENERATE =
+        "POST /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-regenerations/";
+      state.routes[REGENERATE] = () => ({
+        status: 201,
+        body: {
+          run: { ...makeRunSummary({ id: "run-2", status: "queued" }) },
+          created: true,
+          source_run_id: "run-1",
+          correction_revision: 2,
+          first_regenerated_step_id: "step-2"
+        }
+      });
+      const { container } = renderRun(["flows_view", "flows_manage"]);
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: messages.flow_transcript_history_heading })
+      );
+      const history = await screen.findByRole("list", {
+        name: messages.flow_transcript_history_heading
+      });
+      expect(within(history).getByText(/Version 2/)).toBeTruthy();
+      expect(within(history).getByText(/· du$/)).toBeTruthy();
+      expect(within(history).getByText("1 texträttning, 0 talarbyten, 1 namn")).toBeTruthy();
+      await expectNoAxeViolations(container);
+
+      fireEvent.click(screen.getByRole("button", { name: messages.flow_transcript_regenerate }));
+      expect(await screen.findByText(messages.flow_transcript_regenerate_started)).toBeTruthy();
+      const call = calls(REGENERATE)[0];
+      expect(call?.init.body).toEqual({
+        expected_run_revision: 3,
+        expected_correction_revision: 2,
+        segments_hash: "hash-1"
+      });
+      expect(
+        (call?.init as { params?: { header?: Record<string, string> } }).params?.header?.[
+          "Idempotency-Key"
+        ]
+      ).toBeTruthy();
+      expect(
+        screen
+          .getByRole("link", { name: messages.flow_transcript_regenerate_open })
+          .getAttribute("href")
+      ).toBe("/spaces/space-1/flows/flow-1/runs/run-2");
+    });
+
     it("lets only someone who may review name the speakers", async () => {
       answerAudioRun();
       renderRun(["flows_view", "flows_run"]);

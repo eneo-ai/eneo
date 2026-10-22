@@ -553,6 +553,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                   }
                   mayEdit={can("flows_manage")}
                   runCompleted={status === "completed"}
+                  runRevision={summary?.revision ?? null}
                 />
               </Section>
             ) : null}

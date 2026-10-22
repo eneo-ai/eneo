@@ -11,6 +11,8 @@ import { QuietBanner } from "@/components/astryx/banner";
 import { TextInput } from "@/components/astryx/text-input";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
+import { useAppContext } from "@/components/providers/app-context";
+import { useSpace } from "@/features/spaces/use-space";
 import { isStaleRefusal, refusalText } from "./run-messages";
 import {
   editTranscriptCorrections,
@@ -24,7 +26,9 @@ import {
   knownSpeakers,
   type EditRequest
 } from "./transcript-corrections";
+import { CorrectionHistory, RegenerateFromTranscript } from "./transcript-history";
 import { TranscriptLines } from "./transcript-lines";
+import { runHref } from "./runs-list";
 import {
   parseSegments,
   shownSegments,
@@ -140,7 +144,8 @@ function StepTranscript({
   target,
   corrections,
   mayEdit,
-  runCompleted
+  runCompleted,
+  runRevision
 }: {
   flowId: string;
   runId: string;
@@ -148,9 +153,13 @@ function StepTranscript({
   corrections: TranscriptCorrections | null;
   mayEdit: boolean;
   runCompleted: boolean;
+  runRevision: number | null;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
+  const { user } = useAppContext();
+  const userId = user.id;
+  const { routeId } = useSpace();
   const queryClient = useQueryClient();
   const source = useQuery(transcriptQueryOptions(flowId, runId, target));
   const correctionsKey = transcriptCorrectionsQueryOptions(flowId, runId).queryKey;
@@ -229,6 +238,22 @@ function StepTranscript({
           collapsible={false}
         />
       ) : null}
+      {mayEdit && runCompleted && corrections && !corrections.stale ? (
+        <div className="flex flex-col gap-3">
+          <CorrectionHistory flowId={flowId} runId={runId} stepId={target.stepId} userId={userId} />
+          {runRevision !== null ? (
+            <RegenerateFromTranscript
+              flowId={flowId}
+              runId={runId}
+              stepId={target.stepId}
+              runRevision={runRevision}
+              correctionRevision={corrections.revision}
+              sourceHash={sourceHash}
+              runHref={(id) => runHref(routeId, flowId, id)}
+            />
+          ) : null}
+        </div>
+      ) : null}
       {mayEdit && runCompleted && labels.length > 0 ? (
         <SpeakerNames
           key={`${corrections?.revision ?? 0}`}
@@ -258,7 +283,8 @@ export function RunTranscripts({
   targets,
   labelFor,
   mayEdit,
-  runCompleted
+  runCompleted,
+  runRevision = null
 }: {
   flowId: string;
   runId: string;
@@ -266,6 +292,8 @@ export function RunTranscripts({
   labelFor: (target: TranscriptTarget) => string;
   mayEdit: boolean;
   runCompleted: boolean;
+  /** The run's revision, which starting a run from its reviewed transcript is fenced by. */
+  runRevision?: number | null;
 }) {
   const t = useTranslations();
   const corrections = useQuery({
@@ -296,6 +324,7 @@ export function RunTranscripts({
             corrections={corrections.data.find((item) => item.step_id === target.stepId) ?? null}
             mayEdit={mayEdit}
             runCompleted={runCompleted}
+            runRevision={runRevision}
           />
         </section>
       ))}
