@@ -25,7 +25,10 @@ and partial-rerun surfaces.
   authoring chat (`flows/application/flow_authoring_chat.py`, with its loopback
   tools in `backend/src/eneo/internal_mcp/flows.py`) both save through
   `flows/application/flow_authoring_operations.py`.
-- Frontend: `frontend/apps/web/src/lib/features/flows`.
+- Frontend: the new web app, `frontend/apps/web-next/src/features/flows`
+  (space flows, editor and runs) and `src/features/admin/flow-settings`, routed
+  from `src/app/(app)/spaces/[spaceId]/flows` and `src/app/(app)/admin`. The
+  SvelteKit app has no flow screens.
 - Portable packages: `backend/src/eneo/flow_packages`, deliberately outside
   `eneo.flows`.
 

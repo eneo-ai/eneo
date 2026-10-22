@@ -1412,6 +1412,10 @@ are required. The invitation appears in the signed-in shell and opens a new tab,
 leaving the current app available. Setting the flag back to `false` hides it; the
 beta remains reachable by its URL. The banner is discoverability, not access control.
 
+Flows are built, run and administered only in the new app. `NEW_APP_URL` alone,
+without the banner flag, makes the Svelte space menu's **Flows** entry open that
+space's flows page in the new app; without it the Svelte app shows no Flows entry.
+
 To withdraw the beta, disable the invitation and stop the `web-next` service or
 remove its ingress. Keep the shared backend and database running. Do not downgrade
 the shared database simply to turn off the beta; a backend rollback is a separate

@@ -4,6 +4,8 @@ import { Callout } from "nextra/components";
 
 A Flow is a multi-step AI pipeline you build inside a space. You design it as a draft, publish it to make it runnable, and then execute runs against that published version. Every run is tied to an immutable version snapshot, so results are traceable to the exact definition that produced them.
 
+Flows are built, run and administered in the new web app: open a space and choose **Flows**, and an administrator finds the organization's flow settings under **Admin → Flows**. The SvelteKit app has no flow screens; its space menu links to the new app's flows page when the deployment sets `NEW_APP_URL`.
+
 <Callout type="info">
   If you want to build on Flows from your own application, read this page first
   and then continue with the{" "}

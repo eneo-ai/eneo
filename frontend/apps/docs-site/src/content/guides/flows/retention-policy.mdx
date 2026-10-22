@@ -8,7 +8,7 @@ This page explains how retention eligibility for Flow runs, steps, and their run
 
 **Saving a Flow run-history policy does not delete data.**
 
-There is no automatic Flow run-history deletion mode. History is deleted only by the explicit purge (an API call that needs `retention_manage`), and the purge skips every run under a legal hold. The admin UI has no purge button; the review queue is read-only.
+There is no automatic Flow run-history deletion mode. History is deleted only by the explicit purge (an API call that needs `retention_manage`), and the purge skips every run under a legal hold. No admin screen offers a purge; the review queue is read-only.
 
 </Callout>
 
@@ -47,7 +47,7 @@ The litigation Flow uses 90 days. Other Flows in Legal use 60 days. Flows in oth
 
 ## Choose a mode
 
-| UI label                 | API value         | When the threshold passes                                              | What does not happen                                               |
+| Name                     | API value         | When the threshold passes                                              | What does not happen                                               |
 | ------------------------ | ----------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | Manual purge eligibility | `preserve`        | The history becomes eligible for a separately requested explicit purge | No automatic deletion and no review-queue entry                    |
 | Review before purge      | `review_required` | The history appears in the read-only review queue                      | No approval, purge, or deletion merely from appearing in the queue |
@@ -56,21 +56,24 @@ Use **Review before purge** when the data owner, records manager, or security ro
 
 The threshold is measured from `finished_at`. If a terminal run has no finish time, it is measured from `created_at`.
 
-## Configure it in the admin UI
+## Configure it
 
-Open **Admin → Flow settings → Retention and preservation**.
+Neither web app has a screen for run-history retention: the rules, the review
+queue and legal holds are set and read through the [endpoints below](#api-contract),
+by a signed-in person with the permission each needs. Flows themselves are
+built, run and administered in the new web app.
 
-The selectors use an Organization-wide administrative catalog. They include non-personal Spaces and active Flows even when the person is not a member of the target Space; ordinary Space and Flow authoring lists remain membership-scoped.
+The target endpoints use an Organization-wide administrative catalog. They include non-personal Spaces and active Flows even when the person is not a member of the target Space; ordinary Space and Flow authoring lists remain membership-scoped.
 
-A deleted Flow that still has run history stays in the Flow selector with a **Deleted** badge. Deleting a Flow retires it: it can no longer run, but its runs, results, reviews and evidence stay readable with each reader's current permissions and follow the Flow's retention rule. Runs that were still queued, running or waiting for review are cancelled by a maintenance sweep that runs every minute by default, so they become finished history too. Its Flow policy, review queue and purge keep working. A deleted Flow without runs is not listed.
+A deleted Flow that still has run history stays in the Flow targets, marked `retired`. Deleting a Flow retires it: it can no longer run, but its runs, results, reviews and evidence stay readable with each reader's current permissions and follow the Flow's retention rule. Runs that were still queued, running or waiting for review are cancelled by a maintenance sweep that runs every minute by default, so they become finished history too. Its Flow policy, review queue and purge keep working. A deleted Flow without runs is not listed.
 
 1. Set or leave unset the Organization default.
-2. Select a Space only when it needs an exception.
-3. Select an individual Flow only when it needs a more specific exception.
-4. Check the effective badge. It shows the resolved number of days, mode, and source level.
-5. Save each scope separately. The saved audit event identifies that scope and the old and new policy.
+2. Set a Space policy only when the Space needs an exception.
+3. Set a Flow policy only when the Flow needs a more specific exception.
+4. Check `effective` in the response. It shows the resolved number of days, mode, and source level.
+5. Each scope is replaced separately. The audit event identifies that scope and the old and new policy.
 
-A child set to **Inherit the complete parent policy** stores no local policy. If the parent later changes, the child follows both its new mode and its new number of days.
+A Space or Flow whose policy is cleared (`"policy": null`) stores no local policy and inherits the complete parent policy. If the parent later changes, the child follows both its new mode and its new number of days.
 
 ## Review queue
 
@@ -104,7 +107,7 @@ The reference prefix is `/api/v1`. A deployment can configure another API prefix
 
 ### Administrative target discovery
 
-The settings UI does not weaken the ordinary membership-scoped Space and Flow APIs. People with a retention permission use metadata-only, tenant-scoped target endpoints:
+Retention administration does not weaken the ordinary membership-scoped Space and Flow APIs. People with a retention permission use metadata-only, tenant-scoped target endpoints:
 
 | Target | Endpoint                                                                  |
 | ------ | ------------------------------------------------------------------------- |
@@ -112,9 +115,8 @@ The settings UI does not weaken the ordinary membership-scoped Space and Flow AP
 | Flows  | `GET /settings/flow-run-retention-policy/targets/spaces/{space_id}/flows` |
 
 Both responses are bounded to 200 rows per page and return identifiers and current names, not Flow definitions or run content. Each Flow row also carries `retired`, which is `true` for a deleted Flow listed because it still has run history.
-The admin UI loads the first page and offers explicit **Load more** actions for
-large Organizations instead of downloading every Space and Flow into the
-browser when the settings page opens. Personal Spaces are outside this catalog,
+Page through large Organizations rather than reading every Space and Flow at
+once. Personal Spaces are outside this catalog,
 including direct Flow-target requests for a personal Space identifier.
 
 Replace a local policy:
@@ -185,15 +187,13 @@ when it is reviewed and until when.
 - **End date:** optional. The hold stops by itself when it passes; nothing has
   to run for that. An ended or released hold stays listed as part of the record.
 
-In **Admin > Flow settings > Retention**, the **Legal holds** section lists the
-active holds, or all holds including released and ended ones, with who placed
-each, the reason, when, the review date, the end date and who released it and
-why. Choose a Flow under the exceptions, select **Place hold**, choose the whole
-Flow or specific run IDs, and give a reason, a review date and an optional end
-date. **Review** moves the review date later; **Release** asks for a reason and
-explains what becomes deletable again. The Flow selector marks Flows with an
-active hold. A purge preview counts held runs as `legal_hold`, apart from runs
-with another blocker.
+The holds list returns the active holds, or all holds including released and
+ended ones (`status=all`), with who placed each, the reason, when, the review
+date, the end date and who released it and why. Placing a hold names the Flow,
+optionally specific run IDs, a reason, a review date and an optional end date.
+Extending the review moves the review date later; releasing asks for a reason. A
+purge preview counts held runs as `legal_hold`, apart from runs with another
+blocker.
 
 The review limit (`GET`/`PUT /settings/flow-run-retention-policy/hold-review-limit`,
 1-2555 days or `null` for the default) is changed by `retention_manage` and read by
@@ -223,7 +223,7 @@ same transaction, with the reason, the dates and who acted.
 
 The audit log is the lasting history of every hold: the place, review and
 release events (with who, why and the dates) stay under the audit retention.
-Hold rows stay listed (with **All, including ended**) while their Flow and
+Hold rows stay listed (with `status=all`) while their Flow and
 Space exist. A Space cannot be deleted while it contains an active hold; after
 its holds are released, deleting the Space also removes their released hold
 rows, and the audit events remain.
@@ -250,10 +250,10 @@ Only signed-in people decide: a request made with any API key is refused
 (`retention_person_required`, 403) whatever its permissions; a missing
 permission is refused with `retention_permission_required` (403).
 
-A role with `retention_manage` or `retention_holds` but without `admin` opens
-**Admin > Flow settings** and sees only the retention tab: rules with
-`retention_manage`, legal holds with `retention_holds`. The other admin pages
-and Flow settings tabs stay closed to it. The server checks every request again.
+A role with `retention_manage` or `retention_holds` but without `admin` works
+through the endpoints above: rules with `retention_manage`, legal holds with
+`retention_holds`. It does not open the admin area. The server checks every
+request.
 
 **Operator note (rolling deploy):** the upgrade adds `retention_manage` and
 `retention_holds` to every role that has `admin`. Servers still on the previous
