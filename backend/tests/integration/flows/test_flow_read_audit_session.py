@@ -21,14 +21,18 @@ from sqlalchemy.orm import ORMExecuteState, Session
 
 from eneo.audit.application.audit_worker_task import log_audit_event_task
 from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.principal_types import PrincipalType
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.feature_flag_table import GlobalFeatureFlag
 from eneo.database.tables.mcp_server_table import SpacesMCPServers
-from eneo.flows.domain.flow import FlowRun, FlowStep
+from eneo.flows.domain.flow import FlowRun, FlowRunStatus, FlowStep
+from eneo.flows.runtime import tasks as flow_runtime_tasks
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.main.container.container import _active_session_ctx
 from tests.integration.flows.test_flow_tool_call_evidence import (
+    _cancel,
     _execute,
+    _public_attempt,
     tool_calls,  # noqa: F401  (registers the fixture)
 )
 from tests.integration.flows.test_flow_tool_step_sessions import (
@@ -164,3 +168,71 @@ async def test_a_read_queues_one_audit_record_on_a_session_of_its_own(
             )
         )
     assert stored == 1
+
+
+async def test_a_run_cancelled_during_its_http_read_ends_cancelled_without_output(
+    db_container,
+    admin_user,
+    tool_flow: ToolFlow,  # noqa: F811
+    tool_calls,  # noqa: F811
+    monkeypatch,
+) -> None:
+    # A user cancels the run while its HTTP GET is in flight. The read is
+    # audited once as it ends, and the step's answer is never stored: the run
+    # ends cancelled with its attempt cancelled, not completed or failed.
+    run = await _published_run(db_container, tool_flow, "http")
+    sends: list[str] = []
+
+    async def send_request(
+        self: FlowHttpRuntimeHelper, **kwargs: Any
+    ) -> httpx.Response:
+        sends.append(kwargs["method"])
+        await _cancel(db_container, run)
+        return httpx.Response(
+            200,
+            request=httpx.Request("GET", "https://example.org/case"),
+            text="Ärende A-17 är öppet.",
+        )
+
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send_request)
+    queued: list[dict[str, Any]] = []
+
+    async def enqueue(task: object, job_id: object, params: dict[str, Any]) -> None:
+        queued.append(params)
+
+    with patch("eneo.audit.application.audit_service.job_manager") as job_manager:
+        job_manager.enqueue = AsyncMock(side_effect=enqueue)
+        try:
+            result = await flow_runtime_tasks.execute_flow_run_task(
+                run_id=str(run.id),
+                flow_id=str(run.flow_id),
+                tenant_id=str(run.tenant_id),
+                run_revision=run.revision,
+                principal_type=PrincipalType.USER.value,
+                principal_user_id=str(admin_user.id),
+                task_id=None,
+                retry_count=0,
+            )
+        finally:
+            await flow_runtime_tasks.execution_heartbeats().stop()
+
+    assert sends == ["GET"]
+    assert result["status"] == "skipped"
+    async with db_container() as container:
+        ended = await container.flow_run_repo().get(
+            run_id=run.id, tenant_id=run.tenant_id
+        )
+        (step_result,) = await container.flow_run_repo().list_step_results(
+            run_id=run.id, tenant_id=run.tenant_id
+        )
+    assert ended.status == FlowRunStatus.CANCELLED
+    assert ended.output_payload_json is None
+    assert step_result.output_payload_json is None
+    public, _ = await _public_attempt(db_container, run)
+    assert public.status.value == "cancelled"
+    reads = [
+        params
+        for params in queued
+        if params["action"] == ActionType.FLOW_HTTP_OUTBOUND_CALL.value
+    ]
+    assert [read["metadata"]["extra"]["call_type"] for read in reads] == ["http_input"]
