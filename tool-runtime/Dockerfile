@@ -36,7 +36,6 @@ LABEL org.opencontainers.image.source="${SOURCE_URL}" \
       org.opencontainers.image.url="${SOURCE_URL}" \
       org.opencontainers.image.title="Eneo tool runtime" \
       org.opencontainers.image.description="Bundled isolated MCP tools for Eneo" \
-      org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${GIT_SHA}"
 USER root

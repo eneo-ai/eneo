@@ -14,9 +14,9 @@ from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 
 from eneo.actors.actors.space_actor import SpaceAccessFacts
-from eneo.ai_models.embedding_models.embedding_model import EmbeddingModelLegacy
 from eneo.authentication.auth_dependencies import get_current_active_user
 from eneo.authentication.auth_models import ApiKeyOwnership, ApiKeyPermission
+from eneo.embedding_models.domain.embedding_model import EmbeddingModel
 from eneo.info_blobs.info_blob import InfoBlobInDBNoText
 from eneo.info_blobs.info_blob_repo import IntegrationDocumentsPage
 from eneo.integration.domain.entities.integration_knowledge import (
@@ -49,9 +49,29 @@ from eneo.users.user import UserInDB
 from tests.unit.api_key_test_utils import make_api_key
 
 FOLDER = "https://contoso.sharepoint.com/sites/KS/Shared%20Documents/Protokoll"
-EMBEDDING_MODEL = EmbeddingModelLegacy(
-    id=uuid4(), name="multilingual-e5-large", is_deprecated=False, open_source=True
-)
+
+
+def _embedding_model(user: UserInDB) -> EmbeddingModel:
+    return EmbeddingModel(
+        id=uuid4(),
+        created_at=None,
+        updated_at=None,
+        user=user,
+        nickname=None,
+        name="multilingual-e5-large",
+        family=None,
+        hosting=None,
+        org=None,
+        stability=None,
+        open_source=True,
+        description=None,
+        hf_link=None,
+        is_deprecated=False,
+        is_org_enabled=True,
+        max_input=None,
+        dimensions=None,
+        security_classification=None,
+    )
 
 
 @dataclass
@@ -863,7 +883,7 @@ async def test_a_rename_serves_the_item_with_its_permissions(
     ]
     api.space.members[api.user.id].role = SpaceRoleValue.ADMIN
     api.knowledge.wrapper_id = uuid4()
-    api.knowledge.embedding_model = EMBEDDING_MODEL
+    api.knowledge.embedding_model = _embedding_model(api.user)
     api.knowledge.user_integration.id = uuid4()
     api.knowledge.user_integration.auth_type = "user_oauth"
     api.knowledge_repo.one.return_value = api.knowledge

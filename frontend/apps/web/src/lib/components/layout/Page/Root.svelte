@@ -2,10 +2,8 @@
   import { untrack } from "svelte";
   import { get, writable, type Writable } from "svelte/store";
   import { Tabs } from "bits-ui";
-  import { browser } from "$app/environment";
-  import { replaceState } from "$app/navigation";
   import { page } from "$app/state";
-  import { createContentTabs } from "./ctx";
+  import { createContentTabs, selectPageTab } from "./ctx";
 
   type Props = {
     tabController?: Writable<string> | undefined;
@@ -30,23 +28,9 @@
     });
   });
 
-  function syncUrl(tab: string) {
-    if (!browser) return;
-    const url = new URL(page.url);
-    url.searchParams.set("tab", tab);
-    // Reset to page 1 when switching tabs to avoid empty results
-    url.searchParams.delete("page");
-    // replaceState updates the URL without triggering SvelteKit navigation,
-    // so tab switching is instant (no load functions re-run)
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with mutated query params
-    replaceState(url, { ...page.state, tab });
-  }
-
   function selectTab(next: string) {
     const curr = $tabController;
-    const accepted = onTabChange ? onTabChange({ curr, next }) : next;
-    $tabController = accepted;
-    syncUrl(accepted);
+    selectPageTab(tabController, onTabChange ? onTabChange({ curr, next }) : next);
   }
 </script>
 

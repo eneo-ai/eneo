@@ -336,7 +336,8 @@ value and a comment.
     | `DEFAULT_TENANT_QUOTA_LIMIT` | `10737418240` | Storage quota for the initial tenant (bytes) |
     | `DEFAULT_USER_NAME` | `ExampleUser` | Name for the initial admin user |
     | `DEFAULT_USER_EMAIL` | `user@example.com` | Email for the initial admin user |
-    | `DEFAULT_USER_PASSWORD` | `ChangeMePassword1!` | Password for the initial admin user (change after first login) |
+    | `DEFAULT_USER_PASSWORD` | `ChangeMePassword1!` | Password for the initial admin user, at least 12 characters (`db-init` stops with an error otherwise). It is a one-time password: the account must choose its own at its first sign-in |
+    | `DEFAULT_USER_PASSWORD_CHANGE_REQUIRED` | `true` | Set to `false` only for test stacks where the seeded password must stay usable |
     | `USING_ACCESS_MANAGEMENT` | `true` | Mounts the roles API used by **Admin → Users** |
 
     **OIDC Authentication (Enterprise SSO):**

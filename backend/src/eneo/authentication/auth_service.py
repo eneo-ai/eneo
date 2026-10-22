@@ -1,6 +1,6 @@
 import base64
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
 import bcrypt
@@ -75,8 +75,12 @@ class AuthService:
         audience: str = JWT_AUDIENCE,
         expires_in: float = JWT_EXPIRY_TIME_MINUTES,
         extra_claims: dict[str, object] | None = None,
+        auth_method: Literal["password"] | None = None,
     ) -> str:
         """Mint an access token; ``expires_in`` is in minutes.
+
+        ``auth_method`` records a local password login so the password
+        lifecycle policy can gate that session without touching federated ones.
 
         ``extra_claims`` is shared by module and scoped MCP tokens:
         unknown claims ride through ``JWTPayload`` on decode and are read out
@@ -105,6 +109,7 @@ class AuthService:
             sub=user.email,
             username=user.username,
             credential_version=user.credential_version,
+            auth_method=auth_method,
         )
         token_payload = JWTPayload(
             **jwt_meta.model_dump(),

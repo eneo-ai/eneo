@@ -1,5 +1,3 @@
-# MIT License
-
 from eneo.logging.logging import LoggingDetailsInDB, LoggingDetailsPublic
 
 
