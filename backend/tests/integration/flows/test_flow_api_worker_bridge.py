@@ -443,6 +443,7 @@ _PDF_SIDECAR_INSTALLED = Path(
 )
 async def test_a_rendered_document_is_stored_recorded_and_served_by_a_signed_link(
     client,
+    db_container,
     flow_process_auth_headers,
     create_published_compose_text_flow,
     flow_broker_worker_seam,
@@ -524,6 +525,15 @@ async def test_a_rendered_document_is_stored_recorded_and_served_by_a_signed_lin
         )
     tampered = await client.get(signed_url.replace("token=", "token=x", 1))
     assert tampered.status_code != 200
+    # The run holds the classification level its evidence, the document
+    # among it, was produced at: nothing in this space is classified.
+    async with db_container() as container:
+        recorded_level = await container.session().scalar(
+            sa.select(FlowRuns.evidence_classification_level).where(
+                FlowRuns.id == UUID(run_id)
+            )
+        )
+    assert recorded_level == 0
 
 
 async def test_a_run_cancelled_while_queued_starts_no_step_when_its_delivery_arrives(
