@@ -3,8 +3,11 @@
 Status record for the integration branch `feat/flows-core-integration`. It
 keeps the reference flow core with its history, brings develop in, and
 replaces the dedicated AI Builder interaction with ordinary assistant chat over
-a loopback MCP server and a web-next administration. The `flows_core` feature
-flag stays off until the coverage listed under "Delivery gates" is verified.
+a loopback MCP server and a web-next administration. Flows are on for every
+tenant: the `flows_core` feature flag is seeded off by 202610211900 and turned
+on by 202610221000, which also gives existing predefined Owner roles the four
+flow permissions (and AI Configurator roles `flows_trace`), as new tenants get
+them. A tenant row with `enabled = false` turns flows off for that tenant.
 
 ## Starting points
 
@@ -214,7 +217,7 @@ travels in `input_config`), and no separate reader model is offered.
 
 ## Delivery gates
 
-The flag stays off until these pass on this branch:
+These must pass on this branch before the PR to develop:
 
 - The reference behaviour suites and REST/MCP equivalence.
 - Tenant and principal isolation, concurrent edits, snapshots, classification
