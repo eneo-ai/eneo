@@ -1,7 +1,7 @@
 import { cleanup, render, waitFor } from "@testing-library/svelte";
 import { afterEach, expect, it, vi } from "vitest";
 
-import FlowAddStepDialog from "$lib/features/flows/components/FlowAddStepDialog.svelte";
+import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
 import { settleBodyScrollLock } from "./bodyScrollLock";
 
 afterEach(() => {
@@ -10,8 +10,8 @@ afterEach(() => {
 });
 
 async function openDialogThatLocksTheBody(): Promise<void> {
-  render(FlowAddStepDialog, {
-    props: { open: true, previousOutputType: "text", onConfirm: vi.fn() }
+  render(ConfirmDialog, {
+    props: { open: true, title: "Remove", confirmLabel: "Remove", onConfirm: vi.fn() }
   });
   await waitFor(() => expect(document.body.style.overflow).toBe("hidden"));
 }
