@@ -146,7 +146,8 @@ function StepTranscript({
   mayEdit,
   runCompleted,
   runRevision,
-  review = false
+  review = false,
+  onUnsavedChange
 }: {
   flowId: string;
   runId: string;
@@ -157,6 +158,7 @@ function StepTranscript({
   runRevision: number | null;
   /** Shown in a review checkpoint: the lines can be corrected before the run goes on. */
   review?: boolean;
+  onUnsavedChange?: (unsaved: boolean) => void;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -212,6 +214,7 @@ function StepTranscript({
       sourceHash={sourceHash}
       multiFile={multiFile}
       speakerReview={source.data.speakerReview}
+      onUnsavedChange={onUnsavedChange}
       editing={
         editable
           ? {
@@ -346,12 +349,15 @@ export function ReviewTranscript({
   flowId,
   runId,
   target,
-  mayEdit
+  mayEdit,
+  onUnsavedChange
 }: {
   flowId: string;
   runId: string;
   target: TranscriptTarget;
   mayEdit: boolean;
+  /** Tells the review whether an edit of the transcript is not saved yet. */
+  onUnsavedChange?: (unsaved: boolean) => void;
 }) {
   const t = useTranslations();
   const corrections = useQuery(transcriptCorrectionsQueryOptions(flowId, runId));
@@ -376,6 +382,7 @@ export function ReviewTranscript({
       runCompleted={false}
       runRevision={null}
       review
+      onUnsavedChange={onUnsavedChange}
     />
   );
 }

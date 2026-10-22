@@ -191,6 +191,21 @@ export function ReviewPanel({
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState("");
   const [reasonProblem, setReasonProblem] = useState<string | null>(null);
+  // The transcript holds approval while one of its edits is not saved.
+  const [transcriptUnsaved, setTranscriptUnsaved] = useState(false);
+  const [approvalHeld, setApprovalHeld] = useState(false);
+
+  /** True, and says why at the edit, when the transcript has an edit not saved yet. */
+  function holdForTranscript(): boolean {
+    if (!transcriptUnsaved) return false;
+    flushSync(() => setApprovalHeld(true));
+    announce(t("flow_transcript_review_unsaved"));
+    document
+      .getElementById(`${baseId}-transcript`)
+      ?.querySelector<HTMLElement>("textarea")
+      ?.focus();
+    return true;
+  }
 
   const options = reviewOptions(checkpoint, mayReview, now);
   const changed = options.canEdit && draftChanged(draft, checkpoint);
@@ -414,7 +429,7 @@ export function ReviewPanel({
       ) : null}
 
       {transcript ? (
-        <div className="flex flex-col gap-2">
+        <div id={`${baseId}-transcript`} className="flex flex-col gap-2">
           <Heading level={3}>{t("flow_transcript_review_heading")}</Heading>
           <Text type="supporting" as="p">
             {options.canDecide
@@ -426,6 +441,7 @@ export function ReviewPanel({
             runId={checkpoint.flow_run_id}
             target={transcript}
             mayEdit={options.canDecide}
+            onUnsavedChange={setTranscriptUnsaved}
           />
         </div>
       ) : null}
@@ -483,6 +499,9 @@ export function ReviewPanel({
         </div>
       ) : null}
 
+      {options.canDecide && !rejecting && approvalHeld && transcriptUnsaved ? (
+        <p className="text-ax-error m-0 text-sm">{t("flow_transcript_review_unsaved")}</p>
+      ) : null}
       {options.canDecide && !rejecting ? (
         <div className="flex flex-wrap gap-2">
           <Button
@@ -491,13 +510,18 @@ export function ReviewPanel({
             isLoading={approve.isPending}
             isInterruptible
             onClick={() => {
-              if (busy) return;
+              if (busy || holdForTranscript()) return;
               const value = correction();
               if (value !== false) approve.mutate(value);
             }}
           />
           {changed ? null : (
-            <ReviewApproveOnly checkpoint={checkpoint} isBlocked={busy} onRefused={refused} />
+            <ReviewApproveOnly
+              checkpoint={checkpoint}
+              isBlocked={busy}
+              onRefused={refused}
+              mayApprove={() => !holdForTranscript()}
+            />
           )}
           {changed ? (
             <Button

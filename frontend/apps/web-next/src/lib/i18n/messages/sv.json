@@ -10702,6 +10702,7 @@
   "flow_transcript_export": "Ladda ner transkriptionen",
   "flow_transcript_export_file": "transkription.txt",
   "flow_transcript_audio_part_heading": "Del {part}",
+  "flow_transcript_review_unsaved": "Spara eller avbryt ändringen i transkriptionen innan du godkänner.",
   "flow_runs_review_speakers_hint": "Rätta namnen om det behövs. Lämna tomt om talaren inte ska ha något namn.",
   "flow_runs_review_speaker_name": "Namn för {label}",
   "flow_runs_started_by_named": "Startad av {name}",

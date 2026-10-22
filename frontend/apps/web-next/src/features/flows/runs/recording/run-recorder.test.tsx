@@ -428,6 +428,7 @@ describe("The recording's health", () => {
     installBrowser({ live: true });
     grantMicrophone();
     const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
     const { dialog } = await openDialog(audioContract());
     fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
     expect(await within(dialog).findByText(messages.flow_transcript_rec_mic_label)).toBeTruthy();
@@ -444,7 +445,12 @@ describe("The recording's health", () => {
       })
     ).toBeTruthy();
     await expectNoAxeViolations(document.body);
+    // Recording again stops the preview.
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+    expect(pause).toHaveBeenCalled();
     play.mockRestore();
+    pause.mockRestore();
   });
 
   it("starts again by itself after the microphone went away, in the same recording", async () => {

@@ -1060,6 +1060,19 @@ describe("FlowRunPage", () => {
       fireEvent.change(within(lines).getByLabelText("Texten på raden 1:05"), {
         target: { value: "Tackar." }
       });
+      // A change not saved holds the approval, and focus goes to it.
+      for (const name of [
+        messages.flow_runs_review_approve,
+        messages.flow_run_extras_review_approve_only
+      ]) {
+        fireEvent.click(within(panel).getByRole("button", { name }));
+        expect(
+          await within(panel).findByText(messages.flow_transcript_review_unsaved)
+        ).toBeTruthy();
+        expect(document.activeElement).toBe(within(lines).getByLabelText("Texten på raden 1:05"));
+      }
+      expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_review_unsaved);
+      expect(state.stub.calls.filter((call) => call.method === "POST")).toHaveLength(0);
       fireEvent.click(
         within(lines).getByRole("button", { name: messages.flow_transcript_line_save })
       );
@@ -1071,6 +1084,10 @@ describe("FlowRunPage", () => {
           { segment_index: 1, char_start: 4, char_end: 5, original: ".", corrected: "ar." }
         ]
       });
+      // Saved: the approval is no longer held.
+      await waitFor(() =>
+        expect(within(panel).queryByText(messages.flow_transcript_review_unsaved)).toBeNull()
+      );
       expect(
         within(panel).getByRole("button", { name: messages.flow_runs_review_approve })
       ).toBeTruthy();

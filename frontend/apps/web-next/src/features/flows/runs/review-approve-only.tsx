@@ -18,12 +18,15 @@ import { runKeys, type ReviewCheckpoint } from "./runs-api";
 export function ReviewApproveOnly({
   checkpoint,
   isBlocked,
-  onRefused
+  onRefused,
+  mayApprove = () => true
 }: {
   checkpoint: ReviewCheckpoint;
   /** Another decision on this checkpoint is on its way. */
   isBlocked: boolean;
   onRefused: (error: unknown) => void;
+  /** Asked on each press: false when the panel holds approval and says why. */
+  mayApprove?: () => boolean;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -44,7 +47,7 @@ export function ReviewApproveOnly({
       isLoading={approve.isPending}
       isInterruptible
       onClick={() => {
-        if (!isBlocked && !approve.isPending) approve.mutate();
+        if (!isBlocked && !approve.isPending && mayApprove()) approve.mutate();
       }}
     />
   );

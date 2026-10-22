@@ -16,6 +16,7 @@ import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
+import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { clockTime, type ShownSegment, type TranscriptTarget } from "./transcript";
 import {
   nextSpeakerLabel,
@@ -224,11 +225,14 @@ function LineEditor({
   editing,
   lines,
   onSuggest,
+  onDirty,
   onClose
 }: {
   segment: ShownSegment;
   time: string;
   editing: LineEditing;
+  /** Whether the text differs from the line's, as it is typed. */
+  onDirty: (dirty: boolean) => void;
   /** Every line's raw text, where the same correction may apply. */
   lines: readonly { index: number; text: string }[];
   onSuggest: (next: CorrectionSet, suggestions: Suggestions) => void;
@@ -277,7 +281,10 @@ function LineEditor({
           ref={textField}
           label={t("flow_transcript_line_text", { time })}
           value={text}
-          onChange={setText}
+          onChange={(value) => {
+            setText(value);
+            onDirty(value !== segment.text);
+          }}
           rows={3}
           width="100%"
         />
@@ -738,6 +745,7 @@ export function TranscriptLines({
   multiFile,
   editing,
   speakerReview = null,
+  onUnsavedChange,
   children
 }: {
   flowId: string;
@@ -749,6 +757,11 @@ export function TranscriptLines({
   editing: LineEditing | null;
   /** Where the speaker service heard more than one voice at once. */
   speakerReview?: TranscriptSpeakerReview | null;
+  /**
+   * Hears whether an edit here is not saved yet (a line's text changed, or a
+   * correction waiting for its other places), so a review can hold its approval.
+   */
+  onUnsavedChange?: (unsaved: boolean) => void;
   children?: React.ReactNode;
 }) {
   const t = useTranslations();
@@ -769,6 +782,8 @@ export function TranscriptLines({
     lineId: string;
     problem: string | null;
   } | null>(null);
+  /** The open line editor's text differs from the line's. */
+  const [dirty, setDirty] = useState(false);
   const [picked, setPicked] = useState<SelectedSpan[] | null>(null);
   const [pickProblem, setPickProblem] = useState<string | null>(null);
   const area = useRef<HTMLDivElement>(null);
@@ -777,6 +792,16 @@ export function TranscriptLines({
   const turns = view === "turns" ? transcriptTurns(shown) : [];
   const byIndex = new Map(shown.map((segment) => [segment.index, segment]));
   const rawLines = shown.map((segment) => ({ index: segment.index, text: segment.raw }));
+
+  const unsaved = dirty || suggesting !== null;
+  useBeforeUnloadWarning(unsaved);
+  const tellUnsaved = useRef(onUnsavedChange);
+  useEffect(() => {
+    tellUnsaved.current = onUnsavedChange;
+  });
+  useEffect(() => {
+    tellUnsaved.current?.(unsaved);
+  }, [unsaved]);
 
   /** What the document listeners read: the latest lines, corrections and player. */
   const latest = useRef({ shown, editing, seek: playback?.seek });
@@ -849,7 +874,10 @@ export function TranscriptLines({
   }
 
   function openEditor(id: string, index: number) {
-    flushSync(() => setOpen(index));
+    flushSync(() => {
+      setOpen(index);
+      setDirty(false);
+    });
     document.getElementById(id)?.querySelector("textarea")?.focus();
   }
 
@@ -858,7 +886,10 @@ export function TranscriptLines({
   }
 
   function closeEditor(id: string) {
-    flushSync(() => setOpen(null));
+    flushSync(() => {
+      setOpen(null);
+      setDirty(false);
+    });
     // Back to the line's edit button.
     focusEditButton(id);
   }
@@ -969,6 +1000,7 @@ export function TranscriptLines({
           onChange={(next) => {
             if (next === "lines" || next === "turns") {
               setOpen(null);
+              setDirty(false);
               setPicked(null);
               setView(next);
             }
@@ -1053,9 +1085,11 @@ export function TranscriptLines({
                         onSuggest={(next, suggestions) => {
                           flushSync(() => {
                             setOpen(null);
+                            setDirty(false);
                             setSuggesting({ next, suggestions, lineId: id, problem: null });
                           });
                         }}
+                        onDirty={setDirty}
                         onClose={() => closeEditor(id)}
                       />
                     ) : null

@@ -10702,6 +10702,7 @@
   "flow_transcript_export": "Download the transcript",
   "flow_transcript_export_file": "transcript.txt",
   "flow_transcript_audio_part_heading": "Part {part}",
+  "flow_transcript_review_unsaved": "Save or cancel the change to the transcript before you approve.",
   "flow_runs_review_speakers_hint": "Correct the names if needed. Leave it empty if the speaker should have no name.",
   "flow_runs_review_speaker_name": "Name for {label}",
   "flow_runs_started_by_named": "Started by {name}",
