@@ -77,6 +77,8 @@ const NO_SERVER_PROBLEMS: ServerProblems = { fields: {}, inputs: {} };
 type StartRunFormHandle = {
   /** A recording runs, or recorded parts would be thrown away with the form. */
   holdsRecording: () => boolean;
+  /** Something is filled in or uploaded that closing the form would throw away. */
+  holdsInput: () => boolean;
   /** The form's recordings are thrown away, from this device too. */
   discardRecordings: () => void;
   /** Moves focus to the form's first control, after going back from the summary. */
@@ -191,14 +193,6 @@ function StartRunForm({
   // The form's recordings, kept on the device until the run takes them or they are thrown away.
   const [keeper] = useState(() => new RecordingKeeper(flow.id));
 
-  useImperativeHandle(handleRef, () => ({
-    holdsRecording: () =>
-      [...recorders.current.values()].some((recorder) => recorder.busy()) ||
-      Object.values(uploads).some((entries) => entries.some((entry) => entry.recording)),
-    discardRecordings: () => void keeper.forgetAll(),
-    focusForm: () => void focusFirstControl(formId)
-  }));
-
   function recorderRef(stepId: string) {
     return (handle: RecorderHandle | null) => {
       if (handle) recorders.current.set(stepId, handle);
@@ -257,6 +251,22 @@ function StartRunForm({
   }
 
   const [runLabel, setRunLabel] = useState("");
+
+  useImperativeHandle(handleRef, () => ({
+    holdsRecording: () =>
+      [...recorders.current.values()].some((recorder) => recorder.busy()) ||
+      Object.values(uploads).some((entries) => entries.some((entry) => entry.recording)),
+    holdsInput: () =>
+      Object.values(values).some((value) =>
+        Array.isArray(value) ? value.some((item) => item.trim()) : value.trim() !== ""
+      ) ||
+      freeText.trim() !== "" ||
+      runLabel.trim() !== "" ||
+      Object.values(uploads).some((entries) => entries.length > 0),
+    discardRecordings: () => void keeper.forgetAll(),
+    focusForm: () => void focusFirstControl(formId)
+  }));
+
   const screenAudio = useAudioLengthCheck((stepId, message) =>
     setServer((current) => ({ ...current, inputs: { ...current.inputs, [stepId]: message } }))
   );
@@ -565,6 +575,8 @@ export function StartRunDialog({
   const formId = useId();
   const [pending, setPending] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
+  // What closing would throw away: a recording, or what was filled in and uploaded.
+  const [closeLoses, setCloseLoses] = useState<"recording" | "input">("recording");
   // What the run is sent, while the summary step shows; null on the form.
   const [summary, setSummary] = useState<StartSummary | null>(null);
   // Opened again, the dialog starts at the form.
@@ -591,6 +603,12 @@ export function StartRunDialog({
     if (!next && pending) return;
     // A recording exists only in this form: closing it throws the recording away.
     if (!next && form.current?.holdsRecording()) {
+      setCloseLoses("recording");
+      setConfirmClose(true);
+      return;
+    }
+    if (!next && form.current?.holdsInput()) {
+      setCloseLoses("input");
       setConfirmClose(true);
       return;
     }
@@ -694,13 +712,22 @@ export function StartRunDialog({
       <AlertDialog
         isOpen={confirmClose}
         onOpenChange={setConfirmClose}
-        title={t("flow_transcript_close_title")}
-        description={t("flow_transcript_close_body")}
-        actionLabel={t("flow_transcript_close_confirm")}
-        cancelLabel={t("flow_transcript_close_cancel")}
+        {...(closeLoses === "recording"
+          ? {
+              title: t("flow_transcript_close_title"),
+              description: t("flow_transcript_close_body"),
+              actionLabel: t("flow_transcript_close_confirm"),
+              cancelLabel: t("flow_transcript_close_cancel")
+            }
+          : {
+              title: t("flow_run_dialog_close_confirm_title"),
+              description: t("flow_run_dialog_close_confirm_message"),
+              actionLabel: t("flow_run_dialog_close_confirm_discard"),
+              cancelLabel: t("flow_run_dialog_close_confirm_keep")
+            })}
         onAction={() => {
           setConfirmClose(false);
-          form.current?.discardRecordings();
+          if (closeLoses === "recording") form.current?.discardRecordings();
           onOpenChange(false);
         }}
       />

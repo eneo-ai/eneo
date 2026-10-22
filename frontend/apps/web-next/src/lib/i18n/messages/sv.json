@@ -8928,5 +8928,9 @@
   "flow_run_sections_read_each": "Läst del för del: {count} delar. Varje del gav en post i resultatet, i samma ordning som i underlaget.",
   "flow_run_sections_read_summarized": "Läst del för del: {count} delar, sammanfattade stegvis till ett resultat.",
   "flow_editor_tools_long_material_result": "Resultat",
-  "flow_editor_tools_long_material_result_digest": "Ett samlat svar utifrån delarnas anteckningar"
+  "flow_editor_tools_long_material_result_digest": "Ett samlat svar utifrån delarnas anteckningar",
+  "flow_run_dialog_close_confirm_title": "Stäng utan att köra flödet?",
+  "flow_run_dialog_close_confirm_message": "Uppladdade filer och ifyllda fält försvinner om du stänger dialogen.",
+  "flow_run_dialog_close_confirm_discard": "Stäng ändå",
+  "flow_run_dialog_close_confirm_keep": "Fortsätt fylla i"
 }

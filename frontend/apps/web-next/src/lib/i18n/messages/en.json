@@ -8928,5 +8928,9 @@
   "flow_run_sections_read_each": "Read part by part: {count} parts. Each part gave one entry in the result, in the order of the material.",
   "flow_run_sections_read_summarized": "Read part by part: {count} parts, summarized step by step into one result.",
   "flow_editor_tools_long_material_result": "Result",
-  "flow_editor_tools_long_material_result_digest": "One combined answer from the parts' notes"
+  "flow_editor_tools_long_material_result_digest": "One combined answer from the parts' notes",
+  "flow_run_dialog_close_confirm_title": "Close without running the flow?",
+  "flow_run_dialog_close_confirm_message": "Uploaded files and filled-in fields are lost if you close the dialog.",
+  "flow_run_dialog_close_confirm_discard": "Close anyway",
+  "flow_run_dialog_close_confirm_keep": "Keep filling in"
 }

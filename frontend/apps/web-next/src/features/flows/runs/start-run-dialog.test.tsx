@@ -278,6 +278,47 @@ describe("StartRunDialog", () => {
     expect(button(dialog, messages.cancel)).toBeTruthy();
   });
 
+  it("asks before closing a form with something filled in, and closes an empty one", async () => {
+    const { dialog } = await openDialog();
+    fireEvent.change(within(dialog).getByLabelText(/^Ärende/), { target: { value: "Bygglov" } });
+    fireEvent.click(button(dialog, messages.cancel));
+
+    const confirm = await screen.findByRole("alertdialog", {
+      name: messages.flow_run_dialog_close_confirm_title
+    });
+    fireEvent.click(
+      within(confirm).getByRole("button", { name: messages.flow_run_dialog_close_confirm_keep })
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("alertdialog", { name: messages.flow_run_dialog_close_confirm_title })
+      ).toBeNull()
+    );
+    expect((within(dialog).getByLabelText(/^Ärende/) as HTMLInputElement).value).toBe("Bygglov");
+
+    fireEvent.click(button(dialog, messages.cancel));
+    fireEvent.click(
+      within(
+        await screen.findByRole("alertdialog", {
+          name: messages.flow_run_dialog_close_confirm_title
+        })
+      ).getByRole("button", { name: messages.flow_run_dialog_close_confirm_discard })
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Kör Medborgarbrev" })).toBeNull()
+    );
+
+    // Opened again, empty: nothing to lose, nothing to ask.
+    fireEvent.click(screen.getByRole("button", { name: "Kör" }));
+    const again = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
+    await within(again).findByLabelText(/^Ärende/);
+    fireEvent.click(button(again, messages.cancel));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Kör Medborgarbrev" })).toBeNull()
+    );
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
   it("says before starting that a sensitive flow limits who may see its material", async () => {
     const { dialog } = await openDialog(contract, {
       care_data_policy: { sensitive: true, pre_approval_visibility: "uploader_and_reviewers" }
