@@ -95,6 +95,17 @@ class SettingsPublic(SettingsBase):
     # Gates UI-only developer conveniences (e.g. resetting one's own What's
     # new state); the endpoints behind them check the same setting.
     developer_tools_available: bool = False
+    flows_enabled: bool = Field(
+        default=False,
+        description=(
+            "Read-only: whether flows are switched on for the tenant (the "
+            "`flows_core` feature). When false every flow endpoint answers "
+            "`404`. It says nothing about the caller's own access: showing "
+            "or running flows still needs the `flows_view` and `flows_run` "
+            "permissions."
+        ),
+        examples=[True],
+    )
 
 
 class GetModelsResponse(BaseModel):

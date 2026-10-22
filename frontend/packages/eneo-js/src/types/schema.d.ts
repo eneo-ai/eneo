@@ -34738,6 +34738,13 @@ export interface components {
        */
       file_references_enabled?: boolean;
       /**
+       * Flows Enabled
+       * @description Read-only: whether flows are switched on for the tenant (the `flows_core` feature). When false every flow endpoint answers `404`. It says nothing about the caller's own access: showing or running flows still needs the `flows_view` and `flows_run` permissions.
+       * @default false
+       * @example true
+       */
+      flows_enabled?: boolean;
+      /**
        * Object Content Enabled
        * @default false
        */

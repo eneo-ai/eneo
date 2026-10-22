@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
-import { unstable_rethrow } from "next/navigation";
 import { AppContextProvider, type AppContextData } from "@/components/providers/app-context";
 import { AppShellFrame } from "@/components/shell/app-shell";
 import {
@@ -8,11 +7,10 @@ import {
   SIDE_NAV_COLLAPSED_COOKIE
 } from "@/components/shell/side-nav-preference";
 import { unwrap } from "@/lib/api/errors";
-import { hasPermission } from "@/lib/auth/permissions";
 import { backendVersionFrom } from "@/lib/api/version";
 import { eneoApi } from "@/lib/api/server";
 import { env } from "@/lib/env";
-import { probeFlowsEnabled } from "@/features/flows/flows-api";
+import { flowsAvailable } from "@/features/flows/flows-api";
 import { JobsProvider } from "@/features/jobs/use-jobs";
 import { WhatsNewProvider } from "@/features/whats-new/whats-new-provider";
 import { TourProvider } from "@/features/whats-new/tour-provider";
@@ -39,31 +37,17 @@ export default async function AppLayout({
   const sideNavCollapsed = isSideNavCollapsed(
     (await cookies()).get(SIDE_NAV_COLLAPSED_COOKIE)?.value
   );
-  const [
-    user,
-    tenant,
-    settings,
-    federationStatus,
-    limits,
-    backendVersion,
-    whatsNewState,
-    flowsEnabled
-  ] = await Promise.all([
-    unwrap(api.GET("/api/v1/users/me/")),
-    unwrap(api.GET("/api/v1/users/tenant/")),
-    unwrap(api.GET("/api/v1/settings/")),
-    unwrap(api.GET("/api/v1/auth/federation-status")),
-    unwrap(api.GET("/api/v1/limits/")),
-    unwrap(api.GET("/version")).then(backendVersionFrom),
-    // Optional during rolling deployments; an unavailable marker must not look like "never seen".
-    unwrap(api.GET("/api/v1/whats-new/state/")).catch(() => null),
-    // The settings carry no flag for the tenant's flows: the flow list answers.
-    // An unreachable list hides flows; a redirect (expired session) goes through.
-    probeFlowsEnabled(api).catch((error: unknown) => {
-      unstable_rethrow(error);
-      return false;
-    })
-  ]);
+  const [user, tenant, settings, federationStatus, limits, backendVersion, whatsNewState] =
+    await Promise.all([
+      unwrap(api.GET("/api/v1/users/me/")),
+      unwrap(api.GET("/api/v1/users/tenant/")),
+      unwrap(api.GET("/api/v1/settings/")),
+      unwrap(api.GET("/api/v1/auth/federation-status")),
+      unwrap(api.GET("/api/v1/limits/")),
+      unwrap(api.GET("/version")).then(backendVersionFrom),
+      // Optional during rolling deployments; an unavailable marker must not look like "never seen".
+      unwrap(api.GET("/api/v1/whats-new/state/")).catch(() => null)
+    ]);
 
   const value: AppContextData = {
     user,
@@ -73,7 +57,7 @@ export default async function AppLayout({
     limits,
     featureFlags: {
       showWebSearch: env.SHOW_WEB_SEARCH,
-      flows: flowsEnabled && hasPermission(user)("flows_view")
+      flows: flowsAvailable(settings, user)
     },
     links: {
       legacyApp: env.LEGACY_APP_URL ?? null,
