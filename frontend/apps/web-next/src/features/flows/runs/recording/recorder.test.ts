@@ -358,6 +358,19 @@ describe("AudioRecorder", () => {
     expect(recorder.getSnapshot().problem).toBe("permission_denied");
   });
 
+  it("tells the part's size as it grows and from zero in a new part", async () => {
+    const { stream } = fakeStream();
+    const { recorder, advance } = setup(() => Promise.resolve(stream));
+    await recorder.start({ sessionId: "abc", firstIndex: 0, limits: limits({ partMs: 60_000 }) });
+    await advance(3_000);
+    // Each fake chunk is the five bytes of "audio".
+    expect(recorder.getSnapshot().partBytes).toBe(15);
+    await advance(57_000, 500);
+    expect(recorder.getSnapshot().partBytes).toBe(0);
+    await advance(2_000);
+    expect(recorder.getSnapshot().partBytes).toBe(10);
+  });
+
   it("reports its state and recent events without naming the device", async () => {
     const { stream, track } = fakeStream();
     Object.assign(track, {

@@ -515,6 +515,24 @@ describe("The recording's health", () => {
     }
   });
 
+  it("says how large the part is while recording, and how much more fits after a stop", async () => {
+    installBrowser();
+    grantMicrophone();
+    const { dialog } = await openDialog(audioContract());
+    expect(within(dialog).getByText(/Den kan vara upp till 2 h lång\./)).toBeTruthy();
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+    // Opus at 24 kbit/s, against the step's 10 MB per file.
+    expect(
+      within(dialog).getByText(/^Delen är .+ av högst 10\sMB, ungefär 10,3\sMB per timme\.$/)
+    ).toBeTruthy();
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+    await within(dialog).findByText(/^Inspelning, del 1/);
+    // Two hours less the room kept below the limit and the next part's handover.
+    expect(within(dialog).getByText(/Du kan spela in 1 h 58 min till\./)).toBeTruthy();
+    expect(within(dialog).queryByText(/^Delen är/)).toBeNull();
+  });
+
   it("does not record more while earlier parts wait for their upload", async () => {
     installBrowser();
     grantMicrophone();

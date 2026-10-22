@@ -3,8 +3,9 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Text } from "@astryxdesign/core/Text";
 import { CircleAlert, Play, Square } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
+import { formatBytes } from "@/lib/format";
 import type { AudioRecorder, MicrophoneHint } from "./recorder";
 
 type Translator = ReturnType<typeof useTranslations>;
@@ -75,6 +76,38 @@ export function LevelMeter({
         </p>
       ) : null}
     </div>
+  );
+}
+
+/** The bytes an hour of recording takes at `bitsPerSecond`. */
+export function bytesPerHour(bitsPerSecond: number): number {
+  return (bitsPerSecond / 8) * 3_600;
+}
+
+/**
+ * How large the part being recorded is so far, against the most one file
+ * may be, and how much an hour of recording takes at this browser's bit
+ * rate. Not a live region: it changes every second.
+ */
+export function RecordingSize({
+  bytes,
+  maxBytes,
+  bitsPerSecond
+}: {
+  bytes: number;
+  maxBytes: number | null;
+  bitsPerSecond: number;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const size = formatBytes(bytes, locale);
+  const rate = formatBytes(bytesPerHour(bitsPerSecond), locale);
+  return (
+    <Text type="supporting" as="p" className="tabular-nums">
+      {maxBytes
+        ? t("flow_transcript_rec_size_of_max", { size, max: formatBytes(maxBytes, locale), rate })
+        : t("flow_transcript_rec_size", { size, rate })}
+    </Text>
   );
 }
 

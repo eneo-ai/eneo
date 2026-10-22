@@ -67,6 +67,8 @@ export type RecorderSnapshot = {
   minutesLeft: number | null;
   /** Why the microphone may not be heard; null while it is, or while not recording. */
   micHint: MicrophoneHint | null;
+  /** Bytes of the part being recorded so far, as its chunks arrive. */
+  partBytes: number;
 };
 
 export type RecordedPart = {
@@ -242,7 +244,8 @@ const IDLE: RecorderSnapshot = {
   recordedMs: 0,
   clockStartedAt: null,
   minutesLeft: null,
-  micHint: null
+  micHint: null,
+  partBytes: 0
 };
 
 export class AudioRecorder {
@@ -730,6 +733,10 @@ export class AudioRecorder {
         this.#rescueAt = null;
         this.#partChunks += 1;
         this.#partBytes += event.data.size;
+        const { phase } = this.#snapshot;
+        if (phase === "recording" || phase === "paused") {
+          this.#set({ ...this.#snapshot, partBytes: this.#partBytes });
+        }
       }
       part.chunks.push(event.data);
       journal?.append(part.journal, event.data, Math.max(0, this.recordedMs() - part.startedAtMs));
@@ -807,6 +814,7 @@ export class AudioRecorder {
       return false;
     }
     this.#callbacks.onRotate?.();
+    this.#set({ ...this.#snapshot, partBytes: 0 });
     // The new part's encoder starts again: it may take its time for the first chunk.
     this.#firstChunkSeen = false;
     this.#lastChunkAt = this.#env.now();

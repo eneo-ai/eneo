@@ -51,7 +51,7 @@ import {
   type RecorderProblem,
   type RecordingEnd
 } from "./recorder";
-import { LastPartPreview, LevelMeter, micHintText } from "./recorder-health";
+import { LastPartPreview, LevelMeter, micHintText, RecordingSize } from "./recorder-health";
 import { partDiagnostics, RecordingDiagnostics, recordingReport } from "./recording-diagnostics";
 import {
   clockText,
@@ -657,17 +657,29 @@ export function RunRecorder({
   }
 
   const { phase, problem, ended } = snapshot;
-  const continues = partsOf(session ?? latestSession(entries), entries).length > 0;
+  const formParts = partsOf(session ?? latestSession(entries), entries);
+  const continues = formParts.length > 0;
   const running = phase === "recording" || phase === "paused";
+  // What recording more may still hold, said once a recording has parts on the form.
+  const roomMs =
+    continues && limits.maxRecordingMs
+      ? recordingTimeLeftMs(
+          limits.maxRecordingMs,
+          formParts.length + 1,
+          formParts.reduce((sum, part) => sum + part.durationMs, 0)
+        )
+      : null;
   return (
     <div className="border-ax-border rounded-ax-inner flex flex-col gap-3 border p-3">
       <div className="flex flex-col gap-1">
         <Heading level={4}>{t("flow_transcript_rec_heading")}</Heading>
         <Text type="supporting" as="p">
           {t("flow_transcript_rec_hint")}
-          {limits.maxRecordingMs
-            ? ` ${t("flow_transcript_rec_length_hint", { length: lengthText(limits.maxRecordingMs, t) })}`
-            : null}
+          {roomMs !== null && roomMs >= 60_000
+            ? ` ${t("flow_transcript_rec_room_hint", { length: lengthText(Math.floor(roomMs / 60_000) * 60_000, t) })}`
+            : limits.maxRecordingMs && roomMs === null
+              ? ` ${t("flow_transcript_rec_length_hint", { length: lengthText(limits.maxRecordingMs, t) })}`
+              : null}
         </Text>
       </div>
 
@@ -855,6 +867,14 @@ export function RunRecorder({
           </span>
         ) : null}
       </div>
+
+      {running ? (
+        <RecordingSize
+          bytes={snapshot.partBytes}
+          maxBytes={input.max_file_size_bytes ?? null}
+          bitsPerSecond={options.audioBitsPerSecond}
+        />
+      ) : null}
 
       {onSaveForLater && keeper.available && recorded.length > 0 ? (
         <div className="flex flex-col gap-1">
