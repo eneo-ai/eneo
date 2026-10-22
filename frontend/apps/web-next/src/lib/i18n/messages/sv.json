@@ -2454,6 +2454,7 @@
   "lookup_defaults": "Slå upp standardvärden",
   "model_details": "Modelldetaljer",
   "model_family": "Modellfamilj",
+  "model_developed_by": "Utvecklad av",
   "no_models_in_provider": "Inga modeller konfigurerade för denna leverantör.",
   "add_model_to_get_started": "Lägg till en modell för att komma igång.",
   "no_providers_title": "Inga leverantörer konfigurerade",
