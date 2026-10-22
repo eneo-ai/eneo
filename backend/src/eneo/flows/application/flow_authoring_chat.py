@@ -15,7 +15,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from fastapi import Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
@@ -102,6 +102,7 @@ without calling the tool again.
 
 
 class FlowAuthoringChatPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     flow_id: UUID
     assistant_id: UUID
     session_id: UUID = Field(

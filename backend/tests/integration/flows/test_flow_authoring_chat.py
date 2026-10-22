@@ -307,6 +307,25 @@ async def test_flow_tools_act_on_the_chats_flow_only_in_edit_mode(
     assert _page(stale)["code"] == "stale_revision"
 
 
+async def test_run_tools_reach_the_chats_flow(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    chat = (
+        await client.post(
+            f"/api/v1/flows/{flow['id']}/authoring-chat/", headers=headers
+        )
+    ).json()
+    ctx = _loopback_ctx(await _chat_token(db_container, admin_user, chat))
+
+    result = await flows.read_run(ctx, uuid4())
+
+    assert result.isError
+    page = json.loads(result.content[0].text)
+    assert page["errors"] is None, page
+    assert "not found" in page["message"].lower()
+
+
 async def test_a_token_for_another_chat_reaches_no_flow(
     client, enabled_flow, db_container, admin_user
 ):
