@@ -467,8 +467,10 @@
   // capabilities this user may use (a capability the role withholds is not a
   // row, so it must not open an empty popover either).
   const hasMcpTools = $derived(generalMcpServers.length + capabilityServers.length > 0);
+  // An assistant with specialists consults them with their own tools, so the
+  // approval switch covers those tools even when the assistant has none itself.
   const hasDelegatedTools = $derived(
-    chat.partner?.type === "group-chat" && Boolean(chat.partner.orchestrator_assistant_id)
+    chat.partner?.type !== "group-chat" && (chat.partner?.specialists?.length ?? 0) > 0
   );
 
   // Knowledge sources attached to the partner (read-only indicator; knowledge

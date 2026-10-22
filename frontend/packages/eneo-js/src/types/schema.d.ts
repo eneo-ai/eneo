@@ -11365,6 +11365,11 @@ export interface components {
       published?: boolean;
       user: components["schemas"]["UserSparse"];
       tools: components["schemas"]["UseTools"];
+      /**
+       * Specialists
+       * @description Assistants in the same space this one consults before answering. Consulting needs a model that supports tool calling.
+       */
+      specialists?: components["schemas"]["AssistantSpecialistPublic"][];
       type: components["schemas"]["AssistantType"];
       model_info?: components["schemas"]["ModelInfo"] | null;
       /**
@@ -11541,6 +11546,36 @@ export interface components {
        * @description ID of the completion model, or None if not configured
        */
       completion_model_id?: string | null;
+    };
+    /**
+     * AssistantSpecialistInput
+     * @description A specialist to consult, with an optional description for the orchestrator.
+     */
+    AssistantSpecialistInput: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * User Description
+       * @description What to consult this specialist for. Empty means the specialist's own description applies.
+       */
+      user_description?: string | null;
+    };
+    /** AssistantSpecialistPublic */
+    AssistantSpecialistPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Handle */
+      handle: string;
+      /** Default Description */
+      default_description?: string | null;
+      /** User Description */
+      user_description?: string | null;
     };
     /**
      * AssistantTemplateAdminCreate
@@ -13780,6 +13815,11 @@ export interface components {
       published?: boolean;
       user: components["schemas"]["UserSparse"];
       tools: components["schemas"]["UseTools"];
+      /**
+       * Specialists
+       * @description Assistants in the same space this one consults before answering. Consulting needs a model that supports tool calling.
+       */
+      specialists?: components["schemas"]["AssistantSpecialistPublic"][];
       type: components["schemas"]["AssistantType"];
       model_info?: components["schemas"]["ModelInfo"] | null;
       /**
@@ -15099,8 +15139,6 @@ export interface components {
        * Format: uuid
        */
       space_id: string;
-      /** Orchestrator Assistant Id */
-      orchestrator_assistant_id?: string | null;
       /** Allow Mentions */
       allow_mentions: boolean;
       /** Show Response Label */
@@ -15180,8 +15218,6 @@ export interface components {
     };
     /** GroupChatUpdateSchema */
     GroupChatUpdateSchema: {
-      /** Orchestrator Assistant Id */
-      orchestrator_assistant_id?: string | null;
       /**
        * Name
        * @description The name of the group chat.
@@ -19130,6 +19166,11 @@ export interface components {
       attachments?: components["schemas"]["AssistantAttachmentInput"][] | null;
       /** Mcp Tools */
       mcp_tools?: components["schemas"]["MCPToolSetting"][] | null;
+      /**
+       * Specialists
+       * @description Other assistants in the same space this assistant consults before answering. The list replaces the current one; an empty list clears it.
+       */
+      specialists?: components["schemas"]["AssistantSpecialistInput"][] | null;
       /**
        * Description
        * @description A description of the assitant that will be used as default description in GroupChatAssistantPublic

@@ -30,7 +30,7 @@ MCP for existing tools or change their transport and administration.
 
 | Owner | Reused responsibility | Missing for delegation |
 | --- | --- | --- |
-| `group_chat/application/group_chat_service.py` | Membership, mentions, conversation entry | Explicit orchestrator configuration and multi-consultation synthesis |
+| `assistants/assistant.py` (`specialists`) | The assistant's configured specialists in its Space | Multi-consultation synthesis driven by the asked assistant |
 | `assistants/assistant_service.py` | Caller authorization, governance, Skills, classification, effective tools, normal history lifecycle | Parent/child lifecycle and authorization before each later handoff |
 | `assistants/assistant.py` | Configured assistant execution and knowledge retrieval | Shared run limits supplied by the caller |
 | `completion_models/infrastructure/adapters/tenant_model_adapter.py` | Provider calls, tool iteration, local Skill functions, usage and progress | A budget shared by parent and child invocations |
@@ -100,18 +100,20 @@ adapter; specialists receive no delegation function. The adapter reuses its
 existing Skill and MCP tool loop. Loopback knowledge/files and the MCP proxy
 remain the tool transport, including tools nested under a specialist.
 
-The plan binds the interactive caller, tenant, Space, group, orchestrator,
-candidate IDs and permitted attachment IDs on the server. Candidates are
-resolved before any history row is written: a member the caller may not use is
-left out without exposing its name, the root learns only how many are
+The plan binds the interactive caller, tenant, Space, orchestrating assistant,
+its specialist IDs and permitted attachment IDs on the server. The orchestrator
+is the assistant that received the question; its specialists are persisted in
+`assistants_specialists` and must belong to the same Space. Candidates are
+resolved before any history row is written: a specialist the caller may not
+use is left out without exposing its name, the root learns only how many are
 unavailable, and a question with no usable specialist is refused up front. Each later model,
 query-embedding, reranking and MCP boundary rechecks current access/configuration in a short
 transaction. The parent is checked again before receiving specialist evidence.
-Changes to user eligibility, group membership, effective model, prompt, Skills
-or tool configuration stop the affected execution. Prepared values are not
+Changes to user eligibility, the specialist list, effective model, prompt,
+Skills or tool configuration stop the affected execution. Prepared values are not
 persisted authorization grants.
 
-The group ask returns a lazy execution stream from the request's preparation
+The ask returns a lazy execution stream from the request's preparation
 transaction. Provider and retrieval repositories own short reads when there is
 no ambient transaction. Model and MCP calls happen after those scopes exit.
 Non-streaming HTTP requests drain the same execution, so they cannot bypass the
@@ -151,22 +153,22 @@ model's rate. Unexecuted consultations contribute no model row.
 
 ## Configuration, compatibility and rollout
 
-The nullable `GroupChats.orchestrator_assistant_id` is explicit opt-in. The
-existing selector remains owned by `GroupChatService` for persisted groups that
-have no orchestrator. It is not an error fallback: a configured run never
-silently switches to the selector. Delete that selector only after product
-owners have migrated the existing groups and confirmed that clearing the
-orchestrator no longer needs to restore their saved behaviour.
+Specialists are a setting on the assistant, next to its knowledge and tools.
+An assistant with specialists orchestrates whenever its effective model can
+call tools; without such a model it answers on its own and the editor says so.
+Specialists are consulted without their own specialists (depth one), so there
+are no cycles and no nested budgets. The table `assistants_specialists` rejects
+a self-reference; deleting a specialist cascades the link and moving an
+assistant to another Space drops its links in both directions.
 
-The coordinator is a separate assistant in the same Space. Individual deletion
-or movement requires reassignment first. A deferred foreign key also protects
-that relationship while allowing the whole Space to be deleted atomically.
-Direct mentions keep their existing behaviour. Shared-Space default assistant
-orchestration and API-key execution remain future work.
+Group chats are unchanged by this decision: they keep the existing single
+assistant selector and mentions. Retiring that type in favour of specialists on
+an assistant, shared-Space default assistant orchestration and API-key
+execution are separate decisions that build on this one.
 
-The migration adds two nullable columns; it does not migrate or rewrite existing
-groups or question history. For recovery, deselect the orchestrator and retain
-history. A database downgrade drops consultation history and configuration, so
+The migration adds the specialists table and a nullable consultation column on
+questions; it does not rewrite existing assistants or question history. A
+database downgrade drops consultation history and the specialist links, so
 export them before deliberately downgrading. Deploy the migration before the
 new backend and ship the matching client that renders consultation events.
 

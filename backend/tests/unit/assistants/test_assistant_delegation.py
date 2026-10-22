@@ -19,6 +19,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ResponseType,
     ToolCallMetadata,
 )
+from eneo.assistants.assistant import AssistantSpecialist
 from eneo.assistants.assistant_service import AssistantCompletionFileInputs
 from eneo.assistants.delegation import (
     CONSULT_ASSISTANT_TOOL,
@@ -37,7 +38,6 @@ from eneo.completion_models.domain.execution_budget import (
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     _acompletion_call as dispatch_completion,
 )
-from eneo.group_chat.domain.entities.group_chat import GroupChat, GroupChatAssistant
 from eneo.main.exceptions import (
     BadRequestException,
     SecurityClassificationMismatchException,
@@ -300,18 +300,7 @@ async def test_configured_specialists_and_nested_mcp_share_the_parent_loop(
             lambda **kwargs: approval,
         )
         turn.service.completion_service.tenant = turn.user.tenant
-        group = GroupChat.create(
-            name="Purchase group", space_id=turn.space.id, user_id=turn.user.id
-        )
-        group.id = uuid4()
-        group.published = True
-        group.orchestrator_assistant_id = turn.assistant.id
-        group.assistants = [GroupChatAssistant(a) for a in (procurement, it)]
-        turn.space.group_chats = [group]
-        turn.session.group_chat_id = group.id
-        turn.service.space_repo.get_space_by_group_chat = AsyncMock(
-            return_value=turn.space
-        )
+        give_specialists(turn, procurement, it)
         turn.history.record_consultations = AsyncMock()
         monkeypatch.setattr(
             "eneo.assistants.assistant_service.UsersRepository.get_user_by_id_and_tenant_id",
@@ -326,26 +315,12 @@ async def test_configured_specialists_and_nested_mcp_share_the_parent_loop(
             return runtime
 
         monkeypatch.setattr(turn.service, "_create_delegation", capture)
-        from eneo.group_chat.application.group_chat_service import GroupChatService
-
-        turn.service.space_service.get_space_by_group_chat = AsyncMock(
-            return_value=turn.space
-        )
-        group_service = GroupChatService(
-            user=turn.user,
-            space_service=turn.service.space_service,
-            space_repo=turn.service.space_repo,
-            group_chat_repo=Mock(),
-            actor_manager=turn.service.actor_manager,
-            assistant_service=turn.service,
-            session_service=turn.history,
-            completion_service=turn.service.completion_service,
-            icon_repo=Mock(),
-        )
         async with turn.service.repo.session.begin():
-            answer_response = await group_service.ask_group_chat(
+            # No plan is passed: the assistant orchestrates because it has
+            # specialists and a tool-capable model.
+            answer_response = await turn.service.ask(
                 question="What is required for this purchase?",
-                group_chat_id=group.id,
+                assistant_id=turn.assistant.id,
                 stream=True,
                 version=2,
                 require_tool_approval=True,
@@ -535,23 +510,31 @@ async def test_parent_cancellation_cleans_up_active_child():
     assert runtime.consultations[0].status == "cancelled"
 
 
-def group_plan(turn: TurnFixture, monkeypatch: pytest.MonkeyPatch, specialist):
-    group = GroupChat.create(name="Group", space_id=turn.space.id, user_id=turn.user.id)
-    group.id = uuid4()
-    group.published = True
-    group.orchestrator_assistant_id = turn.assistant.id
-    group.assistants = [GroupChatAssistant(specialist)]
-    turn.space.assistants.append(specialist)
-    turn.space.group_chats = [group]
-    turn.session.group_chat_id = group.id
-    turn.service.space_repo.get_space_by_group_chat = AsyncMock(return_value=turn.space)
+def give_specialists(turn: TurnFixture, *specialists, description: str = "Specialist"):
+    """Make the fixture assistant orchestrate the given assistants."""
+    for specialist in specialists:
+        if specialist not in turn.space.assistants:
+            turn.space.assistants.append(specialist)
+    turn.assistant.specialists = [
+        AssistantSpecialist(
+            id=specialist.id,
+            name=specialist.name,
+            default_description=specialist.description,
+            user_description=description,
+        )
+        for specialist in specialists
+    ]
+    turn.service.space_repo.get_space_by_assistant = AsyncMock(return_value=turn.space)
+
+
+def specialist_plan(turn: TurnFixture, monkeypatch: pytest.MonkeyPatch, specialist):
+    give_specialists(turn, specialist)
     turn.history.record_consultations = AsyncMock()
     monkeypatch.setattr(
         "eneo.assistants.assistant_service.UsersRepository.get_user_by_id_and_tenant_id",
         AsyncMock(return_value=turn.user),
     )
     return AssistantDelegationPlan(
-        group.id,
         turn.space.id,
         turn.assistant.id,
         (AssistantCandidate(specialist.id, specialist.name, "Specialist"),),
@@ -567,7 +550,7 @@ async def test_changed_authorization_or_policy_prevents_next_handoff(
 ):
     specialist = copy.deepcopy(turn.assistant)
     specialist.id = uuid4()
-    plan = group_plan(turn, monkeypatch, specialist)
+    plan = specialist_plan(turn, monkeypatch, specialist)
     async with turn.service.repo.session.begin():
         prepared = await turn.service._prepare_turn(
             question="Question", assistant_id=turn.assistant.id
@@ -583,7 +566,7 @@ async def test_changed_authorization_or_policy_prevents_next_handoff(
         )
     await runtime.authorize(specialist.id)
     if change == "membership":
-        turn.space.group_chats[0].assistants = []
+        turn.assistant.specialists = []
     elif change == "disabled_user":
         turn.user.state = UserState.INACTIVE
     elif change == "classification":
@@ -830,7 +813,7 @@ async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
     child.collections = [collection]
     turn.space.collections = [collection]
     turn.space.embedding_models = [embedding]
-    plan = group_plan(turn, monkeypatch, child)
+    plan = specialist_plan(turn, monkeypatch, child)
     skill = ResolvedSkillBinding(
         skill_id=uuid4(),
         skill_revision_id=uuid4(),
@@ -983,7 +966,6 @@ async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
         reply = await turn.service.ask(
             question="Review",
             assistant_id=turn.assistant.id,
-            group_chat_id=plan.group_chat_id,
             delegation_plan=plan,
             stream=knowledge_mode == "tool",
             version=2,
@@ -1232,12 +1214,10 @@ async def test_unreadable_specialists_are_excluded_before_history_writes(
     visible = copy.deepcopy(turn.assistant)
     visible.id = uuid4()
     visible.name = "IT"
-    plan = group_plan(turn, monkeypatch, visible)
-    turn.space.assistants.append(hidden)
-    turn.space.group_chats[0].assistants.append(GroupChatAssistant(hidden))
+    plan = specialist_plan(turn, monkeypatch, visible)
+    give_specialists(turn, visible, hidden)
     unreadable = {hidden.id} if readable == "one" else {hidden.id, visible.id}
     plan = AssistantDelegationPlan(
-        plan.group_chat_id,
         plan.space_id,
         plan.orchestrator_id,
         (
@@ -1275,7 +1255,6 @@ async def test_unreadable_specialists_are_excluded_before_history_writes(
                 await turn.service.ask(
                     question="Review",
                     assistant_id=turn.assistant.id,
-                    group_chat_id=plan.group_chat_id,
                     delegation_plan=plan,
                     stream=True,
                     version=2,
@@ -1290,7 +1269,6 @@ async def test_unreadable_specialists_are_excluded_before_history_writes(
         reply = await turn.service.ask(
             question="Review",
             assistant_id=turn.assistant.id,
-            group_chat_id=plan.group_chat_id,
             delegation_plan=plan,
             stream=True,
             version=2,
@@ -1327,11 +1305,9 @@ async def test_specialists_with_unusable_configuration_are_left_out(
     visible = copy.deepcopy(turn.assistant)
     visible.id = uuid4()
     visible.name = "IT"
-    plan = group_plan(turn, monkeypatch, visible)
-    turn.space.assistants.append(broken)
-    turn.space.group_chats[0].assistants.append(GroupChatAssistant(broken))
+    plan = specialist_plan(turn, monkeypatch, visible)
+    give_specialists(turn, visible, broken)
     plan = AssistantDelegationPlan(
-        plan.group_chat_id,
         plan.space_id,
         plan.orchestrator_id,
         (
@@ -1366,7 +1342,6 @@ async def test_specialists_with_unusable_configuration_are_left_out(
         reply = await turn.service.ask(
             question="Review",
             assistant_id=turn.assistant.id,
-            group_chat_id=plan.group_chat_id,
             delegation_plan=plan,
             stream=True,
             version=2,
@@ -1403,7 +1378,7 @@ async def test_execution_failures_end_the_orchestrated_stream_with_an_error_even
     specialist = copy.deepcopy(turn.assistant)
     specialist.id = uuid4()
     specialist.name = "IT"
-    plan = group_plan(turn, monkeypatch, specialist)
+    plan = specialist_plan(turn, monkeypatch, specialist)
 
     async def explode(*args: object, **kwargs: object):
         raise failure
@@ -1414,7 +1389,6 @@ async def test_execution_failures_end_the_orchestrated_stream_with_an_error_even
         reply = await turn.service.ask(
             question="Review",
             assistant_id=turn.assistant.id,
-            group_chat_id=plan.group_chat_id,
             delegation_plan=plan,
             stream=True,
             version=2,
@@ -1607,7 +1581,7 @@ async def test_turn_deadline_is_suspended_while_the_response_writer_holds_contro
     specialist = copy.deepcopy(turn.assistant)
     specialist.id = uuid4()
     specialist.name = "IT"
-    plan = group_plan(turn, monkeypatch, specialist)
+    plan = specialist_plan(turn, monkeypatch, specialist)
     monkeypatch.setattr(
         "eneo.assistants.assistant_service.ExecutionBudget",
         lambda: ExecutionBudget(
@@ -1644,7 +1618,6 @@ async def test_turn_deadline_is_suspended_while_the_response_writer_holds_contro
         reply = await turn.service.ask(
             question="Count",
             assistant_id=turn.assistant.id,
-            group_chat_id=plan.group_chat_id,
             delegation_plan=plan,
             stream=True,
             version=2,

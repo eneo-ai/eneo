@@ -153,21 +153,26 @@ POST /api/v1/conversations/
 | `stream`                  | boolean                | Default `false`. `true` returns Server-Sent Events.                                                                                                                                                                  |
 | `files`                   | list of `{"id": UUID}` | Previously uploaded files to attach.                                                                                                                                                                                 |
 | `tools`                   | object                 | `{"assistants": [{"id": UUID, "handle": string}]}` targets a specific assistant (mentions in group chats, tool assistants otherwise).                                                                                |
-| `require_tool_approval`   | boolean                | Default `false`. Requires `stream: true`. Supported for orchestrated group chats, including specialist tool calls.                                                                                                   |
+| `require_tool_approval`   | boolean                | Default `false`. Requires `stream: true`. Supported for assistants with specialists, including specialist tool calls; not supported for group chats.                                                                                                   |
 | `disabled_mcp_server_ids` | list of UUID           | MCP servers to switch off for this message. It can only narrow the active set.                                                                                                                                       |
 | `disabled_capabilities`   | list of string         | Capabilities to switch off for this message: `web_search`, `image_generation`, `file_analysis`, `file_creation`, `charts`, `compute`. Like the list above, it can only narrow what the assistant is configured with. |
 
 Exactly one of `session_id`, `assistant_id`, or `group_chat_id` must be present; anything else fails validation with `422`. The optional query parameter `version` (`1`, `2` or `3`, default `1`) selects the knowledge-retrieval behaviour; the web app sends `version=2`. `version=3` retrieves and generates exactly like `2` but, with `stream: true`, frames the stream as the [AI SDK UI Message Stream](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) (data-only events with a `type` field, ended by `data: [DONE]`) instead of the named events below; without `stream` it behaves like `2`.
 
-Sending `require_tool_approval: true` without `stream: true` returns `400` with `code: "invalid_request"`; sending it for a group without a configured orchestrator returns `400` with `code: "not_supported"`.
+Sending `require_tool_approval: true` without `stream: true` returns `400` with `code: "invalid_request"`; sending it for a group chat returns `400` with `code: "not_supported"`.
 
-### Orchestrated groups
+### Assistants with specialists
 
-Set `orchestrator_assistant_id` when updating the group to enable orchestration.
-It names a separate assistant in the same Space; `null` disables orchestration,
-and omission preserves the current selection. This version requires an
-interactive user session; API keys are rejected before delegated execution.
-Explicit mentions still ask that specialist directly.
+Set `specialists` when updating an assistant to make it consult other assistants
+in its Space before answering: a list of `{"id": UUID, "user_description":
+string | null}`. The list replaces the current one and an empty list clears it;
+omission preserves the current selection. The assistant cannot name itself, and
+every specialist must belong to the same Space. `AssistantPublic.specialists`
+returns the configured specialists with `handle`, `default_description` and
+`user_description`. Consulting happens only when the assistant's effective model
+supports tool calling. This version requires an interactive user session: an API
+key asking such an assistant receives `400` with
+`code: "orchestration_requires_session"`.
 
 The parent question owns `consultations`, a list of versioned records containing
 server-generated IDs, ordinal, specialist identity, actual question and answer,
@@ -192,8 +197,8 @@ stops because the caller's access or an assistant's configuration changed uses
 `assistant_access_changed` with `error_code` 403. The persisted answer and
 consultations are kept in both cases. A question whose specialists are all
 unavailable to the caller returns `400` with `code: "no_available_specialists"`
-before anything is saved. See [Group Chats](../guides/group-chats) for limits,
-access checks and cancellation behaviour.
+before anything is saved. See [Assistant Specialists](../guides/assistant-specialists)
+for limits, access checks and cancellation behaviour.
 
 ### Non-streaming response
 

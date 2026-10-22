@@ -128,13 +128,13 @@ describe("ChatMcpServers", () => {
     });
     await trigger.click();
 
-    // The orchestrator's model cannot call tools, so its own servers stay
+    // The assistant's model cannot call tools, so its own servers stay
     // unavailable, while the approval preference still applies to the
     // specialists' external tools.
     await expect.element(page.getByRole("switch", { name: "Server A" })).toBeDisabled();
     await expect
       .element(page.getByRole("switch", { name: m.mcp_run_tools_automatically() }))
       .toBeVisible();
-    await expect.element(page.getByText(m.group_delegated_tools())).toBeVisible();
+    await expect.element(page.getByText(m.assistant_delegated_tools())).toBeVisible();
   });
 });

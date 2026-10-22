@@ -4,7 +4,6 @@
   import { guardUnsavedChanges } from "$lib/core/editing/guardUnsavedChanges";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager.js";
   import { useId } from "bits-ui";
-  import * as Select from "$lib/components/ui/select/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as RadioGroup from "$lib/components/ui/radio-group/index.js";
   import { initGroupChatEditor } from "$lib/features/group-chats/GroupChatEditor.js";
@@ -102,39 +101,6 @@
 
       <Settings.Group title={m.group_settings()}>
         <Settings.Row
-          title={m.group_orchestrator()}
-          description={m.group_orchestrator_description()}
-          hasChanges={$currentChanges.diff.orchestrator_assistant_id !== undefined}
-          revertFn={() => discardChanges("orchestrator_assistant_id")}
-        >
-          <Select.Root
-            type="single"
-            value={$update.orchestrator_assistant_id ?? "none"}
-            onValueChange={(id) => ($update.orchestrator_assistant_id = id === "none" ? null : id)}
-          >
-            <Select.Trigger aria-label={m.group_orchestrator()} class="w-full">
-              {#if !$update.orchestrator_assistant_id}
-                {m.group_orchestrator_unconfigured()}
-              {:else}
-                {$currentSpace.applications.assistants.find(
-                  (assistant) => assistant.id === $update.orchestrator_assistant_id
-                )?.name ?? m.group_orchestrator_unavailable()}
-              {/if}
-            </Select.Trigger>
-            <Select.Content>
-              <Select.Item value="none" label={m.group_orchestrator_unconfigured()}
-                >{m.group_orchestrator_unconfigured()}</Select.Item
-              >
-              {#each $currentSpace.applications.assistants.filter((assistant) => !$update.tools.assistants.some((specialist) => specialist.id === assistant.id)) as assistant (assistant.id)}
-                <Select.Item value={assistant.id} label={assistant.name}
-                  >{assistant.name}</Select.Item
-                >
-              {/each}
-            </Select.Content>
-          </Select.Root>
-        </Settings.Row>
-
-        <Settings.Row
           title={m.assistants()}
           description={m.assistants_will_be_able_to_answer_questions()}
           hasChanges={$currentChanges.diff.tools?.assistants !== undefined}
@@ -142,10 +108,7 @@
             $update.tools.assistants = $resource.tools.assistants;
           }}
         >
-          <GroupChatAssistantList
-            bind:selectedAssistants={$update.tools.assistants}
-            orchestratorId={$update.orchestrator_assistant_id}
-          />
+          <GroupChatAssistantList bind:selectedAssistants={$update.tools.assistants} />
         </Settings.Row>
       </Settings.Group>
 

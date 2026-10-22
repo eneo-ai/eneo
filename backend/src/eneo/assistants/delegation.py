@@ -59,9 +59,12 @@ class AssistantCandidate:
 
 @dataclass(frozen=True)
 class AssistantDelegationPlan:
-    """Server-resolved configuration; never accepted from a model tool call."""
+    """Server-resolved configuration; never accepted from a model tool call.
 
-    group_chat_id: UUID
+    The orchestrator is the assistant that received the question; the
+    candidates are its configured specialists in the same space.
+    """
+
     space_id: UUID
     orchestrator_id: UUID
     candidates: tuple[AssistantCandidate, ...]

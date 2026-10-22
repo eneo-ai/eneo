@@ -20,7 +20,7 @@ from eneo.ai_models.completion_models.completion_model import (
     function_definition_to_tool,
 )
 from eneo.assistants.api.assistant_models import AssistantResponse, KnowledgeMode
-from eneo.assistants.assistant import Assistant
+from eneo.assistants.assistant import Assistant, AssistantSpecialist
 from eneo.assistants.assistant_factory import AssistantFactory
 from eneo.assistants.assistant_repo import (
     AssistantRepository,
@@ -1633,6 +1633,7 @@ class AssistantService:
         mcp_server_ids: list[UUID] | None = None,
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         mcp_tools: list[tuple[UUID, bool]] | None = None,
+        specialists: list[tuple[UUID, str | None]] | None = None,
         attachments: list[tuple[UUID, bool]] | None = None,
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: Optional[bool] = None,
@@ -1726,6 +1727,7 @@ class AssistantService:
                 mcp_server_ids,
                 enabled_capabilities,
                 mcp_tools,
+                specialists,
                 attachments,
                 insight_enabled,
                 inline_file_text,
@@ -2040,6 +2042,33 @@ class AssistantService:
             ).validate_choice(document_template)
             assistant.document_template = document_template
 
+        specialist_entities: list[AssistantSpecialist] | None = None
+        if specialists is not None:
+            specialist_entities = []
+            seen: set[UUID] = set()
+            for specialist_id, user_description in specialists:
+                if specialist_id == assistant.id:
+                    raise BadRequestException(
+                        "An assistant cannot be its own specialist."
+                    )
+                if specialist_id in seen:
+                    continue
+                seen.add(specialist_id)
+                # Raises NotFound for an assistant outside this space.
+                specialist = space.get_assistant(assistant_id=specialist_id)
+                if not actor.can_read_assistant(specialist):
+                    raise UnauthorizedException(
+                        "You do not have access to that specialist."
+                    )
+                specialist_entities.append(
+                    AssistantSpecialist(
+                        id=specialist.id,
+                        name=specialist.name,
+                        default_description=specialist.description,
+                        user_description=user_description or None,
+                    )
+                )
+
         assistant.update(
             name=name,
             prompt=prompt_obj,
@@ -2051,6 +2080,7 @@ class AssistantService:
             collections=group_entities,
             websites=website_entities,
             integration_knowledge_list=integration_knowledge_list,
+            specialists=specialist_entities,
             description=description,
             insight_enabled=insight_enabled,
             inline_file_text=inline_file_text,
@@ -2135,6 +2165,14 @@ class AssistantService:
                 integration_knowledge_ids=integration_knowledge_ids,
                 mcp_server_ids=mcp_server_ids,
                 mcp_tools=mcp_tools,
+                specialists=(
+                    {
+                        specialist.id: specialist.user_description
+                        for specialist in specialist_entities
+                    }
+                    if specialist_entities is not None
+                    else None
+                ),
                 enabled_capabilities=enabled_capabilities,
                 attachments=attachments,
                 description=description,
@@ -3824,7 +3862,7 @@ class AssistantService:
             or prepared.active_assistant.id != plan.orchestrator_id
             or not prepared.effective_completion_model.supports_tool_calling
         ):
-            raise BadRequestException("Invalid group-chat orchestrator configuration.")
+            raise BadRequestException("Invalid orchestration configuration.")
 
         expected: dict[UUID, _PreparedAssistantTurn] = {plan.orchestrator_id: prepared}
         candidates: list[AssistantCandidate] = []
@@ -3855,7 +3893,7 @@ class AssistantService:
             candidates.append(candidate)
         if not candidates:
             raise BadRequestException(
-                "None of this group's specialists are available to you.",
+                "None of this assistant's specialists are available to you.",
                 code="no_available_specialists",
             )
         return _ResolvedDelegation(
@@ -3885,8 +3923,6 @@ class AssistantService:
             )
         plan = resolved.plan
         expected = resolved.expected
-        if session.group_chat_id != plan.group_chat_id:
-            raise BadRequestException("Invalid group-chat orchestrator configuration.")
 
         def provider_policy(turn: _PreparedAssistantTurn) -> tuple[object, ...]:
             return (
@@ -3949,21 +3985,37 @@ class AssistantService:
                     raise UnauthorizedException(
                         "The user session is no longer eligible."
                     )
-                current_space = await self.space_repo.get_space_by_group_chat(
-                    group_chat_id=plan.group_chat_id
-                )
+                try:
+                    current_space = await self.space_repo.get_space_by_assistant(
+                        assistant_id=plan.orchestrator_id
+                    )
+                    orchestrator = current_space.get_assistant(plan.orchestrator_id)
+                except NotFoundException as exc:
+                    raise UnauthorizedException(
+                        "The orchestrating assistant is no longer available."
+                    ) from exc
                 actor = self.actor_manager.get_space_actor_from_space(current_space)
-                group = current_space.get_group_chat(plan.group_chat_id)
+                is_personal_default = (
+                    current_space.is_personal()
+                    and current_space.default_assistant is not None
+                    and orchestrator.id == current_space.default_assistant.id
+                )
+                can_use = (
+                    actor.can_read_default_assistant()
+                    if is_personal_default
+                    else actor.can_read_assistant(orchestrator)
+                )
                 if (
                     current_space.id != plan.space_id
-                    or not actor.can_read_group_chat(group)
-                    or group.orchestrator_assistant_id != plan.orchestrator_id
+                    or not can_use
                     or (
                         assistant_id != plan.orchestrator_id
-                        and assistant_id not in group.assistant_ids
+                        and assistant_id not in orchestrator.specialist_ids
                     )
                 ):
-                    raise UnauthorizedException("The group chat is no longer eligible.")
+                    raise UnauthorizedException(
+                        "The assistant's specialists are no longer eligible."
+                    )
                 fresh = await self._prepare_turn(
                     question="",
                     assistant_id=assistant_id,
@@ -4081,10 +4133,6 @@ class AssistantService:
         disabled_capabilities: list[CapabilityPurpose] | None = None,
         delegation_plan: AssistantDelegationPlan | None = None,
     ):
-        if delegation_plan is not None and self.user.active_api_key is not None:
-            raise BadRequestException(
-                "Orchestrated group chats currently require an interactive user session."
-            )
         prepared = await self._prepare_turn(
             question=question,
             assistant_id=assistant_id,
@@ -4102,6 +4150,32 @@ class AssistantService:
         skill_composition = prepared.skill_composition
         skill_activation = prepared.skill_activation
         model_route = prepared.model_route
+
+        # An assistant with specialists orchestrates its own answer when its
+        # effective model can call tools; a mention (tool_assistant_id) asks
+        # one assistant directly, as before.
+        if (
+            delegation_plan is None
+            and tool_assistant_id is None
+            and assistant_to_ask.specialists
+            and effective_completion_model.supports_tool_calling
+        ):
+            assert prepared.space.id is not None
+            delegation_plan = AssistantDelegationPlan(
+                space_id=prepared.space.id,
+                orchestrator_id=assistant_to_ask.id,
+                candidates=tuple(
+                    AssistantCandidate(
+                        specialist.id, specialist.name, specialist.description
+                    )
+                    for specialist in assistant_to_ask.specialists
+                ),
+            )
+        if delegation_plan is not None and self.user.active_api_key is not None:
+            raise BadRequestException(
+                "Consulting specialists currently requires an interactive user session.",
+                code="orchestration_requires_session",
+            )
 
         # Resolve the specialists before any conversation row exists, so an
         # unusable configuration leaves no empty question behind.

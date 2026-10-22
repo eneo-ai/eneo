@@ -470,12 +470,6 @@ class ConversationService:
                 )
             return selected.assistant.completion_model, 0
 
-        if group_chat.orchestrator_assistant_id is not None:
-            model, _ = await self._assistant_preflight_settings(
-                group_chat.orchestrator_assistant_id
-            )
-            return model, 0
-
         models = [
             group_chat_assistant.assistant.completion_model
             for group_chat_assistant in group_chat.assistants

@@ -278,7 +278,7 @@
             <span id="mcp-auto-accept-desc" class="text-muted-foreground block text-xs">
               {autoAcceptTools ? m.auto_accept_tools_on() : m.auto_accept_tools_off()}
               {#if delegatedTools}
-                {m.group_delegated_tools()}
+                {m.assistant_delegated_tools()}
               {/if}
             </span>
           </span>

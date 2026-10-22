@@ -48,7 +48,7 @@ from eneo.mcp_servers.domain.capabilities import (
     CapabilityPurpose,
 )
 from eneo.prompts.api.prompt_models import PromptCreate, PromptPublic
-from eneo.questions.question import UseTools
+from eneo.questions.question import ToolAssistant, UseTools
 from eneo.sessions.session import SessionInDB
 from eneo.skills.presentation.skill_models import AssistantSkillBindingInput
 from eneo.users.user import UserSparse
@@ -109,6 +109,23 @@ class GroupWithEmbeddingModel(GroupInDBBase):
 
 
 # Models
+class AssistantSpecialistInput(ModelId):
+    """A specialist to consult, with an optional description for the orchestrator."""
+
+    user_description: Optional[str] = Field(
+        default=None,
+        description=(
+            "What to consult this specialist for. Empty means the specialist's "
+            "own description applies."
+        ),
+    )
+
+
+class AssistantSpecialistPublic(ToolAssistant):
+    default_description: Optional[str] = None
+    user_description: Optional[str] = None
+
+
 class AssistantGuard(BaseModel):
     guardrail_active: bool = True
     guardrail_string: str = ""
@@ -275,6 +292,13 @@ class AssistantUpdatePublic(AssistantCreatePublic):
     integration_knowledge_list: Optional[list[ModelId]] = None  # type: ignore[assignment]
     mcp_servers: Optional[list[ModelId]] = None  # type: ignore[assignment]
     mcp_tools: Optional[list[MCPToolSetting]] = None
+    specialists: Optional[list[AssistantSpecialistInput]] = Field(
+        default=None,
+        description=(
+            "Other assistants in the same space this assistant consults before "
+            "answering. The list replaces the current one; an empty list clears it."
+        ),
+    )
     description: Optional[str] = Field(  # type: ignore[assignment]  # NOT_PROVIDED sentinel default
         default=NOT_PROVIDED,
         description=(
@@ -445,6 +469,13 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
     published: bool = False
     user: UserSparse
     tools: UseTools
+    specialists: list[AssistantSpecialistPublic] = Field(
+        default_factory=lambda: list[AssistantSpecialistPublic](),
+        description=(
+            "Assistants in the same space this one consults before answering. "
+            "Consulting needs a model that supports tool calling."
+        ),
+    )
     type: AssistantType
     model_info: Optional[ModelInfo] = None
     description: Optional[str] = Field(

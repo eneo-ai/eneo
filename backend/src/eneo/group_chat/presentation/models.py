@@ -44,8 +44,6 @@ class GroupChatUpdateTools(BaseModel):
 
 
 class GroupChatUpdateSchema(BaseModel):
-    orchestrator_assistant_id: UUID | None = None
-
     name: Optional[str] = Field(
         default=None, title="Name", description="The name of the group chat."
     )
@@ -134,7 +132,6 @@ class GroupChatPublic(BaseModel):
     name: str
     id: UUID
     space_id: UUID
-    orchestrator_assistant_id: UUID | None = None
     allow_mentions: bool
     show_response_label: bool
     published: bool

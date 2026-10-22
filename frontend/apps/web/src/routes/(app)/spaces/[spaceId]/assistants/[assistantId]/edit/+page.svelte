@@ -21,6 +21,7 @@
   import SelectModelSpecificSettings from "$lib/features/ai-models/components/SelectModelSpecificSettings.svelte";
   import SelectKnowledge from "$lib/features/knowledge/components/select/SelectKnowledge.svelte";
   import SelectMCPServers from "$lib/features/mcp/components/SelectMCPServers.svelte";
+  import SpecialistList from "$lib/features/assistants/components/specialists/SpecialistList.svelte";
   import PolicyFunctions from "$lib/features/mcp/components/PolicyFunctions.svelte";
   import CapabilityToggle from "$lib/features/mcp/components/CapabilityToggle.svelte";
   import { CAPABILITIES, getCapability } from "$lib/features/mcp/capabilities";
@@ -515,6 +516,18 @@
               />
             </div>
           {/if}
+        </Settings.Row>
+
+        <Settings.Row
+          title={m.specialists()}
+          description={m.specialists_description()}
+          hasChanges={$currentChanges.diff.specialists !== undefined}
+        >
+          {#if toolModel && !toolModel.supports_tool_calling}
+            <p class="text-warning-stronger mb-3 text-sm">{m.specialists_need_tool_model()}</p>
+          {/if}
+          <SpecialistList bind:specialists={$update.specialists} excludeIds={[$resource.id]} />
+          <p class="text-muted mt-2 text-xs">{m.specialists_depth_note()}</p>
         </Settings.Row>
       </Settings.Group>
 

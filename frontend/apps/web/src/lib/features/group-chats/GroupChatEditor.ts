@@ -41,7 +41,6 @@ function initGroupChatEditor(data: {
       name: true,
       allow_mentions: true,
       show_response_label: true,
-      orchestrator_assistant_id: true,
       tools: {
         assistants: ["id", "user_description"]
       },

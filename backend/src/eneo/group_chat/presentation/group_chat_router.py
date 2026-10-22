@@ -70,11 +70,6 @@ async def update_group_chat(
         insight_enabled=group_chat_upd.insight_enabled,
         metadata_json=group_chat_upd.metadata_json,
         icon_id=icon_id,
-        orchestrator_assistant_id=(
-            group_chat_upd.orchestrator_assistant_id
-            if "orchestrator_assistant_id" in group_chat_upd.model_fields_set
-            else NOT_PROVIDED
-        ),
     )
     return assembler.from_domain_to_model(
         group_chat=updated_group_chat, permissions=updated_group_chat.permissions
