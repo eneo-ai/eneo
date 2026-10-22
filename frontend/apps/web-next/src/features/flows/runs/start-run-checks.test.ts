@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
+import { makeContract, makeInput } from "./run-fixtures";
 import {
   fitRunLabel,
+  reusedInput,
   RUN_LABEL_MAX_LENGTH,
   screenAudioFiles,
+  takesReusableInput,
   withRunLabel
 } from "./start-run-checks";
 
@@ -55,5 +58,60 @@ describe("screenAudioFiles", () => {
     expect((await screenAudioFiles(document, files, measure)).accepted).toHaveLength(3);
     const unlimited = { input_format: "audio" as const, max_duration_seconds: null };
     expect((await screenAudioFiles(unlimited, files, measure)).refused).toEqual([]);
+  });
+});
+
+describe("reusedInput", () => {
+  const form = makeContract({
+    form_fields: [
+      { name: "arende", label: "Ärende", type: "text" },
+      { name: "antal", label: "Antal", type: "number" },
+      { name: "taggar", label: "Taggar", type: "multiselect", options: ["a", "b"] },
+      { name: "lista", label: "Lista", type: "list" },
+      { name: "ny", label: "Nytt fält", type: "text" }
+    ],
+    steps_requiring_input: [makeInput()]
+  });
+
+  it("gives each field of the form the value the run sent, and leaves a new field empty", () => {
+    expect(
+      reusedInput(form, {
+        arende: "Bygglov",
+        antal: 3,
+        taggar: ["a", "b"],
+        lista: "ett, två ,",
+        borttaget: "x"
+      })
+    ).toEqual({
+      values: { arende: "Bygglov", antal: "3", taggar: ["a", "b"], lista: ["ett", "två"], ny: "" },
+      freeText: null
+    });
+  });
+
+  it("reads an empty or unreadable value as empty", () => {
+    expect(reusedInput(form, { arende: null, antal: { x: 1 }, taggar: "a" }).values).toEqual({
+      arende: "",
+      antal: "",
+      taggar: ["a"],
+      lista: [],
+      ny: ""
+    });
+  });
+
+  it("gives a free-text form the run's text, and keeps the form's when the run sent none", () => {
+    const free = makeContract();
+    expect(reusedInput(free, { text: "Hej" })).toEqual({ values: {}, freeText: "Hej" });
+    expect(reusedInput(free, { arende: "Bygglov" }).freeText).toBeNull();
+    expect(reusedInput(free, null).freeText).toBeNull();
+  });
+});
+
+describe("takesReusableInput", () => {
+  it("is true for a form with fields or a free text, and false for files only", () => {
+    expect(takesReusableInput(makeContract())).toBe(true);
+    expect(
+      takesReusableInput(makeContract({ form_fields: [{ name: "a", label: "A", type: "text" }] }))
+    ).toBe(true);
+    expect(takesReusableInput(makeContract({ steps_requiring_input: [makeInput()] }))).toBe(false);
   });
 });

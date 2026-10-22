@@ -3,12 +3,13 @@ import { act, cleanup, fireEvent, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
-import { makeRunSummary } from "./run-fixtures";
+import { renderInApp, testQueryClient } from "@/test/render";
+import { makeRunDetail, makeRunSummary } from "./run-fixtures";
 import type { RunSummary } from "./runs-api";
 
 const state = vi.hoisted(() => ({
   announce: vi.fn(),
+  toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() },
   routes: {} as Record<string, (init: never) => { status?: number; body: unknown }>,
   stub: null as unknown as ReturnType<typeof import("../editor/testing/fixtures").apiStub>
 }));
@@ -18,14 +19,17 @@ vi.mock("@/lib/api/browser", async () => {
   state.stub = apiStub(new Proxy({}, { get: (_target, key: string) => state.routes[key] }));
   return { browserApi: state.stub.client };
 });
+vi.mock("@/lib/toast", () => ({ toast: state.toast }));
 vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
   useAnnounce: () => state.announce
 }));
 
 import { FlowRunsList } from "./runs-list";
+import { rememberStartedRun } from "./runs-optimistic";
 
 const LIST = "GET /api/v1/flows/{id}/runs/";
+const REDISPATCH = "POST /api/v1/flows/{id}/runs/{run_id}/redispatch/";
 
 const NO_COUNTS = {
   queued: 0,
@@ -220,6 +224,20 @@ describe("FlowRunsList", () => {
     expect(listCalls()).toHaveLength(2);
   });
 
+  it("says how long a run still going has gone on so far", async () => {
+    answerList([
+      makeRunSummary({
+        status: "running",
+        started_at: new Date(Date.now() - 65_000).toISOString(),
+        finished_at: null
+      })
+    ]);
+    renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" />);
+    const table = await screen.findByRole("table");
+    const so = messages.flow_run_more_elapsed.replace("{time}", "");
+    expect(within(table).getByText(new RegExp(`^1 min [56] s${so}$`))).toBeTruthy();
+  });
+
   it("does not poll a list where every run has ended", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     answerList([makeRunSummary({ status: "completed" })]);
@@ -236,5 +254,75 @@ describe("FlowRunsList", () => {
     await vi.waitFor(() =>
       expect(listCalls().at(-1)?.init.params?.query).toEqual({ ...FIRST_PAGE, offset: 25 })
     );
+  });
+
+  it("sends a queued run whose start is due again from its row", async () => {
+    const queued = makeRunSummary({
+      id: "run-q",
+      status: "queued",
+      started_at: null,
+      finished_at: null,
+      dispatch_next_attempt_at: "2026-10-21T08:00:05Z",
+      dispatch_exhausted_at: null
+    });
+    answerList([queued, makeRunSummary({ id: "run-c" })]);
+    state.routes[REDISPATCH] = () => ({ body: { redispatched_count: 1, run: queued } });
+    const { container } = renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" />);
+    const table = await screen.findByRole("table");
+    const buttons = within(table).getAllByRole("button", { name: messages.flow_runs_redispatch });
+    // Only the queued run is offered it.
+    expect(buttons).toHaveLength(1);
+    await expectNoAxeViolations(container);
+
+    fireEvent.click(buttons[0]!);
+
+    await vi.waitFor(() =>
+      expect(state.toast.success).toHaveBeenCalledWith(messages.flow_runs_redispatch_done)
+    );
+    const call = state.stub.calls.find((entry) => `${entry.method} ${entry.path}` === REDISPATCH);
+    expect(call?.init.params?.path).toEqual({ id: "flow-1", run_id: "run-q" });
+    await vi.waitFor(() => expect(listCalls().length).toBeGreaterThan(1));
+  });
+
+  it("does not offer it for a queued run whose start is not due yet", async () => {
+    answerList([
+      makeRunSummary({
+        status: "queued",
+        started_at: null,
+        finished_at: null,
+        dispatch_next_attempt_at: "2999-01-01T00:00:00Z"
+      })
+    ]);
+    renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" />);
+    await screen.findByRole("table");
+    expect(screen.queryByRole("button", { name: messages.flow_runs_redispatch })).toBeNull();
+  });
+
+  it("shows a run this tab just started before the list reports it, and then once", async () => {
+    const queryClient = testQueryClient();
+    rememberStartedRun(
+      queryClient,
+      "flow-1",
+      makeRunDetail({ id: "run-new", status: "queued", run_label: "Ärende 7", started_at: null }),
+      Date.now() + 60_000
+    );
+    answerList([makeRunSummary({ id: "run-1", status: "completed" })], false, {
+      ...NO_COUNTS,
+      completed: 1
+    });
+    renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" />, { queryClient });
+    expect(await screen.findByRole("link", { name: "Ärende 7" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("combobox", { name: messages.flow_run_extras_status_filter }));
+    expect(
+      await screen.findByRole("option", { name: `${messages.flow_runs_status_queued} (1)` })
+    ).toBeTruthy();
+
+    answerList([
+      makeRunSummary({ id: "run-new", status: "queued", run_label: "Ärende 7", started_at: null }),
+      makeRunSummary({ id: "run-1" })
+    ]);
+    await act(() => queryClient.invalidateQueries({ queryKey: ["flows", "flow-1", "runs"] }));
+    await vi.waitFor(() => expect(listCalls().length).toBeGreaterThan(1));
+    expect(screen.getAllByRole("link", { name: "Ärende 7" })).toHaveLength(1);
   });
 });
