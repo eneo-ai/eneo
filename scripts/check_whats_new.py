@@ -51,6 +51,8 @@ class Vocabulary:
         self.types: set[str] = set(entry["type"]["enum"])
         self.areas: set[str] = set(entry["area"]["enum"])
         self.audiences: set[str] = set(entry["audience"]["enum"])
+        self.permissions: set[str] = set(defs["permission"]["enum"])
+        self.permission_keys: set[str] = set(defs["permissions"]["properties"])
         self.entry_keys: set[str] = set(entry)
         self.release_keys: set[str] = set(defs["release"]["properties"])
         self.version_re = re.compile(defs["release"]["properties"]["version"]["pattern"])
@@ -138,6 +140,29 @@ def _check_entry(
         errors.append(f"{where}.area: must be one of {sorted(vocab.areas)}")
     if "audience" in entry and entry["audience"] not in vocab.audiences:
         errors.append(f"{where}.audience: must be one of {sorted(vocab.audiences)}")
+
+    if "permissions" in entry:
+        requirements = entry["permissions"]
+        if (
+            not isinstance(requirements, dict)
+            or not requirements
+            or set(requirements) - vocab.permission_keys
+        ):
+            errors.append(f"{where}.permissions: must contain allOf and/or anyOf")
+        else:
+            for mode, permissions in requirements.items():
+                if (
+                    not isinstance(permissions, list)
+                    or not permissions
+                    or any(
+                        not isinstance(p, str) or p not in vocab.permissions
+                        for p in permissions
+                    )
+                    or len(permissions) != len(set(permissions))
+                ):
+                    errors.append(
+                        f"{where}.permissions.{mode}: must be a non-empty array of unique known permissions"
+                    )
 
     _require_localized(entry.get("title"), f"{where}.title", errors, vocab)
     _require_localized(entry.get("body"), f"{where}.body", errors, vocab)
