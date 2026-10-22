@@ -125,6 +125,34 @@ Changing a published flow or one of its step assistants is refused with
 `flow_unpublish_required`, unpublishing a flow that is not published with
 `flow_not_published`.
 
+### Allowed step kinds
+
+`GET /flows/{id}/step-kinds/` answers, for each place a step can be added and
+for each saved step turned to another kind, which of the editor's step kinds
+(`ai`, `structured`, `compose`, `document`, `template`, `transcribe`,
+`speakers`, `review`, `fetch_http`, `tool`, `send_http`) the draft allows and
+why it refuses the others. The kinds and their starting configurations live
+in `flows/domain/step_kinds.py`; a step added first takes the run's input over
+from the step that was first, and an audio kind turns transcription on. Each
+kind's change is built as the editor update makes it and judged by that save's
+placement, read following, inactive-setting cleanup and step rules
+(`flows/application/flow_step_kinds.py`, sharing `sparse_placement`,
+`new_flow_step`, `steps_as_written`, `draft_write_metadata` and
+`draft_step_refusals` with the save), so `allowed` is true exactly when the
+save accepts the change and `refusals` are its errors (`code`, `issue_code`,
+the step). `tests/unit/flows/application/test_flow_step_kinds.py` sends every
+answer through `apply_editor_update` and checks that the save agrees. Not
+judged: the new step's name, the URL or tool the author enters, and the checks
+against the space (assistants, classification, transcription service). The
+work grows with the square of the step count; `position` and `step_id` narrow
+the answer to one place.
+
+The core is the judge, so some answers differ from the web-next copy of the
+rules: a speaker mapping may follow any step (web-next asks
+for a transcription step before it), and a step can be added before a first
+step that takes uploads beside a text input (web-next refuses whenever the
+first step takes uploads; the core refuses only an upload input type).
+
 The `flows_core` gate authenticates in its own session and commits before the
 route's container authenticates. Sharing a request with a function-scoped
 route, an open gate transaction held the row of a legacy key hash it had just

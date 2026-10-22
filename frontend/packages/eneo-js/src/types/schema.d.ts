@@ -6034,6 +6034,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/{id}/step-kinds/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Allowed Step Kinds
+     * @description Which kinds of step the draft allows at each place, and why it refuses the others: for each place a step can be added (before every step and after the last) and for each saved step turned to another kind. Each answer is the draft save's own: the kind's change is built as `PATCH /flows/{id}/editor/` makes it and judged by that save's placement, read following and step rules, so a kind is `allowed` exactly when the save accepts it and `refusals` are the errors the save gives. The change is in the answer: the kind's starting `configuration`, the saved steps it edits too (a step added first takes the run's input over from the step that was first) and whether it turns transcription on. Not judged: the new step's name; the URL of `fetch_http` and `send_http` and the tool of `tool`, judged as entered and valid; and the checks a save makes against the space (assistants, security classification, the transcription service). Every change to a published flow is refused with `flow_unpublish_required`. The answer grows with the square of the step count, so a client that needs one place names it with `position` or `step_id`. It needs read access to the draft.
+     */
+    get: operations["get_flow_step_kinds"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/steps/{step_id}/live-transcription-sessions/": {
     parameters: {
       query?: never;
@@ -18844,6 +18864,52 @@ export interface components {
      */
     FlowFormFieldType: "text" | "multiselect" | "number" | "date" | "select" | "list";
     /**
+     * FlowGraphIssueCode
+     * @enum {string}
+     */
+    FlowGraphIssueCode:
+      | "audio_document_transcript_chain_invalid"
+      | "citation_mode_unsupported"
+      | "duplicate_step_name"
+      | "duplicate_step_order"
+      | "flow_audio_transcription_invalid"
+      | "flow_audio_transcription_model_required"
+      | "flow_audio_transcription_required"
+      | "flow_has_no_steps"
+      | "flow_speaker_service_not_chosen"
+      | "flow_speaker_service_unavailable"
+      | "flow_http_post_output_must_be_terminal"
+      | "flow_input_alias_not_received"
+      | "flow_input_binding_future_step_reference"
+      | "flow_input_binding_invalid_step_reference"
+      | "flow_input_binding_unknown_step_order"
+      | "flow_input_binding_runtime_input_unused"
+      | "flow_input_binding_unsupported_key"
+      | "flow_input_contract_inapplicable"
+      | "flow_review_policy_invalid"
+      | "flow_review_policy_outbound_output_unsupported"
+      | "flow_step_invalid"
+      | "flow_step_limit_exceeded"
+      | "input_contract_source_mismatch"
+      | "input_contract_type_mismatch"
+      | "invalid_input_contract_schema"
+      | "invalid_output_contract_schema"
+      | "output_contract_template_fill_incompatible"
+      | "output_contract_type_mismatch"
+      | "step_order_not_contiguous"
+      | "template_fill_requires_docx"
+      | "transcribe_only_violation"
+      | "typed_io_audio_source_unsupported"
+      | "typed_io_document_source_unsupported"
+      | "typed_io_file_source_unsupported"
+      | "typed_io_flow_input_position_invalid"
+      | "typed_io_incompatible_type_chain"
+      | "typed_io_invalid_input_source_combination"
+      | "typed_io_invalid_input_source_position"
+      | "typed_io_missing_previous_step"
+      | "typed_io_multiple_flow_input_steps"
+      | "unsupported_input_type";
+    /**
      * FlowInputLimitsPublic
      * @example {
      *       "audio_max_duration_ceiling_seconds": 28800,
@@ -26539,6 +26605,419 @@ export interface components {
       text_processing?: components["schemas"]["TextProcessingConfig"] | null;
     } & {
       [key: string]: unknown;
+    };
+    /**
+     * FlowStepKind
+     * @description What a new step does, as the editor's add dialog offers it.
+     * @enum {string}
+     */
+    FlowStepKind:
+      | "ai"
+      | "structured"
+      | "compose"
+      | "document"
+      | "template"
+      | "transcribe"
+      | "speakers"
+      | "review"
+      | "fetch_http"
+      | "tool"
+      | "send_http";
+    /**
+     * FlowStepKindConfigurationPublic
+     * @description A kind's starting configuration at its place. It is valid as
+     *     `new_steps[].configuration` and as `step_edits[].changes` of
+     *     `PATCH /flows/{id}/editor/`.
+     * @example {
+     *       "input_bindings": null,
+     *       "input_config": null,
+     *       "input_contract": null,
+     *       "input_source": "previous_step",
+     *       "input_type": "text",
+     *       "output_config": null,
+     *       "output_contract": null,
+     *       "output_mode": "pass_through",
+     *       "output_type": "text",
+     *       "review_policy": null
+     *     }
+     */
+    FlowStepKindConfigurationPublic: {
+      /**
+       * Input Bindings
+       * @description Always null: a kind starts without underlag.
+       * @example null
+       */
+      input_bindings: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Input Config
+       * @description Uploads for `transcribe`, the HTTP request for `fetch_http` (its `url` empty for the author to enter), otherwise null. A `tool` kind's tool is the author's to choose and is not included.
+       * @example null
+       */
+      input_config: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Input Contract
+       * @description Always null: a kind starts without an input contract.
+       * @example null
+       */
+      input_contract: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * @description `flow_input` at step 1 for a kind that reads the run's input, else the source the kind needs.
+       * @example previous_step
+       */
+      input_source: components["schemas"]["FlowInputSource"];
+      /**
+       * @description The type the kind reads; after a step, one that step's output can give.
+       * @example text
+       */
+      input_type: components["schemas"]["FlowInputType"];
+      /**
+       * Output Config
+       * @description The speaker mapping for `speakers`, the HTTP request for `send_http` (its `url` empty for the author to enter), otherwise null.
+       * @example null
+       */
+      output_config: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * Output Contract
+       * @description Always null: a kind starts without an output contract.
+       * @example null
+       */
+      output_contract: {
+        [key: string]: unknown;
+      } | null;
+      /**
+       * @description What the step does with its input.
+       * @example pass_through
+       */
+      output_mode: components["schemas"]["FlowOutputMode"];
+      /**
+       * @description What the step gives the step after it.
+       * @example text
+       */
+      output_type: components["schemas"]["FlowOutputType"];
+      /**
+       * @description `{"mode": "edit"}` for `review` and `speakers`, which a person confirms; otherwise null.
+       * @example null
+       */
+      review_policy: components["schemas"]["FlowStepReviewPolicy"] | null;
+    };
+    /**
+     * FlowStepKindOptionPublic
+     * @example {
+     *       "allowed": true,
+     *       "configuration": {
+     *         "input_bindings": null,
+     *         "input_config": null,
+     *         "input_contract": null,
+     *         "input_source": "previous_step",
+     *         "input_type": "text",
+     *         "output_config": null,
+     *         "output_contract": null,
+     *         "output_mode": "pass_through",
+     *         "output_type": "text",
+     *         "review_policy": null
+     *       },
+     *       "kind": "ai",
+     *       "refusals": [],
+     *       "step_edits": [],
+     *       "turns_on_transcription": false
+     *     }
+     */
+    FlowStepKindOptionPublic: {
+      /**
+       * Allowed
+       * @description Whether the draft save accepts the change: true exactly when `refusals` is empty.
+       * @example true
+       */
+      allowed: boolean;
+      /** @description The configuration the kind starts with here: of the new step, or the saved step's new configuration (its name and assistant stay). */
+      configuration: components["schemas"]["FlowStepKindConfigurationPublic"];
+      /**
+       * @description What the step does: `ai` (a model writes text), `structured` (a model writes JSON), `compose` (text put together without a model), `document` (text rendered as a Word document; `pdf` is the other output type it takes), `template` (a Word template filled in), `transcribe` (an uploaded recording transcribed), `speakers` (the speakers of the transcript before it named, confirmed by a person), `review` (a person reviews and may edit what the step before it gave), `fetch_http` (text fetched with an HTTP GET), `tool` (an MCP tool's answer), `send_http` (the result sent with an HTTP POST).
+       * @example ai
+       */
+      kind: components["schemas"]["FlowStepKind"];
+      /**
+       * Refusals
+       * @description Every refusal of the save's step rules, in the order the save meets them; the save's error is the first. Empty when allowed.
+       */
+      refusals: components["schemas"]["FlowStepKindRefusalPublic"][];
+      /**
+       * Step Edits
+       * @description Saved steps the change edits too, as `step_edits` of the editor update: a step added first takes the run's input over from the step that was first, which then reads the new step.
+       */
+      step_edits: components["schemas"]["FlowStepKindStepEditPublic"][];
+      /**
+       * Turns On Transcription
+       * @description Whether the change also sets `metadata_json.wizard.transcription_enabled` to true: a step that takes audio needs it.
+       * @example false
+       */
+      turns_on_transcription: boolean;
+    };
+    /**
+     * FlowStepKindPlacePublic
+     * @example {
+     *       "options": [
+     *         {
+     *           "allowed": true,
+     *           "configuration": {
+     *             "input_bindings": null,
+     *             "input_config": null,
+     *             "input_contract": null,
+     *             "input_source": "previous_step",
+     *             "input_type": "text",
+     *             "output_config": null,
+     *             "output_contract": null,
+     *             "output_mode": "pass_through",
+     *             "output_type": "text",
+     *             "review_policy": null
+     *           },
+     *           "kind": "ai",
+     *           "refusals": [],
+     *           "step_edits": [],
+     *           "turns_on_transcription": false
+     *         }
+     *       ],
+     *       "position": 2,
+     *       "step_id": "00000000-0000-0000-0000-000000000102"
+     *     }
+     */
+    FlowStepKindPlacePublic: {
+      /**
+       * Options
+       * @description Every kind, in the same order at every place.
+       */
+      options: components["schemas"]["FlowStepKindOptionPublic"][];
+      /**
+       * Position
+       * @description For an insertion, the place the new step takes (1 is first; the steps from there on move one place down); for a saved step, its `step_order`.
+       * @example 2
+       */
+      position: number;
+      /**
+       * Step Id
+       * @description The saved step turned to each kind; null for an insertion.
+       * @example 00000000-0000-0000-0000-000000000102
+       */
+      step_id: string | null;
+    };
+    /**
+     * FlowStepKindRefusalPublic
+     * @example {
+     *       "code": "flow_http_post_output_must_be_terminal",
+     *       "issue_code": "flow_http_post_output_must_be_terminal",
+     *       "message": "Step 2: output_mode 'http_post' is only supported on the last step.",
+     *       "step_id": null,
+     *       "step_order": 2
+     *     }
+     */
+    FlowStepKindRefusalPublic: {
+      /**
+       * Code
+       * @description The `code` of the error the draft save refuses the change with, as `PATCH /flows/{id}/editor/` returns it.
+       * @example typed_io_incompatible_type_chain
+       */
+      code: string | null;
+      /**
+       * @description The step rule that refuses the change, the `context.issue_code` of the save's error; null for a refusal outside the step rules (a published flow, a read that would lose its step, a step name).
+       * @example flow_http_post_output_must_be_terminal
+       */
+      issue_code: components["schemas"]["FlowGraphIssueCode"] | null;
+      /**
+       * Message
+       * @description The save's message, in English.
+       * @example Step 2: output_mode 'http_post' is only supported on the last step.
+       */
+      message: string;
+      /**
+       * Step Id
+       * @description The saved step the refusal is about; null for the new step and for the flow as a whole.
+       * @example 00000000-0000-0000-0000-000000000102
+       */
+      step_id: string | null;
+      /**
+       * Step Order
+       * @description The step the refusal is about, numbered as after the change; null when it is about the flow as a whole.
+       * @example 2
+       */
+      step_order: number | null;
+    };
+    /**
+     * FlowStepKindStepEditPublic
+     * @example {
+     *       "changes": {
+     *         "input_source": "previous_step"
+     *       },
+     *       "step_id": "00000000-0000-0000-0000-000000000101"
+     *     }
+     */
+    FlowStepKindStepEditPublic: {
+      /**
+       * Changes
+       * @description Its sparse changes, as `step_edits[].changes` of `PATCH /flows/{id}/editor/`.
+       * @example {
+       *       "input_source": "previous_step"
+       *     }
+       */
+      changes: {
+        [key: string]: unknown;
+      };
+      /**
+       * Step Id
+       * Format: uuid
+       * @description The saved step the change also edits.
+       * @example 00000000-0000-0000-0000-000000000101
+       */
+      step_id: string;
+    };
+    /**
+     * FlowStepKindsPublic
+     * @example {
+     *       "draft_revision": 4,
+     *       "flow_id": "00000000-0000-0000-0000-000000000001",
+     *       "insertions": [
+     *         {
+     *           "options": [
+     *             {
+     *               "allowed": true,
+     *               "configuration": {
+     *                 "input_bindings": null,
+     *                 "input_config": {
+     *                   "runtime_input": {
+     *                     "enabled": true,
+     *                     "input_format": "audio",
+     *                     "required": true
+     *                   }
+     *                 },
+     *                 "input_contract": null,
+     *                 "input_source": "flow_input",
+     *                 "input_type": "audio",
+     *                 "output_config": null,
+     *                 "output_contract": null,
+     *                 "output_mode": "transcribe_only",
+     *                 "output_type": "text",
+     *                 "review_policy": null
+     *               },
+     *               "kind": "transcribe",
+     *               "refusals": [],
+     *               "step_edits": [
+     *                 {
+     *                   "changes": {
+     *                     "input_source": "previous_step"
+     *                   },
+     *                   "step_id": "00000000-0000-0000-0000-000000000101"
+     *                 }
+     *               ],
+     *               "turns_on_transcription": true
+     *             }
+     *           ],
+     *           "position": 1,
+     *           "step_id": null
+     *         },
+     *         {
+     *           "options": [
+     *             {
+     *               "allowed": false,
+     *               "configuration": {
+     *                 "input_bindings": null,
+     *                 "input_config": null,
+     *                 "input_contract": null,
+     *                 "input_source": "previous_step",
+     *                 "input_type": "text",
+     *                 "output_config": {
+     *                   "auth": {
+     *                     "mode": "none"
+     *                   },
+     *                   "body": {
+     *                     "mode": "auto"
+     *                   },
+     *                   "custom_headers": [],
+     *                   "timeout_seconds": 30,
+     *                   "url": ""
+     *                 },
+     *                 "output_contract": null,
+     *                 "output_mode": "http_post",
+     *                 "output_type": "text",
+     *                 "review_policy": null
+     *               },
+     *               "kind": "send_http",
+     *               "refusals": [
+     *                 {
+     *                   "code": "flow_http_post_output_must_be_terminal",
+     *                   "issue_code": "flow_http_post_output_must_be_terminal",
+     *                   "message": "Step 2: output_mode 'http_post' is only supported on the last step.",
+     *                   "step_id": null,
+     *                   "step_order": 2
+     *                 }
+     *               ],
+     *               "step_edits": [],
+     *               "turns_on_transcription": false
+     *             }
+     *           ],
+     *           "position": 2,
+     *           "step_id": null
+     *         }
+     *       ],
+     *       "steps": [
+     *         {
+     *           "options": [
+     *             {
+     *               "allowed": true,
+     *               "configuration": {
+     *                 "input_bindings": null,
+     *                 "input_config": null,
+     *                 "input_contract": null,
+     *                 "input_source": "previous_step",
+     *                 "input_type": "text",
+     *                 "output_config": null,
+     *                 "output_contract": null,
+     *                 "output_mode": "pass_through",
+     *                 "output_type": "text",
+     *                 "review_policy": null
+     *               },
+     *               "kind": "ai",
+     *               "refusals": [],
+     *               "step_edits": [],
+     *               "turns_on_transcription": false
+     *             }
+     *           ],
+     *           "position": 2,
+     *           "step_id": "00000000-0000-0000-0000-000000000102"
+     *         }
+     *       ]
+     *     }
+     */
+    FlowStepKindsPublic: {
+      /**
+       * Draft Revision
+       * @description The draft revision the answer judges; send it as `expected_revision` with a change it allows.
+       * @example 4
+       */
+      draft_revision: number;
+      /**
+       * Flow Id
+       * Format: uuid
+       * @description The flow.
+       * @example 00000000-0000-0000-0000-000000000001
+       */
+      flow_id: string;
+      /**
+       * Insertions
+       * @description Each place a step can be added, first to after the last step, or the ones `position` names.
+       */
+      insertions: components["schemas"]["FlowStepKindPlacePublic"][];
+      /**
+       * Steps
+       * @description Each saved step in order, turned to each kind where it stands, or the one `step_id` names.
+       */
+      steps: components["schemas"]["FlowStepKindPlacePublic"][];
     };
     /**
      * FlowStepPhase
@@ -62360,6 +62839,210 @@ export interface operations {
            *       },
            *       "eneo_error_code": 9015,
            *       "message": "The request is larger than the 16777216 bytes a security classification preview accepts. Send fewer or shorter steps."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_flow_step_kinds: {
+    parameters: {
+      query?: {
+        /** @description Answer only this insertion place (1 is first, one past the last step is last), and no saved step unless `step_id` names one. */
+        position?: number | null;
+        /** @description Answer only this saved step, and no insertion place unless `position` names one. */
+        step_id?: string | null;
+      };
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The kinds at each place, with the save's refusals. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "draft_revision": 4,
+           *       "flow_id": "00000000-0000-0000-0000-000000000001",
+           *       "insertions": [
+           *         {
+           *           "options": [
+           *             {
+           *               "allowed": true,
+           *               "configuration": {
+           *                 "input_bindings": null,
+           *                 "input_config": {
+           *                   "runtime_input": {
+           *                     "enabled": true,
+           *                     "input_format": "audio",
+           *                     "required": true
+           *                   }
+           *                 },
+           *                 "input_contract": null,
+           *                 "input_source": "flow_input",
+           *                 "input_type": "audio",
+           *                 "output_config": null,
+           *                 "output_contract": null,
+           *                 "output_mode": "transcribe_only",
+           *                 "output_type": "text",
+           *                 "review_policy": null
+           *               },
+           *               "kind": "transcribe",
+           *               "refusals": [],
+           *               "step_edits": [
+           *                 {
+           *                   "changes": {
+           *                     "input_source": "previous_step"
+           *                   },
+           *                   "step_id": "00000000-0000-0000-0000-000000000101"
+           *                 }
+           *               ],
+           *               "turns_on_transcription": true
+           *             }
+           *           ],
+           *           "position": 1,
+           *           "step_id": null
+           *         },
+           *         {
+           *           "options": [
+           *             {
+           *               "allowed": false,
+           *               "configuration": {
+           *                 "input_bindings": null,
+           *                 "input_config": null,
+           *                 "input_contract": null,
+           *                 "input_source": "previous_step",
+           *                 "input_type": "text",
+           *                 "output_config": {
+           *                   "auth": {
+           *                     "mode": "none"
+           *                   },
+           *                   "body": {
+           *                     "mode": "auto"
+           *                   },
+           *                   "custom_headers": [],
+           *                   "timeout_seconds": 30,
+           *                   "url": ""
+           *                 },
+           *                 "output_contract": null,
+           *                 "output_mode": "http_post",
+           *                 "output_type": "text",
+           *                 "review_policy": null
+           *               },
+           *               "kind": "send_http",
+           *               "refusals": [
+           *                 {
+           *                   "code": "flow_http_post_output_must_be_terminal",
+           *                   "issue_code": "flow_http_post_output_must_be_terminal",
+           *                   "message": "Step 2: output_mode 'http_post' is only supported on the last step.",
+           *                   "step_id": null,
+           *                   "step_order": 2
+           *                 }
+           *               ],
+           *               "step_edits": [],
+           *               "turns_on_transcription": false
+           *             }
+           *           ],
+           *           "position": 2,
+           *           "step_id": null
+           *         }
+           *       ],
+           *       "steps": [
+           *         {
+           *           "options": [
+           *             {
+           *               "allowed": true,
+           *               "configuration": {
+           *                 "input_bindings": null,
+           *                 "input_config": null,
+           *                 "input_contract": null,
+           *                 "input_source": "previous_step",
+           *                 "input_type": "text",
+           *                 "output_config": null,
+           *                 "output_contract": null,
+           *                 "output_mode": "pass_through",
+           *                 "output_type": "text",
+           *                 "review_policy": null
+           *               },
+           *               "kind": "ai",
+           *               "refusals": [],
+           *               "step_edits": [],
+           *               "turns_on_transcription": false
+           *             }
+           *           ],
+           *           "position": 2,
+           *           "step_id": "00000000-0000-0000-0000-000000000102"
+           *         }
+           *       ]
+           *     }
+           */
+          "application/json": components["schemas"]["FlowStepKindsPublic"];
+        };
+      };
+      /** @description `position` is past the place after the last step. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "bad_request",
+           *       "eneo_error_code": 9007,
+           *       "message": "position must be between 1 and 3."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `flow_service_key_admin_required` when a non-admin service-key principal reads the draft, and `insufficient_space_permission` when the caller cannot read the flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_space_permission",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to access this flow."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The flow, or the step `step_id` names, is not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Step not found."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

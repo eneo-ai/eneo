@@ -77,6 +77,7 @@ from eneo.flows.flow_security_classification import (
 )
 from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 from eneo.flows.flow_validators import (
+    draft_step_refusals,
     retained_contracts,
     validate_step_count,
     validate_steps,
@@ -113,6 +114,43 @@ from eneo.settings.encryption_service import EncryptionService
 from eneo.spaces.space import Space
 from eneo.spaces.space_service import SpaceService
 from eneo.users.user import UserInDB
+
+
+def published_draft_refusal(flow: Flow) -> BadRequestException | None:
+    """The refusal of any change to the draft of a published flow."""
+    if flow.published_version is None:
+        return None
+    return BadRequestException(
+        "Cannot mutate a published flow. Unpublish first.",
+        code=FlowApiErrorCode.UNPUBLISH_REQUIRED.value,
+    )
+
+
+def steps_as_written(
+    steps: Sequence[FlowStep], *, unchanged_step_ids: frozenset[UUID] = frozenset()
+) -> list[FlowStep]:
+    """The steps a draft write stores: a saved step the caller hands back as
+    saved (``unchanged_step_ids``) as given, every other one without the
+    settings of the modes it does not use."""
+    return [
+        step
+        if step.id is not None and step.id in unchanged_step_ids
+        else clean_inactive_step_config(step)
+        for step in steps
+    ]
+
+
+def draft_write_metadata(
+    saved: FlowPersistedJsonObject | None,
+    metadata_json: FlowPersistedJsonObject | None | NotProvided = NOT_PROVIDED,
+) -> FlowPersistedJsonObject | None:
+    """The metadata a draft write judges its steps against: the one it
+    writes, else the saved one."""
+    if metadata_json is NOT_PROVIDED:
+        return normalize_persisted_flow_metadata(saved)
+    return normalize_flow_metadata_for_write(
+        cast(FlowPersistedJsonObject | None, metadata_json)
+    )
 
 
 def _assistant_delete_refusal(
@@ -297,20 +335,13 @@ class FlowService:
         either way."""
 
         existing = await self.get_flow(flow_id)
-        if existing.published_version is not None:
-            raise BadRequestException(
-                "Cannot mutate a published flow. Unpublish first.",
-                code=FlowApiErrorCode.UNPUBLISH_REQUIRED.value,
-            )
+        refusal = published_draft_refusal(existing)
+        if refusal is not None:
+            raise refusal
 
         if steps is not None:
             validate_step_count(len(steps))
-            steps = [
-                step
-                if step.id is not None and step.id in unchanged_step_ids
-                else clean_inactive_step_config(step)
-                for step in steps
-            ]
+            steps = steps_as_written(steps, unchanged_step_ids=unchanged_step_ids)
             self._validate_update_step_identity(
                 incoming_steps=steps,
                 stored_steps=existing.steps,
@@ -326,11 +357,7 @@ class FlowService:
             owning_flow_id=existing.id,
         )
 
-        next_metadata = normalize_persisted_flow_metadata(existing.metadata_json)
-        if metadata_json is not NOT_PROVIDED:
-            next_metadata = normalize_flow_metadata_for_write(
-                cast(FlowPersistedJsonObject | None, metadata_json)
-            )
+        next_metadata = draft_write_metadata(existing.metadata_json, metadata_json)
         space: Space | None = None
         if steps is not None or metadata_json is not NOT_PROVIDED:
             # Any draft write stores the default as the choice of a flow that
@@ -341,15 +368,13 @@ class FlowService:
             )
         # A step's own defect is reported before the classification, which
         # reads its configuration (create and publish validate first too).
-        self._validate_steps(
+        refusals = draft_step_refusals(
             next_steps,
             metadata_json=next_metadata,
             retained=retained_contracts(next_steps, existing.steps),
         )
-        self._validate_variable_alias_collisions(
-            steps=next_steps,
-            metadata_json=next_metadata,
-        )
+        if refusals:
+            raise refusals[0]
         # An edit that leaves the metadata alone states no new choice.
         if metadata_json is not NOT_PROVIDED:
             space = await self._check_speaker_service(

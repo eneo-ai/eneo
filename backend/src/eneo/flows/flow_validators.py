@@ -163,6 +163,7 @@ __all__ = [
     "FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED",
     "FLOW_AUDIO_TRANSCRIPTION_REQUIRED",
     "collect_step_graph_issues",
+    "draft_step_refusals",
     "flow_run_input",
     "retained_contracts",
     "run_input_alias_refusal",
@@ -252,6 +253,31 @@ def validate_step_graph(
     )
     if issues:
         raise _to_exception(issues[0])
+
+
+def draft_step_refusals(
+    steps: Sequence[FlowStep],
+    *,
+    metadata_json: FlowPersistedJsonObject | None,
+    retained: frozenset[tuple[int, str]] = frozenset(),
+) -> list[BadRequestException]:
+    """Every refusal the step rules give a draft save of ``steps``, in the
+    order the save meets them; the save refuses with the first. The step
+    graph's issues come first, then a step name the run reserves or a form
+    field takes."""
+    refusals = [
+        _to_exception(issue)
+        for issue in collect_step_graph_issues(
+            flow_step_validation_views_from_flow_steps(steps),
+            metadata_json=metadata_json,
+            retained=retained,
+        )
+    ]
+    try:
+        validate_variable_alias_collisions(steps=steps, metadata_json=metadata_json)
+    except BadRequestException as exc:
+        refusals.append(exc)
+    return refusals
 
 
 def collect_step_graph_issues(
