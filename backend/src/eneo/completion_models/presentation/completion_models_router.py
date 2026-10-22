@@ -1,5 +1,3 @@
-# MIT License
-
 import logging
 from typing import Annotated, cast
 from uuid import UUID
