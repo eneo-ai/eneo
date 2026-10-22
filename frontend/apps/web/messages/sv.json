@@ -4905,6 +4905,7 @@
   "flow_error_flow_runtime_input_not_consumed": "Filerna du laddade upp används inte av något steg. Be en flödesredigerare koppla filerna till rätt steg, eller starta körningen utan dem.",
   "flow_error_flow_mapped_provider_call_limit_exceeded": "Steget körs per fil eller post och kan överskrida organisationens gräns för anrop till AI-tjänsten. Använd färre poster eller filer, eller be en administratör höja gränsen.",
   "flow_error_flow_summarization_non_convergent": "Sammanfattningen kunde inte slutföras inom stegets gränser. Använd mindre underlag eller be en flödesredigerare begära kortare delresultat.",
+  "flow_error_flow_long_material_partial_coverage": "Underlaget var för långt för stegets modell och lästes i delar, men bara delvis. Använd mindre underlag, eller be en flödesredigerare höja stegets tidsgräns, välja en större modell eller lägga till en granskning.",
   "flow_error_flow_unsupported_output_mode": "Steget använder en bearbetning som Eneo inte kan köra. En flödesredigerare behöver välja en annan bearbetning under Resultat och publicera flödet igen. Starta sedan en ny körning.",
   "flow_error_flow_unsupported_output_type": "Steget använder ett svarsformat som Eneo inte kan skapa. En flödesredigerare behöver välja ett annat svarsformat och publicera flödet igen. Starta sedan en ny körning.",
   "flow_error_typed_io_validation_failed": "Stegets underlag eller resultat klarade inte kontrollen. Öppna stegets detaljer, rätta underlaget eller inställningarna och starta en ny körning.",

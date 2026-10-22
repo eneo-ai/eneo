@@ -389,6 +389,31 @@ def test_export_text_processing_round_trip(mode: str) -> None:
     assert write_flow_package(imported) == write_flow_package(envelope)
 
 
+def test_export_long_material_round_trip() -> None:
+    assistant_id = uuid4()
+    input_config: FlowPersistedJsonObject = {"long_material": {"mode": "digest"}}
+    envelope = _build_envelope(
+        flow=_flow(
+            steps=[
+                _step(
+                    1,
+                    assistant_id=assistant_id,
+                    input_config=input_config,
+                )
+            ]
+        ),
+        assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+        resource_bindings=tuple(),
+    )
+
+    assert envelope.spec.steps[0].input_config == input_config
+    imported = read_flow_package(write_flow_package(envelope))
+    assert normalize_flow_package_spec(imported.spec).steps[0].input_config == (
+        input_config
+    )
+    assert imported == envelope
+
+
 @pytest.mark.parametrize(
     "input_source", ["flow_input", "previous_step", "all_previous_steps"]
 )

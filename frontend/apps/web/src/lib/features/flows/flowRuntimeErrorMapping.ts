@@ -182,6 +182,7 @@ const FLOW_API_ERROR_MESSAGES = {
   flow_runtime_input_not_consumed: m.flow_error_flow_runtime_input_not_consumed,
   flow_mapped_provider_call_limit_exceeded: m.flow_error_flow_mapped_provider_call_limit_exceeded,
   flow_summarization_non_convergent: m.flow_error_flow_summarization_non_convergent,
+  flow_long_material_partial_coverage: m.flow_error_flow_long_material_partial_coverage,
   flow_unsupported_output_mode: m.flow_error_flow_unsupported_output_mode,
   flow_unsupported_output_type: m.flow_error_flow_unsupported_output_type,
   typed_io_contract_violation: m.flow_error_typed_io_contract_violation,

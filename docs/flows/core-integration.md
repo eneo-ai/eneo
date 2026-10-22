@@ -152,6 +152,60 @@ Backend tests start `tool-runtime/tests/support/document-control-server.ts`
 through the `shared_document_runtime` fixture; CI installs Bun, the runtime and
 its PDF sidecar in the backend job.
 
+## Long material
+
+A completion step opts in with `input_config.long_material = {"mode":
+"digest"}`, through REST, the editor PATCH, flow packages and the loopback
+`flows` tools. Without it, input larger than the model's window still fails
+with `typed_io_input_exceeds_model_window`, so existing flows run as before.
+
+Taken from #1091: `completion_models/application/map_reduce.py` and its unit
+test, byte-identical to `origin/feat/digest-tools` (segment planning, token
+budgets, the bounded hierarchical reduce, deadline-aware admission and the
+coverage account). Its MCP glue, `internal_mcp/digest.py`, is not taken.
+
+Where it plugs in: `PassThroughStepHandler` (`pass_through` and `http_post`),
+after the attempt is activated as before. `step_handlers/long_material.py`
+measures the step's own request; only `current_request_input_does_not_fit`
+leads to a digest, everything else goes to `complete_step_execution`
+unchanged. The digest:
+
+- splits the input into its sources (uploaded files, earlier step outputs,
+  the rest) as spans of the exact text, measures the room of a map, a merge
+  and the final request with the step's model, and plans the segments;
+- is admitted against the organization's mapped-execution ceilings, with the
+  codes a mapped step gets; a disabled call ceiling refuses it;
+- sends every call through `call_assistant_with_timeout` with the step's model,
+  assistant and settings (response format off), one at a time, so the
+  provider-call recorder, the cancellation watch and the ownership check apply.
+  Each receipt carries `digest_call` (stage `map`, `reduce` or `final`, the
+  source indexes, the segment of a map call) in `flow_provider_calls.digest_call`
+  (migration `202610212300`);
+- starts no call once three quarters of the step's budget are spent, and
+  cancels a call still running then, so the final call keeps the last quarter;
+  map admission stops earlier and leaves a quarter of the digest's time to the
+  merges. A cancelled run, a lost run or an expired step end the step exactly
+  as they end any step;
+- hands the merged notes to the step's own call, which keeps the step's prompt,
+  output contract, native JSON, retrieval and typed output validation.
+
+The step result keeps its real input. `input_payload_json.long_material`, also
+`long_material` on the run step API, records the coverage: complete or partial,
+the reasons, the sources left out, per source the segments read, failed, cut
+and never sent, the call counts and the hash of the notes. The step's token
+counts and the usage ledger include every digest call.
+
+Coverage policy: complete coverage completes the step with an info diagnostic.
+Partial coverage fails the step with `flow_long_material_partial_coverage`
+before the final call, with the record in the failed step's input payload and
+the segments read and planned in the run error. On a step with a review policy,
+which pauses anyway, a partial digest that read something completes with a
+`long_material_partial_coverage` warning and the reviewer approves, edits or
+rejects the partial answer. Partial coverage never completes unmarked.
+
+Not done yet: the web-next step editor has no control for the setting (it
+travels in `input_config`), and no separate reader model is offered.
+
 ## Open decisions
 
 - Flow run retention (legal holds, history purge): retention belongs to a
@@ -169,5 +223,7 @@ The flag stays off until these pass on this branch:
   outcomes.
 - Capabilities, produced files and refused destinations.
 - Documents through a real tool-runtime.
-- Long material, partial coverage and transcript corrections.
+- Long material and partial coverage (the digest end to end in
+  `tests/integration/flows/test_flow_long_material.py`), and transcript
+  corrections.
 - Migration from develop and the web-next journeys, WCAG 2.2 AA.

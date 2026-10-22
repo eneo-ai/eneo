@@ -16416,6 +16416,33 @@ export interface components {
       /** Transcription Audio Limit Bytes */
       transcription_audio_limit_bytes: number;
     };
+    /**
+     * DigestCallInput
+     * @description The part of a long-material digest one provider call performed.
+     *
+     *     ``map`` reads one segment of one source and takes notes; ``reduce``
+     *     merges notes; ``final`` is the step's own call over the merged notes.
+     *     Source indexes are the 1-based positions of the step's sources in its
+     *     ``long_material`` coverage record. A map call names the source it read;
+     *     a reduce or final call names the sources its notes cite, which is empty
+     *     when the notes cite none.
+     */
+    DigestCallInput: {
+      /** Segment Count */
+      segment_count?: number | null;
+      /** Segment Index */
+      segment_index?: number | null;
+      /**
+       * Source Indexes
+       * @description Sources the call read, ascending: the source of a map call, the sources cited by the notes a reduce or final call read.
+       */
+      source_indexes: number[];
+      /**
+       * Stage
+       * @enum {string}
+       */
+      stage: "map" | "reduce" | "final";
+    };
     /** DocumentExportAvailability */
     DocumentExportAvailability: {
       docx: components["schemas"]["DocumentExportFormatAvailability"];
@@ -18048,6 +18075,7 @@ export interface components {
       | "flow_runtime_input_not_consumed"
       | "flow_mapped_provider_call_limit_exceeded"
       | "flow_summarization_non_convergent"
+      | "flow_long_material_partial_coverage"
       | "flow_unsupported_output_mode"
       | "flow_unsupported_output_type"
       | "typed_io_contract_violation"
@@ -21681,6 +21709,7 @@ export interface components {
         | "flow_llm_output_truncated"
         | "flow_llm_output_whitespace_abort"
         | "flow_llm_request_timeout"
+        | "flow_long_material_partial_coverage"
         | "flow_mapped_provider_call_limit_exceeded"
         | "flow_missing_principal"
         | "flow_model_capacity_undeclared"
@@ -24480,6 +24509,7 @@ export interface components {
             | "flow_llm_output_truncated"
             | "flow_llm_output_whitespace_abort"
             | "flow_llm_request_timeout"
+            | "flow_long_material_partial_coverage"
             | "flow_mapped_provider_call_limit_exceeded"
             | "flow_missing_principal"
             | "flow_model_capacity_undeclared"
@@ -24597,6 +24627,8 @@ export interface components {
         | components["schemas"]["FileBackedStepText"]
         | components["schemas"]["InlineStepTextReference"]
       )[];
+      /** @description Set when the step read input larger than its model's capacity in parts (`input_config.long_material`): what the digest covered, why anything was left out and which sources. Partial coverage either failed the step or, on a step with a review, is the reviewer's to judge. Token counts of the step include every digest call. */
+      long_material?: components["schemas"]["LongMaterialCoverage"] | null;
       /** Model Parameters Json */
       model_parameters_json?: {
         [key: string]: unknown;
@@ -25886,6 +25918,7 @@ export interface components {
             | "flow_llm_output_truncated"
             | "flow_llm_output_whitespace_abort"
             | "flow_llm_request_timeout"
+            | "flow_long_material_partial_coverage"
             | "flow_mapped_provider_call_limit_exceeded"
             | "flow_missing_principal"
             | "flow_model_capacity_undeclared"
@@ -26114,6 +26147,7 @@ export interface components {
             | "flow_llm_output_truncated"
             | "flow_llm_output_whitespace_abort"
             | "flow_llm_request_timeout"
+            | "flow_long_material_partial_coverage"
             | "flow_mapped_provider_call_limit_exceeded"
             | "flow_missing_principal"
             | "flow_model_capacity_undeclared"
@@ -26356,6 +26390,8 @@ export interface components {
     };
     /** FlowStepInputConfig */
     FlowStepInputConfig: {
+      /** @description How the step reads input larger than its model's input capacity. Unset, such input fails the step with `typed_io_input_exceeds_model_window`. */
+      long_material?: components["schemas"]["LongMaterialConfig"] | null;
       text_processing?: components["schemas"]["TextProcessingConfig"] | null;
     } & {
       [key: string]: unknown;
@@ -29030,6 +29066,159 @@ export interface components {
       model_kwargs: {
         [key: string]: unknown;
       };
+    };
+    /**
+     * LongMaterialConfig
+     * @description How a step reads input that does not fit its model in one request.
+     */
+    LongMaterialConfig: {
+      /** @description `digest`: when the step's input exceeds its model's input capacity, read it in segments with the step's own model and assistant, merge the notes, and write the answer over them under the step's output contract. The step result records the coverage in `input_payload_json.long_material`. Partial coverage fails the step with `flow_long_material_partial_coverage`, or, on a step with a review policy, completes with a warning for the reviewer. Input that fits is sent unchanged. Needs a completion step (`pass_through` or `http_post`) without `text_processing`, `item_map` or per-source runtime input, and the organization's mapped provider-call ceiling bounds the calls. */
+      mode: components["schemas"]["LongMaterialMode"];
+    };
+    /**
+     * LongMaterialCoverage
+     * @description What a digest of long material covers, recorded on the step.
+     */
+    LongMaterialCoverage: {
+      /**
+       * Coverage
+       * @description `complete`: every segment was read and every source's notes reached the final call. `partial`: something was left out; `reasons` says why and `left_out` names the sources.
+       * @enum {string}
+       */
+      coverage: "complete" | "partial" | "cancelled";
+      /** Failed Calls */
+      failed_calls: number;
+      /**
+       * Input Tokens Estimate
+       * @description The input's size as the planner counted it.
+       */
+      input_tokens_estimate: number;
+      /**
+       * Left Out
+       * @description Keys of the sources not fully represented.
+       * @default []
+       */
+      left_out?: string[];
+      /** Map Calls */
+      map_calls: number;
+      /**
+       * Max Input Tokens
+       * @description The input allowance that request had.
+       */
+      max_input_tokens?: number | null;
+      /**
+       * Mode
+       * @default digest
+       * @constant
+       */
+      mode?: "digest";
+      /** Notes Bytes */
+      notes_bytes?: number | null;
+      /**
+       * Notes Sha256
+       * @description SHA-256 of the notes the final call read.
+       */
+      notes_sha256?: string | null;
+      /**
+       * Num Tokens Input
+       * @description Input tokens of the digest calls that completed.
+       */
+      num_tokens_input?: number | null;
+      /** Num Tokens Output */
+      num_tokens_output?: number | null;
+      /**
+       * Reasons
+       * @default []
+       */
+      reasons?: string[];
+      /** Reduce Calls */
+      reduce_calls: number;
+      /** Reduce Input Tokens */
+      reduce_input_tokens: number;
+      /** Reduce Levels */
+      reduce_levels: number;
+      /**
+       * Refused Input Tokens
+       * @description The size of the step's own request that did not fit.
+       */
+      refused_input_tokens?: number | null;
+      /** Segment Tokens */
+      segment_tokens: number;
+      /** Sources */
+      sources: components["schemas"]["LongMaterialSourceCoverage"][];
+    };
+    /**
+     * LongMaterialMode
+     * @enum {string}
+     */
+    LongMaterialMode: "digest";
+    /** LongMaterialSourceCoverage */
+    LongMaterialSourceCoverage: {
+      /** Complete */
+      complete: boolean;
+      /**
+       * End Char
+       * @description End of the source in the input.
+       */
+      end_char: number;
+      /**
+       * Excluded At Reduce
+       * @description Its notes, or part of them, did not fit the final request.
+       * @default false
+       */
+      excluded_at_reduce?: boolean;
+      /** Index */
+      index: number;
+      /**
+       * Key
+       * @description The key the notes cite the source by.
+       */
+      key: string;
+      /**
+       * Not Relevant
+       * @description Read in full; nothing in it was relevant.
+       * @default false
+       */
+      not_relevant?: boolean;
+      /**
+       * Reference
+       * @description What the source is: its kind and the SHA-256 and size of its text.
+       */
+      reference: {
+        [key: string]: components["schemas"]["JsonValue"];
+      };
+      /**
+       * Segments Cut
+       * @description Segments whose notes the provider cut short.
+       * @default []
+       */
+      segments_cut?: number[];
+      /**
+       * Segments Failed
+       * @description Segments sent whose notes did not come back.
+       * @default []
+       */
+      segments_failed?: number[];
+      /**
+       * Segments Not Read
+       * @description Segments never sent: time, a ceiling or the run stopped them.
+       * @default []
+       */
+      segments_not_read?: number[];
+      /** Segments Planned */
+      segments_planned: number;
+      /**
+       * Segments Read
+       * @description 1-based segments whose notes came back.
+       */
+      segments_read: number[];
+      /**
+       * Start Char
+       * @description Start of the source in the input.
+       */
+      start_char: number;
+      /** Title */
+      title: string;
     };
     /**
      * MCPConnectionStatus
@@ -32991,6 +33180,8 @@ export interface components {
       /** @description Which provider surface this request went to. A completion call is metered in tokens; a transcription call is metered in audio seconds. */
       call_kind: components["schemas"]["ProviderCallKind"];
       call_reason: components["schemas"]["ProviderCallReason"];
+      /** @description Set on the calls of a long-material digest: the stage (map, reduce or final), the sources the call read by their index in the step's long_material record, and for a map call its segment. */
+      digest_call?: components["schemas"]["DigestCallInput"] | null;
       /**
        * Event Id
        * Format: uuid

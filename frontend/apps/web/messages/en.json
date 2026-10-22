@@ -4905,6 +4905,7 @@
   "flow_error_flow_runtime_input_not_consumed": "The files you uploaded are not used by any step. Ask a flow editor to connect them to the right step, or run without them.",
   "flow_error_flow_mapped_provider_call_limit_exceeded": "The step runs per file or item and may exceed the organisation's limit for calls to the AI service. Use fewer items or files, or ask an administrator to raise the limit.",
   "flow_error_flow_summarization_non_convergent": "The summary could not be completed within the step's limits. Use less material or ask a flow editor to request shorter intermediate results.",
+  "flow_error_flow_long_material_partial_coverage": "The material was too long for the step's model and was read in parts, but only partly. Use less material, or ask a flow editor to raise the step's time limit, choose a larger model or add a review.",
   "flow_error_flow_unsupported_output_mode": "The step uses processing that Eneo cannot run. A flow editor needs to choose another option under Result and publish the flow again. Then start a new run.",
   "flow_error_flow_unsupported_output_type": "The step uses a response format that Eneo cannot produce. A flow editor needs to choose another response format and publish the flow again. Then start a new run.",
   "flow_error_typed_io_validation_failed": "The step's material or result did not pass the check. Open the step details, fix the material or settings, and start a new run.",

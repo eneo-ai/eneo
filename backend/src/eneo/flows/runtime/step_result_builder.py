@@ -220,6 +220,8 @@ def build_completed_step_input_payload(output: StepExecutionOutput) -> JsonObjec
         payload["transcription"] = output.transcription_metadata
     if output.runtime_input_metadata is not None:
         payload["runtime_input"] = output.runtime_input_metadata
+    if output.long_material is not None:
+        payload["long_material"] = output.long_material
     citation_state = build_step_result_citation_state(
         output.rag_metadata,
         inherited_sources=output.inherited_citation_sources or (),

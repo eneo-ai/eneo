@@ -33,6 +33,11 @@ on every change. Keep unchanged fields. All changes use the flow core's validati
 permissions, classification and audit. The user must enter edit mode in the editor.
 Read pages until next_offset is null before claiming you reviewed the whole value.
 Credentials belong in the editor and must never be requested or placed in tools.
+A completion step whose input may exceed its model's window can set
+input_config.long_material = {"mode": "digest"}: such input is read in parts with
+the step's own model and the answer is written over the notes. The step result
+records the coverage; partial coverage fails the step unless it has a review.
+Changing input_config replaces it whole, so keep its other keys.
 """,
 )
 
@@ -342,7 +347,8 @@ async def update_step(
     changes: dict[str, Any],
     assistant_changes: dict[str, Any] | None = None,
 ) -> CallToolResult:
-    """Patch one saved step and optionally its assistant in one revision. Use core field names."""
+    """Patch one saved step and optionally its assistant in one revision. Use core
+    field names; input_config is replaced whole (long material: input_config.long_material)."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_models import (

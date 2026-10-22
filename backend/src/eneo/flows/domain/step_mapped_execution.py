@@ -6,6 +6,7 @@ from typing import Any, Literal, cast
 
 from pydantic import ValidationError
 
+from eneo.flows.domain.long_material import long_material_config
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.step_item_map import build_step_item_map_config
 from eneo.flows.domain.text_processing import text_processing_config
@@ -62,6 +63,24 @@ def resolve_step_mapped_execution(
         raise FlowStepMappedExecutionConfigurationError(
             "Configure only one mapped execution mode: per_source or per_item."
         )
+
+    try:
+        long_material = long_material_config(input_config)
+    except ValidationError as exc:
+        raise FlowStepMappedExecutionConfigurationError(
+            "Step input_config.long_material must select the mode digest."
+        ) from exc
+    if long_material is not None:
+        if processing is not None or per_source_configured or per_item_configured:
+            raise FlowStepMappedExecutionConfigurationError(
+                "Long-material digest (input_config.long_material) cannot be "
+                "combined with text_processing, item_map or per_source."
+            )
+        if output_mode not in _MAPPED_COMPLETION_OUTPUT_MODES:
+            raise FlowStepMappedExecutionConfigurationError(
+                "Long-material digest (input_config.long_material) requires a "
+                "completion step: output_mode pass_through or http_post."
+            )
 
     supports_mapped_completion = output_mode in _MAPPED_COMPLETION_OUTPUT_MODES
     if per_source_configured:
