@@ -5,7 +5,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { TextInput } from "@/components/astryx/text-input";
@@ -28,6 +28,7 @@ import {
 } from "./transcript-corrections";
 import { CorrectionHistory, RegenerateFromTranscript } from "./transcript-history";
 import { TranscriptLines } from "./transcript-lines";
+import { ReviewDraftLines, type TranscriptDraftHandle } from "./transcript-review-draft";
 import { runHref } from "./runs-list";
 import {
   parseSegments,
@@ -147,7 +148,8 @@ function StepTranscript({
   runCompleted,
   runRevision,
   review = false,
-  onUnsavedChange
+  onUnsavedChange,
+  draftRef
 }: {
   flowId: string;
   runId: string;
@@ -159,6 +161,8 @@ function StepTranscript({
   /** Shown in a review checkpoint: the lines can be corrected before the run goes on. */
   review?: boolean;
   onUnsavedChange?: (unsaved: boolean) => void;
+  /** In a review: the draft of the corrections, which the review flushes before approving. */
+  draftRef?: Ref<TranscriptDraftHandle>;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -205,6 +209,22 @@ function StepTranscript({
   const multiFile = new Set(shown.map((segment) => segment.fileIndex)).size > 1;
   const sourceHash = source.data.sourceHash;
   const editable = mayEdit && (runCompleted || review) && !corrections?.stale;
+  if (review && editable) {
+    // A review corrects a local draft that saves itself.
+    return (
+      <ReviewDraftLines
+        flowId={flowId}
+        runId={runId}
+        target={target}
+        corrections={corrections}
+        segments={segments}
+        sourceHash={sourceHash}
+        speakerReview={source.data.speakerReview}
+        onUnsavedChange={onUnsavedChange}
+        draftRef={draftRef}
+      />
+    );
+  }
   return (
     <TranscriptLines
       flowId={flowId}
@@ -342,15 +362,17 @@ export function RunTranscripts({
 /**
  * The transcript a review checkpoint is about, inside the review: someone
  * who may decide the review corrects its lines and speakers before
- * approving, and the corrections are saved with the run, so they hold for
- * the steps after the review and for the finished run.
+ * approving, as a draft that saves itself, and the corrections are saved
+ * with the run, so they hold for the steps after the review and for the
+ * finished run.
  */
 export function ReviewTranscript({
   flowId,
   runId,
   target,
   mayEdit,
-  onUnsavedChange
+  onUnsavedChange,
+  draftRef
 }: {
   flowId: string;
   runId: string;
@@ -358,6 +380,8 @@ export function ReviewTranscript({
   mayEdit: boolean;
   /** Tells the review whether an edit of the transcript is not saved yet. */
   onUnsavedChange?: (unsaved: boolean) => void;
+  /** The corrections' draft, which the review flushes before it approves. */
+  draftRef?: Ref<TranscriptDraftHandle>;
 }) {
   const t = useTranslations();
   const corrections = useQuery(transcriptCorrectionsQueryOptions(flowId, runId));
@@ -383,6 +407,7 @@ export function ReviewTranscript({
       runRevision={null}
       review
       onUnsavedChange={onUnsavedChange}
+      draftRef={draftRef}
     />
   );
 }
