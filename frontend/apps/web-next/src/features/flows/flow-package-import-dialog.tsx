@@ -312,7 +312,15 @@ export function FlowPackageImportDialog({
       setPlan(next);
       setSelections((current) => ({ ...initialSelections(next), ...current }));
       setUploads(nextUploads);
-      announce(t("flow_editor_tools_package_plan_ready", { name: next.package_summary.name }));
+      const ready = importReadiness(next, initialSelections(next)).canImport;
+      announce(
+        [
+          t("flow_editor_tools_package_plan_ready", { name: next.package_summary.name }),
+          ready ? null : t("flow_editor_tools_package_blocks_import")
+        ]
+          .filter(Boolean)
+          .join(" ")
+      );
     } catch (error) {
       if (request !== planRequest.current) return;
       const message = packageRefusalMessage(error, t);
@@ -485,7 +493,7 @@ export function FlowPackageImportDialog({
                     {readiness &&
                     (readiness.requiresTranscriptionModel ||
                       readiness.blockingReasons.length > 0) ? (
-                      <Banner
+                      <QuietBanner
                         status="error"
                         title={t("flow_editor_tools_package_blocks_import")}
                         description={

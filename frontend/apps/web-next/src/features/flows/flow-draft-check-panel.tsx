@@ -1,6 +1,5 @@
 "use client";
 
-import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Text } from "@astryxdesign/core/Text";
@@ -211,7 +210,7 @@ export function FlowDraftCheck({
           collapsible={false}
         />
       ) : (
-        <Banner
+        <QuietBanner
           status="warning"
           title={t("flow_editor_tools_check_problems", { count })}
           description={unchecked ? t("flow_editor_tools_check_incomplete") : undefined}
@@ -246,7 +245,7 @@ export function FlowDraftCheck({
               );
             })}
           </ul>
-        </Banner>
+        </QuietBanner>
       )}
     </section>
   );

@@ -11,6 +11,7 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { QuietBanner } from "@/components/astryx/banner";
 import { TextInput } from "@/components/astryx/text-input";
 import { toast } from "@/lib/toast";
 import { saveBlob } from "@/features/chat/side-panel/document-export";
@@ -231,7 +232,7 @@ export function FlowPackageExportDialog({
                   />
                 ) : null}
                 {pending ? (
-                  <Banner
+                  <QuietBanner
                     status="warning"
                     title={t("flow_editor_tools_package_export_mcp_title")}
                     description={t("flow_editor_tools_package_export_mcp_description", {
