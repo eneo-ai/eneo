@@ -17,7 +17,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
-import { clockTime, type ShownSegment, type TranscriptTarget } from "./transcript";
+import { clockTime, type ShownPart, type ShownSegment, type TranscriptTarget } from "./transcript";
 import {
   nextSpeakerLabel,
   shownToRaw,
@@ -32,6 +32,7 @@ import { textRuns, type PlacedWord, type TextRun } from "./transcript-playback";
 import { overlapDetectionUnavailable, overlaps, type Overlap } from "./transcript-overlaps";
 import { partAttributes, selectedSpans, type SelectedSpan } from "./transcript-selection";
 import { SelectionToolbar } from "./transcript-selection-toolbar";
+import { SpeakerMenu } from "./transcript-speaker-menu";
 import { SpeakerBadge, speakerText } from "./transcript-speakers";
 import { SuggestionsDialog } from "./transcript-suggestions-dialog";
 import {
@@ -40,7 +41,8 @@ import {
   type Candidate,
   type Suggestions
 } from "./transcript-suggestions";
-import { transcriptTurns, type Turn } from "./transcript-turns";
+import { TurnEditor } from "./transcript-turn-editor";
+import { transcriptTurns, withPartsSpeaker, type Turn, type TurnPart } from "./transcript-turns";
 import type { TranscriptSpeakerReview } from "./runs-api";
 
 /** What editing a transcript's lines needs: the saved set, and a save that says what went wrong. */
@@ -350,18 +352,25 @@ function Unresolved() {
  * part of it moved. Each part's text carries its anchors, so text marked in
  * it maps back to the line; a placed word carries where it plays from.
  */
+/** Who said a part of a line: a plain badge, or the menu that changes it. */
+type PartBadge = (part: ShownPart, index: number) => React.ReactNode;
+
+const plainBadge: PartBadge = (part) => <SpeakerBadge label={part.speaker} name={part.name} />;
+
 function LineText({
   segment,
   runs,
   words,
   active,
-  activeWord
+  activeWord,
+  badge
 }: {
   segment: ShownSegment;
   runs: TextRun[] | null;
   words: readonly PlacedWord[] | undefined;
   active: boolean;
   activeWord: number;
+  badge: PartBadge;
 }) {
   if (segment.parts.length > 1) {
     const starts = partStarts(segment.parts);
@@ -370,7 +379,7 @@ function LineText({
         {segment.parts.map((part, index) => (
           <span key={index}>
             {index > 0 ? " " : null}
-            <SpeakerBadge label={part.speaker} name={part.name} />{" "}
+            {badge(part, index)}{" "}
             {part.decision === "unresolved" ? (
               <>
                 <Unresolved />{" "}
@@ -384,7 +393,7 @@ function LineText({
   }
   return (
     <>
-      <SpeakerBadge label={segment.label} name={segment.name} />{" "}
+      {badge({ ...segment.parts[0]!, speaker: segment.label, name: segment.name }, 0)}{" "}
       {segment.decision === "unresolved" || segment.unsure ? (
         <>
           <Unresolved />{" "}
@@ -460,7 +469,8 @@ function SegmentLine({
   isEditing,
   onEdit,
   editor,
-  toolbar
+  toolbar,
+  badge
 }: {
   segment: ShownSegment;
   multiFile: boolean;
@@ -477,6 +487,7 @@ function SegmentLine({
   editor: React.ReactNode;
   /** The toolbar for text marked up to this line. */
   toolbar: React.ReactNode;
+  badge: PartBadge;
 }) {
   const t = useTranslations();
   const time = placeTime(segment.fileIndex, segment.start, multiFile, t);
@@ -501,6 +512,7 @@ function SegmentLine({
               words={words}
               active={active}
               activeWord={activeWord}
+              badge={badge}
             />
             {segment.corrected ? (
               <>
@@ -534,10 +546,16 @@ function SegmentLine({
   );
 }
 
+/** A turn's key: where its first part starts. */
+function turnKey(turn: Turn): string {
+  return `${turn.parts[0]!.segmentIndex}:${turn.parts[0]!.shownStart}`;
+}
+
 /**
  * The transcript as speaker turns: what one speaker said in a row, as one
- * paragraph, each playable from its start. Text is corrected in the line
- * view; speakers can be given to marked text here too.
+ * paragraph, each playable from its start. Someone who may correct the
+ * transcript corrects a whole turn's text in place and changes its speaker
+ * from the speaker's badge; speakers can be given to marked text here too.
  */
 function TurnList({
   turns,
@@ -545,7 +563,13 @@ function TurnList({
   activeLine,
   onSeek,
   toolbarAt,
-  toolbar
+  toolbar,
+  turnId,
+  canEdit,
+  openTurn,
+  onEdit,
+  editor,
+  badge
 }: {
   turns: readonly Turn[];
   multiFile: boolean;
@@ -554,26 +578,49 @@ function TurnList({
   /** The turn the marked text ends in, which shows the toolbar. */
   toolbarAt: number;
   toolbar: React.ReactNode;
+  /** The id of the element that shows a turn. */
+  turnId: (turn: Turn) => string;
+  canEdit: boolean;
+  /** The key of the turn being edited. */
+  openTurn: string | null;
+  onEdit: (turn: Turn) => void;
+  editor: (turn: Turn, time: string) => React.ReactNode;
+  badge: (turn: Turn, time: string) => React.ReactNode;
 }) {
   const t = useTranslations();
   return (
     <ol aria-label={t("flow_transcript_turns_list")} className="m-0 flex flex-col gap-1 p-0">
       {turns.map((turn, index) => {
         const active = turn.parts.some((part) => part.position === activeLine);
+        const time = placeTime(turn.fileIndex, turn.start, multiFile, t);
+        const id = turnId(turn);
+        const isEditing = openTurn === turnKey(turn);
         return (
           <li
-            key={`${turn.parts[0]!.segmentIndex}:${turn.parts[0]!.shownStart}`}
+            key={turnKey(turn)}
+            id={id}
             className={active ? "bg-ax-selected rounded-ax-inner" : undefined}
           >
             <div className="flex flex-col gap-1 px-1 py-2">
               <div className="flex flex-wrap items-center gap-2">
                 <TimeButton
-                  time={placeTime(turn.fileIndex, turn.start, multiFile, t)}
+                  time={time}
                   active={active}
                   onPlay={onSeek ? () => onSeek(turn.fileIndex, turn.start) : null}
                 />
-                <SpeakerBadge label={turn.speaker} name={turn.name} />
+                {badge(turn, time)}
                 {turn.marker ? <Unresolved /> : null}
+                {canEdit && !isEditing ? (
+                  <span id={`${id}-edit`} className="ms-auto shrink-0">
+                    <IconButton
+                      label={t("flow_transcript_turn_edit", { time })}
+                      icon={<Pencil aria-hidden="true" />}
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onEdit(turn)}
+                    />
+                  </span>
+                ) : null}
               </div>
               <p className="text-ax-text m-0 text-sm break-words">
                 {turn.parts.map((part, at) => {
@@ -595,6 +642,7 @@ function TurnList({
                 })}
               </p>
             </div>
+            {isEditing ? editor(turn, time) : null}
             {index === toolbarAt ? toolbar : null}
           </li>
         );
@@ -775,6 +823,11 @@ export function TranscriptLines({
     eagerWords: editing !== null
   });
   const [open, setOpen] = useState<number | null>(null);
+  /** The turn being edited, by its key. */
+  const [openTurn, setOpenTurn] = useState<string | null>(null);
+  /** Why the last speaker change from a badge was not saved. */
+  const [menuProblem, setMenuProblem] = useState<string | null>(null);
+  const baseId = useId();
   const [view, setView] = useState<View>("lines");
   const [suggesting, setSuggesting] = useState<{
     next: CorrectionSet;
@@ -879,6 +932,84 @@ export function TranscriptLines({
       setDirty(false);
     });
     document.getElementById(id)?.querySelector("textarea")?.focus();
+  }
+
+  function turnId(turn: Turn) {
+    return `${baseId}-turn-${turnKey(turn).replace(":", "-")}`;
+  }
+
+  function openTurnEditor(turn: Turn) {
+    flushSync(() => {
+      setOpenTurn(turnKey(turn));
+      setDirty(false);
+    });
+    document.getElementById(turnId(turn))?.querySelector("textarea")?.focus();
+  }
+
+  function closeTurnEditor(id: string) {
+    flushSync(() => {
+      setOpenTurn(null);
+      setDirty(false);
+    });
+    focusEditButton(id);
+  }
+
+  /** Gives parts (of a line or a turn) to a speaker from its badge's menu, or resets them. */
+  async function changeSpeaker(
+    parts: readonly Pick<TurnPart, "segmentIndex" | "rawStart" | "rawEnd" | "overridden">[],
+    speaker: string | null | "reset"
+  ) {
+    if (!editing || editing.saving) return;
+    const failed = await editing.save(
+      withPartsSpeaker(
+        editing.set,
+        parts,
+        byIndex,
+        speaker === "reset"
+          ? "reset"
+          : { speaker, decision: speaker === null ? "unresolved" : "confirmed" }
+      ),
+      speaker === "reset"
+        ? t("flow_transcript_speaker_reset_done")
+        : t("flow_transcript_speaker_saved")
+    );
+    setMenuProblem(failed);
+  }
+
+  function speakerMenu(
+    parts: readonly Pick<TurnPart, "segmentIndex" | "rawStart" | "rawEnd" | "overridden">[],
+    label: string | null,
+    name: string | null,
+    context: string
+  ) {
+    if (!editing) return <SpeakerBadge label={label} name={name} />;
+    return (
+      <SpeakerMenu
+        label={label}
+        name={name}
+        context={context}
+        speakers={editing.speakers}
+        names={editing.set.names}
+        newLabel={nextSpeakerLabel(editing.speakers)}
+        overridden={parts.some((part) => part.overridden)}
+        saving={editing.saving}
+        onChoose={(speaker) => void changeSpeaker(parts, speaker)}
+        onReset={() => void changeSpeaker(parts, "reset")}
+      />
+    );
+  }
+
+  function lineBadge(segment: ShownSegment, time: string): PartBadge {
+    if (!editing) return plainBadge;
+    return (part, index) =>
+      speakerMenu(
+        [{ segmentIndex: segment.index, ...part }],
+        part.speaker,
+        part.name,
+        segment.parts.length > 1
+          ? t("flow_transcript_speaker_menu_part", { time, part: index + 1 })
+          : t("flow_transcript_speaker_menu_line", { time })
+      );
   }
 
   function focusEditButton(id: string) {
@@ -1000,6 +1131,7 @@ export function TranscriptLines({
           onChange={(next) => {
             if (next === "lines" || next === "turns") {
               setOpen(null);
+              setOpenTurn(null);
               setDirty(false);
               setPicked(null);
               setView(next);
@@ -1041,6 +1173,14 @@ export function TranscriptLines({
             : t("flow_transcript_selection_intro")}
         </Text>
       ) : null}
+      {menuProblem ? (
+        <QuietBanner
+          status="error"
+          title={t("flow_transcript_speaker_not_saved")}
+          description={menuProblem}
+          collapsible={false}
+        />
+      ) : null}
       <div ref={area}>
         {view === "turns" ? (
           <TurnList
@@ -1048,6 +1188,39 @@ export function TranscriptLines({
             multiFile={multiFile}
             activeLine={playback?.activeLine ?? -1}
             onSeek={seek}
+            turnId={turnId}
+            canEdit={editing !== null}
+            openTurn={openTurn}
+            onEdit={openTurnEditor}
+            badge={(turn, time) =>
+              speakerMenu(
+                turn.parts,
+                turn.speaker,
+                turn.name,
+                t("flow_transcript_speaker_menu_turn", { time })
+              )
+            }
+            editor={(turn, time) =>
+              editing ? (
+                <TurnEditor
+                  turn={turn}
+                  time={time}
+                  editing={editing}
+                  lines={byIndex}
+                  rawLines={rawLines}
+                  onSuggest={(next, suggestions) => {
+                    const id = turnId(turn);
+                    flushSync(() => {
+                      setOpenTurn(null);
+                      setDirty(false);
+                      setSuggesting({ next, suggestions, lineId: id, problem: null });
+                    });
+                  }}
+                  onDirty={setDirty}
+                  onClose={() => closeTurnEditor(turnId(turn))}
+                />
+              ) : null
+            }
             toolbarAt={
               lastPicked === undefined
                 ? -1
@@ -1095,6 +1268,10 @@ export function TranscriptLines({
                     ) : null
                   }
                   toolbar={segment.index === lastPicked ? toolbar : null}
+                  badge={lineBadge(
+                    segment,
+                    placeTime(segment.fileIndex, segment.start, multiFile, t)
+                  )}
                 />
               );
             })}

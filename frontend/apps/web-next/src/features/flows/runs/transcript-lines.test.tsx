@@ -108,6 +108,13 @@ function mark(start: Node, from: number, end: Node, to: number) {
   });
 }
 
+/** Opens a speaker badge's menu and answers it. */
+function openMenu(trigger: HTMLElement): HTMLElement {
+  expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+  fireEvent.click(trigger);
+  return document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
+}
+
 afterEach(() => {
   cleanup();
   document.getSelection()?.removeAllRanges();
@@ -242,6 +249,98 @@ describe("TranscriptLines", () => {
     expect(items[0]!.textContent).toContain("Välkommen Sugary. Hur mår du?");
     expect(within(turns).queryByRole("button", { name: /^Rätta raden/ })).toBeNull();
     await expectNoAxeViolations(document.body);
+  });
+
+  it("corrects a whole turn as one text, saved on the line it changes", async () => {
+    const { saves } = renderLines();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_transcript_view_turns }));
+    const turns = await screen.findByRole("list", { name: messages.flow_transcript_turns_list });
+    fireEvent.click(within(turns).getByRole("button", { name: "Rätta repliken 0:00" }));
+    const field = within(turns).getByLabelText<HTMLTextAreaElement>("Texten i repliken 0:00");
+    expect(field.value).toBe("Välkommen Sugary. Hur mår du?");
+    expect(document.activeElement).toBe(field);
+    await expectNoAxeViolations(document.body);
+    fireEvent.change(field, { target: { value: "Välkommen Sugary. Hur mår ni?" } });
+    fireEvent.click(
+      within(turns).getByRole("button", { name: messages.flow_transcript_line_save })
+    );
+    // A correction of one line is offered for the places that likely say the same.
+    const dialog = await screen.findByRole("dialog", {
+      name: messages.flow_transcript_suggest_title
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: messages.flow_transcript_suggest_skip })
+    );
+
+    await waitFor(() => expect(saves).toHaveLength(1));
+    expect(saves[0]!.occurrences).toEqual([
+      { segment_index: 1, char_start: 8, char_end: 10, original: "du", corrected: "ni" }
+    ]);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(turns).getByRole("button", { name: "Rätta repliken 0:00" })
+      )
+    );
+    expect(turns.textContent).toContain("Välkommen Sugary. Hur mår ni?");
+
+    // Reverting the turn takes its corrected lines back to what was said.
+    fireEvent.click(within(turns).getByRole("button", { name: "Rätta repliken 0:00" }));
+    fireEvent.click(
+      within(turns).getByRole("button", { name: messages.flow_transcript_turn_revert })
+    );
+    await waitFor(() => expect(saves).toHaveLength(2));
+    expect(saves[1]!.occurrences).toEqual([]);
+  });
+
+  it("changes a line's speaker from its badge, and resets it", async () => {
+    const { saves, lines } = renderLines();
+    const menu = openMenu(
+      within(lines).getByRole("button", { name: "SPEAKER_00, byt talare för raden 0:05" })
+    );
+    await expectNoAxeViolations(document.body);
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "SPEAKER_01" }));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    expect(saves[0]!.speakerEdits).toEqual([
+      {
+        segment_index: 1,
+        char_start: null,
+        char_end: null,
+        original: null,
+        original_speaker: "SPEAKER_00",
+        speaker: "SPEAKER_01",
+        decision: "confirmed"
+      }
+    ]);
+
+    const again = openMenu(
+      await within(lines).findByRole("button", { name: "SPEAKER_01, byt talare för raden 0:05" })
+    );
+    fireEvent.click(
+      within(again).getByRole("menuitem", { name: messages.flow_transcript_speaker_reset })
+    );
+    await waitFor(() => expect(saves).toHaveLength(2));
+    expect(saves[1]!.speakerEdits).toEqual([]);
+  });
+
+  it("leaves a whole turn to someone to check from its badge", async () => {
+    const { saves } = renderLines();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_transcript_view_turns }));
+    const turns = await screen.findByRole("list", { name: messages.flow_transcript_turns_list });
+    const menu = openMenu(
+      within(turns).getByRole("button", { name: "SPEAKER_01, byt talare för repliken 0:10" })
+    );
+    fireEvent.click(
+      within(menu).getByRole("menuitemradio", {
+        name: messages.flow_runs_transcript_unknown_speaker
+      })
+    );
+    await waitFor(() => expect(saves).toHaveLength(1));
+    expect(
+      saves[0]!.speakerEdits.map((edit) => [edit.segment_index, edit.speaker, edit.decision])
+    ).toEqual([
+      [2, null, "unresolved"],
+      [3, null, "unresolved"]
+    ]);
   });
 
   it("downloads the reviewed transcript as text", async () => {
