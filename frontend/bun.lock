@@ -233,6 +233,9 @@
     "packages/whats-new": {
       "name": "@eneo/whats-new",
       "version": "0.1.0",
+      "dependencies": {
+        "@eneo/eneo-js": "workspace:*",
+      },
       "devDependencies": {
         "prettier": "^3.9.4",
       },
