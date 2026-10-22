@@ -220,7 +220,7 @@ export function getStepSourceLine(
 
 /**
  * Every step's source line, in the words the step panel uses: the step list's
- * captions and the AI Builder's step rows read the same line. A template step
+ * captions read this line. A template step
  * names its template instead, so it has none.
  */
 export function stepSourceLines(

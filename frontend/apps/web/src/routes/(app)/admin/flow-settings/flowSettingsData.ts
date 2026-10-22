@@ -8,7 +8,6 @@ export type FlowSettingsAdminData = PageData & {
   flowInputLimits: Loaded<PageData["flowInputLimits"]>;
   flowRuntimePolicy: Loaded<PageData["flowRuntimePolicy"]>;
   mappedExecutionPolicy: Loaded<PageData["mappedExecutionPolicy"]>;
-  aiBuilderBudgetSettings: Loaded<PageData["aiBuilderBudgetSettings"]>;
   ragEvidencePolicy: Loaded<PageData["ragEvidencePolicy"]>;
 };
 
@@ -19,7 +18,6 @@ export function adminSettingsData(data: PageData): FlowSettingsAdminData | null 
     data.flowInputLimits === null ||
     data.flowRuntimePolicy === null ||
     data.mappedExecutionPolicy === null ||
-    data.aiBuilderBudgetSettings === null ||
     data.ragEvidencePolicy === null
   ) {
     return null;

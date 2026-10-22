@@ -7,6 +7,7 @@ from uuid import uuid4
 import jsonschema
 import pytest
 
+from eneo.files.text import TEXT_EXTRACTION_WARNINGS
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.domain.flow_step_validation import (
     FlowGraphIssueCode,
@@ -117,42 +118,6 @@ def test_text_processing_requires_an_authored_array_of_records(mode):
         )
 
 
-@pytest.mark.parametrize("mode", [None, "summarize", "process_each_section"])
-def test_section_index_scope_at_existing_authoring_variable_validation(mode):
-    from eneo.flows.ai_builder.ai_builder_validation_common import SpecValidationResult
-    from eneo.flows.ai_builder.ai_builder_validation_references import (
-        validate_variable_references,
-    )
-    from eneo.flows.flow_authoring_spec import (
-        AssistantSpec,
-        FlowDraftSpecCore,
-        StepSpec,
-    )
-    from eneo.flows.flow_variable_definitions import flow_variable_definition_manifest
-
-    step = StepSpec(
-        plan_step_ref="step_a",
-        name="Extract",
-        assistant_spec=AssistantSpec(instructions="S{{ section_index }}-"),
-        input_source="flow_input",
-        input_config={"text_processing": {"mode": mode}} if mode else None,
-    )
-    result = SpecValidationResult()
-    validate_variable_references(
-        FlowDraftSpecCore(flow_name="Sections", steps=[step]), result
-    )
-    variables = flow_variable_definition_manifest(step.input_config)[
-        "reservedRuntimeVariables"
-    ]
-    assert ("section_index" in variables) == (mode == "process_each_section")
-
-    if mode == "process_each_section":
-        assert result.valid
-    else:
-        assert [error.code for error in result.errors] == ["unknown_variable_reference"]
-        assert "'section_index'" in result.errors[0].message
-
-
 @pytest.mark.parametrize(
     "processing",
     [
@@ -161,38 +126,20 @@ def test_section_index_scope_at_existing_authoring_variable_validation(mode):
     ],
 )
 def test_malformed_section_config_returns_structured_authoring_error(processing):
-    from eneo.flows.ai_builder.ai_builder_validator import validate_spec
-    from eneo.flows.flow_authoring_spec import (
-        AssistantSpec,
-        FlowDraftSpecCore,
-        StepSpec,
-    )
     from eneo.flows.flow_variable_definitions import (
         RESERVED_RUNTIME_VARIABLES,
         runtime_variables_for_step,
     )
 
     input_config = {"text_processing": processing}
-    spec = FlowDraftSpecCore(
-        flow_name="Sections",
-        steps=[
-            StepSpec(
-                plan_step_ref="extract",
-                name="Extract records",
-                assistant_spec=AssistantSpec(
-                    instructions="Extract {{ flow_input.text }}."
-                ),
-                input_source="flow_input",
-                input_config=input_config,
-            )
-        ],
+
+    _assert_validate_steps_rejects(
+        [_step(input_config=input_config)],
+        expected_type=FlowStepValidationError,
+        match="text_processing",
+        code=FlowGraphIssueCode.FLOW_STEP_INVALID.value,
+        step_order=1,
     )
-
-    result = validate_spec(spec)
-
-    assert not result.valid
-    assert [error.code for error in result.errors] == ["flow_step_invalid"]
-    assert result.errors[0].step_ref == "extract"
     assert runtime_variables_for_step(input_config) == RESERVED_RUNTIME_VARIABLES
 
 
@@ -1189,6 +1136,36 @@ def test_validate_steps_publish_rejects_unbounded_item_map() -> None:
     )
 
 
+def _documents_contract() -> dict:
+    return {
+        "type": "object",
+        "properties": {
+            "documents": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source_label": {"type": "string"},
+                        "source_file_id": {"type": "string"},
+                        "extraction_warnings": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                            },
+                        },
+                    },
+                    "required": [
+                        "source_label",
+                        "source_file_id",
+                        "extraction_warnings",
+                    ],
+                },
+            }
+        },
+    }
+
+
 def test_validate_steps_publish_accepts_bounded_mapped_modes() -> None:
     validate_steps(
         [
@@ -1203,11 +1180,14 @@ def test_validate_steps_publish_accepts_bounded_mapped_modes() -> None:
                         "max_files": 2,
                     }
                 },
+                output_contract=_documents_contract(),
             ),
             _step(
                 2,
                 input_type="json",
                 input_config={"item_map": {"enabled": True, "max_items": 2}},
+                input_contract=_documents_contract(),
+                output_contract=_documents_contract(),
             ),
         ],
         require_complete_template_fill_config=True,

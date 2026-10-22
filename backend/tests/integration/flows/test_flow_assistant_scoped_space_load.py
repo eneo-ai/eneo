@@ -19,29 +19,13 @@ import sqlalchemy as sa
 from sqlalchemy.engine import Engine
 
 from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceActor, SpaceRole
-from eneo.assistants.assistant_factory import AssistantFactory
 from eneo.authentication.auth_models import ApiKeyScopeType
 from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.flow_tables import Flows
-from eneo.flows.flow_authoring_spec import (
-    AssistantSpec,
-    FlowDraftSpecCore,
-    InputSource,
-    InputType,
-    OutputMode,
-    OutputType,
-    StepSpec,
-)
 from eneo.main.exceptions import BadRequestException
 from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserUpdate
-from tests.integration.flows.test_ai_builder_session_api_regressions import (
-    _create_proposed_ai_builder_plan,  # pyright: ignore[reportPrivateUsage]
-    _create_space_with_planner_model,  # pyright: ignore[reportPrivateUsage]
-    bearer_token,  # noqa: F401  (registers the fixture)
-)
 
 
 async def _space(client, db_container, admin_user) -> UUID:
@@ -194,118 +178,6 @@ async def test_loading_by_the_default_assistant_keeps_every_assistant_as_its_too
         *hidden_ids,
         visible,
     }
-
-
-def _two_step_spec() -> FlowDraftSpecCore:
-    def step(ref: str, source: InputSource) -> StepSpec:
-        return StepSpec(
-            plan_step_ref=ref,
-            name=f"Steg {ref}",
-            assistant_spec=AssistantSpec(instructions="Gör jobbet."),
-            input_source=source,
-            input_type=InputType.TEXT,
-            output_mode=OutputMode.PASS_THROUGH,
-            output_type=OutputType.TEXT,
-        )
-
-    return FlowDraftSpecCore(
-        flow_name="Två steg",
-        flow_description="Skapas ur en plan.",
-        steps=[step("a", InputSource.FLOW_INPUT), step("b", InputSource.PREVIOUS_STEP)],
-    )
-
-
-async def _retained_hidden_assistants(db_container, *, space_id: UUID, count: int):
-    """Hidden assistants a deleted flow with runs keeps in its space."""
-    if count == 0:
-        return
-    async with db_container() as container:
-        flow_service = container.flow_service()
-        flow = await flow_service.create_flow(
-            space_id=space_id, name="Raderat flöde", description="", steps=[]
-        )
-        for index in range(count):
-            await flow_service.create_flow_assistant(
-                flow_id=flow.id, name=f"kvar-{index}"
-            )
-        await container.session().execute(
-            sa.update(Flows).where(Flows.id == flow.id).values(deleted_at=sa.func.now())
-        )
-
-
-async def _assistants_built_by_create(
-    *,
-    client,
-    bearer_token,  # noqa: F811
-    db_container,
-    completion_model_factory,
-    monkeypatch,
-    retained,
-) -> int:
-    space_id = await _create_space_with_planner_model(
-        client=client,
-        bearer_token=bearer_token,
-        db_container=db_container,
-        completion_model_factory=completion_model_factory,
-        space_name=f"Behållna dolda {retained}",
-        planner_model_overrides={"nickname": f"planner-{retained}"},
-    )
-    await _retained_hidden_assistants(
-        db_container, space_id=UUID(space_id), count=retained
-    )
-    _, _, plan_id, _ = await _create_proposed_ai_builder_plan(
-        client=client,
-        bearer_token=bearer_token,
-        db_container=db_container,
-        space_id=space_id,
-        spec=_two_step_spec(),
-    )
-    built = 0
-    original = AssistantFactory.create_space_assistant_from_db
-
-    def counting(self, **kwargs):
-        nonlocal built
-        built += 1
-        return original(self, **kwargs)
-
-    with monkeypatch.context() as patch:
-        patch.setattr(AssistantFactory, "create_space_assistant_from_db", counting)
-        response = await client.post(
-            f"/api/v1/flows/ai-builder/plans/{plan_id}/create",
-            headers={"Authorization": f"Bearer {bearer_token}"},
-        )
-    assert response.status_code == 200, response.text
-    assert response.json()["steps_created"] == 2
-    return built
-
-
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_creating_a_flow_from_a_plan_does_not_build_the_spaces_other_hidden_assistants(
-    client,
-    bearer_token,  # noqa: F811
-    completion_model_factory,
-    db_container,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    without = await _assistants_built_by_create(
-        client=client,
-        bearer_token=bearer_token,
-        db_container=db_container,
-        completion_model_factory=completion_model_factory,
-        monkeypatch=monkeypatch,
-        retained=0,
-    )
-    with_retained = await _assistants_built_by_create(
-        client=client,
-        bearer_token=bearer_token,
-        db_container=db_container,
-        completion_model_factory=completion_model_factory,
-        monkeypatch=monkeypatch,
-        retained=40,
-    )
-
-    assert with_retained == without
 
 
 @pytest.mark.asyncio

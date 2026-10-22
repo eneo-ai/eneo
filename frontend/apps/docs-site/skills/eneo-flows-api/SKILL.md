@@ -1,6 +1,6 @@
 ---
 name: eneo-flows-api
-description: Use this skill when building, debugging, or reviewing an application that consumes already-published Eneo Flows through runtime API endpoints, especially when the deployment's private OpenAPI document is unavailable. It guides correct discovery, step-bound uploads, versioned and idempotent run creation, lifecycle polling, human review, typed results, artifacts, evidence, audit and retention boundaries, and typed error recovery. Do not use for Flow AI Builder, draft Flow authoring, retention administration, or unrelated Eneo APIs.
+description: Use this skill when building, debugging, or reviewing an application that consumes already-published Eneo Flows through runtime API endpoints, especially when the deployment's private OpenAPI document is unavailable. It guides correct discovery, step-bound uploads, versioned and idempotent run creation, lifecycle polling, human review, typed results, artifacts, evidence, audit and retention boundaries, and typed error recovery. Do not use for draft Flow authoring, retention administration, or unrelated Eneo APIs.
 ---
 
 # Eneo Flows API
@@ -11,7 +11,7 @@ Build consumers against the published Flow runtime contract. Prefer server-repor
 
 Use this skill for applications that discover and run an already-published Flow. It covers authentication, uploads, run lifecycle, review checkpoints, typed results, artifacts, evidence, audit behavior, retention, and errors.
 
-Do not use it to create or edit draft Flows, operate Flow AI Builder, administer retention policies, or integrate unrelated Eneo APIs.
+Do not use it to create or edit draft Flows, administer retention policies, or integrate unrelated Eneo APIs.
 
 ## Establish the deployment contract
 

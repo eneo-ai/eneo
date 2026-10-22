@@ -7,10 +7,9 @@ SQLAlchemy column. The ORM and Alembic revisions remain authoritative.
 ## Migration lineage
 
 The initial Flow schema and platform integration revisions are `202608201000`
-and `202608201100`; `202608201200` introduces Builder sessions, plans, and
-session-file attachments. Later revisions extend these schemas, including
-Builder client-error persistence, and merge with platform migration heads. The
-current lineage is in `backend/alembic/versions`; it is not limited to those
+and `202608201100`. Later revisions extend these schemas and merge with
+platform migration heads; `202608201200` added tables for a conversational
+builder that `202610212200` drops again. The current lineage is in `backend/alembic/versions`; it is not limited to those
 initial revisions.
 
 Before an upgrade, check the database revision against that lineage. Follow the
@@ -45,8 +44,6 @@ terminalization.
   principal. Review checkpoints apply the same rule to requester and decider.
 - Runtime files must belong to the run's tenant and authorized principal before
   they can be bound.
-- Builder session-file rows use composite tenant foreign keys; a session cannot
-  attach another tenant's file.
 
 These are database constraints as well as service-layer checks. Do not replace a
 composite ownership constraint with an application-only assertion.
@@ -93,7 +90,7 @@ not a Flow run-history fallback.
 
 ## JSONB columns
 
-Flow and Builder JSONB columns are declared in
+Flow JSONB columns are declared in
 `backend/src/eneo/database/tables/flow_tables.py`, plus `tenants.flow_settings`
 in `backend/src/eneo/database/tables/tenant_table.py`. A small test,
 `backend/tests/unittests/flows/test_flow_jsonb_columns.py`, compares the JSONB
@@ -104,8 +101,8 @@ column, are not uniform, and are not enforced by the test.
 
 Several columns are parsed by a typed model in the module that reads or writes
 them: `flows.metadata_json` by `FlowMetadata`, `flow_versions.definition_json`
-by `PublishedFlowDefinition`, `flow_step_attempt_resolved_inputs` edges by
-`FlowResolvedInputEdges`, and the Builder planning state by `PlanningState`.
+by `PublishedFlowDefinition`, and `flow_step_attempt_resolved_inputs` edges by
+`FlowResolvedInputEdges`.
 Others are stored as plain dictionaries: the `flow_step_results` payload
 columns have no schema version, and `flow_step_transcript_words.words_json`
 is kept as `list[dict]`. Read the code that touches a column to see which
@@ -125,5 +122,4 @@ When adding or changing JSONB:
 - Migration lineage: `backend/alembic/versions/`
 - Initial core schema: `backend/alembic/versions/202608201000_create_final_flow_schema.py`
 - Initial core integration: `backend/alembic/versions/202608201100_integrate_final_flow_schema.py`
-- Initial Builder schema: `backend/alembic/versions/202608201200_create_final_flow_ai_builder_schema.py`
 - Migration behavior tests: `backend/tests/integration/migrations/test_final_flow_schema_migrations.py`

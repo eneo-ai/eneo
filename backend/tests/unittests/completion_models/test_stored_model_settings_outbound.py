@@ -490,7 +490,7 @@ async def test_the_completion_service_keeps_a_callers_effort_for_validation() ->
 
 
 @pytest.mark.parametrize("reasoning_params", [True, False])
-def test_a_fresh_ai_builder_selection_is_still_refused(reasoning_params: bool) -> None:
+def test_a_fresh_selection_is_still_refused(reasoning_params: bool) -> None:
     route = ResolvedCompletionModelRoute(
         litellm_model="openai/gpt-5-mini",
         provider_type="openai",

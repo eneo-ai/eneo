@@ -12,18 +12,7 @@ from eneo.completion_models.domain.skill_context import skill_context_token_allo
 from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
-from eneo.files.docx_template_validation import (
-    MAX_TEMPLATE_ARCHIVE_ENTRIES,
-    MAX_TEMPLATE_UNCOMPRESSED_BYTES,
-)
 from eneo.files.file_reference import file_reference_base_url
-from eneo.flows.ai_builder.ai_builder_settings import (
-    AIBuilderBudgetPolicy,
-    apply_ai_builder_budget_policy_patch,
-    deployment_ai_builder_budget_policy,
-    resolve_ai_builder_budget_policy,
-)
-from eneo.flows.ai_builder.planning_state import PLANNING_STATE_PAYLOAD_CAP_BYTES
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     apply_flow_mapped_execution_policy_patch,
@@ -33,14 +22,6 @@ from eneo.flows.domain.mapped_execution_policy import (
 from eneo.flows.domain.rag_evidence_policy import (
     apply_flow_rag_evidence_policy_patch,
     resolve_flow_rag_evidence_policy,
-)
-from eneo.flows.flow_ai_builder_budget_settings import (
-    AI_BUILDER_BUDGET_MAX_TOKENS,
-    AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
-    AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
-    AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT,
-    AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS,
-    AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES,
 )
 from eneo.flows.flow_document_limits import (
     apply_flow_document_render_limits_patch,
@@ -77,8 +58,6 @@ from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.object_content.runtime import ObjectContentRuntime, object_content_runtime
 from eneo.roles.permissions import Permission, validate_permissions
 from eneo.settings.settings import (
-    AIBuilderBudgetSettingsPublic,
-    AIBuilderBudgetSettingsUpdate,
     FlowDocumentRenderLimitsPublic,
     FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyPublic,
@@ -172,47 +151,6 @@ def _rag_evidence_policy_public(
         max_recorded_passage_bytes_per_run_view=(
             policy.max_recorded_passage_bytes_per_run_view
         ),
-    )
-
-
-def _ai_builder_budget_public(
-    policy: AIBuilderBudgetPolicy,
-) -> AIBuilderBudgetSettingsPublic:
-    deployment = deployment_ai_builder_budget_policy()
-    return AIBuilderBudgetSettingsPublic(
-        conversation_safety_buffer_tokens=policy.conversation_safety_buffer_tokens,
-        minimum_conversation_budget_tokens=policy.minimum_conversation_budget_tokens,
-        review_evidence_max_input_tokens=policy.review_evidence_max_input_tokens,
-        review_investigation_evidence_max_tokens=(
-            policy.review_investigation_evidence_max_tokens
-        ),
-        silence_timeout_seconds=policy.silence_timeout_override_seconds,
-        silence_timeout_seconds_default=deployment.silence_timeout_seconds,
-        call_ceiling_seconds=policy.call_ceiling_override_seconds,
-        call_ceiling_seconds_default=deployment.call_ceiling_seconds,
-        max_attachments=policy.max_attachments,
-        max_message_chars=policy.max_message_chars,
-        max_template_inspection_uncompressed_bytes=(
-            policy.max_template_inspection_uncompressed_bytes
-        ),
-        max_template_placeholders=policy.max_template_placeholders,
-        max_attachments_hard_limit=AI_BUILDER_MAX_ATTACHMENTS_HARD_LIMIT,
-        max_message_chars_hard_limit=AI_BUILDER_MAX_MESSAGE_CHARS_HARD_LIMIT,
-        max_template_inspection_uncompressed_bytes_hard_limit=(
-            AI_BUILDER_TEMPLATE_INSPECTION_HARD_LIMIT_BYTES
-        ),
-        max_template_placeholders_hard_limit=(
-            AI_BUILDER_MAX_TEMPLATE_PLACEHOLDERS_HARD_LIMIT
-        ),
-        review_investigation_evidence_ceiling_tokens=(
-            AI_BUILDER_REVIEW_INVESTIGATION_EVIDENCE_CEILING_TOKENS
-        ),
-        max_template_archive_entries_per_file_hard_limit=MAX_TEMPLATE_ARCHIVE_ENTRIES,
-        max_template_uncompressed_bytes_per_file_hard_limit=(
-            MAX_TEMPLATE_UNCOMPRESSED_BYTES
-        ),
-        max_planning_state_payload_bytes_hard_limit=PLANNING_STATE_PAYLOAD_CAP_BYTES,
-        budget_token_hard_limit=AI_BUILDER_BUDGET_MAX_TOKENS,
     )
 
 
@@ -977,66 +915,6 @@ class SettingService:
                 "setting": "flow_rag_evidence_policy",
                 "changes": {
                     key: {"old": getattr(previous, key), "new": getattr(updated, key)}
-                    for key in patch
-                },
-            },
-        )
-        return updated
-
-    @validate_permissions(Permission.ADMIN)
-    async def get_ai_builder_budget_settings(self) -> AIBuilderBudgetSettingsPublic:
-        return _ai_builder_budget_public(await self.get_ai_builder_budget_policy())
-
-    async def get_ai_builder_budget_policy(self) -> AIBuilderBudgetPolicy:
-        """Resolve effective Builder settings for authenticated tenant services.
-
-        For the admin page and the limits endpoint: neither enforces the
-        deadlines, and the page must open to let an admin repair a conflicting
-        pair.
-        """
-
-        tenant = await self._get_tenant_for_flow_settings()
-        return resolve_ai_builder_budget_policy(
-            getattr(tenant, "flow_settings", None), check_timing_order=False
-        )
-
-    @validate_permissions(Permission.ADMIN)
-    async def update_ai_builder_budget_settings(
-        self,
-        payload: AIBuilderBudgetSettingsUpdate,
-    ) -> AIBuilderBudgetSettingsPublic:
-        patch = payload.model_dump(exclude_unset=True)
-        if not patch:
-            raise BadRequestException(
-                "At least one AI Builder setting must be provided."
-            )
-        change = await self._update_flow_settings(
-            lambda current: apply_ai_builder_budget_policy_patch(
-                current,
-                **patch,
-                remove_keys={key for key, value in patch.items() if value is None},
-            )
-        )
-        previous = _ai_builder_budget_public(
-            resolve_ai_builder_budget_policy(change.before, check_timing_order=False)
-        )
-        updated = _ai_builder_budget_public(
-            resolve_ai_builder_budget_policy(change.after, check_timing_order=False)
-        )
-        await self.audit_service.log_async(
-            tenant_id=self.user.tenant_id,
-            user=self.user,
-            action=ActionType.TENANT_SETTINGS_UPDATED,
-            entity_type=EntityType.TENANT_SETTINGS,
-            entity_id=self.user.tenant_id,
-            description="Updated AI Builder settings",
-            metadata={
-                "setting": "ai_builder_budget_settings",
-                "changes": {
-                    key: {
-                        "old": getattr(previous, key),
-                        "new": getattr(updated, key),
-                    }
                     for key in patch
                 },
             },

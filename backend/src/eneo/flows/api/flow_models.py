@@ -13,6 +13,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictInt,
+    StringConstraints,
     WithJsonSchema,
     computed_field,
     field_validator,
@@ -1072,7 +1073,10 @@ class FlowEditorAssistantChange(BaseModel):
 
 class FlowEditorNewStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    name: str = Field(min_length=1, max_length=200)
+    # A name of blanks would leave the step unnamed.
+    name: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+    ]
     configuration: FlowEditorStepPatch
     assistant: FlowAssistantUpdateRequest = Field(
         default_factory=FlowAssistantUpdateRequest

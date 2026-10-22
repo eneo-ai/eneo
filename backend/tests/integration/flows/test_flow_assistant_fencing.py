@@ -1,7 +1,6 @@
 """A step's assistant is part of its flow's draft, so writing it is a write to
 the draft: it advances `draft_revision` once, fenced on the caller's revision,
-in the transaction that writes the assistant. An apply locks the flow before it
-writes any assistant and advances the revision once for all of them.
+in the transaction that writes the assistant.
 
 The concurrency cases hold one transaction open while the other writer runs and
 wait until that writer is blocked on a lock before letting the first finish.
@@ -26,36 +25,18 @@ import sqlalchemy as sa
 from eneo.assistants.assistant_service import AssistantService
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.flow_tables import Flows, FlowTemplateAssets
-from eneo.flows.application.flow_authoring_command import (
-    FlowAuthoringCommandService,
-    TemplateAttachmentIntent,
-)
-from eneo.flows.application.flow_draft_materialization_executor import (
-    FlowDraftMaterializer,
-)
-from eneo.flows.application.flow_service import FlowService
+from eneo.database.tables.flow_tables import Flows
 from eneo.flows.domain.flow import FlowStep
-from eneo.flows.flow_resource_bindings import FlowResourceBindingSource
-from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 from eneo.main.exceptions import BadRequestException
 from eneo.prompts.api.prompt_models import PromptCreate
+from tests.integration.flows.flow_seed_support import (
+    Seeded,
+    assistant_prompt_text,
+    seed_flow_with_assistants,
+    step_rows,
+)
 from tests.integration.flows.test_flow_assistant_update_siblings import (
     _admin_token_and_space,
-)
-from tests.integration.flows.test_flow_authoring_edit_assistants import (
-    Seeded,
-    _apply_proposal,
-    _edit,
-    _keep,
-    _prompt,
-    _propose,
-    _seed,
-    _step_rows,
-)
-from tests.integration.flows.test_flow_template_attachment_persistence import (
-    _create_flow_and_file,
-    _template_changeset,
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -72,7 +53,7 @@ async def seeded(
     completion_model_factory,
     user_integration_factory,
 ) -> Seeded:
-    return await _seed(
+    return await seed_flow_with_assistants(
         db_container,
         client,
         admin_user,
@@ -228,7 +209,7 @@ async def test_an_assistant_update_behind_the_draft_is_refused_and_writes_nothin
     assert stale.json()["code"] == "stale_revision"
     assert stale.json()["context"]["expected_revision"] == editable.revision
     assert await _assistant_row(db_container, editable.assistant_id) == before
-    assert await _prompt(db_container, editable.assistant_id) == "Först."
+    assert await assistant_prompt_text(db_container, editable.assistant_id) == "Först."
     assert await _revision(db_container, editable.flow_id) == editable.revision + 1
 
 
@@ -264,7 +245,10 @@ async def test_an_assistant_update_of_a_published_flow_is_refused_without_advanc
 
     assert response.status_code == 400, response.text
     assert await _revision(db_container, editable.flow_id) == published.draft_revision
-    assert await _prompt(db_container, editable.assistant_id) == "Gör uppgiften."
+    assert (
+        await assistant_prompt_text(db_container, editable.assistant_id)
+        == "Gör uppgiften."
+    )
 
 
 async def test_creating_and_deleting_an_unused_assistant_leaves_the_revision(
@@ -284,74 +268,6 @@ async def test_creating_and_deleting_an_unused_assistant_leaves_the_revision(
     )
     assert deleted.status_code == 204, deleted.text
     assert await _revision(db_container, editable.flow_id) == editable.revision
-
-
-# --- The apply ---------------------------------------------------------------
-
-
-async def test_an_apply_writing_several_assistants_advances_the_revision_once(
-    db_container, seeded: Seeded
-) -> None:
-    calls = await _edit(
-        db_container,
-        seeded,
-        [
-            _keep(1, assistant_spec={"instructions": "Ny uppgift 1."}),
-            _keep(2, assistant_spec={"instructions": "Ny uppgift 2."}),
-            _keep(3),
-        ],
-    )
-
-    assert calls == {seeded.assistant_ids[0]: 1, seeded.assistant_ids[1]: 1}
-    assert await _revision(db_container, seeded.flow_id) == seeded.revision + 1
-
-
-async def test_an_assistant_edit_committed_after_the_apply_was_prepared_refuses_it(
-    db_container, seeded: Seeded
-) -> None:
-    """The plan was compiled and prepared against revision R; a colleague's
-    prompt edit commits before the apply reaches the flow. The apply is
-    refused before it writes anything, and the colleague's edit stays."""
-
-    proposal = await _propose(
-        db_container,
-        seeded,
-        [
-            _keep(1, assistant_spec={"instructions": "Planens uppgift 1."}),
-            _keep(2, assistant_spec={"instructions": "Planens uppgift 2."}),
-            {"kind": "add", "step": {"name": "Sist", "instructions": "Avsluta."}},
-            _keep(3),
-        ],
-    )
-    apply_prepared = FlowAuthoringCommandService.apply_prepared
-
-    async def colleague_edits_first(self: Any, **kwargs: Any) -> Any:
-        async with db_container() as container:
-            await container.flow_service().update_flow_assistant(
-                flow_id=seeded.flow_id,
-                assistant_id=seeded.assistant_ids[1],
-                update=_prompt_update("Kollegans uppgift 2."),
-            )
-        return await apply_prepared(self, **kwargs)
-
-    assistants_before = await _flow_assistant_ids(db_container, seeded.flow_id)
-    rows_before = await _step_rows(db_container, seeded)
-    with patch.object(
-        FlowAuthoringCommandService, "apply_prepared", colleague_edits_first
-    ):
-        with pytest.raises(BadRequestException) as refused:
-            await _apply_proposal(db_container, seeded, proposal)
-
-    assert refused.value.code == "stale_revision"
-    assert await _prompt(db_container, seeded.assistant_ids[0]) == "Gör uppgift 1."
-    assert await _prompt(db_container, seeded.assistant_ids[1]) == (
-        "Kollegans uppgift 2."
-    )
-    assert await _flow_assistant_ids(db_container, seeded.flow_id) == (
-        assistants_before
-    )
-    assert await _step_rows(db_container, seeded) == rows_before
-    assert await _revision(db_container, seeded.flow_id) == seeded.revision + 1
 
 
 # --- Two writers at once -----------------------------------------------------
@@ -420,8 +336,13 @@ async def test_of_two_concurrent_assistant_edits_of_one_flow_the_second_is_refus
     )
 
     assert _is_stale(outcome), outcome
-    assert await _prompt(db_container, seeded.assistant_ids[0]) == "Första."
-    assert await _prompt(db_container, seeded.assistant_ids[1]) == "Gör uppgift 2."
+    assert (
+        await assistant_prompt_text(db_container, seeded.assistant_ids[0]) == "Första."
+    )
+    assert (
+        await assistant_prompt_text(db_container, seeded.assistant_ids[1])
+        == "Gör uppgift 2."
+    )
     assert await _revision(db_container, seeded.flow_id) == seeded.revision + 1
 
 
@@ -469,133 +390,8 @@ async def test_an_assistant_edit_and_the_removal_of_its_step_do_not_deadlock(
 
     assert not isinstance(edited, BaseException), edited
     assert _is_stale(removed), removed
-    assert await _prompt(db_container, seeded.assistant_ids[2]) == (
+    assert await assistant_prompt_text(db_container, seeded.assistant_ids[2]) == (
         "Ändrad medan steget tas bort."
     )
-    assert len(await _step_rows(db_container, seeded)) == 3
+    assert len(await step_rows(db_container, seeded.flow_id)) == 3
     assert await _revision(db_container, seeded.flow_id) == seeded.revision + 1
-
-
-async def test_an_assistant_edit_during_an_apply_waits_for_it_and_is_refused(
-    db_container, seeded: Seeded
-) -> None:
-    """The apply has written the first of its two assistants when a colleague
-    edits that assistant. The apply holds the flow from before its first
-    write, so the edit waits, the apply completes with one increment, and the
-    edit is refused; an apply locking the flow only when it saves the steps
-    would wait for the edit's flow lock while the edit waits for its
-    assistant."""
-
-    proposal = await _propose(
-        db_container,
-        seeded,
-        [
-            _keep(1, assistant_spec={"instructions": "Planens uppgift 1."}),
-            _keep(2, assistant_spec={"instructions": "Planens uppgift 2."}),
-            _keep(3),
-        ],
-    )
-    written = asyncio.Event()
-    proceed = asyncio.Event()
-    update_reserved = FlowService.update_reserved_flow_assistant
-
-    async def hold_after_first_apply_write(self: FlowService, **kwargs: Any) -> Any:
-        result = await update_reserved(self, **kwargs)
-        if kwargs.get("classification_judged_by_flow_update") and not written.is_set():
-            written.set()
-            await proceed.wait()
-        return result
-
-    with patch.object(
-        FlowService, "update_reserved_flow_assistant", hold_after_first_apply_write
-    ):
-        applying = asyncio.create_task(_apply_proposal(db_container, seeded, proposal))
-        await asyncio.wait_for(written.wait(), timeout=_TIMEOUT)
-        colleague, pid = await _second_writer(
-            db_container,
-            lambda container: container.flow_service().update_flow_assistant(
-                flow_id=seeded.flow_id,
-                assistant_id=seeded.assistant_ids[0],
-                update=_prompt_update("Kollegans uppgift 1."),
-            ),
-        )
-        await _until_waiting_on_a_lock(db_container, pid)
-        proceed.set()
-        applied, edited = await asyncio.wait_for(
-            asyncio.gather(applying, colleague, return_exceptions=True),
-            timeout=_TIMEOUT,
-        )
-
-    assert applied == {seeded.assistant_ids[0]: 1, seeded.assistant_ids[1]: 1}
-    assert _is_stale(edited), edited
-    assert await _prompt(db_container, seeded.assistant_ids[0]) == "Planens uppgift 1."
-    assert await _prompt(db_container, seeded.assistant_ids[1]) == "Planens uppgift 2."
-    assert await _revision(db_container, seeded.flow_id) == seeded.revision + 1
-
-
-async def test_an_apply_reads_its_template_before_it_locks_the_flow_and_a_stale_one_keeps_no_asset(
-    db_container,
-) -> None:
-    """A colleague's edit holds the flow row while an apply that attaches a
-    template runs. The apply reads the template's bytes from object storage
-    before it locks the flow, so that remote read neither waits on the lock nor
-    holds it; once the colleague commits, the apply is refused and the
-    template asset it created is rolled back with it."""
-
-    async with db_container() as setup:
-        _user, space, flow, file = await _create_flow_and_file(
-            setup, placeholder="case_id"
-        )
-        space_id = space.id
-    promoted = asyncio.Event()
-    create_asset = FlowTemplateAssetService.create_from_existing_attached_file
-
-    async def promote(self: FlowTemplateAssetService, **kwargs: Any) -> Any:
-        asset = await create_asset(self, **kwargs)
-        promoted.set()
-        return asset
-
-    def apply(container: Any) -> Awaitable[object]:
-        return FlowDraftMaterializer().execute(
-            changeset=_template_changeset(),
-            flow_service=container.flow_service(),
-            space_id=space_id,
-            flow_id=flow.id,
-            expected_revision=flow.draft_revision,
-            binding_source=FlowResourceBindingSource.AI_BUILDER,
-            template_attachment_intent=TemplateAttachmentIntent(
-                file_id=file.id, terminal_plan_step_ref="step_b"
-            ),
-            template_asset_service=container.flow_template_asset_service(),
-        )
-
-    with patch.object(
-        FlowTemplateAssetService, "create_from_existing_attached_file", promote
-    ):
-        async with db_container() as colleague:
-            await colleague.flow_service().update_flow(
-                flow_id=flow.id, description="Kollegans beskrivning."
-            )
-            applying, pid = await _second_writer(db_container, apply)
-            await asyncio.wait(
-                {asyncio.ensure_future(promoted.wait()), applying},
-                timeout=_TIMEOUT,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-            assert promoted.is_set(), (
-                applying.exception() if applying.done() else "blocked before it"
-            )
-            await _until_waiting_on_a_lock(db_container, pid)
-        [outcome] = await asyncio.wait_for(
-            asyncio.gather(applying, return_exceptions=True), timeout=_TIMEOUT
-        )
-
-    assert _is_stale(outcome), outcome
-    async with db_container() as container:
-        assets = await container.session().scalar(
-            sa.select(sa.func.count(FlowTemplateAssets.id)).where(
-                FlowTemplateAssets.flow_id == flow.id
-            )
-        )
-    assert assets == 0
-    assert await _revision(db_container, flow.id) == flow.draft_revision + 1

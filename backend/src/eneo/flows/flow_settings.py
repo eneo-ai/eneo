@@ -9,9 +9,6 @@ from eneo.flows.domain.mapped_execution_policy import (
 from eneo.flows.domain.rag_evidence_policy import (
     validate_flow_rag_evidence_policy_object,
 )
-from eneo.flows.flow_ai_builder_budget_settings import (
-    validate_ai_builder_budget_settings_object,
-)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_document_limits import (
@@ -40,7 +37,6 @@ FLOW_SETTINGS_DOCUMENT_RENDER_LIMITS_KEY: Final[str] = "document_render_limits"
 FLOW_SETTINGS_RUNTIME_POLICY_KEY: Final[str] = "runtime_policy"
 FLOW_SETTINGS_EVIDENCE_POLICY_KEY: Final[str] = "evidence_policy"
 FLOW_SETTINGS_RETENTION_POLICY_KEY: Final[str] = "retention_policy"
-FLOW_SETTINGS_AI_BUILDER_KEY: Final[str] = "ai_builder"
 FLOW_SETTINGS_MAPPED_EXECUTION_KEY: Final[str] = "mapped_execution"
 FLOW_SETTINGS_RAG_EVIDENCE_KEY: Final[str] = "rag_evidence"
 
@@ -51,7 +47,6 @@ FLOW_SETTINGS_TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset(
         FLOW_SETTINGS_RUNTIME_POLICY_KEY,
         FLOW_SETTINGS_EVIDENCE_POLICY_KEY,
         FLOW_SETTINGS_RETENTION_POLICY_KEY,
-        FLOW_SETTINGS_AI_BUILDER_KEY,
         FLOW_SETTINGS_MAPPED_EXECUTION_KEY,
         FLOW_SETTINGS_RAG_EVIDENCE_KEY,
     }
@@ -64,6 +59,10 @@ _RETIRED_KEYS_BY_SECTION: Final[tuple[tuple[str, frozenset[str]], ...]] = (
     (FLOW_SETTINGS_EVIDENCE_POLICY_KEY, RETIRED_FLOW_EVIDENCE_POLICY_KEYS),
 )
 
+# Sections whose owner is gone. Stored rows may still carry them: they are
+# dropped when a row is read and refused, as unknown, when settings are written.
+_RETIRED_TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset({"ai_builder"})
+
 # Bounded by distinct unknown key names, not tenants, to avoid log spam from
 # historical JSONB rows without hiding newly observed keys.
 _warned_unknown_top_level_keys: set[str] = set()
@@ -74,7 +73,9 @@ def normalize_flow_settings_object(value: object | None) -> dict[str, Any]:
         return {}
 
     settings = _copy_string_key_mapping(cast(Mapping[object, object], value))
-    unknown_fields = set(settings) - FLOW_SETTINGS_TOP_LEVEL_KEYS
+    unknown_fields = (
+        set(settings) - FLOW_SETTINGS_TOP_LEVEL_KEYS - _RETIRED_TOP_LEVEL_KEYS
+    )
     for key in sorted(unknown_fields):
         if key in _warned_unknown_top_level_keys:
             continue
@@ -148,12 +149,6 @@ def validate_flow_settings_object(value: object | None) -> dict[str, Any]:
     if FLOW_SETTINGS_DOCUMENT_RENDER_LIMITS_KEY in settings:
         validate_flow_document_render_limits_object(
             settings[FLOW_SETTINGS_DOCUMENT_RENDER_LIMITS_KEY]
-        )
-    if FLOW_SETTINGS_AI_BUILDER_KEY in settings:
-        _translate_value_error(
-            lambda: validate_ai_builder_budget_settings_object(
-                settings[FLOW_SETTINGS_AI_BUILDER_KEY]
-            )
         )
     if FLOW_SETTINGS_RETENTION_POLICY_KEY in settings:
         _translate_value_error(

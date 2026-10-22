@@ -195,9 +195,8 @@ ticket to its browser when Eneo accepts the module's origin, or relay the
 socket itself; see
 [Show live text while recording](/guides/flows/integrating-flows#show-live-text-while-recording).
 
-Other resource routes refuse the pair: the Flow AI Builder routes
-(`/api/v1/flows/ai-builder/`), Flow package export
-(`/api/v1/flows/{id}/package-exports/`), and every resource route outside
+Other resource routes refuse the pair: Flow package export
+(`/api/v1/flows/{id}/package-exports/`) and every resource route outside
 `/api/v1/flows/`. The broker's own routes under `/api/v1/module-auth/` follow
 the handoff above, and two of them take this same pair: token refresh
 (`POST /api/v1/module-auth/{module_key}/token/refresh/`) and session validation

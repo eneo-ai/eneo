@@ -13,8 +13,6 @@ import pytest
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_service import FileService
-from eneo.flows.ai_builder.ai_builder_new_step_compiler import compile_new_step_draft
-from eneo.flows.ai_builder.ai_builder_new_step_models import NewStepDraft
 from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
 from eneo.flows.domain.flow import (
     FlowRun,
@@ -35,7 +33,6 @@ from eneo.flows.flow_run_provenance import (
     group_resolved_input_edges,
 )
 from eneo.flows.flow_validators import validate_steps
-from eneo.flows.flow_variable_definitions import FlowRunInput
 from eneo.flows.runtime import step_input_resolution
 from eneo.flows.runtime.http_orchestration import FlowOutsideInputResolution
 from eneo.flows.runtime.step_definition_parser import parse_runtime_steps
@@ -550,56 +547,6 @@ def _depth_four_runtime_steps(
                 },
             ]
         }
-    )
-
-
-def test_compiler_emits_publishable_depth_four_contract() -> None:
-    producer = compile_new_step_draft(
-        run_input=FlowRunInput(),
-        step_draft=NewStepDraft.model_validate(
-            {
-                "name": "Group source material",
-                "instructions": "Group the source material.",
-                "output_type": "json",
-                "output_fields": [
-                    {
-                        "name": "documents",
-                        "field_type": "array",
-                        "description": "Source documents.",
-                        "item_fields": [
-                            {
-                                "name": "group",
-                                "field_type": "object",
-                                "description": "A source group.",
-                                "fields": [
-                                    {
-                                        "name": "entries",
-                                        "field_type": "array",
-                                        "description": "Grouped entries.",
-                                        "item_fields": [
-                                            {
-                                                "name": "leaf",
-                                                "field_type": "string",
-                                                "description": "Captured detail.",
-                                            }
-                                        ],
-                                    }
-                                ],
-                            }
-                        ],
-                    }
-                ],
-            }
-        ),
-        plan_step_ref="step_1",
-        prior_steps=[],
-    )
-
-    assert producer.output_contract == _depth_four_output_contract()
-    runtime_steps = _depth_four_runtime_steps(producer.output_contract)
-    validate_steps(
-        [_publish_step(step) for step in runtime_steps],
-        require_complete_template_fill_config=True,
     )
 
 

@@ -1,6 +1,5 @@
 import json
 import logging
-import math
 import os
 import sys
 from datetime import datetime, timezone
@@ -18,7 +17,6 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from eneo.main.ai_builder_timing_order import ai_builder_timing_order_violation
 from eneo.main.removed_env import UPGRADE_GUIDE_URL, check_removed_variables
 from eneo.object_content.configuration import DEFAULT_FILE_UPLOAD_LIMIT_BYTES
 
@@ -249,19 +247,8 @@ _DEVELOPMENT_ENVIRONMENTS = frozenset({"development", "local", "dev"})
 _SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = _DEVELOPMENT_ENVIRONMENTS | {"test"}
 
 
-# The share of the room after a request's required input that AI Builder
-# packing keeps free for the answer (the rest carries optional input). It is
-# a dimensionless allocation policy: the model's own limits decide the window
-# and the ceiling, and this value only splits what is left. Even split when
-# nothing is known about the answer.
 # A flow's longest recording, as stored and as a deployment ceiling: whole seconds within a day.
 FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS = 24 * 60 * 60
-AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT = 0.5
-# The whole of one AI Builder provider call, whatever it keeps producing; the
-# silence deadline detects a stalled stream, this bounds a runaway one and the
-# wait of a call that may think for its first output.
-# Independent of the send-lock lease, which the turn renews while it works.
-AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT = 1800.0
 
 
 class Settings(BaseSettings):
@@ -479,26 +466,9 @@ class Settings(BaseSettings):
     flow_transcription_include_speaker_review: bool = False
 
     # Deployment fallback for the per-mapped-step model-call ceiling. Applies when
-    # an organization has never configured its own value; None disables mapped
-    # authoring platform-wide unless an organization opts in explicitly.
+    # an organization has never configured its own value; None sets no ceiling
+    # beyond each mapped step's own file or item bound.
     flow_mapped_step_max_provider_calls_default: int | None = 1000
-    ai_builder_conversation_safety_buffer_tokens: int = 2_000
-    ai_builder_minimum_conversation_budget_tokens: int = 4_000
-    ai_builder_answer_reserve_share: float = AI_BUILDER_ANSWER_RESERVE_SHARE_DEFAULT
-    # Provider-call deadlines bound *silence*: the longest wait for the
-    # provider's next yielded chunk once the model has produced output, not
-    # the whole answer, so a model that keeps yielding is not cut off by this
-    # deadline while a stalled stream is. A model that does not stream its
-    # reasoning is silent while it thinks, so before its first output a call
-    # that may think (it sends any effort but "none", or no effort on a route
-    # that takes one) waits up to the whole-call ceiling instead. The whole
-    # call is bounded by AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS, policy of
-    # its own. Every Builder call, classification included, uses these two.
-    ai_builder_proposal_timeout_seconds: float = 300.0
-    ai_builder_provider_call_ceiling_seconds: float = (
-        AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS_DEFAULT
-    )
-    ai_builder_send_lock_lease_seconds: int = 900
 
     crawl_heartbeat_interval_seconds: int = (
         300  # Heartbeat every 5 minutes (time-based, not count-based)
@@ -1032,50 +1002,6 @@ class Settings(BaseSettings):
                     getattr(self, name),
                 )
                 sys.exit(1)
-
-        silence_settings = {
-            "AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS": (
-                self.ai_builder_proposal_timeout_seconds
-            ),
-            "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS": (
-                self.ai_builder_provider_call_ceiling_seconds
-            ),
-        }
-        for name, value in silence_settings.items():
-            if not (math.isfinite(value) and value > 0):
-                logging.error(
-                    "%s must be a finite number of seconds greater than zero. "
-                    "Current value: %s",
-                    name,
-                    value,
-                )
-                sys.exit(1)
-        order_violation = ai_builder_timing_order_violation(
-            silence_seconds=self.ai_builder_proposal_timeout_seconds,
-            call_ceiling_seconds=self.ai_builder_provider_call_ceiling_seconds,
-        )
-        if order_violation is not None:
-            logging.error(
-                "AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS (%s) must not be above "
-                "AI_BUILDER_PROVIDER_CALL_CEILING_SECONDS (%s).",
-                order_violation.value,
-                order_violation.bound,
-            )
-            sys.exit(1)
-
-        if not (0 < self.ai_builder_answer_reserve_share < 1):
-            logging.error(
-                "AI_BUILDER_ANSWER_RESERVE_SHARE must be within (0, 1). Current value: %s",
-                self.ai_builder_answer_reserve_share,
-            )
-            sys.exit(1)
-
-        if self.ai_builder_proposal_timeout_seconds <= 0:
-            logging.error(
-                "AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
-                self.ai_builder_proposal_timeout_seconds,
-            )
-            sys.exit(1)
 
         if (
             self.flow_mapped_step_max_provider_calls_default is not None

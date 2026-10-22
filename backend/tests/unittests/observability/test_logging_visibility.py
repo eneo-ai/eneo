@@ -14,17 +14,8 @@ import logging
 
 import pytest
 
-from eneo.flows.ai_builder import (
-    ai_builder_conversation_compaction,
-    ai_builder_create_compiler,
-    ai_builder_schema_evidence,
-    ai_builder_source_reader_contracts,
-)
-from eneo.flows.ai_builder.ai_builder_assembly import create as assembly_create
-from eneo.flows.ai_builder.ai_builder_assembly import lower as assembly_lower
-from eneo.flows.ai_builder.ai_builder_assembly.document_report import (
-    lowering as document_report_lowering,
-)
+from eneo.flows import flow_document_limits, flow_runtime_policy, flow_settings
+from eneo.flows.runtime import docx_template_runtime, remote_transcription
 from eneo.main.logging import OTELJSONFormatter, SimpleLogger
 
 
@@ -44,16 +35,14 @@ def test_import_leaves_pre_registered_loggers_at_their_own_level(name: str):
 @pytest.mark.parametrize(
     "module",
     [
-        ai_builder_conversation_compaction,
-        ai_builder_create_compiler,
-        ai_builder_schema_evidence,
-        ai_builder_source_reader_contracts,
-        assembly_create,
-        assembly_lower,
-        document_report_lowering,
+        flow_document_limits,
+        flow_runtime_policy,
+        flow_settings,
+        docx_template_runtime,
+        remote_transcription,
     ],
 )
-def test_ai_builder_module_records_reach_the_application_handler(module):
+def test_flow_module_records_reach_the_application_handler(module):
     logger = module.logger
     assert isinstance(logger, SimpleLogger)
     handlers = [h for h in logger.handlers if isinstance(h, logging.StreamHandler)]

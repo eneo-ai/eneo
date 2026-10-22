@@ -22,7 +22,7 @@ with_user_container = get_container(
 @router.get(
     "/",
     response_model=Limits,
-    description="Get configured upload and AI Builder input limits.",
+    description="Get configured upload limits.",
     responses=responses.get_responses([]),
 )
 @endpoint_access(

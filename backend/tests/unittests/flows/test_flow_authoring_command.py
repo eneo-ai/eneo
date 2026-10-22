@@ -5,7 +5,6 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from eneo.flows.ai_builder.ai_builder_proposal_telemetry import ChangesetCountSummary
 from eneo.flows.application.flow_authoring_command import (
     CreateFlowAuthoringCommand,
     EditFlowAuthoringCommand,
@@ -244,13 +243,14 @@ async def test_prepare_counts_a_removed_step_without_claiming_its_shared_assista
 
     # The removed step's assistant stays because step 1 still uses it, so no
     # count may claim an assistant deletion.
-    assert ChangesetCountSummary.from_preview(prepared.preview).model_dump() == {
-        "steps_created": 0,
-        "steps_updated": 0,
-        "steps_removed": 1,
-        "assistants_to_create": 0,
-        "assistants_to_update": 0,
-    }
+    preview = prepared.preview
+    assert (
+        preview.steps_created,
+        preview.steps_updated,
+        preview.steps_removed,
+        preview.assistants_to_create,
+        preview.assistants_to_update,
+    ) == (0, 0, 1, 0, 0)
 
 
 @pytest.mark.anyio

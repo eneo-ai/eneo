@@ -22,7 +22,6 @@ class DeletedCounts(TypedDict):
     questions: int
     app_runs: int
     sessions: int
-    builder_client_errors: int
     total: int
 
 
@@ -82,7 +81,6 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             "questions": 0,
             "app_runs": 0,
             "sessions": 0,
-            "builder_client_errors": 0,
             "total": 0,
         },
         "errors": [],
@@ -144,21 +142,6 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
                 results["deleted"]["sessions"] = sessions_count
                 if sessions_count > 0:
                     logger.info(f"Deleted {sessions_count} orphaned sessions")
-
-            while True:
-                client_errors_batch = await _run_cleanup_step(
-                    session=session,
-                    results=results,
-                    error_prefix="Failed to delete expired Builder client errors",
-                    action=(
-                        lambda: retention_service.delete_expired_builder_client_errors_batch(
-                            now=start_time,
-                        )
-                    ),
-                )
-                if not client_errors_batch:
-                    break
-                results["deleted"]["builder_client_errors"] += client_errors_batch
         finally:
             # Later worker calls must not inherit this job's scoped session.
             container.session.reset_override()
@@ -172,7 +155,6 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         results["deleted"]["questions"]
         + results["deleted"]["app_runs"]
         + results["deleted"]["sessions"]
-        + results["deleted"]["builder_client_errors"]
     )
 
     if results["success"]:
@@ -181,8 +163,7 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
             f"deleted {results['deleted']['total']} records in {duration:.2f}s "
             f"(questions: {results['deleted']['questions']}, "
             f"app_runs: {results['deleted']['app_runs']}, "
-            f"sessions: {results['deleted']['sessions']}, "
-            f"builder_client_errors: {results['deleted']['builder_client_errors']})"
+            f"sessions: {results['deleted']['sessions']})"
         )
     else:
         logger.warning(

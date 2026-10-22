@@ -14,7 +14,6 @@ _LAZY_EXPORTS = {
         "eneo.flows.infrastructure.flow_version_repo",
         "FlowVersionRepository",
     ),
-    "ai_builder": ("eneo.flows.ai_builder", None),
     "flow_runtime_file_service": ("eneo.flows.flow_runtime_file_service", None),
     "flow_input_limits": ("eneo.flows.flow_input_limits", None),
     "FlowVariableResolver": (
@@ -28,7 +27,7 @@ _LAZY_EXPORTS = {
 }
 
 if TYPE_CHECKING:
-    from eneo.flows import ai_builder, flow_input_limits, flow_runtime_file_service
+    from eneo.flows import flow_input_limits, flow_runtime_file_service
     from eneo.flows.application.flow_run_service import FlowRunService
     from eneo.flows.application.flow_service import FlowService
     from eneo.flows.execution_backend import FlowExecutionBackend
@@ -48,7 +47,6 @@ __all__ = [
     "FlowVersionRepository",
     "FlowService",
     "FlowVariableResolver",
-    "ai_builder",
     "flow_runtime_file_service",
     "flow_input_limits",
     "iter_template_expressions",

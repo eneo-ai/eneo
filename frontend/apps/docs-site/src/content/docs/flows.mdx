@@ -7,8 +7,9 @@ A Flow is a multi-step AI pipeline you build inside a space. You design it as a 
 <Callout type="info">
   If you want to build on Flows from your own application, read this page first
   and then continue with the{" "}
-  <a href="/guides/flows">Eneo Flows API consumer guide</a>. If you want to
-  draft a Flow conversationally, read <a href="/docs/ai-builder">AI Builder</a>.
+  <a href="/guides/flows">Eneo Flows API consumer guide</a>. A Flow can also be
+  drafted in an ordinary assistant chat, which edits the Flow through the flow
+  tools and the same rules as the editor.
 </Callout>
 
 ![High-level Flows lifecycle diagram showing user-principal-only authoring, publishing to a versioned definition, and runtime execution with outputs, artifacts, and evidence](/diagrams/flows-overview.svg)
@@ -154,7 +155,7 @@ A step whose `input_source` is `tool` names one MCP tool in `input_config.tool`:
 - While the organization has security classifications on, the editor shows, once a tool is chosen, the security class of its server and the rule it sets: the server must have at least the space's class, and a value from an earlier step is sent only if the class of that step's result is not higher than the server's; otherwise the flow cannot be published. For a server without a class it says that the flow cannot be published while the space has a class or while an argument reads an earlier step whose result has a class.
 - Argument values are stored and returned as written and are not treated as secrets. Do not put a credential in an argument; the MCP server's credential is stored with the server.
 - Such a step reads `text` or `json`, takes no uploaded files and cannot use `template_fill`.
-- Publishing requires each reference to name one of these: an earlier step's text (`step_N.output.text`, or the step's name alone), its status, its error message or a field of its declared contract, a declared run-form field, or a runtime variable. A step's name with a path after it (`{{Hämta.output.text}}`) is refused, because a run binds the name to the step's text only. Publishing does not judge whether a runtime variable that depends on the run's data (a transcript, an upload) has a value in a run. It also refuses a step that gives no value for an argument the tool's approved input schema names in its top-level `required`, unless the schema is of JSON Schema draft 3, 4, 6 or 7 and has a top-level `$ref`, which in those drafts stands for the whole schema, so a run does not read that `required`. It refuses an argument, fixed or a reference, whose name the schema refuses whatever its value: the schema's top-level `additionalProperties` is `false`, it has no top-level `patternProperties`, and its top-level `properties` does not name the argument (with the same exception for such a `$ref`). It refuses a fixed value (not a reference) that does not fit what the schema's top-level `properties` declares for that argument, with the same exception for such a `$ref`. Publishing checks fixed properties in a child process with a hard time limit, including regular expressions. If that check times out, cannot evaluate the property schema, or cannot run on the host, publishing leaves the value to the run's check. A value bound to a reference, and every other rule of the schema, are checked when the step runs. It also asks whether the instance and the space allow the tool in the flow's space, and stores the tool's name and the fingerprint of its approved input schema in the published version. The instance does not allow a tool whose server takes a credential (a bearer token, an API key, or a user name or password in the address) at a plain `http` address other than `localhost`, `127.0.0.1` or `[::1]`: it is refused as `server_credential_needs_https` at publish, in the editor's tool list, by the AI Builder and when a run asks, so the credential is never sent; a run refuses a call to such a loopback address later, through the destination policy, as `typed_io_tool_destination_blocked`. The instance administrator registers the server's `https` address, without a user name or password in it; see [MCP servers](/guides/mcp-servers#authentication).
+- Publishing requires each reference to name one of these: an earlier step's text (`step_N.output.text`, or the step's name alone), its status, its error message or a field of its declared contract, a declared run-form field, or a runtime variable. A step's name with a path after it (`{{Hämta.output.text}}`) is refused, because a run binds the name to the step's text only. Publishing does not judge whether a runtime variable that depends on the run's data (a transcript, an upload) has a value in a run. It also refuses a step that gives no value for an argument the tool's approved input schema names in its top-level `required`, unless the schema is of JSON Schema draft 3, 4, 6 or 7 and has a top-level `$ref`, which in those drafts stands for the whole schema, so a run does not read that `required`. It refuses an argument, fixed or a reference, whose name the schema refuses whatever its value: the schema's top-level `additionalProperties` is `false`, it has no top-level `patternProperties`, and its top-level `properties` does not name the argument (with the same exception for such a `$ref`). It refuses a fixed value (not a reference) that does not fit what the schema's top-level `properties` declares for that argument, with the same exception for such a `$ref`. Publishing checks fixed properties in a child process with a hard time limit, including regular expressions. If that check times out, cannot evaluate the property schema, or cannot run on the host, publishing leaves the value to the run's check. A value bound to a reference, and every other rule of the schema, are checked when the step runs. It also asks whether the instance and the space allow the tool in the flow's space, and stores the tool's name and the fingerprint of its approved input schema in the published version. The instance does not allow a tool whose server takes a credential (a bearer token, an API key, or a user name or password in the address) at a plain `http` address other than `localhost`, `127.0.0.1` or `[::1]`: it is refused as `server_credential_needs_https` at publish, in the editor's tool list and when a run asks, so the credential is never sent; a run refuses a call to such a loopback address later, through the destination policy, as `typed_io_tool_destination_blocked`. The instance administrator registers the server's `https` address, without a user name or password in it; see [MCP servers](/guides/mcp-servers#authentication).
 
 At run time a step with `tool` calls the pinned tool once per step attempt, with the MCP server's stored credential, and the answer becomes the step's input: for `input_type` `json` the structured content, or one text block that is a JSON object or array; for `text` the text blocks, or the structured content as JSON text. An answer with a number JSON does not have (NaN, an infinity), with the character U+0000, or with a block that is not text, is refused. The tool must belong to a general MCP server that the flow's space has activated, be switched on, and have an approved definition. The flow calls the tool once per step run; a tool that changes something changes it again when the run is started again, and Eneo does not prevent a repeated change. When a run fails at a step at or after a tool step, or its dispatch fails after it has completed one (also one it took over from the run a retry started from), its error has `retryable` false; for a code that is retryable otherwise, `error.details.tool_call_possible` is true.
 
@@ -256,24 +257,9 @@ is one self-contained document:
   `$dynamicAnchor` such as `#value`. A pointer into other content, such as
   `default` or `examples`, is not a schema and is refused.
 
-Saving, publishing, importing, and the AI Builder reject a contract that breaks
+Saving, publishing and importing reject a contract that breaks
 these rules. The schema error names the step and the JSON pointer of the
 keyword.
-
-A JSON Schema you paste or attach for the AI Builder may name draft 6, 7, or
-2019-09 in a top-level `$schema`. It becomes a 2020-12 contract, with that
-`$schema` dropped, only if every keyword in it is one of these, which all three
-drafts read as 2020-12 does: `type`, `properties`, `required`, `enum`, `const`,
-`items` with one schema, `additionalProperties`, `patternProperties`,
-`propertyNames`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`,
-`multipleOf`, `minLength`, `maxLength`, `pattern`, `format`, `minItems`,
-`maxItems`, `uniqueItems`, `minProperties`, `maxProperties`, `allOf`, `anyOf`,
-`oneOf`, `not`, `if`, `then`, `else` (not in draft 6), `title`, `description`,
-`default`, `examples`, `readOnly`, and `writeOnly`. A schema with anything else,
-such as `$id`, `$ref`, `definitions`, `$defs`, `dependencies`, or `contains`,
-and any draft 4 or draft 3 schema, is not converted, and the Builder does not
-use it as a declared schema. A 2020-12 schema, or one without `$schema`, is
-checked by the rules above as it is.
 
 A contract that was saved before these rules and that a later save leaves
 unchanged, compared as JSON, does not stop that save, so a flow can still be
@@ -343,7 +329,7 @@ runtime input names, earlier steps, and their output contracts:
   body template. The same places are checked: if the edit removes the step, or
   moves it to where the reader cannot read it (after the reader; an HTTP
   delivery may also read its own step's result), the edit is refused with
-  `invalid_existing_step_ref` and nothing is written. A read that was already
+  `flow_step_read_lost_producer` and nothing is written. A read that was already
   invalid stays editable while it stays invalid; if the edit would make it name
   a step the author never chose, the edit is refused with the same code.
   In a template the alias is exactly `step_N` (ASCII digits, no leading zero);
@@ -351,8 +337,8 @@ runtime input names, earlier steps, and their output contracts:
   read as any decimal numeral, so `step_02` is
   step 2; when its step moves, the edit writes it back as `step_N`, and it is
   checked like any other read. Reads in a step's prompt (instructions) are
-  renumbered too, but only the AI Builder checks them, when it validates a
-  proposal. Inactive configuration, such as a body template with mode `none`,
+  renumbered too, and publishing refuses a prompt read that names no earlier
+  step, declared field or runtime variable. Inactive configuration, such as a body template with mode `none`,
   and text that only looks like a reference (a metadata key of a pass-through
   step's output configuration) stay as saved. `föregående_steg` and `previous_step` mean the step
   before and keep meaning position.
@@ -484,7 +470,7 @@ cannot shrink or fit within its remaining aggregate limits stops with
 
 ### `compose_text`
 
-`compose_text` assembles final text from resolved input bindings without calling an LLM, RAG retrieval, or MCP tools. AI Builder uses it for source-section document reports after semantic steps have already produced the section body, source label, source file id, and optional overview fields.
+`compose_text` assembles final text from resolved input bindings without calling an LLM, RAG retrieval, or MCP tools, for example a source-section document report after semantic steps have already produced the section body, source label, source file id, and optional overview fields.
 
 Current validation rules are strict:
 
@@ -550,7 +536,6 @@ it with `typed_io_contract_violation`. Copying does not remove fields to make
 the value fit.
 
 The editor offers this mode for JSON material and selects JSON as its output.
-The AI Builder can preserve a saved copy step but does not propose the mode.
 Deploy the database migration and a runtime that understands `copy_input` before
 saving or running such steps. Rolling back requires replacing or removing copy
 steps from drafts first; already published copy steps also need a compatible
@@ -576,7 +561,7 @@ Current validation rules:
 
 - `output_type` must be `docx`
 - the step must point at a valid template asset or template file configuration before the flow can be published successfully
-- a placeholder bound to a structured field of an earlier step must read a required field of one type: the field's `type` is exactly one of `string`, `number`, `integer` or `boolean`, and the step's result and every object above the field have `type: object` and list the next key in `properties` and `required`. Every other keyword (`enum`, `minLength`, `pattern`, `allOf`, `anyOf`) is allowed, because it can only narrow a node that already has one type. A type list such as `["string", "null"]`, a missing `type` or a `$ref` on that path is refused at publish with a message naming the placeholder and the field. The Builder narrows a type list of one type plus `null` and adds the key to `required` itself, but only when the whole output contract of that step is plain: every node in it carries nothing beyond `type`, `properties`, `required`, `additionalProperties`, `items` and annotations (`title`, `description`, `examples`, `default`, `$comment`). One `enum`, `const`, `allOf`, `$ref` or constraint anywhere in the contract, or a closed object (`additionalProperties: false`) that requires a key it does not declare, means nothing in it is edited, because an edit could leave a schema no value satisfies, and the plan is sent back instead. The Builder also validates a sample instance (text as an empty string, numbers as 0, arrays as `[]`, every required key filled, from `additionalProperties` when only that types it) against the edited contract with the same draft 2020-12 validator the run uses, and keeps the edit only if it passes. The fill step treats an empty string as a deliberate omission and stops the run on `null` or on a key the step did not write, so declare the field required with one type. A `string` field takes an empty string when there is nothing to say only if it accepts one (a `minLength` of 1, an `enum` or a `pattern` that excludes it means its step gives a valid value instead). A `number`, `integer` or `boolean` field has no empty value: its step always gives a valid value, and a deliberately blank template binding is the way to leave the placeholder empty
+- a placeholder bound to a structured field of an earlier step must read a required field of one type: the field's `type` is exactly one of `string`, `number`, `integer` or `boolean`, and the step's result and every object above the field have `type: object` and list the next key in `properties` and `required`. Every other keyword (`enum`, `minLength`, `pattern`, `allOf`, `anyOf`) is allowed, because it can only narrow a node that already has one type. A type list such as `["string", "null"]`, a missing `type` or a `$ref` on that path is refused at publish with a message naming the placeholder and the field. The fill step treats an empty string as a deliberate omission and stops the run on `null` or on a key the step did not write, so declare the field required with one type. A `string` field takes an empty string when there is nothing to say only if it accepts one (a `minLength` of 1, an `enum` or a `pattern` that excludes it means its step gives a valid value instead). A `number`, `integer` or `boolean` field has no empty value: its step always gives a valid value, and a deliberately blank template binding is the way to leave the placeholder empty
 
 Use this when a later step should produce a deterministic DOCX document rather than free-form text.
 
@@ -692,7 +677,7 @@ When a save is refused for its classification, the response names the step, the 
 
 Flow input may use HTTP GET, or the answer of one MCP tool through
 `input_source` `tool`. HTTP POST input, and MCP servers or tools on a step's
-assistant, are not supported in Flow authoring, AI Builder, published runtime
+assistant, are not supported in Flow authoring, published runtime
 definitions, or Flow packages. Standalone assistants and conversations retain their separately owned
 MCP behavior.
 
@@ -716,7 +701,7 @@ fails the run without a sixth POST.
 Current authoring policy is intentionally narrow:
 
 - drafts are user-principal-owned
-- AI Builder requires a user principal
+- the assistant chat that edits a flow acts as the person in it
 - service keys are not supported for draft editing
 - tenant admins and space owners can override draft ownership according to the current authoring rules
 
@@ -744,7 +729,7 @@ That split is deliberate. A service key is a **runtime principal**, not a draft 
 
 ### Core rules
 
-- **Drafts are user-principal-owned.** Draft create, update, and delete, publish/unpublish, template management, flow-assistant authoring, and AI Builder require a user principal. Reading a draft additionally allows an admin service key whose scope covers the flow.
+- **Drafts are user-principal-owned.** Draft create, update, and delete, publish/unpublish, template management, flow-assistant authoring, and the flow authoring chat require a user principal. Reading a draft additionally allows an admin service key whose scope covers the flow.
 - **Published runtime is broader.** Published flows can be executed by a user principal or a service key, but runtime visibility still depends on who owns the run and who is a trusted operator.
 - **Own-run isolation matters.** Service keys are always own-run-only. They do not become cross-run space operators, even if the key is scoped to a space.
 - **Trusted operator roles use user principals.** In this context, trusted in-space operators means **space owner** and **space admin**. Tenant admin remains the tenant-wide trusted operator.
@@ -776,7 +761,6 @@ _Once a run exists, what you can see depends on who you are. Evidence is additio
 | Create runs                              | Yes                         | Yes                      | Yes                         | Yes                       | Yes, published only                                         |
 | Read run status, step outputs, artifacts | Own runs                    | Own runs                 | In-scope runs               | Tenant-wide runs          | Own runs only                                               |
 | Evidence view / export                   | Own runs, policy-gated      | Own runs, policy-gated   | In-scope runs, policy-gated | Tenant-wide, policy-gated | Own runs only, explicit `flow_evidence` capability required |
-| AI Builder                               | Yes                         | n/a                      | Yes                         | Yes                       | No                                                          |
 
 If you need the endpoint-by-endpoint version of this model, use the access matrix in the <a href="/guides/flows-api-guide#access-matrix">Flow Runtime API Reference</a>.
 
@@ -805,7 +789,7 @@ Each flow decides whether its run evidence may be exported at all. The setting i
 - **The flow's current value applies to all of its runs**, including runs made before the setting was changed. Turning it on opens export of older runs; turning it off closes it again.
 - **Anyone who may edit the flow may change it.** A published flow has to be unpublished before it can be edited, like for any other flow setting; the change applies as soon as it is saved. The flow's audit entry records the old and the new value.
 - **A deleted flow keeps the value it was deleted with.** Turn the setting on before deleting a flow whose evidence may be needed later; the delete dialog warns when it is off.
-- A flow created by the AI Builder or imported from a package starts with export off.
+- A flow imported from a package starts with export off.
 
 ### What classification 3 changes
 
@@ -862,18 +846,13 @@ The draft API under `/api/v1/flows/` covers:
 - template asset upload and inspection
 - assistant-specific step configuration routes
 
-### AI Builder
+### Authoring chat
 
-AI Builder lives under `/api/v1/flows/ai-builder/` and is session-based. It supports:
-
-- creating or resuming sessions
-- sending planner messages over SSE
-- reading plans and session state
-- approving and applying plans
-
-Important current rule: **AI Builder requires a user principal**. It relies on flow-edit permission checks plus creator-scoped session access, so it is not a service-key authoring surface.
-
-For the product mental model, including form fields, **"Underlag till steget"**, knowledge sources, external delivery, and token usage, see <a href="/docs/ai-builder">AI Builder</a>.
+A person can edit a draft from an ordinary assistant chat bound to the flow.
+The chat's loopback flow tools read the definition and change it through the
+same editor update, validation, permissions, classification and audit as the
+editor. The chat requires a user principal and edit mode in the editor; it is
+not a service-key authoring surface.
 
 ## Practical takeaway
 

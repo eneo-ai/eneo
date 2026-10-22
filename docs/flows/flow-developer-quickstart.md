@@ -1,9 +1,9 @@
 # Flow Developer Quickstart
 
-This page is a developer quickstart for Eneo Flows. Core includes manual
-authoring and the complete runtime. Flow AI Builder is a stacked branch that
-compiles approved planning evidence into the same core draft model. It does not
-add a separate runtime contract.
+This page is a developer quickstart for Eneo Flows. Core includes authoring and
+the complete runtime. A Flow is authored in the editor or from its authoring
+chat; both write the same draft model through the same operations, and neither
+adds a separate runtime contract.
 
 It
 explains the core data model, the published runtime contract, how step inputs
@@ -21,9 +21,9 @@ A Flow is a versioned executable recipe.
 - Running a Flow creates a version-pinned execution: one `flow_runs` row plus
   per-step runtime records.
 - Runtime code should execute the published snapshot, not the mutable draft.
-- Flow AI Builder is an authoring assistant. It asks bounded discovery
-  questions, builds typed planning evidence, and compiles an approved intent
-  into the same Flow draft shape that manual authoring uses.
+- The authoring chat is an ordinary assistant chat bound to one Flow. Its
+  assistant reads and changes that Flow through Eneo's loopback flow tools,
+  which save through the same operations as the editor.
 
 The most important invariant is draft/runtime separation: editing a draft after
 publish must not change an already-created run or the published version it was
@@ -45,7 +45,7 @@ prepared against.
 | Step Result File | `flow_run_step_result_files` | Generated or declared artifact emitted by a step. |
 | Review Checkpoint | `flow_run_review_checkpoints` | Human review pause, editable payload, state, and revision. |
 | Audit/Webhook Outbox | `flow_run_audit_outbox`, `flow_run_webhook_deliveries` | Reliable outbound delivery records for audit and webhooks. |
-| AI Builder Session | builder session tables plus `PlanningState` JSON | Persisted builder conversation and typed planning state. |
+| Authoring Chat | `flow_authoring_chats` | One user's chat for one Flow: an ordinary conversation and hidden assistant bound to the Flow, with an edit-mode switch. |
 
 ## Runtime API shape
 
@@ -115,7 +115,7 @@ The fields below explain most step behavior.
 | `output_contract` | Typed output shape, validation rules, and artifact expectations. |
 | `output_config` | Renderer, HTTP delivery, or output-mode-specific configuration. |
 | `review_policy` | Optional human review behavior for this step. |
-| `plan_step_ref` | AI Builder and authoring reference that survives compilation into runtime steps. |
+| `plan_step_ref` | Authoring reference from a draft spec (such as a Flow package) that survives materialization into runtime steps. |
 
 `input_source` answers "where does the input come from?" `output_mode` answers
 "how should this step execute or render?" `output_type` answers "what kind of
@@ -124,7 +124,7 @@ value or artifact does the step produce?"
 Flow supports HTTP GET and the answer of one MCP tool (`tool`) as input sources
 and durable HTTP POST as a terminal output mode. Flow does not support HTTP POST
 input, or MCP servers and tools on a step's assistant, at authoring, publish,
-runtime, Builder, or package boundaries.
+runtime, or package boundaries.
 Standalone assistants and conversations keep their separately owned MCP
 behavior. A Flow package export is not blocked when its step assistants have
 persisted MCP server or tool associations: it omits those associations and
@@ -173,8 +173,7 @@ default (`wizard.transcription_max_speakers`, shown as `transcription.max_speake
 the run contract), else automatic. Eneo never derives the bound from the participant names. The
 bound is sent to the speaker identification service as `max_speakers` and recorded in the
 transcription step's metadata. Transcripts from several audio files are
-renumbered so labels are unique across the whole transcript. Manual authoring
-only for now; the AI Builder does not plan this step.
+renumbered so labels are unique across the whole transcript.
 
 ## How data moves between steps
 
@@ -210,8 +209,9 @@ Common input paths:
 | Runtime files | Loads, extracts, transcribes, or passes file data according to runtime input config and file policy. |
 | `http_get` | Fetches input through the runtime HTTP transport before step execution. |
 
-Publish validates every question and source reference against the persisted
-form, runtime names, earlier steps, and declared output contracts:
+Publish validates every read a step makes (questions, source references,
+prompts and HTTP requests) against the persisted form, runtime names, earlier
+steps, and declared output contracts, whichever path wrote the draft:
 
 - `{{ flow_input.<field> }}` accepts a declared form field. A declared field can
   also be bare, such as `{{ case_id }}`, only when the runtime exposes that safe
@@ -238,6 +238,19 @@ form, runtime names, earlier steps, and declared output contracts:
   `step_1.output.structured.report_title` publish only when the referenced
   earlier step's `output_contract` proves every segment. Missing contracts,
   unknown fields, and paths through scalar values are rejected before runtime.
+- A step's prompt (when the step calls a model) and an HTTP step's request
+  configuration are interpolated when the step runs, so publish refuses a read
+  there that names nothing the run has: a name the flow does not declare as a
+  form field, step name or runtime variable; a path below a form field or a
+  step name (a step name reads that step's text); a path a step result does not
+  have; or a step without a result yet (the step itself, a later step, an order
+  the flow does not have, or the previous step of the first step). A structured
+  read of a step that yields text is refused, and when the producer declares an
+  `output_contract` the structured path must be in it.
+- `source_refs` may not read the same source twice: the run renders each one
+  as its own section of the input. A source ref that reads a producer's
+  structured output is refused when the producer yields text, and when the
+  producer declares a contract its `field_path` must be in it.
 - Authoring lowers `plan_step_ref` values to `step_N` before persisting a
   `FlowStep`. `existing_step_ref` identifies an edited step only; neither raw
   identity token is persisted binding syntax, and publish rejects either if it
@@ -245,7 +258,19 @@ form, runtime names, earlier steps, and declared output contracts:
 
 Publish errors identify the precise binding location: question reference and
 path errors point to `input_bindings.question`, while source-reference errors
-point to the indexed `input_bindings.source_refs[i].step_ref`.
+point to the indexed `input_bindings.source_refs[i].step_ref`. Prompt and HTTP
+request reads name `prompt` or the configuration path in `context.field`.
+
+Publish also refuses step shapes the run cannot execute. A step that reads each
+uploaded file on its own (`runtime_input.execution_mode` `per_source`) must
+write one `documents` array whose items declare the source fields the run fills
+in (`source_label`, `source_file_id`, `extraction_warnings`). A step that maps
+the previous step's items (`input_config.item_map`) needs an `input_contract`
+and an `output_contract` that each have exactly one top-level property, an
+array of objects. An `audio` step that takes uploads must set
+`input_config.runtime_input.input_format` to `audio` (checked on every save),
+since the format decides which files the run accepts and whether it transcribes
+them.
 
 Prefer explicit bindings over `all_previous_steps` when the Flow needs precise
 data flow. `all_previous_steps` is useful for broad summarization, but it hides
@@ -304,162 +329,49 @@ selective retrieval.
 - Keep context-window risk visible in authoring and validation. Do not hide it
   with broad repair logic at run time.
 
-## Flow AI Builder
+## Authoring
 
-Flow AI Builder is an authoring path, not a separate runtime engine.
+A Flow is authored in the editor or from its authoring chat. Both are front
+ends over one core path, not separate engines.
 
-High-level builder flow:
+- The editor route `PATCH /api/v1/flows/{id}/editor/` applies one change in one
+  revision: flow settings, sparse step edits, new steps with their managed
+  assistants, and `step_order` to move, insert or remove steps. It is fenced on
+  `expected_revision` and saves as a whole or not at all.
+- The authoring chat (`POST /api/v1/flows/{id}/authoring-chat/`) is an ordinary
+  assistant chat bound to one Flow; each user has one chat per Flow, and the
+  space's default model must support tool calling. Its assistant reaches the
+  Flow only through the loopback flow tools
+  (`backend/src/eneo/internal_mcp/flows.py`): `read_flow`,
+  `update_flow_settings`, `read_step_assistant`, `update_step`, `add_step`,
+  `move_step`, `remove_step`, `publish_flow`, `unpublish_flow`,
+  `read_tool_options`, and the run tools `run_flow`, `read_run`, `cancel_run`,
+  `read_review` and `review_run`. The chat starts in view mode; tools that
+  change the Flow are refused until the user turns on edit mode
+  (`PATCH /api/v1/flows/{id}/authoring-chat/{session_id}/`).
+- Both save through `flows/application/flow_authoring_operations.py`. The
+  editor route and the chat's writing tools use `apply_editor_update`, which
+  ends in the same `update_flow` operation as `PATCH /api/v1/flows/{id}/`, on
+  top of `FlowService.update_flow`; publish and unpublish go through the same
+  module. A change made in the chat is therefore validated, classified and
+  audited exactly like one made in the editor.
+- When steps move, are inserted or are removed, the `step_N` reads of every
+  kept step follow their producers (`flows/application/flow_step_structure.py`).
+  A change that removes a step another step reads, or moves it after its
+  reader, is refused with `flow_step_read_lost_producer`.
+- Flow packages author through `flows/application/flow_authoring_command.py`
+  and draft materialization, which lower a `FlowDraftSpecCore` into the same
+  draft rows.
 
-1. Conversation and attachments are persisted in a builder session.
-2. `PlanningState` stores typed planning evidence:
-   - `signals`
-   - `resolved_slots`
-   - `file_roles`
-   - `schema_resolution` (canonical shapes plus independent input/output evidence)
-   - `architecture_commit`
-3. Discovery runtime merges conversation evidence, attachment evidence, and
-   policy defaults into a planning context.
-4. The server-owned turn controller decides the next action:
-   - ask one canonical question;
-   - commit or revise architecture;
-   - show a requirements summary;
-   - generate a proposal.
-5. The model proposes semantic intent. It should describe what the Flow should
-   do, not hand-author low-level runtime mechanics.
-6. Create assembly compiles supported semantic intents into `FlowDraftSpecCore`.
-7. Lowering turns the assembly plan into concrete draft step specs.
-8. The normal Flow authoring and publish path persists the draft and freezes a
-   runtime version.
+Important authoring rules:
 
-Important builder rules:
-
-- The classifier or understanding call produces evidence. It does not write
-  questions.
-- Only an explicit structured answer submission creates `question_answer`
-  metadata. A free-text reply records only the canonical pending question id in
-  `question_response`; the cited classifier owns any meaning derived from that
-  text.
-- In an edit session a question carries `current_option_id`, the offered option
-  the flow being edited already uses for that slot, read off the flow through the
-  capability profile that owns what the flow does today. It is null in create
-  mode, and null in an edit whenever the flow leaves the slot open, answers it
-  ambiguously, or answers it with something the question does not offer. Render
-  it: without it a user cannot tell a choice apart from a change to a flow other
-  applications already run.
-- While editing, the only thing Eneo recommends is keeping what the flow already
-  does: `recommended_option_id` equals `current_option_id` or is absent. Anything
-  else is a proposal to change something already running, which is the user's
-  decision rather than a badge to accept. The rule is applied where the question
-  is emitted and it fails closed, so a flow whose answer the question cannot
-  describe carries no current value and no recommendation either. A question with
-  no recommendation cannot be delegated, so in an edit session handing a decision
-  back to Eneo can only ever keep the flow as it is.
-- A question carries `recommended_option_id` when the planning state already
-  holds a candidate for that slot: Eneo's own reading, too weak to settle the
-  question by itself, which is why the question is asked at all. A user who cannot judge the choice may hand that one question
-  back with a `delegated_question_answer`, and the server answers it with the
-  recommendation the question carried. The result is an ordinary structured
-  answer marked `delegated`, so it is the user's decision, appears in the
-  requirements summary like any other, and is never asked again. Delegating a
-  closed question, a different question, or a question that recommends nothing
-  is refused; there is no session-wide automatic mode.
-- `recommended_option_evidence` carries the words the recommendation was read
-  from, and only when the user wrote them: a classifier quote from a message or
-  a structured answer, decoded by the evidence codec that owns the encoding. A
-  reading taken from an attachment, a policy default or a heuristic carries no
-  quote, because presenting one of those as the user's own sentence would
-  misattribute the reason for the recommendation.
-- A question carries `question_index`, its place among the questions the
-  session has actually put to the user; a re-asked question keeps its number.
-  There is deliberately no total. The interaction policy decides each slot
-  question turn by turn, and the schema-direction and runtime-field questions
-  are decided outside the per-turn ask queue, so no owner holds the length of
-  the interview. Do not synthesize one from the ask queue: it undercounts, and
-  a wrong total claims a last question that another turn then follows.
-- `questions_planned_remaining` says how many further questions the interview
-  intends to ask after this one, taken from the ordered ask queue the turn
-  decision came from. It is a snapshot of the current plan and not a total: the
-  queue is re-derived every turn, so it shrinks when one answer settles several
-  slots and it grows when an answer opens a family that was not in play before
-  — answering that a JSON flow returns structured JSON is what makes the
-  JSON-processing question exist, and it arrives on the turn after a queue that
-  held nothing else. It is null for the questions decided ahead of that queue,
-  schema direction and the runtime-field follow-up, where no ranked plan stands
-  behind the ask. Do not render it as progress toward a known end, and do not
-  read zero as a promise that this is the last question.
-- An offered option carries `example`, one short sentence naming what choosing
-  it produces — the file the user ends up with, or what the flow does at run
-  time — where the option's `description` says what the option means. The
-  question catalog owns the copy in both languages together, and leaves it out
-  where no honest concrete consequence can be named, so `example` is null on
-  options the catalog does not describe and on every question built outside the
-  catalog. Never fill that gap with generated copy: an invented consequence
-  misleads exactly the first-time reader the field exists for.
-- Key decisions in the requirements summary say where they came from, as one
-  fact enforced by the payload: `is_derived` is false exactly when
-  `question_id` names the canonical question the user answered, so a client can
-  offer to change that one. Everything else — flow defaults, classifier
-  readings, the committed architecture, checkpoint intents — is derived and
-  names no question.
-- `named_content_fields` lists the content obligations the summary prose
-  already states, as `{id, label}` items in the same order. `id` is the stored
-  obligation name, not a promise that a field by that name reaches the compiled
-  result. It is read-only: obligations are admitted from cited user evidence,
-  and there is no contract for adding or removing one from the summary. The
-  list stays outside `RequirementsDisclosureContent`, so it does not enter the
-  version hash — the prose already carries those names and shapes into
-  identity.
-- Prefer one bounded, typed understanding pass per Builder turn when model
-  interpretation is needed. Split it only for a measured context-window limit;
-  do not scatter semantic ownership across phrase scans.
-- Server policy decides whether to ask, what to ask, and when the question
-  budget is exhausted.
-- High-confidence assumptions must be visible in the requirements summary so
-  the user can reject them.
-- A requirements summary names itself with the version that hashes its content,
-  and confirming is a content-free structured action that carries that exact
-  version back. A confirmation accompanied by a message is an ordinary turn:
-  the message is read as evidence and the user confirms the summary it
-  produces, so a requested change is never silently dropped.
-- Attachments are first-class evidence through typed file roles, neutral schema
-  candidates, and output-only template-placeholder evidence. Avoid semantic
-  filename or phrase-list heuristics.
-- A valid JSON Schema does not choose its own boundary. Builder derives bounded
-  current candidates with complete source provenance; explicit structured or
-  cited user evidence may assign one candidate to input, output, both, or
-  reference-only use. Conversation compaction prefers the newest pasted schema
-  sources but may drop older ones and reopen direction instead of making the
-  session unrecoverable. Genuine ambiguity is resolved by one server-owned typed
-  question. Attachment-only evidence cannot assign direction, and an unassigned
-  schema must not change the requested terminal output.
-- Every required model-authored property must be decidable from facts included
-  in the same model request. When legality depends on server-owned mechanics,
-  such as the compiled output mode or capability, keep that decision in the
-  compiler or assembly owner. Either project the necessary typed fact to the
-  model or resolve the mechanic on the server; never make the model guess a
-  hidden fact and pay a repair call when validation rejects the guess. A strict,
-  all-required provider schema does not transfer semantic ownership.
-- Builder attachment text is admitted against the selected model's context
-  window after reserving output, safety, and active-conversation tokens. The
-  remaining capacity is shared fairly across readable files; there are no
-  independent per-file text or DOCX-count quotas.
-- The effective session-attachment, message-length, DOCX-inspection, and
-  placeholder-inspection limits come from the existing Flow settings owner.
-  Authenticated clients read the same effective attachment and message limits
-  through `/limits`; tenant admins see both the effective values and the fixed
-  platform safety ceilings. DOCX validation also has disclosed per-file archive
-  entry and uncompressed-size ceilings. Invalid or oversized templates fail
-  before model work instead of becoming partial evidence.
-- Treat MIME type, shape, and literal placeholders as structural facts. Semantic
-  file roles and intent require quoted, confidence-bearing evidence.
-- Route attachments through existing evidence, asset, and runtime-input owners;
-  do not create a parallel attachment lifecycle.
-- Build-time understanding is allowed when it prevents bad or inefficient
-  runtime Flows. A Flow is built once and may run many times.
-- Delete semantic keyword or marker ownership one family at a time only after
-  deterministic and owned-live evaluation proves the replacement.
-- Prevent invalid topology at the typed understanding or compile boundary
-  instead of adding runtime or proposal repair layers.
+- Publish is the gate. Rules about what a step may read live in the publish
+  validators (`flows/flow_validators.py`), not in either front end, so every
+  authoring path is held to the same contract.
+- Prevent invalid topology at the authoring or publish boundary instead of
+  adding runtime repair layers. A Flow is built once and may run many times.
+- Credentials stay with the editor. The chat's tools refuse step configuration
+  that carries a credential, or that changes an HTTP configuration holding one.
 
 ## Canonical owners
 
@@ -476,13 +388,11 @@ of adding a parallel path.
 | Output validation/rendering | `OutputFormatSpec` and output processing modules |
 | Runtime file upload policy | `FlowRuntimeFileService` and runtime upload repository |
 | Review checkpoints | run review checkpoint API and runtime services |
-| Builder planning state | `PlanningState` |
-| Builder turn decision | `ai_builder_turn_controller` plus action policy |
-| Builder operating limits and prompt reserves | `flow_ai_builder_budget_settings` plus `ai_builder_settings` |
-| Builder attachment inspection and model-aware admission | `ai_builder_attachment_context` |
-| Builder proposal wire contract | `ProposalPrepared.proposal_tool_schema` built by `ai_builder_proposal_intent` |
-| Strict tool schemas on the wire | the completion model's `supports_strict_tool_schema` capability, read from `ResolvedCompletionModelRoute` |
-| Builder create compilation | `ai_builder_create_compiler` and `ai_builder_assembly` |
+| Draft changes from the editor and the authoring chat | `flow_authoring_operations.apply_editor_update` on `FlowService.update_flow` |
+| Step move, insert and remove | `flow_step_structure.restructure_steps` |
+| Authoring chat binding and edit mode | `flow_authoring_chat` and the loopback `internal_mcp/flows.py` server |
+| Publish validation | `flow_validators` |
+| Package and draft-spec authoring | `flow_authoring_command` and draft materialization |
 | Flow package layout rules | [package-layout.md](./package-layout.md) |
 
 ## Practical editing rules
@@ -492,13 +402,11 @@ of adding a parallel path.
 - Prefer typed contracts over raw JSON bags at code boundaries.
 - Prefer explicit `input_bindings` and source refs over implicit string
   concatenation.
-- Keep model evidence quoted and confidence-scored when Builder infers intent.
-- For capability-dependent Builder options, use the cross-contract proof in the
-  [Testing Standard](../engineering/testing-standard.md#model-authored-contracts-cross-the-compile-boundary).
 - Delete dead compatibility paths only with evidence that persisted data and
   tests no longer need them.
 - Keep tests behavior-focused: API contract, run lifecycle, step input/output,
-  publish snapshot, and builder question/assumption behavior.
+  publish snapshot and publish validation, and parity between the editor and
+  the authoring chat.
 
 Flow schema revisions are still unreleased and may be consolidated. An existing
 Alembic stamp does not replay an amended foundation revision. For a disposable
@@ -583,34 +491,13 @@ against a different contract.
 A review checkpoint pauses a run so a human or approved service key can inspect,
 edit, approve, reject, or resume a step output before downstream steps continue.
 
-### What does Flow AI Builder do?
+### How is a Flow authored?
 
-Flow AI Builder turns a conversation into a Flow draft. It gathers evidence,
-asks bounded questions, confirms assumptions, generates a semantic proposal, and
-compiles the approved plan into normal Flow authoring records.
-
-### Why does Flow AI Builder ask questions instead of guessing?
-
-Wrong assumptions create wrong Flows that may run many times. The builder asks
-one server-owned question at a time when the planning state lacks enough
-evidence for a durable Flow design.
-
-### Can Flow AI Builder infer meaning from attachments?
-
-Yes, but semantic file roles need quoted evidence and confidence. Structural
-facts such as MIME type and template placeholders can be inferred
-deterministically. Semantic filename or phrase-list guessing should be avoided.
-
-When a user confirms exactly one DOCX as the terminal fill template, apply
-reuses that File to create the normal Flow template asset and binding inside the
-authoring transaction. The approved proposal already owns every exact
-placeholder binding; apply adds only the local asset identity after rechecking
-the document. Reference, context, and example-output attachments remain
-planning evidence: they are not materialized as Flow inputs or resources and
-are not resent at runtime. Runtime files, when the published Flow accepts them,
-are uploaded separately when a run starts. A template may bind `datum`; a
-transcription binding makes the Flow's audio input required. Template fill
-itself is deterministic and reports zero model tokens.
+In the editor, or from the Flow's authoring chat: an ordinary assistant chat
+whose assistant reads and changes this one Flow through Eneo's flow tools. Both
+save through the same operations, so a change made in the chat is validated,
+classified and audited like one made in the editor, and publishing checks the
+whole Flow either way.
 
 ### How do DOCX templates and DOCX rendering work?
 
@@ -636,8 +523,9 @@ runtime answers (`runtime/document_runtime_preflight.py`).
 `template_fill` writes into Word content controls
 (`runtime/docx_template_runtime.py`): the control's tag is the placeholder name
 a binding addresses, the title is its label, and the placeholder text is the
-authoring hint the AI Builder reads. The runtime reads the controls and reports
-where each one sits; the core holds them to the flow profile. Two kinds are
+authoring hint the step editor shows beside the control. The runtime reads the
+controls and reports where each one sits; the core holds them to the flow
+profile. Two kinds are
 supported: body-level rich text controls (a whole section; Markdown is parsed
 and sub-headings are placed relative to the nearest preceding heading) and
 inline text controls (one line, or several with `multiLine`). Controls without
@@ -647,14 +535,15 @@ inspection, before a template can be selected. Rich controls must be direct
 children of the document body; text controls must be inside body paragraphs.
 Templates must contain at least one supported control; `{{...}}` text
 placeholders are not fill targets and must be converted to tagged Word content
-controls before publication. Ordinary DOCX attachments can still be used as
-source documents in the Builder.
+controls before publication.
 Every control must have a binding before publication. Bindings must select text
 outputs, scalar fields in declared output contracts, scalar form fields or known
-scalar system values. Whole objects, arrays and unknown value shapes are refused
-at publication. A binding that resolves to nothing at runtime is an error; an
-explicit empty binding removes the control and keeps the surrounding static
-content. Source and text size limits include both inline fields and rich sections.
+scalar system values. A binding may name an earlier step by its name, which
+reads that step's text; a path below a step name is refused. Whole objects,
+arrays and unknown value shapes are refused at publication. A binding that
+resolves to nothing at runtime is an error; an explicit empty binding removes
+the control and keeps the surrounding static content. Source and text size
+limits include both inline fields and rich sections.
 The finished document's text is read through `docx2python`, which sees control
 content.
 
@@ -664,19 +553,16 @@ The example templates (`dokument`, `rapport`, `motesprotokoll`) are built by
 developer examples: copy a file from that directory, add branding and edit
 controls in Word's Developer tab, then upload it as a DOCX template.
 
-The Builder projects each selected control's tag, kind, label and hint into its
-proposal prompt as bounded, untrusted template evidence. Selecting a different
-template replaces the previous template's evidence. Preparation values remain
-one string per control. Writer guidance for
-the model derives from the block model in `document_rendering/guidance.py` and
-is the single owner of what the prompts say about markdown and structure.
+Writer guidance for the model derives from the block model in
+`document_rendering/guidance.py` and is the single owner of what the prompts
+say about markdown and structure.
 
 ### Where should a developer start when changing Flow behavior?
 
 Start with the canonical owner table above. For API-facing runtime changes,
 start with the run contract. For data movement changes, start with step input
-resolution. For Builder interview behavior, start with `PlanningState`, action
-policy, and the turn controller.
+resolution. For authoring changes, start with `flow_authoring_operations` and
+the publish validators in `flow_validators`.
 
 ## Quick troubleshooting
 
@@ -687,8 +573,9 @@ policy, and the turn controller.
 | First step tries to read previous output | Step validation or input resolution. The first step cannot use `previous_step` or `all_previous_steps`. |
 | JSON step receives concatenated text | Check for `all_previous_steps`; JSON input should use explicit bindings or structured previous output. |
 | Published run differs from latest draft | Expected behavior. Runs use `flow_versions.definition_json`, not mutable draft rows. |
-| Builder asks too many questions | Inspect `PlanningState.resolved_slots`, selected discovery questions, action policy, and turn controller output. |
-| Builder silently assumes a file role | Check `PlanningState.file_roles`, quoted evidence, confidence, and requirements summary assumptions. |
+| Publish refuses a read | The refusal names the step, where it reads (a question, a source ref, the prompt or an HTTP request field) and what it reads. Declare the value or read an earlier step. |
+| Moving or removing a step is refused with `flow_step_read_lost_producer` | A kept step reads the step the change removes or moves after it. Change that read first. |
+| The authoring chat cannot change the Flow | Edit mode is off or the draft revision is stale: turn on edit mode or reload the current revision. |
 
 ## Related docs and source entry points
 
@@ -699,7 +586,8 @@ policy, and the turn controller.
 - `backend/src/eneo/flows/flow_run_contract_service.py`
 - `backend/src/eneo/flows/runtime/step_input_resolution.py`
 - `backend/src/eneo/flows/domain/runtime.py`
-- `backend/src/eneo/flows/ai_builder/planning_state.py`
-- `backend/src/eneo/flows/ai_builder/ai_builder_turn_controller.py`
-- `backend/src/eneo/flows/ai_builder/ai_builder_create_compiler.py`
-- `backend/src/eneo/flows/ai_builder/ai_builder_assembly/`
+- `backend/src/eneo/flows/application/flow_authoring_operations.py`
+- `backend/src/eneo/flows/application/flow_step_structure.py`
+- `backend/src/eneo/flows/application/flow_authoring_chat.py`
+- `backend/src/eneo/internal_mcp/flows.py`
+- `backend/src/eneo/flows/flow_validators.py`

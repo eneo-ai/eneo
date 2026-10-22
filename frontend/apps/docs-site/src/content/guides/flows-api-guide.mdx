@@ -184,21 +184,19 @@ is `form_field_type_unsupported`, instead of silently remapping the type as earl
 - An omitted `description` keeps the saved value; `null` clears it. An omitted `metadata_json` keeps the saved metadata, which the save still normalizes (a form field of a type an older writer saved, such as `email`, is read and stored as `text`); `null` clears it.
 - With a stale `expected_revision` the update is refused with `stale_revision` and nothing is written.
 
-An AI Builder apply writes differently: only the step columns its approved plan names (see [AI Builder](/docs/ai-builder)).
+The editor update, `PATCH /api/v1/flows/{id}/editor/`, writes differently: only the step columns and assistant fields it names, and the steps it moves, adds or removes. The flow authoring chat writes through it too.
 
 ## Step limit
 
-A flow has at most 256 steps. The flow endpoints that write or evaluate a draft (create, update, publish and the security classification preview) refuse more with `flow_step_limit_exceeded`. Its `context` carries `step_count` and `max_steps`, and its message tells the author to remove steps or split the work into several flows. The preview also caps the request body at 16 MiB (64 KiB for each of the 256 steps) and refuses a larger one with HTTP 413 and `flow_request_body_too_large`, before it parses the body; its `context.max_bytes` states the cap. The preview refuses a saved flow over the limit the same way when it is asked to explain the saved steps, and it answers a request with too many submitted steps with the same 400, not with a request-validation error. The AI Builder reports the same code in its plan validation.
+A flow has at most 256 steps. The flow endpoints that write or evaluate a draft (create, update, publish and the security classification preview) refuse more with `flow_step_limit_exceeded`. Its `context` carries `step_count` and `max_steps`, and its message tells the author to remove steps or split the work into several flows. The preview also caps the request body at 16 MiB (64 KiB for each of the 256 steps) and refuses a larger one with HTTP 413 and `flow_request_body_too_large`, before it parses the body; its `context.max_bytes` states the cap. The preview refuses a saved flow over the limit the same way when it is asked to explain the saved steps, and it answers a request with too many submitted steps with the same 400, not with a request-validation error.
 
 Package import has its own contract and applies the limit through it. Import planning and install refuse a package draft over the limit with `flow_package_flow_draft_invalid`, whose `context.reason` is `flow_step_limit_exceeded`. That response has no `step_count` or `max_steps`; its message states the limit and the number of steps in the package.
 
 ## Draft revision and concurrent edits
 
-A draft flow carries one `draft_revision`, which `GET /api/v1/flows/{id}/` returns. Every write to the draft advances it by one: a flow update, a publish or unpublish, an AI Builder apply, and an update of one of the flow's assistants with `PATCH /api/v1/flows/{id}/assistants/{assistant_id}/`, whose response carries the new `draft_revision`. Creating or deleting a flow assistant leaves it unchanged, because an assistant that no step uses is not part of the draft.
+A draft flow carries one `draft_revision`, which `GET /api/v1/flows/{id}/` returns. Every write to the draft advances it by one: a flow update or editor update, a publish or unpublish, and an update of one of the flow's assistants with `PATCH /api/v1/flows/{id}/assistants/{assistant_id}/`, whose response carries the new `draft_revision`. Creating or deleting a flow assistant leaves it unchanged, because an assistant that no step uses is not part of the draft.
 
 Send the revision you hold as `expected_revision` with a flow update or an assistant update. If the draft has moved on since, in another tab or through a colleague's edit, the write is refused with HTTP 400 and code `stale_revision`, whose `context` carries `expected_revision`, and nothing is written. Read the flow again and redo the change. Without `expected_revision`, a write is fenced on the revision read at the start of that request. After an assistant update, send the returned `draft_revision` with the next flow update: a revision read before the assistant update is refused.
-
-An AI Builder plan is fenced on the revision it was proposed against. An assistant edit made after the proposal refuses the apply with `stale_revision` instead of letting the plan write its copy of the prompt over the edit; ask the Builder again.
 
 ## Preview security classification while authoring
 
@@ -351,7 +349,7 @@ Queue reads are available at the Organization route ending in `/review-queue` an
 
 Every Flow response includes a `run_history_retention` projection with `state`, `mode`, `effective_days`, `source`, and complete Organization, Space, and Flow contributors. The projection reports policy resolution; it does not claim that a particular run has been approved or purged.
 
-See [Flow run-history retention](/guides/flows/retention-policy) for the administrator workflow and [Data retention and deletion](/guides/data-retention) for the separate conversation, AI Builder, and audit-log behavior.
+See [Flow run-history retention](/guides/flows/retention-policy) for the administrator workflow and [Data retention and deletion](/guides/data-retention) for the separate conversation and audit-log behavior.
 
 ### Administrator purge of due run history
 

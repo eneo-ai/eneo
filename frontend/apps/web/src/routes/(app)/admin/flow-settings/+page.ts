@@ -19,7 +19,6 @@ export const load = async (event) => {
     flowInputLimits,
     flowRuntimePolicy,
     mappedExecutionPolicy,
-    aiBuilderBudgetSettings,
     ragEvidencePolicy
   ] = await Promise.all([
     access.admin ? eneo.settings.getFlowRetentionPolicy() : null,
@@ -35,7 +34,6 @@ export const load = async (event) => {
     access.admin ? eneo.settings.getFlowInputLimits() : null,
     access.admin ? eneo.settings.getFlowRuntimePolicy() : null,
     access.admin ? eneo.settings.getMappedExecutionPolicy() : null,
-    access.admin ? eneo.settings.getAIBuilderBudgetSettings() : null,
     access.admin ? eneo.settings.getRagEvidencePolicy() : null
   ]);
   return {
@@ -49,7 +47,6 @@ export const load = async (event) => {
     flowInputLimits,
     flowRuntimePolicy,
     mappedExecutionPolicy,
-    aiBuilderBudgetSettings,
     ragEvidencePolicy
   };
 };

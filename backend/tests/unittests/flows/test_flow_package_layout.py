@@ -7,8 +7,8 @@ BACKEND_ROOT = Path(__file__).resolve().parents[3]
 FLOW_ROOT = BACKEND_ROOT / "src" / "eneo" / "flows"
 FLOW_PACKAGE_ARTIFACT_ROOT = BACKEND_ROOT / "src" / "eneo" / "flow_packages" / "domain"
 
-EXPECTED_ROOT_MODULES = 62
-EXPECTED_ROOT_PACKAGES = 7
+EXPECTED_ROOT_MODULES = 60
+EXPECTED_ROOT_PACKAGES = 6
 
 
 def _imported_modules(module_path: Path) -> set[str]:

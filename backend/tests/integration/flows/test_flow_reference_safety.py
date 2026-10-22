@@ -21,8 +21,11 @@ from sqlalchemy.dialects import postgresql
 
 from eneo.assistants.assistant_service import AssistantService
 from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.database.tables.ai_models_table import TranscriptionModels
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.flow_tables import FlowRuns, Flows, FlowSteps
+from eneo.database.tables.model_providers_table import ModelProviders
+from eneo.database.tables.spaces_table import SpacesTranscriptionModels
 from eneo.flows.domain.flow import Flow, FlowRunStatus, FlowStep
 from eneo.flows.enums import (
     NON_TERMINAL_FLOW_RUN_STATUS_VALUES,
@@ -40,9 +43,6 @@ from eneo.flows.runtime.transcription import (
 from eneo.flows.transcription_config import FlowTranscriptionConfig
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.prompts.api.prompt_models import PromptCreate
-from tests.integration.flows.test_ai_builder_session_api_regressions import (
-    _create_default_transcription_model,  # pyright: ignore[reportPrivateUsage]
-)
 from tests.integration.flows.test_flow_assistant_fencing import (
     _TIMEOUT,  # pyright: ignore[reportPrivateUsage]
     _second_writer,  # pyright: ignore[reportPrivateUsage]
@@ -53,6 +53,52 @@ from tests.integration.flows.test_flow_assistant_update_siblings import (
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
+
+async def _create_default_transcription_model(
+    *,
+    db_container,
+    space_id: str,
+    tenant_id: UUID,
+    marked_default: bool = True,
+) -> UUID:
+    async with db_container() as container:
+        session = container.session()
+        provider = ModelProviders(
+            tenant_id=tenant_id,
+            name="Transcription provider",
+            provider_type="openai",
+            credentials={"api_key": "test-key"},
+            config={},
+            is_active=True,
+        )
+        session.add(provider)
+        await session.flush()
+
+        model = TranscriptionModels(
+            tenant_id=tenant_id,
+            provider_id=provider.id,
+            name="transcriber",
+            model_name="transcriber",
+            family="openai",
+            hosting="usa",
+            stability="stable",
+            org="Provider",
+            base_url="https://transcription.example.org/v1",
+            is_enabled=True,
+            is_default=marked_default,
+        )
+        session.add(model)
+        await session.flush()
+
+        session.add(
+            SpacesTranscriptionModels(
+                space_id=UUID(space_id),
+                transcription_model_id=model.id,
+            )
+        )
+        await session.flush()
+        return model.id
 
 
 def _step(assistant_id: UUID, order: int) -> FlowStep:

@@ -1238,6 +1238,23 @@ async def test_flow_package_import_lock_serializes_successful_retry_visibility(
         await second_session.rollback()
 
 
+# An item map reads and writes one array of objects.
+_ITEMS_CONTRACT = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"title": {"type": "string"}},
+                "required": ["title"],
+            },
+        }
+    },
+    "required": ["items"],
+}
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 @pytest.mark.parametrize(
@@ -1321,6 +1338,7 @@ async def test_flow_package_export_import_route_roundtrip_between_tenants_and_co
                     ),
                     input_source=InputSource.FLOW_INPUT,
                     output_type=OutputType.JSON,
+                    output_contract=_ITEMS_CONTRACT,
                 ),
                 StepSpec(
                     plan_step_ref="items",
@@ -1329,6 +1347,8 @@ async def test_flow_package_export_import_route_roundtrip_between_tenants_and_co
                     input_source=InputSource.PREVIOUS_STEP,
                     input_type=InputType.JSON,
                     output_type=OutputType.JSON,
+                    input_contract=_ITEMS_CONTRACT,
+                    output_contract=_ITEMS_CONTRACT,
                     input_config={"item_map": {"enabled": True, "max_items": 12}},
                 ),
             ],

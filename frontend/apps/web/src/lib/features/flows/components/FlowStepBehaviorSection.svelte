@@ -32,7 +32,6 @@
     assistantLoading,
     assistantLoadFailed = false,
     onRetryAssistantLoad,
-    onImproveInstructionWithAI,
     availableModels,
     steps,
     formSchema,
@@ -55,8 +54,6 @@
     /** The step's AI settings could not be read; the instruction and model are unknown. */
     assistantLoadFailed?: boolean;
     onRetryAssistantLoad?: () => void;
-    /** Opens the AI Builder on this step with a request about the instruction. */
-    onImproveInstructionWithAI?: (request: string) => void;
     availableModels: CompletionModel[];
     steps: FlowStep[];
     formSchema: FlowFormSchemaMetadata | undefined;
@@ -70,7 +67,6 @@
     onInstructionDraft?: (detail: { value: string }) => void;
     onInstructionCommit?: (detail: { value: string }) => void;
   } = $props();
-  const hasInstruction = $derived(instructionText.trim().length > 0);
   // A long instruction gets most of a tall screen before the editor scrolls.
   const instructionMaxHeight = $derived(
     Math.max(360, Math.round((innerHeight.current ?? 0) * 0.6))
@@ -168,36 +164,6 @@
             <Tooltip.Content>{m.flow_step_instructions_tooltip()}</Tooltip.Content>
           </Tooltip.Root>
         </Tooltip.Provider>
-      </svelte:fragment>
-      <svelte:fragment slot="toolbar">
-        {#if onImproveInstructionWithAI}
-          <Tooltip.Provider delayDuration={300}>
-            <Tooltip.Root>
-              <Tooltip.Trigger>
-                {#snippet child({ props })}
-                  <Button
-                    {...props}
-                    variant="outline"
-                    size="sm"
-                    onclick={() =>
-                      onImproveInstructionWithAI?.(
-                        hasInstruction
-                          ? m.flow_step_ai_request_improve_instruction()
-                          : m.flow_step_ai_request_write_instruction()
-                      )}
-                  >
-                    {hasInstruction
-                      ? m.flow_step_ai_menu_improve_instruction()
-                      : m.flow_step_ai_menu_write_instruction()}
-                  </Button>
-                {/snippet}
-              </Tooltip.Trigger>
-              <Tooltip.Content class="max-w-72"
-                >{m.flow_step_ai_menu_instruction_desc()}</Tooltip.Content
-              >
-            </Tooltip.Root>
-          </Tooltip.Provider>
-        {/if}
       </svelte:fragment>
       {@render instructionEditor()}
     </Settings.Row>

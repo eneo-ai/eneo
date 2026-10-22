@@ -100,7 +100,6 @@ FIRST_PARTY_CONNECTORS = {
 # Third-party top-level packages flow code may import, with why they are not a
 # way for a flow author to reach an arbitrary destination.
 ALLOWED_THIRD_PARTY = {
-    "anyio": "async helpers; its connect and DNS functions are refused by name below",
     "dependency_injector": "wiring",
     "fastapi": "the HTTP API flows serve",
     "httpx": "passive types and exceptions only, checked separately below",
@@ -109,7 +108,6 @@ ALLOWED_THIRD_PARTY = {
         "in eneo.flows.domain.schema_engine; only it and eneo.flows.output_processing may "
         "import it"
     ),
-    "litellm": "model provider SDK; the destination is the tenant's provider setting",
     "magic": "file type sniffing, in memory",
     "markdown_it": "markdown rendering",
     "opentelemetry": "telemetry to the operator's collector",
@@ -122,9 +120,7 @@ ALLOWED_THIRD_PARTY = {
         "eneo.flows.output_processing may import it (test_flow_architecture_guards)"
     ),
     "sqlalchemy": "the operator's database",
-    "sse_starlette": "server-sent events the API serves",
     "typing_extensions": "typing",
-    "uuid_utils": "identifiers",
 }
 PASSIVE_HTTPX_NAMES = frozenset(
     {
@@ -478,7 +474,7 @@ def test_the_scanner_finds_each_known_sink(source: str):
         "from urllib.parse import urlsplit",
         "import urllib.parse",
         "from http import HTTPStatus",
-        "import anyio\nanyio.sleep(1)",
+        "import pydantic\npydantic.BaseModel",
         "import asyncio\nasyncio.sleep(1)",
         "import os\nos.environ.get('X')\nos.path.join('a', 'b')",
         "import pydantic\nfrom sqlalchemy.orm import Session",

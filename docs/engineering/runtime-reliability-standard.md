@@ -166,8 +166,8 @@ therefore call a tool that changes something, a run that is started again calls
 it again, and Eneo does not prevent the repeated change. This is an explicit,
 owner-accepted exception to the rule above for mutating external effects, and
 `retryable` is false after a possible tool call. Still not supported: tools for
-a step's model, the AI Builder proposing tool steps, package export of a tool
-step, servers that forward the signed-in user's identity, and personal spaces.
+a step's model, package export of a tool step, servers that forward the
+signed-in user's identity, and personal spaces.
 
 If a mutation lacks the required contract, reject or disable it at the narrowest
 reliable API, compile, publish, or execution boundary. Do not run it optimistically

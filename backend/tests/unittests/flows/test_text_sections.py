@@ -979,7 +979,6 @@ async def test_sections_use_complete_single_file_text_without_source_wrappers(us
 async def test_section_ordinal_question_binding_is_rejected_at_all_stages(
     user, also_in_prompt
 ):
-    from eneo.flows.ai_builder.ai_builder_validator import validate_spec
     from eneo.flows.flow_authoring_spec import (
         AssistantSpec,
         FlowDraftSpecCore,
@@ -1017,7 +1016,6 @@ async def test_section_ordinal_question_binding_is_rejected_at_all_stages(
         ],
     )
     authored = spec.steps[1]
-    builder_result = validate_spec(spec)
     with pytest.raises(BadRequestException) as published:
         validate_step_graph(
             flow_step_validation_views_from_draft_spec(spec.steps),
@@ -1032,10 +1030,6 @@ async def test_section_ordinal_question_binding_is_rejected_at_all_stages(
     assert executed.value.code == "typed_io_variable_resolution_failed"
     repo.activate_step_attempt.assert_not_awaited()
     assistant.get_response.assert_not_awaited()
-    assert [error.code for error in builder_result.errors] == [
-        "unknown_variable_reference"
-    ]
-    assert "'section_index'" in builder_result.errors[0].message
 
 
 async def test_sections_refuse_metadata_only_request_before_activation(

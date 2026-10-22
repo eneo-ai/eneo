@@ -111,8 +111,9 @@ class TestCategoryMappings:
                 f"{action_type} should be mapped to 'user_actions'"
             )
 
-    def test_ai_builder_actions_are_emitted_audit_events(self):
-        """Builder action types must map only to emitted audit events."""
+    def test_ai_builder_actions_keep_their_category(self):
+        """The retired AI Builder's action types keep the category of the
+        entries it wrote."""
         expected_actions = {
             ActionType.AI_BUILDER_SESSION_CREATED,
             ActionType.AI_BUILDER_PLAN_APPROVED,

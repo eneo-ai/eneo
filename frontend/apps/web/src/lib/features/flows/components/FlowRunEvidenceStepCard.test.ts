@@ -24,7 +24,6 @@ function renderCard(
   currentEvidenceNotLoaded: boolean,
   stepResult: FlowRunStep = result,
   transcriptContext: FlowRunTranscriptContext | null = null,
-  onRepairFailure: ((stepOrder: number) => void) | null = null,
   runError: { step_order?: number | null } | null = null,
   overrides: {
     stepDef?: Record<string, unknown>;
@@ -39,7 +38,6 @@ function renderCard(
       runError: runError as never,
       transcriptContext,
       currentEvidenceNotLoaded,
-      onRepairFailure,
       stepDef: undefined,
       duration: null,
       transcription: null,
@@ -64,31 +62,6 @@ function renderCard(
 }
 
 describe("FlowRunEvidenceStepCard", () => {
-  it("offers the AI Builder repair for a rejected-output failure and not for other failures", () => {
-    const failed = (error_code: FlowRunStep["error_code"]): FlowRunStep => ({
-      ...result,
-      status: "failed",
-      error_code,
-      error_message: `Step 1: ${error_code}.`
-    });
-    const repair = () => undefined;
-    expect(renderCard(false, failed("typed_io_output_parse_failed"), null, repair)).toContain(
-      m.flow_run_error_repair_action()
-    );
-    // A candidate code without a handler (no Builder permission) offers nothing.
-    expect(renderCard(false, failed("typed_io_output_parse_failed"), null, null)).not.toContain(
-      m.flow_run_error_repair_action()
-    );
-    // A truncated answer is repairable from what the run recorded about it.
-    expect(renderCard(false, failed("flow_llm_output_truncated"), null, repair)).toContain(
-      m.flow_run_error_repair_action()
-    );
-    // A failure that happened before the model answered is not a repair.
-    expect(
-      renderCard(false, failed("typed_io_input_exceeds_model_window"), null, repair)
-    ).not.toContain(m.flow_run_error_repair_action());
-  });
-
   it("leads a failed step with what went wrong, before its result and prompt", () => {
     const html = renderCard(false, {
       ...result,
@@ -118,7 +91,7 @@ describe("FlowRunEvidenceStepCard", () => {
       error_code: "typed_io_contract_violation",
       error_message: "Step 2: contract violation."
     };
-    const html = renderCard(false, skipped, null, null, { step_order: 2 });
+    const html = renderCard(false, skipped, null, { step_order: 2 });
     expect(html).toContain(m.flow_run_step_not_run());
     expect(html).not.toContain("Step 2: contract violation.");
   });
@@ -132,7 +105,7 @@ describe("FlowRunEvidenceStepCard", () => {
       error_code: "flow_step_attempt_start_failed",
       error_message: "Step 2: attempt could not start."
     };
-    const html = renderCard(false, failedToStart, null, null, { step_order: 2 });
+    const html = renderCard(false, failedToStart, null, { step_order: 2 });
     expect(html).not.toContain(m.flow_run_step_not_run());
   });
 
@@ -153,12 +126,12 @@ describe("FlowRunEvidenceStepCard", () => {
 
     const summarizeStep = { input_config: { text_processing: { mode: "summarize" } } };
     expect(
-      renderCard(false, sectioned([500, 1000]), null, null, null, { stepDef: summarizeStep })
+      renderCard(false, sectioned([500, 1000]), null, null, { stepDef: summarizeStep })
     ).toContain(m.flow_run_sections_read_summarized({ count: "2" }));
 
     expect(renderCard(false, sectioned([1000]))).toContain(m.flow_run_sections_read_one());
 
-    const advanced = renderCard(false, sectioned([250, 500, 1000]), null, null, null, {
+    const advanced = renderCard(false, sectioned([250, 500, 1000]), null, null, {
       isPowerUser: true
     });
     expect(advanced).toContain(m.flow_run_section_position({ index: "3", from: "50", to: "100" }));
@@ -170,8 +143,8 @@ describe("FlowRunEvidenceStepCard", () => {
 
   it("names the speaker identification service that labelled the step, in Avancerad", () => {
     const labelled = { diarization: "external", speaker_service: "Vemsa Sundsvall" };
-    const card = (overrides: Parameters<typeof renderCard>[5]) =>
-      renderCard(false, result, null, null, null, overrides);
+    const card = (overrides: Parameters<typeof renderCard>[4]) =>
+      renderCard(false, result, null, null, overrides);
 
     expect(card({ isPowerUser: true, transcription: labelled })).toContain("Vemsa Sundsvall");
     expect(card({ transcription: labelled })).not.toContain("Vemsa Sundsvall");
@@ -332,7 +305,6 @@ describe("FlowRunEvidenceStepCard", () => {
       { ...result, output_payload_json: { text: "[00:00:00 - 00:00:04] SPEAKER_00: Hej Gunnar." } },
       rawContext,
       null,
-      null,
       { correctionsController: named({ SPEAKER_00: "Gunnar Ek", SPEAKER_01: null }) }
     );
     expect(transcription).toContain("Gunnar Ek");
@@ -363,7 +335,6 @@ describe("FlowRunEvidenceStepCard", () => {
       },
       rawContext,
       null,
-      null,
       { correctionsController: named({ SPEAKER_00: "Gunnar Ek" }) }
     );
     expect(naming).toContain("Gunnar Ek");
@@ -378,7 +349,6 @@ describe("FlowRunEvidenceStepCard", () => {
         output_payload_json: { text: "[00:00:00 - 00:00:04] SPEAKER_00: Hej Gunnar." }
       },
       rawContext,
-      null,
       null,
       { correctionsController: named({ SPEAKER_00: "Gunnar Ek" }) }
     );
@@ -421,7 +391,6 @@ describe("FlowRunEvidenceStepCard", () => {
           } as unknown as FlowRunStep["output_payload_json"]
         },
         rawContext,
-        null,
         null,
         { correctionsController: named(speakerNames) }
       );
