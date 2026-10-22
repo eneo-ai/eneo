@@ -93,12 +93,19 @@ function seededClient() {
   return queryClient;
 }
 
-function renderPalette(permissions: Permission[] = []) {
+function renderPalette(permissions: Permission[] = [], { flowsEnabled = false } = {}) {
   const onCreateSpace = vi.fn();
   const onOpenChange = vi.fn();
   renderInApp(
     <ShellCommandPalette isOpen onOpenChange={onOpenChange} onCreateSpace={onCreateSpace} />,
-    { queryClient: seededClient(), appContext: testAppContext({ permissions }) }
+    {
+      queryClient: seededClient(),
+      appContext: testAppContext({
+        permissions,
+        settings: { flows_enabled: flowsEnabled },
+        featureFlags: { flows: false }
+      })
+    }
   );
   return { onCreateSpace, onOpenChange };
 }
@@ -291,6 +298,20 @@ describe("ShellCommandPalette", () => {
     expect(screen.queryByRole("option", { name: /Gammalt namn|Raderad konversation/ })).toBeNull();
     // The fresh spaces list came from the cache.
     expect(get).not.toHaveBeenCalledWith("/api/v1/spaces/", expect.anything());
+  });
+
+  it("offers the flow settings to an admin when the tenant has flows", async () => {
+    renderPalette(["admin"], { flowsEnabled: true });
+    await screen.findByRole("option", { name: /Upphandlingsassistenten/ });
+    search("flöden");
+    expect(await screen.findByRole("option", { name: /^Administration › Fl ?öden$/ })).toBeTruthy();
+  });
+
+  it("offers no flow settings when the tenant has no flows", async () => {
+    renderPalette(["admin"]);
+    await screen.findByRole("option", { name: /Upphandlingsassistenten/ });
+    search("flöden");
+    await screen.findByText("Inga resultat hittades");
   });
 
   it("hides Skapa yta and admin pages from others", async () => {

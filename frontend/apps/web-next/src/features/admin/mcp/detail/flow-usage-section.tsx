@@ -14,12 +14,13 @@ import { mcpServerFlowUsageQueryOptions, mcpServerToolsQueryOptions } from "../m
 
 /**
  * Which published flows call the server's tools, so an administrator sees
- * what switching the server or a tool off breaks. Shown only when the tenant
- * has flows: the endpoint is behind the flows gate.
+ * what switching the server or a tool off breaks. Shown when the tenant has
+ * flows switched on (the endpoint is behind the flows gate), whatever the
+ * administrator's own flow permissions.
  */
 export function FlowUsageSection({ serverId }: { serverId: string }) {
-  const { featureFlags } = useAppContext();
-  return featureFlags.flows ? <FlowUsage serverId={serverId} /> : null;
+  const { settings } = useAppContext();
+  return settings.flows_enabled === true ? <FlowUsage serverId={serverId} /> : null;
 }
 
 function FlowUsage({ serverId }: { serverId: string }) {
