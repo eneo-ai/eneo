@@ -1,7 +1,7 @@
 """Record the stage and sources of long-material digest calls in provider-call receipts.
 
-Revision ID: 202610212200
-Revises: 202610212100
+Revision ID: 202610212300
+Revises: 202610212200
 """
 
 import sqlalchemy as sa
@@ -9,8 +9,8 @@ from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
-revision = "202610212200"
-down_revision = "202610212100"
+revision = "202610212300"
+down_revision = "202610212200"
 branch_labels = None
 depends_on = None
 
