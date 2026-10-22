@@ -39,6 +39,7 @@ import {
   problemStatus,
   TemplateTextArea
 } from "./editor-fields";
+import { useRecordUpload } from "./editor-uploads";
 import type { FieldProblems } from "./field-problems";
 import {
   readRetrievalPolicy,
@@ -170,6 +171,7 @@ function Attachments({
   const t = useTranslations();
   const locale = useLocale();
   const [uploading, setUploading] = useState(false);
+  const recordUpload = useRecordUpload();
   const rules = fileRestrictionsRules(restrictions);
 
   async function add(picked: File | File[] | null) {
@@ -185,14 +187,14 @@ function Attachments({
       for (const file of accepted) {
         const body = new FormData();
         body.append("upload_file", file);
-        added.push(
-          await unwrap(
-            browserApi.POST("/api/v1/files/", {
-              body: body as unknown as { upload_file: string },
-              bodySerializer: (formData: unknown) => formData as FormData
-            })
-          )
+        const uploaded = await unwrap(
+          browserApi.POST("/api/v1/files/", {
+            body: body as unknown as { upload_file: string },
+            bodySerializer: (formData: unknown) => formData as FormData
+          })
         );
+        recordUpload({ kind: "file", id: uploaded.id });
+        added.push(uploaded);
       }
     } catch (error) {
       toastApiError(error, t);

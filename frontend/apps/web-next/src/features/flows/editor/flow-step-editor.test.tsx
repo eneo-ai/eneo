@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -330,6 +330,69 @@ describe("FlowStepEditor", () => {
     expect(list.textContent).not.toContain("Nivå 2");
   });
 
+  function attachFile(container: HTMLElement, name = "underlag.txt") {
+    const input = container.querySelector<HTMLInputElement>('input[type="file"]');
+    if (!input) throw new Error("no file input");
+    fireEvent.change(input, {
+      target: { files: [new File(["text"], name, { type: "text/plain" })] }
+    });
+  }
+
+  const uploadable = makeAssistant({
+    allowed_attachments: { accepted_file_types: [], limit: { max_files: 5, max_size: 10_000_000 } }
+  } as never);
+
+  it("releases a file uploaded in an edit that is cancelled", async () => {
+    routeBasics(uploadable);
+    api.routes["POST /api/v1/files/"] = () => ({
+      body: { id: "file-new", name: "underlag.txt", size: 4, mimetype: "text/plain" }
+    });
+    api.routes["DELETE /api/v1/files/{id}/"] = () => ({ body: {} });
+    const { container, onCancel } = renderEditor(makeFlow());
+    await nameField();
+    attachFile(container);
+    expect(await screen.findByText("underlag.txt")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: messages.flow_step_editor_discard })
+    );
+    await waitFor(() => expect(onCancel).toHaveBeenCalled());
+    const deletes = api.stub.calls.filter((call) => call.method === "DELETE");
+    expect(deletes).toEqual([
+      expect.objectContaining({
+        path: "/api/v1/files/{id}/",
+        init: { params: { path: { id: "file-new" } } }
+      })
+    ]);
+  });
+
+  it("keeps a file the saved step uses when the editor closes", async () => {
+    const withFile = makeAssistant({
+      ...uploadable,
+      attachments: [{ id: "file-new", name: "underlag.txt", size: 4 }]
+    } as never);
+    let saved = false;
+    api.routes[ASSISTANT] = () => ({ body: saved ? withFile : uploadable });
+    api.routes["POST /api/v1/files/"] = () => ({
+      body: { id: "file-new", name: "underlag.txt", size: 4, mimetype: "text/plain" }
+    });
+    api.routes[EDITOR] = () => {
+      saved = true;
+      return { body: makeFlow({ draft_revision: 5 }) };
+    };
+    const { container, onSaved, unmount } = renderEditor(makeFlow());
+    await nameField();
+    attachFile(container);
+    expect(await screen.findByText("underlag.txt")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+
+    unmount();
+    expect(api.stub.calls.filter((call) => call.method === "DELETE")).toEqual([]);
+  });
+
   it("offers no long material where the step does not let a model answer", async () => {
     renderEditor(makeFlow({ steps: [makeStep({ output_mode: "compose_text" })] }));
     await nameField();
@@ -570,6 +633,57 @@ describe("FlowStepEditor", () => {
     expect(screen.getByText("0 av 1 fält är kopplade.")).toBeTruthy();
     await expectNoAxeViolations(container);
   }, 20_000);
+
+  it("releases a Word template uploaded in an edit that is closed without saving", async () => {
+    api.routes["GET /api/v1/flows/{id}/template-files/"] = () => ({ body: [] });
+    api.routes["POST /api/v1/flows/{id}/template-files/"] = () => ({
+      body: {
+        id: "asset-new",
+        flow_id: "flow-1",
+        file_id: "file-9",
+        name: "Ny.docx",
+        checksum: "x",
+        status: "ready",
+        placeholders: []
+      }
+    });
+    api.routes["GET /api/v1/flows/{id}/template-inspect/"] = () => ({
+      body: { asset_id: "asset-new", file_id: "file-9", file_name: "Ny.docx", placeholders: [] }
+    });
+    api.routes["DELETE /api/v1/flows/{id}/template-files/{file_id}/"] = () => ({ body: {} });
+    const { container, unmount } = renderEditor(
+      makeFlow({
+        steps: [makeStep({ output_mode: "template_fill", output_type: "docx", output_config: {} })]
+      })
+    );
+    await nameField();
+    const input = await waitFor(() => {
+      const found = container.querySelector<HTMLInputElement>('input[type="file"]');
+      if (!found) throw new Error("no template input yet");
+      return found;
+    });
+    fireEvent.change(input, {
+      target: {
+        files: [
+          new File(["docx"], "Ny.docx", {
+            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          })
+        ]
+      }
+    });
+    await waitFor(() =>
+      expect(
+        api.stub.calls.some((call) => call.path === "/api/v1/flows/{id}/template-inspect/")
+      ).toBe(true)
+    );
+
+    unmount();
+    expect(
+      api.stub.calls
+        .filter((call) => call.method === "DELETE")
+        .map((call) => call.init.params?.path)
+    ).toEqual([{ id: "flow-1", file_id: "asset-new" }]);
+  });
 
   it("shows a read-only step as text, without inputs", async () => {
     const { container } = renderEditor(makeFlow(), { readOnly: true });

@@ -19,6 +19,7 @@ import {
   uploadTemplate
 } from "./editor-api";
 import { FieldMessage, problemStatus } from "./editor-fields";
+import { useRecordUpload } from "./editor-uploads";
 import { describeSaveError } from "./field-problems";
 import {
   isStructuredTemplateBinding,
@@ -129,6 +130,7 @@ export function TemplateFillFields({
   });
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const recordUpload = useRecordUpload();
 
   function choose(result: TemplateInspection, assetId: string) {
     const placeholders = result.placeholders.map((item) => item.name);
@@ -177,6 +179,7 @@ export function TemplateFillFields({
     setBusy(true);
     try {
       const asset = await uploadTemplate(flowId, file);
+      recordUpload({ kind: "template", id: asset.id });
       await queryClient.invalidateQueries({ queryKey: flowEditorKeys.templateFiles(flowId) });
       const result = await inspectTemplate(flowId, asset.id);
       queryClient.setQueryData(flowEditorKeys.templateInspection(flowId, asset.id), result);
