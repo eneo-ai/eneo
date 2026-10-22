@@ -5,9 +5,25 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { makeStep } from "./flow-fixtures";
+
+const prompts = vi.hoisted(() => ({ byAssistant: {} as Record<string, string> }));
+const api = vi.hoisted(() => ({
+  GET: vi.fn(async (_path: string, init: { params: { path: { assistant_id: string } } }) => {
+    const id = init.params.path.assistant_id;
+    return {
+      data: { id, prompt: { text: prompts.byAssistant[id] ?? "" } },
+      response: new Response(null, { status: 200 })
+    };
+  })
+}));
+vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+
 import { FlowStepList } from "./flow-step-list";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  prompts.byAssistant = {};
+});
 
 const steps = [
   makeStep(1, { user_description: "Sammanfatta", input_type: "document" }),
@@ -28,7 +44,13 @@ function renderList(canEdit = true) {
     onAdd: vi.fn()
   };
   const view = renderInApp(
-    <FlowStepList steps={steps} canEdit={canEdit} headingRef={createRef()} {...actions} />
+    <FlowStepList
+      flowId="flow-1"
+      steps={steps}
+      canEdit={canEdit}
+      headingRef={createRef()}
+      {...actions}
+    />
   );
   return { ...view, actions };
 }
@@ -50,6 +72,23 @@ describe("FlowStepList", () => {
     expect(within(items[2]!).getByText("Steg 1: Sammanfatta")).toBeTruthy();
 
     await expectNoAxeViolations(container);
+  });
+
+  it("adds what an AI step's prompt reads, and names a prompt reader before a removal", async () => {
+    prompts.byAssistant = {
+      "assistant-3": "Jämför med {{step_2.output.text}} och {{Sammanfatta}}."
+    };
+    renderList();
+    const third = screen.getByRole("article", { name: "Steg 3 Granska" });
+    expect(await within(third).findByText("Steg 2: Skriv svar")).toBeTruthy();
+    expect(within(third).getByText("Steg 1: Sammanfatta")).toBeTruthy();
+
+    const trigger = screen.getByRole("button", { name: "Fler åtgärder för Steg 2: Skriv svar" });
+    fireEvent.click(trigger);
+    const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort steg" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort steget?" });
+    expect(within(dialog).getByText(/^Steg 3: Granska läser Steg 2: Skriv svar\./)).toBeTruthy();
   });
 
   it("moves a step with buttons, never past either end", () => {

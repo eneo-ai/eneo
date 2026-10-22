@@ -226,6 +226,47 @@ export function textProcessingEligibility(
 }
 
 // ---------------------------------------------------------------------------
+// Long material: `input_config.long_material = {"mode": "digest"}`. Input
+// larger than the step's model reads at once is read in segments; the model
+// answers over notes made from them (`long_material.py`).
+// ---------------------------------------------------------------------------
+
+export function readLongMaterial(inputConfig: unknown): boolean {
+  const value = isJsonObject(inputConfig) ? inputConfig.long_material : undefined;
+  return isJsonObject(value) && value.mode === "digest";
+}
+
+export function withLongMaterial(inputConfig: unknown, on: boolean): JsonObject | null {
+  const config = objectOf(inputConfig);
+  if (on) config.long_material = { mode: "digest" };
+  else delete config.long_material;
+  return Object.keys(config).length > 0 ? config : null;
+}
+
+/**
+ * Whether the core accepts long material on the step: a completion step
+ * (`pass_through` or `http_post`) that does not read its material by
+ * section, per item or per file (`step_mapped_execution.py`).
+ */
+export function longMaterialEligibility(
+  step: Pick<StepConfig, "output_mode" | "input_config">
+): "eligible" | "output" | "text_processing" | "mapped" {
+  if (step.output_mode !== "pass_through" && step.output_mode !== "http_post") return "output";
+  const config = objectOf(step.input_config);
+  if (config.text_processing !== undefined && config.text_processing !== null) {
+    return "text_processing";
+  }
+  const runtime = objectOf(config.runtime_input);
+  if (
+    (runtime.enabled === true && runtime.execution_mode === "per_source") ||
+    objectOf(config.item_map).enabled === true
+  ) {
+    return "mapped";
+  }
+  return "eligible";
+}
+
+// ---------------------------------------------------------------------------
 // HTTP: the authored config of `http_get` input and `http_post` output.
 // Credentials are write-only: the API returns `{"$secret": "stored"}` for a
 // stored secret, and sending the sentinel back keeps it.

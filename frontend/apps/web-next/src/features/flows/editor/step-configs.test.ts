@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   argumentValue,
+  longMaterialEligibility,
   newSourceRef,
   readHttpConfig,
   readInputBindings,
+  readLongMaterial,
   readRuntimeInput,
   readTemplateFill,
   withHttpConfig,
+  withLongMaterial,
   withReviewChoice,
   withRuntimeInput,
   withTemplate,
@@ -138,5 +141,46 @@ describe("review", () => {
       expires_after_seconds: 7200
     });
     expect(withReviewChoice({ mode: "view" }, "none")).toBeNull();
+  });
+});
+
+describe("long material", () => {
+  it("is set and cleared without touching the step's other input settings", () => {
+    const stored = { runtime_input: { enabled: true, input_format: "document" } };
+    const on = withLongMaterial(stored, true);
+    expect(on).toEqual({ ...stored, long_material: { mode: "digest" } });
+    expect(readLongMaterial(on)).toBe(true);
+    expect(withLongMaterial(on, false)).toEqual(stored);
+    expect(withLongMaterial({ long_material: { mode: "digest" } }, false)).toBeNull();
+  });
+
+  it("is offered only on a completion step that reads its material whole", () => {
+    expect(longMaterialEligibility({ output_mode: "pass_through", input_config: null })).toBe(
+      "eligible"
+    );
+    expect(longMaterialEligibility({ output_mode: "http_post", input_config: null })).toBe(
+      "eligible"
+    );
+    expect(longMaterialEligibility({ output_mode: "compose_text", input_config: null })).toBe(
+      "output"
+    );
+    expect(
+      longMaterialEligibility({
+        output_mode: "pass_through",
+        input_config: { text_processing: { mode: "summarize" } }
+      })
+    ).toBe("text_processing");
+    expect(
+      longMaterialEligibility({
+        output_mode: "pass_through",
+        input_config: { item_map: { enabled: true } }
+      })
+    ).toBe("mapped");
+    expect(
+      longMaterialEligibility({
+        output_mode: "pass_through",
+        input_config: { runtime_input: { enabled: true, execution_mode: "per_source" } }
+      })
+    ).toBe("mapped");
   });
 });

@@ -5,12 +5,14 @@ import { Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useSpace } from "@/features/spaces/use-space";
-import { toolOptionsQueryOptions } from "./editor-api";
+import { knownClassifications, levelName } from "./classification-names";
+import { securityClassificationsQueryOptions, toolOptionsQueryOptions } from "./editor-api";
 import {
   hasHttpConfig,
   readCitationsOn,
   readHttpConfig,
   readInputBindings,
+  readLongMaterial,
   readRuntimeInput,
   readTemplateFill,
   readToolConfig,
@@ -71,6 +73,8 @@ export function StepReadOnly({
 }) {
   const t = useTranslations();
   const { space } = useSpace();
+  const listing = useQuery(securityClassificationsQueryOptions());
+  const classifications = knownClassifications(listing.data?.items, space);
   const runtime = readRuntimeInput(step.input_config);
   const bindings = readInputBindings(step.input_bindings);
   const tool = readToolConfig(step.input_config);
@@ -124,6 +128,11 @@ export function StepReadOnly({
             ) : (
               t("flow_step_editor_tool_placeholder")
             )}
+          </MetadataListItem>
+        )}
+        {readLongMaterial(step.input_config) && (
+          <MetadataListItem label={t("flow_editor_tools_long_material")}>
+            {t("flow_editor_tools_on")}
           </MetadataListItem>
         )}
         {bindings.status === "valid" && bindings.sourceRefs.length > 0 && (
@@ -208,9 +217,7 @@ export function StepReadOnly({
         <MetadataListItem label={t("flow_step_security_classification")}>
           {step.output_classification_override === null
             ? t("flow_step_security_inherit")
-            : t("flow_step_editor_classification_level", {
-                level: step.output_classification_override
-              })}
+            : levelName(step.output_classification_override, classifications, t)}
         </MetadataListItem>
         {step.timeout_seconds !== null && (
           <MetadataListItem label={t("flow_step_editor_timeout")}>

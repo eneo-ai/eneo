@@ -53,15 +53,15 @@ export function formFieldIsReadable(name: string): boolean {
   );
 }
 
-/** A property name one segment of a variable path can reach. */
-function isPathSegment(name: string): boolean {
+/** A property name one segment of a reference path can reach (`step_2.output.structured.<name>`). */
+export function isVariablePathSegment(name: string): boolean {
   return name.length > 0 && name.trim() === name && !/[.{}]/.test(name);
 }
 
 export function contractFields(contract: unknown): { name: string; type: string | null }[] {
   const properties = objectOf(objectOf(contract).properties);
   return Object.entries(properties)
-    .filter(([name]) => isPathSegment(name))
+    .filter(([name]) => isVariablePathSegment(name))
     .map(([name, schema]) => ({
       name,
       type: typeof objectOf(schema).type === "string" ? (objectOf(schema).type as string) : null

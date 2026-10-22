@@ -25,6 +25,19 @@ import {
   type FormFieldProblem,
   type FormFieldType
 } from "./flow-form-fields";
+import {
+  flowTakesAudio,
+  metadataWithTranscription,
+  speakersRequired,
+  transcriptionModelMissing,
+  transcriptionSettingsOf,
+  type TranscriptionSettings
+} from "./flow-transcription";
+import {
+  TranscriptionFields,
+  TranscriptionSummary,
+  type TranscriptionResources
+} from "./flow-transcription-settings";
 
 const TYPE_KEYS: Record<FormFieldType, string> = {
   text: "flows_field_type_text",
@@ -45,10 +58,25 @@ const PROBLEM_KEYS: Record<FormFieldProblem["problem"], string> = {
   options_required: "flows_field_problem_options"
 };
 
-/** The read view: what a run asks for and whether its evidence may be exported. */
-function SettingsSummary({ flow }: { flow: FlowPublic }) {
+/** Whether the flow shows transcription settings: it takes audio, or has them turned on. */
+function showsTranscription(flow: FlowPublic): boolean {
+  return flowTakesAudio(flow.steps) || transcriptionSettingsOf(flow.metadata_json).enabled;
+}
+
+/**
+ * The read view: what a run asks for, how its audio is transcribed and
+ * whether its evidence may be exported.
+ */
+function SettingsSummary({
+  flow,
+  transcription
+}: {
+  flow: FlowPublic;
+  transcription: TranscriptionResources;
+}) {
   const t = useTranslations();
   const fields = formFieldsOf(flow.metadata_json);
+  const settings = transcriptionSettingsOf(flow.metadata_json);
   return (
     <MetadataList label={{ position: "start", width: "11rem" }}>
       <MetadataListItem label={t("name")}>{flow.name}</MetadataListItem>
@@ -76,6 +104,14 @@ function SettingsSummary({ flow }: { flow: FlowPublic }) {
           </ul>
         )}
       </MetadataListItem>
+      {showsTranscription(flow) ? (
+        <TranscriptionSummary
+          settings={settings}
+          resources={transcription}
+          required={speakersRequired(flow.steps)}
+          modelMissing={transcriptionModelMissing(settings, flow.steps)}
+        />
+      ) : null}
       <MetadataListItem label={t("flows_evidence_export")}>
         {evidenceExportAllowed(flow.metadata_json)
           ? t("flows_evidence_export_allowed")
@@ -181,16 +217,20 @@ function FormFieldRow({
 
 /**
  * The flow's settings: its name, description, the run form people fill in
- * when they start a run, and whether run evidence may be exported. Shown as
- * facts; editors change them in a form that saves them as one revision.
+ * when they start a run, how audio is transcribed (for a flow that takes
+ * audio) and whether run evidence may be exported. Shown as facts; editors
+ * change them in a form that saves them as one revision.
  */
 export function FlowSettings({
   flow,
   canEdit,
+  transcription,
   onSave
 }: {
   flow: FlowPublic;
   canEdit: boolean;
+  /** The space's transcription models and services. */
+  transcription: TranscriptionResources;
   /** Saves the definition change; resolves true when it was saved. */
   onSave: (definition: FlowDefinitionUpdate) => Promise<boolean>;
 }) {
@@ -207,10 +247,15 @@ export function FlowSettings({
   const [savedFields, setSavedFields] = useState<FormFieldDraft[]>([]);
   const [allowExport, setAllowExport] = useState(false);
   const [showProblems, setShowProblems] = useState(false);
+  const [transcriptionDraft, setTranscriptionDraft] = useState<TranscriptionSettings>(() =>
+    transcriptionSettingsOf(flow.metadata_json)
+  );
+  const [maxSpeakersInvalid, setMaxSpeakersInvalid] = useState(false);
   const nextKey = useRef(0);
 
   const problems = formFieldProblems(fields);
   const nameMissing = !name.trim();
+  const takesAudio = flowTakesAudio(flow.steps);
 
   function startEditing() {
     setName(flow.name);
@@ -219,6 +264,8 @@ export function FlowSettings({
     setSavedFields(saved);
     setFields(saved);
     setAllowExport(evidenceExportAllowed(flow.metadata_json));
+    setTranscriptionDraft(transcriptionSettingsOf(flow.metadata_json));
+    setMaxSpeakersInvalid(false);
     setShowProblems(false);
     setEditing(true);
   }
@@ -248,7 +295,7 @@ export function FlowSettings({
   async function submit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving) return;
-    if (nameMissing || problems.length > 0) {
+    if (nameMissing || problems.length > 0 || maxSpeakersInvalid) {
       // Rendered before focus moves, so the first field is read with its error.
       flushSync(() => setShowProblems(true));
       formRef.current
@@ -261,7 +308,12 @@ export function FlowSettings({
     const saved = await onSave({
       name: name.trim(),
       description: description.trim() || null,
-      metadata_json: metadataWithSettings(flow.metadata_json, fields, allowExport),
+      metadata_json: metadataWithTranscription(
+        metadataWithSettings(flow.metadata_json, fields, allowExport),
+        transcriptionSettingsOf(flow.metadata_json),
+        transcriptionDraft,
+        { takesAudio }
+      ),
       ...(Object.keys(renames).length > 0 ? { form_field_renames: renames } : {})
     });
     setSaving(false);
@@ -281,7 +333,7 @@ export function FlowSettings({
         ) : null}
       </div>
       {!editing ? (
-        <SettingsSummary flow={flow} />
+        <SettingsSummary flow={flow} transcription={transcription} />
       ) : (
         <form
           id={formId}
@@ -349,6 +401,18 @@ export function FlowSettings({
               />
             </div>
           </fieldset>
+          {showsTranscription(flow) ? (
+            <TranscriptionFields
+              settings={transcriptionDraft}
+              resources={transcription}
+              takesAudio={takesAudio}
+              required={speakersRequired(flow.steps)}
+              modelMissing={transcriptionModelMissing(transcriptionDraft, flow.steps)}
+              maxSpeakersProblem={maxSpeakersInvalid}
+              onChange={setTranscriptionDraft}
+              onMaxSpeakersInvalid={setMaxSpeakersInvalid}
+            />
+          ) : null}
           <CheckboxInput
             label={t("flows_evidence_export_allow")}
             description={t("flows_evidence_export_hint")}

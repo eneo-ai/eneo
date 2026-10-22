@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readHttpConfig, readRuntimeInput } from "./step-configs";
+import { readHttpConfig, readLongMaterial, readRuntimeInput } from "./step-configs";
 import {
   applyInputSourceChange,
   applyInputTypeChange,
@@ -114,6 +114,14 @@ describe("changing one setting keeps the step valid", () => {
       output_mode: "render_verbatim",
       output_type: "pdf"
     });
+  });
+});
+
+describe("long material follows the mode", () => {
+  it("ends when the step no longer has a model answer, and stays for HTTP delivery", () => {
+    const step = later({ input_config: { long_material: { mode: "digest" } } });
+    expect(readLongMaterial(applyOutputModeChange(step, "compose_text").input_config)).toBe(false);
+    expect(readLongMaterial(applyOutputModeChange(step, "http_post").input_config)).toBe(true);
   });
 });
 

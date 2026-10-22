@@ -5,7 +5,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, Workflow } from "lucide-react";
+import { Plus, Trash2, Upload, Workflow } from "lucide-react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
@@ -22,6 +22,7 @@ import { useRemovalMutation } from "@/features/spaces/removal";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
 import { deleteFlow, flowKeys, flowsListQueryOptions, type FlowSparse } from "./flows-api";
+import { FlowPackageImportDialog } from "./flow-package-import-dialog";
 import { FlowStatusBadge } from "./flow-status";
 import { NewFlowDialog } from "./new-flow-dialog";
 
@@ -37,6 +38,7 @@ export function FlowsPage() {
   const queryClient = useQueryClient();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<FlowSparse | null>(null);
   const flows = useQuery(flowsListQueryOptions(browserApi, space.id));
   const canManage = can("flows_manage");
@@ -53,12 +55,19 @@ export function FlowsPage() {
   });
 
   const createButton = canManage ? (
-    <Button
-      label={t("flows_new")}
-      variant="primary"
-      icon={<Plus aria-hidden="true" />}
-      onClick={() => setCreating(true)}
-    />
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        label={t("flow_editor_tools_package_import")}
+        icon={<Upload aria-hidden="true" />}
+        onClick={() => setImporting(true)}
+      />
+      <Button
+        label={t("flows_new")}
+        variant="primary"
+        icon={<Plus aria-hidden="true" />}
+        onClick={() => setCreating(true)}
+      />
+    </div>
   ) : undefined;
 
   const columns: TableColumn<FlowSparse>[] = [
@@ -154,6 +163,7 @@ export function FlowsPage() {
         }
       </QueryStateBoundary>
       <NewFlowDialog open={creating} onOpenChange={setCreating} />
+      {canManage ? <FlowPackageImportDialog open={importing} onOpenChange={setImporting} /> : null}
       <ConfirmDialogControlled
         open={deleteTarget !== null}
         onOpenChange={(open) => {

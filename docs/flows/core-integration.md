@@ -278,8 +278,9 @@ which pauses anyway, a partial digest that read something completes with a
 `long_material_partial_coverage` warning and the reviewer approves, edits or
 rejects the partial answer. Partial coverage never completes unmarked.
 
-Not done yet: the web-next step editor has no control for the setting (it
-travels in `input_config`), and no separate reader model is offered.
+The web-next step editor offers the setting as a switch on the steps the core
+accepts it on, and the run page shows the coverage record on the step. No
+separate reader model is offered.
 
 ## Open decisions
 

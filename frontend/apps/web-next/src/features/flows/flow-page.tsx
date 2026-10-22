@@ -37,6 +37,8 @@ import {
   type FlowStep
 } from "./flows-api";
 import { FlowChatPanel } from "./flow-chat-panel";
+import { FlowDraftCheck } from "./flow-draft-check-panel";
+import { FlowPackageExportDialog } from "./flow-package-export-dialog";
 import { stepLabel } from "./flow-labels";
 import { flowRefusalMessage, STALE_REVISION } from "./flow-refusals";
 import { FlowSettings } from "./flow-settings";
@@ -77,7 +79,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const announce = useAnnounce();
   const queryClient = useQueryClient();
   const rescue = useFocusRescue();
-  const { routeId } = useSpace();
+  const { routeId, space } = useSpace();
   const { can } = useAppContext();
   const spaceName = useSpaceDisplayName();
   const sections = useSpaceSections();
@@ -97,6 +99,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const [addAt, setAddAt] = useState<number | null>(null);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<PageTab>(
@@ -271,6 +274,12 @@ export function FlowPage({ flowId }: { flowId: string }) {
             onClick={() => setStarting(true)}
           />
         ) : null}
+        {canManage ? (
+          <Button
+            label={t("flow_editor_tools_package_export")}
+            onClick={() => setExporting(true)}
+          />
+        ) : null}
         {canManage && isPublished ? (
           <Button
             label={t("unpublish")}
@@ -408,7 +417,15 @@ export function FlowPage({ flowId }: { flowId: string }) {
                     }
                   />
                 ) : null}
+                {canEdit ? (
+                  <FlowDraftCheck
+                    flow={flow}
+                    speakerServices={space.transcription_services ?? []}
+                    onOpenStep={openStep}
+                  />
+                ) : null}
                 <FlowStepList
+                  flowId={flow.id}
                   steps={steps}
                   canEdit={canEdit}
                   headingRef={stepsHeadingRef}
@@ -417,7 +434,15 @@ export function FlowPage({ flowId }: { flowId: string }) {
                   onRemove={removeStep}
                   onAdd={(position) => setAddAt(position)}
                 />
-                <FlowSettings flow={flow} canEdit={canEdit} onSave={saveSettings} />
+                <FlowSettings
+                  flow={flow}
+                  canEdit={canEdit}
+                  transcription={{
+                    models: space.transcription_models,
+                    services: space.transcription_services ?? []
+                  }}
+                  onSave={saveSettings}
+                />
               </>
             )}
           </div>
@@ -466,6 +491,9 @@ export function FlowPage({ flowId }: { flowId: string }) {
             router.push(runHref(routeId, flow.id, run.id));
           }}
         />
+      ) : null}
+      {canManage ? (
+        <FlowPackageExportDialog flow={flow} open={exporting} onOpenChange={setExporting} />
       ) : null}
       <ConfirmDialogControlled
         open={confirmUnpublish}

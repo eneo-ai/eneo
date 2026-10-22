@@ -21,9 +21,11 @@ import type { FieldProblems } from "./field-problems";
 import { transcriptionEnabled } from "./step-draft";
 import {
   FILE_INPUT_TYPES,
+  longMaterialEligibility,
   newSourceRef,
   readHttpConfig,
   readInputBindings,
+  readLongMaterial,
   readRuntimeInput,
   readTextProcessingMode,
   readToolConfig,
@@ -31,6 +33,7 @@ import {
   sourceRefStepOrder,
   textProcessingEligibility,
   withHttpConfig,
+  withLongMaterial,
   withRuntimeInput,
   withTextProcessingMode,
   withToolConfig,
@@ -150,6 +153,8 @@ function ReadingMode({
   const t = useTranslations();
   const mode = readTextProcessingMode(draft.input_config);
   const eligibility = textProcessingEligibility(draft);
+  // Long material reads the whole input in its own way.
+  const longMaterial = readLongMaterial(draft.input_config);
   if (mode === null && (eligibility !== "eligible" || draft.input_source === "http_get"))
     return null;
   return (
@@ -178,22 +183,67 @@ function ReadingMode({
           value="process_each_section"
           label={t("flow_reading_mode_sections")}
           description={t("flow_reading_mode_sections_desc")}
-          isDisabled={eligibility !== "eligible" && mode !== "process_each_section"}
+          isDisabled={
+            (eligibility !== "eligible" || longMaterial) && mode !== "process_each_section"
+          }
         />
         <RadioListItem
           value="summarize"
           label={t("flow_reading_mode_summarize")}
           description={t("flow_reading_mode_summarize_desc")}
-          isDisabled={eligibility !== "eligible" && mode !== "summarize"}
+          isDisabled={(eligibility !== "eligible" || longMaterial) && mode !== "summarize"}
         />
       </RadioList>
-      {eligibility !== "eligible" && (
+      {eligibility !== "eligible" ? (
         <Text type="supporting" size="sm" as="p" display="block" className="m-0">
           {eligibility === "mapped"
             ? t("flow_reading_mode_unavailable_mapped")
             : t("flow_reading_mode_unavailable_output")}
         </Text>
-      )}
+      ) : longMaterial ? (
+        <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+          {t("flow_editor_tools_reading_mode_long_material")}
+        </Text>
+      ) : null}
+    </Anchor>
+  );
+}
+
+/**
+ * Long material: input larger than the model reads at once is read in
+ * parts. Offered only where the core accepts it; a stored setting the step
+ * no longer allows stays visible with the reason, so it can be turned off.
+ */
+function LongMaterial({
+  formId,
+  draft,
+  onChange,
+  problem
+}: {
+  formId: string;
+  draft: StepConfig;
+  onChange: (next: StepConfig) => void;
+  problem?: string;
+}) {
+  const t = useTranslations();
+  const on = readLongMaterial(draft.input_config);
+  const eligibility = longMaterialEligibility(draft);
+  if (!on && eligibility !== "eligible") return null;
+  const conflict =
+    on && eligibility !== "eligible"
+      ? t(`flow_editor_tools_long_material_conflict_${eligibility}`)
+      : null;
+  return (
+    <Anchor formId={formId} anchor="input_config.long_material">
+      <Switch
+        label={t("flow_editor_tools_long_material")}
+        description={t("flow_editor_tools_long_material_description")}
+        value={on}
+        onChange={(next) =>
+          onChange({ ...draft, input_config: withLongMaterial(draft.input_config, next) })
+        }
+        status={problemStatus(problem ?? conflict)}
+      />
     </Anchor>
   );
 }
@@ -516,6 +566,13 @@ export function StepInputSection({
           problem={problems["input_config.text_processing"]}
         />
       )}
+
+      <LongMaterial
+        formId={formId}
+        draft={draft}
+        onChange={onChange}
+        problem={problems["input_config.long_material"]}
+      />
 
       {showUnderlag && draft.input_source !== "http_get" && draft.input_source !== "tool" && (
         <Underlag
