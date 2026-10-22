@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -51,6 +51,37 @@ describe("RunSteps", () => {
     renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={waiting} />);
     const next = screen.getByRole("article", { name: "Steg 2: Skriv svar" });
     expect(within(next).getByText(messages.flow_run_progress_next_step_hint)).toBeTruthy();
+  });
+});
+
+describe("RunSteps copying", () => {
+  it("copies a step's output, its structured value as JSON", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const steps = runStepViews(
+      makeRunGraph([
+        { order: 1, label: "Sammanfatta", status: "completed" },
+        { order: 2, label: "Fält", status: "completed" }
+      ]),
+      [
+        makeRunStep(1),
+        makeRunStep(2, { output_payload_json: { structured: { mottagare: "Anna" } } })
+      ]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const first = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+    fireEvent.click(
+      within(first).getByRole("button", { name: messages.flow_run_more_copy_output })
+    );
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("Resultat från steg 1"));
+
+    const second = screen.getByRole("article", { name: "Steg 2: Fält" });
+    fireEvent.click(
+      within(second).getByRole("button", { name: messages.flow_run_more_copy_output })
+    );
+    await waitFor(() =>
+      expect(writeText).toHaveBeenLastCalledWith(JSON.stringify({ mottagare: "Anna" }, null, 2))
+    );
   });
 });
 

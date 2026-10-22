@@ -6,6 +6,7 @@ import { QuietBanner } from "@/components/astryx/banner";
 import { StatusLabel } from "@/components/composites/status-label";
 import { LongMaterialCoverage } from "../long-material-coverage";
 import { CitationSummary } from "./run-citations";
+import { CopyButton } from "./run-copy";
 import { formatCount, formatSeconds, stepInputFiles } from "./run-format";
 import { JsonValue } from "./run-json";
 import { flowErrorText, runErrorText } from "./run-messages";
@@ -56,24 +57,32 @@ function stepDurationMs(result: RunStep): number | null {
   return Number.isFinite(ms) && ms >= 0 ? ms : null;
 }
 
-/** What a step produced: its text, its structured value, or both when they differ in kind. */
+/** What a step produced, its text or its structured value, with a button that copies it. */
 function StepOutput({ result }: { result: RunStep }) {
   const t = useTranslations();
   const payload = result.output_payload_json;
   const structured = outputStructured(payload);
   const text = outputText(payload);
-  if (structured !== undefined) return <JsonValue value={structured} />;
-  if (text !== null) {
-    return (
-      <div className="flex flex-col gap-1">
-        <p className="text-ax-text text-sm break-words whitespace-pre-wrap">{text}</p>
-        {payload?.text_overflow ? (
-          <p className="text-ax-text-secondary text-xs">{t("flow_runs_output_overflow")}</p>
-        ) : null}
-      </div>
-    );
+  if (structured === undefined && text === null) {
+    return <p className="text-ax-text-secondary text-sm">{t("flow_runs_output_none")}</p>;
   }
-  return <p className="text-ax-text-secondary text-sm">{t("flow_runs_output_none")}</p>;
+  return (
+    <div className="flex items-start gap-2">
+      <div className="min-w-0 flex-1">
+        {structured !== undefined ? (
+          <JsonValue value={structured} />
+        ) : (
+          <div className="flex flex-col gap-1">
+            <p className="text-ax-text text-sm break-words whitespace-pre-wrap">{text}</p>
+            {payload?.text_overflow ? (
+              <p className="text-ax-text-secondary text-xs">{t("flow_runs_output_overflow")}</p>
+            ) : null}
+          </div>
+        )}
+      </div>
+      <CopyButton label={t("flow_run_more_copy_output")} value={structured ?? text} />
+    </div>
+  );
 }
 
 function StepCard({
@@ -191,8 +200,11 @@ function StepCard({
           chevronPosition="start"
           trigger={<span className="text-sm font-medium">{t("flow_runs_step_input")}</span>}
         >
-          <div className="pt-2">
-            <JsonValue value={result.input_payload_json} />
+          <div className="flex items-start gap-2 pt-2">
+            <div className="min-w-0 flex-1">
+              <JsonValue value={result.input_payload_json} />
+            </div>
+            <CopyButton label={t("flow_run_more_copy_input")} value={result.input_payload_json} />
           </div>
         </Collapsible>
       ) : null}

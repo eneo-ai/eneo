@@ -2717,7 +2717,6 @@
   "flow_runs_status_now": "Körningen har nu status: {status}.",
   "flow_runs_started_at": "Startad",
   "flow_runs_took": "Tog {time}",
-  "flow_runs_trace_id": "Spårnings-id: {id}",
   "flow_runs_failed_title": "Körningen misslyckades",
   "flow_runs_cancelled_title": "Körningen avbröts",
   "flow_runs_dispatch_problem_title": "Körningen har inte startat",
@@ -3065,5 +3064,15 @@
   "flow_run_more_reuse": "Använd underlaget från förra körningen",
   "flow_run_more_reuse_files": "Filer följer inte med. Välj dem igen.",
   "flow_run_more_reuse_done": "Underlaget från förra körningen är ifyllt.",
-  "flow_run_more_reuse_failed": "Underlaget från förra körningen kunde inte hämtas"
+  "flow_run_more_reuse_failed": "Underlaget från förra körningen kunde inte hämtas",
+  "flow_run_more_refresh": "Uppdatera",
+  "flow_run_more_refreshed": "Körningen är uppdaterad.",
+  "flow_run_more_run_id": "Körnings-id",
+  "flow_run_more_trace_id": "Spårnings-id",
+  "flow_run_more_other_files": "Andra filer från körningen",
+  "flow_run_more_copy_output": "Kopiera resultatet",
+  "flow_run_more_copy_input": "Kopiera vad steget fick",
+  "flow_run_more_copy_prompt": "Kopiera prompten",
+  "flow_run_more_redacted": "Åtkomstuppgifter maskerade",
+  "flow_run_more_redacted_hint": "API-nycklar och bearer-tokens är maskerade. Underlaget kan ändå innehålla personuppgifter och text från körningen."
 }

@@ -2717,7 +2717,6 @@
   "flow_runs_status_now": "The run's status is now: {status}.",
   "flow_runs_started_at": "Started",
   "flow_runs_took": "Took {time}",
-  "flow_runs_trace_id": "Trace ID: {id}",
   "flow_runs_failed_title": "The run failed",
   "flow_runs_cancelled_title": "The run was cancelled",
   "flow_runs_dispatch_problem_title": "The run has not started",
@@ -3065,5 +3064,15 @@
   "flow_run_more_reuse": "Use the input from the last run",
   "flow_run_more_reuse_files": "Files are not reused. Pick them again.",
   "flow_run_more_reuse_done": "The input from the last run is filled in.",
-  "flow_run_more_reuse_failed": "The input from the last run could not be read"
+  "flow_run_more_reuse_failed": "The input from the last run could not be read",
+  "flow_run_more_refresh": "Refresh",
+  "flow_run_more_refreshed": "The run is up to date.",
+  "flow_run_more_run_id": "Run ID",
+  "flow_run_more_trace_id": "Trace ID",
+  "flow_run_more_other_files": "Other files from the run",
+  "flow_run_more_copy_output": "Copy the result",
+  "flow_run_more_copy_input": "Copy what the step received",
+  "flow_run_more_copy_prompt": "Copy the prompt",
+  "flow_run_more_redacted": "Credentials masked",
+  "flow_run_more_redacted_hint": "API keys and bearer tokens are masked. The evidence can still contain personal data and text from the run."
 }

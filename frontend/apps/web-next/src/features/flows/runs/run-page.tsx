@@ -10,6 +10,7 @@ import {
   useQueryClient,
   useSuspenseQuery
 } from "@tanstack/react-query";
+import { RefreshCw } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
@@ -23,6 +24,7 @@ import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
+import { CopyableValue } from "@/features/chat/debug-section";
 import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
 import { useSpace } from "@/features/spaces/use-space";
@@ -74,6 +76,36 @@ type Notice = {
   title: string;
   description?: string;
 };
+
+/** The files the run's final result carries. */
+function resultFileIds(result: RunDetail["result"]): Set<string> {
+  if (result?.kind === "artifact") return new Set(result.files.map((file) => file.file_id));
+  if (result?.kind === "file_backed_text") return new Set([result.file.file_id]);
+  return new Set();
+}
+
+/**
+ * Every other file the run's steps made, beside its result: what most
+ * people open a finished run for, a click away without going through the
+ * steps.
+ */
+function RunOtherFiles({ flowId, run }: { flowId: string; run: RunDetail }) {
+  const t = useTranslations();
+  const carried = resultFileIds(run.result);
+  const others = (run.result_files ?? []).filter((file) => !carried.has(file.file_id));
+  if (others.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-ax-text m-0 text-sm font-medium">{t("flow_run_more_other_files")}</p>
+      <RunFiles
+        flowId={flowId}
+        runId={run.id}
+        files={others}
+        label={t("flow_run_more_other_files")}
+      />
+    </div>
+  );
+}
 
 /** The run's final result, by its kind. */
 function RunResult({ flowId, run }: { flowId: string; run: RunDetail }) {
@@ -309,6 +341,18 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   }, [announce, status, t]);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: runKeys.run(flowId, runId) });
+  const [refreshing, setRefreshing] = useState(false);
+  // Reads everything on the page again, the audited content included: the person asked.
+  async function refreshNow() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await refresh();
+      announce(t("flow_run_more_refreshed"));
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const cancel = useMutation({
     mutationFn: () => cancelRun(flowId, runId),
@@ -402,6 +446,13 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
 
   const actions = summary ? (
     <div className="flex flex-wrap items-center gap-2">
+      <Button
+        label={t("flow_run_more_refresh")}
+        icon={<RefreshCw aria-hidden="true" />}
+        onClick={() => void refreshNow()}
+        isLoading={refreshing}
+        isInterruptible
+      />
       {offersRedispatch ? (
         <Button
           label={t("flow_runs_redispatch")}
@@ -544,7 +595,10 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                   isRetrying={detail.isFetching}
                 />
               ) : run ? (
-                <RunResult flowId={flowId} run={run} />
+                <>
+                  <RunResult flowId={flowId} run={run} />
+                  <RunOtherFiles flowId={flowId} run={run} />
+                </>
               ) : (
                 <LoadingState rows={2} />
               )}
@@ -635,9 +689,12 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 access={run?.evidence_access}
               />
             ) : null}
-            <p className="text-ax-text-secondary text-xs">
-              {t("flow_runs_trace_id", { id: summary?.trace_id ?? "" })}
-            </p>
+            {summary ? (
+              <dl className="m-0 grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2">
+                <CopyableValue label={t("flow_run_more_run_id")} value={summary.id} />
+                <CopyableValue label={t("flow_run_more_trace_id")} value={summary.trace_id} />
+              </dl>
+            ) : null}
           </>
         )}
       </div>
