@@ -132,6 +132,8 @@ class ActionType(str, Enum):
     FLOW_UPDATED = "flow_updated"
     FLOW_AUTHORING_CHAT_CREATED = "flow_authoring_chat_created"
     FLOW_AUTHORING_MODE_CHANGED = "flow_authoring_mode_changed"
+    FLOW_AUTHORING_CHAT_MODEL_CHANGED = "flow_authoring_chat_model_changed"
+    FLOW_AUTHORING_CONVERSATION_STARTED = "flow_authoring_conversation_started"
     FLOW_DELETED = "flow_deleted"
     FLOW_PUBLISHED = "flow_published"
     FLOW_UNPUBLISHED = "flow_unpublished"

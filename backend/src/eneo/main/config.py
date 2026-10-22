@@ -427,6 +427,9 @@ class Settings(BaseSettings):
     # Seconds between sweeps that cancel the runs of deleted flows; a divisor of
     # 60, since the sweep runs at fixed seconds of every minute.
     flow_retired_run_drain_interval_seconds: int = 60
+    # Minutes without a question or mode change after which turning on a flow
+    # chat's edit mode starts a new conversation.
+    flow_authoring_chat_idle_minutes: int = Field(default=45, gt=0)
     flow_max_inline_text_bytes: int = 8 * 1024 * 1024
     flow_pdf_max_pages: int = Field(default=2000, gt=0)
     flow_pdf_max_extracted_bytes: int = Field(default=128 * 1024 * 1024, gt=0)

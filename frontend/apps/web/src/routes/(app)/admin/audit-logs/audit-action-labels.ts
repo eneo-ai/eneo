@@ -533,6 +533,14 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_authoring_mode_changed,
     description: m.audit_action_flow_authoring_mode_changed_description
   },
+  flow_authoring_chat_model_changed: {
+    name: m.audit_action_flow_authoring_chat_model_changed,
+    description: m.audit_action_flow_authoring_chat_model_changed_description
+  },
+  flow_authoring_conversation_started: {
+    name: m.audit_action_flow_authoring_conversation_started,
+    description: m.audit_action_flow_authoring_conversation_started_description
+  },
   flow_deleted: {
     name: m.audit_action_flow_deleted,
     description: m.audit_action_flow_deleted_description

@@ -639,6 +639,41 @@ class FlowRagEvidencePolicyUpdate(BaseModel):
     )
 
 
+_FLOW_AUTHORING_CHAT_POLICY_EXAMPLE: JsonDict = {
+    "completion_model_id": "00000000-0000-0000-0000-000000000401"
+}
+
+
+class FlowAuthoringChatPolicyPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": _FLOW_AUTHORING_CHAT_POLICY_EXAMPLE}
+    )
+
+    completion_model_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The organisation's default model for flow chats. A chat whose user "
+            "has not chosen a model answers with it where the flow's space "
+            "allows it, and with the space's default among models that support "
+            "tools otherwise. Null: always the space's default."
+        ),
+    )
+
+
+class FlowAuthoringChatPolicyUpdate(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": _FLOW_AUTHORING_CHAT_POLICY_EXAMPLE},
+    )
+
+    completion_model_id: UUID | None = Field(
+        description=(
+            "An enabled completion model of the organisation that supports "
+            "tools, or null to remove the default."
+        ),
+    )
+
+
 class FlowEvidencePolicyPublic(BaseModel):
     model_config = ConfigDict(
         json_schema_extra={"example": FLOW_EVIDENCE_POLICY_EXAMPLE}
