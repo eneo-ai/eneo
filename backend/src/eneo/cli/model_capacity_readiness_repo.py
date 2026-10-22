@@ -5,31 +5,18 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import noload, selectinload
 
-from eneo.apps.apps.app_factory import AppFactory
-from eneo.assistants.assistant_factory import AssistantFactory
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.completion_models.domain.completion_model_repo import (
     CompletionModelRepository,
 )
-from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.flow_tables import FlowRuns, Flows
-from eneo.database.tables.model_providers_table import ModelProviders
-from eneo.database.tables.security_classifications_table import SecurityClassification
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.flows.domain.flow import FlowRunStatusSnapshot, FlowSparse, FlowVersion
 from eneo.flows.enums import FlowRunStatus, is_terminal_flow_run_status
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
-from eneo.prompts.prompt_factory import PromptFactory
-from eneo.spaces.space import Space
-from eneo.spaces.space_factory import SpaceFactory
-from eneo.templates.app_template.app_template_factory import AppTemplateFactory
-from eneo.templates.assistant_template.assistant_template_factory import (
-    AssistantTemplateFactory,
-)
 from eneo.tenants.tenant import TenantInDB
 from eneo.tenants.tenant_repo import TenantRepository
 
@@ -50,72 +37,6 @@ class ModelCapacityReadinessRepository:
             if owner is None:
                 raise ValueError("Tenant disappeared")
             yield owner
-
-    async def active_provider_ids(self, owner: TenantInDB) -> set[UUID]:
-        rows = await self.session.stream_scalars(
-            sa.select(ModelProviders.id)
-            .where(
-                ModelProviders.tenant_id == owner.id,
-                ModelProviders.is_active.is_(True),
-            )
-            .execution_options(yield_per=100)
-        )
-        return {identity async for identity in rows}
-
-    async def builder_spaces(self, owner: TenantInDB) -> AsyncIterator[Space]:
-        model_rows = await self.session.stream(
-            sa.select(
-                CompletionModels, ModelProviders.name, ModelProviders.provider_type
-            )
-            .outerjoin(
-                ModelProviders, CompletionModels.provider_id == ModelProviders.id
-            )
-            .where(
-                sa.or_(
-                    CompletionModels.tenant_id == owner.id,
-                    CompletionModels.tenant_id.is_(None),
-                ),
-                CompletionModels.deleted_at.is_(None),
-            )
-            .options(
-                selectinload(CompletionModels.security_classification).selectinload(
-                    SecurityClassification.tenant
-                )
-            )
-            .execution_options(yield_per=100)
-        )
-        models = [
-            CompletionModel.create_from_db(
-                row, owner, provider_name=name, provider_type=kind
-            )
-            async for row, name, kind in model_rows
-        ]
-        factory = SpaceFactory(
-            AssistantFactory(PromptFactory(), AssistantTemplateFactory()),
-            AppFactory(AppTemplateFactory()),
-        )
-        # The factory owns personal/shared model selection. Unrelated resources
-        # stay unloaded: this projection cannot fetch attachments or credentials.
-        rows = await self.session.stream_scalars(
-            sa.select(Spaces)
-            .where(Spaces.tenant_id == owner.id)
-            .order_by(Spaces.id)
-            .options(
-                noload("*"),
-                selectinload(Spaces.completion_models_mapping),
-                selectinload(Spaces.security_classification).selectinload(
-                    SecurityClassification.tenant
-                ),
-            )
-            .execution_options(yield_per=100)
-        )
-        async for row in rows:
-            yield factory.create_space_from_db(
-                row,
-                user=None,
-                completion_models=models,
-                security_classification=row.security_classification,
-            )
 
     async def published_flows(self, owner: TenantInDB) -> AsyncIterator[FlowSparse]:
         rows = await self.session.stream(

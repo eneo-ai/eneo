@@ -89,9 +89,9 @@ Rules:
    permissions; do not invoke it in plan mode.
 5. Let Fable reframe the problem; label Codex or Claude theories as hypotheses.
 6. Verify high-impact file claims locally before changing code or policy.
-7. Behavior claims for Flow AI Builder require fresh-session evidence when
-   deterministic tests cannot prove them; repeat flaky signals before trusting
-   them.
+7. Behavior claims for flow authoring through the assistant chat require
+   fresh-session evidence when deterministic tests cannot prove them; repeat
+   flaky signals before trusting them.
 8. After a useful pass, verify, implement, decide, or park the finding. Do not
    spend another broad pass merely to understand the first.
 
@@ -138,7 +138,7 @@ result.
 
 ## Eneo Flow gates
 
-Flow and Flow AI Builder are pre-production product-critical surfaces.
+Flows and their authoring chat are pre-production product-critical surfaces.
 
 - Start each slice with current owner, proposed owner, duplicate paths, and
   deletion candidates.

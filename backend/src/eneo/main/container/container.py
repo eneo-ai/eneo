@@ -107,11 +107,6 @@ from eneo.flows import (
     FlowService,
     FlowVersionRepository,
 )
-from eneo.flows.ai_builder.ai_builder_flow_review import (
-    AIBuilderFlowReviewService,
-)
-from eneo.flows.ai_builder.ai_builder_repo import AIBuilderRepository
-from eneo.flows.ai_builder.ai_builder_service import AIBuilderService
 from eneo.flows.application.flow_retention_hold_service import (
     FlowRetentionHoldService,
 )
@@ -1733,30 +1728,6 @@ class Container(containers.DeclarativeContainer):
         template_asset_repo=flow_template_asset_repo,
         settings=providers.Callable(get_settings),
     )
-    ai_builder_repo = providers.Factory(
-        AIBuilderRepository,
-        session=session,
-    )
-    ai_builder_flow_review_service = providers.Factory(
-        AIBuilderFlowReviewService,
-        user=user,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_version_repo=flow_version_repo,
-        access_policy=flow_run_access_policy,
-        evidence_service=flow_run_evidence_service,
-    )
-    ai_builder_service = providers.Factory(
-        AIBuilderService,
-        user=user,
-        repo=ai_builder_repo,
-        flow_service=flow_service,
-        completion_service=completion_service,
-        file_service=file_service,
-        space_service=space_service,
-        template_asset_service=flow_template_asset_service,
-        flow_review_service=ai_builder_flow_review_service,
-    )
     group_chat_service = providers.Factory(
         GroupChatService,
         user=user,
@@ -1850,7 +1821,6 @@ class Container(containers.DeclarativeContainer):
     )
     limit_service = providers.Factory(
         LimitService,
-        settings_service=settings_service,
         upload_admission=upload_admission,
     )
 

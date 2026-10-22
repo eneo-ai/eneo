@@ -19,7 +19,6 @@ from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.flow_tables import (
-    BuilderClientErrors,
     FlowOutboxDeliveryStatus,
     FlowProviderCalls,
     FlowRunAuditOutbox,
@@ -34,7 +33,6 @@ from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.unused_file_cleanup import delete_unused_root_files
-from eneo.flows.ai_builder.ai_builder_failure_ledger import MAX_WINDOW_DAYS
 from eneo.flows.domain.flow_run_retention_policy import FlowRunRetentionMode
 from eneo.flows.enums import TERMINAL_FLOW_RUN_STATUS_VALUES
 from eneo.flows.flow_retention_policy import resolve_flow_retention_policy
@@ -422,33 +420,6 @@ class DataRetentionService:
             logger.debug("No orphaned sessions to delete")
 
         return total_deleted
-
-    async def delete_expired_builder_client_errors_batch(
-        self, *, now: datetime, limit: int = RETENTION_BATCH_SIZE
-    ) -> int:
-        """Delete ONE batch of client-error rows older than the query window.
-
-        The failure-summary surface reads at most
-        ``ai_builder_failure_ledger.MAX_WINDOW_DAYS`` back, so an older row
-        has no consumer — a fixed invariant tied to that window, not a
-        per-tenant policy. One batch per call so the worker's per-batch
-        transaction loop bounds lock duration and rollback cost; session and
-        tenant cascades handle referential cleanup.
-        """
-
-        cutoff = now - timedelta(days=MAX_WINDOW_DAYS)
-        batch_subquery = (
-            sa.select(BuilderClientErrors.id)
-            .where(BuilderClientErrors.created_at < cutoff)
-            .order_by(BuilderClientErrors.created_at, BuilderClientErrors.id)
-            .limit(limit)
-        )
-        result = await self.session.execute(
-            sa.delete(BuilderClientErrors).where(
-                BuilderClientErrors.id.in_(batch_subquery)
-            )
-        )
-        return affected_row_count(result)
 
     async def get_affected_questions_count_for_assistant(
         self, assistant_id: UUID, retention_days: int

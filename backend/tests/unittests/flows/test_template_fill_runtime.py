@@ -10,22 +10,11 @@ import pytest
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileType
-from eneo.flows.ai_builder.ai_builder_template_attachment_contract import (
-    apply_template_attachment_contract,
-)
-from eneo.flows.application.flow_authoring_command import TemplateAttachmentIntent
-from eneo.flows.application.flow_draft_materialization import (
-    compile_flow_draft_changeset,
-)
-from eneo.flows.application.flow_template_attachment_materialization import (
-    materialize_template_attachment,
-)
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
     FlowStepResult,
     FlowStepResultStatus,
-    FlowTemplateAsset,
 )
 from eneo.flows.domain.runtime import (
     RunExecutionState,
@@ -33,16 +22,6 @@ from eneo.flows.domain.runtime import (
     StepExecutionOutput,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_authoring_spec import (
-    AssistantSpec,
-    FlowDraftSpecCore,
-    FormFieldSpec,
-    InputSource,
-    InputType,
-    OutputMode,
-    OutputType,
-    StepSpec,
-)
 from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
 from eneo.flows.runtime import template_fill_runtime as template_fill_runtime_module
 from eneo.flows.runtime.generated_file_names import GeneratedFileNames
@@ -69,7 +48,7 @@ def _build_template_bytes() -> bytes:
     )
 
 
-def _build_builder_template_bytes() -> bytes:
+def _placeholder_template_bytes() -> bytes:
     return control_template_bytes(
         text=[
             ("title", "Titel", "Titel"),
@@ -497,7 +476,9 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
 
 
 @pytest.mark.asyncio
-async def test_template_contract_materializes_and_renders_without_tokens() -> None:
+async def test_template_fill_renders_run_input_step_results_and_transcript_without_tokens() -> (
+    None
+):
     from eneo.flows.domain.step_output import inline_transcript
 
     run = _run()
@@ -525,108 +506,36 @@ async def test_template_contract_materializes_and_renders_without_tokens() -> No
         result=prior_result,
         additional_results=(analysis_result, writer_result),
     )
-    flow_id = run.flow_id
     file_id = uuid4()
-    template_bytes = _build_builder_template_bytes()
-    placeholders = (
-        "title",
-        "author",
-        "step_a.output.text",
-        "step_b.output.structured.summary",
-        "föregående_steg",
-        "customer   name",
-        "transkribering",
-        "flow_input.transkribering",
-        "flow.input.transkribering",
-    )
-    approved_spec = apply_template_attachment_contract(
-        FlowDraftSpecCore(
-            flow_name="Builder template flow",
-            # The values the person types at run time: nothing else fills them.
-            form_fields=[
-                FormFieldSpec(name=name, type="text", label=name, required=True)
-                for name in ("title", "author", "customer name")
-            ],
-            steps=[
-                StepSpec(
-                    plan_step_ref="step_a",
-                    name="Summarize",
-                    assistant_spec=AssistantSpec(instructions="Summarize."),
-                    input_source=InputSource.FLOW_INPUT,
-                    input_type=InputType.AUDIO,
-                    output_type=OutputType.TEXT,
-                ),
-                StepSpec(
-                    plan_step_ref="step_b",
-                    name="Analyze",
-                    assistant_spec=AssistantSpec(instructions="Analyze."),
-                    input_source=InputSource.PREVIOUS_STEP,
-                    input_type=InputType.TEXT,
-                    output_type=OutputType.JSON,
-                    output_contract={
-                        "type": "object",
-                        "properties": {"summary": {"type": "string"}},
-                    },
-                ),
-                StepSpec(
-                    plan_step_ref="step_c",
-                    name="Write",
-                    assistant_spec=AssistantSpec(instructions="Write."),
-                    input_source=InputSource.PREVIOUS_STEP,
-                    input_type=InputType.TEXT,
-                    output_type=OutputType.TEXT,
-                ),
-                StepSpec(
-                    plan_step_ref="step_d",
-                    name="Fill",
-                    assistant_spec=AssistantSpec(instructions="Fill the template."),
-                    input_source=InputSource.PREVIOUS_STEP,
-                    input_type=InputType.TEXT,
-                    output_mode=OutputMode.TEMPLATE_FILL,
-                    output_type=OutputType.DOCX,
-                ),
-            ],
-        ),
-        selected_template_count=1,
-        placeholders=placeholders,
-    )
-    changeset = compile_flow_draft_changeset(approved_spec, current_flow=None)
-    now = datetime.now(timezone.utc)
-    asset = FlowTemplateAsset(
-        id=uuid4(),
-        flow_id=flow_id,
-        space_id=uuid4(),
-        tenant_id=run.tenant_id,
-        file_id=file_id,
-        name="builder-template.docx",
-        checksum="checksum",
-        placeholders=list(placeholders),
-        created_at=now,
-        updated_at=now,
-    )
-    template_asset_service = AsyncMock()
-    template_asset_service.create_from_existing_attached_file.return_value = asset
-    materialized = await materialize_template_attachment(
-        intent=TemplateAttachmentIntent(
-            file_id=file_id,
-            terminal_plan_step_ref="step_d",
-        ),
-        changeset=changeset,
-        flow_id=flow_id,
-        template_asset_service=template_asset_service,
-    )
-    terminal = materialized.changeset.compiled_steps[-1]
+    template_bytes = _placeholder_template_bytes()
+    asset_id = uuid4()
+    output_config = {
+        "bindings": {
+            "title": "{{ flow_input.title }}",
+            "author": "{{ flow_input.author }}",
+            "step_a.output.text": "{{ step_1.output.text }}",
+            "step_b.output.structured.summary": (
+                "{{ step_2.output.structured.summary }}"
+            ),
+            "föregående_steg": "{{ föregående_steg }}",
+            "customer   name": "{{ flow_input.customer name }}",
+            "transkribering": "{{ transkribering }}",
+            "flow_input.transkribering": "{{ flow_input.transkribering }}",
+            "flow.input.transkribering": "{{ flow.input.transkribering }}",
+        },
+        "template_asset_id": str(asset_id),
+    }
     runtime_step = RuntimeStep(
         step_id=uuid4(),
-        step_order=terminal.step_order,
+        step_order=4,
         assistant_id=uuid4(),
-        user_description=terminal.user_description,
-        input_source=terminal.input_source,
-        input_bindings=terminal.input_bindings,
-        input_config=terminal.input_config,
-        output_mode=terminal.output_mode,
-        output_config=terminal.output_config,
-        output_type=terminal.output_type,
+        user_description="Fill",
+        input_source="previous_step",
+        input_bindings=None,
+        input_config=None,
+        output_mode="template_fill",
+        output_config=output_config,
+        output_type="docx",
     )
     file_repo = AsyncMock()
     template_file = SimpleNamespace(
@@ -656,76 +565,17 @@ async def test_template_contract_materializes_and_renders_without_tokens() -> No
     assert output.full_text.count("Verifierad transkribering") == 3
     assert output.num_tokens_input == 0
     assert output.num_tokens_output == 0
-    assert terminal.output_config == {
-        "bindings": {
-            "title": "{{ flow_input.title }}",
-            "author": "{{ flow_input.author }}",
-            "step_a.output.text": "{{ step_1.output.text }}",
-            "step_b.output.structured.summary": (
-                "{{ step_2.output.structured.summary }}"
-            ),
-            "föregående_steg": "{{ föregående_steg }}",
-            "customer   name": "{{ flow_input.customer name }}",
-            "transkribering": "{{ transkribering }}",
-            "flow_input.transkribering": "{{ flow_input.transkribering }}",
-            "flow.input.transkribering": "{{ flow.input.transkribering }}",
-        },
-        "template_asset_id": str(asset.id),
-    }
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("written", ["", None])
-async def test_a_field_the_builder_binds_to_a_placeholder_renders_empty_never_null(
+async def test_a_bound_field_written_empty_renders_empty_and_null_stops_the_fill(
     written: str | None,
 ) -> None:
-    # The planner declared the field nullable. The compiled contract is what
-    # the step's model answers to: text that may be empty. A run that still
-    # produces null (a provider that ignores the schema) stops at the fill
-    # step, and a run that writes "" leaves the control empty in the document.
+    # A run whose step writes null for a bound field (a provider that ignores
+    # the schema) stops at the fill step, and a run that writes "" leaves the
+    # control empty in the document.
     run = _run()
-    step_ref = "step_a"
-    approved = apply_template_attachment_contract(
-        FlowDraftSpecCore(
-            flow_name="Nullable field flow",
-            steps=[
-                StepSpec(
-                    plan_step_ref=step_ref,
-                    name="Prepare",
-                    assistant_spec=AssistantSpec(instructions="Prepare."),
-                    input_source=InputSource.FLOW_INPUT,
-                    input_type=InputType.TEXT,
-                    output_type=OutputType.JSON,
-                    output_contract={
-                        "type": "object",
-                        "properties": {"title": {"type": ["string", "null"]}},
-                        "required": ["title"],
-                        "additionalProperties": False,
-                    },
-                ),
-                StepSpec(
-                    plan_step_ref="step_b",
-                    name="Fill",
-                    assistant_spec=AssistantSpec(instructions="Fill."),
-                    input_source=InputSource.PREVIOUS_STEP,
-                    input_type=InputType.JSON,
-                    output_mode=OutputMode.TEMPLATE_FILL,
-                    output_type=OutputType.DOCX,
-                ),
-            ],
-        ),
-        selected_template_count=1,
-        placeholders=("title",),
-        inherited_template_asset_id=uuid4(),
-    )
-    compiled = compile_flow_draft_changeset(approved, current_flow=None).compiled_steps
-    assert compiled[0].output_contract is not None
-    assert compiled[0].output_contract["properties"]["title"] == {"type": "string"}
-    terminal = compiled[-1]
-    assert terminal.output_config is not None
-    assert terminal.output_config["bindings"] == {
-        "title": "{{ step_1.output.structured.title }}"
-    }
     template_file_id = uuid4()
     template_asset_repo = AsyncMock()
     template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
@@ -744,18 +594,19 @@ async def test_a_field_the_builder_binds_to_a_placeholder_renders_empty_never_nu
     )
     runtime_step = RuntimeStep(
         step_id=uuid4(),
-        step_order=terminal.step_order,
+        step_order=2,
         assistant_id=uuid4(),
-        user_description=terminal.user_description,
-        input_source=terminal.input_source,
-        input_bindings=terminal.input_bindings,
-        input_config=terminal.input_config,
-        output_mode=terminal.output_mode,
+        user_description="Fill",
+        input_source="previous_step",
+        input_bindings=None,
+        input_config=None,
+        output_mode="template_fill",
         output_config={
-            **(terminal.output_config or {}),
+            "bindings": {"title": "{{ step_1.output.structured.title }}"},
+            "template_asset_id": str(uuid4()),
             "template_checksum": "checksum",
         },
-        output_type=terminal.output_type,
+        output_type="docx",
     )
     state = _state(
         result=_completed_result(

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
 from uuid import UUID
 
@@ -46,15 +45,6 @@ if TYPE_CHECKING:
     from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 
 
-class AIBuilderFlowAuthoringOrigin(BaseModel):
-    kind: Literal["ai_builder"] = "ai_builder"
-    session_id: UUID
-    plan_id: UUID
-    spec_hash: str
-    applied_at: datetime
-    description_override_manual: bool = False
-
-
 class FlowPackageAuthoringOrigin(BaseModel):
     kind: Literal["flow_package"] = "flow_package"
     package_id: str
@@ -62,10 +52,7 @@ class FlowPackageAuthoringOrigin(BaseModel):
     content_checksum: str
 
 
-FlowAuthoringOrigin: TypeAlias = Annotated[
-    AIBuilderFlowAuthoringOrigin | FlowPackageAuthoringOrigin,
-    Field(discriminator="kind"),
-]
+FlowAuthoringOrigin: TypeAlias = FlowPackageAuthoringOrigin
 
 
 class TemplateAttachmentIntent(BaseModel):
@@ -253,7 +240,7 @@ class FlowAuthoringCommandService:
             flow_id=_target_flow_id(prepared.command),
             expected_revision=_expected_revision(prepared.command),
             resource_bindings=prepared.command.resource_bindings,
-            binding_source=_binding_source_for_origin(prepared.command.origin),
+            binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
             template_attachment_intent=(prepared.command.template_attachment_intent),
             template_imports=(
                 prepared.command.template_imports
@@ -407,16 +394,7 @@ def _expected_revision(command: FlowAuthoringCommand) -> int | None:
     return command.expected_revision
 
 
-def _binding_source_for_origin(
-    origin: FlowAuthoringOrigin,
-) -> FlowResourceBindingSource:
-    if origin.kind == "ai_builder":
-        return FlowResourceBindingSource.AI_BUILDER
-    return FlowResourceBindingSource.PACKAGE_IMPORT
-
-
 __all__ = [
-    "AIBuilderFlowAuthoringOrigin",
     "CreateFlowAuthoringCommand",
     "EditFlowAuthoringCommand",
     "FlowAuthoringCommand",

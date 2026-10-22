@@ -319,14 +319,14 @@ async def test_replace_resource_bindings_uses_current_user_tenant(user):
     await service.replace_resource_bindings(
         flow_id=flow_id,
         bindings=(binding,),
-        source=FlowResourceBindingSource.AI_BUILDER,
+        source=FlowResourceBindingSource.PACKAGE_IMPORT,
     )
 
     flow_repo.replace_resource_bindings.assert_awaited_once_with(
         flow_id=flow_id,
         tenant_id=user.tenant_id,
         bindings=(binding,),
-        source=FlowResourceBindingSource.AI_BUILDER,
+        source=FlowResourceBindingSource.PACKAGE_IMPORT,
     )
 
 
@@ -1128,7 +1128,6 @@ async def test_publish_flow_uses_normalized_metadata_in_snapshot(user):
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
 
     flow_id = uuid4()
-    builder_origin = _ai_builder_origin_metadata()
     flow = Flow(
         id=flow_id,
         tenant_id=user.tenant_id,
@@ -1143,10 +1142,8 @@ async def test_publish_flow_uses_normalized_metadata_in_snapshot(user):
                 "fields": [{"name": "case_id", "type": "string"}],
             },
             "care_data_policy": {},
-            "ai_builder": {
-                "origin": builder_origin,
-                "description": "Generated draft",
-            },
+            # Flows the retired AI Builder made still carry its origin.
+            "ai_builder": {"origin": _ai_builder_origin_metadata()},
         },
         data_retention_days=None,
         created_at=datetime.now(timezone.utc),
@@ -1163,7 +1160,6 @@ async def test_publish_flow_uses_normalized_metadata_in_snapshot(user):
     assert definition["metadata_json"] == {
         "form_schema": {"fields": [{"name": "case_id", "type": "text"}]},
         "care_data_policy": {"sensitive": False},
-        "ai_builder": {"origin": builder_origin},
     }
     assert "definition_checksum" not in version_repo.create.await_args.kwargs
 
@@ -4593,7 +4589,6 @@ async def test_create_flow_normalizes_legacy_form_field_types(user):
                 ]
             },
             "wizard": {"transcription_enabled": True},
-            "ai_builder": {"origin": _ai_builder_origin_metadata()},
         },
     )
 
@@ -4602,7 +4597,6 @@ async def test_create_flow_normalizes_legacy_form_field_types(user):
     ]
     assert field_types == ["text", "text"]
     assert created.metadata_json["wizard"] == {"transcription_enabled": True}
-    assert "origin" in created.metadata_json["ai_builder"]
 
 
 @pytest.mark.asyncio

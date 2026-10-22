@@ -207,7 +207,7 @@
         </Alert.Root>
       {/if}
       {#if options.length === 0}
-        <ToolsUnavailable surface="step_editor">
+        <ToolsUnavailable>
           {#snippet actions()}
             {@render refreshButton()}
           {/snippet}

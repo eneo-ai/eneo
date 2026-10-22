@@ -3,7 +3,6 @@ import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 const updateMappedExecutionPolicy = vi.hoisted(() => vi.fn());
-const updateAIBuilderBudgetSettings = vi.hoisted(() => vi.fn());
 const getFlowRetentionPolicy = vi.hoisted(() => vi.fn());
 const replaceOrganizationFlowRunRetentionPolicy = vi.hoisted(() => vi.fn());
 const replaceSpaceFlowRunRetentionPolicy = vi.hoisted(() => vi.fn());
@@ -28,7 +27,6 @@ vi.mock("$lib/core/Eneo", () => ({
       updateFlowInputLimits,
       updateFlowRuntimePolicy,
       updateMappedExecutionPolicy,
-      updateAIBuilderBudgetSettings,
       getFlowRetentionPolicy,
       replaceOrganizationFlowRunRetentionPolicy,
       replaceSpaceFlowRunRetentionPolicy,
@@ -122,18 +120,15 @@ vi.mock("$lib/paraglide/runtime", () => ({
 }));
 
 import FlowSettingsPage from "./+page.svelte";
-import { BUILDER_BUDGET, pageData } from "./flow-settings-test-data";
+import { pageData } from "./flow-settings-test-data";
 import { addLocalDays, endOfLocalDay, localDate } from "./flowRetentionHold";
 
 type PageProps = { data: never };
 
 // The page's data prop type includes the whole layout payload (user, tenant,
 // eneo client, ...); the page itself only reads the settings payload below.
-function pageProps(
-  mappedOverrides: Record<string, unknown> = {},
-  builderOverrides: Record<string, unknown> = {}
-): PageProps {
-  return { data: pageData(mappedOverrides, builderOverrides) as never };
+function pageProps(mappedOverrides: Record<string, unknown> = {}): PageProps {
+  return { data: pageData(mappedOverrides) as never };
 }
 
 function pagePropsWithRunPolicy(overrides: Record<string, unknown>): PageProps {
@@ -180,11 +175,13 @@ describe("flow settings page — mapped restore lifecycle", () => {
       deployment_default_max_provider_calls: 100
     });
     render(FlowSettingsPage, pageProps());
-    await page.getByRole("tab", { name: "AI-byggaren" }).click();
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
 
     // make an unrelated field dirty first
-    const attachments = page.getByRole("textbox", { name: "Bilagor per session" });
-    await attachments.fill("50");
+    const concurrentRuns = page.getByRole("textbox", {
+      name: "Högsta antal samtidiga flödeskörningar"
+    });
+    await concurrentRuns.fill("3");
     await expect.element(page.getByText("1 osparad ändring")).toBeVisible();
 
     const restore = page.getByRole("button", {
@@ -202,7 +199,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await expect
       .element(page.getByRole("textbox", { name: "Nya steg som körs per fil: Högst" }))
       .toHaveValue("100");
-    // …while the unrelated attachment edit stays the only dirty field.
+    // …while the unrelated edit stays the only dirty field.
     await expect.element(page.getByText("1 osparad ändring")).toBeVisible();
     expect(toastSuccess).toHaveBeenCalled();
   });
@@ -648,7 +645,6 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await expect
       .element(page.getByRole("tab", { name: "Uppladdningar och körtider" }))
       .toBeVisible();
-    await expect.element(page.getByRole("tab", { name: "AI-byggaren" })).toBeVisible();
     await expect.element(page.getByRole("tab", { name: "Sparad källtext" })).toBeVisible();
   });
 
@@ -844,46 +840,9 @@ describe("flow settings page — mapped restore lifecycle", () => {
     await expect.element(page.getByText(/Ange ett värde mellan/)).toBeVisible();
   });
 
-  test("the investigation evidence row is bounded by the ceiling the server reports", async () => {
-    render(FlowSettingsPage, pageProps());
-    await page.getByRole("tab", { name: "AI-byggaren" }).click();
-
-    const row = page.getByRole("textbox", { name: "Underlag när ett förslag undersöks" });
-    await expect.element(row).toHaveValue("16000");
-    await expect.element(page.getByText("Systemets högsta tillåtna värde: 16000")).toBeVisible();
-
-    // Above the ceiling stays visible as an error; the server would refuse it.
-    await row.fill("16001");
-    await expect.element(row).toHaveAttribute("aria-invalid", "true");
-    await expect.element(page.getByText(/Ange ett värde mellan/)).toBeVisible();
-
-    await row.fill("12000");
-    expect(row.query()?.getAttribute("aria-invalid")).toBeNull();
-  });
-
-  test("entering the system bound saves it and the row re-baselines to the bound", async () => {
-    // The server stores the bound as no override; the page only has to send
-    // the bound and adopt the response.
-    updateAIBuilderBudgetSettings.mockResolvedValue({ ...BUILDER_BUDGET });
-    render(FlowSettingsPage, pageProps({}, { review_investigation_evidence_max_tokens: 12_000 }));
-    await page.getByRole("tab", { name: "AI-byggaren" }).click();
-
-    const row = page.getByRole("textbox", { name: "Underlag när ett förslag undersöks" });
-    await expect.element(row).toHaveValue("12000");
-    await row.fill("16000");
-    await expect.element(page.getByText("1 osparad ändring")).toBeVisible();
-    await page.getByRole("button", { name: "Spara ändringar" }).click();
-
-    expect(updateAIBuilderBudgetSettings).toHaveBeenCalledExactlyOnceWith({
-      review_investigation_evidence_max_tokens: 16_000
-    });
-    await expect.element(row).toHaveValue("16000");
-    expect(page.getByText("1 osparad ändring").query()).toBeNull();
-  });
-
   test("inherited state shows the hint and offers no restore action", async () => {
     render(FlowSettingsPage, pageProps({ max_provider_calls_source: "deployment_default" }));
-    await page.getByRole("tab", { name: "AI-byggaren" }).click();
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
 
     await expect.element(page.getByText("Följer driftmiljöns standard.")).toBeVisible();
     expect(
@@ -899,7 +858,7 @@ describe("flow settings page — mapped restore lifecycle", () => {
         max_provider_calls_source: "invalid"
       })
     );
-    await page.getByRole("tab", { name: "AI-byggaren" }).click();
+    await page.getByRole("tab", { name: "Uppladdningar och körtider" }).click();
 
     await expect
       .element(
@@ -928,172 +887,5 @@ describe("flow settings page — mapped restore lifecycle", () => {
         )
       )
       .toBeVisible();
-  });
-});
-
-describe("flow settings page — Builder model timing", () => {
-  const SILENCE_LABEL = "Ange en egen väntetid i stället för driftmiljöns standard";
-  const CEILING_LABEL = "Ange en egen gräns per anrop i stället för driftmiljöns standard";
-  const silenceInput = () =>
-    page.getByRole("textbox", { name: /^Väntetid på att modellen fortsätter/ });
-  const ceilingInput = () => page.getByRole("textbox", { name: /^Längsta tid per modellanrop/ });
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-    listOrganizationFlowRunRetentionReviewQueue.mockResolvedValue(
-      pageData().flowRunRetentionReviewQueue
-    );
-    listFlowRunRetentionSpaceTargets.mockResolvedValue({
-      items: [],
-      count: 0,
-      has_more: false
-    });
-  });
-
-  test("without an override each deadline reads as the deployment default, with no input", async () => {
-    render(FlowSettingsPage, pageProps());
-    await page.getByRole("tab", { name: "AI-byggaren" }).click();
-
-    // Kills: showing the raw override (null) or a bare number instead of the unit-bearing default.
-    await expect
-      .element(page.getByText("Följer driftmiljöns standard: 5 min (300 s)."))
-      .toBeVisible();
-    await expect
-      .element(page.getByText("Följer driftmiljöns standard: 30 min (1800 s)."))
-      .toBeVisible();
-    expect(silenceInput().query()).toBeNull();
-    expect(ceilingInput().query()).toBeNull();
-    expect(page.getByRole("alert").query()).toBeNull();
-  });
-
-  test("an override fills its input and each row names its own default; a value has no upper bound", async () => {
-    render(FlowSettingsPage, pageProps({}, { silence_timeout_seconds: 900 }));
-    await page.getByRole("tab", { name: "AI-byggaren" }).click();
-
-    await expect.element(silenceInput()).toHaveValue("900");
-    await expect.element(page.getByText("Motsvarar 15 min")).toBeVisible();
-    await expect.element(page.getByText("Driftmiljöns standard: 5 min (300 s)")).toBeVisible();
-
-    // Kills: the call ceiling row reading the silence default (300 s) instead of its own.
-    await page.getByRole("switch", { name: CEILING_LABEL }).click();
-    await expect.element(ceilingInput()).toHaveValue("1800");
-    await expect.element(page.getByText("Driftmiljöns standard: 30 min (1800 s)")).toBeVisible();
-
-    // Kills: an invented upper bound (the server accepts any positive whole number)
-    // and a human duration that does not scale (86400 s reads as "24 h").
-    await ceilingInput().fill("86400");
-    expect(ceilingInput().query()?.getAttribute("aria-invalid")).toBeNull();
-    await expect.element(page.getByText("Motsvarar 24 h")).toBeVisible();
-    await expect.element(page.getByRole("button", { name: "Spara ändringar" })).toBeEnabled();
-
-    // Kills: a minimum of 0, which the server refuses.
-    await ceilingInput().fill("0");
-    await expect.element(page.getByText("Ange minst 1.")).toBeVisible();
-  });
-
-  test("turning an override on starts from the default and saves only that field", async () => {
-    updateAIBuilderBudgetSettings.mockResolvedValue({
-      ...BUILDER_BUDGET,
-      silence_timeout_seconds: 300
-    });
-    render(FlowSettingsPage, pageProps());
-    await page.getByRole("tab", { name: "AI-byggaren" }).click();
-
-    await page.getByRole("switch", { name: SILENCE_LABEL }).click();
-    // Kills: an empty input on switch-on (the admin would face "Ange ett värde" first).
-    await expect.element(silenceInput()).toHaveValue("300");
-    await expect.element(page.getByText("1 osparad ändring")).toBeVisible();
-    await page.getByRole("button", { name: "Spara ändringar" }).click();
-
-    // Kills: sending the untouched call ceiling along (only dirty fields travel).
-    expect(updateAIBuilderBudgetSettings).toHaveBeenCalledExactlyOnceWith({
-      silence_timeout_seconds: 300
-    });
-    await expect.element(silenceInput()).toHaveValue("300");
-    expect(page.getByText("1 osparad ändring").query()).toBeNull();
-  });
-
-  test("turning an override off sends null and the row follows the default again", async () => {
-    updateAIBuilderBudgetSettings.mockResolvedValue({ ...BUILDER_BUDGET });
-    render(FlowSettingsPage, pageProps({}, { call_ceiling_seconds: 3600 }));
-    await page.getByRole("tab", { name: "AI-byggaren" }).click();
-
-    await page.getByRole("switch", { name: CEILING_LABEL }).click();
-    await page.getByRole("button", { name: "Spara ändringar" }).click();
-
-    // Kills: omitting the key or sending the default number, which would pin today's default.
-    expect(updateAIBuilderBudgetSettings).toHaveBeenCalledExactlyOnceWith({
-      call_ceiling_seconds: null
-    });
-    expect(ceilingInput().query()).toBeNull();
-    await expect
-      .element(page.getByText("Följer driftmiljöns standard: 30 min (1800 s)."))
-      .toBeVisible();
-  });
-
-  test("an effective pair out of order on load is shown, and an unrelated edit still saves", async () => {
-    updateAIBuilderBudgetSettings.mockResolvedValue({ ...BUILDER_BUDGET });
-    render(FlowSettingsPage, pageProps({}, { call_ceiling_seconds: 120 }));
-    await page.getByRole("tab", { name: "AI-byggaren" }).click();
-
-    // Kills: computing the effective value from overrides only, or not showing the pair as loaded.
-    const alert = page.getByRole("alert");
-    await expect.element(alert).toBeVisible();
-    await expect.element(alert).toHaveTextContent("5 min (300 s)");
-    await expect.element(alert).toHaveTextContent("2 min (120 s)");
-
-    // Kills: blocking every save while the loaded pair conflicts (the server only
-    // holds a changed deadline to the order).
-    await page.getByRole("textbox", { name: "Bilagor per session" }).fill("50");
-    await expect.element(page.getByRole("button", { name: "Spara ändringar" })).toBeEnabled();
-  });
-
-  test("typing an effective silence above the call ceiling raises the alert and blocks Save", async () => {
-    render(FlowSettingsPage, pageProps());
-    await page.getByRole("tab", { name: "AI-byggaren" }).click();
-
-    await page.getByRole("switch", { name: SILENCE_LABEL }).click();
-    await silenceInput().fill("2000");
-
-    // Kills: ignoring the deployment default of the field left on "follow" (1800 s here).
-    await expect.element(page.getByRole("alert")).toHaveTextContent("33 min (2000 s)");
-    await expect.element(page.getByRole("alert")).toHaveTextContent("30 min (1800 s)");
-    await expect.element(page.getByRole("button", { name: "Spara ändringar" })).toBeDisabled();
-    await expect
-      .element(
-        page.getByText("Det går inte att spara förrän tidsgränserna under AI-byggaren går ihop.")
-      )
-      .toBeVisible();
-    expect(updateAIBuilderBudgetSettings).not.toHaveBeenCalled();
-
-    // Kills: clamping the value instead of leaving the repair to the admin.
-    await expect.element(silenceInput()).toHaveValue("2000");
-    await silenceInput().fill("600");
-    expect(page.getByRole("alert").query()).toBeNull();
-    await expect.element(page.getByRole("button", { name: "Spara ändringar" })).toBeEnabled();
-  });
-
-  test("a refusal from the server stays on the save-error path and keeps the edit", async () => {
-    const { EneoError } = await import("@eneo/eneo-js");
-    const refusal = new EneoError(
-      "The silence timeout (400 s) is longer than the call ceiling (300 s).",
-      "SERVER",
-      400,
-      9007,
-      { code: "invalid_ai_builder_settings" }
-    );
-    updateAIBuilderBudgetSettings.mockRejectedValueOnce(refusal);
-    render(FlowSettingsPage, pageProps());
-    await page.getByRole("tab", { name: "AI-byggaren" }).click();
-
-    await page.getByRole("switch", { name: SILENCE_LABEL }).click();
-    await silenceInput().fill("900");
-    await page.getByRole("button", { name: "Spara ändringar" }).click();
-
-    // Kills: swallowing the error, or re-baselining before the server accepted the write.
-    expect(toastErrorMock).toHaveBeenCalledExactlyOnceWith(refusal);
-    await expect.element(silenceInput()).toHaveValue("900");
-    await expect.element(page.getByText("1 osparad ändring")).toBeVisible();
-    await expect.element(page.getByRole("button", { name: "Spara ändringar" })).toBeEnabled();
   });
 });

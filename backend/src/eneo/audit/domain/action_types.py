@@ -167,7 +167,7 @@ class ActionType(str, Enum):
     FLOW_RUN_TRANSCRIPT_CORRECTIONS_EDITED = "flow_run_transcript_corrections_edited"
     FLOW_RUN_TRANSCRIPT_CORRECTIONS_APPLIED = "flow_run_transcript_corrections_applied"
 
-    # AI Builder Actions
+    # AI Builder Actions: the builder is retired; its entries stay readable.
     AI_BUILDER_SESSION_CREATED = "ai_builder_session_created"
     AI_BUILDER_PLAN_APPROVED = "ai_builder_plan_approved"
     AI_BUILDER_PLAN_REVISED = "ai_builder_plan_revised"

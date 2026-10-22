@@ -33,7 +33,6 @@ DEFAULTS = {
     "flow_pdf_extraction_timeout_seconds": 900,
     "attachment_max_size_bytes": 268435456,
     "attachment_max_files": 100,
-    "ai_builder_proposal_timeout_seconds": 300.0,
 }
 
 
@@ -71,7 +70,6 @@ def test_invocation_budget_preserves_finalization_reserve(defaults):
         "flow_audio_max_decoded_bytes",
         "flow_max_inline_text_bytes",
         "flow_mapped_step_max_provider_calls_default",
-        "ai_builder_proposal_timeout_seconds",
     ],
 )
 @pytest.mark.parametrize("value", [0, -1])

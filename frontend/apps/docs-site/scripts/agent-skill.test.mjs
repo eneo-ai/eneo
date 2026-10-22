@@ -35,7 +35,7 @@ test("the Eneo Flows API skill has valid discovery metadata", async () => {
   expect(frontmatter).toBeDefined();
   expect(frontmatter).toContain("name: eneo-flows-api");
   expect(frontmatter).toContain("description: Use this skill when");
-  expect(frontmatter).toContain("Do not use for Flow AI Builder");
+  expect(frontmatter).toContain("Do not use for draft Flow authoring");
   const description = frontmatter?.match(/^description: (.+)$/m)?.[1];
   expect(description?.length).toBeLessThanOrEqual(1024);
   expect(source).not.toContain("TODO");

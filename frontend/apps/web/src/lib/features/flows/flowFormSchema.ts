@@ -1,3 +1,4 @@
+import { m } from "$lib/paraglide/messages";
 import flowVariableDefinitions from "./flowVariableDefinitions.generated.json";
 
 export type FlowFormFieldType =
@@ -11,6 +12,16 @@ export type FlowFormField = {
   options?: string[];
   order?: number;
 };
+
+/** A run-time field's type as the form editor names it ("Datum", not "date"). */
+export function fieldTypeLabel(type: string): string {
+  if (type === "number") return m.flow_form_field_type_number();
+  if (type === "date") return m.flow_form_field_type_date();
+  if (type === "select") return m.flow_form_field_type_select();
+  if (type === "multiselect") return m.flow_form_field_type_multiselect();
+  if (type === "list") return m.flow_form_field_type_list();
+  return m.flow_form_field_type_text();
+}
 
 export type FlowFormFieldInput = {
   name: string;

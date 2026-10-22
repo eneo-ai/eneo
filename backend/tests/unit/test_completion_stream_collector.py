@@ -1,9 +1,6 @@
 import asyncio
 import json
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
 
-import litellm
 import pytest
 from litellm.types.utils import ModelResponseStream, Usage
 
@@ -14,66 +11,6 @@ from eneo.completion_models.infrastructure.stream_collector import (
     ProviderStreamCollector,
     ProviderStreamIncomplete,
 )
-from eneo.flows.ai_builder.ai_builder_provider_call import (
-    ProviderSilenceExpired,
-    complete_with_silence_deadline,
-)
-
-
-@pytest.mark.asyncio
-async def test_lazy_native_stream_setup_keeps_the_builder_silence_deadline():
-    async def never(**kwargs):
-        await asyncio.Event().wait()
-
-    response = litellm.CustomStreamWrapper(
-        completion_stream=None,
-        model="gpt-test",
-        logging_obj=MagicMock(model_call_details={}),
-        make_call=AsyncMock(side_effect=never),
-    )
-    with pytest.raises(ProviderSilenceExpired):
-        await complete_with_silence_deadline(
-            SimpleNamespace(acompletion=AsyncMock(return_value=response)),
-            silence_deadline_seconds=0.01,
-            first_output_deadline_seconds=0.01,
-            ceiling_seconds=0.1,
-            request={"model": "gpt-test", "messages": []},
-        )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("response_format", ["json_object", "json_schema"])
-async def test_native_json_completion_aborts_a_whitespace_run(response_format):
-    async def stream():
-        for content, finish in [
-            ('{"fact":1}' + "\n        " * 200, None),
-            ("", "stop"),
-        ]:
-            yield ModelResponseStream(
-                choices=[
-                    {
-                        "index": 0,
-                        "delta": {"role": "assistant", "content": content},
-                        "finish_reason": finish,
-                    }
-                ],
-            )
-
-    client = SimpleNamespace(acompletion=AsyncMock(return_value=stream()))
-    with pytest.raises(Exception, match="JSON whitespace") as caught:
-        await complete_with_silence_deadline(
-            client,
-            silence_deadline_seconds=1,
-            first_output_deadline_seconds=1,
-            ceiling_seconds=5,
-            request={
-                "model": "openai/test",
-                "messages": [{"role": "user", "content": "JSON"}],
-                "response_format": {"type": response_format},
-            },
-        )
-    assert type(caught.value).__name__ == "ProviderJsonWhitespaceAbort"
-    assert client.acompletion.await_count == 1
 
 
 def _chunk(content=None, *, finish=None, **delta):

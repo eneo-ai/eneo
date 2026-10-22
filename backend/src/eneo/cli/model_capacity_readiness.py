@@ -33,10 +33,9 @@ if TYPE_CHECKING:
         CapacityDimension,
     )
     from eneo.flows.domain.flow import FlowRunStatusSnapshot, FlowSparse, FlowVersion
-    from eneo.spaces.space import Space
     from eneo.tenants.tenant import TenantInDB
 
-UseKind = Literal["builder", "published_flow", "resumable_run"]
+UseKind = Literal["published_flow", "resumable_run"]
 
 
 class ReadinessSource(Protocol):
@@ -51,8 +50,6 @@ class ReadinessSource(Protocol):
     async def assistant_model(
         self, owner: TenantInDB, assistant_id: UUID
     ) -> CompletionModel: ...
-    def builder_spaces(self, owner: TenantInDB) -> AsyncIterator[Space]: ...
-    async def active_provider_ids(self, owner: TenantInDB) -> set[UUID]: ...
 
 
 class Use(TypedDict):
@@ -96,8 +93,6 @@ def add_use(
     model: CompletionModel,
     use: UseKind,
     identity: UUID,
-    *,
-    safety_tokens: int = 0,
 ) -> None:
     identity_key = (model.id, use, identity)
     if identity_key in seen:
@@ -123,16 +118,10 @@ def add_use(
     usage = record["uses"].setdefault(use, {"count": 0, "ids": []})
     usage.setdefault("ids", []).append(str(identity))
     usage["count"] += 1
-    record["availability"][use] = model.capacity.availability(
-        safety_tokens=safety_tokens
-    )
+    record["availability"][use] = model.capacity.availability(safety_tokens=0)
 
 
 async def report_tenant(source: ReadinessSource, owner: TenantInDB) -> TenantReadiness:
-    from eneo.flows.ai_builder.ai_builder_context import eligible_planner_models
-    from eneo.flows.ai_builder.ai_builder_settings import (
-        resolve_ai_builder_budget_policy,
-    )
     from eneo.flows.enums import (
         flow_output_mode_uses_completion_model,
         is_terminal_flow_run_status,
@@ -141,15 +130,6 @@ async def report_tenant(source: ReadinessSource, owner: TenantInDB) -> TenantRea
 
     records: dict[UUID, ModelReadiness] = {}
     seen: set[tuple[UUID, UseKind, UUID]] = set()
-    safety = resolve_ai_builder_budget_policy(
-        owner.flow_settings, check_timing_order=False
-    ).conversation_safety_buffer_tokens
-    active = await source.active_provider_ids(owner)
-    async for space in source.builder_spaces(owner):
-        if space.id is None or space.tenant_id != owner.id:
-            raise ValueError("Invalid space ownership")
-        for model in eligible_planner_models(space, active_provider_ids=active):
-            add_use(records, seen, model, "builder", space.id, safety_tokens=safety)
 
     async def add_version(
         flow_id: UUID, number: int, use: UseKind, identity: UUID
@@ -194,8 +174,6 @@ async def report_tenant(source: ReadinessSource, owner: TenantInDB) -> TenantRea
     for record in models:
         for usage in record["uses"].values():
             usage.get("ids", []).sort()
-        if "builder" in record["uses"]:
-            del record["uses"]["builder"]["ids"]
         unusable_uses = [
             use
             for use, availability in record["availability"].items()

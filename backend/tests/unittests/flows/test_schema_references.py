@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import random
 import socket
 import urllib.request
 from dataclasses import replace
@@ -16,21 +15,9 @@ import pytest
 from referencing.exceptions import Unresolvable
 
 from eneo.flows import output_processing
-from eneo.flows.ai_builder.ai_builder_domain_models import ConversationMessage
-from eneo.flows.ai_builder.ai_builder_schema_evidence import (
-    derive_freeform_schema_candidates,
-    parse_schema_candidate,
-)
-from eneo.flows.ai_builder.ai_builder_tools import (
-    NativeStrictSchemaError,
-    validate_native_strict_schema,
-    validate_propose_flow_tool_arguments,
-)
-from eneo.flows.ai_builder.ai_builder_validator import validate_spec
 from eneo.flows.domain import schema_engine
 from eneo.flows.domain.flow import Flow, FlowRunStatus
 from eneo.flows.domain.flow_step_validation import FlowStepValidationError
-from eneo.flows.flow_authoring_spec import AssistantSpec, FlowDraftSpecCore, StepSpec
 from eneo.flows.output_processing import (
     compile_validators,
     validate_against_contract,
@@ -247,59 +234,6 @@ async def test_review_edit_contract_never_retrieves(user, schema_listener):
         )
     assert exc_info.value.code == "typed_io_contract_violation"
     repo.edit_review_checkpoint_payload.assert_not_awaited()
-    assert requests == []
-
-
-@pytest.mark.parametrize("owner", ["native", "proposal"])
-def test_builder_tool_validators_never_retrieve(schema_listener, owner):
-    uri, requests = schema_listener
-    schema = {
-        **_remote_schema(uri),
-        "required": ["value"],
-        "additionalProperties": False,
-    }
-    error = NativeStrictSchemaError if owner == "native" else TypedIOValidationException
-    with pytest.raises(error):
-        if owner == "native":
-            validate_native_strict_schema(schema)
-        else:
-            validate_propose_flow_tool_arguments(
-                arguments={"value": {}},
-                tool_schema={
-                    "type": "function",
-                    "function": {"name": "test", "parameters": schema},
-                },
-            )
-    assert requests == []
-
-
-def test_builder_schema_evidence_rejects_remote_references(schema_listener):
-    uri, requests = schema_listener
-    assert parse_schema_candidate(json.dumps(_remote_schema(uri))) is None
-    assert requests == []
-
-
-def test_builder_compiled_spec_rejects_remote_references(schema_listener):
-    uri, requests = schema_listener
-    result = validate_spec(
-        FlowDraftSpecCore(
-            flow_name="Contracts",
-            steps=[
-                StepSpec(
-                    plan_step_ref="produce",
-                    name="Produce",
-                    assistant_spec=AssistantSpec(instructions="Produce JSON"),
-                    input_source="flow_input",
-                    output_type="json",
-                    output_contract=_remote_schema(uri),
-                )
-            ],
-        )
-    )
-    assert not result.valid
-    assert any(
-        error.code == "invalid_output_contract_schema" for error in result.errors
-    )
     assert requests == []
 
 
@@ -1019,119 +953,12 @@ _PASTED_INSTANCES = [
 ]
 
 
-def _paste(schema):
-    return parse_schema_candidate(json.dumps(schema))
-
-
 def _accepted(schema, instance) -> bool:
     try:
         validate_against_contract(instance, schema, label="Step 2 output")
     except TypedIOValidationException:
         return False
     return True
-
-
-@pytest.mark.parametrize("body", list(_PASTED_BODIES))
-@pytest.mark.parametrize("uri", [_DRAFT_06, _DRAFT_07, _DRAFT_2019])
-def test_pasted_schema_of_a_supported_draft_becomes_a_contract_that_reads_the_same(
-    uri, body
-):
-    schema = _PASTED_BODIES[body]
-    pasted = {"$schema": uri, **schema}
-    assert _paste(pasted) == schema
-    draft = jsonschema.validators.validator_for(pasted)(pasted)
-    for instance in _PASTED_INSTANCES:
-        assert _accepted(schema, instance) == draft.is_valid(instance), instance
-
-
-@pytest.mark.parametrize("uri", [_DRAFT_07, _DRAFT_2019])
-def test_pasted_conditional_keywords_convert_where_the_draft_runs_them(uri):
-    body = {
-        "type": "object",
-        "properties": {"kind": {"type": "string"}, "size": {"type": "integer"}},
-        "if": {"properties": {"kind": {"const": "big"}}},
-        "then": {"properties": {"size": {"minimum": 10}}},
-        "else": {"properties": {"size": {"maximum": 9}}},
-    }
-    pasted = {"$schema": uri, **body}
-    assert _paste(pasted) == body
-    draft = jsonschema.validators.validator_for(pasted)(pasted)
-    for instance in ({"kind": "big", "size": 3}, {"kind": "small", "size": 30}, {}):
-        assert _accepted(body, instance) == draft.is_valid(instance)
-
-
-def test_pasted_conditional_keywords_are_declined_where_the_draft_ignores_them():
-    pasted = {
-        "$schema": _DRAFT_06,
-        "type": "object",
-        "if": {"required": ["a"]},
-        "then": {"required": ["b"]},
-    }
-    assert _paste(pasted) is None
-
-
-def test_pasted_schema_that_already_is_a_contract_is_returned_as_it_came():
-    contract = {"$schema": _DIALECT, **_PASTED_BODIES["plain"]}
-    assert _paste(contract) == contract
-    assert _paste(_PASTED_BODIES["plain"]) == _PASTED_BODIES["plain"]
-
-
-@pytest.mark.parametrize("uri", [_DRAFT_06, _DRAFT_07, _DRAFT_2019])
-def test_pasted_schemas_convert_with_the_verdicts_of_their_draft(uri):
-    # Random schemas over the whole allowed vocabulary.
-    rng = random.Random(uri)
-    names = ["a", "b", "c"]
-    values = [0, 1, 2, "a", "ab", None, True, [], {}]
-
-    def schema(depth):
-        if depth == 0 or rng.random() < 0.2:
-            return rng.choice(
-                [{}, {"type": "string"}, {"enum": [1, "a", None]}, {"minLength": 2}]
-            )
-        node = {}
-        if rng.random() < 0.5:
-            node["type"] = rng.choice(["object", "array", "string", "integer"])
-        if rng.random() < 0.5:
-            node["properties"] = {
-                n: schema(depth - 1) for n in rng.sample(names, rng.randint(1, 3))
-            }
-        if rng.random() < 0.3:
-            node["required"] = rng.sample(names, rng.randint(1, 2))
-        if rng.random() < 0.3:
-            node["items"] = schema(depth - 1)
-        if rng.random() < 0.2:
-            node["additionalProperties"] = rng.choice([False, schema(depth - 1)])
-        for keyword in ("allOf", "anyOf", "oneOf"):
-            if rng.random() < 0.15:
-                node[keyword] = [schema(depth - 1) for _ in range(rng.randint(1, 2))]
-        if rng.random() < 0.1:
-            node["not"] = schema(depth - 1)
-        if rng.random() < 0.2:
-            node["minimum"] = rng.randint(0, 3)
-        if rng.random() < 0.1:
-            node["uniqueItems"] = True
-        if uri != _DRAFT_06 and rng.random() < 0.1:
-            node["if"], node["then"] = schema(depth - 1), schema(depth - 1)
-        return node
-
-    def instance(depth):
-        if depth == 0 or rng.random() < 0.3:
-            return rng.choice(values)
-        if rng.random() < 0.5:
-            return {
-                n: instance(depth - 1) for n in rng.sample(names, rng.randint(0, 3))
-            }
-        return [instance(depth - 1) for _ in range(rng.randint(0, 3))]
-
-    for _ in range(150):
-        # A candidate is a top-level object schema.
-        body = {"type": "object", "properties": {"a": schema(3), "b": schema(2)}}
-        pasted = {"$schema": uri, **body}
-        assert _paste(pasted) == body
-        draft = jsonschema.validators.validator_for(pasted)(pasted)
-        for _ in range(4):
-            value = instance(3)
-            assert _accepted(body, value) == draft.is_valid(value), (pasted, value)
 
 
 def test_the_convertible_keywords_run_the_same_in_every_supported_draft():
@@ -1154,136 +981,6 @@ def test_the_convertible_keywords_run_the_same_in_every_supported_draft():
         assert ("if" in different) == (draft is jsonschema.Draft6Validator)
 
 
-@pytest.mark.parametrize(
-    "pasted",
-    [
-        {
-            "$schema": _DRAFT_07,
-            "$id": "#value",
-            "definitions": {"s": {"$anchor": "value", "type": "string"}},
-            "properties": {"value": {"$ref": "#value"}},
-        },
-        {"$schema": _DRAFT_07, "$id": "urn:contract"},
-        {"$id": "urn:contract"},
-        {"$schema": _DIALECT + "#"},
-        {"$schema": _DRAFT_07, "definitions": {"s": {"type": "string"}}},
-        {"$schema": _DRAFT_2019, "$defs": {"s": {"type": "string"}}},
-        {
-            "$schema": _DRAFT_07,
-            "properties": {"a": {"type": "string"}, "b": {"$ref": "#/properties/a"}},
-        },
-        {"$schema": _DRAFT_07, "$comment": "a note"},
-        {"$schema": _DRAFT_07, "dependencies": {"a": ["b"]}},
-        {"$schema": _DRAFT_07, "dependencies": {"a": {"required": ["b"]}}},
-        {
-            "$schema": _DRAFT_07,
-            "properties": {"a": {"type": "array", "items": [{"type": "string"}]}},
-        },
-        {
-            "$schema": _DRAFT_07,
-            "properties": {
-                "a": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "additionalItems": False,
-                }
-            },
-        },
-        {
-            "$schema": _DRAFT_07,
-            "properties": {"a": {"$ref": "#/definitions/s", "maxLength": 1}},
-            "definitions": {"s": {"type": "string"}},
-        },
-        {"$schema": _DRAFT_07, "properties": {"a": {"prefixItems": [{}]}}},
-        {"$schema": _DRAFT_07, "minimum": 1, "exclusiveMinimum": True},
-        {
-            "$schema": _DRAFT_07,
-            "properties": {
-                "a": {"type": "array", "contains": {"type": "string"}, "minContains": 2}
-            },
-        },
-        {
-            "$schema": _DRAFT_04,
-            "type": "object",
-            "properties": {"value": {"type": "integer"}},
-        },
-        {
-            "$schema": _DRAFT_2019,
-            "$recursiveAnchor": True,
-            "properties": {"a": {"$recursiveRef": "#"}},
-        },
-        {
-            "$schema": _DRAFT_07,
-            "type": "object",
-            "properties": {"a": {"$schema": _DRAFT_07, "type": "string"}},
-        },
-        {"type": "object", "properties": {"a": {"$id": "urn:a", "type": "string"}}},
-        {"$schema": "https://example.com/meta.json", "type": "object"},
-        {"$schema": _DRAFT_03, "type": "object"},
-        {"$schema": 5, "type": "object"},
-        {"$schema": "http://[bad", "type": "object"},
-        {"$schema": _DRAFT_07, "type": "object", "required": True},
-        {
-            "$id": "https://example.com/c.json",
-            "properties": {"a": {"$ref": "https://example.com/c.json#/definitions/s"}},
-            "definitions": {"s": {"type": "string"}},
-        },
-    ],
-    ids=[
-        "anchor-beside-a-root-id",
-        "id-with-dialect",
-        "id-alone",
-        "hash-variant-of-2020-12",
-        "definitions",
-        "defs",
-        "local-reference",
-        "comment",
-        "dependencies",
-        "schema-dependencies",
-        "array-items",
-        "additional-items",
-        "ref-with-sibling",
-        "keyword-of-a-later-draft",
-        "boolean-exclusive-minimum",
-        "min-contains-before-2019-09",
-        "draft-04-integer",
-        "recursive-ref",
-        "nested-dialect",
-        "nested-id",
-        "unknown-dialect",
-        "draft-03",
-        "non-string-dialect",
-        "malformed-dialect-uri",
-        "not-a-valid-schema",
-        "reference-through-the-id",
-    ],
-)
-def test_pasted_schema_outside_the_convertible_keywords_is_not_a_candidate(pasted):
-    # It is not rewritten. A visible reason for it is not built yet: the only
-    # evidence-refusal mechanism reports size limits, so the candidate is left out
-    # exactly as any other invalid pasted schema is.
-    assert (
-        _paste({"type": "object", "properties": {"a": {"type": "string"}}, **pasted})
-        is None
-    )
-
-
-def test_pasted_draft_07_schema_reaches_the_builder_as_a_2020_12_candidate():
-    schema = _PASTED_BODIES["plain"]
-    candidates = derive_freeform_schema_candidates(
-        [
-            ConversationMessage(
-                message_id="pasted",
-                role="user",
-                content="```json\n"
-                + json.dumps({"$schema": _DRAFT_07, **schema})
-                + "\n```",
-            )
-        ]
-    )
-    assert [candidate.json_schema for candidate in candidates] == [schema]
-
-
 def test_stored_contract_keeps_resolving_references_through_its_own_id():
     stored = {
         "$id": "urn:contract",
@@ -1301,30 +998,6 @@ def test_stored_contracts_and_authoring_keep_the_dialect_they_name():
     stored = {"$schema": _DRAFT_07, "dependencies": {"a": ["b"]}}
     assert not _accepted(stored, {"a": 1})
     assert _accepted(stored, {"a": 1, "b": 2})
-
-
-def test_pasted_draft_4_schema_is_declined_because_it_counts_integers_differently():
-    pasted = {
-        "$schema": _DRAFT_04,
-        "type": "object",
-        "properties": {"value": {"type": "integer"}},
-    }
-    assert not jsonschema.Draft4Validator(pasted).is_valid({"value": 2.0})
-    assert _paste(pasted) is None
-
-
-@pytest.mark.parametrize("uri", [_DRAFT_06, _DRAFT_07, _DRAFT_2019])
-def test_pasted_schema_of_a_supported_draft_counts_integers_like_2020_12(uri):
-    pasted = {
-        "$schema": uri,
-        "type": "object",
-        "properties": {"value": {"type": "integer"}},
-    }
-    schema = _paste(pasted)
-    assert schema == {k: v for k, v in pasted.items() if k != "$schema"}
-    draft = jsonschema.validators.validator_for(pasted)(pasted)
-    for value in (2, 2.0, 2.5, "2", True, None):
-        assert _accepted(schema, {"value": value}) == draft.is_valid({"value": value})
 
 
 def test_the_supported_drafts_are_those_whose_type_checker_is_that_of_2020_12():

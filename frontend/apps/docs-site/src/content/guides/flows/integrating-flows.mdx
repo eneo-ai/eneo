@@ -2068,8 +2068,7 @@ Structured output uses the same 8 MiB ceiling, measured as serialized JSON inclu
 | `FLOW_PDF_MAX_PAGES`                          | 2000                  | Pages in each PDF extracted for a Flow                                                                                                                                                                                                                                 |
 | `FLOW_PDF_MAX_EXTRACTED_BYTES`                | 134,217,728 (128 MiB) | Extracted UTF-8 text, including page markers                                                                                                                                                                                                                           |
 | `FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS`         | 900 s                 | Supervised extraction of one PDF                                                                                                                                                                                                                                       |
-| `AI_BUILDER_PROPOSAL_TIMEOUT_SECONDS`         | 300 s                 | Provider silence: longest wait for the next chunk once output has started. Before the first output a call that may think (any effort but none, or no effort on a reasoning route) waits up to the 1800 s call ceiling. Admins override both in Admin > Flow settings   |
-| `ATTACHMENT_MAX_FILES`                        | 100                   | Persistent attachments per assistant; Builder separately allows up to 100 session attachments                                                                                                                                                                          |
+| `ATTACHMENT_MAX_FILES`                        | 100                   | Persistent attachments per assistant                                                                                                                                                                                                                                   |
 
 The 8-hour invocation default must land after heartbeat-based recovery (`eneo-dgh9`); release orchestration enforces this dependency. For longer recordings, operators change **`FLOW_AUDIO_MAX_DURATION_SECONDS` and `TASK_EXECUTION_TIMEOUT_SECONDS` together**. The invocation budget still reserves 60 seconds for finalization, giving steps a maximum of 28,740 seconds within the remaining shared budget; the minimum invocation budget remains 65 seconds. Upload bytes, decoded bytes, and model/provider capacity must also admit the recording. These provisional duration and execution defaults may be revised by the measurement receipt tracked as `eneo-hy7c`.
 
@@ -2117,7 +2116,7 @@ Eligibility does not itself erase runs or their run-owned files. Create-run idem
 
 Abandoned uploads that were never attached to a run are not swept automatically. Delete them yourself with `DELETE /api/v1/flows/{id}/runtime-files/{file_id}/`; a file already bound to a run returns `409 flow_runtime_file_attached`.
 
-Conversation history, Flow AI Builder sessions, and audit logs have separate retention behavior. Read [Flow run-history retention](/guides/flows/retention-policy) for the hierarchy and [Data retention and deletion](/guides/data-retention) before making a system-wide retention claim.
+Conversation history, including flow authoring chats, and audit logs have separate retention behavior. Read [Flow run-history retention](/guides/flows/retention-policy) for the hierarchy and [Data retention and deletion](/guides/data-retention) before making a system-wide retention claim.
 
 ## What this API does not offer
 

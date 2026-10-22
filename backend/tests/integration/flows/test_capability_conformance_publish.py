@@ -14,7 +14,15 @@ import pytest
 from httpx import AsyncClient
 
 from eneo.database.tables.spaces_table import SpacesTranscriptionModels
-from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
+from eneo.flows.enums import FlowAuthoringInputSource
+from eneo.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputType,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
 from tests.integration.flows.test_flow_live_transcription_session import (
     UNREACHABLE_ENDPOINT,
     _create_space,
@@ -24,13 +32,88 @@ from tests.integration.flows.test_flow_template_attachment_persistence import (
     DOCX_MIME,
     _template_bytes,
 )
-from tests.unittests.flows.ai_builder.test_capability_conformance import (
-    PROPOSABLE_TRIPLES,
-    Triple,
-    conformance_flow,
-)
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+
+Triple = tuple[str, str, str]
+
+# (input type, output type, output mode): the manifest's proposable cells,
+# written out so that a new one has to be added here by hand.
+PROPOSABLE_TRIPLES: tuple[Triple, ...] = (
+    ("text", "text", "pass_through"),
+    ("text", "text", "compose_text"),
+    ("text", "json", "pass_through"),
+    ("text", "pdf", "render_verbatim"),
+    ("text", "docx", "render_verbatim"),
+    ("text", "docx", "template_fill"),
+    ("json", "text", "pass_through"),
+    ("json", "json", "pass_through"),
+    ("json", "pdf", "pass_through"),
+    ("json", "docx", "pass_through"),
+    ("json", "docx", "template_fill"),
+    ("audio", "text", "pass_through"),
+    ("audio", "text", "transcribe_only"),
+    ("audio", "json", "pass_through"),
+    ("audio", "pdf", "pass_through"),
+    ("audio", "docx", "pass_through"),
+    ("audio", "docx", "template_fill"),
+    ("document", "text", "pass_through"),
+    ("document", "json", "pass_through"),
+    ("document", "pdf", "pass_through"),
+    ("document", "docx", "pass_through"),
+    ("document", "docx", "template_fill"),
+    ("file", "text", "pass_through"),
+    ("file", "json", "pass_through"),
+    ("file", "pdf", "pass_through"),
+    ("file", "docx", "pass_through"),
+    ("file", "docx", "template_fill"),
+    ("any", "text", "pass_through"),
+    ("any", "json", "pass_through"),
+    ("any", "pdf", "pass_through"),
+    ("any", "docx", "pass_through"),
+    ("any", "docx", "template_fill"),
+)
+
+
+def _conformance_step(
+    ref: str,
+    triple: Triple,
+    *,
+    source: FlowAuthoringInputSource = FlowAuthoringInputSource.FLOW_INPUT,
+) -> StepSpec:
+    input_type, output_type, output_mode = triple
+    return StepSpec(
+        plan_step_ref=ref,
+        name=f"Steg {ref}",
+        assistant_spec=AssistantSpec(
+            instructions="Hantera underlaget och leverera resultatet."
+        ),
+        input_source=source,
+        input_type=InputType(input_type),
+        output_type=OutputType(output_type),
+        output_mode=OutputMode(output_mode),
+    )
+
+
+def conformance_flow(triple: Triple) -> FlowDraftSpecCore:
+    """A flow the platform accepts that contains the triple as a step.
+
+    An audio step reads the flow input, and only one step may. The platform
+    refuses a flow whose first step is audio and whose last step is a document
+    unless that first step is a transcription, so an audio step that itself
+    produces a document is only accepted ahead of a text-producing last step.
+    """
+    input_type, output_type, _mode = triple
+    steps = [_conformance_step("step_a", triple)]
+    if input_type == "audio" and output_type in {"pdf", "docx"}:
+        steps.append(
+            _conformance_step(
+                "step_b",
+                ("text", "text", "pass_through"),
+                source=FlowAuthoringInputSource.PREVIOUS_STEP,
+            )
+        )
+    return FlowDraftSpecCore(flow_name=f"Konformans {'-'.join(triple)}", steps=steps)
 
 
 async def _publish_conformance_flow(

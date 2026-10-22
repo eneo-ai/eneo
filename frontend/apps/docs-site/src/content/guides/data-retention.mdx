@@ -20,7 +20,6 @@ Flow run-history policies never start deletion in this release. Conversation his
 | Unused Flow runtime uploads                | Organization Flow settings                                     | Marks never-attached uploads as eligible for a separate administrator cleanup   | **No Flow-owned scheduled deletion**                  |
 | Flow debug evidence                        | Organization Flow settings                                     | Marks debug evidence as eligible for a separate administrator cleanup           | **No Flow-owned scheduled deletion**                  |
 | Conversation and App history               | Assistant or App, then Space, then the conversation default    | Controls the existing conversation-retention cleanup path                       | **May be automatic when configured**                  |
-| Flow AI Builder sessions                   | Currently follows separate Space/conversation cleanup behavior | Controls Builder conversation-session history, not Flow run history             | **May be automatic when configured**                  |
 | Audit logs                                 | Organization audit-log settings                                | Sets how long audit rows remain available                                       | **Yes; the daily audit cleanup removes expired rows** |
 | Export files and other temporary artifacts | Their owning feature                                           | Uses that feature's documented lifetime                                         | Depends on the feature                                |
 
@@ -69,15 +68,15 @@ The review queue is also side-effect free. Reading or refreshing it cannot appro
 
 For confidential, security-classified, or regulated data, define the retention decision before production use:
 
-1. Identify every data class the workflow creates: run history, uploaded and generated files, evidence, conversations, Builder sessions, and audit logs.
+1. Identify every data class the workflow creates: run history, uploaded and generated files, evidence, conversations (including flow authoring chats), and audit logs.
 2. Set the Organization default, then add only the Space and Flow exceptions you need.
 3. Use **Review before purge** when a person must verify the scope before a future deletion.
-4. Verify conversation, Flow AI Builder, and audit-log settings separately. A safe Flow run-history policy does not override them.
+4. Verify conversation and audit-log settings separately. A safe Flow run-history policy does not override them.
 5. Treat backups, legal holds, object-storage lifecycle rules, and external exports as separate controls unless your deployment documentation explicitly says otherwise.
 
 <Callout type="info">
 
-**Flow AI Builder is a separate retention workstream.** Builder conversation sessions can contain sensitive source material. They are not governed by the Flow run-history hierarchy described here, and their current Space/conversation cleanup behavior must be reviewed separately before handling sensitive production data.
+**Flow authoring chats follow conversation retention.** A chat that edits a flow is an ordinary conversation and can contain sensitive source material. It is not governed by the Flow run-history hierarchy described here; review the Space/conversation cleanup before handling sensitive production data.
 
 </Callout>
 

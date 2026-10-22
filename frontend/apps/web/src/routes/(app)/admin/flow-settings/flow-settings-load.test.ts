@@ -12,7 +12,6 @@ const values = {
   flowInputLimits: { id: "input" },
   flowRuntimePolicy: { id: "runtime" },
   mappedExecutionPolicy: { id: "mapped" },
-  aiBuilderBudgetSettings: { id: "builder" },
   ragEvidencePolicy: { id: "evidence" }
 };
 
@@ -32,7 +31,6 @@ function eneoMock() {
       getFlowInputLimits: vi.fn().mockResolvedValue(values.flowInputLimits),
       getFlowRuntimePolicy: vi.fn().mockResolvedValue(values.flowRuntimePolicy),
       getMappedExecutionPolicy: vi.fn().mockResolvedValue(values.mappedExecutionPolicy),
-      getAIBuilderBudgetSettings: vi.fn().mockResolvedValue(values.aiBuilderBudgetSettings),
       getRagEvidencePolicy: vi.fn().mockResolvedValue(values.ragEvidencePolicy)
     }
   };
@@ -77,7 +75,6 @@ describe("flow settings load", () => {
       eneo.settings.getFlowInputLimits,
       eneo.settings.getFlowRuntimePolicy,
       eneo.settings.getMappedExecutionPolicy,
-      eneo.settings.getAIBuilderBudgetSettings,
       eneo.settings.getRagEvidencePolicy,
       eneo.settings.listOrganizationFlowRunRetentionReviewQueue
     ]) {

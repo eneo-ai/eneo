@@ -41,6 +41,7 @@ class LocalResourceKind(str, Enum):
 
 
 class FlowResourceBindingSource(str, Enum):
+    # Written by the retired AI Builder; kept so the bindings it wrote read.
     AI_BUILDER = "ai_builder"
     PACKAGE_IMPORT = "package_import"
     MANUAL_ADMIN = "manual_admin"

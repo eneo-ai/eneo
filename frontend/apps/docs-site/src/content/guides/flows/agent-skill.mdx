@@ -4,7 +4,7 @@ import { Callout } from "nextra/components";
 
 Give a coding agent a portable, Flow-specific operating guide even when it cannot reach your private Eneo deployment or its `/openapi.json`. The downloadable Agent Skill teaches the runtime sequence, typed states, security boundaries, and recovery rules needed to build reliable applications on published Eneo Flows.
 
-This is an **Agent Skill for development tools such as Codex and Claude Code**. It is not an Eneo in-product Skill, a Flow definition, or Flow AI Builder.
+This is an **Agent Skill for development tools such as Codex and Claude Code**. It is not an Eneo in-product Skill or a Flow definition.
 
 ## What the installed skill improves
 
@@ -18,7 +18,7 @@ An agent using the skill is instructed to:
 - respect audit, evidence, sensitive-content, and retention boundaries;
 - state deployment assumptions instead of inventing an API prefix, limits, or unsupported behavior.
 
-The package contains a concise `SKILL.md`, focused references, and small evaluation definitions. It does not contain credentials, deployment URLs, internal source code, or Flow AI Builder guidance.
+The package contains a concise `SKILL.md`, focused references, and small evaluation definitions. It does not contain credentials, deployment URLs, or internal source code.
 
 ## Download
 
@@ -75,7 +75,7 @@ Our agent cannot reach the private openapi.json. Use the Eneo Flows API skill an
 state which paths, limits, and schemas the application must still discover at runtime.
 ```
 
-The skill deliberately does not activate for creating draft Flows, prompting Flow AI Builder, or using unrelated Eneo APIs.
+The skill deliberately does not activate for creating or editing draft Flows, or for using unrelated Eneo APIs.
 
 ## How contract freshness works
 

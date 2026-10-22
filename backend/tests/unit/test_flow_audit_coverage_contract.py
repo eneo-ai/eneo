@@ -739,8 +739,6 @@ _FORBIDDEN_METADATA_KEYS = {
 
 
 def _is_flow_contract_path(path: str) -> bool:
-    if path.startswith("/api/v1/flows/ai-builder"):
-        return False
     return (
         path.startswith("/api/v1/flows")
         or path.startswith("/api/v1/settings/flow-")

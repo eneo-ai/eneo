@@ -24,7 +24,9 @@
   "exports": {
     ".": "./index.js",
     "./integrations/sync-details": "./src/integrations/sync-details.js",
-    "./integrations/sync-announcements": "./src/integrations/sync-announcements.js"
+    "./integrations/sync-announcements": "./src/integrations/sync-announcements.js",
+    "./flows/run-status-capabilities": "./src/flows/flow-run-status-capabilities.js",
+    "./flows/runtime-upload-policy": "./src/flows/runtime-upload-policy.js"
   },
   "sideEffects": false
 }

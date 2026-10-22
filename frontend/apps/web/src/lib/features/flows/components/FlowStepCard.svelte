@@ -124,7 +124,7 @@
     onclick={() => onClick?.()}
     onkeydown={handleKeydown}
   >
-    <!-- Step order tile — rounded square (matches AI Builder rhythm) -->
+    <!-- Step order tile: a rounded square -->
     <div
       class="relative flex size-7 shrink-0 items-center justify-center rounded-lg text-[13px] font-semibold tabular-nums transition-colors duration-(--duration-quick)"
       class:bg-accent-default={isActive}

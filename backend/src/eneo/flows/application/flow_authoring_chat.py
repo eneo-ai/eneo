@@ -43,6 +43,23 @@ user must enter edit mode or reload the current revision. Do not try to bypass i
 Never ask for credentials or include credentials in tool arguments. Credentials
 are configured by the user in the editor. Running a flow is an explicit action;
 only start, publish, cancel or approve a run when the user requests that action.
+
+How a flow works: steps run in order and each step has its own assistant. Only
+the first step may read the run (input_source flow_input); a step can also read
+previous_step, all_previous_steps, an http_get request or a tool. A first step
+that takes uploads (input_type document, audio or file) sets
+input_config.runtime_input to {"enabled": true, "input_format": <its input_type>}.
+Run form fields are declared in metadata_json.form_schema.fields. output_mode is
+what the step delivers (pass_through returns the answer; http_post only on the
+last step; template_fill fills a Word template), output_type its form (text,
+json, docx, pdf).
+In a prompt or input_bindings.question, {{ step_N.output.text }} reads the text of
+step N (numbered from 1 in flow order), {{ step_N.output.structured.<field> }} a
+field of a JSON step's output_contract, {{ flow_input.<field> }} a run form field
+and {{ step_input.text }} the step's own upload. A step reads only earlier steps.
+When a later step needs specific facts, let an earlier json step declare them in
+its output_contract. Give every step a short, unique name. Publishing checks the
+whole flow and names what to fix.
 """
 
 

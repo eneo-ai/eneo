@@ -4,16 +4,14 @@ These decisions describe the current architecture. Historical planning
 documents may describe deleted pre-release features; this page and the current
 implementation take precedence for maintainer work.
 
-## 1. Builder uses the shared Flow authoring boundary
+## 1. Conversational authoring uses the shared Flow authoring boundary
 
-`eneo.flows.ai_builder` owns conversational authoring. The Flow API router
-registers its routes alongside manual authoring and run APIs. Builder compiles
-proposals into `FlowDraftSpecCore` and applies them through
-`FlowAuthoringCommandService`, also used by package installation. It writes
-normal Flow drafts and does not own a separate runtime.
-
-Builder session, plan, attachment, and client-error persistence is declared in
-`flow_tables.py`; the current ORM and Alembic lineage define the schema.
+A flow is edited conversationally from an ordinary assistant chat bound to the
+flow. Its loopback flow tools call the same authoring operations as the editor
+update, so they write normal Flow drafts through the core's validation,
+permissions, classification and audit, and own no separate runtime or
+persistence. Package installation materializes drafts through
+`FlowAuthoringCommandService`.
 
 ## 2. Published versions are immutable runtime truth
 
@@ -68,16 +66,7 @@ Every tenant-owned query filters by tenant, and composite foreign keys enforce
 ownership for Flow/run/file/checkpoint relationships. User and service-principal
 actor shapes are mutually exclusive and explicitly attributed. Authorization
 checks are repeated at evidence, artifact, review, package, and execution
-boundaries. An AI Builder read of a session's flow or runs later in the same
-request is decided again by the Builder read seam
-(`flows/ai_builder/ai_builder_read_access.py`): each grant reads the caller's
-space role (group roles through the caller's current group memberships) and
-the flow's ownership row, never its content, in its own short transaction,
-never from the Space or group list the request already loaded or the evidence
-snapshot it reads in, so a role lowered or removed meanwhile is refused before
-any content is read. A grant refused in a message stream keeps its public code
-(for example `insufficient_space_permission` or `not_found`) in the stream's error
-event.
+boundaries.
 A review turn takes its grant before its evidence snapshot opens, so a turn
 never holds one pooled connection while it waits for a second. A key scoped to
 a hidden (flow-managed) assistant is refused by the grant as it is by the
@@ -153,8 +142,8 @@ written. The authoring command and the flow update each own their row.
 
 | Operation | An omitted value | A null value | A step left out |
 | --- | --- | --- | --- |
-| Full replace (create: package install, AI Builder create) | Takes its default: input type `text`, output mode `pass_through`, output type `text`; bindings, contracts, configs and review policy are null. An AI Builder create derives the upload configuration of a step that takes audio, documents or files. | Same as omitted | Not applicable |
-| Sparse edit (the authoring command, an AI Builder apply) | A step column the approved diff does not name keeps its saved value, including shapes only the step editor writes (speaker mapping, and an HTTP configuration's settings and credentials, stored in its canonical shape) and columns no spec has (timeout, classification override, id). | A named column is written null (bindings, contracts, configs, review policy); no upload configuration is generated in place of the clear. | Must be listed for removal, or the edit is refused |
+| Full replace (create: package install) | Takes its default: input type `text`, output mode `pass_through`, output type `text`; bindings, contracts, configs and review policy are null. | Same as omitted | Not applicable |
+| Editor update (`PATCH /api/v1/flows/{id}/editor/`, also the authoring chat's flow tools) | A step column a step edit does not name keeps its saved value. | A named column is written null. | Kept, unless `step_order` is sent: a saved step it leaves out is removed |
 | Manual update (`PATCH /api/v1/flows/{id}/`) | Without `steps`, every step row and id is kept; an omitted `description` is kept. An optional column a sent step item omits is stored as null; a required field (`assistant_id`, `step_order`, `input_source`, `input_type`, `output_mode`, `output_type`) it omits fails request validation. An omitted `metadata_json` is normalized as saved (legacy form field types are read as `text`). | `description` and `metadata_json` are cleared | A saved step missing from a sent `steps` list is deleted |
 
 An unnamed column of an edited step changes in two ways only. A step alias
@@ -167,13 +156,6 @@ field an edit carries keeps the type an older writer saved (`email`,
 `string` and `textarea` stay as saved and are read as `text`) for as long as
 the edit does not change the type the platform reads: editing its label,
 requiredness or place keeps it, changing it to another type writes the new one.
-Whether an AI Builder apply needs a transcription setup is read from the steps
-the flow ends with, not from the submitted spec.
-
-`compile_flow_draft_changeset` writes the columns an edit names and carries
-every other one through one function. The plan lifecycle maps each field an
-approved diff can name to the one assistant field or step column it writes,
-and a test fails when a step spec field has no stated write.
 
 ## 15. One capability owner, three projections
 
@@ -184,18 +166,12 @@ manifest rules admit as persisted step shapes, HTTP and image shapes included;
 a persisted image shape is one the runtime still rejects as unsupported input
 (graph validation `unsupported_input_type`). `editable_existing` is the subset
 an authoring spec can carry per axis.
-`proposable_new` is what the AI Builder may propose from scratch. A cell the
-Builder cannot author is `not_exposed` with a permanent reason. The AI Builder
-tool schemas take their vocabularies from `projection_values`, and the document
-delivery modes they offer come from the same cells. The one typed literal for
-those modes cannot be derived under strict typing, so a test pins it equal to
-the derived values. One conformance flow per proposable triple must pass the
-authoring command and publish.
+`proposable_new` lists the cells a new step may be created in; a cell outside
+it is `not_exposed` with a permanent reason.
 
 Three boundaries stay separate. The saved-step snapshot listing is a separate
 per-axis portability check: it asks only whether the authoring vocabulary can
-carry each field of a saved step, and the Builder lists a step outside it
-instead of failing with a bare error. So an HTTP cell is inspectable but not
+carry each field of a saved step. So an HTTP cell is inspectable but not
 portable, and a bound JSON step outside the cell table can still be portable.
 The listing never judges whether the step may run. Per-step authoring
 feasibility is what the manifest cells state for one step on its own. Whether a

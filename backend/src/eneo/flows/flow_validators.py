@@ -49,6 +49,9 @@ from eneo.flows.enums import (
     FLOW_INPUT_SOURCE_VALUES,
     FLOW_INPUT_TYPE_VALUES,
     FLOW_OUTPUT_TYPE_VALUES,
+    FlowInputSource,
+    FlowRuntimeInputFormat,
+    flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_spec import MAX_FLOW_AUTHORING_STEPS
@@ -76,16 +79,22 @@ from eneo.flows.flow_validators_template import (
     validate_template_fill_output_config,
 )
 from eneo.flows.flow_variable_definitions import (
+    PREVIOUS_STEP_TEXT_ALIAS,
+    RESERVED_RUNTIME_VARIABLES,
     FlowRunInput,
     VariableShape,
     flow_input_key_shape,
     reads_unreceived_run_input,
     runtime_variable_shape,
+    runtime_variables_for_step,
 )
+from eneo.flows.http_transport.step_configs import sends_http_config
 from eneo.flows.input_binding_contract_rules import (
     FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
     InputBindingContractError,
+    SourceRefBinding,
     derive_structured_projection_contract,
+    duplicate_source_ref_expressions,
     effective_question_binding,
     has_explicit_underlag,
     input_contract_binding_conflict,
@@ -113,10 +122,14 @@ from eneo.flows.output_processing import (
     validate_schema_syntax,
 )
 from eneo.flows.runtime.output_formats import resolve_format_spec
+from eneo.flows.source_identity import has_required_runtime_managed_source_fields
 from eneo.flows.step_chain_rules import iter_step_chain_violations
 from eneo.flows.step_lineage import (
+    ConfigColumn,
     build_step_ref_mapping,
+    config_channel,
     names_step_without_result,
+    referenced_step_order,
     resolve_upstream_step_orders,
     selected_source_step_order,
 )
@@ -618,6 +631,7 @@ def collect_step_graph_issues(
                         if require_complete_template_fill_config
                         else {}
                     ),
+                    publish_strict=require_complete_template_fill_config,
                 ),
             )
         if require_complete_template_fill_config:
@@ -625,6 +639,17 @@ def collect_step_graph_issues(
                 issues,
                 FlowGraphIssueCode.FLOW_INPUT_ALIAS_NOT_RECEIVED,
                 lambda: _validate_run_input_alias_reads(step=step, run_input=run_input),
+            )
+            _capture_flow_step_validation(
+                issues,
+                FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE,
+                lambda: _validate_template_reads(
+                    step=step,
+                    steps_by_order=steps_by_order,
+                    step_ref_mapping=step_ref_mapping,
+                    form_field_names=form_field_names,
+                    run_input=run_input,
+                ),
             )
             _capture_flow_step_validation(
                 issues,
@@ -641,6 +666,12 @@ def collect_step_graph_issues(
             validate=lambda: _validate_step_input_configuration(step=step),
             step_order=step.step_order,
         )
+        if require_complete_template_fill_config:
+            _capture_flow_step_validation(
+                issues,
+                FlowGraphIssueCode.FLOW_STEP_INVALID,
+                lambda: _validate_mapped_contracts(step=step),
+            )
 
     _capture_bad_request_validation(
         issues,
@@ -1229,6 +1260,13 @@ def whole_reference_value(
         return WholeReferenceProblem.NOT_ONE_REFERENCE
     reference = references[0]
     scalar: bool | None = None
+    if names_step_by_its_name(reference, step_ref_mapping):
+        # The run binds a step's name to that step's text and nothing below it.
+        if names_step_without_result(reference, step_order=step_order):
+            return WholeReferenceProblem.STEP_NOT_EARLIER
+        if reference.tail:
+            return WholeReferenceProblem.UNKNOWN_REFERENCE
+        return WholeReferenceValue(reference=reference, scalar=True)
     if reference.kind is TemplateReferenceKind.STEP:
         source_order = reference.step_order
         if source_order is None:
@@ -1319,8 +1357,7 @@ def validate_template_binding_scalar(
 
     What a DOCX placeholder may read: a value ``whole_reference_value`` knows
     that is a scalar. An explicit blank is allowed. Publication applies it to
-    persisted steps; the Builder applies the same rule to mappings an edit
-    keeps.
+    persisted steps.
     """
 
     if not binding.strip():
@@ -1403,15 +1440,6 @@ def _tool_reference_problem(
 ) -> WholeReferenceProblem | None:
     """Why a bound argument of the tool step ``step_order`` names no value the
     run has when the step runs; None when it names one."""
-    reference = analyze_template(
-        bound.template,
-        step_refs=dict(step_ref_mapping),
-        form_field_names=set(form_field_types),
-    )[0]
-    if names_step_by_its_name(reference, step_ref_mapping):
-        if names_step_without_result(reference, step_order=step_order):
-            return WholeReferenceProblem.STEP_NOT_EARLIER
-        return WholeReferenceProblem.UNKNOWN_REFERENCE if reference.tail else None
     value = whole_reference_value(
         bound.template,
         step_order=step_order,
@@ -1678,8 +1706,7 @@ def _validate_template_binding_present(
     """Refuse a placeholder bound to a step field that is not a required field of one type.
 
     The fill step stops the run on null and on a key the step did not write,
-    and treats "" as a deliberate omission. The Builder makes its own bound
-    fields meet the rule; this is the rule for every other author.
+    and treats "" as a deliberate omission.
     """
 
     source = template_binding_structured_source(
@@ -2068,6 +2095,7 @@ def _validate_source_ref_contracts(
     step: FlowStepValidationView,
     steps_by_order: dict[int, FlowStepValidationView],
     step_ref_mapping: dict[str, int],
+    publish_strict: bool = False,
 ) -> None:
     try:
         source_refs = source_ref_bindings(step.input_bindings)
@@ -2080,6 +2108,19 @@ def _validate_source_ref_contracts(
         ) from exc
     if not source_refs:
         return
+    # The run renders each source ref as its own section of the input.
+    duplicates = (
+        duplicate_source_ref_expressions(step.input_bindings) if publish_strict else ()
+    )
+    if duplicates:
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: input_bindings.source_refs reads "
+            f"{duplicates[0]} more than once; the step would receive the same "
+            "material twice. Keep one of them.",
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            context={"field": "input_bindings.source_refs", "key": duplicates[0]},
+            step_order=step.step_order,
+        )
 
     if is_structured_projection_binding(
         input_bindings=step.input_bindings,
@@ -2159,6 +2200,13 @@ def _validate_source_ref_contracts(
                     context={"field": "input_bindings", "key": "source_refs"},
                     step_order=step.step_order,
                 )
+            if publish_strict and ref.output == "structured":
+                _validate_structured_source_ref(
+                    ref,
+                    step=step,
+                    steps_by_order=steps_by_order,
+                    step_ref_mapping=step_ref_mapping,
+                )
         return
 
     for ref in source_refs:
@@ -2227,6 +2275,48 @@ def _validate_source_ref_contracts(
                 context={"field": "input_bindings", "key": "source_refs"},
                 step_order=step.step_order,
             )
+
+
+def _validate_structured_source_ref(
+    ref: SourceRefBinding,
+    *,
+    step: FlowStepValidationView,
+    steps_by_order: dict[int, FlowStepValidationView],
+    step_ref_mapping: dict[str, int],
+) -> None:
+    """A structured source ref the run renders as a read of the producer's
+    structured output: the producer must yield one and, when it declares its
+    contract, declare the field read. An unknown or later producer is refused
+    by the binding reference check."""
+
+    producer = _referenced_step_for_source_ref(
+        ref_step=ref.step_ref,
+        steps_by_order=steps_by_order,
+        step_ref_mapping=step_ref_mapping,
+    )
+    if producer is None or producer.step_order >= step.step_order:
+        return
+    context: dict[str, object] = {
+        "field": "input_bindings.source_refs",
+        "key": ref.step_ref,
+    }
+    if not _yields_structured_output(producer):
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: source_ref '{ref.step_ref}' reads the "
+            f"structured output of step {producer.step_order}, which yields text. "
+            "Read its text output instead.",
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            context=context,
+            step_order=step.step_order,
+        )
+    if producer.output_contract is not None and ref.field_path:
+        _source_ref_schema(
+            contract=producer.output_contract,
+            field_path=ref.field_path,
+            current_step_order=step.step_order,
+            path_label=f"source_ref field_path '{'.'.join(ref.field_path)}'",
+            context=context,
+        )
 
 
 def _referenced_step_for_source_ref(
@@ -2348,6 +2438,19 @@ def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> No
             f"Step {step.step_order}: transcribe_only steps require runtime_input.input_format 'audio'.",
             step_order=step.step_order,
         )
+    # The upload's format decides which files the run accepts and whether it
+    # transcribes them: an audio step given documents would never hear audio.
+    if (
+        _enum_value(step.input_type) == "audio"
+        and runtime_input.input_format != FlowRuntimeInputFormat.AUDIO
+    ):
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: a step with input_type 'audio' takes audio "
+            "uploads; set runtime_input.input_format to 'audio' (it is "
+            f"'{runtime_input.input_format.value}').",
+            step_order=step.step_order,
+            context={"field": "input_config.runtime_input.input_format"},
+        )
 
     bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
     if bindings is None:
@@ -2462,6 +2565,202 @@ def _validate_run_input_alias_reads(
                 )
 
 
+_STEP_RESULT_TAILS = frozenset(
+    {"", "output", "output.text", "output.structured", "status", "error_message"}
+)
+
+
+def _validate_template_reads(
+    *,
+    step: FlowStepValidationView,
+    steps_by_order: Mapping[int, FlowStepValidationView],
+    step_ref_mapping: Mapping[str, int],
+    form_field_names: set[str],
+    run_input: FlowRunInput,
+) -> None:
+    """Refuse at publish a read the run cannot resolve when it interpolates the
+    step's assistant prompt or its HTTP request: a name the flow does not
+    declare, a path its value does not have, or a step without a result yet
+    (the step itself, a later one, an order the flow does not have, or the
+    previous step of the first). The run would fail the step on it. Reads of
+    run text the run form does not collect are refused by their own rule;
+    template fills and tool arguments by theirs."""
+
+    sites: list[tuple[str, str, int, frozenset[str]]] = []
+    if flow_output_mode_uses_completion_model(step.output_mode):
+        sites.append(
+            (
+                "prompt",
+                step.prompt_template or "",
+                step.step_order,
+                runtime_variables_for_step(step.input_config),
+            )
+        )
+    for column in _HTTP_CONFIG_COLUMNS:
+        channel = config_channel(
+            column=column,
+            config=getattr(step, column),
+            input_source=FlowInputSource(step.input_source),
+            output_mode=FlowOutputMode(step.output_mode),
+            step_order=step.step_order,
+        )
+        if (
+            channel is None
+            or channel.sites is None
+            or not sends_http_config(
+                column, step.input_source, step.output_mode, getattr(step, column)
+            )
+        ):
+            continue
+        sites.extend(
+            (
+                ".".join((column, *(str(part) for part in path))),
+                template,
+                channel.context_step_order,
+                RESERVED_RUNTIME_VARIABLES,
+            )
+            for path, template in channel.sites
+        )
+    for field, template, context_order, runtime_variables in sites:
+        for reference in analyze_template(
+            template,
+            step_refs=dict(step_ref_mapping),
+            form_field_names=form_field_names,
+            runtime_variables=runtime_variables,
+        ):
+            if reads_unreceived_run_input(reference.expression, run_input):
+                continue
+            _validate_template_read(
+                reference,
+                field=field,
+                step_order=step.step_order,
+                context_order=context_order,
+                steps_by_order=steps_by_order,
+                step_ref_mapping=step_ref_mapping,
+            )
+
+
+_HTTP_CONFIG_COLUMNS: tuple[ConfigColumn, ...] = ("input_config", "output_config")
+
+
+def _validate_template_read(
+    reference: TemplateReference,
+    *,
+    field: str,
+    step_order: int,
+    context_order: int,
+    steps_by_order: Mapping[int, FlowStepValidationView],
+    step_ref_mapping: Mapping[str, int],
+) -> None:
+    """``context_order``: the steps before it have a result when the template
+    is interpolated."""
+
+    read = f"{field} reads '{{{{ {reference.expression} }}}}'"
+    problem = _template_read_problem(
+        reference,
+        context_order=context_order,
+        step_count=len(steps_by_order),
+        step_ref_mapping=step_ref_mapping,
+    )
+    if problem is not None:
+        code, reason = problem
+        raise FlowStepValidationError(
+            f"Step {step_order}: the {read}, {reason}",
+            code=code.value,
+            context=_binding_reference_context(field, reference.expression),
+            step_order=step_order,
+        )
+    if reference.kind is not TemplateReferenceKind.STEP or not (
+        reference.structured_path or reference.tail == "output.structured"
+    ):
+        return
+    producer = steps_by_order[cast(int, reference.step_order)]
+    if not _yields_structured_output(producer):
+        raise FlowStepValidationError(
+            f"Step {step_order}: the {read}, but step {producer.step_order} yields "
+            f"text, not structured output. Read its text with "
+            f"{{{{ {reference.head}.output.text }}}}.",
+            code=FlowGraphIssueCode.FLOW_INPUT_BINDING_UNSUPPORTED_KEY.value,
+            context={"field": field, "key": reference.expression},
+            step_order=step_order,
+        )
+    if producer.output_contract is not None and reference.structured_path:
+        _source_ref_schema(
+            contract=producer.output_contract,
+            field_path=reference.structured_path,
+            current_step_order=step_order,
+            path_label=f"'{{{{ {reference.expression} }}}}' in the {field}",
+            context={"field": field, "key": reference.expression},
+        )
+
+
+def _template_read_problem(
+    reference: TemplateReference,
+    *,
+    context_order: int,
+    step_count: int,
+    step_ref_mapping: Mapping[str, int],
+) -> tuple[FlowGraphIssueCode, str] | None:
+    """Why a template read names nothing the run has when it interpolates the
+    template with the results before ``context_order``, as the code and the
+    end of the refusal; None when it names a value."""
+
+    if reference.path_error_code == "invalid_step_reference_format":
+        return (
+            FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE,
+            "which is not a step reference. A step is read as step_<number>.",
+        )
+    if reference.kind is TemplateReferenceKind.UNKNOWN:
+        return (
+            FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE,
+            "a name this flow does not declare: no form field, step name or "
+            "runtime variable is called that.",
+        )
+    if reference.path_error_code is not None:
+        return (
+            FlowGraphIssueCode.FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            "a path its value does not have.",
+        )
+    if reference.kind is TemplateReferenceKind.FORM_FIELD and reference.tail:
+        return (
+            FlowGraphIssueCode.FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            f"a path below the form field '{reference.head}', which holds one value.",
+        )
+    order = referenced_step_order(reference, step_order=context_order)
+    if order is None:
+        return None
+    if not 1 <= order <= step_count:
+        return (
+            FlowGraphIssueCode.FLOW_INPUT_BINDING_UNKNOWN_STEP_ORDER,
+            "the previous step, which the first step does not have."
+            if reference.head == PREVIOUS_STEP_TEXT_ALIAS
+            else f"step {order}, which this flow does not have.",
+        )
+    if order >= context_order:
+        return (
+            FlowGraphIssueCode.FLOW_INPUT_BINDING_FUTURE_STEP_REFERENCE,
+            f"step {order}, which has no result yet when it is read. A step "
+            "can only read earlier steps.",
+        )
+    if reference.kind is not TemplateReferenceKind.STEP:
+        return None
+    if names_step_by_its_name(reference, step_ref_mapping):
+        if not reference.tail:
+            return None
+        return (
+            FlowGraphIssueCode.FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE,
+            "a path below a step name, which reads that step's text: "
+            f"'{{{{ {reference.head} }}}}'.",
+        )
+    if reference.tail in _STEP_RESULT_TAILS or reference.structured_path:
+        return None
+    return (
+        FlowGraphIssueCode.FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+        f"a path a step result does not have. Read {reference.head}.output.text "
+        f"or {reference.head}.output.structured.<field>.",
+    )
+
+
 def _template_text(config: FlowPersistedJsonObject | None) -> str | None:
     return json.dumps(config, ensure_ascii=False) if config else None
 
@@ -2541,6 +2840,54 @@ def _yields_structured_output(step: FlowStepValidationView) -> bool:
     except TypedIOValidationException:
         return False  # the enum check reports an unknown output_type
     return spec.requests_structured_output(step.output_contract)
+
+
+def _validate_mapped_contracts(*, step: FlowStepValidationView) -> None:
+    """Refuse at publish a mapped step whose contracts the run cannot map: a
+    per-source reader writes one ``documents`` array whose items carry the
+    source fields the run fills in, and an item map reads and writes one
+    array of objects."""
+
+    try:
+        mapped = resolve_step_mapped_execution(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            output_mode=step.output_mode,
+            output_type=step.output_type,
+            input_config=step.input_config,
+        )
+    except (FlowStepMappedExecutionConfigurationError, BadRequestException):
+        return  # refused by _validate_step_mapped_execution
+    if mapped is None or mapped.maximum_items is None:
+        return
+    if mapped.execution_mode == "per_source":
+        if single_mapped_array_key(
+            step.output_contract
+        ) != "documents" or not has_required_runtime_managed_source_fields(
+            step.output_contract, "documents"
+        ):
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: a step that reads each uploaded file on "
+                "its own (runtime_input.execution_mode 'per_source') writes one "
+                "array: its output_contract must have 'documents' as its only "
+                "property, an array of objects whose items declare source_label "
+                "and source_file_id as required strings and extraction_warnings "
+                "as a required array of the extraction warning values.",
+                step_order=step.step_order,
+                code=FlowGraphIssueCode.FLOW_STEP_INVALID.value,
+                context={"field": "output_contract"},
+            )
+        return
+    for field in ("input_contract", "output_contract"):
+        if single_mapped_array_key(getattr(step, field)) is None:
+            raise FlowStepValidationError(
+                f"Step {step.step_order}: a step that maps the previous step's items "
+                f"(input_config.item_map) needs an {field} with exactly one "
+                "top-level property, an array of objects.",
+                step_order=step.step_order,
+                code=FlowGraphIssueCode.FLOW_STEP_INVALID.value,
+                context={"field": field},
+            )
 
 
 def _validate_step_mapped_execution(*, step: FlowStepValidationView) -> None:

@@ -38,8 +38,6 @@ from eneo.completion_models.infrastructure.stream_collector import (
     ProviderJsonWhitespaceAbort,
 )
 from eneo.files.model_file_references import file_handle
-from eneo.flows.ai_builder.ai_builder_new_step_compiler import _compile_object_schema
-from eneo.flows.ai_builder.ai_builder_new_step_models import StructuredFieldDraft
 from eneo.flows.citation_sidecar import (
     CITATION_MODE_INLINE_INREF_SIDECAR,
     CITATION_MODE_OFF,
@@ -1118,23 +1116,30 @@ _CLOSED_CONTRACT: dict[str, Any] = {
     },
 }
 
-_BUILDER_COMPILED_CONTRACT = _compile_object_schema(
-    [
-        StructuredFieldDraft(name="title", field_type="string", description="d"),
-        StructuredFieldDraft(
-            name="note", field_type="string", description="d", nullable=True
-        ),
-        StructuredFieldDraft(
-            name="rows",
-            field_type="array",
-            description="d",
-            required=False,
-            item_fields=[
-                StructuredFieldDraft(name="n", field_type="number", description="d")
-            ],
-        ),
-    ]
-)
+# A contract as authors write them: field titles and descriptions, a nullable
+# required field, an optional array of closed objects.
+_AUTHORED_CONTRACT: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string", "title": "Title", "description": "d"},
+        "note": {"type": ["string", "null"], "title": "Note", "description": "d"},
+        "rows": {
+            "type": "array",
+            "title": "Rows",
+            "description": "d",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "n": {"type": "number", "title": "N", "description": "d"}
+                },
+                "additionalProperties": False,
+                "required": ["n"],
+            },
+        },
+    },
+    "additionalProperties": False,
+    "required": ["title", "note"],
+}
 
 _ARRAY_BOUNDS = {"minItems": 1, "maxItems": 1}
 _MAPPED_DERIVED_CONTRACT: dict[str, Any] = {
@@ -1185,28 +1190,28 @@ _OBJECT = {"type": "json_object"}
 # mode, or nothing.
 _EXPECTED_RESPONSE_FORMAT = {
     ("openai", "closed"): _SCHEMA,
-    ("openai", "builder"): _SCHEMA,
+    ("openai", "authored"): _SCHEMA,
     ("openai", "mapped"): _SCHEMA,
     ("openai", "per_source"): _SCHEMA,
     ("openai", "open_group"): _SCHEMA,
     ("openai", "array_root"): None,
     ("openai", "ref"): _OBJECT,
     ("hosted_vllm", "closed"): _SCHEMA,
-    ("hosted_vllm", "builder"): _SCHEMA,
+    ("hosted_vllm", "authored"): _SCHEMA,
     ("hosted_vllm", "mapped"): _SCHEMA,
     ("hosted_vllm", "per_source"): _SCHEMA,
     ("hosted_vllm", "open_group"): _SCHEMA,
     ("hosted_vllm", "array_root"): _SCHEMA,
     ("hosted_vllm", "ref"): _OBJECT,
     ("vllm", "closed"): _SCHEMA,
-    ("vllm", "builder"): _SCHEMA,
+    ("vllm", "authored"): _SCHEMA,
     ("vllm", "mapped"): _SCHEMA,
     ("vllm", "per_source"): _SCHEMA,
     ("vllm", "open_group"): _SCHEMA,
     ("vllm", "array_root"): _SCHEMA,
     ("vllm", "ref"): _OBJECT,
     ("openai-unknown-model", "closed"): _OBJECT,
-    ("openai-unknown-model", "builder"): _OBJECT,
+    ("openai-unknown-model", "authored"): _OBJECT,
     ("openai-unknown-model", "mapped"): _OBJECT,
     ("openai-unknown-model", "per_source"): _OBJECT,
     ("openai-unknown-model", "open_group"): _OBJECT,
@@ -1215,7 +1220,7 @@ _EXPECTED_RESPONSE_FORMAT = {
 }
 _CONTRACT_FAMILIES = {
     "closed": _CLOSED_CONTRACT,
-    "builder": _BUILDER_COMPILED_CONTRACT,
+    "authored": _AUTHORED_CONTRACT,
     "mapped": _MAPPED_DERIVED_CONTRACT,
     "per_source": _PER_SOURCE_DERIVED_CONTRACT,
     "open_group": _OPEN_GROUP_CONTRACT,

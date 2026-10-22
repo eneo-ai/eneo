@@ -24,6 +24,7 @@
     type JsonSchemaType
   } from "$lib/features/flows/jsonSchemaType";
   import {
+    fieldTypeLabel,
     getFlowFormFieldVariableExpression,
     isFlowFormFieldNameUsableAsVariable
   } from "$lib/features/flows/flowFormSchema";
@@ -33,7 +34,6 @@
     VARIABLE_CATEGORY_CLASSES,
     type VariableCategory
   } from "$lib/features/flows/flowVariableTokens";
-  import { fieldTypeLabel } from "$lib/features/flows/ai-builder/aiBuilderSummaryText";
   import { getRuntimeInputConfig } from "$lib/features/flows/flowRuntimeInputConfig";
   import { isJsonObject } from "$lib/features/flows/jsonObject";
 

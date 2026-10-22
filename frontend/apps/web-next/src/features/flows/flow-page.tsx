@@ -4,9 +4,11 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -41,9 +43,13 @@ import { FlowSettings } from "./flow-settings";
 import { FlowStatusBadge } from "./flow-status";
 import { FlowStepList, stepControlId } from "./flow-step-list";
 import { orderWithMove, orderWithout, stepsInOrder } from "./flow-steps";
+import { runKeys } from "./runs/runs-api";
+import { FlowRunsList, runHref } from "./runs/runs-list";
+import { StartRunDialog } from "./runs/start-run-dialog";
 
 type Notice = { key: number; status: "error" | "warning"; title: string; description: string };
 type View = "definition" | "chat";
+type PageTab = "definition" | "runs";
 type EditorChange = Omit<FlowEditorUpdate, "expected_revision" | "definition"> & {
   definition?: FlowDefinitionUpdate;
 };
@@ -80,6 +86,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const isPublished = flow.published_version != null;
   const canManage = can("flows_manage");
   const canEdit = canManage && !isPublished;
+  const canRun = isPublished && can("flows_run");
 
   const stepsHeadingRef = useRef<HTMLHeadingElement>(null);
   const editorRef = useRef<HTMLElement>(null);
@@ -89,6 +96,24 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const [openStepId, setOpenStepId] = useState<string | null>(null);
   const [addAt, setAddAt] = useState<number | null>(null);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<PageTab>(
+    searchParams.get("tab") === "runs" ? "runs" : "definition"
+  );
+  const tabsId = useId();
+  const tabId = (id: PageTab) => `${tabsId}-tab-${id}`;
+  const panelId = `${tabsId}-panel`;
+
+  /** The tab lives in ?tab=, so a run's page can link back to the list. */
+  function selectTab(next: PageTab) {
+    setTab(next);
+    const url = new URL(window.location.href);
+    if (next === "runs") url.searchParams.set("tab", "runs");
+    else url.searchParams.delete("tab");
+    window.history.replaceState(null, "", url);
+  }
 
   /** A refusal above both columns; a stale draft is reloaded first. */
   const refused = useCallback(
@@ -236,26 +261,35 @@ export function FlowPage({ flowId }: { flowId: string }) {
 
   const openedStep = openStepId ? steps.find((step) => step.id === openStepId) : undefined;
 
-  const actions = canManage ? (
-    <div className="flex flex-wrap items-center gap-2">
-      {isPublished ? (
-        <Button
-          label={t("unpublish")}
-          onClick={() => setConfirmUnpublish(true)}
-          isLoading={unpublish.isPending}
-          isInterruptible
-        />
-      ) : (
-        <Button
-          label={t("publish")}
-          variant="primary"
-          onClick={requestPublish}
-          isLoading={publish.isPending}
-          isInterruptible
-        />
-      )}
-    </div>
-  ) : undefined;
+  const actions =
+    canManage || canRun ? (
+      <div className="flex flex-wrap items-center gap-2">
+        {canRun ? (
+          <Button
+            label={t("flow_runs_start")}
+            variant="primary"
+            onClick={() => setStarting(true)}
+          />
+        ) : null}
+        {canManage && isPublished ? (
+          <Button
+            label={t("unpublish")}
+            onClick={() => setConfirmUnpublish(true)}
+            isLoading={unpublish.isPending}
+            isInterruptible
+          />
+        ) : null}
+        {canManage && !isPublished ? (
+          <Button
+            label={t("publish")}
+            variant="primary"
+            onClick={requestPublish}
+            isLoading={publish.isPending}
+            isInterruptible
+          />
+        ) : null}
+      </div>
+    ) : undefined;
 
   return (
     <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
@@ -301,63 +335,92 @@ export function FlowPage({ flowId }: { flowId: string }) {
 
       <div className="flex min-w-0 flex-col lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,0.8fr)]">
         <section
-          aria-label={t("flows_definition_heading")}
+          aria-label={t("flows_view_definition")}
           className={cn(
             "flex min-w-0 flex-col gap-6 px-6 py-5 lg:min-h-0 lg:overflow-y-auto",
             view !== "definition" && "max-lg:hidden"
           )}
         >
-          {openedStep?.id ? (
-            <section
-              ref={editorRef}
-              tabIndex={-1}
-              aria-label={t("flows_step_editor_region", { step: stepLabel(openedStep, t) })}
-              className="focus-visible:outline-ring rounded-ax-inner focus-visible:outline-2 focus-visible:outline-offset-2"
-            >
-              <FlowStepEditor
-                flow={flow}
-                stepId={openedStep.id}
-                readOnly={!canEdit}
-                onSaved={(updated) => {
-                  saved(updated);
-                  announce(t("flows_step_saved", { step: stepLabel(openedStep, t) }));
-                }}
-                onCancel={closeStep}
-              />
-            </section>
-          ) : (
-            <>
-              {isPublished ? (
-                <QuietBanner
-                  status="info"
-                  title={t("flows_published_title", { version: flow.published_version ?? "" })}
-                  description={
-                    canManage ? t("flows_published_description") : t("flows_published_read_only")
-                  }
-                  collapsible={false}
-                  endContent={
-                    canManage ? (
-                      <Button
-                        label={t("flows_unpublish_to_edit")}
-                        size="sm"
-                        onClick={() => setConfirmUnpublish(true)}
-                      />
-                    ) : undefined
-                  }
+          <TabList
+            role="tablist"
+            aria-label={t("flow_runs_tabs_label")}
+            value={tab}
+            onChange={(value) => selectTab(value as PageTab)}
+            hasDivider
+          >
+            <Tab
+              id={tabId("definition")}
+              value="definition"
+              label={t("flow_runs_tab_definition")}
+              panelId={panelId}
+            />
+            <Tab
+              id={tabId("runs")}
+              value="runs"
+              label={t("flow_runs_tab_runs")}
+              panelId={panelId}
+            />
+          </TabList>
+          <div
+            role="tabpanel"
+            id={panelId}
+            aria-labelledby={tabId(tab)}
+            className="flex min-w-0 flex-col gap-6"
+          >
+            {tab === "runs" ? (
+              <FlowRunsList flowId={flow.id} spaceRouteId={routeId} />
+            ) : openedStep?.id ? (
+              <section
+                ref={editorRef}
+                tabIndex={-1}
+                aria-label={t("flows_step_editor_region", { step: stepLabel(openedStep, t) })}
+                className="focus-visible:outline-ring rounded-ax-inner focus-visible:outline-2 focus-visible:outline-offset-2"
+              >
+                <FlowStepEditor
+                  flow={flow}
+                  stepId={openedStep.id}
+                  readOnly={!canEdit}
+                  onSaved={(updated) => {
+                    saved(updated);
+                    announce(t("flows_step_saved", { step: stepLabel(openedStep, t) }));
+                  }}
+                  onCancel={closeStep}
                 />
-              ) : null}
-              <FlowStepList
-                steps={steps}
-                canEdit={canEdit}
-                headingRef={stepsHeadingRef}
-                onOpen={openStep}
-                onMove={moveStep}
-                onRemove={removeStep}
-                onAdd={(position) => setAddAt(position)}
-              />
-              <FlowSettings flow={flow} canEdit={canEdit} onSave={saveSettings} />
-            </>
-          )}
+              </section>
+            ) : (
+              <>
+                {isPublished ? (
+                  <QuietBanner
+                    status="info"
+                    title={t("flows_published_title", { version: flow.published_version ?? "" })}
+                    description={
+                      canManage ? t("flows_published_description") : t("flows_published_read_only")
+                    }
+                    collapsible={false}
+                    endContent={
+                      canManage ? (
+                        <Button
+                          label={t("flows_unpublish_to_edit")}
+                          size="sm"
+                          onClick={() => setConfirmUnpublish(true)}
+                        />
+                      ) : undefined
+                    }
+                  />
+                ) : null}
+                <FlowStepList
+                  steps={steps}
+                  canEdit={canEdit}
+                  headingRef={stepsHeadingRef}
+                  onOpen={openStep}
+                  onMove={moveStep}
+                  onRemove={removeStep}
+                  onAdd={(position) => setAddAt(position)}
+                />
+                <FlowSettings flow={flow} canEdit={canEdit} onSave={saveSettings} />
+              </>
+            )}
+          </div>
         </section>
 
         <section
@@ -387,6 +450,20 @@ export function FlowPage({ flowId }: { flowId: string }) {
             saved(updated);
             setAddAt(null);
             announce(t("flows_step_added"));
+          }}
+        />
+      ) : null}
+      {canRun ? (
+        <StartRunDialog
+          flow={flow}
+          open={starting}
+          onOpenChange={setStarting}
+          onStarted={(run) => {
+            setStarting(false);
+            void queryClient.invalidateQueries({ queryKey: runKeys.list(flow.id) });
+            announce(t("flow_runs_started"));
+            // The run's own page follows it while it moves.
+            router.push(runHref(routeId, flow.id, run.id));
           }}
         />
       ) : null}
