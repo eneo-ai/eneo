@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { makeFlow, makeStep } from "../flow-fixtures";
-import { answerShape, modelParameters, previewParts, readMeaning } from "./request-preview";
+import {
+  answerShape,
+  modelParameters,
+  previewParts,
+  readMeaning,
+  readTone
+} from "./request-preview";
 
 const flow = makeFlow({
   steps: [
@@ -28,7 +34,9 @@ describe("readMeaning", () => {
     });
     expect(readMeaning("Sammanfatta", 3, flow)).toEqual({ kind: "step_answer", order: 1 });
     expect(readMeaning("föregående_steg", 3, flow)).toEqual({ kind: "step_answer", order: 2 });
-    expect(readMeaning("section_index", 3, flow)).toEqual({ kind: "section_index" });
+    expect(readMeaning("section_index", 3, flow, { sectionIndex: true })).toEqual({
+      kind: "section_index"
+    });
     expect(readMeaning("indata_text", 3, flow)).toEqual({ kind: "flow_input" });
   });
 
@@ -39,6 +47,25 @@ describe("readMeaning", () => {
       order: 1
     });
     expect(readMeaning("okänd_variabel", 2, flow)).toEqual({ kind: "other" });
+  });
+
+  it("warns about a reference that reads nothing where it stands", () => {
+    const fields = readMeaning("step_1.output.structured.beslut", 3, flow);
+    const whole = readMeaning("step_1.output.structured", 3, flow);
+    const section = readMeaning("section_index", 3, flow);
+
+    expect([fields, whole]).toEqual([
+      { kind: "fields_of_text", order: 1 },
+      { kind: "fields_of_text", order: 1 }
+    ]);
+    expect(section).toEqual({ kind: "section_index_unavailable" });
+    expect([fields, section, readMeaning("okänd", 3, flow)].map(readTone)).toEqual([
+      "warning",
+      "warning",
+      "warning"
+    ]);
+    expect(readTone(readMeaning("step_2.output.structured", 3, flow))).toBe("reads");
+    expect(readTone(readMeaning("step_3.output.text", 2, flow))).toBe("missing");
   });
 
   it("keeps the text around the references", () => {

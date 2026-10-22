@@ -1,5 +1,6 @@
 "use client";
 
+import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Button } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
@@ -11,7 +12,6 @@ import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";
 import { ClientTime } from "@/components/composites/client-time";
-import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
@@ -22,6 +22,7 @@ import { useRemovalMutation } from "@/features/spaces/removal";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
 import { deleteFlow, flowKeys, flowsListQueryOptions, type FlowSparse } from "./flows-api";
+import { evidenceExportAllowed } from "./flow-form-fields";
 import { FlowPackageImportDialog } from "./flow-package-import-dialog";
 import { flowRefusalMessage } from "./flow-refusals";
 import { FlowStatusBadge } from "./flow-status";
@@ -169,18 +170,24 @@ export function FlowsPage() {
       </QueryStateBoundary>
       <NewFlowDialog open={creating} onOpenChange={setCreating} />
       {canManage ? <FlowPackageImportDialog open={importing} onOpenChange={setImporting} /> : null}
-      <ConfirmDialogControlled
-        open={deleteTarget !== null}
+      <AlertDialog
+        isOpen={deleteTarget !== null}
         onOpenChange={(open) => {
           if (!open && !remove.isPending) setDeleteTarget(null);
         }}
         title={t("flows_delete_title", { name: deleteTarget?.name ?? "" })}
-        description={t("flows_delete_description")}
-        confirmLabel={t("delete")}
-        variant="destructive"
-        pending={remove.isPending}
-        onConfirm={() => {
-          if (deleteTarget) remove.mutate(deleteTarget);
+        description={
+          // A deleted flow can no longer be changed, so its runs' evidence
+          // could then never be downloaded: say so before it is too late.
+          deleteTarget && !evidenceExportAllowed(deleteTarget.metadata_json)
+            ? `${t("flows_delete_description")} ${t("flow_delete_evidence_export_off")}`
+            : t("flows_delete_description")
+        }
+        actionLabel={t("delete")}
+        cancelLabel={t("cancel")}
+        isActionLoading={remove.isPending}
+        onAction={() => {
+          if (deleteTarget && !remove.isPending) remove.mutate(deleteTarget);
         }}
       />
     </div>

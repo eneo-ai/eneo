@@ -158,4 +158,30 @@ describe("FlowsPage", () => {
       expect(toast.error).toHaveBeenCalledWith(messages.flows_refusal_no_permission)
     );
   });
+
+  it("warns before deleting a flow whose runs' evidence could then never be downloaded", async () => {
+    renderPage([
+      sparse({ id: "f1", name: "Medborgarbrev", metadata_json: null }),
+      sparse({
+        id: "f2",
+        name: "Remissvar",
+        metadata_json: { evidence_policy: { allow_export: true } }
+      })
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Ta bort Medborgarbrev" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort ”Medborgarbrev”?" });
+    expect(
+      within(dialog).getByText(new RegExp(messages.flow_delete_evidence_export_off))
+    ).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "Ta bort Remissvar" }));
+    const allowed = await screen.findByRole("alertdialog", { name: "Ta bort ”Remissvar”?" });
+    expect(within(allowed).getByText(messages.flows_delete_description)).toBeTruthy();
+    expect(
+      within(allowed).queryByText(new RegExp(messages.flow_delete_evidence_export_off))
+    ).toBeNull();
+  });
 });
