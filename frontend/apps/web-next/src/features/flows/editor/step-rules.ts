@@ -21,7 +21,10 @@ import {
   withToolConfig,
   readTextProcessingMode,
   withTextProcessingMode,
-  textProcessingEligibility
+  textProcessingEligibility,
+  longMaterialEligibility,
+  readLongMaterial,
+  withLongMaterial
 } from "./step-configs";
 import type { InputSource, InputType, OutputMode, OutputType, StepConfig } from "./step-types";
 
@@ -306,6 +309,15 @@ function settle(step: StepConfig): StepConfig {
     textProcessingEligibility(next) !== "eligible"
   ) {
     next = { ...next, input_config: withTextProcessingMode(next.input_config, null) };
+  }
+  // A mode change that leaves no model answer, or a mapped read, ends long
+  // material; a stored conflict with section reading is left for the author.
+  const longMaterial = longMaterialEligibility(next);
+  if (
+    readLongMaterial(next.input_config) &&
+    (longMaterial === "output" || longMaterial === "mapped")
+  ) {
+    next = { ...next, input_config: withLongMaterial(next.input_config, false) };
   }
   return next;
 }

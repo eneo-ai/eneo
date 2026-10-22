@@ -11,6 +11,7 @@ import {
   readCitationsOn,
   readHttpConfig,
   readInputBindings,
+  readLongMaterial,
   readRuntimeInput,
   readTemplateFill,
   readToolConfig,
@@ -124,6 +125,11 @@ export function StepReadOnly({
             ) : (
               t("flow_step_editor_tool_placeholder")
             )}
+          </MetadataListItem>
+        )}
+        {readLongMaterial(step.input_config) && (
+          <MetadataListItem label={t("flow_editor_tools_long_material")}>
+            {t("flow_editor_tools_on")}
           </MetadataListItem>
         )}
         {bindings.status === "valid" && bindings.sourceRefs.length > 0 && (

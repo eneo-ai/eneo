@@ -4,6 +4,7 @@ import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { useLocale, useTranslations } from "next-intl";
 import { QuietBanner } from "@/components/astryx/banner";
 import { StatusLabel } from "@/components/composites/status-label";
+import { LongMaterialCoverage } from "../long-material-coverage";
 import { formatCount, formatSeconds } from "./run-format";
 import { JsonValue } from "./run-json";
 import { flowErrorText, runErrorText } from "./run-messages";
@@ -135,6 +136,7 @@ function StepCard({ flowId, runId, step }: { flowId: string; runId: string; step
           ))}
         </ul>
       ) : null}
+      {result?.long_material ? <LongMaterialCoverage coverage={result.long_material} /> : null}
       {result && result.status === "completed" ? (
         <div className="flex flex-col gap-2">
           <StepOutput result={result} />

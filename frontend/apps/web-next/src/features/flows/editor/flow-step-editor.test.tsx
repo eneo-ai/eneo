@@ -149,6 +149,36 @@ describe("FlowStepEditor", () => {
     ]);
   });
 
+  it("reads long material in parts as one step setting, and explains what it costs", async () => {
+    api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
+    const { onSaved, container } = renderEditor(makeFlow());
+    await nameField();
+    const toggle = screen.getByRole("switch", { name: messages.flow_editor_tools_long_material });
+    expect(screen.getByText(messages.flow_editor_tools_long_material_description)).toBeTruthy();
+    fireEvent.click(toggle);
+    await expectNoAxeViolations(container);
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(patchBodies()).toEqual([
+      {
+        expected_revision: 4,
+        definition: {},
+        step_edits: [
+          { step_id: "step-1", changes: { input_config: { long_material: { mode: "digest" } } } }
+        ]
+      }
+    ]);
+  }, 20_000);
+
+  it("offers no long material where the step does not let a model answer", async () => {
+    renderEditor(makeFlow({ steps: [makeStep({ output_mode: "compose_text" })] }));
+    await nameField();
+    expect(
+      screen.queryByRole("switch", { name: messages.flow_editor_tools_long_material })
+    ).toBeNull();
+  });
+
   it("saves an instruction with the step assistant only, and reads the assistant back", async () => {
     api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
     const { onSaved } = renderEditor(makeFlow());

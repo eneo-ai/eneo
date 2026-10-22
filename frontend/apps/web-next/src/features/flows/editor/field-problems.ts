@@ -23,6 +23,7 @@ export const FIELD_ANCHORS = [
   "input_type",
   "input_config.runtime_input",
   "input_config.text_processing",
+  "input_config.long_material",
   "input_config.http",
   "input_config.tool",
   "input_bindings",
@@ -54,6 +55,7 @@ export function anchorForPath(
     if (second === "tool") return "input_config.tool";
     if (second === "runtime_input") return "input_config.runtime_input";
     if (second === "text_processing") return "input_config.text_processing";
+    if (second === "long_material") return "input_config.long_material";
     if (step.input_source === "http_get") return "input_config.http";
     if (step.input_source === "tool") return "input_config.tool";
     return null;
