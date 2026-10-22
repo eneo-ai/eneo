@@ -27,7 +27,7 @@ from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
     from eneo.actors.actors.space_actor import SpaceActor
-    from eneo.flows.domain.flow import Flow
+    from eneo.flows.domain.flow import Flow, FlowSparse
     from eneo.flows.flow_evidence_policy import FlowHistoryAccessContext
     from eneo.spaces.space import Space
 
@@ -113,7 +113,66 @@ async def enforce_flow_scope(
         scope_mismatch_message="API key space scope does not match requested flow.",
     )
     space, actor = await _space_and_actor(container, flow.space_id)
+    _ensure_flow_readable(actor, flow)
+    return space
 
+
+def check_flow_scope(
+    container: Container,
+    flow: FlowSparse,
+    *,
+    actor: SpaceActor,
+    scope_filter: ScopeFilter,
+    required_access: FlowApiAction,
+    allow_service_key_principals: bool = False,
+    require_published_for_service_key: bool = False,
+) -> None:
+    """``enforce_flow_scope``'s refusals for a flow whose space actor is
+    already known, made by the same checks."""
+    _ensure_flow_scope_type_allowed(
+        scope_filter,
+        scope_mismatch_message="API key scope does not permit flow access.",
+    )
+    _ensure_flow_reachable(
+        container,
+        flow,
+        scope_filter=scope_filter,
+        required_access=required_access,
+        allow_service_key_principals=allow_service_key_principals,
+        require_published_for_service_key=require_published_for_service_key,
+        scope_mismatch_message="API key space scope does not match requested flow.",
+    )
+    _ensure_flow_readable(actor, flow)
+
+
+def check_flow_access(
+    container: Container,
+    flow: FlowSparse,
+    *,
+    scope_filter: ScopeFilter,
+    required_access: FlowApiAction,
+    allow_service_key_principals: bool = False,
+) -> None:
+    """``resolve_flow_access_context``'s refusals for a loaded flow, made by
+    the same checks."""
+    scope_mismatch_message = "API key space scope does not match requested flow."
+    _ensure_flow_scope_type_allowed(
+        scope_filter, scope_mismatch_message=scope_mismatch_message
+    )
+    _ensure_flow_reachable(
+        container,
+        flow,
+        scope_filter=scope_filter,
+        required_access=required_access,
+        allow_service_key_principals=allow_service_key_principals,
+        require_published_for_service_key=False,
+        scope_mismatch_message=scope_mismatch_message,
+    )
+
+
+def _ensure_flow_readable(
+    actor: SpaceActor, flow: FlowSparse | FlowHistoryAccessContext
+) -> None:
     if not actor.can_read_flows():
         raise FlowUnauthorizedException(
             "You do not have permission to access flows in this space.",
@@ -126,7 +185,6 @@ async def enforce_flow_scope(
             code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         )
-    return space
 
 
 async def _space_and_actor(
@@ -138,7 +196,7 @@ async def _space_and_actor(
 
 def _ensure_flow_reachable(
     container: Container,
-    flow: Flow | FlowHistoryAccessContext,
+    flow: FlowSparse | FlowHistoryAccessContext,
     *,
     scope_filter: ScopeFilter,
     required_access: FlowApiAction,
@@ -320,6 +378,8 @@ async def resolve_member_flow_spaces(
 __all__ = [
     "FlowAccessContext",
     "FlowSpaceAccessContext",
+    "check_flow_access",
+    "check_flow_scope",
     "enforce_flow_scope",
     "resolve_flow_access_context",
     "resolve_member_flow_spaces",

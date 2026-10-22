@@ -338,6 +338,13 @@ FLOW_SPARSE_PUBLIC_EXAMPLE: dict[str, Any] = {
             "flow": {"mode": "preserve", "days": 30},
         },
     },
+    "permissions": {
+        "can_edit": True,
+        "can_publish": True,
+        "can_delete": True,
+        "can_run": True,
+        "can_view_runs": True,
+    },
     "created_at": "2026-03-17T09:30:00Z",
     "updated_at": "2026-03-17T10:00:00Z",
 }
@@ -879,6 +886,60 @@ class FlowStepPublic(BaseModel):
     updated_at: datetime | None = None
 
 
+class FlowPermissionsPublic(BaseModel):
+    """What the caller may do with the flow: whether the access checks of
+    each action let this caller through. The flow's state is the action's own
+    concern: publishing an invalid draft, editing a published flow or running
+    an unpublished one answers 400 with its own code."""
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={"example": FLOW_SPARSE_PUBLIC_EXAMPLE["permissions"]},
+    )
+
+    can_edit: bool = Field(
+        description=(
+            "Change the draft (`PATCH /flows/{id}/`, `PATCH /flows/{id}/editor/`): "
+            "`flows_manage`, the space's permission to edit flows, and being "
+            "the draft's owner, a space owner or a tenant admin. Never for a "
+            "service key."
+        ),
+        examples=[True],
+    )
+    can_publish: bool = Field(
+        description=(
+            "Publish and unpublish (`POST /flows/{id}/publish/`, "
+            "`/unpublish/`): as `can_edit`, with the space's permission to "
+            "publish flows."
+        ),
+        examples=[True],
+    )
+    can_delete: bool = Field(
+        description=(
+            "Delete the flow (`DELETE /flows/{id}/`): as `can_edit`, with the "
+            "space's permission to delete flows."
+        ),
+        examples=[False],
+    )
+    can_run: bool = Field(
+        description=(
+            "Start runs and upload their files (`POST /flows/{id}/runs/`): "
+            "`flows_run` and read access to the flow; a service key in scope "
+            "only for a published flow."
+        ),
+        examples=[True],
+    )
+    can_view_runs: bool = Field(
+        description=(
+            "Read the flow's runs (`GET /flows/{id}/runs/` and a run's status, "
+            "steps and evidence): `flows_view` (or a service key in scope) and "
+            "read access to the flow. Which runs the list shows follows the "
+            "run rules."
+        ),
+        examples=[True],
+    )
+
+
 class FlowSparsePublic(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
@@ -915,6 +976,13 @@ class FlowSparsePublic(BaseModel):
     metadata_json: dict[str, Any] | None = None
     run_history_retention: FlowRunRetentionProjection = Field(
         description=FLOW_RUN_RETENTION_PROJECTION_DESCRIPTION,
+    )
+    permissions: FlowPermissionsPublic = Field(
+        description=(
+            "What the caller may do with this flow, by the same access checks "
+            "the actions make, so a client can leave out what would be refused "
+            "with 403."
+        ),
     )
     created_at: datetime | None = None
     updated_at: datetime | None = None

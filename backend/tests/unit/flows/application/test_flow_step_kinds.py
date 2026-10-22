@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 import pytest
 from pydantic import ValidationError
 
+from eneo.flows.api.flow_definition_access import FlowPermissions
 from eneo.flows.application import flow_authoring_operations
 from eneo.flows.application.flow_service import FlowService
 from eneo.flows.application.flow_step_kinds import (
@@ -240,7 +241,22 @@ async def _save(
     monkeypatch.setattr(
         flow_authoring_operations,
         "require_flow_edit_access",
-        AsyncMock(return_value=SimpleNamespace(flow=flow)),
+        AsyncMock(
+            return_value=SimpleNamespace(
+                flow=flow, actor=MagicMock(), scope_filter=None
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        flow_authoring_operations,
+        "flow_permissions",
+        lambda *_, **__: FlowPermissions(
+            can_edit=True,
+            can_publish=True,
+            can_delete=True,
+            can_run=True,
+            can_view_runs=True,
+        ),
     )
     try:
         update = editor_update(

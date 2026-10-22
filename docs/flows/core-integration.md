@@ -125,6 +125,22 @@ Changing a published flow or one of its step assistants is refused with
 `flow_unpublish_required`, unpublishing a flow that is not published with
 `flow_not_published`.
 
+### Caller permissions on a flow
+
+`FlowPublic` and `FlowSparsePublic` carry `permissions` (`can_edit`,
+`can_publish`, `can_delete`, `can_run`, `can_view_runs`) for the caller.
+`flow_definition_access.flow_permissions` decides them with the checks the
+endpoints make, run without raising: editing, publishing and deleting as
+`require_flow_edit_access`, `require_flow_publish_access` and
+`require_flow_delete_access` (the action's permission, the space's permission
+and the draft-ownership rule), running as run creation and reading runs as the
+run list (`enforce_flow_scope`, through `check_flow_scope`). The flow's state is
+not part of them: a published flow still says `can_edit` for its owner, and
+the edit answers `flow_unpublish_required`.
+`tests/integration/flows/test_flow_permissions.py` checks each flag against
+its endpoint for the owner, another editor, a viewer, a user outside the space
+and a space-scoped service key.
+
 ### Allowed step kinds
 
 `GET /flows/{id}/step-kinds/` answers, for each place a step can be added and

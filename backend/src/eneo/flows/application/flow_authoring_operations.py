@@ -27,6 +27,7 @@ from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_definition_access import (
+    flow_permissions,
     require_flow_current_definition_access,
     require_flow_edit_access,
     require_flow_publish_access,
@@ -172,7 +173,15 @@ async def create_flow(
     if owns_audit:
         await audit.log()
 
-    return assembler.to_public(created)
+    return assembler.to_public(
+        created,
+        permissions=flow_permissions(
+            container,
+            flow=created,
+            actor=access_context.actor,
+            scope_filter=access_context.scope_filter,
+        ),
+    )
 
 
 async def get_flow(id: UUID, request: Request, container: Container) -> FlowPublic:
@@ -181,9 +190,7 @@ async def get_flow(id: UUID, request: Request, container: Container) -> FlowPubl
         container,
         flow_id=id,
     )
-    assembler = FlowAssembler()
-
-    return assembler.to_public(access_context.flow)
+    return _flow_public(container, access_context.flow, access_context)
 
 
 async def update_flow(
@@ -315,7 +322,7 @@ async def _write_definition(
             ),
         )
 
-    return assembler.to_public(updated)
+    return _flow_public(container, updated, access_context)
 
 
 async def publish_flow(
@@ -325,7 +332,7 @@ async def publish_flow(
     *,
     expected_revision: int | None = None,
 ) -> FlowPublic:
-    await require_flow_publish_access(request, container, flow_id=id)
+    access = await require_flow_publish_access(request, container, flow_id=id)
     if expected_revision is not None:
         await container.flow_service().reserve_draft_revision(
             flow_id=id, expected_revision=expected_revision
@@ -345,7 +352,7 @@ async def publish_flow(
     )
     if owns_audit:
         await audit.log()
-    return FlowAssembler().to_public(published)
+    return _flow_public(container, published, access)
 
 
 async def unpublish_flow(
@@ -355,7 +362,7 @@ async def unpublish_flow(
     *,
     expected_revision: int | None = None,
 ) -> FlowPublic:
-    await require_flow_unpublish_access(request, container, flow_id=id)
+    access = await require_flow_unpublish_access(request, container, flow_id=id)
     if expected_revision is not None:
         await container.flow_service().reserve_draft_revision(
             flow_id=id, expected_revision=expected_revision
@@ -375,7 +382,24 @@ async def unpublish_flow(
     )
     if owns_audit:
         await audit.log()
-    return FlowAssembler().to_public(unpublished)
+    return _flow_public(container, unpublished, access)
+
+
+def _flow_public(
+    container: Container,
+    flow: Flow,
+    access: flow_access_context.FlowAccessContext,
+) -> FlowPublic:
+    """``flow`` with the permissions of the caller the access was checked for."""
+
+    actor = access.actor
+    assert actor is not None, "a resolved flow access context carries its actor"
+    return FlowAssembler().to_public(
+        flow,
+        permissions=flow_permissions(
+            container, flow=flow, actor=actor, scope_filter=access.scope_filter
+        ),
+    )
 
 
 async def apply_editor_update(

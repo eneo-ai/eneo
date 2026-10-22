@@ -19835,6 +19835,52 @@ export interface components {
       steps_count: number;
     };
     /**
+     * FlowPermissionsPublic
+     * @description What the caller may do with the flow: whether the access checks of
+     *     each action let this caller through. The flow's state is the action's own
+     *     concern: publishing an invalid draft, editing a published flow or running
+     *     an unpublished one answers 400 with its own code.
+     * @example {
+     *       "can_delete": true,
+     *       "can_edit": true,
+     *       "can_publish": true,
+     *       "can_run": true,
+     *       "can_view_runs": true
+     *     }
+     */
+    FlowPermissionsPublic: {
+      /**
+       * Can Delete
+       * @description Delete the flow (`DELETE /flows/{id}/`): as `can_edit`, with the space's permission to delete flows.
+       * @example false
+       */
+      can_delete: boolean;
+      /**
+       * Can Edit
+       * @description Change the draft (`PATCH /flows/{id}/`, `PATCH /flows/{id}/editor/`): `flows_manage`, the space's permission to edit flows, and being the draft's owner, a space owner or a tenant admin. Never for a service key.
+       * @example true
+       */
+      can_edit: boolean;
+      /**
+       * Can Publish
+       * @description Publish and unpublish (`POST /flows/{id}/publish/`, `/unpublish/`): as `can_edit`, with the space's permission to publish flows.
+       * @example true
+       */
+      can_publish: boolean;
+      /**
+       * Can Run
+       * @description Start runs and upload their files (`POST /flows/{id}/runs/`): `flows_run` and read access to the flow; a service key in scope only for a published flow.
+       * @example true
+       */
+      can_run: boolean;
+      /**
+       * Can View Runs
+       * @description Read the flow's runs (`GET /flows/{id}/runs/` and a run's status, steps and evidence): `flows_view` (or a service key in scope) and read access to the flow. Which runs the list shows follows the run rules.
+       * @example true
+       */
+      can_view_runs: boolean;
+    };
+    /**
      * FlowPublic
      * @example {
      *       "created_at": "2026-03-17T09:30:00Z",
@@ -19852,6 +19898,13 @@ export interface components {
      *       "name": "Employee Review Summary",
      *       "output_type": "pdf",
      *       "owner_user_id": "00000000-0000-0000-0000-000000000030",
+     *       "permissions": {
+     *         "can_delete": true,
+     *         "can_edit": true,
+     *         "can_publish": true,
+     *         "can_run": true,
+     *         "can_view_runs": true
+     *       },
      *       "published_version": 3,
      *       "run_history_retention": {
      *         "contributors": {
@@ -19937,6 +19990,8 @@ export interface components {
       output_type?: components["schemas"]["FlowOutputType"] | null;
       /** Owner User Id */
       owner_user_id?: string | null;
+      /** @description What the caller may do with this flow, by the same access checks the actions make, so a client can leave out what would be refused with 403. */
+      permissions: components["schemas"]["FlowPermissionsPublic"];
       /** Published Version */
       published_version?: number | null;
       /**
@@ -25899,6 +25954,13 @@ export interface components {
      *       "name": "Employee Review Summary",
      *       "output_type": "pdf",
      *       "owner_user_id": "00000000-0000-0000-0000-000000000030",
+     *       "permissions": {
+     *         "can_delete": true,
+     *         "can_edit": true,
+     *         "can_publish": true,
+     *         "can_run": true,
+     *         "can_view_runs": true
+     *       },
      *       "published_version": 3,
      *       "run_history_retention": {
      *         "contributors": {
@@ -25953,6 +26015,8 @@ export interface components {
       output_type?: components["schemas"]["FlowOutputType"] | null;
       /** Owner User Id */
       owner_user_id?: string | null;
+      /** @description What the caller may do with this flow, by the same access checks the actions make, so a client can leave out what would be refused with 403. */
+      permissions: components["schemas"]["FlowPermissionsPublic"];
       /** Published Version */
       published_version?: number | null;
       /**
@@ -57943,6 +58007,13 @@ export interface operations {
            *           "name": "Employee Review Summary",
            *           "output_type": "pdf",
            *           "owner_user_id": "00000000-0000-0000-0000-000000000030",
+           *           "permissions": {
+           *             "can_delete": true,
+           *             "can_edit": true,
+           *             "can_publish": true,
+           *             "can_run": true,
+           *             "can_view_runs": true
+           *           },
            *           "published_version": 3,
            *           "run_history_retention": {
            *             "contributors": {

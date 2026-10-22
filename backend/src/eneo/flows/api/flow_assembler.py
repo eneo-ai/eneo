@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -68,6 +68,9 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRead,
 )
 
+if TYPE_CHECKING:
+    from eneo.flows.api.flow_definition_access import FlowPermissions
+
 logger = logging.getLogger(__name__)
 # Keep drift logs searchable without dumping arbitrary persisted payload keys.
 _MAX_LOGGED_DIAGNOSTIC_ERROR_TYPES = 3
@@ -104,12 +107,17 @@ class FlowAssembler:
             review_policy=step.review_policy,
         )
 
-    def to_public(self, flow: Flow) -> FlowPublic:
+    def to_public(self, flow: Flow, *, permissions: FlowPermissions) -> FlowPublic:
+        """``flow`` for the caller whose ``permissions`` on it are given."""
         redacted = self._redact_step_configs(flow)
-        return FlowPublic.model_validate(redacted)
+        return FlowPublic.model_validate({**dict(redacted), "permissions": permissions})
 
-    def to_sparse_public(self, flow: FlowSparse) -> FlowSparsePublic:
-        return FlowSparsePublic.model_validate(flow)
+    def to_sparse_public(
+        self, flow: FlowSparse, *, permissions: FlowPermissions
+    ) -> FlowSparsePublic:
+        return FlowSparsePublic.model_validate(
+            {**dict(flow), "permissions": permissions}
+        )
 
     def to_runtime_public(
         self, flow: Flow, *, published_version: int, api_prefix: str
