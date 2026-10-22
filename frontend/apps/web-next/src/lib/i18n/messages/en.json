@@ -10641,5 +10641,6 @@
   "flow_run_journey_step_tokens": "{total} tokens ({input} in, {output} out)",
   "flow_run_journey_export_refused": "You cannot download this evidence.",
   "flow_run_journey_failure_consumer_action": "For integrations",
-  "flow_run_journey_progress": "Run progress"
+  "flow_run_journey_progress": "Run progress",
+  "flow_run_journey_sections_read": "Read part by part: {count} parts."
 }

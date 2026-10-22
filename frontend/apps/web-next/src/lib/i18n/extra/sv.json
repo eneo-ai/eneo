@@ -2952,5 +2952,6 @@
   "flow_run_journey_step_tokens": "{total} token ({input} in, {output} ut)",
   "flow_run_journey_export_refused": "Du kan inte ladda ner det här underlaget.",
   "flow_run_journey_failure_consumer_action": "För integrationer",
-  "flow_run_journey_progress": "Körningens förlopp"
+  "flow_run_journey_progress": "Körningens förlopp",
+  "flow_run_journey_sections_read": "Läst del för del: {count} delar."
 }

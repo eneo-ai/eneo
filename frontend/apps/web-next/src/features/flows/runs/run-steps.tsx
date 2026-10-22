@@ -19,6 +19,13 @@ import {
 import { RunFiles, RunInputFiles } from "./run-files";
 import { stepStatusView } from "./run-status";
 import { StepPromptDetails } from "./run-step-details";
+import {
+  StepRejectedOutput,
+  StepRuntimeInputSummary,
+  StepSectionReading,
+  StepTemplateProvenance
+} from "./run-step-extras";
+import { runtimeInputSummary } from "./run-step-facts";
 import type { RunStep } from "./runs-api";
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -140,6 +147,9 @@ function StepCard({
           collapsible={false}
         />
       ) : null}
+      {result?.status === "failed" ? (
+        <StepRejectedOutput payload={result.output_payload_json} />
+      ) : null}
       {warnings.length > 0 ? (
         <ul className="text-ax-text flex list-disc flex-col gap-0.5 pl-5 text-sm">
           {warnings.map((item, index) => (
@@ -151,6 +161,8 @@ function StepCard({
       {result && result.status === "completed" ? (
         <div className="flex flex-col gap-2">
           <StepOutput result={result} />
+          <StepSectionReading payload={result.output_payload_json} />
+          <StepTemplateProvenance payload={result.output_payload_json} />
           <RunFiles
             flowId={flowId}
             runId={runId}
@@ -160,9 +172,11 @@ function StepCard({
           <CitationSummary summary={result.citation_summary} />
         </div>
       ) : null}
-      {result && (result.runtime_input_file_ids ?? []).length > 0 ? (
+      {result &&
+      ((result.runtime_input_file_ids ?? []).length > 0 || runtimeInputSummary(result)) ? (
         <div className="flex flex-col gap-1">
           <p className="text-ax-text text-sm font-medium">{t("flow_runs_step_input_files")}</p>
+          <StepRuntimeInputSummary result={result} />
           <RunInputFiles
             flowId={flowId}
             runId={runId}
@@ -190,7 +204,9 @@ function StepCard({
 /**
  * The run's steps in order, each with its status, how long it took and the
  * tokens it used in and out, what it produced (text, a structured value,
- * files), the sources it cited, and why it failed when it did. A running
+ * files; how it read long material and the document template it filled),
+ * the sources it cited, what was sent in at run time, and why it failed when
+ * it did, with the answer it gave that was not accepted. A running
  * step says what it is doing and the step next in turn says so. Each card
  * can be gone to (`showRunStep`), as the failure notice does.
  */
