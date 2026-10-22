@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { makeCheckpoint } from "./run-fixtures";
 import {
+  changedFields,
   draftChanged,
   editedValueOf,
   REJECT_REASON_MAX_LENGTH,
@@ -140,6 +141,27 @@ describe("editedValueOf", () => {
       ok: false,
       problem: { field: null, reason: "json_kind" }
     });
+  });
+});
+
+describe("changedFields", () => {
+  it("names the fields whose value differs from the step's own output, by what would be sent", () => {
+    const fields = [
+      { name: "mottagare", kind: "string" as const, value: "Bo" },
+      { name: "antal", kind: "number" as const, value: "2" },
+      { name: "klar", kind: "boolean" as const, value: "true" },
+      { name: "notering", kind: "null" as const, value: "" },
+      { name: "ny", kind: "string" as const, value: "x" }
+    ];
+    expect([
+      ...changedFields(fields, { mottagare: "Anna", antal: 2, klar: true, notering: null })
+    ]).toEqual(["mottagare", "ny"]);
+  });
+
+  it("counts a value that cannot be sent as changed", () => {
+    expect([
+      ...changedFields([{ name: "antal", kind: "number", value: "två" }], { antal: 2 })
+    ]).toEqual(["antal"]);
   });
 });
 

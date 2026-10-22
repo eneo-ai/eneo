@@ -147,6 +147,36 @@ export function runDetailQueryOptions(
   });
 }
 
+/** The run's audited detail, read once (what "use the last run's input" fills the form from). */
+export function getRunDetail(flowId: string, runId: string): Promise<RunDetail> {
+  return unwrap(
+    browserApi.GET("/api/v1/flows/{id}/runs/{run_id}/", {
+      params: { path: { id: flowId, run_id: runId } }
+    })
+  );
+}
+
+/**
+ * The newest run the caller started of this flow, from the content-free
+ * list (`mine`, newest first), or null when the caller has none. It sits
+ * under the list's key, so a new run refreshes it.
+ */
+export function lastOwnRunQueryOptions(flowId: string) {
+  return queryOptions({
+    queryKey: [...runKeys.list(flowId), "last-own"] as const,
+    queryFn: async ({ signal }): Promise<RunSummary | null> => {
+      const page = await unwrap(
+        browserApi.GET("/api/v1/flows/{id}/runs/", {
+          params: { path: { id: flowId }, query: { limit: 1, mine: true } },
+          signal
+        })
+      );
+      return page.items[0] ?? null;
+    },
+    staleTime: 0
+  });
+}
+
 export function runStepsQueryOptions(flowId: string, runId: string, version: string) {
   return queryOptions({
     queryKey: runKeys.steps(flowId, runId, version),

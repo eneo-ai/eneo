@@ -175,6 +175,8 @@ describe("RunTrace", () => {
     expect(rows).toHaveLength(2);
     expect(within(rows[0]!).getByText(messages.flow_error_flow_provider_rate_limited)).toBeTruthy();
     expect(within(rows[1]!).getByText(/Modell model-large-2026/)).toBeTruthy();
+    // The evidence says its credentials are masked.
+    expect(screen.getByText(messages.flow_run_more_redacted)).toBeTruthy();
 
     const table = screen.getByRole("table", { name: messages.flow_run_extras_calls_heading });
     expect(within(table).getAllByRole("row")).toHaveLength(2);

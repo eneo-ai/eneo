@@ -49,6 +49,7 @@ import { orderWithMove, orderWithout, stepsInOrder } from "./flow-steps";
 import { speakerStepCandidate, speakerStepOption, speakerStepUpdate } from "./speaker-step-offer";
 import { runKeys } from "./runs/runs-api";
 import { FlowRunsList, runHref } from "./runs/runs-list";
+import { rememberStartedRun } from "./runs/runs-optimistic";
 import { StartRunDialog } from "./runs/start-run-dialog";
 
 type Notice = { key: number; status: "error" | "warning"; title: string; description: string };
@@ -562,6 +563,8 @@ export function FlowPage({ flowId }: { flowId: string }) {
           onOpenChange={setStarting}
           onStarted={(run) => {
             setStarting(false);
+            // The runs list shows the run at once, before it is read again.
+            rememberStartedRun(queryClient, flow.id, run);
             void queryClient.invalidateQueries({ queryKey: runKeys.list(flow.id) });
             announce(t("flow_runs_started"));
             // The run's own page follows it while it moves.

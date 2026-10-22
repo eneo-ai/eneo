@@ -1,15 +1,18 @@
 "use client";
 
 import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
-import { formatCount } from "./run-format";
+import { formatBytes } from "@/lib/format";
+import { formatCount, formatSeconds } from "./run-format";
 import { JsonValue } from "./run-json";
 import {
   rejectedOutput,
   runtimeInputSummary,
   sectionReading,
-  templateProvenance
+  templateProvenance,
+  transcriptionFacts
 } from "./run-step-facts";
 import type { RunStep } from "./runs-api";
 
@@ -130,4 +133,72 @@ export function StepRuntimeInputSummary({
   ].filter(Boolean);
   if (facts.length === 0) return null;
   return <p className="text-ax-text-secondary m-0 text-sm">{facts.join(" · ")}</p>;
+}
+
+/**
+ * How a step transcribed its audio: how many files, the language, how long
+ * it took, the model and the speaker service, the transcript's size and
+ * estimated tokens, and whether the speakers were labelled.
+ */
+export function StepTranscriptionFacts({
+  result
+}: {
+  result: Pick<RunStep, "input_payload_json">;
+}) {
+  const t = useTranslations();
+  const locale = useLocale();
+  const facts = transcriptionFacts(result);
+  if (!facts) return null;
+  const duration = (ms: number) => formatSeconds(ms / 1000, t);
+  const items = [
+    facts.files !== null
+      ? [t("flow_run_more_transcription_files"), formatCount(facts.files, locale)]
+      : null,
+    facts.language ? [t("flow_run_more_transcription_language"), facts.language] : null,
+    facts.elapsedMs !== null
+      ? [t("flow_run_more_transcription_duration"), duration(facts.elapsedMs)]
+      : null,
+    facts.model ? [t("flow_run_more_transcription_model"), facts.model] : null,
+    facts.speakerService
+      ? [t("flow_run_more_transcription_speaker_service"), facts.speakerService]
+      : null,
+    facts.transcriptBytes !== null
+      ? [t("flow_run_more_transcription_size"), formatBytes(facts.transcriptBytes, locale)]
+      : null,
+    facts.estimatedTokens !== null
+      ? [t("flow_run_more_transcription_tokens"), formatCount(facts.estimatedTokens, locale)]
+      : null
+  ].filter((item): item is [string, string] => item !== null);
+  const speakers =
+    facts.speakers === "labelled"
+      ? t("flow_run_more_speakers_labelled", {
+          duration: facts.speakersElapsedMs !== null ? duration(facts.speakersElapsedMs) : "–"
+        })
+      : facts.speakers === "reduced_precision"
+        ? t("flow_run_more_speakers_reduced")
+        : facts.speakers === "skipped"
+          ? t("flow_run_more_speakers_skipped")
+          : null;
+  if (items.length === 0 && !speakers) return null;
+  return (
+    <div className="flex flex-col gap-1">
+      <p className="text-ax-text m-0 text-sm font-medium">{t("flow_run_more_transcription")}</p>
+      {items.length > 0 ? (
+        <MetadataList columns="multi">
+          {items.map(([label, value]) => (
+            <MetadataListItem key={label} label={label}>
+              <span className="break-words">{value}</span>
+            </MetadataListItem>
+          ))}
+        </MetadataList>
+      ) : null}
+      {speakers ? (
+        <p
+          className={`m-0 text-sm ${facts.speakers === "labelled" ? "text-ax-text-secondary" : "text-ax-warning"}`}
+        >
+          {speakers}
+        </p>
+      ) : null}
+    </div>
+  );
 }

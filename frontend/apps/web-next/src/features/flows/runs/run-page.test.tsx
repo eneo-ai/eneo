@@ -12,6 +12,7 @@ import { makeFlow } from "../flow-fixtures";
 import { flowKeys } from "../flows-api";
 import {
   makeCheckpoint,
+  makeResultFile,
   makeRunDetail,
   makeRunGraph,
   makeRunStep,
@@ -252,6 +253,9 @@ describe("FlowRunPage", () => {
     expect(within(first).getByText("Sammanfatta ärendet: Bygglov")).toBeTruthy();
     expect(within(first).getByText(messages.flow_run_extras_prompt_truncated)).toBeTruthy();
     expect(within(first).getByText("temperature")).toBeTruthy();
+    expect(
+      within(first).getByRole("button", { name: messages.flow_run_more_copy_prompt })
+    ).toBeTruthy();
     const second = screen.getByRole("article", { name: "Steg 2: Skriv svar" });
     expect(
       within(second).queryByRole("button", { name: messages.flow_run_extras_prompt_heading })
@@ -341,6 +345,60 @@ describe("FlowRunPage", () => {
       expect(state.announce).toHaveBeenCalledWith(messages.flow_runs_cancel_done)
     );
     expect(calls("POST /api/v1/flows/{id}/runs/{run_id}/cancel/")).toHaveLength(1);
+  });
+
+  it("reads the whole run again when asked, and says so", async () => {
+    answerRun(makeRunSummary());
+    renderRun();
+    await screen.findByText("Beslutet är fattat.");
+    expect(calls(DETAIL)).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_more_refresh }));
+
+    await waitFor(() =>
+      expect(state.announce).toHaveBeenCalledWith(messages.flow_run_more_refreshed)
+    );
+    expect(calls(STATUS)).toHaveLength(2);
+    expect(calls(DETAIL)).toHaveLength(2);
+    expect(calls(STEPS)).toHaveLength(2);
+  });
+
+  it("copies the run's id and trace id for support", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    answerRun(makeRunSummary());
+    renderRun();
+    await screen.findByText("Beslutet är fattat.");
+    expect(screen.getByText("trace-1")).toBeTruthy();
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: messages.chat_debug_copy_value.replace("{label}", messages.flow_run_more_trace_id)
+      })
+    );
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("trace-1"));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: messages.chat_debug_copy_value.replace("{label}", messages.flow_run_more_run_id)
+      })
+    );
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("run-1"));
+  });
+
+  it("offers every other file the run made beside its result", async () => {
+    const summary = makeRunSummary();
+    answerRun(
+      summary,
+      makeRunDetail({
+        ...summary,
+        result: { kind: "inline_text", text: "Beslutet är fattat." },
+        result_files: [makeResultFile({ file_id: "file-7", name: "underlag.docx" })]
+      })
+    );
+    const { container } = renderRun();
+    const files = await screen.findByRole("list", { name: messages.flow_run_more_other_files });
+    expect(within(files).getByText("underlag.docx")).toBeTruthy();
+    await expectNoAxeViolations(container);
   });
 
   it("follows a moving run through its status alone, and reads the detail again only when it moved", async () => {
