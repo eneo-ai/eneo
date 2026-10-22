@@ -358,9 +358,8 @@ describe("RunRecorder in the start dialog", () => {
     FakeUpload.failNext = true;
     const { dialog } = await openDialog(audioContract());
     await recordAndStop(dialog);
-    expect(
-      await within(dialog).findByText(messages.flow_transcript_upload_offline_hint)
-    ).toBeTruthy();
+    // It goes again by itself a few seconds later, or as soon as the browser is back online.
+    expect(await within(dialog).findByText(/^Nytt försök kl\. \d\d:\d\d:\d\d/)).toBeTruthy();
     const retry = within(dialog).getByRole("button", {
       name: /^Försök igen med Inspelning, del 1/
     });
@@ -478,6 +477,75 @@ describe("The recording's health", () => {
     expect(FakeUpload.sent[1]!.name).toMatch(/-seg01-/);
   });
 
+  it("shows the recording's diagnostics and copies them, with nothing personal in them", async () => {
+    installBrowser();
+    grantMicrophone();
+    const writeText = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const { dialog } = await openDialog(audioContract());
+    await recordAndStop(dialog);
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(1));
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: messages.flow_transcript_rec_diag_show })
+    );
+    const region = await within(dialog).findByRole("region", {
+      name: messages.flow_transcript_rec_diag_label
+    });
+    const shown = JSON.parse(region.textContent ?? "{}");
+    expect(shown.recorder).toMatchObject({ phase: "idle", ended: "manual" });
+    expect(shown.recorder.format.requested).toBe("audio/webm;codecs=opus");
+    expect(shown.parts).toEqual([
+      expect.objectContaining({ index: 0, upload: "done", kept: "device" })
+    ]);
+    expect(shown.recorder.events.map((entry: { event: string }) => entry.event)).toContain(
+      "part_handed_over"
+    );
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_diag_copy));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const copied = writeText.mock.calls[0]![0];
+    expect(JSON.parse(copied).parts).toHaveLength(1);
+    // No step name, file name, recording id or file id.
+    const sessionId = FakeUpload.sent[0]!.name.split("-seg")[0]!.replace("recording-", "");
+    for (const personal of ["Mötet", "Inspelning, del", "recording-", sessionId, "file-1"]) {
+      expect(copied).not.toContain(personal);
+    }
+  });
+
+  it("says how large the part is while recording, and how much more fits after a stop", async () => {
+    installBrowser();
+    grantMicrophone();
+    const { dialog } = await openDialog(audioContract());
+    expect(within(dialog).getByText(/Den kan vara upp till 2 h lång\./)).toBeTruthy();
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+    // Opus at 24 kbit/s, against the step's 10 MB per file.
+    expect(
+      within(dialog).getByText(/^Delen är .+ av högst 10\sMB, ungefär 10,3\sMB per timme\.$/)
+    ).toBeTruthy();
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+    await within(dialog).findByText(/^Inspelning, del 1/);
+    // Two hours less the room kept below the limit and the next part's handover.
+    expect(within(dialog).getByText(/Du kan spela in 1 h 58 min till\./)).toBeTruthy();
+    expect(within(dialog).queryByText(/^Delen är/)).toBeNull();
+  });
+
+  it("says how long one file holds where the step sets no length", async () => {
+    installBrowser();
+    const contract = audioContract();
+    const input = contract.steps_requiring_input![0]!;
+    contract.steps_requiring_input = [
+      { ...input, max_duration_seconds: null, max_recording_seconds: null }
+    ];
+    const { dialog } = await openDialog(contract);
+    // 10 MB at 24 kbit/s.
+    expect(
+      within(dialog).getByText(/En fil på 10\sMB rymmer ungefär 58 min med den här webbläsaren\./)
+    ).toBeTruthy();
+  });
+
   it("does not record more while earlier parts wait for their upload", async () => {
     installBrowser();
     grantMicrophone();
@@ -494,9 +562,7 @@ describe("The recording's health", () => {
       fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
       await within(dialog).findByText(new RegExp(`^Inspelning, del ${part}`));
       await waitFor(() =>
-        expect(
-          within(dialog).getAllByText(messages.flow_transcript_upload_offline_hint)
-        ).toHaveLength(part)
+        expect(within(dialog).getAllByText(/^Nytt försök kl\./)).toHaveLength(part)
       );
     }
     fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
@@ -583,6 +649,53 @@ describe("Keeping a recording on the device", () => {
     fireEvent.click(screen.getByRole("button", { name: "Kör" }));
     const again = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
     expect(await within(again).findByText(messages.flow_transcript_resume_title)).toBeTruthy();
+  });
+
+  it("throws the whole recording away after asking, its uploads and what the device kept", async () => {
+    installBrowser();
+    grantMicrophone();
+    const { dialog } = await openDialog(audioContract());
+    await recordAndStop(dialog);
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(1));
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+    await within(dialog).findByText(/^Inspelning, del 2/);
+    await waitFor(() => expect(device.db.parts.size).toBe(2));
+
+    fireEvent.click(button(dialog, messages.flow_transcript_discard));
+    const confirm = await screen.findByRole("alertdialog", {
+      name: messages.flow_transcript_discard_title
+    });
+    await expectNoAxeViolations(document.body);
+    fireEvent.click(
+      within(confirm).getByRole("button", { name: messages.flow_transcript_discard })
+    );
+
+    await waitFor(() => expect(within(dialog).queryByText(/^Inspelning, del/)).toBeNull());
+    expect(device.db.parts.size).toBe(0);
+    const deleted = api.stub.calls
+      .filter((call) => call.method === "DELETE")
+      .map((call) => call.init);
+    expect(deleted).toEqual([
+      { params: { path: { id: "flow-1", file_id: "file-1" } } },
+      { params: { path: { id: "flow-1", file_id: "file-2" } } }
+    ]);
+    // A new recording starts from the first part, and focus waits on its button.
+    const start = button(dialog, messages.flow_transcript_rec_start);
+    expect(document.activeElement).toBe(start);
+    expect(
+      within(dialog).queryByRole("button", { name: messages.flow_transcript_discard })
+    ).toBeNull();
+    fireEvent.click(start);
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+    await within(dialog).findByText(/^Inspelning, del 1/);
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(3));
+    expect(FakeUpload.sent[2]!.name).toMatch(/-seg00-/);
+    expect(FakeUpload.sent[2]!.name.split("-seg")[0]).not.toBe(
+      FakeUpload.sent[0]!.name.split("-seg")[0]
+    );
   });
 
   it("throws the recording away from the device when the form closes without it", async () => {

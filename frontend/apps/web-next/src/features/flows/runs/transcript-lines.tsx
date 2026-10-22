@@ -11,15 +11,16 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { Token } from "@astryxdesign/core/Token";
-import { Download, Pencil, Volume2 } from "lucide-react";
+import { Download, Pencil, Undo2, Volume2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
-import { clockTime, type ShownSegment, type TranscriptTarget } from "./transcript";
+import { clockTime, type ShownPart, type ShownSegment, type TranscriptTarget } from "./transcript";
 import {
   nextSpeakerLabel,
+  sameCorrections,
   shownToRaw,
   withLineText,
   withoutLineText,
@@ -32,6 +33,7 @@ import { textRuns, type PlacedWord, type TextRun } from "./transcript-playback";
 import { overlapDetectionUnavailable, overlaps, type Overlap } from "./transcript-overlaps";
 import { partAttributes, selectedSpans, type SelectedSpan } from "./transcript-selection";
 import { SelectionToolbar } from "./transcript-selection-toolbar";
+import { SpeakerMenu } from "./transcript-speaker-menu";
 import { SpeakerBadge, speakerText } from "./transcript-speakers";
 import { SuggestionsDialog } from "./transcript-suggestions-dialog";
 import {
@@ -40,7 +42,8 @@ import {
   type Candidate,
   type Suggestions
 } from "./transcript-suggestions";
-import { transcriptTurns, type Turn } from "./transcript-turns";
+import { TurnEditor } from "./transcript-turn-editor";
+import { transcriptTurns, withPartsSpeaker, type Turn, type TurnPart } from "./transcript-turns";
 import type { TranscriptSpeakerReview } from "./runs-api";
 
 /** What editing a transcript's lines needs: the saved set, and a save that says what went wrong. */
@@ -350,18 +353,25 @@ function Unresolved() {
  * part of it moved. Each part's text carries its anchors, so text marked in
  * it maps back to the line; a placed word carries where it plays from.
  */
+/** Who said a part of a line: a plain badge, or the menu that changes it. */
+type PartBadge = (part: ShownPart, index: number) => React.ReactNode;
+
+const plainBadge: PartBadge = (part) => <SpeakerBadge label={part.speaker} name={part.name} />;
+
 function LineText({
   segment,
   runs,
   words,
   active,
-  activeWord
+  activeWord,
+  badge
 }: {
   segment: ShownSegment;
   runs: TextRun[] | null;
   words: readonly PlacedWord[] | undefined;
   active: boolean;
   activeWord: number;
+  badge: PartBadge;
 }) {
   if (segment.parts.length > 1) {
     const starts = partStarts(segment.parts);
@@ -370,7 +380,7 @@ function LineText({
         {segment.parts.map((part, index) => (
           <span key={index}>
             {index > 0 ? " " : null}
-            <SpeakerBadge label={part.speaker} name={part.name} />{" "}
+            {badge(part, index)}{" "}
             {part.decision === "unresolved" ? (
               <>
                 <Unresolved />{" "}
@@ -384,7 +394,7 @@ function LineText({
   }
   return (
     <>
-      <SpeakerBadge label={segment.label} name={segment.name} />{" "}
+      {badge({ ...segment.parts[0]!, speaker: segment.label, name: segment.name }, 0)}{" "}
       {segment.decision === "unresolved" || segment.unsure ? (
         <>
           <Unresolved />{" "}
@@ -460,7 +470,8 @@ function SegmentLine({
   isEditing,
   onEdit,
   editor,
-  toolbar
+  toolbar,
+  badge
 }: {
   segment: ShownSegment;
   multiFile: boolean;
@@ -477,6 +488,7 @@ function SegmentLine({
   editor: React.ReactNode;
   /** The toolbar for text marked up to this line. */
   toolbar: React.ReactNode;
+  badge: PartBadge;
 }) {
   const t = useTranslations();
   const time = placeTime(segment.fileIndex, segment.start, multiFile, t);
@@ -501,6 +513,7 @@ function SegmentLine({
               words={words}
               active={active}
               activeWord={activeWord}
+              badge={badge}
             />
             {segment.corrected ? (
               <>
@@ -534,10 +547,16 @@ function SegmentLine({
   );
 }
 
+/** A turn's key: where its first part starts. */
+function turnKey(turn: Turn): string {
+  return `${turn.parts[0]!.segmentIndex}:${turn.parts[0]!.shownStart}`;
+}
+
 /**
  * The transcript as speaker turns: what one speaker said in a row, as one
- * paragraph, each playable from its start. Text is corrected in the line
- * view; speakers can be given to marked text here too.
+ * paragraph, each playable from its start. Someone who may correct the
+ * transcript corrects a whole turn's text in place and changes its speaker
+ * from the speaker's badge; speakers can be given to marked text here too.
  */
 function TurnList({
   turns,
@@ -545,7 +564,13 @@ function TurnList({
   activeLine,
   onSeek,
   toolbarAt,
-  toolbar
+  toolbar,
+  turnId,
+  canEdit,
+  openTurn,
+  onEdit,
+  editor,
+  badge
 }: {
   turns: readonly Turn[];
   multiFile: boolean;
@@ -554,26 +579,49 @@ function TurnList({
   /** The turn the marked text ends in, which shows the toolbar. */
   toolbarAt: number;
   toolbar: React.ReactNode;
+  /** The id of the element that shows a turn. */
+  turnId: (turn: Turn) => string;
+  canEdit: boolean;
+  /** The key of the turn being edited. */
+  openTurn: string | null;
+  onEdit: (turn: Turn) => void;
+  editor: (turn: Turn, time: string) => React.ReactNode;
+  badge: (turn: Turn, time: string) => React.ReactNode;
 }) {
   const t = useTranslations();
   return (
     <ol aria-label={t("flow_transcript_turns_list")} className="m-0 flex flex-col gap-1 p-0">
       {turns.map((turn, index) => {
         const active = turn.parts.some((part) => part.position === activeLine);
+        const time = placeTime(turn.fileIndex, turn.start, multiFile, t);
+        const id = turnId(turn);
+        const isEditing = openTurn === turnKey(turn);
         return (
           <li
-            key={`${turn.parts[0]!.segmentIndex}:${turn.parts[0]!.shownStart}`}
+            key={turnKey(turn)}
+            id={id}
             className={active ? "bg-ax-selected rounded-ax-inner" : undefined}
           >
             <div className="flex flex-col gap-1 px-1 py-2">
               <div className="flex flex-wrap items-center gap-2">
                 <TimeButton
-                  time={placeTime(turn.fileIndex, turn.start, multiFile, t)}
+                  time={time}
                   active={active}
                   onPlay={onSeek ? () => onSeek(turn.fileIndex, turn.start) : null}
                 />
-                <SpeakerBadge label={turn.speaker} name={turn.name} />
+                {badge(turn, time)}
                 {turn.marker ? <Unresolved /> : null}
+                {canEdit && !isEditing ? (
+                  <span id={`${id}-edit`} className="ms-auto shrink-0">
+                    <IconButton
+                      label={t("flow_transcript_turn_edit", { time })}
+                      icon={<Pencil aria-hidden="true" />}
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onEdit(turn)}
+                    />
+                  </span>
+                ) : null}
               </div>
               <p className="text-ax-text m-0 text-sm break-words">
                 {turn.parts.map((part, at) => {
@@ -595,6 +643,7 @@ function TurnList({
                 })}
               </p>
             </div>
+            {isEditing ? editor(turn, time) : null}
             {index === toolbarAt ? toolbar : null}
           </li>
         );
@@ -612,12 +661,21 @@ function OverlapReview({
   found,
   unavailable,
   multiFile,
-  onGo
+  onGo,
+  onListen,
+  unsure,
+  onConfirmAll
 }: {
   found: Overlap[];
   unavailable: boolean;
   multiFile: boolean;
   onGo: (overlap: Overlap) => void;
+  /** Plays the overlap alone; absent without audio. */
+  onListen: ((overlap: Overlap) => void) | null;
+  /** Lines whose speaker the service was unsure of and nobody has decided yet. */
+  unsure: number;
+  /** Keeps the service's speaker on every such line; absent when the transcript is read only. */
+  onConfirmAll: (() => void) | null;
 }) {
   const t = useTranslations();
   if (found.length === 0) {
@@ -662,6 +720,15 @@ function OverlapReview({
                     : t("flow_transcript_overlap_checked")
                 }
               />
+              {onListen ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<Volume2 aria-hidden="true" />}
+                  label={t("flow_transcript_overlap_listen", { time: where })}
+                  onClick={() => onListen(overlap)}
+                />
+              ) : null}
               {overlap.lines.length > 0 ? (
                 <Button
                   size="sm"
@@ -674,9 +741,21 @@ function OverlapReview({
           );
         })}
       </ol>
+      {onConfirmAll && unsure > 0 ? (
+        <div className="pt-2">
+          <Button
+            size="sm"
+            label={t("flow_transcript_overlap_confirm_all", { count: unsure })}
+            onClick={onConfirmAll}
+          />
+        </div>
+      ) : null}
     </QuietBanner>
   );
 }
+
+/** How many of the reviewer's changes "Ångra" can take back, one at a time. */
+const MAX_UNDO = 20;
 
 /** A line to hear a speaker by: theirs, said with confidence, with words in it. */
 function sampleLine(shown: readonly ShownSegment[], label: string): ShownSegment | undefined {
@@ -743,7 +822,7 @@ export function TranscriptLines({
   shown,
   sourceHash,
   multiFile,
-  editing,
+  editing: given,
   speakerReview = null,
   onUnsavedChange,
   children
@@ -766,15 +845,41 @@ export function TranscriptLines({
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
+  /**
+   * The reviewer's own changes, latest last: the set before each and the set
+   * it made. "Ångra" takes the latest back while the transcript is still as
+   * that change left it.
+   */
+  const [undoable, setUndoable] = useState<{ before: CorrectionSet; after: CorrectionSet }[]>([]);
+  const editing: LineEditing | null = given
+    ? {
+        ...given,
+        save: async (next, done) => {
+          const before = given.set;
+          const failed = await given.save(next, done);
+          if (!failed)
+            setUndoable((stack) => [...stack.slice(1 - MAX_UNDO), { before, after: next }]);
+          return failed;
+        }
+      }
+    : null;
+  const lastChange = undoable.at(-1);
+  const canUndo =
+    given !== null && lastChange !== undefined && sameCorrections(lastChange.after, given.set);
   const playback = useTranscriptPlayback({
     flowId,
     runId,
     target,
     lines: shown,
     sourceHash,
-    eagerWords: editing !== null
+    eagerWords: given !== null
   });
   const [open, setOpen] = useState<number | null>(null);
+  /** The turn being edited, by its key. */
+  const [openTurn, setOpenTurn] = useState<string | null>(null);
+  /** Why the last speaker change from a badge was not saved. */
+  const [menuProblem, setMenuProblem] = useState<string | null>(null);
+  const baseId = useId();
   const [view, setView] = useState<View>("lines");
   const [suggesting, setSuggesting] = useState<{
     next: CorrectionSet;
@@ -881,6 +986,121 @@ export function TranscriptLines({
     document.getElementById(id)?.querySelector("textarea")?.focus();
   }
 
+  function turnId(turn: Turn) {
+    return `${baseId}-turn-${turnKey(turn).replace(":", "-")}`;
+  }
+
+  function openTurnEditor(turn: Turn) {
+    flushSync(() => {
+      setOpenTurn(turnKey(turn));
+      setDirty(false);
+    });
+    document.getElementById(turnId(turn))?.querySelector("textarea")?.focus();
+  }
+
+  function closeTurnEditor(id: string) {
+    flushSync(() => {
+      setOpenTurn(null);
+      setDirty(false);
+    });
+    focusEditButton(id);
+  }
+
+  /** Takes the reviewer's latest change back, as a change of its own. */
+  async function undoLast() {
+    if (!given || !lastChange || given.saving) return;
+    const failed = await given.save(lastChange.before, t("flow_transcript_undo_done"));
+    setMenuProblem(failed);
+    if (!failed) setUndoable((stack) => stack.slice(0, -1));
+  }
+
+  /** Keeps the speaker service's speaker on every line it was unsure of. */
+  async function confirmAll() {
+    if (!editing || editing.saving) return;
+    const next = shown
+      .filter((segment) => segment.unsure)
+      .reduce(
+        (set, segment) =>
+          withSpeaker(
+            set,
+            { index: segment.index, text: segment.raw, speaker: segment.speaker },
+            null,
+            { speaker: segment.speaker, decision: "confirmed" }
+          ),
+        editing.set
+      );
+    setMenuProblem(await editing.save(next, t("flow_transcript_overlap_confirmed_all")));
+  }
+
+  /** Gives parts (of a line or a turn) to a speaker from its badge's menu, or resets them. */
+  async function changeSpeaker(
+    parts: readonly Pick<TurnPart, "segmentIndex" | "rawStart" | "rawEnd" | "overridden">[],
+    speaker: string | null | "reset"
+  ) {
+    if (!editing || editing.saving) return;
+    const failed = await editing.save(
+      withPartsSpeaker(
+        editing.set,
+        parts,
+        byIndex,
+        speaker === "reset"
+          ? "reset"
+          : { speaker, decision: speaker === null ? "unresolved" : "confirmed" }
+      ),
+      speaker === "reset"
+        ? t("flow_transcript_speaker_reset_done")
+        : t("flow_transcript_speaker_saved")
+    );
+    setMenuProblem(failed);
+  }
+
+  function speakerMenu(
+    parts: readonly Pick<TurnPart, "segmentIndex" | "rawStart" | "rawEnd" | "overridden">[],
+    label: string | null,
+    name: string | null,
+    context: string
+  ) {
+    if (!editing) return <SpeakerBadge label={label} name={name} />;
+    // Who the transcription heard, where the reviewer gave the words to someone else.
+    const originals = [
+      ...new Set(
+        parts
+          .filter((part) => part.overridden)
+          .map((part) => byIndex.get(part.segmentIndex)?.speaker ?? null)
+      )
+    ];
+    return (
+      <SpeakerMenu
+        label={label}
+        name={name}
+        context={context}
+        speakers={editing.speakers}
+        names={editing.set.names}
+        newLabel={nextSpeakerLabel(editing.speakers)}
+        overridden={parts.some((part) => part.overridden)}
+        changedFrom={
+          originals.length === 1 ? speakerText(originals[0] ?? null, editing.set.names, t) : null
+        }
+        saving={editing.saving}
+        onChoose={(speaker) => void changeSpeaker(parts, speaker)}
+        onReset={() => void changeSpeaker(parts, "reset")}
+      />
+    );
+  }
+
+  function lineBadge(segment: ShownSegment, time: string): PartBadge {
+    if (!editing) return plainBadge;
+    return (part, index) =>
+      speakerMenu(
+        [{ segmentIndex: segment.index, ...part }],
+        part.speaker,
+        part.name,
+        segment.parts.length > 1
+          ? t("flow_transcript_speaker_menu_part", { time, part: index + 1 })
+          : t("flow_transcript_speaker_menu_line", { time })
+      );
+  }
+
   function focusEditButton(id: string) {
     area.current?.querySelector<HTMLElement>(`[id="${id}-edit"] button`)?.focus();
   }
@@ -976,6 +1196,13 @@ export function TranscriptLines({
         found={overlaps(speakerReview, shown)}
         unavailable={overlapDetectionUnavailable(speakerReview)}
         multiFile={multiFile}
+        onListen={
+          playback
+            ? (overlap) => playback.seek(overlap.fileIndex, overlap.start, overlap.end)
+            : null
+        }
+        unsure={shown.filter((segment) => segment.unsure).length}
+        onConfirmAll={editing ? () => void confirmAll() : null}
         onGo={(overlap) => {
           playback?.seek(overlap.fileIndex, overlap.start);
           const first = overlap.lines[0];
@@ -1000,6 +1227,7 @@ export function TranscriptLines({
           onChange={(next) => {
             if (next === "lines" || next === "turns") {
               setOpen(null);
+              setOpenTurn(null);
               setDirty(false);
               setPicked(null);
               setView(next);
@@ -1011,6 +1239,15 @@ export function TranscriptLines({
           <ToggleButton value="turns" label={t("flow_transcript_view_turns")} />
         </ToggleButtonGroup>
         <div className="flex flex-wrap items-center gap-3">
+          {canUndo ? (
+            <Button
+              label={t("flow_transcript_undo")}
+              icon={<Undo2 aria-hidden="true" />}
+              size="sm"
+              variant="ghost"
+              onClick={() => void undoLast()}
+            />
+          ) : null}
           {corrected > 0 ? (
             <Text type="supporting">
               {t("flow_transcript_corrected_count", { count: corrected })}
@@ -1041,6 +1278,14 @@ export function TranscriptLines({
             : t("flow_transcript_selection_intro")}
         </Text>
       ) : null}
+      {menuProblem ? (
+        <QuietBanner
+          status="error"
+          title={t("flow_transcript_speaker_not_saved")}
+          description={menuProblem}
+          collapsible={false}
+        />
+      ) : null}
       <div ref={area}>
         {view === "turns" ? (
           <TurnList
@@ -1048,6 +1293,39 @@ export function TranscriptLines({
             multiFile={multiFile}
             activeLine={playback?.activeLine ?? -1}
             onSeek={seek}
+            turnId={turnId}
+            canEdit={editing !== null}
+            openTurn={openTurn}
+            onEdit={openTurnEditor}
+            badge={(turn, time) =>
+              speakerMenu(
+                turn.parts,
+                turn.speaker,
+                turn.name,
+                t("flow_transcript_speaker_menu_turn", { time })
+              )
+            }
+            editor={(turn, time) =>
+              editing ? (
+                <TurnEditor
+                  turn={turn}
+                  time={time}
+                  editing={editing}
+                  lines={byIndex}
+                  rawLines={rawLines}
+                  onSuggest={(next, suggestions) => {
+                    const id = turnId(turn);
+                    flushSync(() => {
+                      setOpenTurn(null);
+                      setDirty(false);
+                      setSuggesting({ next, suggestions, lineId: id, problem: null });
+                    });
+                  }}
+                  onDirty={setDirty}
+                  onClose={() => closeTurnEditor(turnId(turn))}
+                />
+              ) : null
+            }
             toolbarAt={
               lastPicked === undefined
                 ? -1
@@ -1095,6 +1373,10 @@ export function TranscriptLines({
                     ) : null
                   }
                   toolbar={segment.index === lastPicked ? toolbar : null}
+                  badge={lineBadge(
+                    segment,
+                    placeTime(segment.fileIndex, segment.start, multiFile, t)
+                  )}
                 />
               );
             })}

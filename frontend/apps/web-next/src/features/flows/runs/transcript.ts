@@ -4,6 +4,7 @@ import {
   applicableOccurrences,
   correctionSet,
   lineParts,
+  type CorrectionSet,
   type LinePart,
   type SpeakerDecision
 } from "./transcript-corrections";
@@ -165,7 +166,14 @@ export function shownSegments(
   segments: readonly TranscriptSegment[],
   corrections: Pick<TranscriptCorrections, "occurrences" | "speaker_edits" | "speaker_names"> | null
 ): ShownSegment[] {
-  const set = correctionSet(corrections, segments);
+  return shownSegmentsOf(segments, correctionSet(corrections, segments));
+}
+
+/** The lines with a set of corrections as the editor holds it (a draft not saved yet). */
+export function shownSegmentsOf(
+  segments: readonly TranscriptSegment[],
+  set: CorrectionSet
+): ShownSegment[] {
   const nameOf = (label: string | null) => (label ? set.names[label]?.trim() || null : null);
   return segments.map((segment) => {
     const own = set.occurrences.filter((occurrence) => occurrence.segment_index === segment.index);

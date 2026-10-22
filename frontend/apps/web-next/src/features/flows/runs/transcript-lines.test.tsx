@@ -5,7 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
-import { parseSegments, shownSegments, type TranscriptTarget } from "./transcript";
+import type { TranscriptSpeakerReview } from "./runs-api";
+import {
+  parseSegments,
+  shownSegments,
+  type TranscriptSegment,
+  type TranscriptTarget
+} from "./transcript";
 import { correctionSet, knownSpeakers, type CorrectionSet } from "./transcript-corrections";
 import { TranscriptLines } from "./transcript-lines";
 
@@ -59,9 +65,19 @@ const segments = parseSegments([
 const target: TranscriptTarget = { stepId: "step-1", stepOrder: 1, attemptNo: 1, fileIds: [] };
 
 /** The transcript with corrections saved as the reviewer makes them. */
-function Harness({ saves, audio = target }: { saves: CorrectionSet[]; audio?: TranscriptTarget }) {
-  const [set, setSet] = useState<CorrectionSet>(() => correctionSet(null, segments));
-  const shown = shownSegments(segments, {
+function Harness({
+  saves,
+  audio = target,
+  lines = segments,
+  speakerReview = null
+}: {
+  saves: CorrectionSet[];
+  audio?: TranscriptTarget;
+  lines?: TranscriptSegment[];
+  speakerReview?: TranscriptSpeakerReview | null;
+}) {
+  const [set, setSet] = useState<CorrectionSet>(() => correctionSet(null, lines));
+  const shown = shownSegments(lines, {
     occurrences: set.occurrences,
     speaker_edits: set.speakerEdits,
     speaker_names: set.names
@@ -74,9 +90,10 @@ function Harness({ saves, audio = target }: { saves: CorrectionSet[]; audio?: Tr
       shown={shown}
       sourceHash="hash-1"
       multiFile={false}
+      speakerReview={speakerReview}
       editing={{
         set,
-        speakers: knownSpeakers(segments, set.speakerEdits),
+        speakers: knownSpeakers(lines, set.speakerEdits),
         saving: false,
         save: async (next) => {
           saves.push(next);
@@ -106,6 +123,13 @@ function mark(start: Node, from: number, end: Node, to: number) {
   act(() => {
     document.dispatchEvent(new Event("selectionchange"));
   });
+}
+
+/** Opens a speaker badge's menu and answers it. */
+function openMenu(trigger: HTMLElement): HTMLElement {
+  expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+  fireEvent.click(trigger);
+  return document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
 }
 
 afterEach(() => {
@@ -244,6 +268,189 @@ describe("TranscriptLines", () => {
     await expectNoAxeViolations(document.body);
   });
 
+  it("corrects a whole turn as one text, saved on the line it changes", async () => {
+    const { saves } = renderLines();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_transcript_view_turns }));
+    const turns = await screen.findByRole("list", { name: messages.flow_transcript_turns_list });
+    fireEvent.click(within(turns).getByRole("button", { name: "Rätta repliken 0:00" }));
+    const field = within(turns).getByLabelText<HTMLTextAreaElement>("Texten i repliken 0:00");
+    expect(field.value).toBe("Välkommen Sugary. Hur mår du?");
+    expect(document.activeElement).toBe(field);
+    await expectNoAxeViolations(document.body);
+    fireEvent.change(field, { target: { value: "Välkommen Sugary. Hur mår ni?" } });
+    fireEvent.click(
+      within(turns).getByRole("button", { name: messages.flow_transcript_line_save })
+    );
+    // A correction of one line is offered for the places that likely say the same.
+    const dialog = await screen.findByRole("dialog", {
+      name: messages.flow_transcript_suggest_title
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: messages.flow_transcript_suggest_skip })
+    );
+
+    await waitFor(() => expect(saves).toHaveLength(1));
+    expect(saves[0]!.occurrences).toEqual([
+      { segment_index: 1, char_start: 8, char_end: 10, original: "du", corrected: "ni" }
+    ]);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(turns).getByRole("button", { name: "Rätta repliken 0:00" })
+      )
+    );
+    expect(turns.textContent).toContain("Välkommen Sugary. Hur mår ni?");
+
+    // Reverting the turn takes its corrected lines back to what was said.
+    fireEvent.click(within(turns).getByRole("button", { name: "Rätta repliken 0:00" }));
+    fireEvent.click(
+      within(turns).getByRole("button", { name: messages.flow_transcript_turn_revert })
+    );
+    await waitFor(() => expect(saves).toHaveLength(2));
+    expect(saves[1]!.occurrences).toEqual([]);
+  });
+
+  it("changes a line's speaker from its badge, and resets it", async () => {
+    const { saves, lines } = renderLines();
+    const menu = openMenu(
+      within(lines).getByRole("button", { name: "SPEAKER_00, byt talare för raden 0:05" })
+    );
+    await expectNoAxeViolations(document.body);
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "SPEAKER_01" }));
+    await waitFor(() => expect(saves).toHaveLength(1));
+    expect(saves[0]!.speakerEdits).toEqual([
+      {
+        segment_index: 1,
+        char_start: null,
+        char_end: null,
+        original: null,
+        original_speaker: "SPEAKER_00",
+        speaker: "SPEAKER_01",
+        decision: "confirmed"
+      }
+    ]);
+
+    const again = openMenu(
+      await within(lines).findByRole("button", {
+        name: "SPEAKER_01, ändrad från SPEAKER_00, byt talare för raden 0:05"
+      })
+    );
+    fireEvent.click(
+      within(again).getByRole("menuitem", { name: messages.flow_transcript_speaker_reset })
+    );
+    await waitFor(() => expect(saves).toHaveLength(2));
+    expect(saves[1]!.speakerEdits).toEqual([]);
+  });
+
+  it("leaves a whole turn to someone to check from its badge", async () => {
+    const { saves } = renderLines();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_transcript_view_turns }));
+    const turns = await screen.findByRole("list", { name: messages.flow_transcript_turns_list });
+    const menu = openMenu(
+      within(turns).getByRole("button", { name: "SPEAKER_01, byt talare för repliken 0:10" })
+    );
+    fireEvent.click(
+      within(menu).getByRole("menuitemradio", {
+        name: messages.flow_runs_transcript_unknown_speaker
+      })
+    );
+    await waitFor(() => expect(saves).toHaveLength(1));
+    expect(
+      saves[0]!.speakerEdits.map((edit) => [edit.segment_index, edit.speaker, edit.decision])
+    ).toEqual([
+      [2, null, "unresolved"],
+      [3, null, "unresolved"]
+    ]);
+  });
+
+  it("takes the reviewer's latest changes back one at a time", async () => {
+    const { saves, lines } = renderLines();
+    expect(screen.queryByRole("button", { name: messages.flow_transcript_undo })).toBeNull();
+    fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 0:05" }));
+    fireEvent.change(within(lines).getByLabelText("Texten på raden 0:05"), {
+      target: { value: "Hur mår ni?" }
+    });
+    fireEvent.click(
+      within(lines).getByRole("button", { name: messages.flow_transcript_line_save })
+    );
+    fireEvent.click(
+      within(await screen.findByRole("dialog")).getByRole("button", {
+        name: messages.flow_transcript_suggest_skip
+      })
+    );
+    await waitFor(() => expect(saves).toHaveLength(1));
+    const menu = openMenu(
+      within(lines).getByRole("button", { name: "SPEAKER_01, byt talare för raden 0:10" })
+    );
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: "SPEAKER_00" }));
+    await waitFor(() => expect(saves).toHaveLength(2));
+
+    fireEvent.click(await screen.findByRole("button", { name: messages.flow_transcript_undo }));
+    await waitFor(() => expect(saves).toHaveLength(3));
+    expect(saves[2]!.speakerEdits).toEqual([]);
+    expect(saves[2]!.occurrences).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_transcript_undo }));
+    await waitFor(() => expect(saves).toHaveLength(4));
+    expect(saves[3]!.occurrences).toEqual([]);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: messages.flow_transcript_undo })).toBeNull()
+    );
+  });
+
+  it("keeps the suggested speakers on every line to check at once", async () => {
+    const unsure = parseSegments([
+      {
+        segment_index: 0,
+        file_index: 0,
+        start: 0,
+        end: 4,
+        speaker: "SPEAKER_00",
+        text: "Ja, precis.",
+        overlap_ids: ["audio-1:o1"],
+        speaker_attribution: "provisional"
+      },
+      {
+        segment_index: 1,
+        file_index: 0,
+        start: 2,
+        end: 5,
+        speaker: "SPEAKER_01",
+        text: "Nej, vänta.",
+        overlap_ids: ["audio-1:o1"],
+        speaker_attribution: "provisional"
+      },
+      { segment_index: 2, file_index: 0, start: 6, end: 9, speaker: "SPEAKER_00", text: "Okej." }
+    ]);
+    const saves: CorrectionSet[] = [];
+    renderInApp(
+      <Harness
+        saves={saves}
+        lines={unsure}
+        speakerReview={{
+          files: [
+            {
+              file_index: 0,
+              overlap_detection: "available",
+              overlaps: [{ id: "audio-1:o1", start: 1.5, end: 5, detected_speaker_count: 2 }]
+            }
+          ]
+        }}
+      />
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Behåll föreslagna talare på alla 2 rader att kontrollera"
+      })
+    );
+    await waitFor(() => expect(saves).toHaveLength(1));
+    expect(
+      saves[0]!.speakerEdits.map((edit) => [edit.segment_index, edit.speaker, edit.decision])
+    ).toEqual([
+      [0, "SPEAKER_00", "confirmed"],
+      [1, "SPEAKER_01", "confirmed"]
+    ]);
+    expect(await screen.findByText(messages.flow_transcript_overlap_done)).toBeTruthy();
+  });
+
   it("downloads the reviewed transcript as text", async () => {
     const made: Blob[] = [];
     vi.stubGlobal(
@@ -349,6 +556,92 @@ describe("TranscriptLines with audio", () => {
     });
     fireEvent.timeUpdate(audio);
     expect(pause).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips five seconds either way and moves between the recording's parts", async () => {
+    answerAudio();
+    // Each part's link is its own file's.
+    state.routes[SIGN] = (init: { params: { path: { file_id: string } } }) => ({
+      body: {
+        url: `http://backend:8000/api/v1/files/${init.params.path.file_id}/download/?token=t0k3n`,
+        expires_at: Math.floor(Date.now() / 1000) + 3_600
+      }
+    });
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    const { lines } = renderLines({ ...target, fileIds: ["audio-1", "audio-2"] });
+    fireEvent.click(within(lines).getByRole("button", { name: /^Spela från 0:05/ }));
+    const audio = await screen.findByLabelText<HTMLAudioElement>(
+      "Ljudet till transkriptionen, del 1"
+    );
+    fireEvent.loadedMetadata(audio);
+    Object.defineProperty(audio, "currentTime", { configurable: true, writable: true, value: 30 });
+    fireEvent.click(screen.getByRole("button", { name: "5 sekunder framåt" }));
+    expect(audio.currentTime).toBe(35);
+    fireEvent.click(screen.getByRole("button", { name: "5 sekunder bakåt" }));
+    fireEvent.click(screen.getByRole("button", { name: "5 sekunder bakåt" }));
+    expect(audio.currentTime).toBe(25);
+    const previous = screen.getByRole("button", {
+      name: messages.flow_transcript_audio_previous_part
+    });
+    expect(
+      previous.getAttribute("aria-disabled") === "true" || (previous as HTMLButtonElement).disabled
+    ).toBe(true);
+    await expectNoAxeViolations(document.body);
+
+    // Paused, the next part loads from its start without playing.
+    Object.defineProperty(audio, "paused", { configurable: true, value: true });
+    play.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_transcript_audio_next_part }));
+    const second = await screen.findByLabelText<HTMLAudioElement>(
+      "Ljudet till transkriptionen, del 2"
+    );
+    const signed = state.stub.calls
+      .filter((call) => call.path.endsWith("/signed-url/"))
+      .map((call) => (call.init as { params: { path: { file_id: string } } }).params.path.file_id);
+    expect(signed).toEqual(["audio-1", "audio-2"]);
+    fireEvent.loadedMetadata(second);
+    expect(second.currentTime).toBe(0);
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it("signs the audio link again a minute before it runs out, where the person is", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    try {
+      answerAudio();
+      const expires = Math.floor(Date.now() / 1000) + 3_600;
+      const sign = state.routes[SIGN]!;
+      state.routes[SIGN] = (init) => ({
+        body: { ...(sign(init).body as object), expires_at: expires }
+      });
+      const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+      vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+      const { lines } = renderLines(audioTarget);
+      const audio = await startAudio(lines);
+      Object.defineProperty(audio, "currentTime", {
+        configurable: true,
+        writable: true,
+        value: 42
+      });
+      Object.defineProperty(audio, "paused", { configurable: true, value: true });
+      play.mockClear();
+      const signs = () => state.stub.calls.filter((call) => call.path.endsWith("/signed-url/"));
+      expect(signs()).toHaveLength(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_600_000 - 60_000 - 1_000);
+      });
+      expect(signs()).toHaveLength(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      await waitFor(() => expect(signs()).toHaveLength(2));
+      fireEvent.loadedMetadata(audio);
+      expect(audio.currentTime).toBe(42);
+      expect(play).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("changes the speed, and skips with J, K and L only while the player has focus", async () => {

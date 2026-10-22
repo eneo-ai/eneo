@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { parseSegments, shownSegments } from "./transcript";
-import { transcriptTurns } from "./transcript-turns";
+import { correctionSet } from "./transcript-corrections";
+import {
+  transcriptTurns,
+  turnLineTexts,
+  turnText,
+  withPartsSpeaker,
+  withTurnText
+} from "./transcript-turns";
 
 const segment = (
   index: number,
@@ -79,5 +86,104 @@ describe("transcriptTurns", () => {
     ]);
     const turns = transcriptTurns(shownSegments(lines, null));
     expect(turns.map((turn) => turn.marker)).toEqual([null, "unsure", null]);
+  });
+});
+
+describe("editing a turn as one text", () => {
+  const lines = parseSegments([
+    segment(0, "SPEAKER_00", "Hej på dig."),
+    segment(1, "SPEAKER_00", "Hur mår du?"),
+    segment(2, "SPEAKER_01", "Bra, tack.")
+  ]);
+  const shown = shownSegments(lines, null);
+  const [turn] = transcriptTurns(shown);
+  const text = (index: number) => shown[index]?.text;
+
+  it("reads the turn's lines as one text", () => {
+    expect(turnText(turn!)).toBe("Hej på dig. Hur mår du?");
+  });
+
+  it("changes only the line an edit falls in", () => {
+    expect(turnLineTexts(turn!, "Hej på er. Hur mår du?", text)).toEqual(
+      new Map([[0, "Hej på er."]])
+    );
+    expect(turnLineTexts(turn!, "Hej på dig. Hur mår ni?", text)).toEqual(
+      new Map([[1, "Hur mår ni?"]])
+    );
+    expect(turnLineTexts(turn!, turnText(turn!), text).size).toBe(0);
+  });
+
+  it("gives an edit across lines to the first line it touches", () => {
+    expect(turnLineTexts(turn!, "Hej på er, hur mår du?", text)).toEqual(
+      new Map([
+        [0, "Hej på er, hur"],
+        [1, " mår du?"]
+      ])
+    );
+    // Typed at the end of a line, the text joins it; after the space, the next line.
+    expect(turnLineTexts(turn!, "Hej på dig, Anna. Hur mår du?", text)).toEqual(
+      new Map([[0, "Hej på dig, Anna."]])
+    );
+    expect(turnLineTexts(turn!, "Hej på dig. Ja. Hur mår du?", text)).toEqual(
+      new Map([[1, "Ja. Hur mår du?"]])
+    );
+  });
+
+  it("keeps the rest of a line whose part belongs to another turn", () => {
+    const split = shownSegments(lines, {
+      occurrences: [],
+      speaker_edits: [
+        {
+          segment_index: 1,
+          char_start: 4,
+          char_end: 11,
+          original: "mår du?",
+          original_speaker: "SPEAKER_00",
+          speaker: "SPEAKER_01",
+          decision: "confirmed"
+        }
+      ],
+      speaker_names: {}
+    });
+    const second = transcriptTurns(split)[1]!;
+    expect(turnText(second)).toBe("mår du? Bra, tack.");
+    const { next, texts } = withTurnText(
+      correctionSet(null, lines),
+      second,
+      "mår ni? Bra, tack.",
+      new Map(split.map((line) => [line.index, line]))
+    );
+    expect(texts).toEqual(new Map([[1, "Hur mår ni?"]]));
+    expect(next.occurrences).toEqual([
+      { segment_index: 1, char_start: 8, char_end: 10, original: "du", corrected: "ni" }
+    ]);
+  });
+
+  it("gives a turn's parts to another speaker and resets only the reassigned ones", () => {
+    const byIndex = new Map(shown.map((line) => [line.index, line]));
+    const moved = withPartsSpeaker(correctionSet(null, lines), turn!.parts, byIndex, {
+      speaker: "SPEAKER_01",
+      decision: "confirmed"
+    });
+    expect(
+      moved.speakerEdits.map((edit) => [edit.segment_index, edit.char_start, edit.speaker])
+    ).toEqual([
+      [0, null, "SPEAKER_01"],
+      [1, null, "SPEAKER_01"]
+    ]);
+    const after = shownSegments(lines, {
+      occurrences: [],
+      speaker_edits: moved.speakerEdits,
+      speaker_names: {}
+    });
+    const reassigned = transcriptTurns(after)[0]!;
+    expect(reassigned.parts.map((part) => part.overridden)).toEqual([true, true, false]);
+    const reset = withPartsSpeaker(
+      moved,
+      reassigned.parts.slice(0, 1),
+      new Map(after.map((line) => [line.index, line])),
+      "reset"
+    );
+    expect(reset.speakerEdits.map((edit) => edit.segment_index)).toEqual([1]);
   });
 });
