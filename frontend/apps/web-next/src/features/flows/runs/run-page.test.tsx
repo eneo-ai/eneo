@@ -603,7 +603,7 @@ describe("FlowRunPage", () => {
 
       const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
       expect(within(lines).getByText("1:05")).toBeTruthy();
-      expect(within(lines).getByText("SPEAKER_01:")).toBeTruthy();
+      expect(within(lines).getByText("SPEAKER_01")).toBeTruthy();
       await expectNoAxeViolations(container);
 
       fireEvent.change(screen.getByLabelText("Namn för SPEAKER_00"), { target: { value: "Anna" } });
@@ -679,7 +679,9 @@ describe("FlowRunPage", () => {
       // The word playing is marked for the eye only, once the word timings came.
       await waitFor(() => {
         fireEvent.timeUpdate(audio);
-        expect(within(playing).getByText("Tack.").className).toContain("bg-ax-accent-muted");
+        expect(within(playing.closest("li")!).getByText("Tack.").className).toContain(
+          "bg-ax-accent-muted"
+        );
       });
       expect(container.querySelector("[aria-live] [data-word]")).toBeNull();
       await expectNoAxeViolations(container);
@@ -1058,6 +1060,19 @@ describe("FlowRunPage", () => {
       fireEvent.change(within(lines).getByLabelText("Texten på raden 1:05"), {
         target: { value: "Tackar." }
       });
+      // A change not saved holds the approval, and focus goes to it.
+      for (const name of [
+        messages.flow_runs_review_approve,
+        messages.flow_run_extras_review_approve_only
+      ]) {
+        fireEvent.click(within(panel).getByRole("button", { name }));
+        expect(
+          await within(panel).findByText(messages.flow_transcript_review_unsaved)
+        ).toBeTruthy();
+        expect(document.activeElement).toBe(within(lines).getByLabelText("Texten på raden 1:05"));
+      }
+      expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_review_unsaved);
+      expect(state.stub.calls.filter((call) => call.method === "POST")).toHaveLength(0);
       fireEvent.click(
         within(lines).getByRole("button", { name: messages.flow_transcript_line_save })
       );
@@ -1069,6 +1084,10 @@ describe("FlowRunPage", () => {
           { segment_index: 1, char_start: 4, char_end: 5, original: ".", corrected: "ar." }
         ]
       });
+      // Saved: the approval is no longer held.
+      await waitFor(() =>
+        expect(within(panel).queryByText(messages.flow_transcript_review_unsaved)).toBeNull()
+      );
       expect(
         within(panel).getByRole("button", { name: messages.flow_runs_review_approve })
       ).toBeTruthy();
