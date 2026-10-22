@@ -302,9 +302,17 @@ def redact_payload_with_manifest(
         dict_masked_paths: list[str] = []
         dict_masked_fields: list[MaskedField] = []
         raw_items = cast(dict[object, Any], value)
+        credential_fields = _http_credential_fields(raw_items)
         for raw_item_key, item_value in raw_items.items():
             item_key = str(raw_item_key)
             child_path = f"{path}.{item_key}" if path else item_key
+            if item_key in credential_fields and isinstance(item_value, str):
+                redacted_dict[item_key] = _REDACTED_VALUE
+                dict_masked_paths.append(child_path)
+                dict_masked_fields.append(
+                    MaskedField(path=child_path, key=item_key, reason="sensitive_key")
+                )
+                continue
             child_result = redact_payload_with_manifest(
                 item_value,
                 key=item_key,
@@ -355,6 +363,18 @@ def redact_payload_with_manifest(
             masked_fields=string_masked_fields,
         )
     return RedactionResult(value=value, masked_paths=())
+
+
+def _http_credential_fields(mapping: dict[object, Any]) -> frozenset[str]:
+    """The fields of an authored HTTP config that hold a credential under a
+    name the key vocabulary leaves readable: an API key auth's ``key`` and a
+    secret custom header's ``value``."""
+    fields: set[str] = set()
+    if mapping.get("mode") == "api_key":
+        fields.add("key")
+    if mapping.get("secret") is True:
+        fields.add("value")
+    return frozenset(fields)
 
 
 def _normalize_key(key: str) -> str:

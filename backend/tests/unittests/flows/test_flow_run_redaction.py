@@ -403,3 +403,87 @@ def test_url_redaction_preserves_safe_url_structure_exactly() -> None:
     assert redact_url_secrets("https://example.test/path?blank=&safe=yes#frag") == (
         "https://example.test/path?blank=&safe=yes#frag"
     )
+
+
+def test_every_credential_an_authored_http_config_stores_is_masked() -> None:
+    # A published definition carries each step's authored HTTP configs with
+    # their stored credentials. Whatever the auth mode, and in a custom header
+    # marked secret, the credential is masked and the manifest names it; the
+    # names, modes and non-secret headers stay readable.
+    definition = {
+        "steps": [
+            {
+                "input_config": {
+                    "url": "https://example.org/case",
+                    "auth": {
+                        "mode": "api_key",
+                        "header_name": "X-Key",
+                        "key": "stored-api-key",
+                    },
+                    "custom_headers": [
+                        {"name": "X-Tenant", "value": "kommun", "secret": False},
+                        {"name": "X-Signing", "value": "stored-header", "secret": True},
+                    ],
+                },
+                "output_config": {
+                    "url": "https://example.org/hook",
+                    "auth": {"mode": "bearer_token", "token": "stored-token"},
+                },
+            },
+            {
+                "input_config": {
+                    "url": "https://example.org/other",
+                    "auth": {
+                        "mode": "basic_auth",
+                        "username": "integration",
+                        "password": "stored-password",
+                    },
+                },
+            },
+        ]
+    }
+
+    result = redact_payload_with_manifest(definition, path="definition")
+
+    rendered = repr(result.value)
+    for credential in (
+        "stored-api-key",
+        "stored-header",
+        "stored-token",
+        "stored-password",
+    ):
+        assert credential not in rendered
+    first, second = result.value["steps"]
+    assert first["input_config"]["auth"] == {
+        "mode": "api_key",
+        "header_name": "X-Key",
+        "key": "[REDACTED]",
+    }
+    assert first["input_config"]["custom_headers"] == [
+        {"name": "X-Tenant", "value": "kommun", "secret": False},
+        {"name": "X-Signing", "value": "[REDACTED]", "secret": True},
+    ]
+    assert second["input_config"]["auth"]["username"] == "integration"
+    assert set(result.masked_paths) == {
+        "definition.steps[0].input_config.auth.key",
+        "definition.steps[0].input_config.custom_headers[1].value",
+        "definition.steps[0].output_config.auth.token",
+        "definition.steps[1].input_config.auth.password",
+    }
+    assert {field.reason for field in result.masked_fields} == {"sensitive_key"}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"mode": "summary", "key": "case-17"},
+        {"mode": "bearer_token", "key": "case-17"},
+        {"secret": False, "value": "plain"},
+        {"name": "X-Tenant", "value": "kommun"},
+    ],
+    ids=["other-mode", "other-auth-mode", "not-secret", "no-secret-flag"],
+)
+def test_key_and_value_fields_outside_a_credential_shape_stay_readable(
+    payload: dict[str, object],
+) -> None:
+    assert redact_payload(payload) == payload

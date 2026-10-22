@@ -354,6 +354,18 @@ async def _seed_flow_run_contract_data(
                                 "Authorization": "Bearer super-secret",
                                 "X-Api-Key": "super-secret",
                             },
+                            "auth": {
+                                "mode": "api_key",
+                                "header_name": "X-Key",
+                                "key": "stored-api-key",
+                            },
+                            "custom_headers": [
+                                {
+                                    "name": "X-Signing",
+                                    "value": "stored-header",
+                                    "secret": True,
+                                }
+                            ],
                         },
                     }
                 ],
@@ -1376,6 +1388,8 @@ async def test_completed_invalid_snapshot_remains_inspectable_with_null_result(
     payload = response.json()
     assert payload["definition_integrity"]["status"] == "invalid"
     assert payload["definition_snapshot"]["steps"]
+    assert "stored-api-key" not in response.text
+    assert "stored-header" not in response.text
     assert payload["run"]["status"] == "completed"
     assert payload["run"]["result"] is None
 
@@ -2019,6 +2033,13 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
         ]["Authorization"]
         == "[REDACTED]"
     )
+    stored_output_config = payload["bundle"]["definition_snapshot"]["steps"][0][
+        "output_config"
+    ]
+    assert stored_output_config["auth"]["key"] == "[REDACTED]"
+    assert stored_output_config["custom_headers"][0]["value"] == "[REDACTED]"
+    assert "stored-api-key" not in response.text
+    assert "stored-header" not in response.text
     assert (
         payload["bundle"]["step_attempts"][0]["input_payload_json"][
             "completion_configuration"

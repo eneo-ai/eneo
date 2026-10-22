@@ -1,14 +1,23 @@
 from __future__ import annotations
 
+import hashlib
+import io
+import os
+import zipfile
 from collections.abc import Mapping
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient
 
-from eneo.database.tables.flow_tables import FlowRunAuditOutbox, FlowRuns
+from eneo.database.tables.flow_tables import (
+    FlowRunAuditOutbox,
+    FlowRunReviewCheckpoints,
+    FlowRuns,
+)
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_DISPATCH_MAX_ATTEMPTS,
     FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
@@ -410,3 +419,322 @@ async def test_generated_pdf_downloads_under_the_flow_name_and_run_day(
         f'attachment; filename="Namndmote protokoll {run_day}.pdf"; '
         f"filename*=UTF-8''N%C3%A4mndm%C3%B6te%20protokoll%20{run_day}.pdf"
     )
+
+
+# The runtime lays out PDFs with its WeasyPrint sidecar; CI installs it, a
+# developer machine may not.
+_PDF_SIDECAR_INSTALLED = Path(
+    os.environ.get("PDF_PYTHON", "/opt/pdf/bin/python3")
+).exists()
+
+
+@pytest.mark.parametrize(
+    "output_type",
+    [
+        "docx",
+        pytest.param(
+            "pdf",
+            marks=pytest.mark.skipif(
+                not _PDF_SIDECAR_INSTALLED,
+                reason="The tool runtime's PDF sidecar is not installed here.",
+            ),
+        ),
+    ],
+)
+async def test_a_rendered_document_is_stored_recorded_and_served_by_a_signed_link(
+    client,
+    db_container,
+    flow_process_auth_headers,
+    create_published_compose_text_flow,
+    flow_broker_worker_seam,
+    output_type: str,
+) -> None:
+    # The worker renders the step's text in the shared tool runtime (a real
+    # process, not a stand-in) and stores the document as the step's declared
+    # artifact. The run's result is the stored bytes, served only through a
+    # signed link that names the producing run's file.
+    flow = await create_published_compose_text_flow(
+        client,
+        flow_process_auth_headers,
+        name="Beslutsunderlag",
+        output_mode="render_verbatim",
+        output_type=output_type,
+    )
+    await flow_broker_worker_seam.start_worker()
+    create_response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/",
+        json={
+            "expected_flow_version": flow.published_version,
+            "input_payload_json": {
+                "text": "# Beslut\n\nNämnden godkänner förslaget om ny bibliotekslokal."
+            },
+        },
+        headers={
+            **flow_process_auth_headers,
+            "Idempotency-Key": f"flow-rendered-document:{uuid4().hex}",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    run_id = create_response.json()["id"]
+
+    completed_run, _ = await flow_broker_worker_seam.wait_for_public_run_status(
+        client=client,
+        headers=flow_process_auth_headers,
+        flow_id=flow.flow_id,
+        run_id=run_id,
+        expected_status="completed",
+        timeout_seconds=60,
+    )
+    result = completed_run["result"]
+    assert isinstance(result, dict) and result["kind"] == "artifact"
+    [artifact] = result["files"]
+    assert artifact["source"] == "declared_artifact"
+    assert artifact["step_id"] == flow.step_id
+    assert artifact["attempt_no"] == 1
+    assert artifact["name"].endswith(f".{output_type}")
+
+    unsigned = await client.get(
+        f"/api/v1/flows/{flow.flow_id}/runs/{run_id}"
+        f"/artifacts/{artifact['file_id']}/signed-url/",
+    )
+    assert unsigned.status_code in {401, 403, 405}
+    signed_url_response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/{run_id}"
+        f"/artifacts/{artifact['file_id']}/signed-url/",
+        json={"expires_in": 60, "content_disposition": "attachment"},
+        headers=flow_process_auth_headers,
+    )
+    assert signed_url_response.status_code == 200, signed_url_response.text
+    signed_url = signed_url_response.json()["url"]
+    download = await client.get(signed_url)
+    assert download.status_code == 200, download.text
+    content = download.content
+    assert len(content) == artifact["size"]
+    assert artifact["checksum"].removeprefix("sha256:") == (
+        hashlib.sha256(content).hexdigest()
+    )
+    if output_type == "pdf":
+        assert content.startswith(b"%PDF-")
+        assert artifact["mimetype"] == "application/pdf"
+    else:
+        with zipfile.ZipFile(io.BytesIO(content)) as document:
+            body = document.read("word/document.xml").decode("utf-8")
+        assert "godkänner förslaget" in body
+        assert artifact["mimetype"] == (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+    tampered = await client.get(signed_url.replace("token=", "token=x", 1))
+    assert tampered.status_code != 200
+    # The run holds the classification level its evidence, the document
+    # among it, was produced at: nothing in this space is classified.
+    async with db_container() as container:
+        recorded_level = await container.session().scalar(
+            sa.select(FlowRuns.evidence_classification_level).where(
+                FlowRuns.id == UUID(run_id)
+            )
+        )
+    assert recorded_level == 0
+
+
+async def test_a_run_cancelled_while_queued_starts_no_step_when_its_delivery_arrives(
+    client: AsyncClient,
+    db_container,
+    flow_process_auth_headers: Mapping[str, str],
+    create_published_compose_text_flow,
+    flow_broker_worker_seam: FlowBrokerWorkerSeam,
+) -> None:
+    # The run is cancelled while its delivery waits on the queue. The worker
+    # that takes the delivery afterwards starts no step: the run stays
+    # cancelled, with no attempt and one terminal audit record.
+    flow = await create_published_compose_text_flow(
+        client,
+        flow_process_auth_headers,
+    )
+    create_response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/",
+        json={
+            "expected_flow_version": flow.published_version,
+            "input_payload_json": {"text": "Avbryts innan den startar."},
+        },
+        headers={
+            **flow_process_auth_headers,
+            "Idempotency-Key": f"flow-queued-cancel:{uuid4().hex}",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    run_id = create_response.json()["id"]
+    [queued_job] = await flow_broker_worker_seam.broker_client.zrange(
+        flow_broker_worker_seam.queue_name, 0, -1
+    )
+    task_id = queued_job.decode() if isinstance(queued_job, bytes) else queued_job
+
+    cancel_response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/{run_id}/cancel/",
+        headers=flow_process_auth_headers,
+    )
+    assert cancel_response.status_code == 200, cancel_response.text
+    assert cancel_response.json()["status"] == "cancelled"
+
+    await flow_broker_worker_seam.start_worker()
+    task_result = await flow_broker_worker_seam.wait_for_task_result(
+        task_id=task_id, timeout_seconds=30
+    )
+    assert task_result["status"] == "skipped"
+    assert str(task_result["reason"]).startswith("run_cancelled")
+
+    evidence_response = await client.get(
+        f"/api/v1/flows/{flow.flow_id}/runs/{run_id}/evidence/",
+        headers=flow_process_auth_headers,
+    )
+    assert evidence_response.status_code == 200, evidence_response.text
+    evidence = evidence_response.json()
+    assert evidence["run"]["status"] == "cancelled"
+    assert evidence["run"]["result"] is None
+    assert evidence["step_attempts"] == []
+    assert all(
+        result["output_payload_json"] is None for result in evidence["step_results"]
+    )
+    async with db_container() as container:
+        audit_rows = (
+            await container.session().execute(
+                sa.select(
+                    FlowRunAuditOutbox.action,
+                    FlowRunAuditOutbox.target_status,
+                ).where(FlowRunAuditOutbox.flow_run_id == UUID(run_id))
+            )
+        ).all()
+    assert audit_rows == [("flow_run_cancelled", "cancelled")]
+
+
+@pytest.mark.parametrize("decision", ["edit_and_continue", "reject", "expire"])
+async def test_a_review_decided_after_a_worker_restart_ends_the_run_it_paused(
+    client: AsyncClient,
+    db_container,
+    flow_process_auth_headers: Mapping[str, str],
+    create_published_compose_text_flow,
+    flow_broker_worker_seam: FlowBrokerWorkerSeam,
+    decision: str,
+) -> None:
+    # The run pauses for review in one worker process, and the decision is
+    # taken after that worker is gone and another has started. An edited
+    # approval continues the run in the new worker with the reviewer's text
+    # and without running the step again; a rejection cancels the run, and so
+    # does the maintenance worker's expiry job once the review has expired.
+    flow = await create_published_compose_text_flow(
+        client,
+        flow_process_auth_headers,
+        review_policy={"mode": "edit"},
+    )
+    await flow_broker_worker_seam.start_worker()
+    create_response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/",
+        json={
+            "expected_flow_version": flow.published_version,
+            "input_payload_json": {"text": "Utkast till beslut."},
+        },
+        headers={
+            **flow_process_auth_headers,
+            "Idempotency-Key": f"flow-review-restart:{uuid4().hex}",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    run_id = create_response.json()["id"]
+    run_path = f"/api/v1/flows/{flow.flow_id}/runs/{run_id}"
+    await flow_broker_worker_seam.wait_for_public_run_status(
+        client=client,
+        headers=flow_process_auth_headers,
+        flow_id=flow.flow_id,
+        run_id=run_id,
+        expected_status="awaiting_review",
+        timeout_seconds=30,
+    )
+
+    await flow_broker_worker_seam.close()
+    await flow_broker_worker_seam.start_worker()
+
+    active_response = await client.get(
+        f"{run_path}/review-checkpoints/active/",
+        headers=flow_process_auth_headers,
+    )
+    assert active_response.status_code == 200, active_response.text
+    checkpoint = active_response.json()
+    checkpoint_path = f"{run_path}/review-checkpoints/{checkpoint['id']}"
+    if decision == "expire":
+        async with db_container() as container:
+            await container.session().execute(
+                sa.update(FlowRunReviewCheckpoints)
+                .where(FlowRunReviewCheckpoints.id == UUID(checkpoint["id"]))
+                .values(expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+            )
+            await container.session().commit()
+        expiry = await flow_broker_worker_seam.send_task_and_wait(
+            task_name="flows.reconcile_review_expiry",
+            timeout_seconds=30,
+        )
+        assert expiry == {"status": "ok", "reconciled": 1}
+        ended, _ = await flow_broker_worker_seam.wait_for_public_run_status(
+            client=client,
+            headers=flow_process_auth_headers,
+            flow_id=flow.flow_id,
+            run_id=run_id,
+            expected_status="cancelled",
+            timeout_seconds=30,
+        )
+        assert ended["result"] is None
+        assert ended["error"]["code"] == "flow_review_expired"
+    elif decision == "reject":
+        reject_response = await client.post(
+            f"{checkpoint_path}/reject/",
+            json={
+                "expected_checkpoint_revision": checkpoint["revision"],
+                "reason": "Underlaget saknar beslutsdatum.",
+            },
+            headers=flow_process_auth_headers,
+        )
+        assert reject_response.status_code == 200, reject_response.text
+        ended, _ = await flow_broker_worker_seam.wait_for_public_run_status(
+            client=client,
+            headers=flow_process_auth_headers,
+            flow_id=flow.flow_id,
+            run_id=run_id,
+            expected_status="cancelled",
+            timeout_seconds=30,
+        )
+        assert ended["result"] is None
+        assert ended["error"]["code"] == "flow_review_rejected"
+    else:
+        edit_response = await client.patch(
+            f"{checkpoint_path}/",
+            json={
+                "expected_checkpoint_revision": checkpoint["revision"],
+                "edited_value": "Granskat beslut.",
+            },
+            headers=flow_process_auth_headers,
+        )
+        assert edit_response.status_code == 200, edit_response.text
+        continue_response = await client.post(
+            f"{checkpoint_path}/approve-and-continue/",
+            json={"expected_checkpoint_revision": edit_response.json()["revision"]},
+            headers={
+                **flow_process_auth_headers,
+                "Idempotency-Key": f"flow-review-continue:{uuid4().hex}",
+            },
+        )
+        assert continue_response.status_code == 202, continue_response.text
+        ended, _ = await flow_broker_worker_seam.wait_for_public_run_status(
+            client=client,
+            headers=flow_process_auth_headers,
+            flow_id=flow.flow_id,
+            run_id=run_id,
+            expected_status="completed",
+            timeout_seconds=30,
+        )
+        assert ended["result"] == {"kind": "inline_text", "text": "Granskat beslut."}
+
+    evidence_response = await client.get(
+        f"{run_path}/evidence/", headers=flow_process_auth_headers
+    )
+    assert evidence_response.status_code == 200, evidence_response.text
+    [attempt] = evidence_response.json()["step_attempts"]
+    assert attempt["attempt_no"] == 1
+    assert attempt["status"] == "completed"
