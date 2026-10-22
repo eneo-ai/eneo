@@ -7,13 +7,35 @@ from enum import IntEnum
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    GetJsonSchemaHandler,
+    model_validator,
+)
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import CoreSchema
 
 
 class TranscriptSourceOmissionReason(IntEnum):
+    """Why a transcript source component was not stored, sent as its number:
+    `1` TOO_LARGE (over its byte bound), `2` NO_SEGMENTS (the transcription
+    produced no structured lines), `3` SEGMENTS_UNAVAILABLE (word timings
+    without the lines they anchor to)."""
+
     TOO_LARGE = 1
     NO_SEGMENTS = 2
     SEGMENTS_UNAVAILABLE = 3
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core_schema: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        json_schema = handler.resolve_ref_schema(handler(core_schema))
+        # Names for the wire numbers, for generators that build named enums.
+        json_schema["x-enum-varnames"] = [reason.name for reason in cls]
+        return json_schema
 
 
 class TranscriptSourceBounds(BaseModel):

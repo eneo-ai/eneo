@@ -32818,10 +32818,8 @@ export interface components {
       segments: components["schemas"]["TranscriptSourceSegmentPublic"][];
       /** Source Hash */
       source_hash: string;
-      /** Speaker Review */
-      speaker_review?: {
-        [key: string]: unknown;
-      } | null;
+      /** @description Speaker review detail, on the first page only (`start_segment_index=0`); null when none was stored. */
+      speaker_review?: components["schemas"]["TranscriptSpeakerReviewPublic"] | null;
       /** Start Segment Index */
       start_segment_index: number;
       /**
@@ -37790,14 +37788,20 @@ export interface components {
     };
     /** TranscriptSegmentWordsPublic */
     TranscriptSegmentWordsPublic: {
-      /** Overlap Ids */
+      /**
+       * Overlap Ids
+       * @description The segment's `overlap_ids` from the transcript source: overlaps in its speaker review the segment falls in.
+       */
       overlap_ids?: string[];
       /**
        * Segment Index
        * @description Index into the step's stored `transcription.segments` array.
        */
       segment_index: number;
-      /** Speaker Attribution */
+      /**
+       * Speaker Attribution
+       * @description The segment's `speaker_attribution` from the transcript source (`provisional` when overlapping speech made the speaker uncertain), or null when the speaker service did not mark it.
+       */
       speaker_attribution?: string | null;
       /** Words */
       words: components["schemas"]["TranscriptWordPublic"][];
@@ -37820,13 +37824,67 @@ export interface components {
     };
     /**
      * TranscriptSourceOmissionReason
+     * @description Why a transcript source component was not stored, sent as its number:
+     *     `1` TOO_LARGE (over its byte bound), `2` NO_SEGMENTS (the transcription
+     *     produced no structured lines), `3` SEGMENTS_UNAVAILABLE (word timings
+     *     without the lines they anchor to).
      * @enum {integer}
      */
     TranscriptSourceOmissionReason: 1 | 2 | 3;
-    /** TranscriptSourceSegmentPublic */
+    /**
+     * TranscriptSourceSegmentPublic
+     * @description One structured transcript line as it is stored. Keys not listed here
+     *     are passed through unchanged.
+     * @example {
+     *       "end": 3.2,
+     *       "file_index": 0,
+     *       "segment_index": 0,
+     *       "speaker": "SPEAKER_00",
+     *       "start": 0,
+     *       "text": "Vi ses imorgon."
+     *     }
+     */
     TranscriptSourceSegmentPublic: {
-      /** Segment Index */
+      /**
+       * End
+       * @description Seconds from the start of that audio file.
+       */
+      end: number;
+      /**
+       * File Index
+       * @description Which uploaded audio file the times belong to, counted from 0 in upload order. A multi-file transcript restarts its times at 0 for each file.
+       */
+      file_index: number;
+      /**
+       * Overlap Ids
+       * @description Overlaps in `speaker_review` this line falls in, by their `id`. Present only on lines the speaker service marked.
+       */
+      overlap_ids?: string[];
+      /**
+       * Segment Index
+       * @description Absolute index of the line in the attempt's transcript source. Corrections and word timings address lines by this index.
+       */
       segment_index: number;
+      /**
+       * Speaker
+       * @description Diarization label of the line (`SPEAKER_00`), or null when the transcription labelled no speakers. Names given to speakers are transcript corrections, not part of the source.
+       */
+      speaker: string | null;
+      /**
+       * Speaker Attribution
+       * @description How sure the speaker service is of the line's speaker; `provisional` means overlapping speech made the speaker uncertain. Present only on lines the speaker service marked.
+       */
+      speaker_attribution?: string | null;
+      /**
+       * Start
+       * @description Seconds from the start of that audio file.
+       */
+      start: number;
+      /**
+       * Text
+       * @description The line's text as the transcription produced it.
+       */
+      text: string;
     } & {
       [key: string]: unknown;
     };
@@ -37875,6 +37933,93 @@ export interface components {
        * @description The label the content is reassigned to. A label not present in the transcript is allowed (splitting a merged speaker). A speaker-mapping step that runs after the split names it like any other label; while its review is open, the reviewer can name it in that review.
        */
       speaker: string | null;
+    };
+    /** TranscriptSpeakerOverlapPublic */
+    TranscriptSpeakerOverlapPublic: {
+      /**
+       * Detected Speaker Count
+       * @description How many voices the speaker service heard in the overlap.
+       */
+      detected_speaker_count?: number | null;
+      /**
+       * End
+       * @description Seconds from the start of its audio file.
+       */
+      end: number;
+      /**
+       * Id
+       * @description Overlap id, prefixed with its audio file's id. Lines in the overlap list it in their `overlap_ids`.
+       */
+      id: string;
+      /**
+       * Start
+       * @description Seconds from the start of its audio file.
+       */
+      start: number;
+    } & {
+      [key: string]: unknown;
+    };
+    /** TranscriptSpeakerReviewFilePublic */
+    TranscriptSpeakerReviewFilePublic: {
+      /**
+       * File Id
+       * @description Id of that audio file.
+       */
+      file_id?: string | null;
+      /**
+       * File Index
+       * @description The audio file this review covers, counted from 0 in upload order.
+       */
+      file_index: number;
+      /**
+       * Overlap Detection
+       * @description Whether the speaker service looked for overlapping speech: `available` or `unavailable`.
+       */
+      overlap_detection?: string | null;
+      /**
+       * Overlaps
+       * @description Stretches where more than one voice was heard.
+       */
+      overlaps?: components["schemas"]["TranscriptSpeakerOverlapPublic"][];
+      /**
+       * Version
+       * @description Version of the speaker service's review contract.
+       */
+      version?: number | null;
+    } & {
+      [key: string]: unknown;
+    };
+    /**
+     * TranscriptSpeakerReviewPublic
+     * @description The speaker service's review detail, passed through as it was stored;
+     *     members not listed here are kept.
+     * @example {
+     *       "files": [
+     *         {
+     *           "file_id": "00000000-0000-0000-0000-000000000701",
+     *           "file_index": 0,
+     *           "overlap_detection": "available",
+     *           "overlaps": [
+     *             {
+     *               "detected_speaker_count": 2,
+     *               "end": 1.5,
+     *               "id": "00000000-0000-0000-0000-000000000701:overlap_0000",
+     *               "start": 1
+     *             }
+     *           ],
+     *           "version": 1
+     *         }
+     *       ]
+     *     }
+     */
+    TranscriptSpeakerReviewPublic: {
+      /**
+       * Files
+       * @description One review per audio file the speaker service labelled.
+       */
+      files: components["schemas"]["TranscriptSpeakerReviewFilePublic"][];
+    } & {
+      [key: string]: unknown;
     };
     /**
      * TranscriptWordPublic

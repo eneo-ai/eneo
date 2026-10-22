@@ -457,8 +457,22 @@ describe("FlowRunPage", () => {
           max_response_bytes: 1000000,
           next_segment_index: null,
           segments: [
-            { segment_index: 0, start: 0, end: 3, speaker: "SPEAKER_00", text: "Välkomna." },
-            { segment_index: 1, start: 65, end: 70, speaker: "SPEAKER_01", text: "Tack." }
+            {
+              segment_index: 0,
+              file_index: 0,
+              start: 0,
+              end: 3,
+              speaker: "SPEAKER_00",
+              text: "Välkomna."
+            },
+            {
+              segment_index: 1,
+              file_index: 0,
+              start: 65,
+              end: 70,
+              speaker: "SPEAKER_01",
+              text: "Tack."
+            }
           ]
         }
       });
@@ -496,6 +510,26 @@ describe("FlowRunPage", () => {
       renderRun(["flows_view", "flows_run"]);
       await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
       expect(screen.queryByLabelText("Namn för SPEAKER_00")).toBeNull();
+    });
+
+    it.each([
+      [1, messages.flow_runs_transcript_omitted],
+      [2, messages.flow_runs_transcript_unavailable]
+    ])("says why an omitted transcript (reason %i) has no lines", async (reason, text) => {
+      answerAudioRun();
+      state.routes[SOURCE] = () => ({
+        body: {
+          status: "omitted",
+          run_id: "run-1",
+          step_id: "step-1",
+          attempt_no: 1,
+          reason,
+          bounds: { segments_bytes: 0, detail_bytes: 0, words_bytes: 0, segments_count: 0 }
+        }
+      });
+      renderRun();
+      expect(await screen.findByText(text)).toBeTruthy();
+      expect(screen.queryByRole("list", { name: messages.flow_runs_transcript_lines })).toBeNull();
     });
   });
 });

@@ -3522,8 +3522,21 @@ class TranscriptWordPublic(BaseModel):
 
 
 class TranscriptSegmentWordsPublic(BaseModel):
-    speaker_attribution: str | None = None
-    overlap_ids: list[str] = Field(default_factory=list)
+    speaker_attribution: str | None = Field(
+        default=None,
+        description=(
+            "The segment's `speaker_attribution` from the transcript source "
+            "(`provisional` when overlapping speech made the speaker uncertain), "
+            "or null when the speaker service did not mark it."
+        ),
+    )
+    overlap_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The segment's `overlap_ids` from the transcript source: overlaps "
+            "in its speaker review the segment falls in."
+        ),
+    )
 
     segment_index: int = Field(
         ge=0,

@@ -4659,3 +4659,38 @@ def test_openapi_default_speaker_service_is_marked_by_update_and_shown_on_links(
     # An update changes the mark only when it sends it, and never to null.
     assert update["properties"]["is_default"]["type"] == "boolean"
     assert "is_default" not in update.get("required", [])
+
+
+def test_openapi_transcript_source_payloads_are_typed(openapi_spec: dict) -> None:
+    schemas = openapi_spec["components"]["schemas"]
+
+    segment = schemas["TranscriptSourceSegmentPublic"]
+    assert set(segment["required"]) == {
+        "segment_index",
+        "file_index",
+        "start",
+        "end",
+        "speaker",
+        "text",
+    }
+    assert {"speaker_attribution", "overlap_ids"} <= set(segment["properties"])
+    assert segment.get("additionalProperties") is True
+
+    page = schemas["PresentTranscriptSourcePage"]
+    speaker_review_refs = [
+        option.get("$ref") for option in page["properties"]["speaker_review"]["anyOf"]
+    ]
+    assert "#/components/schemas/TranscriptSpeakerReviewPublic" in speaker_review_refs
+    review_file = schemas["TranscriptSpeakerReviewFilePublic"]
+    assert review_file["properties"]["overlaps"]["items"] == {
+        "$ref": "#/components/schemas/TranscriptSpeakerOverlapPublic"
+    }
+
+    reason = schemas["TranscriptSourceOmissionReason"]
+    assert reason["enum"] == [1, 2, 3]
+    assert reason["x-enum-varnames"] == [
+        "TOO_LARGE",
+        "NO_SEGMENTS",
+        "SEGMENTS_UNAVAILABLE",
+    ]
+    assert "TOO_LARGE" in reason["description"]
