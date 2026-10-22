@@ -60,14 +60,24 @@ export function isStaleRefusal(error: unknown): boolean {
 }
 
 /**
+ * The catalog's sentence for a run's terminal error, refined by the facts
+ * its `details` carry, or null when the catalog has none for its code.
+ */
+export function runErrorCatalogText(
+  error: Pick<RunError, "code" | "details">,
+  t: Translator
+): string | null {
+  return (
+    contextualText(error.code, (error.details ?? {}) as Record<string, unknown>, t) ??
+    flowErrorText(error.code, t)
+  );
+}
+
+/**
  * A run's terminal error as a sentence: the catalog's text for its typed
  * `code`, refined by the facts its `details` carry. The run's own `message`
  * is technical detail for support, never the sentence shown.
  */
 export function runErrorText(error: Pick<RunError, "code" | "details">, t: Translator): string {
-  return (
-    contextualText(error.code, (error.details ?? {}) as Record<string, unknown>, t) ??
-    flowErrorText(error.code, t) ??
-    t("flow_runs_error_unknown")
-  );
+  return runErrorCatalogText(error, t) ?? t("flow_runs_error_unknown");
 }

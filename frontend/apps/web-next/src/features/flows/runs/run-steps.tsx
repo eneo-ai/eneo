@@ -9,7 +9,13 @@ import { CitationSummary } from "./run-citations";
 import { formatCount, formatSeconds, stepInputFiles } from "./run-format";
 import { JsonValue } from "./run-json";
 import { flowErrorText, runErrorText } from "./run-messages";
-import { outputStructured, outputText, tokenTotal, type RunStepView } from "./run-progress";
+import {
+  nextStepOrder,
+  outputStructured,
+  outputText,
+  tokenTotal,
+  type RunStepView
+} from "./run-progress";
 import { RunFiles, RunInputFiles } from "./run-files";
 import { stepStatusView } from "./run-status";
 import { StepPromptDetails } from "./run-step-details";
@@ -21,6 +27,20 @@ export function stepTitle(step: Pick<RunStepView, "order" | "label">, t: Transla
   return step.label.trim()
     ? t("flow_runs_step_title", { order: step.order, label: step.label.trim() })
     : t("flow_runs_step_title_unnamed", { order: step.order });
+}
+
+/** The id of a step's card on the run page, to go to it. */
+export function runStepAnchorId(order: number): string {
+  return `flow-run-step-${order}`;
+}
+
+/** Brings a step's card into view and moves focus to it. */
+export function showRunStep(order: number): void {
+  const card = document.getElementById(runStepAnchorId(order));
+  if (!card) return;
+  const reduceMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  card.scrollIntoView?.({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+  card.focus({ preventScroll: true });
 }
 
 function stepDurationMs(result: RunStep): number | null {
@@ -49,7 +69,17 @@ function StepOutput({ result }: { result: RunStep }) {
   return <p className="text-ax-text-secondary text-sm">{t("flow_runs_output_none")}</p>;
 }
 
-function StepCard({ flowId, runId, step }: { flowId: string; runId: string; step: RunStepView }) {
+function StepCard({
+  flowId,
+  runId,
+  step,
+  isNext
+}: {
+  flowId: string;
+  runId: string;
+  step: RunStepView;
+  isNext: boolean;
+}) {
   const t = useTranslations();
   const locale = useLocale();
   const view = stepStatusView(step.status);
@@ -61,20 +91,38 @@ function StepCard({ flowId, runId, step }: { flowId: string; runId: string; step
 
   return (
     <article
+      id={runStepAnchorId(step.order)}
+      tabIndex={-1}
       aria-label={title}
-      className="border-ax-border rounded-ax-element flex flex-col gap-3 border p-4"
+      className="border-ax-border rounded-ax-element focus-visible:outline-ring flex scroll-mt-4 flex-col gap-3 border p-4 focus-visible:outline-2 focus-visible:outline-offset-2"
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <h3 className="text-ax-text text-base font-semibold break-words">{title}</h3>
         <StatusLabel status={view.tone} label={t(view.labelKey)} isPulsing={view.isPulsing} />
       </div>
+      {isNext ? (
+        <p className="text-ax-text-secondary text-sm">{t("flow_run_progress_next_step_hint")}</p>
+      ) : null}
+      {step.status === "running" ? (
+        <p className="text-ax-text-secondary text-sm">
+          {step.speakerIdentification
+            ? t("flow_run_progress_transcribing_with_speakers_hint")
+            : t("flow_run_progress_running_body")}
+        </p>
+      ) : null}
       {duration !== null || tokens !== null ? (
         <p className="text-ax-text-secondary text-sm">
           {[
             duration !== null
               ? t("flow_runs_step_took", { time: formatSeconds(duration / 1000, t) })
               : null,
-            tokens !== null ? t("flow_runs_tokens", { count: formatCount(tokens, locale) }) : null
+            tokens !== null && result
+              ? t("flow_run_journey_step_tokens", {
+                  total: formatCount(tokens, locale),
+                  input: formatCount(result.num_tokens_input ?? 0, locale),
+                  output: formatCount(result.num_tokens_output ?? 0, locale)
+                })
+              : null
           ]
             .filter(Boolean)
             .join(" · ")}
@@ -140,9 +188,11 @@ function StepCard({ flowId, runId, step }: { flowId: string; runId: string; step
 }
 
 /**
- * The run's steps in order, each with its status, how long it took and what
- * it used, what it produced (text, a structured value, files), the sources
- * it cited, and why it failed when it did.
+ * The run's steps in order, each with its status, how long it took and the
+ * tokens it used in and out, what it produced (text, a structured value,
+ * files), the sources it cited, and why it failed when it did. A running
+ * step says what it is doing and the step next in turn says so. Each card
+ * can be gone to (`showRunStep`), as the failure notice does.
  */
 export function RunSteps({
   flowId,
@@ -157,11 +207,12 @@ export function RunSteps({
   if (steps.length === 0) {
     return <p className="text-ax-text-secondary text-sm">{t("flow_runs_steps_none")}</p>;
   }
+  const next = nextStepOrder(steps);
   return (
     <ol className="m-0 flex flex-col gap-3 p-0">
       {steps.map((step) => (
         <li key={step.order} className="list-none">
-          <StepCard flowId={flowId} runId={runId} step={step} />
+          <StepCard flowId={flowId} runId={runId} step={step} isNext={step.order === next} />
         </li>
       ))}
     </ol>

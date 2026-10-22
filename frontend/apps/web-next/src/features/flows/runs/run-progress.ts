@@ -8,6 +8,8 @@ export type RunStepView = {
   /** The freshest status: the content-free graph's, else the step result's. */
   status: string | null;
   outputType: string | null;
+  /** An audio step whose transcription also labels who speaks. */
+  speakerIdentification?: boolean;
   /** The step's audited result, when it has one. */
   result: RunStep | null;
 };
@@ -33,6 +35,7 @@ export function runStepViews(
       label: node.label,
       status: node.run_status ?? result?.status ?? null,
       outputType: node.output_type ?? null,
+      ...(node.speaker_identification ? { speakerIdentification: true } : {}),
       result
     });
   }
@@ -85,4 +88,42 @@ export function tokenTotal(
 ): number | null {
   if (input == null && output == null) return null;
   return (input ?? 0) + (output ?? 0);
+}
+
+/** How far a run's steps have come: steps ended or under way, of all. */
+export type RunStepProgress = {
+  total: number;
+  /** Steps that ended (completed, failed or cancelled). */
+  ended: number;
+  running: number;
+  /** The step counter's "step N": the steps ended plus the one under way. */
+  current: number;
+};
+
+const ENDED_STEP_STATUSES: ReadonlySet<string> = new Set(["completed", "failed", "cancelled"]);
+const WAITING_STEP_STATUSES: ReadonlySet<string> = new Set(["pending", "queued"]);
+
+export function runStepProgress(steps: readonly Pick<RunStepView, "status">[]): RunStepProgress {
+  const ended = steps.filter((step) => ENDED_STEP_STATUSES.has(step.status ?? "")).length;
+  const running = steps.filter((step) => step.status === "running").length;
+  return { total: steps.length, ended, running, current: Math.min(steps.length, ended + running) };
+}
+
+/**
+ * The step that is next in turn: the first waiting step while none runs,
+ * nothing failed and nothing waits for review. Null otherwise.
+ */
+export function nextStepOrder(
+  steps: readonly Pick<RunStepView, "order" | "status">[]
+): number | null {
+  const blocked = steps.some(
+    (step) =>
+      step.status === "running" ||
+      step.status === "failed" ||
+      step.status === "cancelled" ||
+      step.status === "awaiting_review"
+  );
+  if (blocked) return null;
+  const next = steps.find((step) => step.status === null || WAITING_STEP_STATUSES.has(step.status));
+  return next?.order ?? null;
 }

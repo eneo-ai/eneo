@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { makeRunGraph, makeRunStep, makeRunSummary } from "./run-fixtures";
 import {
+  nextStepOrder,
   outputStructured,
   outputText,
   progressSignature,
+  runStepProgress,
   runStepViews,
   tokenTotal
 } from "./run-progress";
@@ -63,5 +65,36 @@ describe("step output", () => {
     expect(tokenTotal(600, 150)).toBe(750);
     expect(tokenTotal(null, 150)).toBe(150);
     expect(tokenTotal(null, undefined)).toBeNull();
+  });
+});
+
+describe("runStepProgress", () => {
+  it("counts the steps that ended and the one under way", () => {
+    expect(
+      runStepProgress([{ status: "completed" }, { status: "running" }, { status: "pending" }])
+    ).toEqual({ total: 3, ended: 1, running: 1, current: 2 });
+    expect(runStepProgress([{ status: "completed" }, { status: "failed" }])).toEqual({
+      total: 2,
+      ended: 2,
+      running: 0,
+      current: 2
+    });
+  });
+});
+
+describe("nextStepOrder", () => {
+  const steps = (...statuses: (string | null)[]) =>
+    statuses.map((status, index) => ({ order: index + 1, status }));
+
+  it("names the first waiting step while nothing runs", () => {
+    expect(nextStepOrder(steps("completed", "pending", "pending"))).toBe(2);
+    expect(nextStepOrder(steps(null, null))).toBe(1);
+  });
+
+  it("names none while a step runs, waits for review or failed, or when all ended", () => {
+    expect(nextStepOrder(steps("completed", "running", "pending"))).toBeNull();
+    expect(nextStepOrder(steps("awaiting_review", "pending"))).toBeNull();
+    expect(nextStepOrder(steps("failed", "pending"))).toBeNull();
+    expect(nextStepOrder(steps("completed", "completed"))).toBeNull();
   });
 });

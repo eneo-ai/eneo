@@ -13,28 +13,30 @@ import { saveBlob } from "@/features/chat/side-panel/document-export";
 import { EneoApiError } from "@/lib/api/errors";
 import { toast } from "@/lib/toast";
 import { focusFirstControl } from "./run-form-fields";
-import { refusalText } from "./run-messages";
+import { flowErrorText, refusalText } from "./run-messages";
 import { exportRunEvidence } from "./run-trace-api";
 import { EXPORT_REASON_MAX_LENGTH, exportRecovery, rawReasonProblem } from "./run-trace-rules";
+import type { EvidenceAccess } from "./runs-api";
 
 type Request = { detail: "redacted" } | { detail: "raw"; reason: string };
 
 /**
  * Exports the run's evidence as the core's JSON file: the redacted export
  * for support and review, and the full export, which needs the person's
- * own reason (the core logs it). Offered only when the flow allows export;
- * the page offers it only to callers the core lets read the evidence. A
- * refusal says why and, for an export too large to make, where to look
+ * own reason (the core logs it). Each is offered only when the run detail's
+ * `evidence_access` says the core would allow it (the flow's export switch
+ * and the classification-3 rule included); otherwise the catalog says why.
+ * A refusal says why and, for an export too large to make, where to look
  * instead.
  */
 export function RunEvidenceExport({
   flowId,
   runId,
-  exportAllowed
+  access
 }: {
   flowId: string;
   runId: string;
-  exportAllowed: boolean;
+  access: EvidenceAccess;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -74,79 +76,98 @@ export function RunEvidenceExport({
     }
   });
 
-  if (!exportAllowed) {
-    return <p className="text-ax-text-secondary text-sm">{t("flow_run_extras_export_off")}</p>;
+  const refusal = (code: string | null | undefined) =>
+    code === "flow_run_evidence_export_disabled"
+      ? t("flow_run_extras_export_off")
+      : (flowErrorText(code, t) ?? t("flow_run_journey_export_refused"));
+
+  if (!access.can_export_redacted && !access.can_export_raw) {
+    return (
+      <p className="text-ax-text-secondary text-sm">
+        {refusal(access.redacted_export_refusal_code)}
+      </p>
+    );
   }
 
   const pending = download.isPending ? download.variables.detail : null;
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-col items-start gap-2">
+      {!access.can_export_redacted ? (
         <p className="text-ax-text-secondary text-sm">
-          {t("flow_run_extras_export_redacted_hint")}
+          {refusal(access.redacted_export_refusal_code)}
         </p>
-        <Button
-          label={t("flow_run_extras_export_redacted")}
-          icon={<Download aria-hidden="true" />}
-          isLoading={pending === "redacted"}
-          isInterruptible
-          onClick={() => {
-            if (!download.isPending) download.mutate({ detail: "redacted" });
-          }}
-        />
-      </div>
-      <Collapsible
-        isOpen={rawOpen}
-        onOpenChange={setRawOpen}
-        chevronPosition="start"
-        trigger={
-          <span className="text-sm font-medium">{t("flow_run_extras_export_raw_heading")}</span>
-        }
-      >
-        {rawOpen ? (
-          <div id={reasonId} className="flex flex-col items-start gap-2 pt-2">
-            <TextArea
-              label={t("flow_run_extras_export_raw_reason")}
-              description={t("flow_run_extras_export_raw_hint")}
-              value={reason}
-              onChange={(next) => {
-                setReason(next);
-                setReasonProblem(null);
-              }}
-              rows={2}
-              maxLength={EXPORT_REASON_MAX_LENGTH}
-              status={reasonProblem ? { type: "error", message: reasonProblem } : undefined}
-              isRequired
-              width="100%"
-            />
-            <Button
-              label={t("flow_run_extras_export_raw")}
-              icon={<Download aria-hidden="true" />}
-              isLoading={pending === "raw"}
-              isInterruptible
-              onClick={() => {
-                if (download.isPending) return;
-                const problem = rawReasonProblem(reason);
-                if (problem) {
-                  flushSync(() =>
-                    setReasonProblem(
-                      problem === "required"
-                        ? t("flow_run_extras_export_raw_reason_required")
-                        : t("flow_run_extras_export_raw_reason_too_long", {
-                            max: EXPORT_REASON_MAX_LENGTH
-                          })
-                    )
-                  );
-                  focusFirstControl(reasonId);
-                  return;
-                }
-                download.mutate({ detail: "raw", reason });
-              }}
-            />
-          </div>
-        ) : null}
-      </Collapsible>
+      ) : (
+        <div className="flex flex-col items-start gap-2">
+          <p className="text-ax-text-secondary text-sm">
+            {t("flow_run_extras_export_redacted_hint")}
+          </p>
+          <Button
+            label={t("flow_run_extras_export_redacted")}
+            icon={<Download aria-hidden="true" />}
+            isLoading={pending === "redacted"}
+            isInterruptible
+            onClick={() => {
+              if (!download.isPending) download.mutate({ detail: "redacted" });
+            }}
+          />
+        </div>
+      )}
+      {!access.can_export_raw ? (
+        <p className="text-ax-text-secondary text-sm">{refusal(access.raw_export_refusal_code)}</p>
+      ) : (
+        <Collapsible
+          isOpen={rawOpen}
+          onOpenChange={setRawOpen}
+          chevronPosition="start"
+          trigger={
+            <span className="text-sm font-medium">{t("flow_run_extras_export_raw_heading")}</span>
+          }
+        >
+          {rawOpen ? (
+            <div id={reasonId} className="flex flex-col items-start gap-2 pt-2">
+              <TextArea
+                label={t("flow_run_extras_export_raw_reason")}
+                description={t("flow_run_extras_export_raw_hint")}
+                value={reason}
+                onChange={(next) => {
+                  setReason(next);
+                  setReasonProblem(null);
+                }}
+                rows={2}
+                maxLength={EXPORT_REASON_MAX_LENGTH}
+                status={reasonProblem ? { type: "error", message: reasonProblem } : undefined}
+                isRequired
+                width="100%"
+              />
+              <Button
+                label={t("flow_run_extras_export_raw")}
+                icon={<Download aria-hidden="true" />}
+                isLoading={pending === "raw"}
+                isInterruptible
+                onClick={() => {
+                  if (download.isPending) return;
+                  const problem = rawReasonProblem(reason);
+                  if (problem) {
+                    flushSync(() =>
+                      setReasonProblem(
+                        problem === "required"
+                          ? t("flow_run_extras_export_raw_reason_required")
+                          : t("flow_run_extras_export_raw_reason_too_long", {
+                              max: EXPORT_REASON_MAX_LENGTH
+                            })
+                      )
+                    );
+                    focusFirstControl(reasonId);
+                    return;
+                  }
+                  download.mutate({ detail: "raw", reason });
+                }}
+              />
+            </div>
+          ) : null}
+        </Collapsible>
+      )}
     </div>
   );
 }

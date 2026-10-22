@@ -2948,5 +2948,9 @@
   "flow_run_journey_search": "Sök körningar",
   "flow_run_journey_search_hint": "På namn eller vem som startade",
   "flow_run_journey_search_empty_title": "Inga körningar matchar ”{search}”",
-  "flow_run_journey_search_empty": "Sök på en annan del av namnet, eller töm sökfältet."
+  "flow_run_journey_search_empty": "Sök på en annan del av namnet, eller töm sökfältet.",
+  "flow_run_journey_step_tokens": "{total} token ({input} in, {output} ut)",
+  "flow_run_journey_export_refused": "Du kan inte ladda ner det här underlaget.",
+  "flow_run_journey_failure_consumer_action": "För integrationer",
+  "flow_run_journey_progress": "Körningens förlopp"
 }

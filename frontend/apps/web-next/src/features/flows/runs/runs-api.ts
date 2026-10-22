@@ -36,6 +36,8 @@ export type UploadedFile = Schema<"FilePublic">;
 export type ReviewCheckpoint = Schema<"FlowRunReviewCheckpointPublic">;
 export type ReviewResume = Schema<"FlowRunReviewCheckpointResumeResponse">;
 export type RunEvidence = Schema<"FlowRunEvidenceResponse">;
+export type EvidenceAccess = Schema<"FlowRunEvidenceAccessPublic">;
+export type RunErrorWithGuidance = Schema<"FlowRunErrorPublic">;
 export type TokenUsage = Schema<"FlowRunTokenUsagePublic">;
 export type TranscriptionUsage = Schema<"FlowRunTranscriptionUsagePublic">;
 

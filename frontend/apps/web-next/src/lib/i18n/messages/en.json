@@ -10637,5 +10637,9 @@
   "flow_run_journey_search": "Search runs",
   "flow_run_journey_search_hint": "By name or by who started it",
   "flow_run_journey_search_empty_title": "No runs match “{search}”",
-  "flow_run_journey_search_empty": "Search for another part of the name, or clear the search."
+  "flow_run_journey_search_empty": "Search for another part of the name, or clear the search.",
+  "flow_run_journey_step_tokens": "{total} tokens ({input} in, {output} out)",
+  "flow_run_journey_export_refused": "You cannot download this evidence.",
+  "flow_run_journey_failure_consumer_action": "For integrations",
+  "flow_run_journey_progress": "Run progress"
 }

@@ -5,17 +5,8 @@ import {
   attemptDurationMs,
   attemptsByStep,
   exportRecovery,
-  mayReadEvidence,
   rawReasonProblem
 } from "./run-trace-rules";
-
-const nobody = {
-  tenantAdmin: false,
-  personalSpace: false,
-  spaceAdmin: false,
-  startedRun: false,
-  canTrace: false
-};
 
 function attempt(step_order: number, attempt_no: number) {
   return {
@@ -26,21 +17,6 @@ function attempt(step_order: number, attempt_no: number) {
     finished_at: "2026-10-21T08:00:12Z"
   } as Schema<"FlowStepAttemptPublic">;
 }
-
-describe("mayReadEvidence", () => {
-  it("lets in the roles the run access policy lets in", () => {
-    expect(mayReadEvidence(nobody)).toBe(false);
-    expect(mayReadEvidence({ ...nobody, tenantAdmin: true })).toBe(true);
-    expect(mayReadEvidence({ ...nobody, personalSpace: true })).toBe(true);
-    expect(mayReadEvidence({ ...nobody, spaceAdmin: true })).toBe(true);
-    expect(mayReadEvidence({ ...nobody, startedRun: true, canTrace: true })).toBe(true);
-  });
-
-  it("needs the trace permission for the person who started the run", () => {
-    expect(mayReadEvidence({ ...nobody, startedRun: true })).toBe(false);
-    expect(mayReadEvidence({ ...nobody, canTrace: true })).toBe(false);
-  });
-});
 
 describe("rawReasonProblem", () => {
   it("asks for a reason of the person's own", () => {
