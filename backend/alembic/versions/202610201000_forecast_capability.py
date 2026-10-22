@@ -10,7 +10,7 @@ function that writes files is opted in for other roles by an administrator.
 Custom roles are left unchanged.
 
 Revision ID: 202610201000
-Revises: 202610191600
+Revises: 202610161000
 Create Date: 2026-10-20
 
 """
@@ -21,7 +21,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = "202610201000"
-down_revision = "202610191600"
+down_revision = "202610161000"
 branch_labels = None
 depends_on = None
 
