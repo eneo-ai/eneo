@@ -8,6 +8,7 @@ import {
   DropdownMenuRadioItem
 } from "@astryxdesign/core/DropdownMenu";
 import { Token } from "@astryxdesign/core/Token";
+import { UserRoundPen } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { speakerColor, speakerText } from "./transcript-speakers";
 
@@ -16,8 +17,9 @@ const NO_SPEAKER = "__none__";
 /**
  * A speaker badge that is also the menu for who said the line, the part or
  * the turn: another speaker, a new one, "unknown speaker" (left for someone
- * to check), or back to the speaker the transcription heard. The button's
- * name starts with the speaker it shows, then says what it changes.
+ * to check), or back to the speaker the transcription heard. A speaker a
+ * reviewer gave is marked with an icon, and the button's name, which starts
+ * with the speaker it shows, says it was changed and from whom.
  */
 export function SpeakerMenu({
   label,
@@ -27,6 +29,7 @@ export function SpeakerMenu({
   names,
   newLabel,
   overridden,
+  changedFrom = null,
   saving,
   onChoose,
   onReset
@@ -40,6 +43,8 @@ export function SpeakerMenu({
   newLabel: string;
   /** A speaker edit gave the badge its speaker: it can be reset. */
   overridden: boolean;
+  /** The speaker the transcription heard, when one speaker was changed. */
+  changedFrom?: string | null;
   saving: boolean;
   /** The speaker chosen; null for "unknown speaker". */
   onChoose: (speaker: string | null) => void;
@@ -50,11 +55,26 @@ export function SpeakerMenu({
   return (
     <DropdownMenu
       button={{
-        label: t("flow_transcript_speaker_menu", { name: shown, context }),
+        label: !overridden
+          ? t("flow_transcript_speaker_menu", { name: shown, context })
+          : changedFrom
+            ? t("flow_transcript_speaker_menu_changed_from", {
+                name: shown,
+                from: changedFrom,
+                context
+              })
+            : t("flow_transcript_speaker_menu_changed", { name: shown, context }),
         variant: "ghost",
         size: "sm",
         className: "h-auto min-h-6 px-0.5 py-0 align-baseline",
-        children: <Token size="sm" color={label ? speakerColor(label) : "default"} label={shown} />
+        children: (
+          <Token
+            size="sm"
+            color={label ? speakerColor(label) : "default"}
+            label={shown}
+            icon={overridden ? <UserRoundPen aria-hidden="true" /> : undefined}
+          />
+        )
       }}
       hasChevron={false}
       menuWidth={240}

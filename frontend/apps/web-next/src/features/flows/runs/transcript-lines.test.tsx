@@ -313,7 +313,9 @@ describe("TranscriptLines", () => {
     ]);
 
     const again = openMenu(
-      await within(lines).findByRole("button", { name: "SPEAKER_01, byt talare för raden 0:05" })
+      await within(lines).findByRole("button", {
+        name: "SPEAKER_01, ändrad från SPEAKER_00, byt talare för raden 0:05"
+      })
     );
     fireEvent.click(
       within(again).getByRole("menuitem", { name: messages.flow_transcript_speaker_reset })

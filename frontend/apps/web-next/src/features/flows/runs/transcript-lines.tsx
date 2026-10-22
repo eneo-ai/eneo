@@ -983,6 +983,14 @@ export function TranscriptLines({
     context: string
   ) {
     if (!editing) return <SpeakerBadge label={label} name={name} />;
+    // Who the transcription heard, where the reviewer gave the words to someone else.
+    const originals = [
+      ...new Set(
+        parts
+          .filter((part) => part.overridden)
+          .map((part) => byIndex.get(part.segmentIndex)?.speaker ?? null)
+      )
+    ];
     return (
       <SpeakerMenu
         label={label}
@@ -992,6 +1000,9 @@ export function TranscriptLines({
         names={editing.set.names}
         newLabel={nextSpeakerLabel(editing.speakers)}
         overridden={parts.some((part) => part.overridden)}
+        changedFrom={
+          originals.length === 1 ? speakerText(originals[0] ?? null, editing.set.names, t) : null
+        }
         saving={editing.saving}
         onChoose={(speaker) => void changeSpeaker(parts, speaker)}
         onReset={() => void changeSpeaker(parts, "reset")}

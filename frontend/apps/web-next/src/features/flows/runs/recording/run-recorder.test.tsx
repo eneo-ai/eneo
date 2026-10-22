@@ -532,6 +532,20 @@ describe("The recording's health", () => {
     expect(within(dialog).queryByText(/^Delen är/)).toBeNull();
   });
 
+  it("says how long one file holds where the step sets no length", async () => {
+    installBrowser();
+    const contract = audioContract();
+    const input = contract.steps_requiring_input![0]!;
+    contract.steps_requiring_input = [
+      { ...input, max_duration_seconds: null, max_recording_seconds: null }
+    ];
+    const { dialog } = await openDialog(contract);
+    // 10 MB at 24 kbit/s.
+    expect(
+      within(dialog).getByText(/En fil på 10\sMB rymmer ungefär 58 min med den här webbläsaren\./)
+    ).toBeTruthy();
+  });
+
   it("does not record more while earlier parts wait for their upload", async () => {
     installBrowser();
     grantMicrophone();

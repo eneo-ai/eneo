@@ -9,7 +9,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { Timer } from "@astryxdesign/core/Timer";
 import { useQuery } from "@tanstack/react-query";
 import { Mic, Pause, Play, Square } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "next-intl";
 import {
   useEffect,
   useId,
@@ -22,6 +22,7 @@ import {
 import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { EneoApiError } from "@/lib/api/errors";
+import { formatBytes } from "@/lib/format";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import type { RecordingPartInfo, UploadEntry } from "../run-contract";
 import {
@@ -291,6 +292,7 @@ export function RunRecorder({
   handleRef?: Ref<RecorderHandle>;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const announce = useAnnounce();
   const [support] = useState(() => recordingSupport(browserEnvironment()));
   const [options] = useState(() =>
@@ -709,17 +711,36 @@ export function RunRecorder({
           formParts.reduce((sum, part) => sum + part.durationMs, 0)
         )
       : null;
+
+  /** What the step lets a recording hold, as the form says it under its heading. */
+  function limitHint(): string | null {
+    if (roomMs !== null) {
+      return roomMs >= 60_000
+        ? t("flow_transcript_rec_room_hint", {
+            length: lengthText(Math.floor(roomMs / 60_000) * 60_000, t)
+          })
+        : null;
+    }
+    if (limits.maxRecordingMs) {
+      return t("flow_transcript_rec_length_hint", { length: lengthText(limits.maxRecordingMs, t) });
+    }
+    // No length limit: how long one file of the most a file may be holds at this bit rate.
+    const maxBytes = input.max_file_size_bytes;
+    if (!maxBytes) return null;
+    return t("flow_transcript_rec_file_hint", {
+      size: formatBytes(maxBytes, locale),
+      length: lengthText(((maxBytes * 8) / options.audioBitsPerSecond) * 1000, t)
+    });
+  }
+  const hint = limitHint();
+
   return (
     <div className="border-ax-border rounded-ax-inner flex flex-col gap-3 border p-3">
       <div className="flex flex-col gap-1">
         <Heading level={4}>{t("flow_transcript_rec_heading")}</Heading>
         <Text type="supporting" as="p">
           {t("flow_transcript_rec_hint")}
-          {roomMs !== null && roomMs >= 60_000
-            ? ` ${t("flow_transcript_rec_room_hint", { length: lengthText(Math.floor(roomMs / 60_000) * 60_000, t) })}`
-            : limits.maxRecordingMs && roomMs === null
-              ? ` ${t("flow_transcript_rec_length_hint", { length: lengthText(limits.maxRecordingMs, t) })}`
-              : null}
+          {hint ? ` ${hint}` : null}
         </Text>
       </div>
 
