@@ -28,10 +28,14 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
+import { useAppContext } from "@/components/providers/app-context";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { toast } from "@/lib/toast";
 import { useDebouncedValue } from "../editor/use-debounced-value";
 import { formatCount, formatSeconds } from "./run-format";
+import { CancelRunButton, RetryRunButton, runActions, type RunActionNotice } from "./run-actions";
 import { refusalText } from "./run-messages";
+import { runHref } from "./run-routes";
 import { starterName } from "./run-starter";
 import { useStartedRuns, withStartedRuns } from "./runs-optimistic";
 import {
@@ -65,10 +69,8 @@ const DEFAULT_SORT: RunsSort = { key: "started_at", order: "desc" };
 /** How long a search waits for the typing to stop before it asks again. */
 const SEARCH_DELAY_MS = 300;
 
-/** Where a run's own page is. */
-export function runHref(spaceRouteId: string, flowId: string, runId: string): string {
-  return `/spaces/${spaceRouteId}/flows/${flowId}/runs/${runId}`;
-}
+// Where a run's own page is; kept here for the screens that link to runs.
+export { runHref };
 
 export function RunStatus({ status, purpose }: Pick<RunSummary, "status" | "purpose">) {
   const t = useTranslations();
@@ -89,7 +91,7 @@ export function RunStatus({ status, purpose }: Pick<RunSummary, "status" | "purp
  * The run's name as the link to its page, with its start time under it; a
  * run started without a name is named by its start time.
  */
-function RunLink({ run, href }: { run: RunSummary; href: string }) {
+function RunLink({ id, run, href }: { id: string; run: RunSummary; href: string }) {
   const t = useTranslations();
   const startedAt = run.started_at ?? run.created_at;
   const time = useClientTimeText(startedAt, "date_time");
@@ -99,7 +101,7 @@ function RunLink({ run, href }: { run: RunSummary; href: string }) {
   if (label) {
     return (
       <span className="flex min-w-0 flex-col items-start">
-        <Link href={href} className={`${linkClass} break-words`}>
+        <Link id={id} href={href} className={`${linkClass} break-words`}>
           {label}
         </Link>
         <span className="text-ax-text-secondary text-xs">
@@ -110,6 +112,7 @@ function RunLink({ run, href }: { run: RunSummary; href: string }) {
   }
   return (
     <Link
+      id={id}
       href={href}
       aria-label={time ? t("flow_runs_open", { time }) : undefined}
       className={linkClass}
@@ -149,6 +152,24 @@ function RedispatchButton({ flowId, run }: { flowId: string; run: RunSummary }) 
   );
 }
 
+/** What came of a row's retry or cancel, as a toast (errors stay until closed). */
+function toastNotice(notice: RunActionNotice) {
+  const options = notice.description ? { description: notice.description } : undefined;
+  switch (notice.status) {
+    case "error":
+      toast.error(notice.title, options);
+      return;
+    case "warning":
+      toast.warning(notice.title, options);
+      return;
+    case "info":
+      toast.info(notice.title, options);
+      return;
+    case "success":
+      toast.success(notice.title, options);
+  }
+}
+
 const SORT_KEYS: readonly RunsSort["key"][] = ["started_at", "status", "duration"];
 
 function isSortKey(value: string): value is RunsSort["key"] {
@@ -164,22 +185,34 @@ function isSortKey(value: string): value is RunsSort["key"] {
  * keeps itself current while a run in it is queued, running
  * or waiting for review, on the cadence the run API asks for, and stops once
  * all of them have ended. A run that moves on is announced. A queued run
- * whose start is due or gave up can be sent again from its row, and a run
- * this tab just started shows at once (`runs-optimistic.ts`).
+ * whose start is due or gave up can be sent again from its row, a failed run
+ * retried and a run under way cancelled, by the run page's rules
+ * (`run-actions.tsx`), and a run this tab just started shows at once
+ * (`runs-optimistic.ts`).
  */
 export function FlowRunsList({
   flowId,
   spaceRouteId,
+  publishedVersion,
   headingLevel = 2
 }: {
   flowId: string;
   spaceRouteId: string;
+  /** The flow's published version: only its failed runs can be retried. */
+  publishedVersion: number | null;
   headingLevel?: 2 | 3;
 }) {
   const t = useTranslations();
   const locale = useLocale();
   const announce = useAnnounce();
+  const { can, user } = useAppContext();
+  // A cancelled run's button goes: focus moves to the run's link in its row,
+  // or to the heading when the run left the list (a status filter).
+  const rescue = useFocusRescue();
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
+  const linkId = (runId: string) => `${headingId}-run-${runId}`;
+  const person = { canRun: can("flows_run"), userId: user.id, publishedVersion };
   const [mine, setMine] = useState(false);
   const [status, setStatus] = useState<RunStatusValue | null>(null);
   const [searchInput, setSearchInput] = useState("");
@@ -243,21 +276,49 @@ export function FlowRunsList({
       header: t("flow_run_journey_column_run"),
       width: proportional(3),
       sortable: true,
-      renderCell: (run) => <RunLink run={run} href={runHref(spaceRouteId, flowId, run.id)} />
+      renderCell: (run) => (
+        <RunLink id={linkId(run.id)} run={run} href={runHref(spaceRouteId, flowId, run.id)} />
+      )
     },
     {
       key: "status",
       header: t("flow_runs_column_status"),
       width: proportional(3),
       sortable: true,
-      renderCell: (run) => (
-        <span className="flex flex-col items-start gap-1">
-          <RunStatus status={run.status} purpose={run.purpose} />
-          {canRedispatch(run, runs.dataUpdatedAt) ? (
-            <RedispatchButton flowId={flowId} run={run} />
-          ) : null}
-        </span>
-      )
+      renderCell: (run) => {
+        const redispatch = canRedispatch(run, runs.dataUpdatedAt);
+        const offers = runActions(run, person);
+        return (
+          <span className="flex flex-col items-start gap-1">
+            <RunStatus status={run.status} purpose={run.purpose} />
+            {redispatch || offers.retry || offers.cancel ? (
+              <span className="flex flex-wrap gap-1">
+                {redispatch ? <RedispatchButton flowId={flowId} run={run} /> : null}
+                {offers.retry ? (
+                  <RetryRunButton
+                    spaceRouteId={spaceRouteId}
+                    flowId={flowId}
+                    runId={run.id}
+                    report={toastNotice}
+                    size="sm"
+                  />
+                ) : null}
+                {offers.cancel ? (
+                  <CancelRunButton
+                    flowId={flowId}
+                    runId={run.id}
+                    report={toastNotice}
+                    onCancelled={() =>
+                      rescue(() => document.getElementById(linkId(run.id)) ?? headingRef.current)
+                    }
+                    size="sm"
+                  />
+                ) : null}
+              </span>
+            ) : null}
+          </span>
+        );
+      }
     },
     {
       key: "principal",
@@ -294,7 +355,12 @@ export function FlowRunsList({
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
-      <Heading id={headingId} className="text-ax-text text-lg font-semibold">
+      <Heading
+        id={headingId}
+        ref={headingRef}
+        tabIndex={-1}
+        className="text-ax-text focus-visible:outline-ring text-lg font-semibold outline-none focus-visible:outline-2 focus-visible:outline-offset-2"
+      >
         {t("flow_runs_heading")}
       </Heading>
       <div className="flex flex-wrap items-end gap-x-6 gap-y-3">

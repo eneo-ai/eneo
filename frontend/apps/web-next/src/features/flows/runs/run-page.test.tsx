@@ -339,12 +339,21 @@ describe("FlowRunPage", () => {
     const dialog = await screen.findByRole("alertdialog", {
       name: messages.flow_runs_cancel_title
     });
+    const cancelled = makeRunSummary({ status: "cancelled" });
+    answerRun(cancelled, makeRunDetail({ ...cancelled, result: null }));
     fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_cancel }));
 
     await waitFor(() =>
       expect(state.announce).toHaveBeenCalledWith(messages.flow_runs_cancel_done)
     );
     expect(calls("POST /api/v1/flows/{id}/runs/{run_id}/cancel/")).toHaveLength(1);
+    // The button goes with the run's state; focus moves to the page's heading.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: messages.flow_runs_cancel })).toBeNull()
+    );
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("heading", { level: 1 }))
+    );
   });
 
   it("reads the whole run again when asked, and says so", async () => {
