@@ -52,6 +52,7 @@ import {
   type RecordingEnd
 } from "./recorder";
 import { LastPartPreview, LevelMeter, micHintText } from "./recorder-health";
+import { partDiagnostics, RecordingDiagnostics, recordingReport } from "./recording-diagnostics";
 import {
   clockText,
   lengthParts,
@@ -880,6 +881,19 @@ export function RunRecorder({
       ) : null}
 
       <LiveText snapshot={text} />
+
+      <RecordingDiagnostics
+        report={() =>
+          recordingReport({
+            recorder,
+            parts: partDiagnostics(latestEntries.current, (sessionId, index) =>
+              keeper.keeping(stepId, sessionId, index)
+            ),
+            storage: degradation,
+            live: liveAvailable ? live.getSnapshot().status : null
+          })
+        }
+      />
     </div>
   );
 }

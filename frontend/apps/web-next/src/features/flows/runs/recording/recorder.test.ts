@@ -84,7 +84,7 @@ function fakeStream() {
 }
 
 function setup(
-  getUserMedia: () => Promise<MediaStream>,
+  getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>,
   { meter = false, journal }: { meter?: boolean; journal?: JournalSpy } = {}
 ) {
   let now = 0;
@@ -316,6 +316,48 @@ describe("AudioRecorder", () => {
     recorder.pause();
     expect(recorder.level()).toBe(0);
     expect(recorder.getSnapshot().micHint).toBeNull();
+  });
+
+  it("reports its state and recent events without naming the device", async () => {
+    const { stream, track } = fakeStream();
+    Object.assign(track, {
+      getSettings: () => ({
+        deviceId: "device-secret",
+        groupId: "group-secret",
+        sampleRate: 48_000,
+        channelCount: 1,
+        echoCancellation: true
+      })
+    });
+    const { recorder, advance } = setup(() => Promise.resolve(stream));
+    await recorder.start({ sessionId: "session-secret", firstIndex: 0, limits: limits() });
+    await advance(2_000);
+    const report = recorder.diagnostics();
+    expect(report).toMatchObject({
+      phase: "recording",
+      format: {
+        requested: "audio/ogg;codecs=opus",
+        recorder: "audio/ogg",
+        audioBitsPerSecond: 24_000
+      },
+      microphone: {
+        constraints: "preferred",
+        settings: { sampleRate: 48_000, channelCount: 1, echoCancellation: true }
+      },
+      recording: {
+        recordedMs: 2_000,
+        part: { index: 0, chunks: 2, bytes: 10 },
+        firstChunkAfterMs: expect.any(Number)
+      }
+    });
+    expect(report.events.map((entry) => entry.event)).toEqual([
+      "start",
+      "microphone_open",
+      "part_started",
+      "first_chunk"
+    ]);
+    const text = JSON.stringify(report);
+    expect(text).not.toMatch(/secret/);
   });
 
   it("stops rather than pile up parts waiting for their upload", async () => {

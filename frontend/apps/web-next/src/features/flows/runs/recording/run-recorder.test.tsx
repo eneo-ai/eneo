@@ -478,6 +478,43 @@ describe("The recording's health", () => {
     expect(FakeUpload.sent[1]!.name).toMatch(/-seg01-/);
   });
 
+  it("shows the recording's diagnostics and copies them, with nothing personal in them", async () => {
+    installBrowser();
+    grantMicrophone();
+    const writeText = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    const { dialog } = await openDialog(audioContract());
+    await recordAndStop(dialog);
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(1));
+
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: messages.flow_transcript_rec_diag_show })
+    );
+    const region = await within(dialog).findByRole("region", {
+      name: messages.flow_transcript_rec_diag_label
+    });
+    const shown = JSON.parse(region.textContent ?? "{}");
+    expect(shown.recorder).toMatchObject({ phase: "idle", ended: "manual" });
+    expect(shown.recorder.format.requested).toBe("audio/webm;codecs=opus");
+    expect(shown.parts).toEqual([
+      expect.objectContaining({ index: 0, upload: "done", kept: "device" })
+    ]);
+    expect(shown.recorder.events.map((entry: { event: string }) => entry.event)).toContain(
+      "part_handed_over"
+    );
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_diag_copy));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const copied = writeText.mock.calls[0]![0];
+    expect(JSON.parse(copied).parts).toHaveLength(1);
+    // No step name, file name, recording id or file id.
+    const sessionId = FakeUpload.sent[0]!.name.split("-seg")[0]!.replace("recording-", "");
+    for (const personal of ["Mötet", "Inspelning, del", "recording-", sessionId, "file-1"]) {
+      expect(copied).not.toContain(personal);
+    }
+  });
+
   it("does not record more while earlier parts wait for their upload", async () => {
     installBrowser();
     grantMicrophone();
