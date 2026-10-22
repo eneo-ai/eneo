@@ -59,7 +59,9 @@ describe("transcriptTargets", () => {
       }),
       makeRunStep(3, { input_payload_json: { transcription: { file_ids: [], source: {} } } })
     ];
-    expect(transcriptTargets(steps)).toEqual([{ stepId: "step-1", stepOrder: 1, attemptNo: 2 }]);
+    expect(transcriptTargets(steps)).toEqual([
+      { stepId: "step-1", stepOrder: 1, attemptNo: 2, fileIds: ["f1"] }
+    ]);
   });
 });
 

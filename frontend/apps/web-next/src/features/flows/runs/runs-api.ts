@@ -1,9 +1,10 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { browserApi, type EneoClient } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { proxiedDownloadPath } from "@/features/files/signed-file-url";
 import { OMISSION_REASON, type TranscriptSourceSegment } from "./transcript";
+import type { TranscriptWords } from "./transcript-playback";
 
 /**
  * The flow-core run endpoints the run screens use: the run contract, uploads,
@@ -407,6 +408,45 @@ export function transcriptQueryOptions(
     // A finished attempt's source does not change.
     staleTime: Infinity
   });
+}
+
+/**
+ * The word timings a transcription step stored, or null when it stored
+ * none. An audited content read: asked for once someone plays the audio.
+ */
+export function transcriptWordsQueryOptions(flowId: string, runId: string, stepId: string) {
+  return queryOptions({
+    queryKey: [...runKeys.run(flowId, runId), "transcript-words", stepId],
+    queryFn: async ({ signal }): Promise<TranscriptWords | null> => {
+      try {
+        return await unwrap(
+          browserApi.GET("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-words/", {
+            params: { path: { id: flowId, run_id: runId, step_id: stepId } },
+            signal
+          })
+        );
+      } catch (error) {
+        if (error instanceof EneoApiError && error.status === 404) return null;
+        throw error;
+      }
+    },
+    staleTime: Infinity
+  });
+}
+
+/** A short-lived path (through the app's proxy) that plays an audio file the run received. */
+export async function inputFilePlaybackPath(
+  flowId: string,
+  runId: string,
+  fileId: string
+): Promise<string> {
+  const signed = await unwrap(
+    browserApi.POST("/api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/", {
+      params: { path: { id: flowId, run_id: runId, file_id: fileId } },
+      body: { content_disposition: "inline", expires_in: 3600 }
+    })
+  );
+  return proxiedDownloadPath(signed.url, fileId);
 }
 
 export function transcriptCorrectionsQueryOptions(flowId: string, runId: string) {

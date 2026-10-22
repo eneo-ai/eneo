@@ -21,8 +21,16 @@ export const OMISSION_REASON = {
   SEGMENTS_UNAVAILABLE: 3
 } as const satisfies Record<string, Schema<"TranscriptSourceOmissionReason">>;
 
-/** A transcription step of the run and the attempt that owns its transcript. */
-export type TranscriptTarget = { stepId: string; stepOrder: number; attemptNo: number };
+/**
+ * A transcription step of the run, the attempt that owns its transcript, and
+ * its audio files in upload order (a line's `fileIndex` counts in them).
+ */
+export type TranscriptTarget = {
+  stepId: string;
+  stepOrder: number;
+  attemptNo: number;
+  fileIds: string[];
+};
 
 export type TranscriptSegment = {
   index: number;
@@ -66,7 +74,14 @@ export function transcriptTargets(
       ) {
         return [];
       }
-      return [{ stepId: step.step_id, stepOrder: step.step_order, attemptNo }];
+      return [
+        {
+          stepId: step.step_id,
+          stepOrder: step.step_order,
+          attemptNo,
+          fileIds: files.filter((id): id is string => typeof id === "string")
+        }
+      ];
     })
     .sort((a, b) => a.stepOrder - b.stepOrder);
 }
@@ -86,8 +101,15 @@ export function parseSegments(raw: readonly TranscriptSourceSegment[]): Transcri
   }));
 }
 
-/** A line with the saved corrections applied, and its speaker's shown name. */
-export type ShownSegment = TranscriptSegment & { label: string | null; name: string | null };
+/**
+ * A line with the saved corrections applied, its speaker's shown name, and
+ * whether a text correction changed it.
+ */
+export type ShownSegment = TranscriptSegment & {
+  label: string | null;
+  name: string | null;
+  corrected: boolean;
+};
 
 /**
  * Applies saved corrections: each occurrence replaces exactly its span of
@@ -107,6 +129,7 @@ export function shownSegments(
   const names = corrections?.speaker_names ?? {};
   return segments.map((segment) => {
     let text = segment.text;
+    let corrected = false;
     const own = occurrences
       .filter((occurrence) => occurrence.segment_index === segment.index)
       .sort((a, b) => b.char_start - a.char_start);
@@ -116,11 +139,12 @@ export function shownSegments(
         text.slice(0, occurrence.char_start) +
         occurrence.corrected +
         text.slice(occurrence.char_end);
+      corrected = true;
     }
     const edit = edits.find((item) => item.segment_index === segment.index);
     const label = edit && edit.decision !== "unresolved" ? edit.speaker : segment.speaker;
     const name = label ? names[label]?.trim() || null : null;
-    return { ...segment, text, label, name };
+    return { ...segment, text, label, name, corrected };
   });
 }
 

@@ -18,6 +18,8 @@ import {
   transcriptCorrectionsQueryOptions,
   transcriptQueryOptions
 } from "./runs-api";
+import { useTranscriptPlayback } from "./transcript-player";
+import { textRuns, type PlacedWord } from "./transcript-playback";
 import {
   clockTime,
   parseSegments,
@@ -129,22 +131,83 @@ function SpeakerNames({
   );
 }
 
-function SegmentLine({ segment, multiFile }: { segment: ShownSegment; multiFile: boolean }) {
+function SegmentLine({
+  segment,
+  multiFile,
+  id,
+  active,
+  activeWord,
+  words,
+  onSeek
+}: {
+  segment: ShownSegment;
+  multiFile: boolean;
+  id: string;
+  active: boolean;
+  activeWord: number;
+  /** The line's placed words, when they still match its text. */
+  words: readonly PlacedWord[] | undefined;
+  /** Plays the line from `time`; absent without audio. */
+  onSeek: ((time: number) => void) | null;
+}) {
   const t = useTranslations();
   const speaker = segment.name ?? segment.label ?? t("flow_runs_transcript_unknown_speaker");
-  return (
-    <li className="grid gap-x-3 gap-y-0.5 py-1.5 sm:grid-cols-[minmax(6rem,max-content)_1fr]">
+  const time = multiFile
+    ? t("flow_runs_transcript_time_in_file", {
+        file: segment.fileIndex + 1,
+        time: clockTime(segment.start)
+      })
+    : clockTime(segment.start);
+  // Words are placed in the raw text: a corrected line is marked as a whole.
+  const runs = words && !segment.corrected ? textRuns(segment.text, words) : null;
+  const body = (
+    <>
       <span className="text-ax-text-secondary text-xs tabular-nums sm:pt-0.5">
-        {multiFile
-          ? t("flow_runs_transcript_time_in_file", {
-              file: segment.fileIndex + 1,
-              time: clockTime(segment.start)
-            })
-          : clockTime(segment.start)}
+        {onSeek ? <span className="sr-only">{t("flow_transcript_play_from")} </span> : null}
+        {time}
       </span>
       <span className="text-ax-text text-sm break-words">
-        <span className="font-semibold">{speaker}:</span> {segment.text}
+        <span className="font-semibold">{speaker}:</span>{" "}
+        {runs
+          ? runs.map((run, index) =>
+              run.word === null ? (
+                <span key={index}>{run.text}</span>
+              ) : (
+                <span
+                  key={index}
+                  data-word={run.word}
+                  className={
+                    active && run.word === activeWord ? "bg-ax-accent-muted rounded-sm" : undefined
+                  }
+                >
+                  {run.text}
+                </span>
+              )
+            )
+          : segment.text}
       </span>
+    </>
+  );
+  const layout = "grid gap-x-3 gap-y-0.5 py-1.5 sm:grid-cols-[minmax(6rem,max-content)_1fr]";
+  return (
+    <li id={id} className={active ? "bg-ax-selected rounded-ax-inner" : undefined}>
+      {onSeek ? (
+        <button
+          type="button"
+          aria-current={active ? "time" : undefined}
+          className={`${layout} hover:bg-ax-hover focus-visible:outline-ring rounded-ax-inner w-full px-1 text-left outline-none focus-visible:outline-2 focus-visible:outline-offset-2`}
+          onClick={(event) => {
+            // A click on a word plays from that word; the keyboard plays the line.
+            const word = (event.target as HTMLElement).closest<HTMLElement>("[data-word]");
+            const placed = word ? words?.[Number(word.dataset.word)] : undefined;
+            onSeek(placed ? placed.start : segment.start);
+          }}
+        >
+          {body}
+        </button>
+      ) : (
+        <div className={`${layout} px-1`}>{body}</div>
+      )}
     </li>
   );
 }
@@ -192,7 +255,14 @@ function StepTranscript({
   const labels = speakerLabels(shown);
   const multiFile = new Set(shown.map((segment) => segment.fileIndex)).size > 1;
   return (
-    <div className="flex flex-col gap-4">
+    <TranscriptLines
+      flowId={flowId}
+      runId={runId}
+      target={target}
+      shown={shown}
+      sourceHash={source.data.sourceHash}
+      multiFile={multiFile}
+    >
       {corrections?.stale ? (
         <QuietBanner
           status="warning"
@@ -212,9 +282,46 @@ function StepTranscript({
           sourceHash={source.data.sourceHash}
         />
       ) : null}
+    </TranscriptLines>
+  );
+}
+
+/** The lines of one transcript, with its audio player above them. */
+function TranscriptLines({
+  flowId,
+  runId,
+  target,
+  shown,
+  sourceHash,
+  multiFile,
+  children
+}: {
+  flowId: string;
+  runId: string;
+  target: TranscriptTarget;
+  shown: ShownSegment[];
+  sourceHash: string;
+  multiFile: boolean;
+  children?: React.ReactNode;
+}) {
+  const t = useTranslations();
+  const playback = useTranscriptPlayback({ flowId, runId, target, lines: shown, sourceHash });
+  return (
+    <div className="flex flex-col gap-4">
+      {children}
+      {playback?.player}
       <ol aria-label={t("flow_runs_transcript_lines")} className="m-0 flex flex-col p-0">
-        {shown.map((segment) => (
-          <SegmentLine key={segment.index} segment={segment} multiFile={multiFile} />
+        {shown.map((segment, position) => (
+          <SegmentLine
+            key={segment.index}
+            id={playback?.lineId(position) ?? `line-${segment.index}`}
+            segment={segment}
+            multiFile={multiFile}
+            active={playback?.activeLine === position}
+            activeWord={playback?.activeLine === position ? playback.activeWord : -1}
+            words={playback?.words.get(segment.index)}
+            onSeek={playback ? (time) => playback.seek(segment.fileIndex, time) : null}
+          />
         ))}
       </ol>
     </div>

@@ -532,6 +532,70 @@ describe("FlowRunPage", () => {
       });
     });
 
+    it("plays the audio from a line or a word and marks the line playing", async () => {
+      answerAudioRun();
+      state.routes["POST /api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/"] =
+        () => ({
+          body: {
+            url: "http://backend:8000/api/v1/files/audio-1/download/?token=t0k3n",
+            expires_at: "2026-10-21T10:00:00Z"
+          }
+        });
+      state.routes["GET /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-words/"] =
+        () => ({
+          body: {
+            alignment: "provider_words",
+            created_at: "2026-10-21T09:00:00Z",
+            flow_run_id: "run-1",
+            step_id: "step-1",
+            segments_hash: "hash-1",
+            stale: false,
+            segments: [
+              {
+                segment_index: 1,
+                words: [{ word: "Tack.", start: 65.5, end: 66, probability: 0.9 }]
+              }
+            ]
+          }
+        });
+      const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+      const { container } = renderRun(["flows_view"]);
+
+      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      fireEvent.click(within(lines).getByRole("button", { name: /^Spela från 1:05/ }));
+      const audio = await screen.findByLabelText<HTMLAudioElement>(
+        messages.flow_transcript_audio_label
+      );
+      expect(audio.getAttribute("src")).toBe(
+        "/api/eneo/api/v1/files/audio-1/download/?token=t0k3n"
+      );
+      fireEvent.loadedMetadata(audio);
+      expect(audio.currentTime).toBe(65);
+      expect(play).toHaveBeenCalled();
+
+      Object.defineProperty(audio, "currentTime", {
+        configurable: true,
+        writable: true,
+        value: 65.7
+      });
+      fireEvent.timeUpdate(audio);
+      const playing = within(lines).getByRole("button", { name: /^Spela från 1:05/ });
+      await waitFor(() => expect(playing.getAttribute("aria-current")).toBe("time"));
+      expect(
+        within(lines)
+          .getByRole("button", { name: /^Spela från 0:00/ })
+          .getAttribute("aria-current")
+      ).toBeNull();
+      // The word playing is marked for the eye only, once the word timings came.
+      await waitFor(() => {
+        fireEvent.timeUpdate(audio);
+        expect(within(playing).getByText("Tack.").className).toContain("bg-ax-accent-muted");
+      });
+      expect(container.querySelector("[aria-live] [data-word]")).toBeNull();
+      await expectNoAxeViolations(container);
+      play.mockRestore();
+    });
+
     it("lets only someone who may review name the speakers", async () => {
       answerAudioRun();
       renderRun(["flows_view", "flows_run"]);
