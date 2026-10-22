@@ -1,6 +1,6 @@
 """Round-trip test for the forecast_models migration.
 
-``202610211200`` creates the catalog and binds every existing Forecast source
+``202610221000`` creates the catalog and binds every existing Forecast source
 to its tenant's ``default`` forecast model, under a tool service provider,
 without changing anything else on the source. The downgrade removes both, and
 the provider unless another model uses it.
@@ -25,7 +25,7 @@ from alembic.config import Config
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 PRE_REVISION = "202610201000"
-REVISION = "202610211200"
+REVISION = "202610221000"
 TOOL_SERVICE = "eneo_tool_service"
 # What the migration must leave as it was on a Forecast source.
 SOURCE_COLUMNS = (

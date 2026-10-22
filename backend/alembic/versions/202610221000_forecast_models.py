@@ -17,7 +17,7 @@ wins over the model's.
 The downgrade drops the column and the table, and removes the tool service
 providers that no other model uses.
 
-Revision ID: 202610211200
+Revision ID: 202610221000
 Revises: 202610201000
 Create Date: 2026-10-21
 
@@ -29,7 +29,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "202610211200"
+revision = "202610221000"
 down_revision = "202610201000"
 branch_labels = None
 depends_on = None
