@@ -796,6 +796,20 @@ class FlowUpdateRequest(BaseModel):
     description: str | None
     steps: list[FlowStepUpdateRequest]
     metadata_json: dict[str, Any] | None | NotProvided = Field(default=NOT_PROVIDED)
+    form_field_renames: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Run form fields this update renames, from the saved name to the name "
+            "the field has in `metadata_json.form_schema`. Every read of a renamed "
+            "field in the steps (prompts, input bindings, HTTP requests, template "
+            "bindings, tool arguments) follows it. A saved field the new form no "
+            "longer has and this map does not name is removed, and the update is "
+            "refused with `flow_form_field_still_read` while a step reads it. A "
+            "rename the form does not describe is refused with "
+            "`flow_form_field_rename_invalid`."
+        ),
+        examples=[{"kommun": "ort"}],
+    )
     expected_revision: int | None = Field(
         default=None,
         ge=0,
@@ -1077,6 +1091,17 @@ class FlowEditorAssistantChange(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     assistant_id: UUID
+    step_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The step whose assistant this changes. When other steps share the "
+            "assistant, this step gets its own copy of it with the change, and "
+            "the other steps keep the assistant as it was; the saved revision "
+            "shows the step with its new `assistant_id`. Without `step_id` the "
+            "change reaches every step that uses the assistant."
+        ),
+        examples=["00000000-0000-0000-0000-000000000102"],
+    )
     changes: FlowAssistantUpdateRequest
 
 
@@ -1183,7 +1208,7 @@ class FlowEditorUpdateRequest(BaseModel):
         step_ids = [change.step_id for change in self.step_edits]
         if len(step_ids) != len(set(step_ids)):
             raise ValueError("A step can only be updated once per edit.")
-        ids = [change.assistant_id for change in self.assistants]
+        ids = [(change.assistant_id, change.step_id) for change in self.assistants]
         if len(ids) != len(set(ids)):
             raise ValueError("An assistant can only be updated once per edit.")
         if self.step_order is not None:

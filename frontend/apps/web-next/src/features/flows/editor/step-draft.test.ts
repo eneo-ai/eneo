@@ -125,7 +125,11 @@ describe("buildEditorUpdate", () => {
       definition: {},
       step_edits: [{ step_id: "step-1", changes: { user_description: "Nytt namn" } }],
       assistants: [
-        { assistant_id: "assistant-1", changes: { prompt: { text: "Hej", description: null } } }
+        {
+          assistant_id: "assistant-1",
+          step_id: "step-1",
+          changes: { prompt: { text: "Hej", description: null } }
+        }
       ]
     });
   });

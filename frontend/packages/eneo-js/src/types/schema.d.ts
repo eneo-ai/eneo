@@ -4827,7 +4827,7 @@ export interface paths {
     head?: never;
     /**
      * Update Flow
-     * @description Update a draft flow definition, including steps and metadata. Operational retention is managed separately by Organization administrators. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
+     * @description Update a draft flow definition, including steps and metadata. `steps`, when sent, replaces the step list: a step that keeps its `id` moves to its `step_order`, a step without an `id` is new, and a saved step left out is removed. A read column (`input_bindings`, `input_config`, `output_config`) a step sends as it was read is the saved one, and its reads of other steps follow the change (`step_N` is renumbered, a read by step name follows a rename); one it sends changed is taken as given. Prompts of the step assistants follow in the same revision. A rename of a run form field (`form_field_renames`) takes its reads along. Operational retention is managed separately by Organization administrators. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     patch: operations["update_flow"];
     trace?: never;
@@ -4935,7 +4935,7 @@ export interface paths {
     head?: never;
     /**
      * Update Flow and Step Assistants
-     * @description Apply one editor change to a draft flow and its flow-managed step assistants in a single revision: flow settings, sparse step edits, new steps with their assistants, and `step_order` to move, insert or remove steps. The change is fenced on `expected_revision` and either saves as a whole or not at all. Reads of a step that moves follow it; a change that removes a step another step reads, or moves it after that step, is refused with `flow_step_read_lost_producer`. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
+     * @description Apply one editor change to a draft flow and its flow-managed step assistants in a single revision: flow settings, sparse step edits, new steps with their assistants, and `step_order` to move, insert or remove steps. The change is fenced on `expected_revision` and either saves as a whole or not at all, and its audit entries are logged only once it has passed every check. Reads of a step that moves follow it, reads of a renamed step or run form field (`definition.form_field_renames`) follow the new name; a change that would make a step read another step than it reads now is refused with `flow_step_read_lost_producer`. An assistant change with `step_id` gives that step its own copy of an assistant it shares with other steps. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     patch: operations["update_flow_editor"];
     trace?: never;
@@ -17981,6 +17981,9 @@ export interface components {
       | "flow_run_required_step_input_missing"
       | "flow_document_runtime_required"
       | "flow_step_read_lost_producer"
+      | "flow_unpublish_required"
+      | "flow_form_field_still_read"
+      | "flow_form_field_rename_invalid"
       | "flow_run_runtime_input_disabled"
       | "flow_run_top_level_file_ids_not_supported"
       | "flow_run_idempotency_conflict"
@@ -18607,6 +18610,12 @@ export interface components {
        */
       assistant_id: string;
       changes: components["schemas"]["FlowAssistantUpdateRequest"];
+      /**
+       * Step Id
+       * @description The step whose assistant this changes. When other steps share the assistant, this step gets its own copy of it with the change, and the other steps keep the assistant as it was; the saved revision shows the step with its new `assistant_id`. Without `step_id` the change reaches every step that uses the assistant.
+       * @example 00000000-0000-0000-0000-000000000102
+       */
+      step_id?: string | null;
     };
     /** FlowEditorNewStep */
     FlowEditorNewStep: {
@@ -32426,6 +32435,16 @@ export interface components {
        * @description The `draft_revision` the editor read before making these changes. When set, the update is refused with `400` and code `stale_revision` if the draft has moved on since; when omitted the write is fenced on the revision read at the start of this request.
        */
       expected_revision?: number | null;
+      /**
+       * Form Field Renames
+       * @description Run form fields this update renames, from the saved name to the name the field has in `metadata_json.form_schema`. Every read of a renamed field in the steps (prompts, input bindings, HTTP requests, template bindings, tool arguments) follows it. A saved field the new form no longer has and this map does not name is removed, and the update is refused with `flow_form_field_still_read` while a step reads it. A rename the form does not describe is refused with `flow_form_field_rename_invalid`.
+       * @example {
+       *       "kommun": "ort"
+       *     }
+       */
+      form_field_renames?: {
+        [key: string]: string;
+      } | null;
       /** Metadata Json */
       metadata_json?: {
         [key: string]: unknown;
@@ -57688,19 +57707,12 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
-      /** @description The submitted draft flow update is invalid or the flow cannot be updated in its current state. */
+      /** @description The submitted draft flow update is invalid, the draft moved on since `expected_revision` (`stale_revision`), or a change would make a step read another step than it reads now (`flow_step_read_lost_producer`). Its `context` names the reading step (`step_id`, `step_order`), where the read is (`site`), the saved order of the step it reads (`reads_step`, with `reads_name` for a read by step name) and `reason`: `producer_removed` (the change removes that step), `producer_moved_after_reader` (it moves that step to or after the reader), `reader_moved_before_producer` (it moves the reader to or before that step), `producer_renamed` (the step loses the name the read uses, or another step takes it) or `would_read_another_step` (a read that named no step it could read would come to name one). A saved run form field the new `metadata_json.form_schema` drops, and `form_field_renames` does not rename, is refused with `flow_form_field_still_read` while a step reads it; `context.readers` lists each read (`field`, `step_id`, `step_order`, `site`). A rename the forms do not describe is refused with `flow_form_field_rename_invalid` (`context`: `from`, `to`, `problem`). A published flow is refused with `flow_unpublish_required`. */
       400: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          /**
-           * @example {
-           *       "code": "bad_request",
-           *       "eneo_error_code": 9007,
-           *       "message": "Flow update is invalid."
-           *     }
-           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
@@ -57997,7 +58009,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description A step of the flow (`context.reason` `step_reference`) or a run that has not finished (`unfinished_run_reference`, with `context.flow_version`) still uses the assistant. A published flow is refused with 400 `bad_request`. */
+      /** @description A step of the flow (`context.reason` `step_reference`) or a run that has not finished (`unfinished_run_reference`, with `context.flow_version`) still uses the assistant. A published flow is refused with `flow_unpublish_required`. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -58130,7 +58142,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowAssistantUpdatePublic"];
         };
       };
-      /** @description The flow's draft has moved on since `expected_revision` (or since the revision this request read); nothing is written. A published flow is refused with 400 `bad_request`. */
+      /** @description The flow's draft has moved on since `expected_revision` (or since the revision this request read); nothing is written. A published flow is refused with `flow_unpublish_required`. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -58408,7 +58420,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
-      /** @description The change is invalid, the draft moved on since `expected_revision` (`stale_revision`), or a step would lose a step it reads (`flow_step_read_lost_producer`). */
+      /** @description The change is invalid, the draft moved on since `expected_revision` (`stale_revision`), or a change would make a step read another step than it reads now (`flow_step_read_lost_producer`). Its `context` names the reading step (`step_id`, `step_order`), where the read is (`site`), the saved order of the step it reads (`reads_step`, with `reads_name` for a read by step name) and `reason`: `producer_removed` (the change removes that step), `producer_moved_after_reader` (it moves that step to or after the reader), `reader_moved_before_producer` (it moves the reader to or before that step), `producer_renamed` (the step loses the name the read uses, or another step takes it) or `would_read_another_step` (a read that named no step it could read would come to name one). A saved run form field the new `metadata_json.form_schema` drops, and `form_field_renames` does not rename, is refused with `flow_form_field_still_read` while a step reads it; `context.readers` lists each read (`field`, `step_id`, `step_order`, `site`). A rename the forms do not describe is refused with `flow_form_field_rename_invalid` (`context`: `from`, `to`, `problem`). A published flow is refused with `flow_unpublish_required`. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -62848,7 +62860,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
-      /** @description The flow cannot be unpublished in its current state. */
+      /** @description The flow cannot be unpublished in its current state: it is not published (`flow_not_published`). */
       400: {
         headers: {
           [name: string]: unknown;
@@ -62856,9 +62868,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "bad_request",
+           *       "code": "flow_not_published",
            *       "eneo_error_code": 9007,
-           *       "message": "Flow cannot be unpublished in its current state."
+           *       "message": "Flow is not published."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

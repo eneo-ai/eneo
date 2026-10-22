@@ -891,6 +891,67 @@ class AssistantService:
 
         return assistant, permissions  # type: ignore[return-value]
 
+    async def copy_flow_managed_assistant(
+        self, *, assistant_id: UUID
+    ) -> tuple[Assistant, list[ResourcePermission]]:
+        """A new assistant of the same flow with the settings ``assistant_id``
+        has now: prompt, model and its settings, knowledge, attachments and
+        their modes, retention and logging. A copy changes no setting, so it
+        takes none of their own permissions, only the right to create
+        assistants in the space."""
+
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        source = space.get_assistant(assistant_id=assistant_id)
+        if source.origin != AssistantOrigin.FLOW_MANAGED:
+            raise NotFoundException("Assistant is not flow-managed.")
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_create_assistants():
+            raise UnauthorizedException(
+                "User does not have permission to create assistants in this space"
+            )
+        assert space.id is not None
+        prompt = None
+        if source.prompt is not None:
+            prompt = await self.prompt_service.create_prompt(
+                source.prompt.text,
+                source.prompt.description,
+                owner_user_id=(
+                    source.user.id if source.user is not None else self.user.id
+                ),
+            )
+        copy = self.factory.create_assistant(
+            name=source.name,
+            user=self.user,
+            space_id=space.id,
+            prompt=prompt,
+            completion_model=source.completion_model,
+            completion_model_kwargs=source.completion_model_kwargs,
+            logging_enabled=source.logging_enabled,
+            attachments=list(source.attachments),
+            attachment_inline_text=dict(source.attachment_inline_text),
+            collections=list(source.collections),
+            integration_knowledge_list=list(source.integration_knowledge_list),
+            insight_enabled=source.insight_enabled,
+            data_retention_days=source.data_retention_days,
+            metadata_json=source.metadata_json,
+            description=source.description,
+            hidden=True,
+            origin=AssistantOrigin.FLOW_MANAGED,
+            managing_flow_id=source.managing_flow_id,
+        )
+        copy.websites = list(source.websites)
+        copy.inline_file_text = source.inline_file_text
+        copy.knowledge_mode = source.knowledge_mode
+        copy.rerank_model_id = source.rerank_model_id
+        copy.icon_id = source.icon_id
+        copy.enabled_capabilities = list(source.enabled_capabilities)
+        await self._add_assistant_to_space(space, copy)
+        refreshed_space = await self.space_repo.one(
+            id=space.id, hidden_assistant_ids={copy.id}
+        )
+        copy = refreshed_space.get_assistant(copy.id)
+        return copy, actor.get_assistant_permissions(assistant=copy)
+
     async def _add_assistant_to_space(
         self, space: "Space", assistant: Assistant
     ) -> None:

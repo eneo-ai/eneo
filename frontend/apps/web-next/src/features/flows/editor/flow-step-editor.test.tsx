@@ -166,6 +166,7 @@ describe("FlowStepEditor", () => {
         assistants: [
           {
             assistant_id: "assistant-1",
+            step_id: "step-1",
             changes: { prompt: { text: "Sammanfatta i tre punkter.", description: null } }
           }
         ]
