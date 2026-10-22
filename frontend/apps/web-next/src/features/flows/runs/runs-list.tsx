@@ -3,7 +3,9 @@
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { useAnnounce } from "@astryxdesign/core/hooks";
+import { Selector } from "@astryxdesign/core/Selector";
 import { proportional, type TableColumn } from "@astryxdesign/core/Table";
+import { FLOW_RUN_STATUS_FILTER_ORDER } from "@eneo/eneo-js/flows/run-status-capabilities";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { History } from "lucide-react";
 import Link from "next/link";
@@ -25,9 +27,18 @@ import {
   runStatusView,
   statusChanges
 } from "./run-status";
-import { RUNS_MAX_PAGES, RUNS_PAGE_SIZE, runsListQueryOptions, type RunSummary } from "./runs-api";
+import {
+  RUNS_MAX_PAGES,
+  RUNS_PAGE_SIZE,
+  runsListQueryOptions,
+  type RunStatus as RunStatusValue,
+  type RunSummary
+} from "./runs-api";
 
 type Row = RunSummary & Record<string, unknown>;
+
+/** The status filter's "every status" choice; no run status has this name. */
+const ANY_STATUS = "any";
 
 /** Where a run's own page is. */
 export function runHref(spaceRouteId: string, flowId: string, runId: string): string {
@@ -66,7 +77,8 @@ function RunLink({ run, href }: { run: RunSummary; href: string }) {
 
 /**
  * A flow's runs, newest first: status, when each started, who started it,
- * how long it took and which version ran. The list keeps itself current
+ * how long it took and which version ran, narrowed to one status or to the
+ * caller's own runs by the list endpoint. The list keeps itself current
  * while a run in it is queued, running or waiting for review, on the
  * cadence the run API asks for, and stops once all of them have ended. A
  * run that moves on is announced.
@@ -85,11 +97,12 @@ export function FlowRunsList({
   const announce = useAnnounce();
   const headingId = useId();
   const [mine, setMine] = useState(false);
+  const [status, setStatus] = useState<RunStatusValue | null>(null);
   const [clock] = useState(() => createPollClock());
   const seen = useRef(new Map<string, string>());
 
   const runs = useInfiniteQuery({
-    ...runsListQueryOptions(flowId, { mine }),
+    ...runsListQueryOptions(flowId, { mine, status }),
     refetchInterval: (query) => {
       const items = query.state.data?.pages.flatMap((page) => page.items) ?? [];
       return clock(listSignature(items), listNeedsPolling(items));
@@ -150,10 +163,24 @@ export function FlowRunsList({
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Heading id={headingId} className="text-ax-text text-lg font-semibold">
-          {t("flow_runs_heading")}
-        </Heading>
+      <Heading id={headingId} className="text-ax-text text-lg font-semibold">
+        {t("flow_runs_heading")}
+      </Heading>
+      <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+        <Selector
+          label={t("flow_run_extras_status_filter")}
+          size="sm"
+          width={220}
+          value={status ?? ANY_STATUS}
+          onChange={(value) => setStatus(value === ANY_STATUS ? null : (value as RunStatusValue))}
+          options={[
+            { value: ANY_STATUS, label: t("flow_run_extras_status_any") },
+            ...FLOW_RUN_STATUS_FILTER_ORDER.map((value) => ({
+              value,
+              label: t(runStatusView(value).labelKey)
+            }))
+          ]}
+        />
         <CheckboxInput label={t("flow_runs_only_mine")} value={mine} onChange={setMine} />
       </div>
       {runs.isPending ? (
@@ -171,8 +198,18 @@ export function FlowRunsList({
           hue="purple"
           headingLevel={headingLevel === 2 ? 3 : 4}
           isCompact
-          title={mine ? t("flow_runs_empty_mine_title") : t("flow_runs_empty_title")}
-          description={t("flow_runs_empty_description")}
+          title={
+            status
+              ? t("flow_run_extras_status_empty_title", {
+                  status: t(runStatusView(status).labelKey)
+                })
+              : mine
+                ? t("flow_runs_empty_mine_title")
+                : t("flow_runs_empty_title")
+          }
+          description={
+            status ? t("flow_run_extras_status_empty") : t("flow_runs_empty_description")
+          }
         />
       ) : (
         <>

@@ -77,6 +77,30 @@ describe("reviewDraftOf", () => {
     });
   });
 
+  it("edits nested JSON its output contract describes as a form built from the contract", () => {
+    const contract = {
+      type: "object",
+      properties: { punkter: { type: "array", items: { type: "string" } } }
+    };
+    const checkpoint = makeCheckpoint({
+      output_type: "json",
+      output_contract: contract,
+      current_payload_json: { structured: { punkter: ["a", "b"] } }
+    });
+    expect(reviewDraftOf(checkpoint)).toEqual({
+      kind: "structured",
+      schema: contract,
+      value: { punkter: ["a", "b"] }
+    });
+    // A value the contract does not describe stays JSON text.
+    const mismatched = makeCheckpoint({
+      output_type: "json",
+      output_contract: contract,
+      current_payload_json: { structured: ["a", "b"] }
+    });
+    expect(reviewDraftOf(mismatched).kind).toBe("json");
+  });
+
   it("reviews a document step as its file", () => {
     expect(reviewDraftOf(makeCheckpoint({ output_type: "pdf" })).kind).toBe("file");
   });
@@ -99,6 +123,9 @@ describe("editedValueOf", () => {
       })
     ).toEqual({ ok: true, value: { antal: 4, klar: true, not: null } });
     expect(editedValueOf({ kind: "json", text: '["a"]' })).toEqual({ ok: true, value: ["a"] });
+    expect(
+      editedValueOf({ kind: "structured", schema: {}, value: { punkter: [{ antal: 2 }] } })
+    ).toEqual({ ok: true, value: { punkter: [{ antal: 2 }] } });
   });
 
   it("names the field that is not a number, and JSON text that is not an object or list", () => {
