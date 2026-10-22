@@ -25,6 +25,8 @@ import {
 } from "./transcript-corrections";
 import { useTranscriptPlayback } from "./transcript-player";
 import { textRuns, type PlacedWord, type TextRun } from "./transcript-playback";
+import { overlapDetectionUnavailable, overlaps, type Overlap } from "./transcript-overlaps";
+import type { TranscriptSpeakerReview } from "./runs-api";
 
 /** What editing a transcript's lines needs: the saved set, and a save that says what went wrong. */
 export type LineEditing = {
@@ -111,6 +113,17 @@ function SpeakerEditor({
     else onDone();
   }
 
+  // The speaker service was unsure; the reviewer keeps its speaker.
+  async function confirm() {
+    if (editing.saving) return;
+    const failed = await editing.save(
+      withSpeaker(editing.set, line, null, { speaker: segment.speaker, decision: "confirmed" }),
+      t("flow_transcript_speaker_confirmed")
+    );
+    if (failed) onProblem(failed);
+    else onDone();
+  }
+
   async function reset() {
     if (editing.saving) return;
     const failed = await editing.save(
@@ -159,6 +172,16 @@ function SpeakerEditor({
         size="sm"
       />
       <div className="flex flex-wrap gap-2">
+        {segment.unsure ? (
+          <Button
+            label={t("flow_transcript_speaker_confirm", {
+              name: speakerName(segment.label, editing.set.names, t)
+            })}
+            variant="primary"
+            isInterruptible
+            onClick={() => void confirm()}
+          />
+        ) : null}
         <Button
           label={t("flow_transcript_speaker_apply")}
           isLoading={editing.saving}
@@ -316,7 +339,7 @@ function LineText({
   return (
     <>
       <span className="font-semibold">{speaker}:</span>{" "}
-      {segment.decision === "unresolved" ? <>{unresolved} </> : null}
+      {segment.decision === "unresolved" || segment.unsure ? <>{unresolved} </> : null}
       {runs
         ? runs.map((run, index) =>
             run.word === null ? (
@@ -386,6 +409,12 @@ function SegmentLine({
             <Token size="sm" label={t("flow_transcript_line_corrected")} />
           </>
         ) : null}
+        {segment.overlapIds?.length ? (
+          <>
+            {" "}
+            <Token size="sm" color="gray" label={t("flow_transcript_overlap_line")} />
+          </>
+        ) : null}
       </span>
     </>
   );
@@ -430,6 +459,81 @@ function SegmentLine({
 }
 
 /**
+ * The places where more than one voice spoke at once, with how many lines
+ * there still need a reviewer's decision on who spoke; each can be gone to
+ * (and played from).
+ */
+function OverlapReview({
+  found,
+  unavailable,
+  multiFile,
+  onGo
+}: {
+  found: Overlap[];
+  unavailable: boolean;
+  multiFile: boolean;
+  onGo: (overlap: Overlap) => void;
+}) {
+  const t = useTranslations();
+  if (found.length === 0) {
+    return unavailable ? (
+      <Text type="supporting" as="p">
+        {t("flow_transcript_overlap_unavailable")}
+      </Text>
+    ) : null;
+  }
+  const open = found.filter((overlap) => overlap.open > 0).length;
+  return (
+    <QuietBanner
+      status={open > 0 ? "warning" : "success"}
+      title={
+        open > 0
+          ? t("flow_transcript_overlap_title", { count: open })
+          : t("flow_transcript_overlap_done")
+      }
+      description={t("flow_transcript_overlap_hint")}
+      collapsible={false}
+    >
+      <ol aria-label={t("flow_transcript_overlap_list")} className="m-0 flex flex-col gap-1 p-0">
+        {found.map((overlap) => {
+          const time = `${clockTime(overlap.start)}–${clockTime(overlap.end)}`;
+          const where = multiFile
+            ? t("flow_runs_transcript_time_in_file", { file: overlap.fileIndex + 1, time })
+            : time;
+          return (
+            <li key={overlap.id} className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="tabular-nums">{where}</span>
+              {overlap.voices ? (
+                <span className="text-ax-text-secondary">
+                  {t("flow_transcript_overlap_voices", { count: overlap.voices })}
+                </span>
+              ) : null}
+              <Token
+                size="sm"
+                color={overlap.open > 0 ? "orange" : "green"}
+                label={
+                  overlap.open > 0
+                    ? t("flow_transcript_overlap_open", { count: overlap.open })
+                    : t("flow_transcript_overlap_checked")
+                }
+              />
+              {overlap.lines.length > 0 ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  label={t("flow_transcript_overlap_go", { time: where })}
+                  onClick={() => onGo(overlap)}
+                />
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </QuietBanner>
+  );
+}
+
+/**
  * The lines of one transcript, with its audio player above them. Someone who
  * may correct the transcript corrects a line's text in place; the line then
  * shows that it is corrected and what it said before, and the correction can
@@ -443,6 +547,7 @@ export function TranscriptLines({
   sourceHash,
   multiFile,
   editing,
+  speakerReview = null,
   children
 }: {
   flowId: string;
@@ -452,6 +557,8 @@ export function TranscriptLines({
   sourceHash: string;
   multiFile: boolean;
   editing: LineEditing | null;
+  /** Where the speaker service heard more than one voice at once. */
+  speakerReview?: TranscriptSpeakerReview | null;
   children?: React.ReactNode;
 }) {
   const t = useTranslations();
@@ -478,6 +585,19 @@ export function TranscriptLines({
   return (
     <div className="flex flex-col gap-4">
       {children}
+      <OverlapReview
+        found={overlaps(speakerReview, shown)}
+        unavailable={overlapDetectionUnavailable(speakerReview)}
+        multiFile={multiFile}
+        onGo={(overlap) => {
+          playback?.seek(overlap.fileIndex, overlap.start);
+          const first = overlap.lines[0];
+          if (first === undefined) return;
+          const line = document.getElementById(lineId(first, shown[first]!));
+          line?.scrollIntoView({ block: "nearest" });
+          line?.querySelector<HTMLElement>("button")?.focus();
+        }}
+      />
       {playback?.player}
       {corrected > 0 ? (
         <Text type="supporting" as="p">

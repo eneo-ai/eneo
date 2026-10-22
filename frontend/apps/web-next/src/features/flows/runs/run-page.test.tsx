@@ -843,6 +843,85 @@ describe("FlowRunPage", () => {
       ).toBe("/spaces/space-1/flows/flow-1/runs/run-2");
     });
 
+    it("marks where more than one voice spoke and lets the reviewer decide the speaker", async () => {
+      answerAudioRun();
+      const source = state.routes[SOURCE]!({} as never).body as Record<string, unknown>;
+      const segments = source.segments as Record<string, unknown>[];
+      state.routes[SOURCE] = () => ({
+        body: {
+          ...source,
+          speaker_review: {
+            files: [
+              {
+                file_index: 0,
+                overlap_detection: "available",
+                overlaps: [{ id: "f:o1", start: 64, end: 67, detected_speaker_count: 2 }]
+              }
+            ]
+          },
+          segments: [
+            segments[0],
+            { ...segments[1], overlap_ids: ["f:o1"], speaker_attribution: "provisional" }
+          ]
+        }
+      });
+      let revision = 0;
+      state.routes[EDIT] = (init: { body: Record<string, unknown> }) => {
+        revision += 1;
+        return {
+          body: {
+            flow_run_id: "run-1",
+            step_id: "step-1",
+            created_at: "2026-10-21T09:00:00Z",
+            updated_at: "2026-10-21T09:00:00Z",
+            edited_by_principal_type: "user",
+            schema_version: 3,
+            segments_hash: "hash-1",
+            stale: false,
+            revision,
+            occurrences: init.body.occurrences,
+            speaker_edits: init.body.speaker_edits,
+            speaker_names: init.body.speaker_names ?? {}
+          }
+        };
+      };
+      const { container } = renderRun(["flows_view", "flows_manage"]);
+
+      expect(
+        await screen.findByText("Ett ställe med överlappande tal behöver kontrolleras")
+      ).toBeTruthy();
+      const places = screen.getByRole("list", { name: messages.flow_transcript_overlap_list });
+      expect(within(places).getByText("2 röster")).toBeTruthy();
+      const lines = screen.getByRole("list", { name: messages.flow_runs_transcript_lines });
+      expect(within(lines).getByText(messages.flow_transcript_overlap_line)).toBeTruthy();
+      expect(within(lines).getByText(messages.flow_transcript_speaker_unresolved)).toBeTruthy();
+      await expectNoAxeViolations(container);
+
+      fireEvent.click(within(places).getByRole("button", { name: "Gå till 1:04–1:07" }));
+      expect(document.activeElement).toBe(
+        within(lines).getByRole("button", { name: /^Spela från 1:05/ })
+      );
+
+      fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
+      fireEvent.click(within(lines).getByRole("button", { name: "Behåll SPEAKER_01 som talare" }));
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_speaker_confirmed)
+      );
+      expect(calls(EDIT)[0]?.init.body).toMatchObject({
+        speaker_edits: [
+          {
+            segment_index: 1,
+            char_start: null,
+            original_speaker: "SPEAKER_01",
+            speaker: "SPEAKER_01",
+            decision: "confirmed"
+          }
+        ]
+      });
+      expect(await screen.findByText(messages.flow_transcript_overlap_done)).toBeTruthy();
+      expect(within(lines).queryByText(messages.flow_transcript_speaker_unresolved)).toBeNull();
+    });
+
     it("lets only someone who may review name the speakers", async () => {
       answerAudioRun();
       renderRun(["flows_view", "flows_run"]);

@@ -345,6 +345,7 @@ export function newIdempotencyKey(): string {
 }
 
 export type TranscriptSourcePage = Schema<"PresentTranscriptSourcePage">;
+export type TranscriptSpeakerReview = Schema<"TranscriptSpeakerReviewPublic">;
 
 /**
  * The transcript source of one transcription attempt, all pages read in
@@ -357,12 +358,18 @@ export async function getTranscriptSource(
   target: { stepId: string; attemptNo: number },
   signal?: AbortSignal
 ): Promise<
-  | { status: "present"; segments: TranscriptSourceSegment[]; sourceHash: string }
+  | {
+      status: "present";
+      segments: TranscriptSourceSegment[];
+      sourceHash: string;
+      speakerReview: TranscriptSpeakerReview | null;
+    }
   | { status: "omitted"; tooLarge: boolean }
   | { status: "unavailable" }
 > {
   const segments: TranscriptSourceSegment[] = [];
   let sourceHash: string | null = null;
+  let speakerReview: TranscriptSpeakerReview | null = null;
   let start = 0;
   for (;;) {
     const page = await unwrap(
@@ -388,13 +395,15 @@ export async function getTranscriptSource(
     }
     if (page.status !== "present") return { status: "unavailable" };
     sourceHash ??= page.source_hash;
+    // The speaker review comes with the first page only.
+    speakerReview ??= page.speaker_review ?? null;
     segments.push(...page.segments);
     if (page.next_segment_index === null) break;
     if (page.next_segment_index <= start)
       throw new Error("Transcript source paging did not advance");
     start = page.next_segment_index;
   }
-  return { status: "present", segments, sourceHash: sourceHash ?? "" };
+  return { status: "present", segments, sourceHash: sourceHash ?? "", speakerReview };
 }
 
 export function transcriptQueryOptions(

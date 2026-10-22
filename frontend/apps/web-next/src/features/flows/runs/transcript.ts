@@ -49,6 +49,10 @@ export type TranscriptSegment = {
   /** The diarization label (`SPEAKER_00`), or null when the line has none. */
   speaker: string | null;
   text: string;
+  /** The speaker review's overlaps the line falls in, by id. */
+  overlapIds?: string[];
+  /** Overlapping speech made the speaker service unsure of the line's speaker. */
+  provisional?: boolean;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -104,7 +108,9 @@ export function parseSegments(raw: readonly TranscriptSourceSegment[]): Transcri
     start: item.start,
     end: Math.max(item.start, item.end),
     speaker: item.speaker || null,
-    text: item.text
+    text: item.text,
+    ...(item.overlap_ids?.length ? { overlapIds: item.overlap_ids } : {}),
+    ...(item.speaker_attribution === "provisional" ? { provisional: true } : {})
   }));
 }
 
@@ -125,6 +131,11 @@ export type ShownSegment = TranscriptSegment & {
   parts: ShownPart[];
   /** How sure the reviewer was of a whole-line reassignment; null without one. */
   decision: SpeakerDecision | null;
+  /**
+   * The speaker service was unsure of the line's speaker, and no reviewer
+   * has decided it since.
+   */
+  unsure: boolean;
 };
 
 /**
@@ -158,7 +169,8 @@ export function shownSegments(
       name: nameOf(label),
       corrected,
       parts,
-      decision: single?.decision ?? null
+      decision: single?.decision ?? null,
+      unsure: Boolean(segment.provisional) && !parts.some((part) => part.overridden)
     };
   });
 }

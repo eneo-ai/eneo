@@ -208,6 +208,7 @@ function StepTranscript({
       shown={shown}
       sourceHash={sourceHash}
       multiFile={multiFile}
+      speakerReview={source.data.speakerReview}
       editing={
         editable
           ? {
