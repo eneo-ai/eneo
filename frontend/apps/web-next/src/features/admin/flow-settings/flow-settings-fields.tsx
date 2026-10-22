@@ -2,6 +2,8 @@
 
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
+import { Section } from "@astryxdesign/core/Section";
+import { Heading, Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "next-intl";
 import type { ReactNode } from "react";
 import type {
@@ -26,6 +28,44 @@ export type FieldKit = {
   /** Ref for a control (a field key, or another name), so focus can move to it. */
   fieldRef: (key: string) => (element: HTMLElement | null) => void;
 };
+
+/**
+ * One group of settings: an Astryx Section with the group's h2 and its
+ * one-line summary, then its fields. `id` is the anchor the old admin URLs
+ * and the save errors scroll to. Like the page's other groups it is not a
+ * landmark: the h2 is what a screen reader lists.
+ */
+export function SettingsSection({
+  id,
+  title,
+  description,
+  children
+}: {
+  id: string;
+  title: string;
+  description: string;
+  children: ReactNode;
+}) {
+  return (
+    <Section
+      id={id}
+      padding={5}
+      className="border-ax-border rounded-ax-container scroll-mt-32 overflow-hidden border"
+    >
+      <div className="flex flex-col gap-6">
+        <div className="border-ax-border flex flex-col gap-1 border-b pb-4">
+          <Heading level={2} className="text-base">
+            {title}
+          </Heading>
+          <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+            {description}
+          </Text>
+        </div>
+        {children}
+      </div>
+    </Section>
+  );
+}
 
 /**
  * One number setting: an Astryx NumberInput in the units it is shown in
@@ -107,8 +147,12 @@ export function AdvancedSettings({
       }}
       trigger={
         <span className="flex min-w-0 flex-col text-left">
-          <span className="text-sm font-medium">{title}</span>
-          <span className="text-muted-foreground text-sm font-normal">{summary}</span>
+          <Text size="sm" weight="medium">
+            {title}
+          </Text>
+          <Text type="supporting" size="sm">
+            {summary}
+          </Text>
         </span>
       }
     >

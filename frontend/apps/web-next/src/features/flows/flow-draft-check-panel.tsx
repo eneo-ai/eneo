@@ -2,7 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { Text } from "@astryxdesign/core/Text";
+import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId } from "react";
@@ -183,9 +183,9 @@ export function FlowDraftCheck({
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id={headingId} className="text-ax-text text-lg font-semibold">
+        <Heading level={2} id={headingId} weight="semibold" className="text-lg">
           {t("flow_editor_tools_check_heading")}
-        </h2>
+        </Heading>
         <Button
           label={t("flow_editor_tools_check_again")}
           size="sm"

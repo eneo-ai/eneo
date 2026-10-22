@@ -2,6 +2,7 @@
 
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { List, ListItem } from "@astryxdesign/core/List";
+import { Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, Workflow } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -53,11 +54,15 @@ function FlowUsage({ serverId }: { serverId: string }) {
   }
   const found = usage.data;
   if (found.total_count === 0) {
-    return <p className="text-muted-foreground text-sm">{t("flow_admin_usage_none")}</p>;
+    return (
+      <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+        {t("flow_admin_usage_none")}
+      </Text>
+    );
   }
 
   return (
-    <div className="rounded-lg border px-3 py-1">
+    <div className="border-ax-border rounded-ax-container border px-3 py-1">
       <Collapsible
         defaultIsOpen={false}
         trigger={
@@ -68,7 +73,9 @@ function FlowUsage({ serverId }: { serverId: string }) {
         }
       >
         <div className="flex flex-col gap-2 pb-2">
-          <p className="text-muted-foreground text-sm">{t("flow_admin_usage_hint")}</p>
+          <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+            {t("flow_admin_usage_hint")}
+          </Text>
           <List density="compact" hasDividers header={t("flow_admin_usage_list")}>
             {found.items.map((flow) => {
               const opens = canOpenFlows && memberSpaceIds.has(flow.space_id);
@@ -79,7 +86,7 @@ function FlowUsage({ serverId }: { serverId: string }) {
                   href={opens ? `/spaces/${flow.space_id}/flows/${flow.flow_id}` : undefined}
                   endContent={
                     opens ? (
-                      <ChevronRight className="text-muted-foreground size-4" aria-hidden="true" />
+                      <ChevronRight className="text-ax-text-secondary size-4" aria-hidden="true" />
                     ) : undefined
                   }
                   description={
@@ -102,12 +109,12 @@ function FlowUsage({ serverId }: { serverId: string }) {
             })}
           </List>
           {found.total_count > found.items.length ? (
-            <p className="text-muted-foreground text-sm">
+            <Text type="supporting" size="sm" as="p" display="block" className="m-0">
               {t("flow_admin_usage_shown", {
                 shown: found.items.length,
                 total: found.total_count
               })}
-            </p>
+            </Text>
           ) : null}
         </div>
       </Collapsible>

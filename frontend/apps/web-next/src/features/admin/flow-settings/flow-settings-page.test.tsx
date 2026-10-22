@@ -242,7 +242,7 @@ describe("flow settings page", { timeout: 20_000 }, () => {
     await show();
     const group = screen
       .getByRole("heading", { level: 2, name: "Samtidiga körningar" })
-      .closest("section")!;
+      .closest<HTMLElement>("#flow-runs")!;
     const runs = within(group).getByLabelText("Högsta antal samtidiga körningar");
     expect(runs.getAttribute("aria-disabled") ?? runs.getAttribute("disabled")).not.toBeNull();
     expect(within(group).getAllByText(/serverns kapacitet är 0/).length).toBeGreaterThan(0);

@@ -2,6 +2,7 @@
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { useAnnounce } from "@astryxdesign/core/hooks";
+import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
@@ -215,8 +216,12 @@ export function FlowChatPanel({ flow, onFlowMayHaveChanged, onRefused }: ChatPan
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="border-ax-border flex flex-col gap-3 border-b px-4 py-3">
         <div className="flex flex-col gap-0.5">
-          <h2 className="text-ax-text text-lg font-semibold">{t("flows_chat_heading")}</h2>
-          <p className="text-ax-text-secondary text-sm">{t("flows_chat_intro")}</p>
+          <Heading level={2} weight="semibold" className="text-lg">
+            {t("flows_chat_heading")}
+          </Heading>
+          <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+            {t("flows_chat_intro")}
+          </Text>
         </div>
         {chat.data ? <EditModeSwitch chat={chat.data} onRefused={onRefused} /> : null}
       </div>

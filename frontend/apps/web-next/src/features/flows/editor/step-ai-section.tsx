@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { FieldLabel } from "@astryxdesign/core/Field";
 import { FileInput } from "@astryxdesign/core/FileInput";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Selector } from "@astryxdesign/core/Selector";
@@ -338,9 +339,7 @@ export function StepAiSection({
       </Anchor>
 
       <Anchor formId={formId} anchor="completion_model" className="flex flex-col gap-2">
-        <label htmlFor={modelSelectorId} className="text-ax-text text-sm font-medium">
-          {t("completion_model")}
-        </label>
+        <FieldLabel label={t("completion_model")} inputID={modelSelectorId} />
         <ModelSelector
           id={modelSelectorId}
           models={space.completion_models}

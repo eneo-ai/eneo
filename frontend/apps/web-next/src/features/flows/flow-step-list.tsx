@@ -219,14 +219,16 @@ export function FlowStepList({
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2
+        <Heading
+          level={2}
           id={headingId}
           ref={headingRef}
           tabIndex={-1}
-          className="text-ax-text focus-visible:outline-ring rounded-ax-inner text-lg font-semibold focus-visible:outline-2 focus-visible:outline-offset-2"
+          weight="semibold"
+          className="focus-visible:outline-ring rounded-ax-inner text-lg focus-visible:outline-2 focus-visible:outline-offset-2"
         >
           {t("flows_steps_heading")}
-        </h2>
+        </Heading>
         {canEdit && steps.length > 0 ? addButton : null}
       </div>
       {steps.length === 0 ? (
