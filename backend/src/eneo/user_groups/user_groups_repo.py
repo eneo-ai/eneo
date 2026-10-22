@@ -1,5 +1,3 @@
-# MIT License
-
 from typing import List, Optional
 from uuid import UUID
 

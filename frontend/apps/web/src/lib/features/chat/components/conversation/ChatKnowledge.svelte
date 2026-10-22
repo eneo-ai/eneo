@@ -1,8 +1,6 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
 
-    Licensed under the MIT License.
-
     Read-only knowledge indicator for the chat input toolbar: shows which
     knowledge sources (collections, websites, integrations) are attached to
     the current partner, mirroring how MCP servers are surfaced. Unlike MCP
