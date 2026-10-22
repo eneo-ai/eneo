@@ -856,6 +856,36 @@ same editor update, validation, permissions, classification and audit as the
 editor. The chat requires a user principal and edit mode in the editor; it is
 not a service-key authoring surface.
 
+**Model.** Each person chooses the chat's model in the chat header
+(`PATCH /api/v1/flows/{id}/authoring-chat/{session_id}/` with
+`completion_model_id` and `reasoning_effort`; null returns to the default). The
+model is checked like an assistant's model: it must be enabled in the flow's
+space, meet the space's security classification and support tool calling,
+otherwise the change is refused with `flow_authoring_model_not_in_space`,
+`flow_authoring_model_below_classification` or
+`flow_authoring_model_without_tools`. A chat whose person chose no model uses
+the organisation's default for flow chats (Admin > Flows, "Modell för
+flödesassistenten", `PATCH /api/v1/settings/flow-authoring-chat-policy`) where
+the space allows it, and the space's default among models that support tools
+otherwise. Opening the chat and every change bring its assistant in line, so a
+new default reaches existing chats the next time they are opened. The
+instructions belong to the core and cannot be configured.
+
+**Conversations.** The flow is the source of truth: the chat reads it with
+`read_flow` on every turn, and what changed lives in the flow's revisions and
+the audit log. A long conversation adds noise rather than value, and an old
+refusal could keep steering the model. So turning edit mode on after
+`FLOW_AUTHORING_CHAT_IDLE_MINUTES` (45 by default) without a question or a
+mode change starts a new conversation with the same assistant, and "Ny
+konversation" in the chat header starts one at any time
+(`POST .../authoring-chat/{session_id}/conversations/`). Turning edit mode off
+and on within the pause, viewing the flow and asking questions outside edit
+mode keep the current conversation. Earlier conversations are kept for
+traceability and audited when they end, but they are never answered or sent
+to the model again; the chat points only at its current one. The chat panel
+does not list earlier conversations: what they changed is in the flow and its
+history.
+
 ## Practical takeaway
 
 Flows are best understood as a user-principal-owned draft workflow on top of a versioned runtime contract with evidence-aware execution. Once that model is clear, the API and UI make much more sense:

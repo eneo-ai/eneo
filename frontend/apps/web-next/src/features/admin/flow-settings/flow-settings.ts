@@ -4,7 +4,7 @@ import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 
 /*
- * The tenant's flow settings as one form: six admin endpoints under
+ * The tenant's flow settings as one form: seven admin endpoints under
  * /api/v1/settings, each with its own PATCH. Retention is not here; it is a
  * separate platform concern. Bounds mirror the backend's (settings.py and the
  * flow limit modules); the backend checks every value again.
@@ -17,6 +17,7 @@ export type FlowSettings = {
   ragEvidence: Schema<"FlowRagEvidencePolicyPublic">;
   documentRender: Schema<"FlowDocumentRenderLimitsPublic">;
   evidence: Schema<"FlowEvidencePolicyPublic">;
+  authoringChat: Schema<"FlowAuthoringChatPolicyPublic">;
 };
 
 export type FlowSettingsSection = keyof FlowSettings;
@@ -27,16 +28,25 @@ export function flowSettingsQueryOptions(api: EneoClient) {
   return queryOptions({
     queryKey: FLOW_SETTINGS_KEY,
     queryFn: async (): Promise<FlowSettings> => {
-      const [inputLimits, runtime, mapped, ragEvidence, documentRender, evidence] =
+      const [inputLimits, runtime, mapped, ragEvidence, documentRender, evidence, authoringChat] =
         await Promise.all([
           unwrap(api.GET("/api/v1/settings/flow-input-limits")),
           unwrap(api.GET("/api/v1/settings/flow-runtime-policy")),
           unwrap(api.GET("/api/v1/settings/flow-mapped-execution-policy")),
           unwrap(api.GET("/api/v1/settings/flow-rag-evidence-policy")),
           unwrap(api.GET("/api/v1/settings/flow-document-render-limits")),
-          unwrap(api.GET("/api/v1/settings/flow-evidence-policy"))
+          unwrap(api.GET("/api/v1/settings/flow-evidence-policy")),
+          unwrap(api.GET("/api/v1/settings/flow-authoring-chat-policy"))
         ]);
-      return { inputLimits, runtime, mapped, ragEvidence, documentRender, evidence };
+      return {
+        inputLimits,
+        runtime,
+        mapped,
+        ragEvidence,
+        documentRender,
+        evidence,
+        authoringChat
+      };
     }
   });
 }
@@ -81,6 +91,9 @@ export const EVIDENCE_KEYS = [
   "allow_service_key_raw_export_class3"
 ] as const;
 
+/** The flow chat's default model: a model id, or null for the space's own default. */
+export const AUTHORING_CHAT_KEYS = ["completion_model_id"] as const;
+
 export type NumberKey =
   | (typeof INPUT_LIMIT_KEYS)[number]
   | (typeof RUNTIME_KEYS)[number]
@@ -88,12 +101,13 @@ export type NumberKey =
   | (typeof RAG_EVIDENCE_KEYS)[number]
   | (typeof DOCUMENT_RENDER_KEYS)[number];
 export type FlagKey = (typeof EVIDENCE_KEYS)[number];
-export type FieldKey = NumberKey | FlagKey;
+export type ModelKey = (typeof AUTHORING_CHAT_KEYS)[number];
+export type FieldKey = NumberKey | FlagKey | ModelKey;
 
-/** Every editable value, keyed by its API field (unique across the six endpoints). */
+/** Every editable value, keyed by its API field (unique across the seven endpoints). */
 export type FlowSettingsDraft = { [Key in NumberKey]: number | null } & {
   [Key in FlagKey]: boolean;
-};
+} & { [Key in ModelKey]: string | null };
 
 /** The fields each endpoint owns; also the order they are saved in. */
 export const SECTION_KEYS = {
@@ -102,7 +116,8 @@ export const SECTION_KEYS = {
   mapped: MAPPED_KEYS,
   ragEvidence: RAG_EVIDENCE_KEYS,
   documentRender: DOCUMENT_RENDER_KEYS,
-  evidence: EVIDENCE_KEYS
+  evidence: EVIDENCE_KEYS,
+  authoringChat: AUTHORING_CHAT_KEYS
 } as const satisfies { [Section in FlowSettingsSection]: readonly FieldKey[] };
 
 const SECTIONS = Object.keys(SECTION_KEYS) as FlowSettingsSection[];
@@ -127,7 +142,8 @@ export function sectionOf(key: FieldKey): FlowSettingsSection {
 }
 
 export function draftFrom(settings: FlowSettings): FlowSettingsDraft {
-  const { inputLimits, runtime, mapped, ragEvidence, documentRender, evidence } = settings;
+  const { inputLimits, runtime, mapped, ragEvidence, documentRender, evidence, authoringChat } =
+    settings;
   return {
     max_files_per_run: inputLimits.max_files_per_run,
     audio_max_files_per_run: inputLimits.audio_max_files_per_run,
@@ -156,7 +172,8 @@ export function draftFrom(settings: FlowSettings): FlowSettingsDraft {
     max_object_fields: documentRender.max_object_fields,
     allow_space_admin_raw_export_class3: evidence.allow_space_admin_raw_export_class3 ?? false,
     allow_run_owner_raw_export_class3: evidence.allow_run_owner_raw_export_class3 ?? false,
-    allow_service_key_raw_export_class3: evidence.allow_service_key_raw_export_class3 ?? false
+    allow_service_key_raw_export_class3: evidence.allow_service_key_raw_export_class3 ?? false,
+    completion_model_id: authoringChat.completion_model_id ?? null
   };
 }
 
@@ -343,6 +360,7 @@ export type FlowSettingsPatches = {
   ragEvidence?: Schema<"FlowRagEvidencePolicyUpdate">;
   documentRender?: Schema<"FlowDocumentRenderLimitsUpdate">;
   evidence?: Schema<"FlowEvidencePolicyUpdate">;
+  authoringChat?: Schema<"FlowAuthoringChatPolicyUpdate">;
 };
 
 function changed<Key extends FieldKey>(
@@ -373,7 +391,8 @@ export function buildPatches(
     mapped: changed(MAPPED_KEYS, draft, baseline),
     ragEvidence: changed(RAG_EVIDENCE_KEYS, draft, baseline),
     documentRender: changed(DOCUMENT_RENDER_KEYS, draft, baseline),
-    evidence: changed(EVIDENCE_KEYS, draft, baseline)
+    evidence: changed(EVIDENCE_KEYS, draft, baseline),
+    authoringChat: changed(AUTHORING_CHAT_KEYS, draft, baseline)
   };
   return Object.fromEntries(
     Object.entries(patches).filter(([, patch]) => patch !== undefined)
@@ -394,7 +413,9 @@ export function flowSettingsWriter(api: EneoClient): FlowSettingsWriter {
     ragEvidence: (body) => unwrap(api.PATCH("/api/v1/settings/flow-rag-evidence-policy", { body })),
     documentRender: (body) =>
       unwrap(api.PATCH("/api/v1/settings/flow-document-render-limits", { body })),
-    evidence: (body) => unwrap(api.PATCH("/api/v1/settings/flow-evidence-policy", { body }))
+    evidence: (body) => unwrap(api.PATCH("/api/v1/settings/flow-evidence-policy", { body })),
+    authoringChat: (body) =>
+      unwrap(api.PATCH("/api/v1/settings/flow-authoring-chat-policy", { body }))
   };
 }
 
@@ -455,7 +476,9 @@ export function rebaseDraft(
 const REFUSAL_FIELDS: Record<string, FieldKey> = {
   max_concurrent_runs_exceeds_server_capacity: "max_concurrent_runs",
   tenant_max_exceeds_env_hard_ceiling: "max_step_timeout_seconds",
-  default_timeout_exceeds_tenant_max: "default_step_timeout_seconds"
+  default_timeout_exceeds_tenant_max: "default_step_timeout_seconds",
+  flow_authoring_model_without_tools: "completion_model_id",
+  flow_authoring_model_unavailable: "completion_model_id"
 };
 
 /** The field a refused save is about, when the refusal says: its code, its context or a 422's location. */

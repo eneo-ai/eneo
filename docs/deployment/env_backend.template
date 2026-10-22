@@ -503,6 +503,9 @@ TASK_EXECUTION_TIMEOUT_SECONDS=28800
 TASK_MAINTENANCE_TIMEOUT_SECONDS=120
 # Seconds between sweeps that cancel the unfinished runs of deleted flows (divides 60).
 # FLOW_RETIRED_RUN_DRAIN_INTERVAL_SECONDS=60
+# Minutes without a question or mode change after which turning on a flow chat's
+# edit mode starts a new conversation.
+# FLOW_AUTHORING_CHAT_IDLE_MINUTES=45
 
 # Inline text, structured JSON output, and retained rejected-output previews.
 FLOW_MAX_INLINE_TEXT_BYTES=8388608

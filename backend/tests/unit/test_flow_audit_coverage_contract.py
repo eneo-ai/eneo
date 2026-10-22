@@ -184,6 +184,9 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             "get_flow_retention_policy": (
                 "flow_settings_router.get_flow_retention_policy"
             ),
+            "get_flow_authoring_chat_policy": (
+                "flow_settings_router.get_flow_authoring_chat_policy"
+            ),
             "get_organization_flow_run_retention_policy": (
                 "flow_run_retention_policy_router.get_organization_policy"
             ),
@@ -228,6 +231,7 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             "update_rag_evidence_policy",
             "update_flow_evidence_policy",
             "update_flow_retention_policy",
+            "update_flow_authoring_chat_policy",
         )
     },
     **{
@@ -345,11 +349,33 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
         idempotency="one event when the chat is created; reopening it emits none",
         actor="signed-in user; API keys are refused",
     ),
-    "set_flow_authoring_mode": _configurable(
-        ActionType.FLOW_AUTHORING_MODE_CHANGED,
-        owner="flow_authoring_chat.set_authoring_mode",
-        metadata_keys=(*_FLOW_METADATA, "session_id", "editing"),
-        idempotency="one event per mode change; setting the current mode emits none",
+    "update_flow_authoring_chat": _configurable(
+        (
+            ActionType.FLOW_AUTHORING_MODE_CHANGED,
+            ActionType.FLOW_AUTHORING_CHAT_MODEL_CHANGED,
+            ActionType.FLOW_AUTHORING_CONVERSATION_STARTED,
+        ),
+        owner="flow_authoring_chat.update_authoring_chat",
+        metadata_keys=(
+            *_FLOW_METADATA,
+            "session_id",
+            "editing",
+            "completion_model_id",
+            "reasoning_effort",
+            "previous_session_id",
+            "reason",
+        ),
+        idempotency=(
+            "one event per mode or model change, and one when entering edit "
+            "mode after a pause starts a conversation; an unchanged value emits none"
+        ),
+        actor="signed-in user; API keys are refused",
+    ),
+    "start_flow_authoring_conversation": _configurable(
+        ActionType.FLOW_AUTHORING_CONVERSATION_STARTED,
+        owner="flow_authoring_chat.start_authoring_conversation",
+        metadata_keys=(*_FLOW_METADATA, "session_id", "previous_session_id", "reason"),
+        idempotency="one event per request; each request starts a new conversation",
         actor="signed-in user; API keys are refused",
     ),
     "delete_flow": _required_transaction(

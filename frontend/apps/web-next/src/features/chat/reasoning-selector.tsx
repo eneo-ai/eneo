@@ -22,6 +22,8 @@ export type ReasoningEffortSelectorProps = {
    * to `stored`, so report the failure yourself.
    */
   onSelect: (effort: string | null) => void | Promise<unknown>;
+  /** The name of the default option; the organisation default unless said otherwise. */
+  defaultLabel?: string;
   className?: string;
 };
 
@@ -36,6 +38,7 @@ export function ReasoningEffortSelector({
   stored,
   policyDefault,
   onSelect,
+  defaultLabel,
   className
 }: ReasoningEffortSelectorProps) {
   const t = useTranslations();
@@ -60,7 +63,7 @@ export function ReasoningEffortSelector({
       options: [
         {
           value: DEFAULT_VALUE,
-          label: t("governance_reasoning_organization_default"),
+          label: defaultLabel ?? t("governance_reasoning_organization_default"),
           description: policyLabel
         },
         ...options.map((option) => ({

@@ -24,6 +24,12 @@ from eneo.flows.domain.rag_evidence_policy import (
     apply_flow_rag_evidence_policy_patch,
     resolve_flow_rag_evidence_policy,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_authoring_chat_policy import (
+    apply_flow_authoring_chat_policy_patch,
+    resolve_flow_authoring_chat_model_id,
+)
 from eneo.flows.flow_document_limits import (
     apply_flow_document_render_limits_patch,
     resolve_flow_document_render_limits,
@@ -59,6 +65,8 @@ from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.object_content.runtime import ObjectContentRuntime, object_content_runtime
 from eneo.roles.permissions import Permission, validate_permissions
 from eneo.settings.settings import (
+    FlowAuthoringChatPolicyPublic,
+    FlowAuthoringChatPolicyUpdate,
     FlowDocumentRenderLimitsPublic,
     FlowDocumentRenderLimitsUpdate,
     FlowEvidencePolicyPublic,
@@ -927,6 +935,65 @@ class SettingService:
             },
         )
         return updated
+
+    @validate_permissions(Permission.ADMIN)
+    async def get_flow_authoring_chat_policy(self) -> FlowAuthoringChatPolicyPublic:
+        tenant = await self._get_tenant_for_flow_settings()
+        return FlowAuthoringChatPolicyPublic(
+            completion_model_id=resolve_flow_authoring_chat_model_id(
+                getattr(tenant, "flow_settings", None)
+            )
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_flow_authoring_chat_policy(
+        self,
+        payload: FlowAuthoringChatPolicyUpdate,
+    ) -> FlowAuthoringChatPolicyPublic:
+        model_id = payload.completion_model_id
+        if model_id is not None:
+            models = await self.ai_models_service.get_completion_models(
+                id_list=[model_id]
+            )
+            model = next((model for model in models if model.id == model_id), None)
+            if model is None or not model.can_access:
+                raise FlowBadRequestException(
+                    "The model is not one of the organisation's enabled models.",
+                    code=FlowApiErrorCode.AUTHORING_MODEL_UNAVAILABLE,
+                    context={"completion_model_id": str(model_id)},
+                )
+            if not model.supports_tool_calling:
+                raise FlowBadRequestException(
+                    "The flow chat needs a model that supports tools.",
+                    code=FlowApiErrorCode.AUTHORING_MODEL_WITHOUT_TOOLS,
+                    context={"completion_model_id": str(model_id)},
+                )
+        change = await self._update_flow_settings(
+            lambda current: apply_flow_authoring_chat_policy_patch(
+                current, completion_model_id=model_id
+            )
+        )
+        previous = resolve_flow_authoring_chat_model_id(change.before)
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description="Updated the default model for flow chats",
+            metadata={
+                "setting": "flow_authoring_chat_policy",
+                "changes": {
+                    "completion_model_id": {
+                        "old": str(previous) if previous else None,
+                        "new": str(model_id) if model_id else None,
+                    }
+                },
+            },
+        )
+        return FlowAuthoringChatPolicyPublic(
+            completion_model_id=resolve_flow_authoring_chat_model_id(change.after)
+        )
 
     @validate_permissions(Permission.ADMIN)
     async def get_flow_evidence_policy(self) -> FlowEvidencePolicyPublic:

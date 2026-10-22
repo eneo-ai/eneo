@@ -57,6 +57,21 @@ describe("buildPatches", () => {
   it("sends nothing when nothing changed", () => {
     expect(buildPatches(baseline, baseline)).toEqual({});
   });
+
+  it("sends the flow chat's default model, and null to leave chats on the space's own", () => {
+    const chosen = { ...baseline, completion_model_id: "model-1" };
+    expect(buildPatches(chosen, baseline)).toEqual({
+      authoringChat: { completion_model_id: "model-1" }
+    });
+    expect(validateDraft(chosen, baseline, settings)).toEqual({});
+
+    const saved = draftFrom(
+      flowSettingsFixture({ authoringChat: { completion_model_id: "model-1" } })
+    );
+    expect(buildPatches({ ...saved, completion_model_id: null }, saved)).toEqual({
+      authoringChat: { completion_model_id: null }
+    });
+  });
 });
 
 describe("fieldBounds", () => {
@@ -155,7 +170,8 @@ function writer(fail?: keyof FlowSettingsWriter): FlowSettingsWriter & {
     mapped: answer("mapped"),
     ragEvidence: answer("ragEvidence"),
     documentRender: answer("documentRender"),
-    evidence: answer("evidence")
+    evidence: answer("evidence"),
+    authoringChat: answer("authoringChat")
   };
 }
 
@@ -227,6 +243,9 @@ describe("refusalField", () => {
         refusal({ status: 422, details: [{ loc: ["body", "max_blocks"], msg: "too large" }] })
       )
     ).toBe("max_blocks");
+    expect(
+      refusalField(refusal({ status: 400, reason: "flow_authoring_model_without_tools" }))
+    ).toBe("completion_model_id");
   });
 
   it("names no field for other failures", () => {

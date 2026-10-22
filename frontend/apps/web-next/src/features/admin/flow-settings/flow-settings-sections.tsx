@@ -4,10 +4,15 @@ import { Button } from "@astryxdesign/core/Button";
 import { Link } from "@astryxdesign/core/Link";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Text } from "@astryxdesign/core/Text";
+import { useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
+import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { QuietBanner } from "@/components/astryx/banner";
 import { Switch } from "@/components/astryx/switch";
+import { useAppContext } from "@/components/providers/app-context";
+import { adminModelsQueryOptions } from "@/features/admin/models/models";
+import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
 import {
   DOCUMENT_RENDER_KEYS,
@@ -466,6 +471,62 @@ export function ExportSection({ kit }: { kit: FieldKit }) {
           />
         ))}
       </fieldset>
+    </SettingsSection>
+  );
+}
+
+/** The trigger's id, so a refused save can move focus to it. */
+export const AUTHORING_CHAT_MODEL_FIELD_ID = "flow-setting-completion_model_id";
+
+/**
+ * "Modell för flödesassistenten": the organisation's default model for flow
+ * chats. The list holds the organisation's enabled models that support
+ * tools; the first option leaves each chat on its space's default. A space
+ * that does not allow the chosen model keeps its own default, and a person
+ * can still choose another model in their chat.
+ */
+export function AuthoringChatSection({ kit }: { kit: FieldKit }) {
+  const t = useTranslations();
+  const { tenant } = useAppContext();
+  const catalog = useQuery(adminModelsQueryOptions(browserApi));
+  const models = (catalog.data?.completion_models ?? []).filter(
+    (model) =>
+      model.supports_tool_calling &&
+      model.is_org_enabled !== false &&
+      model.can_access !== false &&
+      !model.is_deprecated
+  );
+  const problem = kit.problem("completion_model_id");
+
+  return (
+    <SettingsSection
+      id="flow-chat"
+      title={t("flow_admin_chat_group")}
+      description={t("flow_admin_chat_group_description")}
+    >
+      {/* Focus moves to the trigger by its id (the page's focusField): the
+          picker holds inputs of its own that must not take it. */}
+      <div className="max-w-md">
+        <ModelSelector
+          id={AUTHORING_CHAT_MODEL_FIELD_ID}
+          models={models}
+          selectedId={kit.draft.completion_model_id}
+          onSelect={(id) => kit.set("completion_model_id", id)}
+          defaultChoice={{
+            label: t("flow_admin_chat_model_space_default"),
+            modelId: null,
+            isSelected: kit.draft.completion_model_id === null,
+            onSelect: () => kit.set("completion_model_id", null)
+          }}
+          field={{
+            label: t("flow_admin_chat_model_label"),
+            description: t("flow_admin_chat_model_description")
+          }}
+          disabled={kit.disabled || catalog.isPending}
+          showPricing={tenant.show_model_pricing}
+          status={problem ? { type: "error", message: problem } : undefined}
+        />
+      </div>
     </SettingsSection>
   );
 }
