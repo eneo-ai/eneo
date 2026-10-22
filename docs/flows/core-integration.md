@@ -72,19 +72,94 @@ Each group lands as its own commit with the reference tests it touches.
 
 ## Authoring through the core
 
-The editor (`PATCH /flows/{id}/editor/`) and the chat's loopback tools share
-`flow_authoring_operations.apply_editor_update`. Moving, inserting and removing
-steps (`step_order`, and the `move_step`, `remove_step` and positioned
-`add_step` tools) used to be safe only in the AI Builder; the core now does it
-in `flow_step_structure.py`: aliases a kept step reads (`step_N` in its
-bindings, interpolated configuration and prompt) follow their producers, and a
-change that removes a read step or moves it after its reader is refused with
-`flow_step_read_lost_producer`.
+The editor (`PATCH /flows/{id}/editor/`), the manual update
+(`PATCH /flows/{id}/`) and the chat's loopback tools share
+`flow_authoring_operations`. Rewriting reads used to happen in the AI Builder
+and in the Svelte editor's browser code; the core now does it in
+`flow_step_structure.py`, so every client (web-next, the chat's tools, API
+keys) gets the same result and every rewrite is part of the saved revision, so
+a stale client is fenced by `expected_revision`. A read of another step is its
+alias (`step_N`) or the step's name, in the step's bindings (by name: the
+question and a source ref's `step_ref`), the configuration its modes
+interpolate (HTTP requests, template bindings, tool arguments) and its
+assistant's prompt; a read of a run form field is `flow_input.<name>`,
+`flow.input.<name>` or the bare name.
+
+- Moving, inserting and removing steps (`step_order`, and the `move_step`,
+  `remove_step` and positioned `add_step` tools): aliases follow their
+  producers.
+- Full replacement (`steps` in `PATCH /flows/{id}/`, or `definition.steps` in
+  the editor update): a step that keeps its `id` moves to its `step_order`, a
+  step without an `id` is new, and a saved step left out is removed. A read
+  column (`input_bindings`, `input_config`, `output_config`) a step sends as
+  it was read (stored credentials as sentinels) is the saved one and its reads
+  follow the change; one it sends changed is taken as given. Unknown or
+  repeated ids and step orders that are not 1 to n are refused by the save as
+  before. The Svelte editor no longer renumbers prompts itself (it would do it
+  twice); it marks reads of a removed step as before and reloads the step
+  assistants after a save of the steps.
+- Renaming a step: reads of the old name in every step follow the new one,
+  several renames in one edit at once (two steps may swap names).
+- Renaming a run form field: `form_field_renames` (`{"old": "new"}`, on the
+  manual update, the editor's `definition` and the chat's
+  `update_flow_settings`) names it; the reads of the field follow it, and a
+  bare read of a field renamed to a name that cannot be bare becomes
+  `flow_input.<new>`. A rename the forms do not describe is refused with
+  `flow_form_field_rename_invalid` (`context.problem`: `unknown_field`,
+  `not_in_form`, `still_in_form`, `name_taken`, `renamed_twice`). web-next
+  sends it for every saved field whose technical name changed.
+- A change that would make a kept read name another step, or none, is refused
+  with `flow_step_read_lost_producer`; `context.reason` says why:
+  `producer_removed`, `producer_moved_after_reader`,
+  `reader_moved_before_producer` (of the two steps, the one that moved
+  farther), `producer_renamed` (the name is cleared, cannot be read in a
+  template, or another step takes it; `context.reads_name` holds it) or
+  `would_read_another_step` (a forward or dangling read would come to name a
+  step it could not read before). A dangling read by name may come to name a
+  step that is given that name. Removing a run form field a kept step reads is
+  refused with `flow_form_field_still_read`, `context.readers` naming each
+  reading step and site.
+- Columns and prompts the same edit writes are taken as given.
+
+Changing a published flow or one of its step assistants is refused with
+`flow_unpublish_required`, unpublishing a flow that is not published with
+`flow_not_published`.
 
 The `flows_core` gate authenticates in its own session and commits before the
 route's container authenticates. Sharing a request with a function-scoped
 route, an open gate transaction held the row of a legacy key hash it had just
 upgraded, and the route's own authentication of the same key waited on it.
+
+### Shared step assistants
+
+An editor assistant change can name its step (`step_id`). When other steps
+share that assistant, the step gets its own copy of it (copy on write) with the
+change, in the same transaction as the edit, and the other steps keep the
+assistant as it was; the saved revision shows the step with its new
+`assistant_id`. The copy is made from the assistant's settings as they are
+(prompt, model and its settings, knowledge, attachments and their modes,
+retention, logging), so copying asks only for the right to create assistants in
+the space. The chat's `update_step` tool always names its step; web-next's
+step editor does too. A change without `step_id` reaches every step that uses
+the assistant, as before. The classification preview still judges a change of
+a shared assistant on all its steps; the save judges each step with the
+assistant it ends up with.
+
+### Audit of an authoring change
+
+The authoring routes (create, update, editor update, publish, unpublish) and
+the chat's loopback tools open the change's transaction with
+`flow_authoring_operations.authoring_transaction`. The change's audit entries
+(`ASSISTANT_UPDATED`, `ASSISTANT_CREATED` for new steps and copies, the prompt
+rewrites with `reasons` `step_order_changed`, `step_renamed` or
+`form_field_renamed`, `FLOW_UPDATED`, `FLOW_CLASSIFICATION_OVERRIDE`,
+`FLOW_CREATED`, `FLOW_PUBLISHED`, `FLOW_UNPUBLISHED`) are held while it runs and
+handed to the audit queue once the transaction has committed, before the
+response goes out. A refused change, rolled back, leaves no entry. The routes'
+audit contract stays configurable and asynchronous: a queue failure after the
+commit does not undo the change. An operation called outside such a
+transaction logs its entries once every check that can refuse the change has
+passed.
 
 ### Rules moved from the AI Builder
 
@@ -120,10 +195,7 @@ Dismissed: the builder's catalog references (model and knowledge refs), plan
 step refs, quality lints, topology preferences and intent heuristics have no
 meaning outside its planner. Steps without names stay publishable, because the
 run reads steps by position. A flow_input file step without uploads keeps
-reading the run's text, as the editor allows. Still open: a full `PUT` of the
-steps reorders without renumbering prompt reads (the Svelte editor renumbers
-them itself), a rename can make a kept read by step name name another step, and
-`update_step` patches a step's assistant even when another step shares it.
+reading the run's text, as the editor allows.
 
 ### AI Builder removed
 

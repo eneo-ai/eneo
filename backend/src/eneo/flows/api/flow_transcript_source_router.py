@@ -58,10 +58,140 @@ class TranscriptSourcePageIdentity(BaseModel):
     attempt_no: int
 
 
+TRANSCRIPT_SOURCE_SEGMENT_EXAMPLE: dict[str, Any] = {
+    "segment_index": 0,
+    "file_index": 0,
+    "start": 0.0,
+    "end": 3.2,
+    "speaker": "SPEAKER_00",
+    "text": "Vi ses imorgon.",
+}
+
+TRANSCRIPT_SPEAKER_REVIEW_EXAMPLE: dict[str, Any] = {
+    "files": [
+        {
+            "version": 1,
+            "overlap_detection": "available",
+            "file_index": 0,
+            "file_id": "00000000-0000-0000-0000-000000000701",
+            "overlaps": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000701:overlap_0000",
+                    "start": 1.0,
+                    "end": 1.5,
+                    "detected_speaker_count": 2,
+                }
+            ],
+        }
+    ]
+}
+
+
 class TranscriptSourceSegmentPublic(BaseModel):
+    """One structured transcript line as it is stored. Keys not listed here
+    are passed through unchanged."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={"example": TRANSCRIPT_SOURCE_SEGMENT_EXAMPLE},
+    )
+
+    segment_index: int = Field(
+        ge=0,
+        description=(
+            "Absolute index of the line in the attempt's transcript source. "
+            "Corrections and word timings address lines by this index."
+        ),
+    )
+    file_index: int = Field(
+        ge=0,
+        description=(
+            "Which uploaded audio file the times belong to, counted from 0 in "
+            "upload order. A multi-file transcript restarts its times at 0 for "
+            "each file."
+        ),
+    )
+    start: float = Field(description="Seconds from the start of that audio file.")
+    end: float = Field(description="Seconds from the start of that audio file.")
+    speaker: str | None = Field(
+        description=(
+            "Diarization label of the line (`SPEAKER_00`), or null when the "
+            "transcription labelled no speakers. Names given to speakers are "
+            "transcript corrections, not part of the source."
+        ),
+    )
+    text: str = Field(description="The line's text as the transcription produced it.")
+    speaker_attribution: str | None = Field(
+        default=None,
+        description=(
+            "How sure the speaker service is of the line's speaker; "
+            "`provisional` means overlapping speech made the speaker "
+            "uncertain. Present only on lines the speaker service marked."
+        ),
+    )
+    overlap_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Overlaps in `speaker_review` this line falls in, by their `id`. "
+            "Present only on lines the speaker service marked."
+        ),
+    )
+
+
+class TranscriptSpeakerOverlapPublic(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    segment_index: int = Field(ge=0)
+    id: str = Field(
+        description=(
+            "Overlap id, prefixed with its audio file's id. Lines in the overlap "
+            "list it in their `overlap_ids`."
+        ),
+    )
+    start: float = Field(description="Seconds from the start of its audio file.")
+    end: float = Field(description="Seconds from the start of its audio file.")
+    detected_speaker_count: int | None = Field(
+        default=None,
+        description="How many voices the speaker service heard in the overlap.",
+    )
+
+
+class TranscriptSpeakerReviewFilePublic(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    file_index: int = Field(
+        ge=0,
+        description="The audio file this review covers, counted from 0 in upload order.",
+    )
+    file_id: str | None = Field(default=None, description="Id of that audio file.")
+    version: int | None = Field(
+        default=None,
+        description="Version of the speaker service's review contract.",
+    )
+    overlap_detection: str | None = Field(
+        default=None,
+        description=(
+            "Whether the speaker service looked for overlapping speech: "
+            "`available` or `unavailable`."
+        ),
+    )
+    overlaps: list[TranscriptSpeakerOverlapPublic] = Field(
+        default_factory=list[TranscriptSpeakerOverlapPublic],
+        description="Stretches where more than one voice was heard.",
+    )
+
+
+class TranscriptSpeakerReviewPublic(BaseModel):
+    """The speaker service's review detail, passed through as it was stored;
+    members not listed here are kept."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={"example": TRANSCRIPT_SPEAKER_REVIEW_EXAMPLE},
+    )
+
+    files: list[TranscriptSpeakerReviewFilePublic] = Field(
+        description="One review per audio file the speaker service labelled.",
+    )
 
 
 class PresentTranscriptSourcePage(TranscriptSourcePageIdentity):
@@ -74,7 +204,13 @@ class PresentTranscriptSourcePage(TranscriptSourcePageIdentity):
     max_response_bytes: int
     next_segment_index: int | None
     segments: list[TranscriptSourceSegmentPublic]
-    speaker_review: dict[str, Any] | None = None
+    speaker_review: TranscriptSpeakerReviewPublic | None = Field(
+        default=None,
+        description=(
+            "Speaker review detail, on the first page only "
+            "(`start_segment_index=0`); null when none was stored."
+        ),
+    )
 
 
 class OmittedTranscriptSourcePage(TranscriptSourcePageIdentity):
@@ -218,8 +354,16 @@ async def get_flow_run_transcript_source(
                         )
                     ],
                 )
-                payload = page.model_dump(mode="json", exclude={"speaker_review"})
+                payload = page.model_dump(
+                    mode="json", exclude={"segments", "speaker_review"}
+                )
+                # Each line goes out with exactly the keys it was stored with.
+                payload["segments"] = [
+                    segment.model_dump(mode="json", exclude_unset=True)
+                    for segment in page.segments
+                ]
                 if start_segment_index == 0:
+                    # Stored verbatim from the speaker service; not reshaped.
                     payload["speaker_review"] = source.speaker_review
             elif state.status == "omitted":
                 page = OmittedTranscriptSourcePage(

@@ -17,6 +17,9 @@ import pytest
 import sqlalchemy as sa
 from pydantic import ValidationError
 
+from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
 from eneo.database.tables.flow_tables import Flows
 from eneo.database.tables.transcription_services_table import (
     SpacesTranscriptionServiceConnections,
@@ -42,6 +45,7 @@ from eneo.flows.flow_authoring_spec import (
 )
 from eneo.json_types import JsonValue
 from eneo.main.models import ModelId
+from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.settings.encryption_service import EncryptionService
@@ -975,3 +979,302 @@ async def test_a_named_step_whose_producer_moves_keeps_its_credential_beside_the
     assert written["auth"]["token"] == stored["auth"]["token"]
     assert encryption.decrypt(written["auth"]["token"]) == "lagrad-hemlighet"
     assert written["url"] == "https://example.test/{{step_3.output.text}}"
+
+
+# Reads keep their meaning through a full replacement, renames and form changes.
+
+_KOMMUN_FORM = {"form_schema": {"fields": [{"name": "kommun", "type": "text"}]}}
+_READING_STEPS: list[dict[str, Any]] = [
+    {
+        "input_source": "flow_input",
+        "input_type": "text",
+        "output_mode": "pass_through",
+        "output_type": "text",
+    },
+    {
+        "input_source": "previous_step",
+        "input_type": "text",
+        "output_mode": "pass_through",
+        "output_type": "text",
+        "input_bindings": {"question": "Läs {{ step_1.output.text }}."},
+    },
+    {
+        "input_source": "previous_step",
+        "input_type": "text",
+        "output_mode": "pass_through",
+        "output_type": "text",
+        "input_bindings": {"question": "Skriv från {{ Steg 2 }}."},
+    },
+]
+_THIRD_PROMPT = "Utgå från {{step_2.output.text}} i {{ flow_input.kommun }}."
+
+
+@pytest.fixture
+async def reading(client, db_container, admin_user, patch_auth_service_jwt) -> Saved:
+    """Step 2 reads step 1 by alias; step 3 reads step 2 by name, and its
+    prompt reads step 2 by alias and the run form field `kommun`."""
+
+    space_id, headers = await _space(client, db_container, admin_user)
+    saved = await _flow(
+        db_container, space_id, headers, _READING_STEPS, metadata_json=_KOMMUN_FORM
+    )
+    rows = await step_rows(db_container, saved.flow_id)
+    async with db_container() as container:
+        service = container.flow_service()
+        _, _, revision = await service.update_flow_assistant(
+            flow_id=saved.flow_id,
+            assistant_id=rows[2]["assistant_id"],
+            update=AssistantUpdateCommand(prompt=PromptCreate(text=_THIRD_PROMPT)),
+        )
+    saved.revision = revision
+    return saved
+
+
+async def _assistant_prompt(client, saved: Saved, assistant_id: UUID) -> str:
+    response = await client.get(
+        f"/api/v1/flows/{saved.flow_id}/assistants/{assistant_id}/",
+        headers=saved.headers,
+    )
+    assert response.status_code == 200, response.text
+    return (response.json().get("prompt") or {}).get("text") or ""
+
+
+def _record_audit(monkeypatch: pytest.MonkeyPatch) -> list[ActionType]:
+    actions: list[ActionType] = []
+    log_async = AuditService.log_async
+
+    async def record(self: AuditService, **kwargs: Any) -> Any:
+        actions.append(kwargs["action"])
+        return await log_async(self, **kwargs)
+
+    monkeypatch.setattr(AuditService, "log_async", record)
+    return actions
+
+
+async def test_a_full_replacement_that_inserts_a_step_moves_every_read(
+    client, db_container, reading: Saved
+) -> None:
+    rows = await step_rows(db_container, reading.flow_id)
+    new_assistant = await client.post(
+        f"/api/v1/flows/{reading.flow_id}/assistants/",
+        json={"name": "Hälsa"},
+        headers=reading.headers,
+    )
+    assert new_assistant.status_code == 201, new_assistant.text
+    revision = await _current_revision(db_container, reading.flow_id)
+    steps = [
+        {
+            "assistant_id": new_assistant.json()["id"],
+            "step_order": 1,
+            "user_description": "Hälsa",
+            "input_source": "flow_input",
+            "input_type": "text",
+            "output_mode": "pass_through",
+            "output_type": "text",
+        },
+        _step_item(rows[0], step_order=2, input_source="previous_step"),
+        _step_item(rows[1], step_order=3),
+        _step_item(rows[2], step_order=4),
+    ]
+
+    response = await _patch(
+        client, reading, {"steps": steps, "expected_revision": revision}
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["draft_revision"] == revision + 1
+    after = await step_rows(db_container, reading.flow_id)
+    assert [row["id"] for row in after[1:]] == [row["id"] for row in rows]
+    assert after[2]["input_bindings"] == {"question": "Läs {{ step_2.output.text }}."}
+    assert after[3]["input_bindings"] == {"question": "Skriv från {{ Steg 2 }}."}
+    assert await _assistant_prompt(client, reading, rows[2]["assistant_id"]) == (
+        "Utgå från {{step_3.output.text}} i {{ flow_input.kommun }}."
+    )
+
+
+async def test_a_full_replacement_that_removes_a_read_step_is_refused(
+    client, db_container, reading: Saved
+) -> None:
+    rows = await step_rows(db_container, reading.flow_id)
+
+    response = await _patch(
+        client,
+        reading,
+        {
+            "steps": [_step_item(rows[0]), _step_item(rows[2], step_order=2)],
+            "expected_revision": reading.revision,
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    body = response.json()
+    assert body["code"] == "flow_step_read_lost_producer"
+    assert body["context"]["reason"] == "producer_removed"
+    assert body["context"]["step_id"] == str(rows[2]["id"])
+    assert await step_rows(db_container, reading.flow_id) == rows
+    assert await _current_revision(db_container, reading.flow_id) == reading.revision
+
+
+async def test_renaming_a_step_in_a_full_replacement_renames_its_reads(
+    client, db_container, reading: Saved
+) -> None:
+    rows = await step_rows(db_container, reading.flow_id)
+
+    response = await _patch(
+        client,
+        reading,
+        {
+            "steps": [
+                _step_item(rows[0]),
+                _step_item(rows[1], user_description="Granska"),
+                _step_item(rows[2]),
+            ],
+            "expected_revision": reading.revision,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    after = await step_rows(db_container, reading.flow_id)
+    assert after[2]["input_bindings"] == {"question": "Skriv från {{ Granska }}."}
+
+
+async def test_a_renamed_form_field_takes_its_reads_and_a_read_one_cannot_go(
+    client, db_container, reading: Saved
+) -> None:
+    rows = await step_rows(db_container, reading.flow_id)
+    renamed_form = {"form_schema": {"fields": [{"name": "ort", "type": "text"}]}}
+
+    renamed = await _patch(
+        client,
+        reading,
+        {
+            "metadata_json": renamed_form,
+            "form_field_renames": {"kommun": "ort"},
+            "expected_revision": reading.revision,
+        },
+    )
+
+    assert renamed.status_code == 200, renamed.text
+    assert await _assistant_prompt(client, reading, rows[2]["assistant_id"]) == (
+        "Utgå från {{step_2.output.text}} i {{ flow_input.ort }}."
+    )
+
+    removed = await _patch(
+        client,
+        reading,
+        {
+            "metadata_json": {"form_schema": {"fields": []}},
+            "expected_revision": renamed.json()["draft_revision"],
+        },
+    )
+
+    assert removed.status_code == 400, removed.text
+    body = removed.json()
+    assert body["code"] == "flow_form_field_still_read"
+    assert body["context"]["fields"] == ["ort"]
+    assert body["context"]["readers"] == [
+        {
+            "field": "ort",
+            "step_id": str(rows[2]["id"]),
+            "step_order": 3,
+            "site": "prompt",
+        }
+    ]
+    assert (await _flow_columns(db_container, reading.flow_id))[
+        "metadata_json"
+    ] == renamed_form
+
+
+async def test_a_refused_editor_change_leaves_no_assistant_audit_entry(
+    client, db_container, reading: Saved, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = await step_rows(db_container, reading.flow_id)
+    audited = _record_audit(monkeypatch)
+
+    response = await client.patch(
+        f"/api/v1/flows/{reading.flow_id}/editor/",
+        json={
+            "expected_revision": reading.revision,
+            "definition": {},
+            "assistants": [
+                {
+                    "assistant_id": str(rows[0]["assistant_id"]),
+                    "changes": {"prompt": {"text": "Ändrad men aldrig sparad."}},
+                }
+            ],
+            # Step 3 reads step 2, which this order leaves out.
+            "step_order": [
+                {"step_id": str(rows[0]["id"])},
+                {"step_id": str(rows[2]["id"])},
+            ],
+        },
+        headers=reading.headers,
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == "flow_step_read_lost_producer"
+    assert audited == []
+    assert await _assistant_prompt(client, reading, rows[0]["assistant_id"]) == ""
+
+
+async def test_editing_the_assistant_a_step_shares_gives_it_its_own_copy(
+    client, db_container, reading: Saved, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    rows = await step_rows(db_container, reading.flow_id)
+    shared = rows[0]["assistant_id"]
+    sharing = await _patch(
+        client,
+        reading,
+        {
+            "steps": [
+                _step_item(rows[0]),
+                _step_item(rows[1], assistant_id=str(shared)),
+                _step_item(rows[2]),
+            ],
+            "expected_revision": reading.revision,
+        },
+    )
+    assert sharing.status_code == 200, sharing.text
+    audited = _record_audit(monkeypatch)
+
+    response = await client.patch(
+        f"/api/v1/flows/{reading.flow_id}/editor/",
+        json={
+            "expected_revision": sharing.json()["draft_revision"],
+            "definition": {},
+            "assistants": [
+                {
+                    "assistant_id": str(shared),
+                    "step_id": str(rows[1]["id"]),
+                    "changes": {"prompt": {"text": "Bara för steg 2."}},
+                }
+            ],
+        },
+        headers=reading.headers,
+    )
+
+    assert response.status_code == 200, response.text
+    saved_steps = response.json()["steps"]
+    assert saved_steps[0]["assistant_id"] == str(shared)
+    copy_id = UUID(saved_steps[1]["assistant_id"])
+    assert copy_id != shared
+    after = await step_rows(db_container, reading.flow_id)
+    assert [row["assistant_id"] for row in after] == [
+        shared,
+        copy_id,
+        rows[2]["assistant_id"],
+    ]
+    assert await _assistant_prompt(client, reading, shared) == ""
+    assert await _assistant_prompt(client, reading, copy_id) == "Bara för steg 2."
+    assert audited == [ActionType.ASSISTANT_CREATED, ActionType.FLOW_UPDATED]
+
+
+async def test_unpublishing_a_flow_that_is_not_published_is_refused_with_a_code(
+    client, reading: Saved
+) -> None:
+    response = await client.post(
+        f"/api/v1/flows/{reading.flow_id}/unpublish/", headers=reading.headers
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == "flow_not_published"

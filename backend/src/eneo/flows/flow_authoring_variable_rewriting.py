@@ -147,6 +147,27 @@ def rewrite_step_alias_heads(
     return TEMPLATE_VARIABLE_PATTERN.sub(replace, text)
 
 
+def rewrite_template_expressions(
+    text: str, rewrite: Callable[[str], str | None]
+) -> str:
+    """`text` with each template expression the runtime resolver reads
+    replaced by what `rewrite(expression)` gives for it (the expression without
+    the spaces around it), or kept when it gives None. The spaces the author
+    put inside the braces are kept."""
+
+    def replace(match: re.Match[str]) -> str:
+        whole = match.group(0)
+        inner = match.group(1)
+        expression = inner.rstrip()
+        rewritten = rewrite(expression) if expression else None
+        if rewritten is None or rewritten == expression:
+            return whole
+        start = match.start(1) - match.start(0)
+        return whole[:start] + rewritten + whole[start + len(expression) :]
+
+    return TEMPLATE_VARIABLE_PATTERN.sub(replace, text)
+
+
 def renumber_step_aliases(value: Any, renumbering: Mapping[int, int]) -> Any:
     """`value` with the alias of each step that changed position (saved
     position to new) renumbered in every string it holds."""

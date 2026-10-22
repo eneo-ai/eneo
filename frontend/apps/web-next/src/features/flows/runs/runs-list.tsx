@@ -16,6 +16,7 @@ import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { formatSeconds } from "./run-format";
+import { starterName } from "./run-starter";
 import {
   createPollClock,
   listNeedsPolling,
@@ -124,10 +125,7 @@ export function FlowRunsList({
       key: "principal",
       header: t("flow_runs_column_started_by"),
       width: proportional(2),
-      renderCell: (run) =>
-        run.principal_type === "service_key"
-          ? t("flow_runs_started_by_service_key")
-          : t("flow_runs_started_by_person")
+      renderCell: (run) => starterName(run, t)
     },
     {
       key: "duration",

@@ -108,7 +108,10 @@ from eneo.flows.flow_run_provenance import (
     resolve_attempt_terminalization_evidence,
     tool_answer_source,
 )
-from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
+from eneo.flows.flow_run_step_input_file import (
+    FlowRunStepInputFileMetadata,
+    FlowRunStepInputFileRef,
+)
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFileProjection
 from eneo.flows.flow_run_step_result_file import (
     FlowRunStepResultFile,
@@ -2710,6 +2713,67 @@ class FlowRunRepository:
         return {
             step_result_id: tuple(file_ids)
             for step_result_id, file_ids in file_ids_by_step_result_id.items()
+        }
+
+    async def list_current_step_input_file_refs_by_step_result_id(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step_results: Sequence[FlowStepResult | FlowStepResultIdentity],
+    ) -> dict[UUID, tuple[FlowRunStepInputFileRef, ...]]:
+        """Every current-attempt input file in step order, with the name and
+        MIME type of its file row when the row is in the run's tenant."""
+        step_result_id_by_step_attempt, current_attempt_pairs = (
+            _current_step_attempt_pairs_by_result_id(step_results)
+        )
+        if not current_attempt_pairs:
+            return {}
+
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowRunStepInputFiles.step_id,
+                    FlowRunStepInputFiles.attempt_no,
+                    FlowRunStepInputFiles.file_id,
+                    Files.name,
+                    Files.mimetype,
+                )
+                .outerjoin(
+                    Files,
+                    sa.and_(
+                        Files.id == FlowRunStepInputFiles.file_id,
+                        Files.tenant_id == tenant_id,
+                    ),
+                )
+                .where(FlowRunStepInputFiles.flow_run_id == run_id)
+                .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+                .where(
+                    sa.tuple_(
+                        FlowRunStepInputFiles.step_id,
+                        FlowRunStepInputFiles.attempt_no,
+                    ).in_(current_attempt_pairs)
+                )
+                .order_by(
+                    FlowRunStepInputFiles.step_order.asc(),
+                    FlowRunStepInputFiles.attempt_no.asc(),
+                    FlowRunStepInputFiles.ordinal.asc(),
+                )
+            )
+        ).all()
+
+        refs_by_step_result_id: dict[UUID, list[FlowRunStepInputFileRef]] = {}
+        for step_id, attempt_no, file_id, name, mimetype in rows:
+            step_result_id = step_result_id_by_step_attempt.get((step_id, attempt_no))
+            if step_result_id is None:
+                continue
+            refs_by_step_result_id.setdefault(step_result_id, []).append(
+                FlowRunStepInputFileRef(file_id=file_id, name=name, mimetype=mimetype)
+            )
+
+        return {
+            step_result_id: tuple(refs)
+            for step_result_id, refs in refs_by_step_result_id.items()
         }
 
     async def list_current_step_input_file_metadata_by_step_result_id(

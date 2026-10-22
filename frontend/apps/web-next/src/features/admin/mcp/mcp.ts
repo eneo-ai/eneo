@@ -66,6 +66,24 @@ export function mcpServerToolsQueryOptions(api: EneoClient, serverId: string) {
   });
 }
 
+export type McpServerFlowUsage = Schema<"PublishedToolUsagePublic">;
+
+/**
+ * The published flows whose steps call the server's tools. Behind the
+ * tenant's flows gate: ask only when the tenant has flows.
+ */
+export function mcpServerFlowUsageQueryOptions(api: EneoClient, serverId: string) {
+  return queryOptions({
+    queryKey: ["admin-mcp-servers", serverId, "flow-usage"],
+    queryFn: (): Promise<McpServerFlowUsage> =>
+      unwrap(
+        api.GET("/api/v1/mcp-servers/{mcp_server_id}/flow-usage", {
+          params: { path: { mcp_server_id: serverId } }
+        })
+      )
+  });
+}
+
 /**
  * Create a global MCP server. The backend validates the connection and returns
  * a 400 on failure, so the resolved response always carries a successful

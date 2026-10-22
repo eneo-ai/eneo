@@ -126,6 +126,25 @@ export function persistedFormFields(fields: readonly FormFieldDraft[]): Persiste
   });
 }
 
+/**
+ * The saved fields the edit renames, from the saved name to the new one, for
+ * `form_field_renames`: the core then moves the steps' reads of each field
+ * along with it. A row is the same field while its `key` stays.
+ */
+export function renamedFormFields(
+  saved: readonly FormFieldDraft[],
+  fields: readonly FormFieldDraft[]
+): Record<string, string> {
+  const savedNames = new Map(saved.map((field) => [field.key, field.name.trim()]));
+  const renames: Record<string, string> = {};
+  for (const field of fields) {
+    const before = savedNames.get(field.key);
+    const after = field.name.trim();
+    if (before && after && before !== after) renames[before] = after;
+  }
+  return renames;
+}
+
 export type FieldNameIssue = "namespace_head" | "reserved" | "step_alias" | "dot";
 
 export function fieldNameIssue(name: string): FieldNameIssue | null {

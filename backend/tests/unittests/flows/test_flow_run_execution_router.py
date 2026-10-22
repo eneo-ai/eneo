@@ -111,6 +111,14 @@ class _CommitFailureTransaction:
         return False
 
 
+def _stub_run_starters(container: MagicMock) -> None:
+    """The runs in these tests name no starter: no user or key resolves."""
+    starters = AsyncMock()
+    starters.list_users.return_value = {}
+    starters.list_service_principals.return_value = {}
+    container.flow_run_starter_repo.return_value = starters
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("principal_kind", ["user", "service_key"])
 async def test_get_flow_graph_keeps_run_version_snapshot_visible_after_unpublish(
@@ -432,6 +440,7 @@ async def test_get_flow_graph_rejects_corrupt_published_snapshot_without_run_id(
 @pytest.mark.asyncio
 async def test_create_flow_run_allows_service_key_principals():
     container = MagicMock()
+    _stub_run_starters(container)
     flow_service = AsyncMock()
     flow_run_service = AsyncMock()
     audit_service = AsyncMock()
@@ -477,6 +486,7 @@ async def test_create_flow_run_allows_service_key_principals():
 )
 async def test_create_flow_run_schedules_background_dispatch(label_fields):
     container = MagicMock()
+    _stub_run_starters(container)
     flow_run_service = AsyncMock()
     audit_service = AsyncMock()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
@@ -540,6 +550,7 @@ async def test_create_flow_run_schedules_background_dispatch(label_fields):
 @pytest.mark.asyncio
 async def test_create_flow_run_replay_skips_creation_audit_and_dispatch():
     container = MagicMock()
+    _stub_run_starters(container)
     flow_run_service = AsyncMock()
     audit_service = AsyncMock()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
@@ -576,6 +587,7 @@ async def test_create_flow_run_replay_skips_creation_audit_and_dispatch():
 @pytest.mark.asyncio
 async def test_create_flow_run_audit_failure_aborts_before_dispatch():
     container = MagicMock()
+    _stub_run_starters(container)
     flow_run_service = AsyncMock()
     audit_service = AsyncMock()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
@@ -610,6 +622,7 @@ async def test_create_flow_run_audit_failure_aborts_before_dispatch():
 @pytest.mark.asyncio
 async def test_resume_review_replay_projects_completed_run_result(monkeypatch):
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     step_id = uuid4()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
@@ -687,6 +700,7 @@ async def test_resume_review_replay_projects_completed_run_result(monkeypatch):
 @pytest.mark.asyncio
 async def test_create_flow_run_forwards_idempotency_key():
     container = MagicMock()
+    _stub_run_starters(container)
     flow_run_service = AsyncMock()
     audit_service = AsyncMock()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
@@ -722,6 +736,7 @@ async def test_create_flow_run_forwards_idempotency_key():
 @pytest.mark.asyncio
 async def test_create_flow_run_handles_missing_headers_object():
     container = MagicMock()
+    _stub_run_starters(container)
     flow_run_service = AsyncMock()
     audit_service = AsyncMock()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
@@ -750,6 +765,7 @@ async def test_create_flow_run_handles_missing_headers_object():
 @pytest.mark.asyncio
 async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4()).model_copy(
         update={"status": FlowRunStatus.QUEUED}
@@ -911,6 +927,7 @@ async def test_get_flow_run_exposes_no_content_when_required_audit_fails(
     failure_kind: str,
 ) -> None:
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     user = SimpleNamespace(
         id=uuid4(),
@@ -992,6 +1009,7 @@ async def test_list_flow_runs_raises_not_found_when_flow_missing_without_scope_f
 @pytest.mark.asyncio
 async def test_cancel_flow_run_uses_terminalizer_audit_only(monkeypatch):
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     run = _run(flow_id=flow_id, tenant_id=user.tenant_id)
@@ -1042,6 +1060,7 @@ async def test_redispatch_flow_run_uses_run_scoped_dispatch_and_audits(
     monkeypatch,
 ):
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
@@ -1108,6 +1127,7 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
     monkeypatch,
 ):
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
     run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(

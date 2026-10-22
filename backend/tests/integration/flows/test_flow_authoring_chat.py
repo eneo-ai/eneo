@@ -7,6 +7,8 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.flows.application.flow_authoring_chat import load_authoring_chat
 from eneo.internal_mcp import flows
@@ -432,3 +434,173 @@ async def test_chat_moves_and_removes_steps_through_the_same_rules(
     ahead = await flows.move_step(ctx, revision, UUID(write["id"]), 2)
     assert ahead.isError
     assert _page(ahead)["code"] == "flow_step_read_lost_producer"
+
+
+async def _editing_chat(client, db_container, admin_user, base, headers, revision):
+    url = base + "/authoring-chat/"
+    chat = (await client.post(url, headers=headers)).json()
+    mode = await client.patch(
+        url + chat["session_id"] + "/",
+        headers=headers,
+        json={"expected_revision": revision, "editing": True},
+    )
+    assert mode.status_code == 200, mode.text
+    return _loopback_ctx(await _chat_token(db_container, admin_user, chat))
+
+
+def _record_audit(monkeypatch: pytest.MonkeyPatch) -> list[ActionType]:
+    actions: list[ActionType] = []
+    log_async = AuditService.log_async
+
+    async def record(self: AuditService, **kwargs):
+        actions.append(kwargs["action"])
+        return await log_async(self, **kwargs)
+
+    monkeypatch.setattr(AuditService, "log_async", record)
+    return actions
+
+
+async def test_chat_renames_carry_reads_and_a_refused_edit_audits_nothing(
+    client, enabled_flow, db_container, admin_user, monkeypatch: pytest.MonkeyPatch
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    created = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": flow["draft_revision"],
+            "definition": {
+                "metadata_json": {
+                    "form_schema": {"fields": [{"name": "kommun", "type": "text"}]}
+                }
+            },
+            "new_steps": [
+                _new_step("Collect", "Collect the facts.", input_source="flow_input"),
+                _new_step(
+                    "Write",
+                    "Write from {{ Collect }} for {{ flow_input.kommun }}.",
+                    input_source="previous_step",
+                ),
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    collect, write = created.json()["steps"]
+    revision = created.json()["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    audited = _record_audit(monkeypatch)
+
+    # Write reads Collect by its name, which this edit takes away.
+    refused = await flows.update_step(
+        ctx,
+        revision,
+        UUID(collect["id"]),
+        {"user_description": None},
+        {"prompt": {"text": "Never saved."}},
+    )
+    assert refused.isError
+    assert _page(refused)["code"] == "flow_step_read_lost_producer"
+    assert audited == []
+    assert await _prompt(client, base, headers, collect) == "Collect the facts."
+
+    renamed = await flows.update_step(
+        ctx, revision, UUID(collect["id"]), {"user_description": "Facts"}
+    )
+    assert not renamed.isError, renamed.content[0].text
+    revision += 1
+    assert await _prompt(client, base, headers, write) == (
+        "Write from {{ Facts }} for {{ flow_input.kommun }}."
+    )
+
+    field_renamed = await flows.update_flow_settings(
+        ctx,
+        revision,
+        {
+            "metadata_json": {
+                "form_schema": {"fields": [{"name": "ort", "type": "text"}]}
+            },
+            "form_field_renames": {"kommun": "ort"},
+        },
+    )
+    assert not field_renamed.isError, field_renamed.content[0].text
+    revision += 1
+    assert await _prompt(client, base, headers, write) == (
+        "Write from {{ Facts }} for {{ flow_input.ort }}."
+    )
+
+    removed = await flows.update_flow_settings(
+        ctx, revision, {"metadata_json": {"form_schema": {"fields": []}}}
+    )
+    assert removed.isError
+    assert _page(removed)["code"] == "flow_form_field_still_read"
+
+
+async def test_chat_edit_of_a_shared_assistant_gives_the_step_its_own_copy(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    created = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": flow["draft_revision"],
+            "definition": {},
+            "new_steps": [
+                _new_step("Collect", "Shared prompt.", input_source="flow_input"),
+                _new_step("Check", "Own prompt.", input_source="previous_step"),
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    collect, check = created.json()["steps"]
+    step_keys = {
+        "id",
+        "assistant_id",
+        "step_order",
+        "user_description",
+        "input_source",
+        "input_type",
+        "output_mode",
+        "output_type",
+    }
+    sharing = await client.patch(
+        base + "/",
+        headers=headers,
+        json={
+            "expected_revision": created.json()["draft_revision"],
+            "steps": [
+                {key: collect[key] for key in step_keys},
+                {
+                    **{key: check[key] for key in step_keys},
+                    "assistant_id": collect["assistant_id"],
+                },
+            ],
+        },
+    )
+    assert sharing.status_code == 200, sharing.text
+    revision = sharing.json()["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+
+    result = await flows.update_step(
+        ctx,
+        revision,
+        UUID(check["id"]),
+        {},
+        {"prompt": {"text": "Only for Check."}},
+    )
+
+    assert not result.isError, result.content[0].text
+    copy_id = json.loads(_page(result)["content"])["assistant_id"]
+    assert copy_id != collect["assistant_id"]
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision + 1
+    assert [step["assistant_id"] for step in current["steps"]] == [
+        collect["assistant_id"],
+        copy_id,
+    ]
+    assert await _prompt(client, base, headers, collect) == "Shared prompt."
+    assert await _prompt(client, base, headers, current["steps"][1]) == (
+        "Only for Check."
+    )

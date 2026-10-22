@@ -871,6 +871,7 @@ async def test_update_flow_pins_audit_entity_ids():
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = flow
     flow_service.update_flow.return_value = flow
+    flow_service.get_flow_assistant_prompts.return_value = {}
     audit_service = AsyncMock()
     container.flow_service.return_value = flow_service
     container.audit_service.return_value = audit_service

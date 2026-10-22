@@ -3818,8 +3818,11 @@ async def test_update_flow_rejects_when_flow_is_published(user):
     )
     flow_repo.get.return_value = source_flow
 
-    with pytest.raises(BadRequestException, match="Cannot mutate a published flow"):
+    with pytest.raises(
+        BadRequestException, match="Cannot mutate a published flow"
+    ) as refused:
         await service.update_flow(flow_id=flow_id, name="new")
+    assert refused.value.code == "flow_unpublish_required"
 
 
 @pytest.mark.asyncio
@@ -3854,12 +3857,13 @@ async def test_update_flow_assistant_rejects_when_flow_published(user):
 
     with pytest.raises(
         BadRequestException, match="Cannot mutate assistant of a published flow"
-    ):
+    ) as refused:
         await service.update_flow_assistant(
             flow_id=flow_id,
             assistant_id=uuid4(),
             update=AssistantUpdateCommand(name="Updated"),
         )
+    assert refused.value.code == "flow_unpublish_required"
 
 
 @pytest.mark.asyncio

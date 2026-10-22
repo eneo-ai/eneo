@@ -19,6 +19,7 @@ import {
   formFieldsOf,
   hasOptions,
   metadataWithSettings,
+  renamedFormFields,
   suggestedFieldName,
   type FormFieldDraft,
   type FormFieldProblem,
@@ -243,6 +244,7 @@ export function FlowSettings({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [fields, setFields] = useState<FormFieldDraft[]>([]);
+  const [savedFields, setSavedFields] = useState<FormFieldDraft[]>([]);
   const [allowExport, setAllowExport] = useState(false);
   const [showProblems, setShowProblems] = useState(false);
   const [transcriptionDraft, setTranscriptionDraft] = useState<TranscriptionSettings>(() =>
@@ -258,7 +260,9 @@ export function FlowSettings({
   function startEditing() {
     setName(flow.name);
     setDescription(flow.description ?? "");
-    setFields(formFieldsOf(flow.metadata_json));
+    const saved = formFieldsOf(flow.metadata_json);
+    setSavedFields(saved);
+    setFields(saved);
     setAllowExport(evidenceExportAllowed(flow.metadata_json));
     setTranscriptionDraft(transcriptionSettingsOf(flow.metadata_json));
     setMaxSpeakersInvalid(false);
@@ -300,6 +304,7 @@ export function FlowSettings({
       return;
     }
     setSaving(true);
+    const renames = renamedFormFields(savedFields, fields);
     const saved = await onSave({
       name: name.trim(),
       description: description.trim() || null,
@@ -308,7 +313,8 @@ export function FlowSettings({
         transcriptionSettingsOf(flow.metadata_json),
         transcriptionDraft,
         { takesAudio }
-      )
+      ),
+      ...(Object.keys(renames).length > 0 ? { form_field_renames: renames } : {})
     });
     setSaving(false);
     if (saved) stopEditing();

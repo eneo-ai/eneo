@@ -78,6 +78,14 @@ class FlowErrorResponse(TypedDict):
     payload: dict[str, object]
 
 
+def _stub_run_starters(container: MagicMock) -> None:
+    """The runs in these tests name no starter: no user or key resolves."""
+    starters = AsyncMock()
+    starters.list_users.return_value = {}
+    starters.list_service_principals.return_value = {}
+    container.flow_run_starter_repo.return_value = starters
+
+
 def _empty_provider_calls() -> dict[str, object]:
     return {
         "items": [],
@@ -211,6 +219,7 @@ def test_flow_evidence_error_response_omits_request_id_when_absent():
 @pytest.mark.asyncio
 async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
     container = MagicMock()
+    _stub_run_starters(container)
     events: list[str] = []
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
@@ -402,6 +411,7 @@ async def test_list_flow_run_provider_calls_forwards_cursor_and_audits_page(
 @pytest.mark.asyncio
 async def test_get_flow_run_evidence_returns_failed_run_retryability(monkeypatch):
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     secret = "worker-secret-token"
     run = _run(flow_id=flow_id, tenant_id=uuid4()).model_copy(
@@ -496,6 +506,7 @@ async def test_get_flow_run_evidence_projects_redacted_artifact_result_files(
     monkeypatch,
 ):
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
     final_step_id = uuid4()
@@ -592,6 +603,7 @@ async def test_get_flow_run_evidence_enriches_service_principal_actor_summaries(
     monkeypatch,
 ):
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     tenant_id = uuid4()
     requester_service_id = uuid4()
@@ -745,6 +757,7 @@ async def test_get_flow_run_evidence_allows_space_admin_without_trace_permission
     monkeypatch,
 ):
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
     evidence = {
@@ -897,6 +910,7 @@ async def test_get_flow_run_evidence_fails_closed_when_required_audit_is_unavail
     monkeypatch, audit_outcome: str
 ):
     container = MagicMock()
+    _stub_run_starters(container)
     flow_id = uuid4()
     run = _run(flow_id=flow_id, tenant_id=uuid4())
     evidence = {

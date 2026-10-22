@@ -13,6 +13,7 @@ from eneo.data_retention.infrastructure.data_retention_service import (
     DataRetentionService,
 )
 from eneo.files.file_reference import file_reference_base_url
+from eneo.flows.application.feature_gate import FLOW_FEATURE
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     apply_flow_mapped_execution_policy_patch,
@@ -519,6 +520,11 @@ class SettingService:
             )
         )
 
+        flows_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name=FLOW_FEATURE,
+            tenant_id=self.user.tenant_id,
+        )
+
         tenant = await self.tenant_repo.get(self.user.tenant_id)
         provisioning = (
             overrides["provisioning"]
@@ -546,6 +552,7 @@ class SettingService:
                 app_settings.sharepoint_fixture_mode_active
             ),
             developer_tools_available=app_settings.is_development,
+            flows_enabled=flows_enabled,
         )
 
     async def get_settings(self) -> SettingsPublic:

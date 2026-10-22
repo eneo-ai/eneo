@@ -2,6 +2,7 @@ import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import { browserApi, type EneoClient } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { hasPermission } from "@/lib/auth/permissions";
 
 export type FlowPublic = Schema<"FlowPublic">;
 export type FlowSparse = Schema<"FlowSparsePublic">;
@@ -60,14 +61,15 @@ export function flowQueryOptions(api: EneoClient, flowId: string) {
 }
 
 /**
- * Whether the tenant has flows: the `flows_core` gate answers 404 on every
- * flow route when it is off, and the settings carry no flag for it. A user
- * without the flow permissions is refused too; either way there is nothing
- * to show, so any refusal reads as "no flows" instead of an error.
+ * Whether flows are shown to this user: the tenant has them switched on
+ * (`flows_enabled` in the settings, the `flows_core` gate that answers 404 on
+ * every flow route when off) and the user may see flows (`flows_view`).
  */
-export async function probeFlowsEnabled(api: EneoClient): Promise<boolean> {
-  const { response } = await api.GET("/api/v1/flows/", { params: { query: { limit: 1 } } });
-  return response.ok;
+export function flowsAvailable(
+  settings: Pick<Schema<"SettingsPublic">, "flows_enabled">,
+  user: Parameters<typeof hasPermission>[0]
+): boolean {
+  return settings.flows_enabled === true && hasPermission(user)("flows_view");
 }
 
 export function createFlow(body: {

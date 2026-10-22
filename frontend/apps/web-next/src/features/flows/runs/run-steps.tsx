@@ -5,7 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { QuietBanner } from "@/components/astryx/banner";
 import { StatusLabel } from "@/components/composites/status-label";
 import { LongMaterialCoverage } from "../long-material-coverage";
-import { formatCount, formatSeconds } from "./run-format";
+import { formatCount, formatSeconds, stepInputFiles } from "./run-format";
 import { JsonValue } from "./run-json";
 import { flowErrorText, runErrorText } from "./run-messages";
 import { outputStructured, outputText, tokenTotal, type RunStepView } from "./run-progress";
@@ -155,7 +155,7 @@ function StepCard({ flowId, runId, step }: { flowId: string; runId: string; step
           <RunInputFiles
             flowId={flowId}
             runId={runId}
-            fileIds={result.runtime_input_file_ids ?? []}
+            files={stepInputFiles(result)}
             label={t("flow_runs_step_input_files")}
           />
         </div>

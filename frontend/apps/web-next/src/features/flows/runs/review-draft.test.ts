@@ -3,6 +3,8 @@ import { makeCheckpoint } from "./run-fixtures";
 import {
   draftChanged,
   editedValueOf,
+  REJECT_REASON_MAX_LENGTH,
+  rejectReasonProblem,
   reviewDraftOf,
   reviewExpired,
   reviewOptions
@@ -150,5 +152,22 @@ describe("reviewOptions", () => {
 
   it("treats a checkpoint the core marked expired as expired whatever the clock says", () => {
     expect(reviewExpired(makeCheckpoint({ state: "expired" }), NOW)).toBe(true);
+  });
+});
+
+describe("rejectReasonProblem", () => {
+  it("asks for a reason that is not blank", () => {
+    expect(rejectReasonProblem("")).toBe("required");
+    expect(rejectReasonProblem("  \n ")).toBe("required");
+    expect(rejectReasonProblem("Fel mottagare")).toBeNull();
+  });
+
+  it("counts the trimmed reason in code points, as the core does", () => {
+    expect(REJECT_REASON_MAX_LENGTH).toBe(1024);
+    expect(rejectReasonProblem(`  ${"å".repeat(1024)}  `)).toBeNull();
+    expect(rejectReasonProblem("x".repeat(1025))).toBe("too_long");
+    // An emoji outside the basic plane is one code point but two UTF-16 units.
+    expect(rejectReasonProblem("😀".repeat(1024))).toBeNull();
+    expect(rejectReasonProblem("😀".repeat(1025))).toBe("too_long");
   });
 });

@@ -106,6 +106,24 @@ describe("FlowSettings", () => {
     // The axe scan of the whole form takes a few seconds in jsdom.
   }, 20_000);
 
+  it("sends a renamed field's saved name, so the steps' reads follow it", async () => {
+    const onSave = vi.fn(async () => true);
+    renderInApp(
+      <FlowSettings flow={flow} canEdit transcription={noTranscription} onSave={onSave} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    const field = screen.getByRole("group", { name: "Diarienummer" });
+    fireEvent.change(within(field).getByRole("textbox", { name: /Tekniskt namn/ }), {
+      target: { value: "arendenummer" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ form_field_renames: { diarienummer: "arendenummer" } })
+    );
+  });
+
   it("explains a name a step could not read, at the field, without saving", async () => {
     const onSave = vi.fn(async () => true);
     renderInApp(
@@ -169,6 +187,44 @@ describe("FlowSettings", () => {
             transcription_language: "auto"
           }
         }
+      })
+    );
+  }, 20_000);
+
+  it("saves a renamed field and a transcription change as one edit", async () => {
+    const onSave = vi.fn(async () => true);
+    const withField = makeFlow({
+      steps: audioFlow.steps,
+      metadata_json: {
+        wizard: { transcription_enabled: true, transcription_model: { id: "tm-1" } },
+        form_schema: {
+          fields: [{ name: "diarienummer", label: "Diarienummer", type: "text", required: true }]
+        }
+      }
+    });
+    renderInApp(
+      <FlowSettings flow={withField} canEdit transcription={resources} onSave={onSave} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    const field = screen.getByRole("group", { name: "Diarienummer" });
+    fireEvent.change(within(field).getByRole("textbox", { name: /Tekniskt namn/ }), {
+      target: { value: "arendenummer" }
+    });
+    fireEvent.click(screen.getByRole("combobox", { name: /Språk/ }));
+    fireEvent.click(await screen.findByRole("option", { name: "English" }));
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        form_field_renames: { diarienummer: "arendenummer" },
+        metadata_json: expect.objectContaining({
+          wizard: {
+            transcription_enabled: true,
+            transcription_model: { id: "tm-1" },
+            transcription_language: "en"
+          }
+        })
       })
     );
   }, 20_000);
