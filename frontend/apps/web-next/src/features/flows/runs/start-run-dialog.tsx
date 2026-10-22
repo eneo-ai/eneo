@@ -56,7 +56,12 @@ import {
   type RunPublic
 } from "./runs-api";
 import { withRunLabel } from "./start-run-checks";
-import { RunLabelField, TemplateReadiness, useAudioLengthCheck } from "./start-run-extras";
+import {
+  RunLabelField,
+  ReuseLastInput,
+  TemplateReadiness,
+  useAudioLengthCheck
+} from "./start-run-extras";
 import { useRuntimeUploads } from "./use-runtime-uploads";
 
 type ServerProblems = {
@@ -388,6 +393,15 @@ function StartRunForm({
         ) : null}
       </div>
 
+      <ReuseLastInput
+        flowId={flow.id}
+        contract={contract}
+        onApply={(input) => {
+          setValues(input.values);
+          if (input.freeText !== null) setFreeText(input.freeText);
+          setServer((current) => ({ ...current, fields: {} }));
+        }}
+      />
       <RunLabelField value={runLabel} onChange={setRunLabel} />
 
       {fields.map((field) => (

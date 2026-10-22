@@ -1,15 +1,31 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
+import { useAnnounce } from "@astryxdesign/core/hooks";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { History } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import type { Schema } from "@/lib/api/models";
+import { toast } from "@/lib/toast";
 import { measureAudioSeconds } from "./audio-length";
 import { formatSeconds } from "./run-format";
-import { flowErrorText } from "./run-messages";
-import { fitRunLabel, RUN_LABEL_MAX_LENGTH, screenAudioFiles } from "./start-run-checks";
-import type { RunContract, RuntimeInput } from "./runs-api";
+import { flowErrorText, refusalText } from "./run-messages";
+import {
+  fitRunLabel,
+  RUN_LABEL_MAX_LENGTH,
+  reusedInput,
+  screenAudioFiles,
+  takesReusableInput
+} from "./start-run-checks";
+import {
+  getRunDetail,
+  lastOwnRunQueryOptions,
+  type RunContract,
+  type RuntimeInput
+} from "./runs-api";
 
 type TemplateStatus = Schema<"FlowTemplateAssetStatus">;
 
@@ -145,4 +161,53 @@ export function useAudioLengthCheck(onRefused: (stepId: string, message: string)
       if (accepted.length > 0) then(accepted);
     });
   };
+}
+
+/**
+ * Fills the form from the caller's newest run of this flow: its field values
+ * or its free text, read from that run when asked (an audited content read).
+ * Offered only when the caller has run the flow and the form has fields or a
+ * free text; files are picked again.
+ */
+export function ReuseLastInput({
+  flowId,
+  contract,
+  onApply
+}: {
+  flowId: string;
+  contract: Pick<RunContract, "form_fields" | "steps_requiring_input">;
+  onApply: (input: ReturnType<typeof reusedInput>) => void;
+}) {
+  const t = useTranslations();
+  const announce = useAnnounce();
+  const reusable = takesReusableInput(contract);
+  const last = useQuery({ ...lastOwnRunQueryOptions(flowId), enabled: reusable });
+  const read = useMutation({
+    mutationFn: (runId: string) => getRunDetail(flowId, runId),
+    onSuccess: (run) => {
+      onApply(reusedInput(contract, run.input_payload_json));
+      announce(t("flow_run_more_reuse_done"));
+    },
+    onError: (error) =>
+      toast.error(t("flow_run_more_reuse_failed"), { description: refusalText(error, t) })
+  });
+  const run = last.data;
+  if (!reusable || !run) return null;
+  return (
+    <div className="flex flex-col items-start gap-1">
+      <Button
+        label={t("flow_run_more_reuse")}
+        icon={<History aria-hidden="true" />}
+        size="sm"
+        isLoading={read.isPending}
+        isInterruptible
+        onClick={() => {
+          if (!read.isPending) read.mutate(run.id);
+        }}
+      />
+      {(contract.steps_requiring_input ?? []).length > 0 ? (
+        <p className="text-ax-text-secondary m-0 text-xs">{t("flow_run_more_reuse_files")}</p>
+      ) : null}
+    </div>
+  );
 }

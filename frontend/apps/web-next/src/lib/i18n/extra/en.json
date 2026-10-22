@@ -3061,5 +3061,9 @@
   "flow_run_journey_source_document": "The document {name}",
   "flow_run_journey_source_passage_now": "Passage {chunk}, {current} of {total}",
   "flow_run_journey_source_passage_not_found": "No longer in the document.",
-  "flow_run_journey_source_passage_count": "{count, plural, one {# passage} other {# passages}}"
+  "flow_run_journey_source_passage_count": "{count, plural, one {# passage} other {# passages}}",
+  "flow_run_more_reuse": "Use the input from the last run",
+  "flow_run_more_reuse_files": "Files are not reused. Pick them again.",
+  "flow_run_more_reuse_done": "The input from the last run is filled in.",
+  "flow_run_more_reuse_failed": "The input from the last run could not be read"
 }

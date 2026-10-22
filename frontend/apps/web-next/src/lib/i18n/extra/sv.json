@@ -3061,5 +3061,9 @@
   "flow_run_journey_source_document": "Dokumentet {name}",
   "flow_run_journey_source_passage_now": "Textavsnitt {chunk}, {current} av {total}",
   "flow_run_journey_source_passage_not_found": "Finns inte längre i dokumentet.",
-  "flow_run_journey_source_passage_count": "{count, plural, one {# textavsnitt} other {# textavsnitt}}"
+  "flow_run_journey_source_passage_count": "{count, plural, one {# textavsnitt} other {# textavsnitt}}",
+  "flow_run_more_reuse": "Använd underlaget från förra körningen",
+  "flow_run_more_reuse_files": "Filer följer inte med. Välj dem igen.",
+  "flow_run_more_reuse_done": "Underlaget från förra körningen är ifyllt.",
+  "flow_run_more_reuse_failed": "Underlaget från förra körningen kunde inte hämtas"
 }

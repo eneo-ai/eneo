@@ -6,7 +6,7 @@ import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { makeFlow } from "../flow-fixtures";
-import { makeContract, makeInput, makeRunSummary } from "./run-fixtures";
+import { makeContract, makeInput, makeRunDetail, makeRunSummary } from "./run-fixtures";
 import type { RunContract, RunPublic } from "./runs-api";
 
 const api = vi.hoisted(() => ({
@@ -24,6 +24,8 @@ import { StartRunDialog } from "./start-run-dialog";
 
 const CONTRACT = "GET /api/v1/flows/{id}/run-contract/";
 const START = "POST /api/v1/flows/{id}/runs/";
+const LIST = "GET /api/v1/flows/{id}/runs/";
+const DETAIL = "GET /api/v1/flows/{id}/runs/{run_id}/";
 
 /** Answers runtime uploads as the core does, at once. */
 class FakeUpload {
@@ -173,6 +175,50 @@ describe("StartRunDialog", () => {
         "Idempotency-Key"
       ]
     ).toBeTruthy();
+  });
+
+  it("fills the form from the caller's last run when asked, and the files are picked again", async () => {
+    api.routes[LIST] = () => ({
+      body: {
+        count: 1,
+        items: [makeRunSummary({ id: "run-7" })],
+        has_more: true,
+        status_counts: {}
+      }
+    });
+    api.routes[DETAIL] = () => ({
+      body: makeRunDetail({ id: "run-7", input_payload_json: { arende: "Bygglov", prio: "Hög" } })
+    });
+    const { dialog } = await openDialog();
+    const reuse = await within(dialog).findByRole("button", {
+      name: messages.flow_run_more_reuse
+    });
+    expect(within(dialog).getByText(messages.flow_run_more_reuse_files)).toBeTruthy();
+    const list = api.stub.calls.find((call) => `${call.method} ${call.path}` === LIST);
+    expect((list?.init as { params?: { query?: unknown } }).params?.query).toEqual({
+      limit: 1,
+      mine: true
+    });
+    // The run's input is a content read, made only when asked for.
+    expect(api.stub.calls.some((call) => `${call.method} ${call.path}` === DETAIL)).toBe(false);
+
+    fireEvent.click(reuse);
+
+    await waitFor(() =>
+      expect((within(dialog).getByLabelText(/^Ärende/) as HTMLInputElement).value).toBe("Bygglov")
+    );
+    expect(FakeUpload.sent).toEqual([]);
+  });
+
+  it("does not offer the last run's input to a caller who has not run the flow", async () => {
+    api.routes[LIST] = () => ({
+      body: { count: 0, items: [], has_more: false, status_counts: {} }
+    });
+    const { dialog } = await openDialog();
+    await waitFor(() =>
+      expect(api.stub.calls.some((call) => `${call.method} ${call.path}` === LIST)).toBe(true)
+    );
+    expect(within(dialog).queryByRole("button", { name: messages.flow_run_more_reuse })).toBeNull();
   });
 
   it("shows the core's refusal at the field it names", async () => {
