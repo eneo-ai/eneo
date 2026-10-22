@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
+  changedPaths,
   emptyValue,
   fieldKind,
   fieldLabel,
   formFits,
   itemPreview,
   objectFields,
+  propertyPath,
+  valuesEqual,
   withProperty
 } from "./review-structured";
 
@@ -73,5 +76,33 @@ describe("rows and properties", () => {
     expect(
       itemPreview(row, { text: "Ring Anna", prioritet: "hög", antal: 1, not: "Före fredag" })
     ).toBe("Ring Anna");
+  });
+});
+
+describe("changedPaths", () => {
+  it("names each changed property and the objects around it", () => {
+    const before = { sammanfattning: "A", detaljer: { datum: "2026-10-01", ort: "Sundsvall" } };
+    const after = { sammanfattning: "A", detaljer: { datum: "2026-10-02", ort: "Sundsvall" } };
+    expect([...changedPaths(before, after)].sort()).toEqual(["", "/detaljer", "/detaljer/datum"]);
+    expect(changedPaths(before, structuredClone(before)).size).toBe(0);
+  });
+
+  it("compares a list as a whole", () => {
+    const changed = changedPaths(
+      { rader: [{ text: "a" }, { text: "b" }] },
+      { rader: [{ text: "b" }] }
+    );
+    expect([...changed].sort()).toEqual(["", "/rader"]);
+  });
+
+  it("escapes keys that hold the path separator", () => {
+    expect(propertyPath("", "a/b~c")).toBe("/a~1b~0c");
+  });
+});
+
+describe("valuesEqual", () => {
+  it("ignores the order of an object's keys", () => {
+    expect(valuesEqual({ a: 1, b: [1, 2] }, { b: [1, 2], a: 1 })).toBe(true);
+    expect(valuesEqual({ a: 1 }, { a: 1, b: null })).toBe(false);
   });
 });

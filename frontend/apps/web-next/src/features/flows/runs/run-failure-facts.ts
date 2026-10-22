@@ -70,3 +70,45 @@ export function failureFacts(
   if (!details.tool_call_possible) facts.push({ kind: "retry", retryable: error.retryable });
   return facts;
 }
+
+/** A step of the flow, as far as the review-policy refusal needs it. */
+export type ReviewPolicyStep = {
+  step_order: number;
+  user_description?: string | null;
+  review_policy?: unknown;
+};
+
+/**
+ * The steps a refused review policy concerns: the step the error names, or,
+ * when it names none, every step that has a review policy (only possibly
+ * the one). Empty for any other error.
+ */
+export function reviewPolicySteps(
+  error: Pick<RunError, "code" | "step_order">,
+  steps: readonly ReviewPolicyStep[]
+): { exact: boolean; steps: { order: number; name: string | null }[] } {
+  if (error.code !== "flow_review_policy_invalid") return { exact: false, steps: [] };
+  const named = (step: ReviewPolicyStep | undefined, order: number) => ({
+    order,
+    name: step?.user_description?.trim() || null
+  });
+  if (typeof error.step_order === "number") {
+    const order = error.step_order;
+    return {
+      exact: true,
+      steps: [
+        named(
+          steps.find((step) => step.step_order === order),
+          order
+        )
+      ]
+    };
+  }
+  return {
+    exact: false,
+    steps: steps
+      .filter((step) => step.review_policy != null)
+      .sort((a, b) => a.step_order - b.step_order)
+      .map((step) => named(step, step.step_order))
+  };
+}

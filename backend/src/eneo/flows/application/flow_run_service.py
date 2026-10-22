@@ -17,6 +17,7 @@ from eneo.flows.api.flow_run_contract_models import FlowFinalOutputContractPubli
 from eneo.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
     FlowRunAccessPolicy,
+    FlowRunEvidenceAccess,
 )
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.domain.flow import (
@@ -34,6 +35,7 @@ from eneo.flows.domain.flow_run_exceptions import (
     FlowRunConcurrencyLimitReachedError,
     FlowRunNotFoundError,
 )
+from eneo.flows.domain.flow_run_listing import FlowRunListing
 from eneo.flows.domain.mapped_execution_policy import (
     resolve_flow_mapped_execution_policy_from_source,
 )
@@ -132,7 +134,7 @@ from eneo.flows.transcription_config import (
     SpeakerServiceGap,
     parse_transcription_config,
 )
-from eneo.main.exceptions import NotFoundException, ValidationException
+from eneo.main.exceptions import NotFoundException
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.settings.setting_service import SettingService
 from eneo.users.user import UserInDB
@@ -382,14 +384,26 @@ class FlowRunService:
         if run_label is not None:
             run_label = unicodedata.normalize("NFC", run_label)
             if any(breaks_one_line(char) for char in run_label):
-                raise ValidationException(
-                    "run_label must be a single line without control characters."
+                raise FlowValidationException(
+                    "run_label must be a single line without control characters.",
+                    code=FlowApiErrorCode.RUN_INVALID_LABEL,
+                    context={
+                        "field": "run_label",
+                        "reason": "not_one_line",
+                        "max_length": ONE_LINE_TEXT_MAX_CHARS,
+                    },
                 )
             run_label = run_label.strip()
             if not 1 <= len(run_label) <= ONE_LINE_TEXT_MAX_CHARS:
-                raise ValidationException(
+                raise FlowValidationException(
                     "run_label must contain between 1 and "
-                    f"{ONE_LINE_TEXT_MAX_CHARS} characters."
+                    f"{ONE_LINE_TEXT_MAX_CHARS} characters.",
+                    code=FlowApiErrorCode.RUN_INVALID_LABEL,
+                    context={
+                        "field": "run_label",
+                        "reason": "empty" if not run_label else "too_long",
+                        "max_length": ONE_LINE_TEXT_MAX_CHARS,
+                    },
                 )
         principal = self._principal()
         published = await self._load_published_run_definition(
@@ -918,6 +932,7 @@ class FlowRunService:
         limit: int | None = None,
         offset: int | None = None,
         history: bool = False,
+        listing: FlowRunListing | None = None,
     ) -> list[FlowRunStatusSnapshot]:
         principal = self._principal()
         own_runs_only = mine or not await self._lists_every_run(
@@ -935,6 +950,39 @@ class FlowRunService:
             ),
             limit=limit,
             offset=offset,
+            listing=listing,
+        )
+
+    async def evidence_access(
+        self, run: FlowRunStatusSnapshot, *, history: bool = False
+    ) -> FlowRunEvidenceAccess:
+        """What the caller may do with the run's evidence, decided by the run
+        access policy the evidence routes use."""
+        return await self.access_policy.evidence_access_for_run(run, history=history)
+
+    async def count_run_statuses(
+        self,
+        *,
+        flow_id: UUID,
+        mine: bool = False,
+        history: bool = False,
+        search: str | None = None,
+    ) -> dict[FlowRunStatus, int]:
+        """How many of the runs the caller may list have each status, within
+        ``mine`` and ``search`` and before any status filter: what a status
+        filter would leave."""
+        principal = self._principal()
+        own_runs_only = mine or not await self._lists_every_run(
+            principal, flow_id=flow_id, history=history
+        )
+        return await self.flow_run_repo.count_statuses(
+            tenant_id=self.user.tenant_id,
+            flow_id=flow_id,
+            principal_user_id=principal.principal_user_id if own_runs_only else None,
+            principal_service_id=(
+                principal.principal_service_id if own_runs_only else None
+            ),
+            search=search,
         )
 
     async def _lists_every_run(

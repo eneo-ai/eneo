@@ -49,6 +49,7 @@ from eneo.flows.application.flow_dispatch import (
     FlowRunDispatchNotClaimed,
     dispatch_flow_run_recoverably_after_commit,
 )
+from eneo.flows.application.flow_run_access_policy import FlowRunEvidenceAccess
 from eneo.flows.application.flow_run_service import (
     CreateRunResult,
     FlowRunDetailView,
@@ -59,6 +60,7 @@ from eneo.flows.domain.flow import (
     FlowRunStatus,
     FlowStepResultAnnotation,
 )
+from eneo.flows.domain.flow_run_listing import FlowRunListing
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
@@ -666,6 +668,9 @@ async def test_resume_review_replay_projects_completed_run_result(monkeypatch):
         accepted=False,
     )
     container.flow_run_service.return_value = run_service
+    run_service.evidence_access.return_value = FlowRunEvidenceAccess(
+        view_refusal=None, redacted_export_refusal=None, raw_export_refusal=None
+    )
     container.flow_run_review_checkpoint_service.return_value = review_service
     container.flow_service.return_value = AsyncMock()
     container.user.return_value = user
@@ -787,6 +792,7 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     )
     run_service = AsyncMock()
     run_service.list_run_statuses.return_value = [run]
+    run_service.count_run_statuses.return_value = dict.fromkeys(FlowRunStatus, 0)
     run_service.get_run_detail_with_result_files_and_usage.return_value = (
         FlowRunDetailView(
             run=run,
@@ -799,6 +805,9 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     run_service.get_run_status.return_value = run
     run_service.get_run.return_value = run
     container.flow_run_service.return_value = run_service
+    run_service.evidence_access.return_value = FlowRunEvidenceAccess(
+        view_refusal=None, redacted_export_refusal=None, raw_export_refusal=None
+    )
     container.flow_transcript_source_service.return_value = AsyncMock(
         get_references_for_step_results=AsyncMock(return_value={})
     )
@@ -884,7 +893,16 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     assert {call.kwargs["include_retired"] for call in gate.await_args_list} == {True}
     assert flow_service.get_flow.await_count == 0
     run_service.list_run_statuses.assert_awaited_once_with(
-        flow_id=flow_id, statuses=None, mine=False, limit=21, offset=2, history=True
+        flow_id=flow_id,
+        statuses=None,
+        mine=False,
+        limit=21,
+        offset=2,
+        history=True,
+        listing=FlowRunListing(),
+    )
+    run_service.count_run_statuses.assert_awaited_once_with(
+        flow_id=flow_id, mine=False, history=True, search=None
     )
     run_service.get_run_detail_with_result_files_and_usage.assert_awaited_once_with(
         run_id=run.id, flow_id=flow_id, history=True
@@ -947,6 +965,9 @@ async def test_get_flow_run_exposes_no_content_when_required_audit_fails(
         )
     )
     container.flow_run_service.return_value = run_service
+    run_service.evidence_access.return_value = FlowRunEvidenceAccess(
+        view_refusal=None, redacted_export_refusal=None, raw_export_refusal=None
+    )
     container.user.return_value = user
     container.flow_service.return_value = AsyncMock()
     container.audit_service.return_value = AsyncMock()
@@ -983,6 +1004,9 @@ async def test_list_flow_runs_raises_not_found_when_flow_missing_without_scope_f
     flow_id = uuid4()
     run_service = AsyncMock()
     container.flow_run_service.return_value = run_service
+    run_service.evidence_access.return_value = FlowRunEvidenceAccess(
+        view_refusal=None, redacted_export_refusal=None, raw_export_refusal=None
+    )
     flow_service = AsyncMock()
     flow_service.get_flow.side_effect = NotFoundException("Flow not found.")
     container.flow_service.return_value = flow_service
@@ -1023,6 +1047,9 @@ async def test_cancel_flow_run_uses_terminalizer_audit_only(monkeypatch):
     run_service = AsyncMock()
     run_service.cancel_run.side_effect = _cancel_run
     container.flow_run_service.return_value = run_service
+    run_service.evidence_access.return_value = FlowRunEvidenceAccess(
+        view_refusal=None, redacted_export_refusal=None, raw_export_refusal=None
+    )
     flow_service = AsyncMock()
     flow_service.get_flow.return_value = _flow(flow_id)
     container.flow_service.return_value = flow_service
@@ -1073,6 +1100,9 @@ async def test_redispatch_flow_run_uses_run_scoped_dispatch_and_audits(
     run_service = AsyncMock()
     run_service.get_run.side_effect = [run, refreshed]
     container.flow_run_service.return_value = run_service
+    run_service.evidence_access.return_value = FlowRunEvidenceAccess(
+        view_refusal=None, redacted_export_refusal=None, raw_export_refusal=None
+    )
     container.user.return_value = user
 
     async def _dispatch(**_kwargs):
@@ -1150,6 +1180,9 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
         )
     )
     container.flow_run_service.return_value = run_service
+    run_service.evidence_access.return_value = FlowRunEvidenceAccess(
+        view_refusal=None, redacted_export_refusal=None, raw_export_refusal=None
+    )
     container.user.return_value = user
     container.audit_service.return_value = AsyncMock()
 
@@ -1205,6 +1238,9 @@ async def test_redispatch_flow_run_translates_exhaustion_generation_conflict(
     run_service = AsyncMock()
     run_service.get_run.return_value = run
     container.flow_run_service.return_value = run_service
+    run_service.evidence_access.return_value = FlowRunEvidenceAccess(
+        view_refusal=None, redacted_export_refusal=None, raw_export_refusal=None
+    )
     container.user.return_value = user
     dispatch = AsyncMock(
         side_effect=FlowRunDispatchExhaustionGenerationConflictError(
@@ -1245,6 +1281,9 @@ async def test_redispatch_flow_run_translates_dispatch_error(monkeypatch):
     run_service = AsyncMock()
     run_service.get_run.return_value = run
     container.flow_run_service.return_value = run_service
+    run_service.evidence_access.return_value = FlowRunEvidenceAccess(
+        view_refusal=None, redacted_export_refusal=None, raw_export_refusal=None
+    )
     container.user.return_value = user
     container.audit_service.return_value = AsyncMock()
 

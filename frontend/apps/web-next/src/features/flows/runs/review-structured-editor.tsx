@@ -11,15 +11,20 @@ import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { flushSync } from "react-dom";
 import { focusFirstControl } from "./run-form-fields";
+import { JsonValue } from "./run-json";
 import {
+  changedPaths,
   emptyValue,
   fieldChoices,
   fieldDescription,
   fieldKind,
   fieldLabel,
   isReviewObject,
+  isReviewValue,
   itemPreview,
+  LONG_DESCRIPTION_CHARS,
   objectFields,
+  propertyPath,
   schemaOf,
   withProperty,
   type ReviewSchema,
@@ -31,11 +36,66 @@ type FieldProps = {
   value: ReviewValue | undefined;
   label: string;
   depth: number;
+  /** Where the field sits in the output, as `changedPaths` names it. */
+  path: string;
+  /** The field's value before any review changed it, when there is one to compare with. */
+  original?: ReviewValue;
+  /** The paths that differ from the original. */
+  changed: ReadonlySet<string>;
   /** A closed row is named by its first text fields. */
   preview?: string;
   defaultIsOpen?: boolean;
   onChange: (value: ReviewValue) => void;
 };
+
+const NO_CHANGES: ReadonlySet<string> = new Set();
+
+/** That a field differs from the original, and what it was, behind a disclosure. */
+function ChangedMarker({ original }: { original: ReviewValue | undefined }) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <p className="text-ax-text-secondary m-0 text-xs font-medium">
+        {t("flow_run_review_changed")}
+      </p>
+      <Collapsible
+        isOpen={open}
+        onOpenChange={setOpen}
+        chevronPosition="start"
+        trigger={<span className="text-xs font-medium">{t("flow_run_review_previous_value")}</span>}
+      >
+        {open ? (
+          <div className="border-ax-border ml-1 border-l pt-1 pl-3">
+            <ShownValue label={t("flow_run_review_previous_value")} value={original} />
+          </div>
+        ) : null}
+      </Collapsible>
+    </div>
+  );
+}
+
+/**
+ * A field's description: under the control when it is short, behind a help
+ * button when it is long, so a long contract does not bury the fields.
+ */
+function useFieldHelp(label: string, description: string | undefined) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  const long = description !== undefined && description.length > LONG_DESCRIPTION_CHARS;
+  return {
+    description: long && !open ? undefined : description,
+    toggle: long ? (
+      <Button
+        label={t("flow_run_review_field_help", { label })}
+        size="sm"
+        variant="ghost"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+      />
+    ) : null
+  };
+}
 
 /** Puts focus in a new row's first field, past the row's own disclosure. */
 function focusNewRow(id: string) {
@@ -73,8 +133,11 @@ function ObjectFields({
   schema,
   value,
   depth,
+  path,
+  original,
+  changed,
   onChange
-}: Pick<FieldProps, "schema" | "value" | "depth" | "onChange">) {
+}: Pick<FieldProps, "schema" | "value" | "depth" | "path" | "original" | "changed" | "onChange">) {
   return (
     <div className="flex min-w-0 flex-col gap-3">
       {objectFields(schema, value).map((field) => (
@@ -84,6 +147,9 @@ function ObjectFields({
           value={isReviewObject(value) ? value[field.key] : undefined}
           label={fieldLabel(field.schema, field.key)}
           depth={depth + 1}
+          path={propertyPath(path, field.key)}
+          original={isReviewObject(original) ? original[field.key] : undefined}
+          changed={changed}
           onChange={(next) => onChange(withProperty(value, field.key, next))}
         />
       ))}
@@ -128,6 +194,9 @@ function ListRows({
                     label={rowLabel}
                     preview={itemPreview(itemSchema, item)}
                     depth={depth + 1}
+                    // Rows have no identity to compare by: the list is marked as a whole.
+                    path={`${baseId}-row-${index}`}
+                    changed={NO_CHANGES}
                     defaultIsOpen={index === added}
                     onChange={(next) =>
                       onChange(items.map((existing, at) => (at === index ? next : existing)))
@@ -168,53 +237,123 @@ function ListRows({
   );
 }
 
-function StructuredField({
+function StructuredField(props: FieldProps) {
+  const { value, path, original, changed } = props;
+  const isChanged = changed.has(path);
+  const kind = fieldKind(props.schema, value, props.depth);
+  if (kind === "object" || kind === "array") {
+    return <NestedField {...props} kind={kind} isChanged={isChanged} />;
+  }
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <ScalarField {...props} kind={kind} />
+      {isChanged ? <ChangedMarker original={original} /> : null}
+    </div>
+  );
+}
+
+/** An object or a list: its fields or rows, opened and closed below the top level. */
+function NestedField({
   schema,
   value,
   label,
   depth,
+  path,
+  original,
+  changed,
   preview,
   defaultIsOpen,
-  onChange
-}: FieldProps) {
+  onChange,
+  kind,
+  isChanged
+}: FieldProps & { kind: "object" | "array"; isChanged: boolean }) {
   const t = useTranslations();
-  const kind = fieldKind(schema, value, depth);
   const description = fieldDescription(schema);
-
-  if (kind === "object" || kind === "array") {
-    const contents =
-      kind === "object" ? (
-        <ObjectFields schema={schema} value={value} depth={depth} onChange={onChange} />
-      ) : (
+  const contents =
+    kind === "object" ? (
+      <ObjectFields
+        schema={schema}
+        value={value}
+        depth={depth}
+        path={path}
+        original={original}
+        changed={changed}
+        onChange={onChange}
+      />
+    ) : (
+      <>
         <ListRows schema={schema} value={value} label={label} depth={depth} onChange={onChange} />
-      );
-    if (depth === 0) return contents;
-    const count = kind === "array" && Array.isArray(value) ? value.length : null;
-    return (
-      <Collapsible
-        defaultIsOpen={defaultIsOpen ?? depth === 1}
-        chevronPosition="start"
-        trigger={
-          <span className="flex min-w-0 flex-col text-sm">
-            <span className="text-ax-text font-medium break-words">
-              {preview ? `${label}: ${preview}` : label}
-            </span>
-            {count !== null ? (
-              <span className="text-ax-text-secondary text-xs">
-                {t("flow_run_extras_review_rows", { count })}
-              </span>
-            ) : null}
-          </span>
-        }
-      >
-        <div className="border-ax-border ml-2 flex min-w-0 flex-col gap-3 border-l py-2 pl-4">
-          {description ? <p className="text-ax-text-secondary text-sm">{description}</p> : null}
-          {contents}
-        </div>
-      </Collapsible>
+        {isChanged ? <ChangedMarker original={original} /> : null}
+      </>
     );
-  }
+  if (depth === 0) return contents;
+  const count = kind === "array" && Array.isArray(value) ? value.length : null;
+  return (
+    <Collapsible
+      defaultIsOpen={defaultIsOpen ?? depth === 1}
+      chevronPosition="start"
+      trigger={
+        <span className="flex min-w-0 flex-col text-sm">
+          <span className="text-ax-text font-medium break-words">
+            {preview ? `${label}: ${preview}` : label}
+          </span>
+          {count !== null || isChanged ? (
+            <span className="text-ax-text-secondary text-xs">
+              {[
+                count !== null ? t("flow_run_extras_review_rows", { count }) : null,
+                isChanged ? t("flow_run_review_changed") : null
+              ]
+                .filter(Boolean)
+                .join(" · ")}
+            </span>
+          ) : null}
+        </span>
+      }
+    >
+      <div className="border-ax-border ml-2 flex min-w-0 flex-col gap-3 border-l py-2 pl-4">
+        {description ? <p className="text-ax-text-secondary text-sm">{description}</p> : null}
+        {contents}
+      </div>
+    </Collapsible>
+  );
+}
 
+/** A text, number, choice or yes/no value, or one shown as it is stored. */
+function ScalarField({
+  schema,
+  value,
+  label,
+  onChange,
+  kind
+}: FieldProps & { kind: Exclude<ReturnType<typeof fieldKind>, "object" | "array"> }) {
+  const help = useFieldHelp(label, fieldDescription(schema));
+  return (
+    <>
+      <ScalarControl
+        schema={schema}
+        value={value}
+        label={label}
+        description={help.description}
+        kind={kind}
+        onChange={onChange}
+      />
+      {help.toggle ? <div>{help.toggle}</div> : null}
+    </>
+  );
+}
+
+function ScalarControl({
+  schema,
+  value,
+  label,
+  description,
+  kind,
+  onChange
+}: Pick<FieldProps, "schema" | "value" | "label" | "onChange"> & {
+  description: string | undefined;
+  kind: Exclude<ReturnType<typeof fieldKind>, "object" | "array">;
+}) {
+  const t = useTranslations();
   switch (kind) {
     case "string": {
       const text = typeof value === "string" ? value : "";
@@ -292,38 +431,123 @@ function StructuredField({
   }
 }
 
+type EditorView = "fields" | "json" | "original";
+
 /**
  * The paused step's JSON output as a form built from its output contract:
  * nested objects open and close, lists get rows to add and remove (within
  * the contract's bounds), and each scalar gets the control its type asks
  * for. Fields the contract does not name and parts the form cannot edit
- * are kept as they are. `problem` is a refusal that names no field.
+ * are kept as they are. A field that differs from `original` (the step's
+ * own output, before any review changed it) is marked, with its previous
+ * value behind a disclosure; "Visa original" shows that output read-only,
+ * and "Visa som JSON" edits the whole value as JSON text, which reaches the
+ * draft only while it reads as JSON. A long description sits behind a
+ * help button. `problem` is a refusal that names no field.
  */
 export function StructuredReviewEditor({
   id,
   schema,
   value,
+  original,
   problem,
   onChange
 }: {
   id: string;
   schema: ReviewSchema;
   value: ReviewValue;
+  original?: unknown;
   problem: string | null;
   onChange: (value: ReviewValue) => void;
 }) {
   const t = useTranslations();
+  const [view, setView] = useState<EditorView>("fields");
+  const [jsonText, setJsonText] = useState("");
+  const [jsonInvalid, setJsonInvalid] = useState(false);
+  const before = original !== undefined && isReviewValue(original) ? original : undefined;
+  const changed = before !== undefined ? changedPaths(before, value) : NO_CHANGES;
+
+  function editJson(text: string) {
+    setJsonText(text);
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (!isReviewValue(parsed)) throw new Error("not JSON data");
+      setJsonInvalid(false);
+      onChange(parsed);
+    } catch {
+      setJsonInvalid(true);
+    }
+  }
+
   return (
     <div id={id} className="flex min-w-0 flex-col gap-3">
-      <p className="text-ax-text-secondary text-sm">{t("flow_run_extras_review_form_hint")}</p>
-      {problem ? <p className="text-ax-error text-sm">{problem}</p> : null}
-      <StructuredField
-        schema={schema}
-        value={value}
-        label={t("flow_runs_review_output")}
-        depth={0}
-        onChange={onChange}
-      />
+      <div className="flex flex-wrap items-center gap-2">
+        {before !== undefined ? (
+          <Button
+            label={
+              view === "original"
+                ? t("flow_run_review_back_to_edit")
+                : t("flow_run_review_show_original")
+            }
+            size="sm"
+            onClick={() => setView(view === "original" ? "fields" : "original")}
+          />
+        ) : null}
+        {view !== "original" ? (
+          <Button
+            label={
+              view === "json" ? t("flow_run_review_show_fields") : t("flow_run_review_show_json")
+            }
+            size="sm"
+            onClick={() => {
+              if (view === "json") {
+                setView("fields");
+                setJsonInvalid(false);
+                return;
+              }
+              setJsonText(JSON.stringify(value, null, 2));
+              setView("json");
+            }}
+          />
+        ) : null}
+      </div>
+      {view === "original" && before !== undefined ? (
+        <>
+          <p className="text-ax-text-secondary text-sm">{t("flow_run_review_original_help")}</p>
+          <JsonValue value={before} />
+        </>
+      ) : view === "json" ? (
+        <>
+          {problem ? <p className="text-ax-error text-sm">{problem}</p> : null}
+          <TextArea
+            label={t("flow_run_review_json_payload")}
+            value={jsonText}
+            onChange={editJson}
+            rows={14}
+            status={
+              jsonInvalid
+                ? { type: "error", message: t("flow_run_review_payload_invalid") }
+                : undefined
+            }
+            width="100%"
+          />
+        </>
+      ) : (
+        <>
+          <p className="text-ax-text-secondary text-sm">{t("flow_run_extras_review_form_hint")}</p>
+          {problem ? <p className="text-ax-error text-sm">{problem}</p> : null}
+          <StructuredField
+            schema={schema}
+            value={value}
+            label={t("flow_runs_review_output")}
+            depth={0}
+            path=""
+            original={before}
+            changed={changed}
+            onChange={onChange}
+          />
+        </>
+      )}
     </div>
   );
 }

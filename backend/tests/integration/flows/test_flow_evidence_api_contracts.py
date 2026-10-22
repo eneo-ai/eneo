@@ -2483,3 +2483,170 @@ async def test_flow_run_evidence_export_fails_closed_when_audit_logging_is_unava
     payload = response.json()
     assert payload["code"] == "flow_evidence_audit_logging_failed"
     assert payload["context"]["audit_required"] is True
+
+
+async def _join_space(
+    *, db_container, space_id: UUID, user_id: UUID, role: SpaceRoleValue
+) -> None:
+    async with db_container() as container:
+        await container.session().execute(
+            sa.text(
+                "INSERT INTO spaces_users (space_id, user_id, role) "
+                "VALUES (:space_id, :user_id, :role)"
+            ),
+            {"space_id": str(space_id), "user_id": str(user_id), "role": role.value},
+        )
+
+
+async def _evidence_answers(
+    client, *, run_url: str, headers: dict[str, str]
+) -> list[str | None]:
+    """The refusal code each evidence route answers with, None when it answers."""
+    answers: list[str | None] = []
+    for path in (
+        "evidence/",
+        "evidence/export?format=json",
+        "evidence/export?format=json&detail=raw&reason=access-check",
+    ):
+        response = await client.get(f"{run_url}/{path}", headers=headers)
+        assert response.status_code in {200, 403}, response.text
+        answers.append(None if response.status_code == 200 else response.json()["code"])
+    return answers
+
+
+async def test_a_runs_evidence_access_is_what_the_evidence_routes_answer(
+    client,
+    db_container,
+    monkeypatch,
+    patch_auth_service_jwt,
+    admin_user,
+    flow_process_auth_headers,
+    create_published_compose_text_flow,
+):
+    async def _noop_dispatch(
+        *, run_id: UUID, tenant_id: UUID, expected_revision: int
+    ) -> None:
+        _ = (run_id, tenant_id, expected_revision)
+
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch,
+    )
+    _ = patch_auth_service_jwt
+    flow = await create_published_compose_text_flow(
+        client,
+        flow_process_auth_headers,
+        metadata_json={"evidence_policy": {"allow_export": True}},
+    )
+    admin_headers = {"Authorization": f"Bearer {flow_process_auth_headers.token}"}
+    flow_response = await client.get(
+        f"/api/v1/flows/{flow.flow_id}/", headers=admin_headers
+    )
+    assert flow_response.status_code == 200, flow_response.text
+    space_id = UUID(flow_response.json()["space_id"])
+
+    async def member(
+        permissions: list[Permission], role: SpaceRoleValue
+    ) -> dict[str, str]:
+        user, token = await _create_user_with_flow_permissions_and_token(
+            db_container=db_container,
+            tenant_id=admin_user.tenant_id,
+            role_name_prefix="Evidence access",
+            permissions=permissions,
+        )
+        await _join_space(
+            db_container=db_container, space_id=space_id, user_id=user.id, role=role
+        )
+        return {"Authorization": f"Bearer {token}"}
+
+    run_and_trace = [
+        Permission.FLOWS_VIEW,
+        Permission.FLOWS_RUN,
+        Permission.FLOWS_TRACE,
+    ]
+    space_admin = await member(
+        [Permission.FLOWS_VIEW, Permission.FLOWS_RUN], SpaceRoleValue.ADMIN
+    )
+    tracer = await member(run_and_trace, SpaceRoleValue.EDITOR)
+    runner = await member(
+        [Permission.FLOWS_VIEW, Permission.FLOWS_RUN], SpaceRoleValue.EDITOR
+    )
+    other_member = await member(run_and_trace, SpaceRoleValue.EDITOR)
+    key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": f"evidence-access-{uuid4().hex[:8]}",
+            "key_type": "sk_",
+            "permission": "write",
+            "scope_type": "tenant",
+            "ownership": "service",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            "resource_permissions": {"flows": "write", "flow_evidence": "write"},
+        },
+        headers=flow_process_auth_headers,
+    )
+    assert key_response.status_code == 201, key_response.text
+    service_key = {"X-API-Key": key_response.json()["secret"]}
+
+    async def start(headers: dict[str, str]) -> str:
+        response = await client.post(
+            f"/api/v1/flows/{flow.flow_id}/runs/",
+            json={
+                "expected_flow_version": flow.published_version,
+                "input_payload_json": {"text": "Evidence access"},
+            },
+            headers=headers,
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["id"]
+
+    classified_run = await start(tracer)
+    tracer_run = await start(tracer)
+    runner_run = await start(runner)
+    service_run = await start(service_key)
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == UUID(classified_run))
+            .values(evidence_classification_level=3)
+        )
+
+    no_trace = "insufficient_tenant_permission"
+    raw_forbidden = "flow_run_evidence_raw_export_forbidden"
+    expected: list[tuple[dict[str, str], str, list[str | None]]] = [
+        (admin_headers, classified_run, [None, None, None]),
+        (space_admin, classified_run, [None, None, raw_forbidden]),
+        (space_admin, runner_run, [None, None, None]),
+        (tracer, classified_run, [None, None, raw_forbidden]),
+        (tracer, tracer_run, [None, None, None]),
+        (runner, runner_run, [no_trace, no_trace, no_trace]),
+        (service_key, service_run, [None, None, "flow_run_evidence_forbidden"]),
+    ]
+    for headers, run_id, refusals in expected:
+        run_url = f"/api/v1/flows/{flow.flow_id}/runs/{run_id}"
+        detail = await client.get(f"{run_url}/", headers=headers)
+        assert detail.status_code == 200, detail.text
+        access = detail.json()["evidence_access"]
+        assert [
+            access["read_refusal_code"],
+            access["redacted_export_refusal_code"],
+            access["raw_export_refusal_code"],
+        ] == refusals
+        assert [
+            access["can_read_evidence"],
+            access["can_export_redacted"],
+            access["can_export_raw"],
+        ] == [refusal is None for refusal in refusals]
+        assert await _evidence_answers(client, run_url=run_url, headers=headers) == (
+            refusals
+        )
+
+    # Another member reads neither the run nor its evidence.
+    run_url = f"/api/v1/flows/{flow.flow_id}/runs/{tracer_run}"
+    detail = await client.get(f"{run_url}/", headers=other_member)
+    assert detail.status_code == 403, detail.text
+    assert (
+        await _evidence_answers(client, run_url=run_url, headers=other_member)
+        == ["flow_run_access_denied"] * 3
+    )

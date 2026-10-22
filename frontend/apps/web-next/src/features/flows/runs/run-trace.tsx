@@ -8,20 +8,21 @@ import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
-import { useAppContext } from "@/components/providers/app-context";
 import { saveBlob } from "@/features/chat/side-panel/document-export";
-import { useSpace } from "@/features/spaces/use-space";
 import { toast } from "@/lib/toast";
-import { evidenceExportAllowed } from "../flow-form-fields";
 import type { FlowPublic } from "../flows-api";
+import { EvidenceOmissions } from "./run-evidence-counters";
 import { RunEvidenceExport } from "./run-evidence-export";
 import type { RunStepView } from "./run-progress";
-import { startedByUser } from "./run-starter";
 import { stepTitle } from "./run-steps";
 import { RunTraceAttempts } from "./run-trace-attempts";
 import { RunTraceProviderCalls } from "./run-trace-provider-calls";
-import { mayReadEvidence } from "./run-trace-rules";
-import { runEvidenceQueryOptions, type RunEvidence, type RunSummary } from "./runs-api";
+import {
+  runEvidenceQueryOptions,
+  type EvidenceAccess,
+  type RunEvidence,
+  type RunSummary
+} from "./runs-api";
 
 function Part({ title, children }: { title: string; children: React.ReactNode }) {
   const headingId = useId();
@@ -79,12 +80,9 @@ function TraceBody({
   stepName: (order: number) => string;
 }) {
   const t = useTranslations();
-  const omitted = (evidence.debug_export.run.summary?.omissions ?? []).length > 0;
   return (
     <div className="flex flex-col gap-6">
-      {omitted ? (
-        <p className="text-ax-text-secondary text-sm">{t("flow_run_extras_trace_omitted")}</p>
-      ) : null}
+      <EvidenceOmissions summary={evidence.debug_export.run.summary} />
       <Part title={t("flow_run_extras_attempts_heading")}>
         <RunTraceAttempts attempts={evidence.step_attempts} stepName={stepName} />
       </Part>
@@ -106,38 +104,33 @@ function TraceBody({
 /**
  * The run's evidence for those the core lets read it: every attempt each
  * step made, the calls to AI services page by page, the content-free
- * diagnostic export, and the evidence export when the flow allows it. The
- * evidence is an audited read, so it loads when asked for (one read serves
- * the knowledge section too); a caller the core would refuse is not
- * offered the section at all.
+ * diagnostic export, and the evidence export as far as the core allows it.
+ * `access` is the run detail's `evidence_access`, decided by the run access
+ * policy the evidence routes use; until the detail has been read, and for
+ * a caller the core would refuse, the section is not offered. The evidence
+ * is an audited read, so it loads when asked for (one read serves the
+ * knowledge section too).
  */
 export function RunTrace({
   flow,
   summary,
-  steps
+  steps,
+  access
 }: {
   flow: FlowPublic;
   summary: RunSummary;
   steps: readonly RunStepView[];
+  access: EvidenceAccess | undefined;
 }) {
   const t = useTranslations();
   const headingId = useId();
-  const { can, user } = useAppContext();
-  const { can: canInSpace, space } = useSpace();
   const [requested, setRequested] = useState(false);
   const evidence = useQuery({
     ...runEvidenceQueryOptions(flow.id, summary.id),
     enabled: requested
   });
 
-  const allowed = mayReadEvidence({
-    tenantAdmin: can("admin"),
-    personalSpace: space.personal,
-    spaceAdmin: canInSpace("edit", "member"),
-    startedRun: startedByUser(summary, user.id) === true,
-    canTrace: can("flows_trace")
-  });
-  if (!allowed) return null;
+  if (!access?.can_read_evidence) return null;
 
   const stepName = (order: number) =>
     stepTitle({ order, label: steps.find((step) => step.order === order)?.label ?? "" }, t);
@@ -148,11 +141,7 @@ export function RunTrace({
         {t("flow_run_extras_trace_heading")}
       </h2>
       <Part title={t("flow_run_extras_export_heading")}>
-        <RunEvidenceExport
-          flowId={flow.id}
-          runId={summary.id}
-          exportAllowed={evidenceExportAllowed(flow.metadata_json)}
-        />
+        <RunEvidenceExport flowId={flow.id} runId={summary.id} access={access} />
       </Part>
       {!requested ? (
         <div className="flex flex-col items-start gap-2">

@@ -5118,7 +5118,7 @@ export interface paths {
      *         Accepted input, terminal errors, terminal output, result-file metadata, provider usage, and
      *         webhook deliveries are deliberately omitted so background history refresh does not expose
      *         or repeatedly read sensitive content. Retrieve one run's audited detail when that content
-     *         is needed.
+     *         is needed. The caller-supplied `run_label` is run metadata and is included.
      *
      *         Current runtime visibility is policy-based: callers always list their own runs, tenant admins
      *         can list runs across the tenant, same-space admins and owners can list run metadata for flows
@@ -5155,7 +5155,8 @@ export interface paths {
      *         `step_inputs[step_id].file_ids` instead. A `speaker_labels` choice the run contract does
      *         not offer returns `422` with code `flow_run_speaker_labels_not_selectable`, and a
      *         `max_speakers` for a run that labels no speakers returns `422` with code
-     *         `flow_run_max_speakers_not_available`.
+     *         `flow_run_max_speakers_not_available`. A `run_label` that is not one line of 1 to
+     *         120 characters after trimming returns `422` with code `flow_run_invalid_label`.
      *
      *         `Idempotency-Key` is optional but recommended for retried writes. Reusing the same key with
      *         the same request payload returns the existing run payload. Reusing the same key with a
@@ -18026,6 +18027,7 @@ export interface components {
       | "flow_run_reserved_input_payload_key"
       | "flow_run_speaker_labels_not_selectable"
       | "flow_run_max_speakers_not_available"
+      | "flow_run_invalid_label"
       | "flow_run_input_payload_too_large"
       | "flow_run_input_exceeds_limit"
       | "flow_input_required_field_missing"
@@ -20999,7 +21001,7 @@ export interface components {
       max_speakers?: number | null;
       /**
        * Run Label
-       * @description Caller-supplied run label. Normalized to Unicode NFC and trimmed on creation; must contain 1–120 characters and no line breaks or control characters. Omitted or null labels are stored as null.
+       * @description Caller-supplied run label. Normalized to Unicode NFC and trimmed on creation; must contain 1–120 characters and no line breaks or control characters. Omitted or null labels are stored as null. The label is run metadata: the content-free list and status reads return it and the list searches it, so name the run rather than describe its content.
        */
       run_label?: string | null;
       /**
@@ -21544,6 +21546,14 @@ export interface components {
      *       "dispatch_attempt_count": 0,
      *       "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
      *       "dispatch_pending_since": "2026-03-17T10:05:00Z",
+     *       "evidence_access": {
+     *         "can_export_raw": false,
+     *         "can_export_redacted": true,
+     *         "can_read_evidence": true,
+     *         "raw_export_refusal_code": "flow_run_evidence_raw_export_forbidden",
+     *         "read_refusal_code": null,
+     *         "redacted_export_refusal_code": null
+     *       },
      *       "flow_id": "00000000-0000-0000-0000-000000000001",
      *       "flow_version": 3,
      *       "id": "00000000-0000-0000-0000-000000000301",
@@ -21625,8 +21635,10 @@ export interface components {
        * @description Timestamp when this dispatch epoch first became possibly accepted: either the broker confirmed acceptance or a later claim proved an earlier attempt ended without a durable rejection receipt.
        */
       dispatched_at?: string | null;
-      /** @description Structured terminal run error available only through audited detail and evidence reads. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
-      error?: components["schemas"]["FlowRunError"] | null;
+      /** @description Structured terminal run error, with the error taxonomy's `user_action` and `consumer_action` for its code. API consumers should branch on `error.code`; null means the run has no terminal run-level error. */
+      error?: components["schemas"]["FlowRunErrorPublic"] | null;
+      /** @description What this caller may do with the run's evidence (read the trace, export it redacted or raw), so a client offers only what the evidence routes would allow instead of approximating their rules. Computed for the caller when the detail is read. */
+      evidence_access: components["schemas"]["FlowRunEvidenceAccessPublic"];
       /**
        * Finished At
        * @description When the run reached a terminal status. Null while non-terminal.
@@ -21699,7 +21711,8 @@ export interface components {
       revision: number;
       /**
        * Run Label
-       * @description Caller-supplied run label, available only through audited reads.
+       * @description The run's name, as the caller supplied it on creation (NFC, trimmed, one line). It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run was started without one.
+       * @example Case 123
        */
       run_label?: string | null;
       /**
@@ -22042,6 +22055,231 @@ export interface components {
        * @description Last observed transcription service stage before the interruption.
        */
       transcription_stage?: string | null;
+    };
+    /**
+     * FlowRunErrorPublic
+     * @description Structured terminal run error with the error taxonomy's guidance for its code. Clients should branch on `code`, not on the human-readable message.
+     * @example {
+     *       "code": "flow_step_timeout",
+     *       "consumer_action": "Do not auto-retry because an in-flight provider request may still complete and bill; inspect the run, then raise the step's timeout_seconds or reduce the input before a new run.",
+     *       "details": {
+     *         "phase": "provider_request",
+     *         "provider_work_may_have_completed": true
+     *       },
+     *       "message": "Step 2 exceeded its execution budget during provider_request.",
+     *       "retryable": false,
+     *       "schema_version": 1,
+     *       "source": "executor_failed",
+     *       "step_order": 2,
+     *       "user_action": "Check the run before retrying and ask the flow author to raise the step's time budget or reduce the input."
+     *     }
+     */
+    FlowRunErrorPublic: {
+      /**
+       * @description Stable machine-readable run error code.
+       * @enum {string}
+       */
+      code:
+        | "flow_assistant_model_provider_required"
+        | "flow_assistant_snapshot_drift"
+        | "flow_assistant_snapshot_republish_required"
+        | "flow_assistant_snapshot_resource_invalid"
+        | "flow_definition_checksum_mismatch"
+        | "flow_definition_flow_id_invalid"
+        | "flow_definition_invalid"
+        | "flow_definition_no_executable_steps"
+        | "flow_definition_schema_version_missing"
+        | "flow_definition_schema_version_unsupported"
+        | "flow_definition_steps_invalid"
+        | "flow_deleted"
+        | "flow_dispatch_failed"
+        | "flow_input_contract_inapplicable"
+        | "flow_llm_output_truncated"
+        | "flow_llm_output_whitespace_abort"
+        | "flow_llm_request_timeout"
+        | "flow_long_material_partial_coverage"
+        | "flow_mapped_provider_call_limit_exceeded"
+        | "flow_missing_principal"
+        | "flow_model_capacity_undeclared"
+        | "flow_provider_call_evidence_persistence_failed"
+        | "flow_provider_rate_limited"
+        | "flow_provider_unavailable"
+        | "flow_review_expired"
+        | "flow_review_open_active_conflict_invariant"
+        | "flow_review_open_multiple_active_checkpoints_invariant"
+        | "flow_review_open_step_result_incomplete_invariant"
+        | "flow_review_policy_invalid"
+        | "flow_review_rejected"
+        | "flow_run_abandoned"
+        | "flow_run_cancelled"
+        | "flow_run_error_payload_invalid"
+        | "flow_run_input_exceeds_limit"
+        | "flow_run_user_cancelled"
+        | "flow_runtime_actor_invalid"
+        | "flow_runtime_input_not_consumed"
+        | "flow_service_principal_disabled"
+        | "flow_step_attempt_start_failed"
+        | "flow_step_execution_failed"
+        | "flow_step_missing"
+        | "flow_step_timeout"
+        | "flow_summarization_non_convergent"
+        | "flow_task_failure"
+        | "flow_task_timeout"
+        | "flow_unsupported_output_mode"
+        | "flow_unsupported_output_type"
+        | "flow_webhook_delivery_failed"
+        | "flow_worker_stalled"
+        | "typed_io_audio_exceeds_limit"
+        | "typed_io_audio_invalid_file_type"
+        | "typed_io_audio_missing_file"
+        | "typed_io_audio_source_unsupported"
+        | "typed_io_audio_too_many_files"
+        | "typed_io_contract_not_checked"
+        | "typed_io_contract_violation"
+        | "typed_io_document_source_unsupported"
+        | "typed_io_empty_extraction"
+        | "typed_io_file_not_found"
+        | "typed_io_file_source_unsupported"
+        | "typed_io_http_connection_error"
+        | "typed_io_http_invalid_config"
+        | "typed_io_http_invalid_url"
+        | "typed_io_http_malformed_response"
+        | "typed_io_http_non_success"
+        | "typed_io_http_response_too_large"
+        | "typed_io_http_ssrf_blocked"
+        | "typed_io_http_timeout"
+        | "typed_io_input_exceeds_model_window"
+        | "typed_io_input_too_large"
+        | "typed_io_invalid_file_type"
+        | "typed_io_invalid_input_source_combination"
+        | "typed_io_invalid_input_source_position"
+        | "typed_io_invalid_json_input"
+        | "typed_io_invalid_output_mode_combination"
+        | "typed_io_invalid_schema"
+        | "typed_io_missing_required_files"
+        | "typed_io_output_parse_failed"
+        | "typed_io_render_failed"
+        | "typed_io_speaker_identification_failed"
+        | "typed_io_speaker_service_unavailable"
+        | "typed_io_structured_output_exceeds_limit"
+        | "typed_io_template_checksum_mismatch"
+        | "typed_io_template_render_failed"
+        | "typed_io_tool_answer_too_large"
+        | "typed_io_tool_changed"
+        | "typed_io_tool_classification_changed"
+        | "typed_io_tool_connection_error"
+        | "typed_io_tool_destination_blocked"
+        | "typed_io_tool_invalid_arguments"
+        | "typed_io_tool_invalid_config"
+        | "typed_io_tool_invalid_schema"
+        | "typed_io_tool_malformed_answer"
+        | "typed_io_tool_not_allowed"
+        | "typed_io_tool_reported_error"
+        | "typed_io_tool_timeout"
+        | "typed_io_transcript_too_large"
+        | "typed_io_transcription_config_invalid"
+        | "typed_io_transcription_empty"
+        | "typed_io_transcription_failed"
+        | "typed_io_transcription_model_missing"
+        | "typed_io_transcription_model_unavailable"
+        | "typed_io_transcription_not_enabled"
+        | "typed_io_unsupported_type"
+        | "typed_io_validation_failed"
+        | "typed_io_variable_resolution_failed";
+      /**
+       * Consumer Action
+       * @description What an API client should do about this error, from the Flow error taxonomy, in English. Null for a code the taxonomy does not list.
+       * @example Configure the shared tool runtime before publishing or starting a run.
+       */
+      consumer_action: string | null;
+      /** @description Small, API-safe context for diagnostics and UI guidance. */
+      details?: components["schemas"]["FlowRunErrorDetails"] | null;
+      /**
+       * Message
+       * @description Human-readable technical detail for logs, support and fallback UI. This text is not a stable client contract.
+       */
+      message: string;
+      /**
+       * Retryable
+       * @description Whether a consumer may submit a new logical run without repeating provider work that was accepted or an external effect. True only for a code the platform lists as such, and false for such a code when `details.tool_call_possible` is true, because a new run calls the tool again. This does not automatically start work.
+       */
+      readonly retryable: boolean;
+      /**
+       * Schema Version
+       * @description Schema version for the structured run error payload.
+       * @default 1
+       * @constant
+       */
+      schema_version?: 1;
+      /** @description Flow runtime lifecycle source that terminalized the run. */
+      source?: components["schemas"]["FlowRunLifecycleSource"] | null;
+      /**
+       * Step Id
+       * @description Step id when the terminal error is tied to one step.
+       */
+      step_id?: string | null;
+      /**
+       * Step Order
+       * @description Step order when the terminal error is tied to one step.
+       */
+      step_order?: number | null;
+      /**
+       * User Action
+       * @description What the person who started or reviews the run can do, from the Flow error taxonomy (the errors reference's guidance), in English. A localized client shows its own catalog's sentence for `code` and falls back to this. Null for a code the taxonomy does not list.
+       * @example Ask an administrator to configure document rendering.
+       */
+      user_action: string | null;
+    };
+    /**
+     * FlowRunEvidenceAccessPublic
+     * @description What the caller may do with this run's evidence, decided when the run
+     *     detail is read by the same run access policy the evidence routes use.
+     * @example {
+     *       "can_export_raw": false,
+     *       "can_export_redacted": true,
+     *       "can_read_evidence": true,
+     *       "raw_export_refusal_code": "flow_run_evidence_raw_export_forbidden",
+     *       "read_refusal_code": null,
+     *       "redacted_export_refusal_code": null
+     *     }
+     */
+    FlowRunEvidenceAccessPublic: {
+      /**
+       * Can Export Raw
+       * @description Whether the raw evidence export (`detail=raw` with a reason) would answer this caller. It includes the flow's export setting and the classification-3 rule: evidence held to classification 3 (the space's level now or the level the run recorded) is exported raw only to space owners, tenant admins, and the roles the tenant's evidence policy allows.
+       */
+      can_export_raw: boolean;
+      /**
+       * Can Export Redacted
+       * @description Whether the redacted evidence export (`.../evidence/export` with `detail=redacted`) would answer this caller. It includes the flow's export setting.
+       */
+      can_export_redacted: boolean;
+      /**
+       * Can Read Evidence
+       * @description Whether `GET .../runs/{run_id}/evidence/` and the provider-call pages would answer this caller. Offer the trace only when true.
+       */
+      can_read_evidence: boolean;
+      /**
+       * Raw Export Refusal Code
+       * @description The `code` the raw export would refuse this caller with (`flow_run_access_denied`, `flow_run_evidence_forbidden`, `flow_run_evidence_export_disabled`, `flow_run_evidence_raw_export_forbidden` or `insufficient_tenant_permission`), or null when it would answer.
+       * @example null
+       * @example flow_run_evidence_raw_export_forbidden
+       */
+      raw_export_refusal_code: string | null;
+      /**
+       * Read Refusal Code
+       * @description The `code` the evidence read would refuse this caller with (`flow_run_access_denied`, `flow_run_evidence_forbidden`, `flow_run_evidence_export_disabled`, `flow_run_evidence_raw_export_forbidden` or `insufficient_tenant_permission`), or null when it would answer.
+       * @example null
+       * @example insufficient_tenant_permission
+       */
+      read_refusal_code: string | null;
+      /**
+       * Redacted Export Refusal Code
+       * @description The `code` the redacted export would refuse this caller with (`flow_run_access_denied`, `flow_run_evidence_forbidden`, `flow_run_evidence_export_disabled`, `flow_run_evidence_raw_export_forbidden` or `insufficient_tenant_permission`), or null when it would answer.
+       * @example null
+       * @example flow_run_evidence_export_disabled
+       */
+      redacted_export_refusal_code: string | null;
     };
     /**
      * FlowRunEvidenceExportResponse
@@ -23227,6 +23465,67 @@ export interface components {
       | "review_checkpoint_cancelled"
       | "review_expired"
       | "review_checkpoint_expired";
+    /**
+     * FlowRunListPublic
+     * @description One page of a flow's run history.
+     * @example {
+     *       "count": 1,
+     *       "has_more": false,
+     *       "items": [
+     *         {
+     *           "created_at": "2026-03-17T10:05:00Z",
+     *           "dispatch_attempt_count": 0,
+     *           "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+     *           "dispatch_pending_since": "2026-03-17T10:05:00Z",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
+     *           "flow_version": 3,
+     *           "id": "00000000-0000-0000-0000-000000000301",
+     *           "job_id": "00000000-0000-0000-0000-000000000401",
+     *           "principal_type": "user",
+     *           "purpose": "production",
+     *           "revision": 1,
+     *           "run_label": "Case 123",
+     *           "started_by": {
+     *             "display_name": "Alex Example",
+     *             "email": "alex.example@example.com",
+     *             "id": "00000000-0000-0000-0000-000000000030",
+     *             "principal_type": "user"
+     *           },
+     *           "status": "queued",
+     *           "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *           "trace_id": "00000000-0000-0000-0000-000000000302",
+     *           "updated_at": "2026-03-17T10:05:00Z"
+     *         }
+     *       ],
+     *       "status_counts": {
+     *         "awaiting_review": 0,
+     *         "cancelled": 0,
+     *         "completed": 12,
+     *         "failed": 2,
+     *         "queued": 1,
+     *         "running": 0
+     *       }
+     *     }
+     */
+    FlowRunListPublic: {
+      /**
+       * Count
+       * @description Number of runs in `items`, not a total.
+       */
+      count: number;
+      /**
+       * Has More
+       * @description Whether another page exists after the returned offset window.
+       */
+      has_more: boolean;
+      /**
+       * Items
+       * @description The returned page of runs, in the requested order.
+       */
+      items: components["schemas"]["FlowRunSummaryPublic"][];
+      /** @description How many runs the caller may list have each status, counted over every page within `mine` and `search` and without the `status` filter, so a status filter can show what each choice would leave. Counted when the page is read; a run can move on before the next read. */
+      status_counts: components["schemas"]["FlowRunStatusCountsPublic"];
+    };
     /** FlowRunOutboundHttpResultPublic */
     FlowRunOutboundHttpResultPublic: {
       /**
@@ -23390,7 +23689,8 @@ export interface components {
       revision: number;
       /**
        * Run Label
-       * @description Caller-supplied run label, available only through audited reads.
+       * @description The run's name, as the caller supplied it on creation (NFC, trimmed, one line). It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run was started without one.
+       * @example Case 123
        */
       run_label?: string | null;
       /**
@@ -24636,6 +24936,50 @@ export interface components {
       status: components["schemas"]["FlowRunStatus"];
     };
     /**
+     * FlowRunStatusCountsPublic
+     * @description How many listed runs have each status, every status included.
+     * @example {
+     *       "awaiting_review": 0,
+     *       "cancelled": 0,
+     *       "completed": 12,
+     *       "failed": 2,
+     *       "queued": 1,
+     *       "running": 0
+     *     }
+     */
+    FlowRunStatusCountsPublic: {
+      /**
+       * Awaiting Review
+       * @description Listed runs with status `awaiting_review`, within `mine` and `search` and before any `status` filter.
+       */
+      awaiting_review: number;
+      /**
+       * Cancelled
+       * @description Listed runs with status `cancelled`, within `mine` and `search` and before any `status` filter.
+       */
+      cancelled: number;
+      /**
+       * Completed
+       * @description Listed runs with status `completed`, within `mine` and `search` and before any `status` filter.
+       */
+      completed: number;
+      /**
+       * Failed
+       * @description Listed runs with status `failed`, within `mine` and `search` and before any `status` filter.
+       */
+      failed: number;
+      /**
+       * Queued
+       * @description Listed runs with status `queued`, within `mine` and `search` and before any `status` filter.
+       */
+      queued: number;
+      /**
+       * Running
+       * @description Listed runs with status `running`, within `mine` and `search` and before any `status` filter.
+       */
+      running: number;
+    };
+    /**
      * FlowRunStepInputFilePublic
      * @example {
      *       "file_id": "00000000-0000-0000-0000-000000000701",
@@ -25050,6 +25394,7 @@ export interface components {
      *       "principal_type": "user",
      *       "purpose": "production",
      *       "revision": 1,
+     *       "run_label": "Case 123",
      *       "started_by": {
      *         "display_name": "Alex Example",
      *         "email": "alex.example@example.com",
@@ -25146,6 +25491,12 @@ export interface components {
        * @description Monotonic run lifecycle compare token.
        */
       revision: number;
+      /**
+       * Run Label
+       * @description The run's name, as the caller supplied it on creation (NFC, trimmed, one line). It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run was started without one.
+       * @example Case 123
+       */
+      run_label?: string | null;
       /**
        * Started At
        * @description When a worker began executing the first step. Null while queued.
@@ -31615,24 +31966,6 @@ export interface components {
     ObjectStoreSwitchBackInput: {
       /** Expected Previous Revision */
       expected_previous_revision: number;
-    };
-    /** OffsetPaginatedResponse[FlowRunSummaryPublic] */
-    OffsetPaginatedResponse_FlowRunSummaryPublic_: {
-      /**
-       * Count
-       * @description Number of items returned in the response
-       */
-      readonly count: number;
-      /**
-       * Has More
-       * @description Whether another page exists after the returned offset window
-       */
-      has_more: boolean;
-      /**
-       * Items
-       * @description List of items returned in the response
-       */
-      items: components["schemas"]["FlowRunSummaryPublic"][];
     };
     /** OffsetPaginatedResponse[FlowSparsePublic] */
     OffsetPaginatedResponse_FlowSparsePublic_: {
@@ -59855,6 +60188,12 @@ export interface operations {
         status?: components["schemas"]["FlowRunStatus"][] | null;
         /** @description Only return runs the caller started, within the runs the caller may see. A module session counts as its signed-in user. */
         mine?: boolean;
+        /** @description Only return runs whose `run_label`, or the name of whoever started them (a user's username or email, a service key's name), contains this text, ignoring case. It searches run metadata only, never accepted input, output or evidence, so the list stays a content-free read. Blank searches nothing. */
+        search?: string | null;
+        /** @description Order of the runs: `created_at` (when the run was created, the default), `started_at` (when it started; its creation time while it has not), `status` (the status capability table's `filter_order`) or `duration` (from start to finish; runs that have not finished come last in both orders). Ties list the newest run first, so paging stays stable. */
+        sort?: "created_at" | "started_at" | "status" | "duration";
+        /** @description `desc` (the default) or `asc`. */
+        order?: "asc" | "desc";
       };
       header?: never;
       path: {
@@ -59865,7 +60204,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Flow run page. `items` contains the returned page only; `count` is the number of returned runs and `has_more` tells clients whether to request the next offset window. */
+      /** @description Flow run page. `items` contains the returned page only; `count` is the number of returned runs, `has_more` tells clients whether to request the next offset window, and `status_counts` counts every listed run by status. */
       200: {
         headers: {
           [name: string]: unknown;
@@ -59888,6 +60227,7 @@ export interface operations {
            *           "principal_type": "user",
            *           "purpose": "production",
            *           "revision": 1,
+           *           "run_label": "Case 123",
            *           "started_by": {
            *             "display_name": "Alex Example",
            *             "email": "alex.example@example.com",
@@ -59899,10 +60239,18 @@ export interface operations {
            *           "trace_id": "00000000-0000-0000-0000-000000000302",
            *           "updated_at": "2026-03-17T10:05:00Z"
            *         }
-           *       ]
+           *       ],
+           *       "status_counts": {
+           *         "awaiting_review": 0,
+           *         "cancelled": 0,
+           *         "completed": 12,
+           *         "failed": 2,
+           *         "queued": 1,
+           *         "running": 0
+           *       }
            *     }
            */
-          "application/json": components["schemas"]["OffsetPaginatedResponse_FlowRunSummaryPublic_"];
+          "application/json": components["schemas"]["FlowRunListPublic"];
         };
       };
       /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */

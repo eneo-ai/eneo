@@ -48,6 +48,7 @@ from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
     FlowRunPersistenceInvariantError,
 )
+from eneo.flows.domain.flow_run_listing import FlowRunListing
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_DISPATCH_MAX_ATTEMPTS,
     FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS,
@@ -125,6 +126,10 @@ from eneo.flows.infrastructure.flow_provider_call_repo import (
 )
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
+)
+from eneo.flows.infrastructure.flow_run_list_query import (
+    run_list_order,
+    run_search_clause,
 )
 from eneo.flows.infrastructure.flow_run_staleness import (
     stale_running_flow_run_predicate,
@@ -567,9 +572,32 @@ _FLOW_RUN_STATUS_COLUMNS = (
     FlowRuns.finished_at,
     FlowRuns.job_id,
     FlowRuns.evidence_classification_level,
+    FlowRuns.run_label,
     FlowRuns.created_at,
     FlowRuns.updated_at,
 )
+
+
+def _listed_runs(
+    stmt: Any,
+    *,
+    tenant_id: UUID,
+    flow_id: UUID | None,
+    principal_user_id: UUID | None,
+    principal_service_id: UUID | None,
+    search: str | None,
+) -> Any:
+    """``stmt`` narrowed to the runs a run list shows, before any status filter."""
+    stmt = stmt.where(FlowRuns.tenant_id == tenant_id)
+    if flow_id is not None:
+        stmt = stmt.where(FlowRuns.flow_id == flow_id)
+    if principal_user_id is not None:
+        stmt = stmt.where(FlowRuns.principal_user_id == principal_user_id)
+    if principal_service_id is not None:
+        stmt = stmt.where(FlowRuns.principal_service_id == principal_service_id)
+    if search:
+        stmt = stmt.where(run_search_clause(search))
+    return stmt
 
 
 class FlowRunRepository:
@@ -984,22 +1012,21 @@ class FlowRunRepository:
         principal_service_id: UUID | None = None,
         limit: int | None = None,
         offset: int | None = None,
+        listing: FlowRunListing | None = None,
     ) -> list[FlowRunStatusSnapshot]:
-        stmt = (
-            sa.select(*_FLOW_RUN_STATUS_COLUMNS)
-            .where(FlowRuns.tenant_id == tenant_id)
-            .order_by(FlowRuns.created_at.desc(), FlowRuns.id.desc())
-        )
-        if flow_id is not None:
-            stmt = stmt.where(FlowRuns.flow_id == flow_id)
+        listing = listing or FlowRunListing()
+        stmt = _listed_runs(
+            sa.select(*_FLOW_RUN_STATUS_COLUMNS),
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            principal_user_id=principal_user_id,
+            principal_service_id=principal_service_id,
+            search=listing.search,
+        ).order_by(*run_list_order(listing))
         if statuses:
             stmt = stmt.where(
                 FlowRuns.status.in_(tuple(status.value for status in statuses))
             )
-        if principal_user_id is not None:
-            stmt = stmt.where(FlowRuns.principal_user_id == principal_user_id)
-        if principal_service_id is not None:
-            stmt = stmt.where(FlowRuns.principal_service_id == principal_service_id)
         if offset is not None:
             stmt = stmt.offset(offset)
         if limit is not None:
@@ -1007,6 +1034,29 @@ class FlowRunRepository:
 
         rows = (await self.session.execute(stmt)).mappings().all()
         return [FlowRunStatusSnapshot.model_validate(row) for row in rows]
+
+    async def count_statuses(
+        self,
+        *,
+        tenant_id: UUID,
+        flow_id: UUID | None = None,
+        principal_user_id: UUID | None = None,
+        principal_service_id: UUID | None = None,
+        search: str | None = None,
+    ) -> dict[FlowRunStatus, int]:
+        """How many listed runs have each status, every status included."""
+        stmt = _listed_runs(
+            sa.select(FlowRuns.status, sa.func.count()),
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            principal_user_id=principal_user_id,
+            principal_service_id=principal_service_id,
+            search=search,
+        ).group_by(FlowRuns.status)
+        counts = {status: 0 for status in FlowRunStatus}
+        for status, count in (await self.session.execute(stmt)).all():
+            counts[FlowRunStatus(status)] = int(count)
+        return counts
 
     async def list_dispatchable_queued_runs(
         self,

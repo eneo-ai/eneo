@@ -107,6 +107,33 @@ describe("FlowRunPage", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("offers neither knowledge nor trace when the core would not let the caller read the evidence", async () => {
+    const summary = makeRunSummary();
+    answerRun(
+      summary,
+      makeRunDetail({
+        ...summary,
+        evidence_access: {
+          can_read_evidence: false,
+          can_export_redacted: false,
+          can_export_raw: false,
+          read_refusal_code: "insufficient_tenant_permission",
+          redacted_export_refusal_code: "insufficient_tenant_permission",
+          raw_export_refusal_code: "insufficient_tenant_permission"
+        }
+      })
+    );
+    renderRun(["flows_view", "flows_run", "flows_trace", "admin"]);
+
+    expect(await screen.findByText("Beslutet är fattat.")).toBeTruthy();
+    expect(
+      screen.queryByRole("heading", { name: messages.flow_runs_knowledge_heading })
+    ).toBeNull();
+    expect(
+      screen.queryByRole("heading", { name: messages.flow_run_extras_trace_heading })
+    ).toBeNull();
+  });
+
   it("says why a run failed in the catalog's words and offers a retry", async () => {
     const failed = makeRunSummary({ status: "failed" });
     answerRun(

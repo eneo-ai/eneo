@@ -36,6 +36,8 @@ export type UploadedFile = Schema<"FilePublic">;
 export type ReviewCheckpoint = Schema<"FlowRunReviewCheckpointPublic">;
 export type ReviewResume = Schema<"FlowRunReviewCheckpointResumeResponse">;
 export type RunEvidence = Schema<"FlowRunEvidenceResponse">;
+export type EvidenceAccess = Schema<"FlowRunEvidenceAccessPublic">;
+export type RunErrorWithGuidance = Schema<"FlowRunErrorPublic">;
 export type TokenUsage = Schema<"FlowRunTokenUsagePublic">;
 export type TranscriptionUsage = Schema<"FlowRunTranscriptionUsagePublic">;
 
@@ -80,12 +82,22 @@ export const RUNS_PAGE_SIZE = 25;
 /** The history reads at most this many pages, newest first. */
 export const RUNS_MAX_PAGES = 8;
 
+/** How the list endpoint orders runs (start time, status or duration). */
+export type RunsSort = { key: "started_at" | "status" | "duration"; order: "asc" | "desc" };
+export type RunStatusCounts = Schema<"FlowRunStatusCountsPublic">;
+
 /**
  * `mine`: only the runs the caller started, within those the caller may see.
- * `status`: only runs with this status; the list endpoint filters, so every
- * page and "show more" stay within it.
+ * `status`: only runs with this status. `search`: runs whose name or starter's
+ * name contains it. `sort`: the order. The list endpoint does all of it, so
+ * every page and "show more" stay within it.
  */
-export type RunsFilter = { mine: boolean; status?: RunStatus | null };
+export type RunsFilter = {
+  mine: boolean;
+  status?: RunStatus | null;
+  search?: string;
+  sort?: RunsSort;
+};
 
 export function runsListQueryOptions(flowId: string, filter: RunsFilter = { mine: false }) {
   return infiniteQueryOptions({
@@ -99,7 +111,9 @@ export function runsListQueryOptions(flowId: string, filter: RunsFilter = { mine
               limit: RUNS_PAGE_SIZE,
               offset: pageParam * RUNS_PAGE_SIZE,
               ...(filter.mine ? { mine: true } : {}),
-              ...(filter.status ? { status: [filter.status] } : {})
+              ...(filter.status ? { status: [filter.status] } : {}),
+              ...(filter.search ? { search: filter.search } : {}),
+              ...(filter.sort ? { sort: filter.sort.key, order: filter.sort.order } : {})
             }
           },
           signal

@@ -178,3 +178,54 @@ export function formFits(contract: unknown, value: unknown): value is ReviewValu
   const kind = fieldKind(schemaOf(contract), value);
   return kind === "object" || kind === "array";
 }
+
+/** Whether two values are the same JSON (object key order aside). */
+export function valuesEqual(
+  left: ReviewValue | undefined,
+  right: ReviewValue | undefined
+): boolean {
+  if (left === right) return true;
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return (
+      left.length === right.length && left.every((item, index) => valuesEqual(item, right[index]))
+    );
+  }
+  if (isReviewObject(left) && isReviewObject(right)) {
+    const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+    return [...keys].every((key) => valuesEqual(left[key], right[key]));
+  }
+  return false;
+}
+
+/** The path of an object's property, as `changedPaths` names it. */
+export function propertyPath(path: string, key: string): string {
+  return `${path}/${key.replaceAll("~", "~0").replaceAll("/", "~1")}`;
+}
+
+/**
+ * Where a value differs from what it was: the path of each property that
+ * changed and of every object around it ("" is the whole value). A list
+ * changes as a whole: its rows have no identity to match them by, so a
+ * row-by-row comparison would mark false matches.
+ */
+export function changedPaths(before: ReviewValue, after: ReviewValue): ReadonlySet<string> {
+  const changed = new Set<string>();
+  function visit(left: ReviewValue | undefined, right: ReviewValue | undefined, path: string) {
+    let differs: boolean;
+    if (isReviewObject(left) && isReviewObject(right)) {
+      differs = false;
+      for (const key of new Set([...Object.keys(left), ...Object.keys(right)])) {
+        if (visit(left[key], right[key], propertyPath(path, key))) differs = true;
+      }
+    } else {
+      differs = !valuesEqual(left, right);
+    }
+    if (differs) changed.add(path);
+    return differs;
+  }
+  visit(before, after, "");
+  return changed;
+}
+
+/** A description long enough to sit behind a help button rather than under the field. */
+export const LONG_DESCRIPTION_CHARS = 140;

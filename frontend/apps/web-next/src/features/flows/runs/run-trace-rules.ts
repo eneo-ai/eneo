@@ -2,38 +2,13 @@ import { EneoApiError } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 
 /**
- * Pure rules for a run's trace on the run page: who it is offered to, what
- * a raw export's reason must be, which recovery an oversized export points
- * to, and how the step attempts and provider calls group.
+ * Pure rules for a run's trace on the run page: what a raw export's reason
+ * must be, which recovery an oversized export points to, and how the step
+ * attempts and provider calls group. Who the trace is offered to is the
+ * core's answer, the run detail's `evidence_access`.
  */
 
 type Attempt = Schema<"FlowStepAttemptPublic">;
-
-/**
- * Whether the caller is one the core lets read a run's evidence, by the
- * same rules as its run access policy: a tenant administrator, the owner of
- * a personal space, an administrator of the flow's space (the one role that
- * may edit its members), or the person who started the run when they hold
- * the flow trace permission.
- *
- * The core also decides a raw export by the evidence's classification and
- * the tenant's classification-3 policy, which no read reports; a raw export
- * it refuses for that reason is explained with its refusal.
- */
-export function mayReadEvidence(caller: {
-  tenantAdmin: boolean;
-  personalSpace: boolean;
-  spaceAdmin: boolean;
-  startedRun: boolean;
-  canTrace: boolean;
-}): boolean {
-  return (
-    caller.tenantAdmin ||
-    caller.personalSpace ||
-    caller.spaceAdmin ||
-    (caller.startedRun && caller.canTrace)
-  );
-}
 
 /** The reason the core uses for a redacted export; a raw export must give its own. */
 export const DEFAULT_EXPORT_REASON = "support_debug";

@@ -30,6 +30,9 @@ from eneo.flows.api import (
 )
 from eneo.flows.domain.flow import FlowStepResult
 from eneo.flows.enums import FlowRunReviewCheckpointState, FlowStepResultStatus
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_error_taxonomy import FLOW_ERROR_TAXONOMY
+from eneo.flows.flow_run_error import FlowRunError, dump_flow_run_error
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.flows.flow_run_step_result_file import FlowStepResultFileReference
 from eneo.flows.principal import FlowPrincipal
@@ -1376,7 +1379,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert "input_payload_json" not in immediate_poll
     assert "result" not in immediate_poll
     assert "result_files" not in immediate_poll
-    assert "run_label" not in immediate_poll
+    assert immediate_poll["run_label"] == "Årende ä ö"
     assert "error" not in immediate_poll
 
     immediate_detail_response = await client.get(
@@ -1458,7 +1461,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert "input_payload_json" not in list_payload["items"][0]
     assert "result" not in list_payload["items"][0]
     assert "result_files" not in list_payload["items"][0]
-    assert "run_label" not in list_payload["items"][0]
+    assert list_payload["items"][0]["run_label"] == "Årende ä ö"
     assert "error" not in list_payload["items"][0]
 
     detail_response = await client.get(
@@ -2191,10 +2194,13 @@ async def test_flow_run_list_omits_content_and_skips_enrichment_queries(
         "flow_run_step_result_files": 0,
         "flow_step_attempts": 0,
     }
-    assert len(flow_run_selects) == 1
-    assert "flow_runs.input_payload_json" not in flow_run_selects[0]
-    assert "flow_runs.output_payload_json" not in flow_run_selects[0]
-    assert "flow_runs.error_json" not in flow_run_selects[0]
+    # One read for the page, one for the per-status counts; neither reads content.
+    assert len(flow_run_selects) == 2
+    assert "group by flow_runs.status" in flow_run_selects[1]
+    for select in flow_run_selects:
+        assert "flow_runs.input_payload_json" not in select
+        assert "flow_runs.output_payload_json" not in select
+        assert "flow_runs.error_json" not in select
 
     version_one_detail_response = await client.get(
         f"/api/v1/flows/{flow['id']}/runs/{version_one_run['id']}/",
@@ -2274,6 +2280,8 @@ async def test_flow_run_detail_sanitizes_corrupt_persisted_error_json(
         "step_id": None,
         "step_order": None,
         "details": None,
+        "user_action": "Contact support with the run ID.",
+        "consumer_action": "Treat the run as failed and contact support with the run ID.",
     }
 
 
@@ -3537,7 +3545,7 @@ async def test_flow_service_key_can_drive_human_review_runtime_paths(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_run_label_validation_uses_existing_error_response(
+async def test_a_refused_run_label_names_the_rule_it_broke(
     client, admin_token, monkeypatch
 ):
     dispatch = AsyncMock()
@@ -3548,7 +3556,13 @@ async def test_flow_run_label_validation_uses_existing_error_response(
     )
     space_id = await _create_space(client, token=admin_token)
     flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
-    for label in ["", "  ", "a\nb", "a\x00b", "x" * 121]:
+    for label, reason in [
+        ("", "empty"),
+        ("  ", "empty"),
+        ("a\nb", "not_one_line"),
+        ("a\x00b", "not_one_line"),
+        ("x" * 121, "too_long"),
+    ]:
         response = await client.post(
             f"/api/v1/flows/{flow['id']}/runs/",
             json={"run_label": label, "input_payload_json": {"text": "hello"}},
@@ -3556,7 +3570,12 @@ async def test_flow_run_label_validation_uses_existing_error_response(
         )
         assert response.status_code == 422, response.text
         assert response.json()["eneo_error_code"] == 9012
-        assert response.json()["code"] == "validation_error"
+        assert response.json()["code"] == "flow_run_invalid_label"
+        assert response.json()["context"] == {
+            "field": "run_label",
+            "reason": reason,
+            "max_length": 120,
+        }
     dispatch.assert_not_awaited()
     assert (
         await _flow_run_first_page_count(client, flow_id=flow["id"], token=admin_token)
@@ -3570,6 +3589,47 @@ async def test_flow_run_label_validation_uses_existing_error_response(
         )
         assert response.status_code == 201, response.text
         assert response.json()["run_label"] is None
+
+
+async def test_a_failed_runs_detail_carries_the_taxonomys_guidance_for_its_error(
+    client, admin_token, db_container, monkeypatch
+):
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        AsyncMock(),
+    )
+    space_id = await _create_space(client, token=admin_token)
+    flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    created = await client.post(
+        f"/api/v1/flows/{flow['id']}/runs/",
+        json={"input_payload_json": {"text": "hello"}},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    run_id = created.json()["id"]
+    error = FlowRunError(
+        code=FlowApiErrorCode.STEP_TIMEOUT,
+        message="Step 1 exceeded its execution budget during provider_request.",
+        step_order=1,
+    )
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == UUID(run_id))
+            .values(status="failed", error_json=dump_flow_run_error(error))
+        )
+
+    detail = await client.get(
+        f"/api/v1/flows/{flow['id']}/runs/{run_id}/", headers=headers
+    )
+
+    assert detail.status_code == 200, detail.text
+    entry = FLOW_ERROR_TAXONOMY[FlowApiErrorCode.STEP_TIMEOUT]
+    assert detail.json()["error"]["code"] == "flow_step_timeout"
+    assert detail.json()["error"]["user_action"] == entry.user_action
+    assert detail.json()["error"]["consumer_action"] == entry.consumer_action
 
 
 @pytest.mark.integration

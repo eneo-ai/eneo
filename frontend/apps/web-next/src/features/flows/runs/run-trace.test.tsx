@@ -2,20 +2,16 @@
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
-import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
-import type { Space } from "@/features/spaces/space";
-import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { makeFlow } from "../flow-fixtures";
 import { runStepViews } from "./run-progress";
 import { makeRunGraph, makeRunSummary } from "./run-fixtures";
-import type { RunEvidence } from "./runs-api";
+import type { EvidenceAccess, RunEvidence } from "./runs-api";
 
 const state = vi.hoisted(() => ({
   announce: vi.fn(),
   saveBlob: vi.fn(),
-  space: null as unknown as Space,
   routes: {} as Record<string, (init: never) => { status?: number; body: unknown }>,
   stub: null as unknown as ReturnType<typeof import("../editor/testing/fixtures").apiStub>
 }));
@@ -30,10 +26,6 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   useAnnounce: () => state.announce
 }));
 vi.mock("@/features/chat/side-panel/document-export", () => ({ saveBlob: state.saveBlob }));
-vi.mock("@/features/spaces/use-space", async () => {
-  const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
-  return { useSpace: () => useSpaceFromQuery(() => state.space) };
-});
 
 import { RunTrace } from "./run-trace";
 
@@ -121,13 +113,19 @@ function evidence(): RunEvidence {
   } as unknown as RunEvidence;
 }
 
-function renderTrace(
-  permissions: Permission[] = ["flows_view", "flows_trace"],
-  flowOverrides: Parameters<typeof makeFlow>[0] = {}
-) {
+const ALL_ALLOWED: EvidenceAccess = {
+  can_read_evidence: true,
+  can_export_redacted: true,
+  can_export_raw: true,
+  read_refusal_code: null,
+  redacted_export_refusal_code: null,
+  raw_export_refusal_code: null
+};
+
+function renderTrace(access: EvidenceAccess = ALL_ALLOWED) {
   return renderInApp(
-    <RunTrace flow={makeFlow(flowOverrides)} summary={makeRunSummary()} steps={steps} />,
-    { appContext: testAppContext({ permissions }) }
+    <RunTrace flow={makeFlow()} summary={makeRunSummary()} steps={steps} access={access} />,
+    { appContext: testAppContext({ permissions: ["flows_view"] }) }
   );
 }
 
@@ -137,8 +135,6 @@ function calls(route: string) {
 
 beforeEach(() => {
   state.routes = {};
-  // A member who may not edit the space's members is no space administrator.
-  state.space = makeSpace({ resourcePermissions: ["read"] });
 });
 
 afterEach(() => {
@@ -149,7 +145,11 @@ afterEach(() => {
 
 describe("RunTrace", () => {
   it("is not offered to a caller the core would not let read the evidence", () => {
-    renderTrace(["flows_view"]);
+    renderTrace({
+      ...ALL_ALLOWED,
+      can_read_evidence: false,
+      read_refusal_code: "insufficient_tenant_permission"
+    });
     expect(
       screen.queryByRole("heading", { name: messages.flow_run_extras_trace_heading })
     ).toBeNull();
@@ -186,11 +186,9 @@ describe("RunTrace", () => {
     await expectNoAxeViolations(container);
   });
 
-  it("downloads the redacted export when the flow allows export", async () => {
+  it("downloads the redacted export when the core allows it", async () => {
     state.routes[EXPORT] = () => ({ body: new Blob(["{}"], { type: "application/json" }) });
-    const { container } = renderTrace(["flows_view", "flows_trace"], {
-      metadata_json: { evidence_policy: { allow_export: true } }
-    });
+    const { container } = renderTrace();
 
     fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_export_redacted }));
     await vi.waitFor(() => expect(state.saveBlob).toHaveBeenCalledTimes(1));
@@ -206,9 +204,7 @@ describe("RunTrace", () => {
 
   it("asks for a reason of one's own before the full export", async () => {
     state.routes[EXPORT] = () => ({ body: new Blob(["{}"], { type: "application/json" }) });
-    renderTrace(["flows_view", "flows_trace"], {
-      metadata_json: { evidence_policy: { allow_export: true } }
-    });
+    renderTrace();
 
     fireEvent.click(
       screen.getByRole("button", { name: messages.flow_run_extras_export_raw_heading })
@@ -232,10 +228,33 @@ describe("RunTrace", () => {
   });
 
   it("says export is off for a flow that does not allow it", () => {
-    renderTrace(["admin"]);
+    renderTrace({
+      ...ALL_ALLOWED,
+      can_export_redacted: false,
+      can_export_raw: false,
+      redacted_export_refusal_code: "flow_run_evidence_export_disabled",
+      raw_export_refusal_code: "flow_run_evidence_export_disabled"
+    });
     expect(screen.getByText(messages.flow_run_extras_export_off)).toBeTruthy();
     expect(
       screen.queryByRole("button", { name: messages.flow_run_extras_export_redacted })
+    ).toBeNull();
+  });
+
+  it("offers the redacted export and says why the full one is refused", () => {
+    renderTrace({
+      ...ALL_ALLOWED,
+      can_export_raw: false,
+      raw_export_refusal_code: "flow_run_evidence_raw_export_forbidden"
+    });
+    expect(
+      screen.getByRole("button", { name: messages.flow_run_extras_export_redacted })
+    ).toBeTruthy();
+    expect(
+      screen.getByText(messages.flow_error_flow_run_evidence_raw_export_forbidden)
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: messages.flow_run_extras_export_raw_heading })
     ).toBeNull();
   });
 });

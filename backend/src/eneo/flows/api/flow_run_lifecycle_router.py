@@ -41,6 +41,7 @@ from eneo.flows.api.flow_models import (
     PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE,
     FlowRunCreateRequest,
     FlowRunDetailPublic,
+    FlowRunListPublic,
     FlowRunPublic,
     FlowRunRedispatchRequest,
     FlowRunRedispatchResponse,
@@ -86,6 +87,12 @@ from eneo.flows.application.flow_trace_audit import (
 )
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 from eneo.flows.domain.flow_run_exceptions import FlowRunConcurrencyLimitReachedError
+from eneo.flows.domain.flow_run_listing import (
+    FLOW_RUN_LIST_SEARCH_MAX_CHARS,
+    FlowRunListing,
+    FlowRunListOrder,
+    FlowRunListSort,
+)
 from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
@@ -96,7 +103,6 @@ from eneo.main.exceptions import (
     ErrorCodes,
     InternalServerException,
 )
-from eneo.main.models import OffsetPaginatedResponse
 from eneo.server.dependencies.container import (
     get_container,
     get_container_for_explicit_transaction,
@@ -181,7 +187,8 @@ _FLOW_RUN_CREATE_DESCRIPTION = (
     `step_inputs[step_id].file_ids` instead. A `speaker_labels` choice the run contract does
     not offer returns `422` with code `flow_run_speaker_labels_not_selectable`, and a
     `max_speakers` for a run that labels no speakers returns `422` with code
-    `flow_run_max_speakers_not_available`.
+    `flow_run_max_speakers_not_available`. A `run_label` that is not one line of 1 to
+    120 characters after trimming returns `422` with code `flow_run_invalid_label`.
 
     `Idempotency-Key` is optional but recommended for retried writes. Reusing the same key with
     the same request payload returns the existing run payload. Reusing the same key with a
@@ -253,7 +260,7 @@ _FLOW_RUN_LIST_DESCRIPTION = """
     Accepted input, terminal errors, terminal output, result-file metadata, provider usage, and
     webhook deliveries are deliberately omitted so background history refresh does not expose
     or repeatedly read sensitive content. Retrieve one run's audited detail when that content
-    is needed.
+    is needed. The caller-supplied `run_label` is run metadata and is included.
 
     Current runtime visibility is policy-based: callers always list their own runs, tenant admins
     can list runs across the tenant, same-space admins and owners can list run metadata for flows
@@ -556,7 +563,7 @@ async def create_flow_run(
 
 @router.get(
     FLOW_RUNS_PATH,
-    response_model=OffsetPaginatedResponse[FlowRunSummaryPublic],
+    response_model=FlowRunListPublic,
     status_code=status.HTTP_200_OK,
     operation_id="list_flow_runs",
     summary="List flow runs",
@@ -565,8 +572,9 @@ async def create_flow_run(
         200: {
             "description": (
                 "Flow run page. `items` contains the returned page only; "
-                "`count` is the number of returned runs and `has_more` tells "
-                "clients whether to request the next offset window."
+                "`count` is the number of returned runs, `has_more` tells "
+                "clients whether to request the next offset window, and "
+                "`status_counts` counts every listed run by status."
             ),
             "content": {
                 "application/json": {
@@ -623,6 +631,38 @@ async def list_flow_runs(
             ),
         ),
     ] = False,
+    search: Annotated[
+        str | None,
+        Query(
+            max_length=FLOW_RUN_LIST_SEARCH_MAX_CHARS,
+            description=(
+                "Only return runs whose `run_label`, or the name of whoever started "
+                "them (a user's username or email, a service key's name), contains "
+                "this text, ignoring case. It searches run metadata only, never "
+                "accepted input, output or evidence, so the list stays a "
+                "content-free read. Blank searches nothing."
+            ),
+            examples=["Case 123"],
+        ),
+    ] = None,
+    sort: Annotated[
+        FlowRunListSort,
+        Query(
+            description=(
+                "Order of the runs: `created_at` (when the run was created, the "
+                "default), `started_at` (when it started; its creation time while "
+                "it has not), `status` (the status capability table's "
+                "`filter_order`) or `duration` (from start to finish; runs that "
+                "have not finished come last in both orders). Ties list the "
+                "newest run first, so paging stays stable."
+            ),
+            examples=["started_at"],
+        ),
+    ] = "created_at",
+    order: Annotated[
+        FlowRunListOrder,
+        Query(description="`desc` (the default) or `asc`.", examples=["desc"]),
+    ] = "desc",
     container: Container = Depends(
         get_container(with_user=True, with_module_user=True, with_upload_admission=True)
     ),
@@ -635,6 +675,7 @@ async def list_flow_runs(
         allow_service_key_principals=True,
         history=True,
     )
+    listing = FlowRunListing.of(search=search, sort=sort, order=order)
     run_service = container.flow_run_service()
     runs = await run_service.list_run_statuses(
         flow_id=id,
@@ -643,6 +684,10 @@ async def list_flow_runs(
         limit=limit + 1,
         offset=offset,
         history=True,
+        listing=listing,
+    )
+    status_counts = await run_service.count_run_statuses(
+        flow_id=id, mine=mine, history=True, search=listing.search
     )
     page_runs = runs[:limit]
     started_by = await started_by_for_runs(container, page_runs)
@@ -654,6 +699,9 @@ async def list_flow_runs(
             for run in page_runs
         ],
         "has_more": len(runs) > limit,
+        "status_counts": {
+            status.value: count for status, count in status_counts.items()
+        },
     }
 
 
@@ -788,6 +836,9 @@ async def get_flow_run(
                 final_output=run_view.final_output,
                 webhook_deliveries=run_view.webhook_deliveries,
                 started_by=await started_by_for_run(container, run_view.run),
+                evidence_access=await run_service.evidence_access(
+                    run_view.run, history=True
+                ),
             )
             user = container.user()
             await log_flow_trace_audit_or_raise(

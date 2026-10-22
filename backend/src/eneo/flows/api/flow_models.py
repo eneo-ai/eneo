@@ -123,6 +123,7 @@ from eneo.flows.enums import (
     FlowOutputDelivery as FlowOutputDelivery,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_error_taxonomy import FLOW_ERROR_TAXONOMY
 from eneo.flows.flow_review_policy import (
     FLOW_STEP_REVIEW_POLICY_DESCRIPTION,
     FlowStepReviewMode,
@@ -384,6 +385,7 @@ FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE: dict[str, Any] = {
     "purpose": "production",
     "principal_type": "user",
     "started_by": FLOW_RUN_STARTED_BY_PUBLIC_EXAMPLE,
+    "run_label": "Case 123",
     "tenant_id": "00000000-0000-0000-0000-000000000010",
     "trace_id": "00000000-0000-0000-0000-000000000302",
     "revision": 1,
@@ -405,7 +407,6 @@ FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE: dict[str, Any] = {
 
 FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     **FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE,
-    "run_label": "Case 123",
     "error": None,
     "input_payload_json": {"employee_name": "Alex Example"},
     "speaker_labels": None,
@@ -636,10 +637,20 @@ PAGINATED_FLOW_SPARSE_RESPONSE_EXAMPLE: dict[str, Any] = {
     "count": 1,
 }
 
+FLOW_RUN_STATUS_COUNTS_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "queued": 1,
+    "running": 0,
+    "awaiting_review": 0,
+    "completed": 12,
+    "failed": 2,
+    "cancelled": 0,
+}
+
 PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE: dict[str, Any] = {
     "items": [FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE],
     "has_more": False,
     "count": 1,
+    "status_counts": FLOW_RUN_STATUS_COUNTS_PUBLIC_EXAMPLE,
 }
 
 
@@ -1060,7 +1071,9 @@ class FlowRunCreateRequest(BaseModel):
         description=(
             "Caller-supplied run label. Normalized to Unicode NFC and trimmed on "
             "creation; must contain 1–120 characters and no line breaks or control "
-            "characters. Omitted or null labels are stored as null."
+            "characters. Omitted or null labels are stored as null. The label is "
+            "run metadata: the content-free list and status reads return it and "
+            "the list searches it, so name the run rather than describe its content."
         ),
     )
     expected_flow_version: int | None = Field(
@@ -1531,6 +1544,19 @@ class FlowRunSummaryPublic(BaseModel):
             "principal."
         ),
     )
+    run_label: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=ONE_LINE_TEXT_MAX_CHARS,
+        description=(
+            "The run's name, as the caller supplied it on creation (NFC, trimmed, "
+            "one line). It is run metadata, not run content: it is returned by the "
+            "content-free list and status reads and matched by the list's "
+            "`search`, so it should name the run (a case number, a meeting), not "
+            "carry what the run is about. Null when the run was started without one."
+        ),
+        examples=["Case 123"],
+    )
     tenant_id: UUID = Field(description="Tenant that owns the run and its data.")
     trace_id: UUID = Field(
         description=(
@@ -1626,6 +1652,65 @@ class FlowRunSummaryPublic(BaseModel):
     )
 
 
+_STATUS_COUNT_DESCRIPTION = (
+    "Listed runs with status `{status}`, within `mine` and `search` and before "
+    "any `status` filter."
+)
+
+
+class FlowRunStatusCountsPublic(BaseModel):
+    """How many listed runs have each status, every status included."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUN_STATUS_COUNTS_PUBLIC_EXAMPLE},
+    )
+
+    queued: int = Field(
+        ge=0, description=_STATUS_COUNT_DESCRIPTION.format(status="queued")
+    )
+    running: int = Field(
+        ge=0, description=_STATUS_COUNT_DESCRIPTION.format(status="running")
+    )
+    awaiting_review: int = Field(
+        ge=0, description=_STATUS_COUNT_DESCRIPTION.format(status="awaiting_review")
+    )
+    completed: int = Field(
+        ge=0, description=_STATUS_COUNT_DESCRIPTION.format(status="completed")
+    )
+    failed: int = Field(
+        ge=0, description=_STATUS_COUNT_DESCRIPTION.format(status="failed")
+    )
+    cancelled: int = Field(
+        ge=0, description=_STATUS_COUNT_DESCRIPTION.format(status="cancelled")
+    )
+
+
+class FlowRunListPublic(BaseModel):
+    """One page of a flow's run history."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE},
+    )
+
+    items: list[FlowRunSummaryPublic] = Field(
+        description="The returned page of runs, in the requested order."
+    )
+    count: int = Field(description="Number of runs in `items`, not a total.")
+    has_more: bool = Field(
+        description="Whether another page exists after the returned offset window."
+    )
+    status_counts: FlowRunStatusCountsPublic = Field(
+        description=(
+            "How many runs the caller may list have each status, counted over every "
+            "page within `mine` and `search` and without the `status` filter, so a "
+            "status filter can show what each choice would leave. Counted when the "
+            "page is read; a run can move on before the next read."
+        ),
+    )
+
+
 class FlowRunPublic(FlowRunSummaryPublic):
     model_config = ConfigDict(
         from_attributes=True,
@@ -1633,12 +1718,6 @@ class FlowRunPublic(FlowRunSummaryPublic):
         json_schema_extra={"example": FLOW_RUN_PUBLIC_EXAMPLE},
     )
 
-    run_label: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=ONE_LINE_TEXT_MAX_CHARS,
-        description="Caller-supplied run label, available only through audited reads.",
-    )
     error: FlowRunError | None = Field(
         default=None,
         description=(
@@ -1736,6 +1815,140 @@ class FlowRunWebhookDeliveryPublic(BaseModel):
     updated_at: datetime
 
 
+FLOW_RUN_ERROR_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "schema_version": 1,
+    "code": FlowApiErrorCode.STEP_TIMEOUT.value,
+    "message": "Step 2 exceeded its execution budget during provider_request.",
+    "source": "executor_failed",
+    "step_order": 2,
+    "retryable": False,
+    "details": {"phase": "provider_request", "provider_work_may_have_completed": True},
+    "user_action": (
+        "Check the run before retrying and ask the flow author to raise the "
+        "step's time budget or reduce the input."
+    ),
+    "consumer_action": (
+        "Do not auto-retry because an in-flight provider request may still "
+        "complete and bill; inspect the run, then raise the step's "
+        "timeout_seconds or reduce the input before a new run."
+    ),
+}
+
+
+class FlowRunErrorPublic(FlowRunError):
+    """A run's terminal error with the Flow error taxonomy's guidance for its code."""
+
+    model_config = ConfigDict(
+        frozen=True,
+        extra="forbid",
+        json_schema_extra={
+            "description": (
+                "Structured terminal run error with the error taxonomy's guidance "
+                "for its code. Clients should branch on `code`, not on the "
+                "human-readable message."
+            ),
+            "examples": [FLOW_RUN_ERROR_PUBLIC_EXAMPLE],
+        },
+    )
+
+    user_action: str | None = Field(
+        description=(
+            "What the person who started or reviews the run can do, from the Flow "
+            "error taxonomy (the errors reference's guidance), in English. A "
+            "localized client shows its own catalog's sentence for `code` and "
+            "falls back to this. Null for a code the taxonomy does not list."
+        ),
+        examples=["Ask an administrator to configure document rendering."],
+    )
+    consumer_action: str | None = Field(
+        description=(
+            "What an API client should do about this error, from the Flow error "
+            "taxonomy, in English. Null for a code the taxonomy does not list."
+        ),
+        examples=[
+            "Configure the shared tool runtime before publishing or starting a run."
+        ],
+    )
+
+    @classmethod
+    def with_guidance(cls, error: FlowRunError) -> "FlowRunErrorPublic":
+        entry = FLOW_ERROR_TAXONOMY.get(FlowApiErrorCode(error.code))
+        return cls.model_validate(
+            {
+                **error.model_dump(),
+                "user_action": entry.user_action if entry else None,
+                "consumer_action": entry.consumer_action if entry else None,
+            }
+        )
+
+
+FLOW_RUN_EVIDENCE_ACCESS_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "can_read_evidence": True,
+    "can_export_redacted": True,
+    "can_export_raw": False,
+    "read_refusal_code": None,
+    "redacted_export_refusal_code": None,
+    "raw_export_refusal_code": "flow_run_evidence_raw_export_forbidden",
+}
+
+_EVIDENCE_REFUSAL_CODE_DESCRIPTION = (
+    "The `code` {route} would refuse this caller with (`flow_run_access_denied`, "
+    "`flow_run_evidence_forbidden`, `flow_run_evidence_export_disabled`, "
+    "`flow_run_evidence_raw_export_forbidden` or `insufficient_tenant_permission`), "
+    "or null when it would answer."
+)
+
+
+class FlowRunEvidenceAccessPublic(BaseModel):
+    """What the caller may do with this run's evidence, decided when the run
+    detail is read by the same run access policy the evidence routes use."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUN_EVIDENCE_ACCESS_PUBLIC_EXAMPLE},
+    )
+
+    can_read_evidence: bool = Field(
+        description=(
+            "Whether `GET .../runs/{run_id}/evidence/` and the provider-call pages "
+            "would answer this caller. Offer the trace only when true."
+        ),
+    )
+    can_export_redacted: bool = Field(
+        description=(
+            "Whether the redacted evidence export (`.../evidence/export` with "
+            "`detail=redacted`) would answer this caller. It includes the flow's "
+            "export setting."
+        ),
+    )
+    can_export_raw: bool = Field(
+        description=(
+            "Whether the raw evidence export (`detail=raw` with a reason) would "
+            "answer this caller. It includes the flow's export setting and the "
+            "classification-3 rule: evidence held to classification 3 (the space's "
+            "level now or the level the run recorded) is exported raw only to "
+            "space owners, tenant admins, and the roles the tenant's evidence "
+            "policy allows."
+        ),
+    )
+    read_refusal_code: str | None = Field(
+        description=_EVIDENCE_REFUSAL_CODE_DESCRIPTION.format(
+            route="the evidence read"
+        ),
+        examples=[None, "insufficient_tenant_permission"],
+    )
+    redacted_export_refusal_code: str | None = Field(
+        description=_EVIDENCE_REFUSAL_CODE_DESCRIPTION.format(
+            route="the redacted export"
+        ),
+        examples=[None, "flow_run_evidence_export_disabled"],
+    )
+    raw_export_refusal_code: str | None = Field(
+        description=_EVIDENCE_REFUSAL_CODE_DESCRIPTION.format(route="the raw export"),
+        examples=[None, "flow_run_evidence_raw_export_forbidden"],
+    )
+
+
 class FlowRunDetailPublic(FlowRunPublic):
     model_config = ConfigDict(
         from_attributes=True,
@@ -1743,6 +1956,7 @@ class FlowRunDetailPublic(FlowRunPublic):
             "example": {
                 **FLOW_RUN_PUBLIC_EXAMPLE,
                 "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
+                "evidence_access": FLOW_RUN_EVIDENCE_ACCESS_PUBLIC_EXAMPLE,
             }
         },
     )
@@ -1754,6 +1968,24 @@ class FlowRunDetailPublic(FlowRunPublic):
             "HTTP delivery. Eneo has no inbound webhook subscription surface, so this "
             "reports deliveries the flow author configured, never callbacks a client "
             "registered."
+        ),
+    )
+    # The detail narrows the error to its subclass with guidance; responses are
+    # never written to, so the override cannot be misused.
+    error: FlowRunErrorPublic | None = Field(  # pyright: ignore[reportIncompatibleVariableOverride]
+        default=None,
+        description=(
+            "Structured terminal run error, with the error taxonomy's `user_action` "
+            "and `consumer_action` for its code. API consumers should branch on "
+            "`error.code`; null means the run has no terminal run-level error."
+        ),
+    )
+    evidence_access: FlowRunEvidenceAccessPublic = Field(
+        description=(
+            "What this caller may do with the run's evidence (read the trace, export "
+            "it redacted or raw), so a client offers only what the evidence routes "
+            "would allow instead of approximating their rules. Computed for the "
+            "caller when the detail is read."
         ),
     )
 

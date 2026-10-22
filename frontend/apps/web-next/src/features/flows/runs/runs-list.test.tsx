@@ -27,9 +27,23 @@ import { FlowRunsList } from "./runs-list";
 
 const LIST = "GET /api/v1/flows/{id}/runs/";
 
-function answerList(items: RunSummary[], hasMore = false) {
-  state.routes[LIST] = () => ({ body: { count: items.length, items, has_more: hasMore } });
+const NO_COUNTS = {
+  queued: 0,
+  running: 0,
+  awaiting_review: 0,
+  completed: 0,
+  failed: 0,
+  cancelled: 0
+};
+
+function answerList(items: RunSummary[], hasMore = false, statusCounts = NO_COUNTS) {
+  state.routes[LIST] = () => ({
+    body: { count: items.length, items, has_more: hasMore, status_counts: statusCounts }
+  });
 }
+
+/** The query every list read sends: newest start first unless sorted otherwise. */
+const FIRST_PAGE = { limit: 25, offset: 0, sort: "started_at", order: "desc" };
 
 function listCalls() {
   return state.stub.calls.filter((call) => `${call.method} ${call.path}` === LIST);
@@ -92,11 +106,11 @@ describe("FlowRunsList", () => {
     answerList([makeRunSummary()]);
     renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" />);
     await screen.findByRole("table");
-    expect(listCalls()[0]?.init.params?.query).toEqual({ limit: 25, offset: 0 });
+    expect(listCalls()[0]?.init.params?.query).toEqual(FIRST_PAGE);
 
     fireEvent.click(screen.getByRole("checkbox", { name: messages.flow_runs_only_mine }));
     await vi.waitFor(() =>
-      expect(listCalls().at(-1)?.init.params?.query).toEqual({ limit: 25, offset: 0, mine: true })
+      expect(listCalls().at(-1)?.init.params?.query).toEqual({ ...FIRST_PAGE, mine: true })
     );
   });
 
@@ -107,11 +121,12 @@ describe("FlowRunsList", () => {
 
     answerList([]);
     fireEvent.click(screen.getByRole("combobox", { name: messages.flow_run_extras_status_filter }));
-    fireEvent.click(await screen.findByRole("option", { name: messages.flow_runs_status_failed }));
+    fireEvent.click(
+      await screen.findByRole("option", { name: `${messages.flow_runs_status_failed} (0)` })
+    );
     await vi.waitFor(() =>
       expect(listCalls().at(-1)?.init.params?.query).toEqual({
-        limit: 25,
-        offset: 0,
+        ...FIRST_PAGE,
         status: ["failed"]
       })
     );
@@ -124,6 +139,64 @@ describe("FlowRunsList", () => {
       )
     ).toBeTruthy();
     await expectNoAxeViolations(container);
+  });
+
+  it("names a run by its name, with its start time under it", async () => {
+    answerList([makeRunSummary({ id: "run-9", run_label: "Ärende 42" })]);
+    renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" />);
+    const link = await screen.findByRole("link", { name: "Ärende 42" });
+    expect(link.getAttribute("href")).toBe("/spaces/space-1/flows/flow-1/runs/run-9");
+  });
+
+  it("searches the runs by name or starter once the typing stops", async () => {
+    answerList([makeRunSummary()]);
+    const { container } = renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" />);
+    await screen.findByRole("table");
+
+    answerList([]);
+    fireEvent.change(screen.getByRole("textbox", { name: messages.flow_run_journey_search }), {
+      target: { value: "  ärende " }
+    });
+    await vi.waitFor(() =>
+      expect(listCalls().at(-1)?.init.params?.query).toEqual({ ...FIRST_PAGE, search: "ärende" })
+    );
+    expect(
+      await screen.findByText(
+        messages.flow_run_journey_search_empty_title.replace("{search}", "ärende")
+      )
+    ).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
+  it("asks the list endpoint to sort by the column header", async () => {
+    answerList([makeRunSummary()]);
+    renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" />);
+    const table = await screen.findByRole("table");
+
+    fireEvent.click(
+      within(table).getByRole("button", { name: new RegExp(messages.flow_runs_column_status) })
+    );
+    await vi.waitFor(() =>
+      expect(listCalls().at(-1)?.init.params?.query).toMatchObject({ sort: "status" })
+    );
+  });
+
+  it("counts the runs per status in the status filter", async () => {
+    answerList([makeRunSummary({ status: "failed" })], false, {
+      ...NO_COUNTS,
+      completed: 12,
+      failed: 2
+    });
+    renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" />);
+    await screen.findByRole("table");
+
+    fireEvent.click(screen.getByRole("combobox", { name: messages.flow_run_extras_status_filter }));
+    expect(
+      await screen.findByRole("option", { name: `${messages.flow_runs_status_failed} (2)` })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("option", { name: `${messages.flow_run_extras_status_any} (14)` })
+    ).toBeTruthy();
   });
 
   it("polls while a run moves, announces the change, then stops", async () => {
@@ -161,7 +234,7 @@ describe("FlowRunsList", () => {
     renderInApp(<FlowRunsList flowId="flow-1" spaceRouteId="space-1" />);
     fireEvent.click(await screen.findByRole("button", { name: messages.flow_runs_show_more }));
     await vi.waitFor(() =>
-      expect(listCalls().at(-1)?.init.params?.query).toEqual({ limit: 25, offset: 25 })
+      expect(listCalls().at(-1)?.init.params?.query).toEqual({ ...FIRST_PAGE, offset: 25 })
     );
   });
 });

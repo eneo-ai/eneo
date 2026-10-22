@@ -55,6 +55,7 @@ from eneo.flows.api.flow_run_lifecycle_router import (
     redispatch_flow_run,
 )
 from eneo.flows.api.flow_run_steps_router import get_flow_graph
+from eneo.flows.domain.flow import FlowRunStatus
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.exceptions import (
     NotFoundException,
@@ -389,6 +390,7 @@ async def test_flow_runtime_endpoints_reject_scope_mismatch(monkeypatch):
     run = _run(flow_id=flow_id, tenant_id=uuid4())
     run_service = AsyncMock()
     run_service.list_run_statuses.return_value = [run]
+    run_service.count_run_statuses.return_value = dict.fromkeys(FlowRunStatus, 0)
     run_service.get_run_detail_with_result_files_and_usage.return_value = (
         SimpleNamespace(
             run=run,
@@ -1028,6 +1030,7 @@ async def test_tenant_scoped_user_api_key_loads_space_membership_check(monkeypat
 
     run_service = AsyncMock()
     run_service.list_run_statuses.return_value = [run]
+    run_service.count_run_statuses.return_value = dict.fromkeys(FlowRunStatus, 0)
     container.flow_run_service.return_value = run_service
 
     monkeypatch.setattr(
@@ -1114,6 +1117,7 @@ async def test_space_scoped_api_key_matching_space_succeeds(monkeypatch):
 
     run_service = AsyncMock()
     run_service.list_run_statuses.return_value = [run]
+    run_service.count_run_statuses.return_value = dict.fromkeys(FlowRunStatus, 0)
     container.flow_run_service.return_value = run_service
 
     # Space-scoped key matching the flow's space

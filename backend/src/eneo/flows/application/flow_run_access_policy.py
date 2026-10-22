@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, NoReturn, Protocol, TypeGuard, get_args
 from uuid import UUID
 
@@ -47,6 +48,22 @@ _FLOW_RUN_ACCESS_KINDS = set(get_args(FlowRunAccessKind))
 # History reads never mutate; any mutation needs a live flow.
 _MUTATING_ACCESS_KINDS: frozenset[FlowRunAccessKind] = frozenset({"cancel"})
 FlowRunSpaceRole = Literal["admin", "owner"]
+_EVIDENCE_ACCESS_KINDS: tuple[FlowRunAccessKind, ...] = (
+    "evidence_view",
+    "evidence_export_redacted",
+    "evidence_export_raw",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunEvidenceAccess:
+    """What one caller may do with one run's evidence, as the evidence routes
+    would answer them: each refusal is the code those routes would refuse
+    with, and None where they would let the caller through."""
+
+    view_refusal: str | None
+    redacted_export_refusal: str | None
+    raw_export_refusal: str | None
 
 
 class FlowRunSpaceServiceProtocol(Protocol):
@@ -332,6 +349,28 @@ class FlowRunAccessPolicy:
                 )
 
         self.deny_run_access(auth_layer="flow_run_owner")
+
+    async def evidence_access_for_run(
+        self, run: FlowRunStatusSnapshot, *, history: bool = False
+    ) -> FlowRunEvidenceAccess:
+        """Asks this policy each evidence question the evidence routes ask,
+        so a client can offer exactly what they would allow."""
+        refusals: list[str | None] = []
+        for access_kind in _EVIDENCE_ACCESS_KINDS:
+            try:
+                await self.ensure_can_access_run(
+                    run, access_kind=access_kind, history=history
+                )
+            except FlowUnauthorizedException as exc:
+                refusals.append(exc.code.value)
+            else:
+                refusals.append(None)
+        view, redacted_export, raw_export = refusals
+        return FlowRunEvidenceAccess(
+            view_refusal=view,
+            redacted_export_refusal=redacted_export,
+            raw_export_refusal=raw_export,
+        )
 
     async def passage_disclosure_for_run(
         self,

@@ -34,7 +34,8 @@ import { RunWebhookDeliveries } from "./run-webhooks";
 import { RunFiles } from "./run-files";
 import { JsonValue } from "./run-json";
 import { refusalText, runErrorText } from "./run-messages";
-import { progressSignature, runStepViews, tokenTotal } from "./run-progress";
+import { progressSignature, runStepViews, tokenTotal, type RunStepView } from "./run-progress";
+import { RunLiveProgress } from "./run-live-progress";
 import { RunKnowledge } from "./run-knowledge";
 import { startedByUser, starterName } from "./run-starter";
 import { RunSteps, stepTitle } from "./run-steps";
@@ -169,9 +170,25 @@ function RunUsage({ run }: { run: RunDetail }) {
 }
 
 /** Why the run stopped, or why a queued run has not started. */
-function RunProblem({ run }: { run: RunDetail }) {
+function RunProblem({
+  run,
+  flow,
+  steps
+}: {
+  run: RunDetail;
+  flow: FlowPublic;
+  steps: readonly RunStepView[];
+}) {
   const t = useTranslations();
-  if (run.status === "failed" && run.error) return <RunFailure error={run.error} />;
+  if (run.status === "failed" && run.error) {
+    return (
+      <RunFailure
+        error={run.error}
+        stepName={(order) => steps.find((step) => step.order === order)?.label.trim() || null}
+        reviewSteps={flow.steps}
+      />
+    );
+  }
   if (run.status === "cancelled" && run.error) {
     return (
       <QuietBanner
@@ -488,7 +505,13 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
           />
         ) : (
           <>
-            {run ? <RunProblem run={run} /> : null}
+            {run ? (
+              <RunProblem
+                run={run}
+                flow={flow}
+                steps={runStepViews(progress.data.graph, steps.data)}
+              />
+            ) : null}
             {awaitingReview && review.isError ? (
               <ListError
                 error={review.error}
@@ -535,11 +558,17 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                   isRetrying={steps.isFetching}
                 />
               ) : (
-                <RunSteps
-                  flowId={flowId}
-                  runId={runId}
-                  steps={runStepViews(progress.data.graph, steps.data)}
-                />
+                <>
+                  <RunLiveProgress
+                    summary={progress.data.status}
+                    steps={runStepViews(progress.data.graph, steps.data)}
+                  />
+                  <RunSteps
+                    flowId={flowId}
+                    runId={runId}
+                    steps={runStepViews(progress.data.graph, steps.data)}
+                  />
+                </>
               )}
             </Section>
             {transcriptTargets(steps.data).length > 0 && !reviewTranscript ? (
@@ -562,13 +591,15 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 />
               </Section>
             ) : null}
-            <Section title={t("flow_runs_knowledge_heading")}>
-              <RunKnowledge
-                flowId={flowId}
-                runId={runId}
-                steps={runStepViews(progress.data.graph, steps.data)}
-              />
-            </Section>
+            {run?.evidence_access.can_read_evidence ? (
+              <Section title={t("flow_runs_knowledge_heading")}>
+                <RunKnowledge
+                  flowId={flowId}
+                  runId={runId}
+                  steps={runStepViews(progress.data.graph, steps.data)}
+                />
+              </Section>
+            ) : null}
             {run ? (
               <>
                 <Section title={t("flow_runs_input_heading")}>
@@ -601,6 +632,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 flow={flow}
                 summary={summary}
                 steps={runStepViews(progress.data.graph, steps.data)}
+                access={run?.evidence_access}
               />
             ) : null}
             <p className="text-ax-text-secondary text-xs">

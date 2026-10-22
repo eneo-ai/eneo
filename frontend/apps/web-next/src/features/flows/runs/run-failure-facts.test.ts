@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { failureFacts } from "./run-failure-facts";
+import { failureFacts, reviewPolicySteps } from "./run-failure-facts";
 
 describe("failureFacts", () => {
   it("says where a timed-out step stopped, what it was doing and how far it got", () => {
@@ -49,5 +49,38 @@ describe("failureFacts", () => {
       details: { completed_items: 2, total_items: 0, transcription_service_reason: "  " }
     });
     expect(facts.map((fact) => fact.kind)).toEqual(["retry"]);
+  });
+});
+
+describe("reviewPolicySteps", () => {
+  const flowSteps = [
+    { step_order: 2, user_description: " Skriv svar ", review_policy: { mode: "edit" } },
+    { step_order: 1, user_description: "Sammanfatta", review_policy: null },
+    { step_order: 3, user_description: null, review_policy: { mode: "approve" } }
+  ];
+
+  it("names the step the refusal names", () => {
+    expect(
+      reviewPolicySteps({ code: "flow_review_policy_invalid", step_order: 1 }, flowSteps)
+    ).toEqual({ exact: true, steps: [{ order: 1, name: "Sammanfatta" }] });
+  });
+
+  it("lists every step with a review policy when the refusal names none", () => {
+    expect(
+      reviewPolicySteps({ code: "flow_review_policy_invalid", step_order: null }, flowSteps)
+    ).toEqual({
+      exact: false,
+      steps: [
+        { order: 2, name: "Skriv svar" },
+        { order: 3, name: null }
+      ]
+    });
+  });
+
+  it("names nothing for any other error", () => {
+    expect(reviewPolicySteps({ code: "flow_step_timeout", step_order: 2 }, flowSteps)).toEqual({
+      exact: false,
+      steps: []
+    });
   });
 });
