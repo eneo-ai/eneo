@@ -96,6 +96,21 @@ Once a provider is configured and models are added, tenant admins can enable spe
 
 ---
 
+## Rerank models
+
+A rerank model reorders the knowledge an assistant retrieves, so the most relevant passages come first regardless of their length. Add one under **Admin** → **Models** → **Rerank models** on a provider that serves reranking, for example Cohere, Azure AI or a self-hosted vLLM or Infinity server. Enter the model identifier without a provider prefix (`cohere-rerank-v4.0-fast`, not `azure_ai/cohere-rerank-v4.0-fast`). Space owners then choose it per assistant under **Material handling** → **Result ranking**; only models the space's security classification allows are offered.
+
+Each rerank model has two settings:
+
+| Setting                        | Default | Allowed | Effect                                                                                                       |
+| ------------------------------ | ------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| Candidates per requested chunk | 5       | 1–20    | How many candidates are scored for each chunk the assistant asks for. Matters when few chunks are requested. |
+| Maximum candidates per search  | 100     | 1–1000  | The most candidates scored and returned in one search.                                                       |
+
+The defaults were measured on one municipality's public and internal web content with 200-token chunks; a higher maximum gave the same ranking and a lower one lost answers. Other material, chunk sizes or rerankers may need other values. A higher maximum can find relevant text further down but makes every search slower and, for providers that charge per search, more expensive. The backend log line `Reranked search` shows the time spent per step and the number of candidates.
+
+---
+
 ## Custom & Self-Hosted Providers
 
 For self-hosted inference servers or providers not natively listed in LiteLLM, use any provider type that speaks the OpenAI protocol — such as **`hosted_vllm`**, **`openai`**, or **`ollama`** — and point it at your own endpoint. The key requirement is that the server exposes an OpenAI-compatible API.
