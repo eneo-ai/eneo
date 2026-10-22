@@ -10,7 +10,11 @@ import sqlalchemy as sa
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.database.tables.ai_models_table import CompletionModels
-from eneo.flows.application.flow_authoring_chat import load_authoring_chat
+from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
+from eneo.flows.application.flow_authoring_chat import (
+    AUTHORING_INSTRUCTIONS,
+    load_authoring_chat,
+)
 from eneo.internal_mcp import flows
 from eneo.main.exceptions import NotFoundException
 
@@ -80,6 +84,42 @@ async def test_chat_bootstrap_is_idempotent_scoped_and_initially_read_only(
     )
     assert mode.status_code == 200, mode.text
     assert mode.json()["editing"] is True
+
+
+async def test_reopening_a_chat_gives_it_the_current_instructions_once(
+    client, enabled_flow, db_container
+):
+    flow, headers = enabled_flow
+    url = f"/api/v1/flows/{flow['id']}/authoring-chat/"
+    chat = (await client.post(url, headers=headers)).json()
+    assistant_id = UUID(chat["assistant_id"])
+
+    async def prompts() -> tuple[str, int]:
+        async with db_container() as container:
+            rows = (
+                await container.session().execute(
+                    sa.select(Prompts.text, PromptsAssistants.is_selected)
+                    .join(PromptsAssistants, PromptsAssistants.prompt_id == Prompts.id)
+                    .where(PromptsAssistants.assistant_id == assistant_id)
+                )
+            ).all()
+        return next(text for text, selected in rows if selected), len(rows)
+
+    selected, _ = await prompts()
+    async with db_container() as container:
+        # A chat created before the instructions last changed.
+        await container.session().execute(
+            sa.update(Prompts).where(Prompts.text == selected).values(text="Old.")
+        )
+    _, before = await prompts()
+
+    assert (await client.post(url, headers=headers)).status_code == 200
+    selected, refreshed = await prompts()
+    assert selected == AUTHORING_INSTRUCTIONS
+    assert refreshed == before + 1
+
+    assert (await client.post(url, headers=headers)).status_code == 200
+    assert await prompts() == (AUTHORING_INSTRUCTIONS, refreshed)
 
 
 async def test_failed_joint_edit_rolls_back_assistant_and_revision(

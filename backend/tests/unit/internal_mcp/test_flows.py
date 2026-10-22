@@ -168,6 +168,35 @@ def test_http_without_credentials_remains_configurable_after_save():
     )
 
 
+def test_a_malformed_http_config_without_credentials_is_left_to_the_core():
+    # The shape a model guessed: no credentials, so the core's own validation
+    # answers with the fields to fix instead of a credential refusal.
+    flows.require_safe_model_configuration(
+        {
+            "input_config": {
+                "request": {
+                    "url": "https://httpbin.org/get?arende={{ flow_input.diarienummer }}",
+                    "method": "GET",
+                    "auth": {"type": "none"},
+                    "headers": {},
+                }
+            }
+        },
+        {},
+    )
+
+
+@pytest.mark.parametrize(
+    "auth",
+    [{"type": "bearer", "token": "abc123"}, {"token": "abc123"}, "bearer"],
+)
+def test_a_malformed_http_config_with_credentials_is_still_refused(auth):
+    with pytest.raises(BadRequestException):
+        flows.require_safe_model_configuration(
+            {"input_config": {"url": "https://new.test", "auth": auth}}, {}
+        )
+
+
 def test_custom_secret_headers_use_the_core_credential_policy():
     with pytest.raises(BadRequestException):
         flows.require_safe_model_configuration(

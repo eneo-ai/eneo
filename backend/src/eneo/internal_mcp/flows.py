@@ -309,6 +309,23 @@ def require_safe_model_configuration(
         contains_secret_sentinel,
     )
 
+    def declares_secret_material(value: dict[str, Any]) -> bool:
+        # Read without the core model, for configs it refuses: any auth other
+        # than none, any auth field besides its mode, or any custom header.
+        auth = value.get("auth")
+        if isinstance(auth, dict):
+            if auth.get("mode", auth.get("type")) not in (None, "", "none"):
+                return True
+            if any(
+                item not in (None, "", {}, [])
+                for key, item in auth.items()
+                if key not in ("mode", "type")
+            ):
+                return True
+        elif auth not in (None, "", "none"):
+            return True
+        return value.get("custom_headers") not in (None, "", {}, [])
+
     def contains_credential(value: Any) -> bool:
         if contains_secret_sentinel(value):
             return True
@@ -323,9 +340,13 @@ def require_safe_model_configuration(
                         }
                     )
                 except ValidationError:
-                    return True
-                if authored.has_declared_credentials:
-                    return True
+                    # A malformed config without credentials goes on to the
+                    # core, whose refusal names the fields to fix.
+                    if declares_secret_material(value):
+                        return True
+                else:
+                    if authored.has_declared_credentials:
+                        return True
             return any(
                 (
                     key.lower()

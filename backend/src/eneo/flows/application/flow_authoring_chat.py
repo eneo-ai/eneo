@@ -66,6 +66,14 @@ it pointed: the core rewrites the reads, and refuses a change that would leave a
 read without its step or field. Change that read first when it is refused.
 When two steps share an assistant, update_step with assistant_changes gives the
 edited step its own copy and leaves the other step's assistant as it was.
+An http_get step (input_source http_get) keeps its request in input_config and
+an http_post step in output_config, flat in this shape: {"url": "...",
+"auth": {"mode": "none"}, "timeout_seconds": 30, "response_format": "text" or
+"json"}; an http_post may add "body": {"mode": "auto"} or {"mode":
+"json_template", "template": "..."}. The step decides the method, so there is no
+method or headers key. The url and a body template may read
+{{ flow_input.<field> }} and earlier steps. Keep auth at {"mode": "none"}:
+credentials and custom headers are set by the user in the editor.
 """
 
 
@@ -157,6 +165,21 @@ async def require_authoring_edit(
     )
 
 
+async def _refresh_instructions(container: Container, chat: FlowAuthoringChats) -> None:
+    """Give an existing chat the current instructions; write only on change."""
+    space = await container.space_repo().one(
+        id=chat.space_id, hidden_assistant_ids={chat.assistant_id}
+    )
+    assistant = space.get_assistant(assistant_id=chat.assistant_id)
+    if assistant.get_prompt_text() == AUTHORING_INSTRUCTIONS:
+        return
+    await container.assistant_service().update_assistant(
+        assistant_id=chat.assistant_id,
+        update=AssistantUpdateCommand(prompt=PromptCreate(text=AUTHORING_INSTRUCTIONS)),
+        include_hidden=True,
+    )
+
+
 async def get_or_create_authoring_chat(
     container: Container, *, flow_id: UUID, request: Request
 ) -> FlowAuthoringChatPublic:
@@ -182,6 +205,7 @@ async def get_or_create_authoring_chat(
         chat = await load_authoring_chat(
             container, session_id=existing.session_id, flow_id=flow_id
         )
+        await _refresh_instructions(container, chat)
         return FlowAuthoringChatPublic.model_validate(chat)
     assistant, _ = await container.assistant_service().create_assistant(
         name=access.flow.name,
