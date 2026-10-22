@@ -3537,7 +3537,7 @@ async def test_flow_service_key_can_drive_human_review_runtime_paths(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_run_label_validation_uses_existing_error_response(
+async def test_a_refused_run_label_names_the_rule_it_broke(
     client, admin_token, monkeypatch
 ):
     dispatch = AsyncMock()
@@ -3548,7 +3548,13 @@ async def test_flow_run_label_validation_uses_existing_error_response(
     )
     space_id = await _create_space(client, token=admin_token)
     flow = await _create_published_flow(client, token=admin_token, space_id=space_id)
-    for label in ["", "  ", "a\nb", "a\x00b", "x" * 121]:
+    for label, reason in [
+        ("", "empty"),
+        ("  ", "empty"),
+        ("a\nb", "not_one_line"),
+        ("a\x00b", "not_one_line"),
+        ("x" * 121, "too_long"),
+    ]:
         response = await client.post(
             f"/api/v1/flows/{flow['id']}/runs/",
             json={"run_label": label, "input_payload_json": {"text": "hello"}},
@@ -3556,7 +3562,12 @@ async def test_flow_run_label_validation_uses_existing_error_response(
         )
         assert response.status_code == 422, response.text
         assert response.json()["eneo_error_code"] == 9012
-        assert response.json()["code"] == "validation_error"
+        assert response.json()["code"] == "flow_run_invalid_label"
+        assert response.json()["context"] == {
+            "field": "run_label",
+            "reason": reason,
+            "max_length": 120,
+        }
     dispatch.assert_not_awaited()
     assert (
         await _flow_run_first_page_count(client, flow_id=flow["id"], token=admin_token)

@@ -105,6 +105,7 @@ const FLOW_API_ERROR_MESSAGES = {
   flow_run_reserved_input_payload_key: m.flow_error_flow_run_reserved_input_payload_key,
   flow_run_speaker_labels_not_selectable: m.flow_error_flow_run_speaker_labels_not_selectable,
   flow_run_max_speakers_not_available: m.flow_error_flow_run_max_speakers_not_available,
+  flow_run_invalid_label: m.flow_error_flow_run_invalid_label,
   flow_run_input_payload_too_large: m.flow_error_flow_run_input_payload_too_large,
   flow_run_input_exceeds_limit: m.flow_error_flow_run_input_exceeds_limit,
   flow_input_required_field_missing: m.flow_error_flow_input_required_field_missing,

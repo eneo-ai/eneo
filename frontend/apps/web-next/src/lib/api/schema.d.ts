@@ -5155,7 +5155,8 @@ export interface paths {
      *         `step_inputs[step_id].file_ids` instead. A `speaker_labels` choice the run contract does
      *         not offer returns `422` with code `flow_run_speaker_labels_not_selectable`, and a
      *         `max_speakers` for a run that labels no speakers returns `422` with code
-     *         `flow_run_max_speakers_not_available`.
+     *         `flow_run_max_speakers_not_available`. A `run_label` that is not one line of 1 to
+     *         120 characters after trimming returns `422` with code `flow_run_invalid_label`.
      *
      *         `Idempotency-Key` is optional but recommended for retried writes. Reusing the same key with
      *         the same request payload returns the existing run payload. Reusing the same key with a
@@ -18006,6 +18007,7 @@ export interface components {
       | "flow_run_reserved_input_payload_key"
       | "flow_run_speaker_labels_not_selectable"
       | "flow_run_max_speakers_not_available"
+      | "flow_run_invalid_label"
       | "flow_run_input_payload_too_large"
       | "flow_run_input_exceeds_limit"
       | "flow_input_required_field_missing"

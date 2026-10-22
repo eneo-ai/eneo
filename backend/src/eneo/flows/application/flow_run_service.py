@@ -133,7 +133,7 @@ from eneo.flows.transcription_config import (
     SpeakerServiceGap,
     parse_transcription_config,
 )
-from eneo.main.exceptions import NotFoundException, ValidationException
+from eneo.main.exceptions import NotFoundException
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.settings.setting_service import SettingService
 from eneo.users.user import UserInDB
@@ -383,14 +383,26 @@ class FlowRunService:
         if run_label is not None:
             run_label = unicodedata.normalize("NFC", run_label)
             if any(breaks_one_line(char) for char in run_label):
-                raise ValidationException(
-                    "run_label must be a single line without control characters."
+                raise FlowValidationException(
+                    "run_label must be a single line without control characters.",
+                    code=FlowApiErrorCode.RUN_INVALID_LABEL,
+                    context={
+                        "field": "run_label",
+                        "reason": "not_one_line",
+                        "max_length": ONE_LINE_TEXT_MAX_CHARS,
+                    },
                 )
             run_label = run_label.strip()
             if not 1 <= len(run_label) <= ONE_LINE_TEXT_MAX_CHARS:
-                raise ValidationException(
+                raise FlowValidationException(
                     "run_label must contain between 1 and "
-                    f"{ONE_LINE_TEXT_MAX_CHARS} characters."
+                    f"{ONE_LINE_TEXT_MAX_CHARS} characters.",
+                    code=FlowApiErrorCode.RUN_INVALID_LABEL,
+                    context={
+                        "field": "run_label",
+                        "reason": "empty" if not run_label else "too_long",
+                        "max_length": ONE_LINE_TEXT_MAX_CHARS,
+                    },
                 )
         principal = self._principal()
         published = await self._load_published_run_definition(

@@ -403,6 +403,13 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Send speaker_labels only when the run contract marks speaker labels as selectable.",
         user_action="Reload the flow and start the run again.",
     ),
+    FlowApiErrorCode.RUN_INVALID_LABEL: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The run label is not one line of 1 to 120 characters after trimming.",
+        consumer_action="Send a one-line run_label of 1 to 120 characters or omit it; the reason in the error context names the rule it broke.",
+        user_action="Give the run a shorter name on one line, or leave the name empty.",
+    ),
     FlowApiErrorCode.RUN_MAX_SPEAKERS_NOT_AVAILABLE: _entry(
         category="Run input",
         surfaced_through="API error response",

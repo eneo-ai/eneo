@@ -58,9 +58,16 @@ class FlowServiceUnavailableException(NotReadyException):
 class FlowValidationException(ValidationException):
     """A well-formed Flow request the server cannot accept (422), with a code."""
 
-    def __init__(self, message: str, *, code: FlowApiErrorCode) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: FlowApiErrorCode,
+        context: dict[str, object] | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
+        self.context = context
 
 
 def flow_run_abandonment_refusal(
