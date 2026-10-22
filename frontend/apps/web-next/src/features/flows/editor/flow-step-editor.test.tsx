@@ -309,7 +309,7 @@ describe("FlowStepEditor", () => {
         completion_models: [
           {
             id: "model-1",
-            name: "claude-haiku",
+            name: "snabb-modell",
             nickname: "Haiku 4.5",
             security_classification: {
               id: "c-2",
