@@ -68,6 +68,22 @@ describe("FlowSettings", () => {
     // The axe scan of the whole form takes a few seconds in jsdom.
   }, 20_000);
 
+  it("sends a renamed field's saved name, so the steps' reads follow it", async () => {
+    const onSave = vi.fn(async () => true);
+    renderInApp(<FlowSettings flow={flow} canEdit onSave={onSave} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    const field = screen.getByRole("group", { name: "Diarienummer" });
+    fireEvent.change(within(field).getByRole("textbox", { name: /Tekniskt namn/ }), {
+      target: { value: "arendenummer" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ form_field_renames: { diarienummer: "arendenummer" } })
+    );
+  });
+
   it("explains a name a step could not read, at the field, without saving", async () => {
     const onSave = vi.fn(async () => true);
     renderInApp(<FlowSettings flow={flow} canEdit onSave={onSave} />);

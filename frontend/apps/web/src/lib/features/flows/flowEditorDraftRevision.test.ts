@@ -320,20 +320,26 @@ describe("FlowEditor draft revision", () => {
 });
 
 describe("FlowEditor writes that change prompts and steps together", () => {
-  it("moves a step, rewriting the prompt that reads it, without refusing its own saves", async () => {
+  it("moves a step in one save and leaves the prompts' reads of it to the core", async () => {
     const server = makeServer(4, {
       "assistant-1": "Gör uppgift 1.",
       "assistant-2": "Gör uppgift 2.",
       "assistant-3": "Läs {{step_2.output.text}}."
     });
     const editor = editorFor(server, makeFlow(4, [makeStep(1), makeStep(2), makeStep(3)]));
+    await editor.loadAssistant("assistant-3");
+    const reads = server.eneo.flows.assistants.get as unknown as ReturnType<typeof vi.fn>;
+    const readsBefore = reads.mock.calls.length;
 
     await editor.moveStepAtIndex(1, 1);
     await editor.flushSaves();
 
-    expect(server.prompts["assistant-3"]).toBe("Läs {{step_3.output.text}}.");
-    expect(server.sent.map((entry) => entry.kind).sort()).toEqual(["assistant", "flow"]);
+    // The core renumbers the prompt when it saves the order; the editor reads it again.
+    expect(server.prompts["assistant-3"]).toBe("Läs {{step_2.output.text}}.");
+    expect(server.sent.map((entry) => entry.kind)).toEqual(["flow"]);
     expectOneChain(server, 4);
+    await editor.loadAssistant("assistant-3");
+    expect(reads.mock.calls.length).toBeGreaterThan(readsBefore);
   });
 
   it("renames a form field in the prompts that read it without refusing its own saves", async () => {
