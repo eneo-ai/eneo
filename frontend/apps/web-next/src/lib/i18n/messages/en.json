@@ -7817,6 +7817,7 @@
   "flow_step_editor_variable_upload": "Text from uploaded files",
   "flow_step_editor_variable_transcription": "The transcription",
   "flow_step_editor_variable_date": "Today's date",
+  "flow_step_editor_variable_section_index": "Section number",
   "flow_step_editor_variable_previous_step": "The answer of the step before",
   "flow_step_editor_variable_step_text": "The answer as text",
   "flow_step_editor_variable_step_structured": "The whole fixed-format answer",

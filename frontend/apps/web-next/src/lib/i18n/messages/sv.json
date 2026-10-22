@@ -7817,6 +7817,7 @@
   "flow_step_editor_variable_upload": "Text från uppladdade filer",
   "flow_step_editor_variable_transcription": "Transkriberingen",
   "flow_step_editor_variable_date": "Dagens datum",
+  "flow_step_editor_variable_section_index": "Delens nummer",
   "flow_step_editor_variable_previous_step": "Svaret från steget före",
   "flow_step_editor_variable_step_text": "Svaret som text",
   "flow_step_editor_variable_step_structured": "Hela svaret i fast format",

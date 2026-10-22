@@ -36,7 +36,12 @@ import {
 } from "./field-problems";
 import { StepAdvancedSection, parseContract, type ContractDrafts } from "./step-advanced-section";
 import { StepAiSection } from "./step-ai-section";
-import { httpUrlProblem, readHttpConfig, readToolConfig } from "./step-configs";
+import {
+  httpUrlProblem,
+  readHttpConfig,
+  readTextProcessingMode,
+  readToolConfig
+} from "./step-configs";
 import { StepControlSection } from "./step-control-section";
 import {
   assistantChanges,
@@ -333,6 +338,13 @@ function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel
   const usesModel = stepUsesModel(draft);
   const isLast = isLastStep(flow, { step_order: stepOrder });
   const groups = variableGroups({ flow, stepOrder, inputConfig: draft.input_config });
+  // Only the AI instruction runs once per section, so only it reads the section's number.
+  const promptGroups = variableGroups({
+    flow,
+    stepOrder,
+    inputConfig: draft.input_config,
+    sectionVariables: readTextProcessingMode(draft.input_config) === "process_each_section"
+  });
   const wholeValueGroups = variableGroups({
     flow,
     stepOrder,
@@ -596,7 +608,7 @@ function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel
                   onAssistantChange={changeAssistant}
                   onStepChange={changeStep}
                   problems={shownProblems}
-                  groups={groups}
+                  groups={promptGroups}
                   classification={classification}
                 />
               )}

@@ -28,6 +28,8 @@ describe("readMeaning", () => {
     });
     expect(readMeaning("Sammanfatta", 3, flow)).toEqual({ kind: "step_answer", order: 1 });
     expect(readMeaning("föregående_steg", 3, flow)).toEqual({ kind: "step_answer", order: 2 });
+    expect(readMeaning("section_index", 3, flow)).toEqual({ kind: "section_index" });
+    expect(readMeaning("indata_text", 3, flow)).toEqual({ kind: "flow_input" });
   });
 
   it("marks a reference to a removed or later step as one the run cannot read", () => {
@@ -36,7 +38,7 @@ describe("readMeaning", () => {
       kind: "missing",
       order: 1
     });
-    expect(readMeaning("section_index", 2, flow)).toEqual({ kind: "other" });
+    expect(readMeaning("okänd_variabel", 2, flow)).toEqual({ kind: "other" });
   });
 
   it("keeps the text around the references", () => {

@@ -105,6 +105,8 @@ export function meaningLabel(
       return t("flow_step_editor_variable_transcription");
     case "date":
       return t("flow_step_editor_variable_date");
+    case "section_index":
+      return t("flow_step_editor_variable_section_index");
     case "step_answer":
       return t("flow_editor_tools_preview_read_step", {
         step: step(meaning.order),
@@ -138,6 +140,8 @@ export function variableEntryLabel(entry: VariableEntry, t: T): string {
       return t("flow_step_editor_variable_transcription");
     case "date":
       return t("flow_step_editor_variable_date");
+    case "section_index":
+      return t("flow_step_editor_variable_section_index");
     case "previous_step":
       return t("flow_step_editor_variable_previous_step");
     case "step_text":

@@ -16,6 +16,8 @@ export type ReadMeaning =
   | { kind: "upload" }
   | { kind: "transcription" }
   | { kind: "date" }
+  /** The number of the section an instruction run once per section is on. */
+  | { kind: "section_index" }
   | { kind: "step_answer"; order: number }
   | { kind: "step_structured"; order: number }
   | { kind: "step_field"; order: number; field: string }
@@ -35,7 +37,11 @@ export function readMeaning(
   if (token === "step_input.text") return { kind: "upload" };
   if (token === "transkribering") return { kind: "transcription" };
   if (token === "datum") return { kind: "date" };
-  if (token === "flow_input" || token === "flow_input.text") return { kind: "flow_input" };
+  if (token === "section_index") return { kind: "section_index" };
+  // `indata_text` and `indata_json` are the run input's older names.
+  if (["flow_input", "flow_input.text", "indata_text", "indata_json"].includes(token)) {
+    return { kind: "flow_input" };
+  }
   if (token.startsWith("flow_input.")) {
     const name = token.slice("flow_input.".length);
     const field = formFieldsOf(flow).find((candidate) => candidate.name === name);

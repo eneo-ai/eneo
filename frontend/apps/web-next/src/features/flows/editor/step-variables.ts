@@ -76,6 +76,7 @@ export type VariableEntry = {
     | { type: "upload" }
     | { type: "transcription" }
     | { type: "date" }
+    | { type: "section_index" }
     | { type: "previous_step" }
     | { type: "step_text" }
     | { type: "step_structured" }
@@ -103,8 +104,10 @@ export function variableGroups(params: {
   stepOrder: number;
   inputConfig?: unknown;
   wholeValue?: boolean;
+  /** The text is an AI instruction run once per section: it can read the section's number. */
+  sectionVariables?: boolean;
 }): VariableGroup[] {
-  const { flow, stepOrder, inputConfig, wholeValue = false } = params;
+  const { flow, stepOrder, inputConfig, wholeValue = false, sectionVariables = false } = params;
   const groups: VariableGroup[] = [];
 
   const fields = formFieldsOf(flow)
@@ -129,6 +132,7 @@ export function variableGroups(params: {
     run.push({ token: "transkribering", kind: { type: "transcription" } });
   }
   if (!wholeValue) run.push({ token: "datum", kind: { type: "date" } });
+  if (sectionVariables) run.push({ token: "section_index", kind: { type: "section_index" } });
   if (stepOrder > 1 && !wholeValue) {
     run.push({ token: "föregående_steg", kind: { type: "previous_step" } });
   }
