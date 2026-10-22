@@ -596,6 +596,74 @@ describe("FlowRunPage", () => {
       play.mockRestore();
     });
 
+    it("corrects a line's text, shows it corrected and reverts the correction", async () => {
+      answerAudioRun();
+      let revision = 0;
+      state.routes[EDIT] = (init: { body: Record<string, unknown> }) => {
+        revision += 1;
+        return {
+          body: {
+            flow_run_id: "run-1",
+            step_id: "step-1",
+            created_at: "2026-10-21T09:00:00Z",
+            updated_at: "2026-10-21T09:00:00Z",
+            edited_by_principal_type: "user",
+            schema_version: 3,
+            segments_hash: "hash-1",
+            stale: false,
+            revision,
+            occurrences: init.body.occurrences,
+            speaker_edits: init.body.speaker_edits,
+            speaker_names: init.body.speaker_names ?? {}
+          }
+        };
+      };
+      const { container } = renderRun(["flows_view", "flows_manage"]);
+      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+
+      fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
+      const field = within(lines).getByLabelText("Texten på raden 1:05");
+      expect(document.activeElement).toBe(field);
+      await expectNoAxeViolations(container);
+      fireEvent.change(field, { target: { value: "Tack så mycket." } });
+      fireEvent.click(
+        within(lines).getByRole("button", { name: messages.flow_transcript_line_save })
+      );
+
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_line_saved)
+      );
+      expect(calls(EDIT)[0]?.init.body).toEqual({
+        expected_revision: null,
+        segments_hash: "hash-1",
+        schema_version: 3,
+        occurrences: [
+          { segment_index: 1, char_start: 4, char_end: 5, original: ".", corrected: " så mycket." }
+        ],
+        speaker_edits: [],
+        speaker_names: {}
+      });
+      expect(await within(lines).findByText(/Tack så mycket\./)).toBeTruthy();
+      expect(within(lines).getByText(messages.flow_transcript_line_corrected)).toBeTruthy();
+      // Focus goes back to the line's edit button.
+      expect(document.activeElement).toBe(
+        within(lines).getByRole("button", { name: "Rätta raden 1:05" })
+      );
+
+      fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
+      expect(within(lines).getByText("Ursprunglig text: Tack.")).toBeTruthy();
+      fireEvent.click(
+        within(lines).getByRole("button", { name: messages.flow_transcript_line_revert })
+      );
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_line_reverted)
+      );
+      expect(calls(EDIT)[1]?.init.body).toMatchObject({ expected_revision: 1, occurrences: [] });
+      await waitFor(() =>
+        expect(within(lines).queryByText(messages.flow_transcript_line_corrected)).toBeNull()
+      );
+    });
+
     it("lets only someone who may review name the speakers", async () => {
       answerAudioRun();
       renderRun(["flows_view", "flows_run"]);

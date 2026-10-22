@@ -1,5 +1,6 @@
 import type { Schema } from "@/lib/api/models";
 import type { RunStep } from "./runs-api";
+import { applicableOccurrences, correctedText, correctionSet } from "./transcript-corrections";
 
 /**
  * A run's transcript as a reader sees it: the transcription step's
@@ -102,49 +103,39 @@ export function parseSegments(raw: readonly TranscriptSourceSegment[]): Transcri
 }
 
 /**
- * A line with the saved corrections applied, its speaker's shown name, and
- * whether a text correction changed it.
+ * A line with the saved corrections applied: its corrected text (`text`)
+ * and raw text (`raw`), whether a text correction changed it, and its
+ * speaker's label and shown name.
  */
 export type ShownSegment = TranscriptSegment & {
+  raw: string;
   label: string | null;
   name: string | null;
   corrected: boolean;
 };
 
 /**
- * Applies saved corrections: each occurrence replaces exactly its span of
- * the raw text (later spans first, so earlier offsets hold); a whole-line
- * speaker edit reassigns the line; a speaker's name replaces its label.
- * Span-level speaker edits (part of a line to another speaker) are not
- * shown split; the line keeps its own speaker.
+ * Applies saved corrections: each text correction replaces exactly its span
+ * of the raw text; a whole-line speaker edit decided as confirmed reassigns
+ * the line; a speaker's name replaces its label. Anchors that no longer match
+ * are left out.
  */
 export function shownSegments(
   segments: readonly TranscriptSegment[],
   corrections: Pick<TranscriptCorrections, "occurrences" | "speaker_edits" | "speaker_names"> | null
 ): ShownSegment[] {
-  const occurrences = corrections?.occurrences ?? [];
-  const edits = (corrections?.speaker_edits ?? []).filter(
-    (edit) => edit.char_start == null && edit.char_end == null
-  );
-  const names = corrections?.speaker_names ?? {};
+  const set = correctionSet(corrections, segments);
+  const edits = set.speakerEdits.filter((edit) => edit.char_start == null && edit.char_end == null);
   return segments.map((segment) => {
-    let text = segment.text;
-    let corrected = false;
-    const own = occurrences
-      .filter((occurrence) => occurrence.segment_index === segment.index)
-      .sort((a, b) => b.char_start - a.char_start);
-    for (const occurrence of own) {
-      if (text.slice(occurrence.char_start, occurrence.char_end) !== occurrence.original) continue;
-      text =
-        text.slice(0, occurrence.char_start) +
-        occurrence.corrected +
-        text.slice(occurrence.char_end);
-      corrected = true;
-    }
-    const edit = edits.find((item) => item.segment_index === segment.index);
+    const own = set.occurrences.filter((occurrence) => occurrence.segment_index === segment.index);
+    const corrected = applicableOccurrences(segment.text, own).length > 0;
+    const text = corrected ? correctedText(segment.text, own) : segment.text;
+    const edit = edits.find(
+      (item) => item.segment_index === segment.index && item.original_speaker === segment.speaker
+    );
     const label = edit && edit.decision !== "unresolved" ? edit.speaker : segment.speaker;
-    const name = label ? names[label]?.trim() || null : null;
-    return { ...segment, text, label, name, corrected };
+    const name = label ? set.names[label]?.trim() || null : null;
+    return { ...segment, text, raw: segment.text, label, name, corrected };
   });
 }
 
