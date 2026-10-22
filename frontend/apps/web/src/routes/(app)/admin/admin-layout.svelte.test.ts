@@ -5,7 +5,6 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 import "../../../app.css";
 
 const modulePermission = vi.hoisted(() => ({ enabled: true }));
-const adminPermission = vi.hoisted(() => ({ enabled: true }));
 
 vi.mock("$app/stores", () => ({
   page: readable({
@@ -20,9 +19,7 @@ vi.mock("$lib/core/AppContext", () => ({
     },
     user: {
       id: "user-1",
-      hasPermission: (permission: string) =>
-        (permission === "modules" && modulePermission.enabled) ||
-        (permission === "admin" && adminPermission.enabled)
+      hasPermission: (permission: string) => permission === "modules" && modulePermission.enabled
     },
     settings: {
       using_templates: false
@@ -61,7 +58,6 @@ import AdminLayout from "./+layout.svelte";
 describe("admin layout navigation", () => {
   beforeEach(async () => {
     modulePermission.enabled = true;
-    adminPermission.enabled = true;
     await page.viewport(375, 800);
   });
 
@@ -83,17 +79,6 @@ describe("admin layout navigation", () => {
       }
     }
   );
-
-  test("a retention-only role sees Flow settings and no other admin page", async () => {
-    adminPermission.enabled = false;
-    render(AdminLayout);
-    await page.getByRole("button", { name: "admin_nav_toggle" }).click();
-
-    await expect.element(page.getByRole("link", { name: "flow_settings_title" })).toBeVisible();
-    for (const name of ["overview", "storage_settings_nav", "users", "roles", "audit_logs"]) {
-      await expect.element(page.getByRole("link", { name })).not.toBeInTheDocument();
-    }
-  });
 
   test("opens the mobile drawer and restores focus to its localized trigger", async () => {
     render(AdminLayout);

@@ -8,7 +8,7 @@ application stack.
 
 ```mermaid
 flowchart LR
-  UI["SvelteKit UI / SDK"] --> API["FastAPI adapters"]
+  UI["Web app (web-next) / SDK"] --> API["FastAPI adapters"]
   API --> APP["Application services"]
   APP --> DOMAIN["Domain policies"]
   APP --> REPO["SQLAlchemy repositories"]
@@ -44,9 +44,13 @@ Flow domain/application code.
 
 ## Frontend layers
 
-The generated Eneo SDK owns API types. `src/lib/features/flows` owns Flow
-state/presentation helpers and components. SvelteKit routes assemble those
-components for manual authoring and run/review views.
+Flows are built, run and administered in the new web app
+(`frontend/apps/web-next`); the SvelteKit app has no flow screens. Its API
+types are generated from the OpenAPI schema (`src/lib/api/schema.d.ts`).
+`src/features/flows` owns Flow state/presentation helpers and components, and
+`src/features/admin/flow-settings` the organization's flow settings. The
+routes under `src/app/(app)/spaces/[spaceId]/flows` and `src/app/(app)/admin`
+assemble them for manual authoring, run/review views and administration.
 
 Conversational authoring is an ordinary assistant chat bound to one flow. Its
 loopback flow tools call the same authoring operations as the editor update

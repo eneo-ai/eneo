@@ -197,7 +197,7 @@ class FlowTranscribers:
 
 
 # Must stay aligned with
-# frontend/apps/web/src/lib/features/audio/recordingSession.ts::buildSegmentFilenameBase.
+# frontend/apps/web-next/src/features/flows/runs/recording/recording-format.ts::partFileName.
 # Other uploads fall back to the unlabeled transcript join.
 _SEGMENT_FILENAME_RE = re.compile(
     r"^recording-(?P<session>[0-9a-fA-F-]+)-seg(?P<index>\d{2,4})-"

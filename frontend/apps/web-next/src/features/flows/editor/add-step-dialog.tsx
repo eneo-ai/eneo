@@ -13,29 +13,32 @@ import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
-import { getFlow, toolOptionsQueryOptions, updateFlowEditor } from "./editor-api";
+import { QueryStateBoundary, type QueryLike } from "@/components/composites/query-state";
+import {
+  getFlow,
+  insertionKindsQueryOptions,
+  toolOptionsQueryOptions,
+  updateFlowEditor
+} from "./editor-api";
 import { problemStatus } from "./editor-fields";
 import { describeSaveError, isStaleRevision } from "./field-problems";
 import { httpUrlProblem } from "./step-configs";
 import {
-  kindBlock,
+  kindOption,
+  kindRefusalText,
   newStepUpdate,
-  STEP_KINDS,
   stepNameTaken,
   uniqueStepName,
   type DocumentFormat,
-  type KindBlock,
-  type StepKind
+  type StepKind,
+  type StepKindOption,
+  type StepKindPlace
 } from "./step-kinds";
 import { stepLabel } from "./step-labels";
 import type { FlowPublic, ToolOption } from "./step-types";
 
 type Field = "kind" | "name" | "url" | "tool";
 type Problems = Partial<Record<Field, string>>;
-
-function blockText(block: KindBlock, t: ReturnType<typeof useTranslations>): string {
-  return t(`flow_step_editor_kind_block_${block}`);
-}
 
 function toolKey(tool: Pick<ToolOption, "mcp_server_id" | "tool_id">): string {
   return `${tool.mcp_server_id}:${tool.tool_id}`;
@@ -97,34 +100,47 @@ function ToolChoice({
   );
 }
 
-/** The form of the dialog; it mounts each time the dialog opens, so it starts empty. */
+/**
+ * The form of the dialog; it mounts each time the dialog opens, so it starts
+ * empty. The kinds and their starting configurations are the core's answer
+ * for the place (`kinds`, without data while it loads).
+ */
 function AddStepForm({
-  flow: propFlow,
-  position: requestedPosition,
+  flow,
+  position,
+  kinds,
   formId,
   onClose,
   onSaved,
-  onPendingChange
+  onPendingChange,
+  onReloaded
 }: {
   flow: FlowPublic;
   position: number;
+  kinds: QueryLike<StepKindPlace>;
   formId: string;
   onClose: () => void;
   onSaved: (flow: FlowPublic) => void;
   onPendingChange: (pending: boolean) => void;
+  onReloaded: (flow: FlowPublic) => void;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
-  const [reloaded, setReloaded] = useState<FlowPublic | null>(null);
-  const flow = reloaded && reloaded.draft_revision >= propFlow.draft_revision ? reloaded : propFlow;
-  const position = Math.min(Math.max(1, Math.round(requestedPosition)), flow.steps.length + 1);
+  const place = kinds.data;
   const [format, setFormat] = useState<DocumentFormat>("docx");
-  const firstAvailable =
-    STEP_KINDS.find((kind) => kindBlock(flow, position, kind) === null) ?? "ai";
-  const [kind, setKind] = useState<StepKind>(firstAvailable);
+  const [chosenKind, setChosenKind] = useState<StepKind | null>(null);
+  // Until the author picks a kind, the first one the core allows here.
+  const kind: StepKind =
+    chosenKind ??
+    place?.options.find((option) => option.allowed)?.kind ??
+    place?.options[0]?.kind ??
+    "ai";
+  const option = kindOption(place, kind);
   const kindDefault = (value: StepKind) =>
     uniqueStepName(flow, t(`flow_step_editor_kind_${value}_name`));
-  const [name, setName] = useState(() => kindDefault(firstAvailable));
+  // Null while the name is the chosen kind's default, so it follows the kind.
+  const [typedName, setTypedName] = useState<string | null>(null);
+  const name = typedName ?? kindDefault(kind);
   const [url, setUrl] = useState("");
   const [tool, setTool] = useState<ToolOption | null>(null);
   const [problems, setProblems] = useState<Problems>({});
@@ -135,12 +151,14 @@ function AddStepForm({
   const kindRef = useRef<HTMLDivElement>(null);
   const summaryRef = useRef<HTMLDivElement>(null);
   const needsUrl = kind === "fetch_http" || kind === "send_http";
+  const refusalText = (candidate: StepKindOption) =>
+    candidate.refusals[0] ? kindRefusalText(candidate.refusals[0], position, flow, t) : null;
 
   const add = useMutation({
-    mutationFn: () =>
+    mutationFn: (adding: StepKindOption) =>
       updateFlowEditor(
         flow.id,
-        newStepUpdate(flow, position, kind, {
+        newStepUpdate(flow, position, adding, {
           name,
           format,
           url,
@@ -156,7 +174,7 @@ function AddStepForm({
       onSaved(updated);
       onClose();
     },
-    onError: (error) => {
+    onError: (error, adding) => {
       if (isStaleRevision(error)) {
         flushSync(() => setFormProblem({ message: t("flow_step_editor_add_stale"), stale: true }));
         summaryRef.current?.focus();
@@ -168,9 +186,8 @@ function AddStepForm({
           stepId: "",
           stepOrder: position,
           config: {
-            input_source:
-              kind === "fetch_http" ? "http_get" : kind === "tool" ? "tool" : "flow_input",
-            output_mode: kind === "send_http" ? "http_post" : "pass_through"
+            input_source: adding.configuration.input_source,
+            output_mode: adding.configuration.output_mode
           }
         },
         t
@@ -211,7 +228,7 @@ function AddStepForm({
   const reload = useMutation({
     mutationFn: () => getFlow(flow.id),
     onSuccess: (fresh) => {
-      setReloaded(fresh);
+      onReloaded(fresh);
       setFormProblem(null);
       announce(t("flow_step_editor_reloaded"));
     }
@@ -226,16 +243,18 @@ function AddStepForm({
   }
 
   function chooseKind(next: StepKind) {
-    const previousDefault = kindDefault(kind);
-    setKind(next);
-    if (!name.trim() || name === previousDefault) setName(kindDefault(next));
+    setChosenKind(next);
+    // A cleared name, or the default of the kind left, becomes the new kind's default.
+    if (typedName !== null && (!typedName.trim() || typedName === kindDefault(kind))) {
+      setTypedName(null);
+    }
     setProblems((current) => ({ ...current, kind: undefined }));
   }
 
-  function check(): Problems {
+  function check(chosen: StepKindOption): Problems {
     const found: Problems = {};
-    const block = kindBlock(flow, position, kind, format);
-    if (block) found.kind = blockText(block, t);
+    const refused = refusalText(chosen);
+    if (refused) found.kind = refused;
     const trimmed = name.trim();
     if (!trimmed) found.name = t("flow_step_editor_name_required");
     else if (trimmed.length > 200) found.name = t("flow_step_editor_name_too_long");
@@ -251,8 +270,8 @@ function AddStepForm({
 
   function submit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (add.isPending) return;
-    const found = check();
+    if (add.isPending || !option) return;
+    const found = check(option);
     const first = (["kind", "name", "url", "tool"] as const).find((field) => found[field]);
     if (first) {
       flushSync(() => setProblems(found));
@@ -261,7 +280,7 @@ function AddStepForm({
     }
     setProblems({});
     setFormProblem(null);
-    add.mutate();
+    add.mutate(option);
   }
 
   return (
@@ -297,31 +316,40 @@ function AddStepForm({
         )}
       </div>
       <div ref={kindRef}>
-        <RadioList
-          label={t("flow_step_editor_kind")}
-          description={t("flow_step_editor_kind_description")}
-          value={kind}
-          onChange={(value) => chooseKind(value as StepKind)}
-          status={problemStatus(problems.kind)}
-          isRequired
+        <QueryStateBoundary
+          query={kinds}
+          rows={6}
+          loadingLabel={t("flow_step_editor_kinds_loading")}
         >
-          {STEP_KINDS.map((value) => {
-            const block = kindBlock(flow, position, value, format);
-            return (
-              <RadioListItem
-                key={value}
-                value={value}
-                label={t(`flow_step_editor_kind_${value}`)}
-                description={
-                  block
-                    ? `${t(`flow_step_editor_kind_${value}_description`)} ${blockText(block, t)}`
-                    : t(`flow_step_editor_kind_${value}_description`)
-                }
-                isDisabled={block !== null && value !== kind}
-              />
-            );
-          })}
-        </RadioList>
+          {(answer) => (
+            <RadioList
+              label={t("flow_step_editor_kind")}
+              description={t("flow_step_editor_kind_description")}
+              value={kind}
+              onChange={(value) => chooseKind(value as StepKind)}
+              status={problemStatus(problems.kind)}
+              isRequired
+            >
+              {answer.options.map((candidate) => {
+                const value = candidate.kind;
+                const refused = refusalText(candidate);
+                return (
+                  <RadioListItem
+                    key={value}
+                    value={value}
+                    label={t(`flow_step_editor_kind_${value}`)}
+                    description={
+                      refused
+                        ? `${t(`flow_step_editor_kind_${value}_description`)} ${refused}`
+                        : t(`flow_step_editor_kind_${value}_description`)
+                    }
+                    isDisabled={!candidate.allowed && value !== kind}
+                  />
+                );
+              })}
+            </RadioList>
+          )}
+        </QueryStateBoundary>
       </div>
       {kind === "document" && (
         <RadioList
@@ -340,7 +368,7 @@ function AddStepForm({
         description={t("flow_step_editor_name_description")}
         value={name}
         onChange={(value) => {
-          setName(value);
+          setTypedName(value);
           if (value.trim()) setProblems((current) => ({ ...current, name: undefined }));
         }}
         isRequired
@@ -387,12 +415,13 @@ function AddStepForm({
 
 /**
  * Adds a step at `position` (1-based): the author picks what the step does
- * and names it, and the step starts with a configuration that is valid
- * where it lands. Saved as one editor change (`new_steps` + `step_order`).
+ * and names it. The kinds the place allows, why the others are refused and
+ * the configuration each starts with are the core's answer for the place;
+ * the step is saved as one editor change (`new_steps` + `step_order`).
  */
 export function AddStepDialog({
-  flow,
-  position,
+  flow: propFlow,
+  position: requestedPosition,
   open,
   onOpenChange,
   onSaved
@@ -406,10 +435,24 @@ export function AddStepDialog({
   const t = useTranslations();
   const formId = useId();
   const [pending, setPending] = useState(false);
+  // A draft read again after a stale save, while the dialog stays open.
+  const [reloaded, setReloaded] = useState<FlowPublic | null>(null);
+  const flow = reloaded && reloaded.draft_revision >= propFlow.draft_revision ? reloaded : propFlow;
+  const position = Math.min(Math.max(1, Math.round(requestedPosition)), flow.steps.length + 1);
+  const kinds = useQuery({
+    ...insertionKindsQueryOptions(flow.id, flow.draft_revision, position),
+    enabled: open
+  });
+
+  function close() {
+    setReloaded(null);
+    onOpenChange(false);
+  }
 
   function requestOpenChange(next: boolean) {
     if (!next && pending) return;
-    onOpenChange(next);
+    if (next) onOpenChange(true);
+    else close();
   }
 
   return (
@@ -431,10 +474,12 @@ export function AddStepDialog({
               <AddStepForm
                 flow={flow}
                 position={position}
+                kinds={kinds}
                 formId={formId}
-                onClose={() => onOpenChange(false)}
+                onClose={close}
                 onSaved={onSaved}
                 onPendingChange={setPending}
+                onReloaded={setReloaded}
               />
             </LayoutContent>
           ) : null
@@ -455,6 +500,7 @@ export function AddStepDialog({
                   label={t("flow_step_editor_add_submit")}
                   isLoading={pending}
                   isInterruptible
+                  isDisabled={!kinds.data}
                 />
               </div>
             </LayoutFooter>

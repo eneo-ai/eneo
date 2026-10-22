@@ -23,8 +23,8 @@ import {
   type ReferenceSuggestion,
   type ReferenceTrigger
 } from "./reference-autocomplete";
-import { previewParts, type PreviewPart, type ReadMeaning } from "./request-preview";
-import { meaningLabel, variableEntryLabel, variableGroupTitle } from "./step-labels";
+import { previewParts, readTone, type PreviewPart, type ReadMeaning } from "./request-preview";
+import { meaningLabel, readWarning, variableEntryLabel, variableGroupTitle } from "./step-labels";
 import type { FlowPublic } from "./step-types";
 import { insertToken, type VariableGroup } from "./step-variables";
 
@@ -64,14 +64,17 @@ const MIRRORED = [
 ] as const;
 
 function chipClass(meaning: ReadMeaning): string {
-  if (meaning.kind === "missing") return "bg-ax-red-muted text-ax-red";
-  if (meaning.kind === "other") return "bg-ax-orange-muted text-ax-orange";
+  const tone = readTone(meaning);
+  if (tone === "missing") return "bg-ax-red-muted text-ax-red";
+  if (tone === "warning") return "bg-ax-orange-muted text-ax-orange";
   return "bg-ax-blue-muted text-ax-blue";
 }
 
-function tokenColor(meaning: ReadMeaning) {
-  if (meaning.kind === "missing") return "red" as const;
-  if (meaning.kind === "other") return "orange" as const;
+/** The colour of a reference's token, by how it fares (`readTone`). */
+export function tokenColor(meaning: ReadMeaning) {
+  const tone = readTone(meaning);
+  if (tone === "missing") return "red" as const;
+  if (tone === "warning") return "orange" as const;
   return "blue" as const;
 }
 
@@ -170,14 +173,22 @@ export function TemplateTextArea({
   const [dismissed, setDismissed] = useState<number | null>(null);
   const [active, setActive] = useState(0);
 
+  // The text's menus offer what it can read: the section's number only in
+  // an instruction run once per section.
+  const sectionIndex = groups.some((group) =>
+    group.entries.some((entry) => entry.kind.type === "section_index")
+  );
   const parts: PreviewPart[] = scope
-    ? previewParts(value, scope.stepOrder, scope.flow)
+    ? previewParts(value, scope.stepOrder, scope.flow, { sectionIndex })
     : [{ kind: "text", text: value }];
   const reads = [
     ...new Map(
       parts.flatMap((part) => (part.kind === "read" ? [[part.token, part] as const] : []))
     ).values()
   ];
+  const warnings = scope
+    ? [...new Set(reads.flatMap((read) => readWarning(read.meaning, scope.flow, t) ?? []))]
+    : [];
   const suggestions = trigger
     ? referenceSuggestions(groups, trigger.query, (entry, group) =>
         group.type === "run"
@@ -345,7 +356,10 @@ export function TemplateTextArea({
           aria-controls={open ? listboxId : undefined}
           aria-activedescendant={open ? optionId(activeIndex) : undefined}
           rows={rows}
-          status={status}
+          status={
+            status ??
+            (warnings.length > 0 ? { type: "warning", message: warnings.join(" ") } : undefined)
+          }
           placeholder={placeholder}
           isRequired={isRequired}
           isOptional={isOptional}

@@ -1,5 +1,6 @@
 "use client";
 
+import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Button } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
@@ -11,7 +12,6 @@ import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";
 import { ClientTime } from "@/components/composites/client-time";
-import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
@@ -22,14 +22,17 @@ import { useRemovalMutation } from "@/features/spaces/removal";
 import { SpaceTableFrame } from "@/features/spaces/table-frame";
 import { useSpace } from "@/features/spaces/use-space";
 import { deleteFlow, flowKeys, flowsListQueryOptions, type FlowSparse } from "./flows-api";
+import { evidenceExportAllowed } from "./flow-form-fields";
 import { FlowPackageImportDialog } from "./flow-package-import-dialog";
+import { flowRefusalMessage } from "./flow-refusals";
 import { FlowStatusBadge } from "./flow-status";
 import { NewFlowDialog } from "./new-flow-dialog";
 
 /**
  * A space's flows: name and description, whether each is published, how many
  * steps it has and when it last changed. "Nytt flöde" creates an empty draft
- * and opens it; a flow is built on its own page, by hand or in its chat.
+ * and opens it; a flow is built on its own page, by hand or in its chat. A
+ * flow's own controls follow what the core says the caller may do with it.
  */
 export function FlowsPage() {
   const t = useTranslations();
@@ -51,6 +54,8 @@ export function FlowsPage() {
       setDeleteTarget(null);
       toast.success(t("flows_deleted", { name: flow.name }));
     },
+    // A refusal (one the flags did not foresee, such as a 403) says why in words.
+    onError: (error) => toast.error(flowRefusalMessage(error, [], t)),
     focusTarget: headingRef
   });
 
@@ -108,22 +113,23 @@ export function FlowsPage() {
       renderCell: (flow) =>
         flow.updated_at ? <ClientTime value={flow.updated_at} format="auto" /> : "—"
     },
-    ...(canManage
+    ...((flows.data ?? []).some((flow) => flow.permissions.can_delete)
       ? [
           {
             key: "actions",
             header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
             width: pixel(72),
             align: "end" as const,
-            renderCell: (flow: FlowSparse) => (
-              <IconButton
-                label={t("flows_delete_named", { name: flow.name })}
-                icon={<Trash2 aria-hidden="true" />}
-                variant="ghost"
-                size="sm"
-                onClick={() => setDeleteTarget(flow)}
-              />
-            )
+            renderCell: (flow: FlowSparse) =>
+              flow.permissions.can_delete ? (
+                <IconButton
+                  label={t("flows_delete_named", { name: flow.name })}
+                  icon={<Trash2 aria-hidden="true" />}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setDeleteTarget(flow)}
+                />
+              ) : null
           }
         ]
       : [])
@@ -164,18 +170,24 @@ export function FlowsPage() {
       </QueryStateBoundary>
       <NewFlowDialog open={creating} onOpenChange={setCreating} />
       {canManage ? <FlowPackageImportDialog open={importing} onOpenChange={setImporting} /> : null}
-      <ConfirmDialogControlled
-        open={deleteTarget !== null}
+      <AlertDialog
+        isOpen={deleteTarget !== null}
         onOpenChange={(open) => {
           if (!open && !remove.isPending) setDeleteTarget(null);
         }}
         title={t("flows_delete_title", { name: deleteTarget?.name ?? "" })}
-        description={t("flows_delete_description")}
-        confirmLabel={t("delete")}
-        variant="destructive"
-        pending={remove.isPending}
-        onConfirm={() => {
-          if (deleteTarget) remove.mutate(deleteTarget);
+        description={
+          // A deleted flow can no longer be changed, so its runs' evidence
+          // could then never be downloaded: say so before it is too late.
+          deleteTarget && !evidenceExportAllowed(deleteTarget.metadata_json)
+            ? `${t("flows_delete_description")} ${t("flow_delete_evidence_export_off")}`
+            : t("flows_delete_description")
+        }
+        actionLabel={t("delete")}
+        cancelLabel={t("cancel")}
+        isActionLoading={remove.isPending}
+        onAction={() => {
+          if (deleteTarget && !remove.isPending) remove.mutate(deleteTarget);
         }}
       />
     </div>

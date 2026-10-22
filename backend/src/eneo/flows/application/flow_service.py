@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from eneo.assistants.assistant import Assistant, AssistantOrigin
 from eneo.assistants.assistant_service import AssistantService
@@ -151,6 +152,18 @@ def draft_write_metadata(
     return normalize_flow_metadata_for_write(
         cast(FlowPersistedJsonObject | None, metadata_json)
     )
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateAssistantChange:
+    """An unsaved change to a step assistant, with the meaning of an editor
+    update's assistant change: to the assistant itself, or, with ``step_id``
+    naming a step whose assistant other steps share, to that step's own copy
+    of it."""
+
+    assistant_id: UUID
+    update: AssistantUpdateCommand
+    step_id: UUID | None = None
 
 
 def _assistant_delete_refusal(
@@ -958,13 +971,17 @@ class FlowService:
         *,
         flow_id: UUID,
         steps: list[FlowStep] | None = None,
-        assistant_updates: Mapping[UUID, AssistantUpdateCommand] | None = None,
+        assistant_changes: Sequence[CandidateAssistantChange] = (),
     ) -> list[FlowStepClassificationExplanation]:
         """Explain the classification of the editor's unsaved state; writes nothing.
 
-        The candidate steps replace the saved ones and each assistant update is
-        applied to an in-memory copy of its assistant, then the save's own rule
-        runs over the result. Only reads reach the repositories.
+        The candidate steps replace the saved ones and each assistant change is
+        applied to an in-memory copy of its assistant, as the editor update
+        applies it: in order to the assistant itself, except a change naming a
+        step whose assistant other candidate steps share, which gives that step
+        its own copy, made from the assistant as the other changes left it.
+        Then the save's own rule runs over the result. Only reads reach the
+        repositories.
         """
         if self.space_service is None:
             raise RuntimeError("FlowService requires space_service to preview.")
@@ -981,19 +998,39 @@ class FlowService:
         assistants_by_id: dict[UUID, Any] = dict(
             await self._load_step_assistants(candidate_steps)
         )
-        updates = assistant_updates or {}
-        if not updates.keys() <= assistants_by_id.keys():
+        if not {change.assistant_id for change in assistant_changes} <= (
+            assistants_by_id.keys()
+        ):
             raise BadRequestException(
                 "Assistant changes must belong to assistants that steps of the flow use."
             )
-        for assistant_id, update in updates.items():
-            assistants_by_id[assistant_id] = (
+        copies = _candidate_copies(assistant_changes, candidate_steps)
+        for change in assistant_changes:
+            if any(change is copy for copy in copies):
+                continue
+            assistants_by_id[change.assistant_id] = (
                 self._build_candidate_flow_assistant_for_security_validation(
-                    assistant=assistants_by_id[assistant_id],
+                    assistant=assistants_by_id[change.assistant_id],
                     space=space,
-                    update=update,
+                    update=change.update,
                 )
             )
+        for change in copies:
+            # An id only this preview knows, for the step's own copy.
+            copy_id = uuid4()
+            assistants_by_id[copy_id] = (
+                self._build_candidate_flow_assistant_for_security_validation(
+                    assistant=assistants_by_id[change.assistant_id],
+                    space=space,
+                    update=change.update,
+                )
+            )
+            candidate_steps = [
+                step.model_copy(update={"assistant_id": copy_id})
+                if step.id == change.step_id
+                else step
+                for step in candidate_steps
+            ]
         return await explain_flow_security_classification(
             steps=candidate_steps,
             assistants_by_id=assistants_by_id,
@@ -1549,6 +1586,30 @@ class FlowService:
             f"Step {step_order}: selected DOCX template is no longer available for this flow. Upload the template again or choose another DOCX file.",
             code=FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value,
         )
+
+
+def _candidate_copies(
+    changes: Sequence[CandidateAssistantChange], steps: Sequence[FlowStep]
+) -> list[CandidateAssistantChange]:
+    """The changes that give their step its own copy of the assistant other
+    ``steps`` share, as an editor update gives it. A change naming a step that
+    is not among ``steps`` or does not use the assistant is refused."""
+
+    copies: list[CandidateAssistantChange] = []
+    for change in changes:
+        if change.step_id is None:
+            continue
+        step = next((step for step in steps if step.id == change.step_id), None)
+        if step is None or step.assistant_id != change.assistant_id:
+            raise BadRequestException(
+                "An assistant change names a step that does not use its assistant."
+            )
+        if any(
+            other.id != step.id and other.assistant_id == step.assistant_id
+            for other in steps
+        ):
+            copies.append(change)
+    return copies
 
 
 def _with_saved_form_fields(

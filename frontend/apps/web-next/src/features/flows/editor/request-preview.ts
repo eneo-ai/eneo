@@ -18,13 +18,20 @@ export type ReadMeaning =
   | { kind: "date" }
   /** The number of the section an instruction run once per section is on. */
   | { kind: "section_index" }
+  /** The section's number in a text that is not an instruction run once per section: it is empty. */
+  | { kind: "section_index_unavailable" }
   | { kind: "step_answer"; order: number }
   | { kind: "step_structured"; order: number }
   | { kind: "step_field"; order: number; field: string }
+  /** The fields of an earlier step that answers in text or a document: it has none to read. */
+  | { kind: "fields_of_text"; order: number }
   /** A step the reference names that is removed, or not earlier: the run cannot read it. */
   | { kind: "missing"; order: number }
   /** A value the run provides that the editor has no name for. */
   | { kind: "other" };
+
+/** Where the text is: an AI instruction run once per section reads the section's number. */
+export type TextPlace = { sectionIndex?: boolean };
 
 const STRUCTURED = /^step_\d+\.output\.structured(?:\.(.+))?$/;
 const ANSWER = /^step_\d+\.output\.text$/;
@@ -32,12 +39,15 @@ const ANSWER = /^step_\d+\.output\.text$/;
 export function readMeaning(
   token: string,
   stepOrder: number,
-  flow: Pick<FlowPublic, "steps" | "metadata_json">
+  flow: Pick<FlowPublic, "steps" | "metadata_json">,
+  place: TextPlace = {}
 ): ReadMeaning {
   if (token === "step_input.text") return { kind: "upload" };
   if (token === "transkribering") return { kind: "transcription" };
   if (token === "datum") return { kind: "date" };
-  if (token === "section_index") return { kind: "section_index" };
+  if (token === "section_index") {
+    return place.sectionIndex ? { kind: "section_index" } : { kind: "section_index_unavailable" };
+  }
   // `indata_text` and `indata_json` are the run input's older names.
   if (["flow_input", "flow_input.text", "indata_text", "indata_json"].includes(token)) {
     return { kind: "flow_input" };
@@ -58,6 +68,10 @@ export function readMeaning(
       if (target.via !== "alias") return { kind: "step_answer", order: target.order };
       const structured = STRUCTURED.exec(token);
       if (structured) {
+        const read = flow.steps.find((candidate) => candidate.step_order === target.order);
+        if (read && read.output_type !== "json") {
+          return { kind: "fields_of_text", order: target.order };
+        }
         return structured[1]
           ? { kind: "step_field", order: target.order, field: structured[1] }
           : { kind: "step_structured", order: target.order };
@@ -76,11 +90,32 @@ export type PreviewPart =
 export function previewParts(
   text: string,
   stepOrder: number,
-  flow: Pick<FlowPublic, "steps" | "metadata_json">
+  flow: Pick<FlowPublic, "steps" | "metadata_json">,
+  place: TextPlace = {}
 ): PreviewPart[] {
   return templateParts(text).map((part) =>
-    part.kind === "text" ? part : { ...part, meaning: readMeaning(part.token, stepOrder, flow) }
+    part.kind === "text"
+      ? part
+      : { ...part, meaning: readMeaning(part.token, stepOrder, flow, place) }
   );
+}
+
+/**
+ * How a reference fares: it reads what it names, it reads nothing useful
+ * there (a warning: the run gives it an empty or unnamed value), or it names
+ * a step the run cannot read.
+ */
+export function readTone(meaning: ReadMeaning): "reads" | "warning" | "missing" {
+  switch (meaning.kind) {
+    case "missing":
+      return "missing";
+    case "other":
+    case "fields_of_text":
+    case "section_index_unavailable":
+      return "warning";
+    default:
+      return "reads";
+  }
 }
 
 export type AnswerShape =
