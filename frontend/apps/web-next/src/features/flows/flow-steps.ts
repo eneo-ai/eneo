@@ -36,8 +36,65 @@ const DELETED_STEP_ALIAS = /^step_(\d+)_deleted/;
 /** The reference editor's word for "the step before this one". */
 const PREVIOUS_STEP_TOKEN = "föregående_steg";
 
-function tokensOf(template: string): string[] {
+/** The references a template reads (`{{step_2.output.text}}` reads `step_2.output.text`). */
+export function tokensOf(template: string): string[] {
   return [...template.matchAll(TOKEN)].map((match) => match[1]!.trim());
+}
+
+/** A template as its text and the references in it, in order. */
+export type TemplatePart = { kind: "text"; text: string } | { kind: "read"; token: string };
+
+export function templateParts(template: string): TemplatePart[] {
+  const parts: TemplatePart[] = [];
+  let cursor = 0;
+  for (const match of template.matchAll(TOKEN)) {
+    const start = match.index ?? 0;
+    if (start > cursor) parts.push({ kind: "text", text: template.slice(cursor, start) });
+    parts.push({ kind: "read", token: match[1]!.trim() });
+    cursor = start + match[0].length;
+  }
+  if (cursor < template.length) parts.push({ kind: "text", text: template.slice(cursor) });
+  return parts;
+}
+
+/**
+ * What one reference of a step reads: an earlier step (by its alias, by its
+ * name, or as the step before), a step a change removed or one that is not
+ * earlier, or else what the run is given (a run input or a system value).
+ */
+export type ReadTarget =
+  | { kind: "step"; order: number; via: "alias" | "name" | "previous" }
+  | { kind: "deleted"; order: number }
+  | { kind: "not_earlier"; order: number }
+  | { kind: "flow_input" };
+
+export function readTarget(
+  token: string,
+  step: Pick<FlowStep, "step_order">,
+  steps: readonly FlowStep[]
+): ReadTarget {
+  const removed = DELETED_STEP_ALIAS.exec(token);
+  if (removed) return { kind: "deleted", order: Number(removed[1]) };
+  const alias = STEP_ALIAS.exec(token);
+  if (alias) {
+    const order = Number(alias[1]);
+    return order < step.step_order
+      ? { kind: "step", order, via: "alias" }
+      : { kind: "not_earlier", order };
+  }
+  const earlier = steps
+    .filter((candidate) => candidate.step_order < step.step_order)
+    .sort((a, b) => a.step_order - b.step_order);
+  if (token === PREVIOUS_STEP_TOKEN) {
+    const previous = earlier.at(-1);
+    return previous
+      ? { kind: "step", order: previous.step_order, via: "previous" }
+      : { kind: "flow_input" };
+  }
+  // A step can be read by its name; any other token is a run input or a
+  // system value.
+  const named = earlier.find((candidate) => stepName(candidate) === token);
+  return named ? { kind: "step", order: named.step_order, via: "name" } : { kind: "flow_input" };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -93,26 +150,21 @@ function readFacts(step: FlowStep, steps: readonly FlowStep[]): ReadFacts {
   };
 
   const readToken = (token: string) => {
-    const removed = DELETED_STEP_ALIAS.exec(token);
-    if (removed) {
-      facts.deleted.add(Number(removed[1]));
-      return;
+    const target = readTarget(token, step, steps);
+    switch (target.kind) {
+      case "deleted":
+        facts.deleted.add(target.order);
+        break;
+      case "not_earlier":
+        break;
+      case "step":
+        if (target.via === "previous") facts.implicit.add(target.order);
+        else facts.named.add(target.order);
+        break;
+      case "flow_input":
+        facts.readsFlowInput = true;
+        break;
     }
-    const alias = STEP_ALIAS.exec(token);
-    if (alias) {
-      const order = Number(alias[1]);
-      if (order < step.step_order) facts.named.add(order);
-      return;
-    }
-    if (token === PREVIOUS_STEP_TOKEN) {
-      readPrevious();
-      return;
-    }
-    // A step can be read by its name; any other token is a run input or a
-    // system value.
-    const named = earlier.find((candidate) => stepName(candidate) === token);
-    if (named) facts.named.add(named.step_order);
-    else facts.readsFlowInput = true;
   };
 
   const { question, refs } = bindingsOf(step);

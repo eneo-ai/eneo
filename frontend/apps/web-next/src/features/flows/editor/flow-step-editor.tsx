@@ -54,6 +54,7 @@ import { stepNameTaken } from "./step-kinds";
 import { inputSourceLabel, outputModeLabel, stepLabel } from "./step-labels";
 import { StepOutputSection } from "./step-output-section";
 import { StepReadOnly } from "./step-read-only";
+import { StepRequestPreviewButton } from "./step-request-preview";
 import { stepUsesModel } from "./step-rules";
 import {
   assistantConfigOf,
@@ -457,6 +458,12 @@ function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel
         <ArrowRight className="text-ax-text-secondary size-4" aria-hidden="true" />
         <Token label={outputModeLabel(draft.output_mode, t)} size="sm" color="blue" />
       </div>
+      <StepRequestPreviewButton
+        flow={flow}
+        stepOrder={stepOrder}
+        draft={draft}
+        assistant={assistantDraft}
+      />
     </header>
   );
 

@@ -171,6 +171,51 @@ describe("FlowStepEditor", () => {
     ]);
   }, 20_000);
 
+  it("shows what the step would send, its references named and no credential", async () => {
+    routeBasics(
+      makeAssistant({
+        prompt: {
+          id: "prompt-1",
+          text: "Sammanfatta {{flow_input.diarienummer}} kort.",
+          description: null
+        } as never,
+        completion_model_kwargs: { temperature: 0.2 }
+      })
+    );
+    const { container } = renderEditor(
+      makeFlow({
+        metadata_json: {
+          form_schema: { fields: [{ name: "diarienummer", label: "Diarienummer", type: "text" }] }
+        }
+      })
+    );
+    await nameField();
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_editor_tools_preview_button })
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: messages.flow_editor_tools_preview_title
+    });
+    expect(dialog.textContent).toContain("Diarienummer");
+    expect(dialog.textContent).toContain("Haiku 4.5");
+    expect(dialog.textContent).toContain("temperature: 0.2");
+    await expectNoAxeViolations(container);
+  }, 20_000);
+
+  it("names a stored credential as stored in the preview, never its value", async () => {
+    renderEditor(httpFlow({ mode: "bearer_token", token: { $secret: "stored" } }));
+    await nameField();
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_editor_tools_preview_button })
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: messages.flow_editor_tools_preview_title
+    });
+    expect(dialog.textContent).toContain("https://api.example.org/a");
+    expect(dialog.textContent).toContain(messages.flow_step_editor_secret_stored);
+    expect(dialog.textContent).not.toContain("$secret");
+  });
+
   it("offers no long material where the step does not let a model answer", async () => {
     renderEditor(makeFlow({ steps: [makeStep({ output_mode: "compose_text" })] }));
     await nameField();

@@ -4,9 +4,11 @@ import {
   orderWithMove,
   orderWithNewStep,
   orderWithout,
+  readTarget,
   stepReaders,
   stepReads,
-  stepsInOrder
+  stepsInOrder,
+  templateParts
 } from "./flow-steps";
 
 const ids = (slots: { step_id?: string | null }[] | null) => slots?.map((slot) => slot.step_id);
@@ -107,5 +109,32 @@ describe("step orders", () => {
     ]);
     expect(orderWithNewStep(steps, 1)[0]).toEqual({ new_step: 0 });
     expect(orderWithNewStep(steps, 9).at(-1)).toEqual({ new_step: 0 });
+  });
+});
+
+describe("the reference grammar", () => {
+  const steps = [makeStep(1, { user_description: "Sammanfatta" }), makeStep(2)];
+
+  it("splits a template into its text and references", () => {
+    expect(templateParts("{{a}} och {{ b }}")).toEqual([
+      { kind: "read", token: "a" },
+      { kind: "text", text: " och " },
+      { kind: "read", token: "b" }
+    ]);
+  });
+
+  it("tells what one reference reads from where it stands", () => {
+    expect(readTarget("step_1.output.text", steps[1]!, steps)).toEqual({
+      kind: "step",
+      order: 1,
+      via: "alias"
+    });
+    expect(readTarget("Sammanfatta", steps[1]!, steps)).toEqual({
+      kind: "step",
+      order: 1,
+      via: "name"
+    });
+    expect(readTarget("step_2", steps[1]!, steps)).toEqual({ kind: "not_earlier", order: 2 });
+    expect(readTarget("föregående_steg", steps[0]!, steps)).toEqual({ kind: "flow_input" });
   });
 });
