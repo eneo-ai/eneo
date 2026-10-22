@@ -450,6 +450,92 @@ describe("TranscriptLines with audio", () => {
     expect(pause).toHaveBeenCalledTimes(1);
   });
 
+  it("skips five seconds either way and moves between the recording's parts", async () => {
+    answerAudio();
+    // Each part's link is its own file's.
+    state.routes[SIGN] = (init: { params: { path: { file_id: string } } }) => ({
+      body: {
+        url: `http://backend:8000/api/v1/files/${init.params.path.file_id}/download/?token=t0k3n`,
+        expires_at: Math.floor(Date.now() / 1000) + 3_600
+      }
+    });
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    const { lines } = renderLines({ ...target, fileIds: ["audio-1", "audio-2"] });
+    fireEvent.click(within(lines).getByRole("button", { name: /^Spela från 0:05/ }));
+    const audio = await screen.findByLabelText<HTMLAudioElement>(
+      "Ljudet till transkriptionen, del 1"
+    );
+    fireEvent.loadedMetadata(audio);
+    Object.defineProperty(audio, "currentTime", { configurable: true, writable: true, value: 30 });
+    fireEvent.click(screen.getByRole("button", { name: "5 sekunder framåt" }));
+    expect(audio.currentTime).toBe(35);
+    fireEvent.click(screen.getByRole("button", { name: "5 sekunder bakåt" }));
+    fireEvent.click(screen.getByRole("button", { name: "5 sekunder bakåt" }));
+    expect(audio.currentTime).toBe(25);
+    const previous = screen.getByRole("button", {
+      name: messages.flow_transcript_audio_previous_part
+    });
+    expect(
+      previous.getAttribute("aria-disabled") === "true" || (previous as HTMLButtonElement).disabled
+    ).toBe(true);
+    await expectNoAxeViolations(document.body);
+
+    // Paused, the next part loads from its start without playing.
+    Object.defineProperty(audio, "paused", { configurable: true, value: true });
+    play.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_transcript_audio_next_part }));
+    const second = await screen.findByLabelText<HTMLAudioElement>(
+      "Ljudet till transkriptionen, del 2"
+    );
+    const signed = state.stub.calls
+      .filter((call) => call.path.endsWith("/signed-url/"))
+      .map((call) => (call.init as { params: { path: { file_id: string } } }).params.path.file_id);
+    expect(signed).toEqual(["audio-1", "audio-2"]);
+    fireEvent.loadedMetadata(second);
+    expect(second.currentTime).toBe(0);
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it("signs the audio link again a minute before it runs out, where the person is", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    try {
+      answerAudio();
+      const expires = Math.floor(Date.now() / 1000) + 3_600;
+      const sign = state.routes[SIGN]!;
+      state.routes[SIGN] = (init) => ({
+        body: { ...(sign(init).body as object), expires_at: expires }
+      });
+      const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+      vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+      const { lines } = renderLines(audioTarget);
+      const audio = await startAudio(lines);
+      Object.defineProperty(audio, "currentTime", {
+        configurable: true,
+        writable: true,
+        value: 42
+      });
+      Object.defineProperty(audio, "paused", { configurable: true, value: true });
+      play.mockClear();
+      const signs = () => state.stub.calls.filter((call) => call.path.endsWith("/signed-url/"));
+      expect(signs()).toHaveLength(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3_600_000 - 60_000 - 1_000);
+      });
+      expect(signs()).toHaveLength(1);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      await waitFor(() => expect(signs()).toHaveLength(2));
+      fireEvent.loadedMetadata(audio);
+      expect(audio.currentTime).toBe(42);
+      expect(play).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("changes the speed, and skips with J, K and L only while the player has focus", async () => {
     answerAudio();
     const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();

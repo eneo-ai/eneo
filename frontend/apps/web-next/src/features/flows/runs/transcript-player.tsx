@@ -3,16 +3,17 @@
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { useHotkeys } from "@astryxdesign/core/hooks";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { Kbd } from "@astryxdesign/core/Kbd";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
-import { Play } from "lucide-react";
+import { ChevronLeft, ChevronRight, Play, RotateCcw, RotateCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { refusalText } from "./run-messages";
-import { inputFilePlaybackPath, transcriptWordsQueryOptions } from "./runs-api";
+import { inputFilePlayback, transcriptWordsQueryOptions } from "./runs-api";
 import type { ShownSegment, TranscriptTarget } from "./transcript";
 import {
   activeLine,
@@ -44,6 +45,17 @@ const NO_WORDS: ReadonlyMap<number, PlacedWord[]> = new Map();
 export const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 2] as const;
 /** How far J and L skip, in seconds. */
 export const SKIP_SECONDS = 10;
+/** How far the skip buttons go, in seconds. */
+export const NUDGE_SECONDS = 5;
+/** A signed link is signed again this long before it runs out. */
+export const RESIGN_LEAD_MS = 60_000;
+/** Signed links last at most an hour; a later expiry is signed again daily, within what a timer holds. */
+const RESIGN_MAX_DELAY_MS = 24 * 60 * 60 * 1000;
+
+/** How long until a link that runs out at `expiresAt` (epoch ms) is signed again. */
+export function resignDelay(expiresAt: number, now: number): number {
+  return Math.min(RESIGN_MAX_DELAY_MS, Math.max(5_000, expiresAt - now - RESIGN_LEAD_MS));
+}
 
 /** How many placed words the aligner spread over their window instead of finding them. */
 export function uncertainWordCount(words: ReadonlyMap<number, readonly PlacedWord[]>): number {
@@ -60,10 +72,12 @@ export function uncertainWordCount(words: ReadonlyMap<number, readonly PlacedWor
  * playback when it is first played (and again when the link has run out).
  * The marks are visual only: a screen reader is not told of every word.
  *
- * The speed can be changed, and while focus is in the player J, K and L skip
- * back, play or pause, and skip forward (single letters a screen reader's
- * browse mode keeps for itself only reach the player in its focus mode, so
- * they never stand in for the controls).
+ * The speed can be changed, buttons skip five seconds either way and move
+ * between the parts of a recording, and while focus is in the player J, K
+ * and L skip back, play or pause, and skip forward (single letters a screen
+ * reader's browse mode keeps for itself only reach the player in its focus
+ * mode, so they never stand in for the controls). The signed link is signed
+ * again a minute before it runs out, so a long listen does not stop.
  */
 export function useTranscriptPlayback({
   flowId,
@@ -87,9 +101,12 @@ export function useTranscriptPlayback({
   // Applied once the next file has its metadata, so a seek into a file that
   // is not loaded yet lands where the person clicked.
   const pending = useRef<number | null>(null);
+  /** Whether the file goes on playing once it has loaded. */
+  const pendingPlay = useRef(true);
   const resigned = useRef(false);
   const [file, setFile] = useState(0);
   const [src, setSrc] = useState<string | null>(null);
+  const [expiresAt, setExpiresAt] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [follow, setFollow] = useState(true);
@@ -109,16 +126,18 @@ export function useTranscriptPlayback({
   const lineId = (index: number) => `${baseId}-line-${index}`;
   const fileCount = target.fileIds.length;
 
-  async function load(fileIndex: number, time: number) {
+  async function load(fileIndex: number, time: number, play = true) {
     const fileId = target.fileIds[fileIndex];
     if (!fileId) return;
     setLoading(true);
     setProblem(null);
     try {
-      const path = await inputFilePlaybackPath(flowId, runId, fileId);
+      const signed = await inputFilePlayback(flowId, runId, fileId);
       pending.current = time;
+      pendingPlay.current = play;
       setFile(fileIndex);
-      setSrc(path);
+      setSrc(signed.path);
+      setExpiresAt(signed.expiresAt);
     } catch (error) {
       setProblem(refusalText(error, t));
     } finally {
@@ -150,6 +169,30 @@ export function useTranscriptPlayback({
     if (element.paused) void element.play().catch(() => undefined);
     else element.pause();
   }
+
+  /** Another part of the recording, from its start; it plays on when this one played. */
+  function goToPart(fileIndex: number) {
+    const element = audio.current;
+    stopAt.current = null;
+    void load(fileIndex, 0, element ? !element.paused : false);
+  }
+
+  // Signed again before the link runs out, where the person is, playing or not.
+  const latestLoad = useRef(load);
+  useEffect(() => {
+    latestLoad.current = load;
+  });
+  useEffect(() => {
+    if (!src || expiresAt === null) return;
+    const timer = setTimeout(
+      () => {
+        const element = audio.current;
+        void latestLoad.current(file, element?.currentTime ?? 0, element ? !element.paused : false);
+      },
+      resignDelay(expiresAt, Date.now())
+    );
+    return () => clearTimeout(timer);
+  }, [src, expiresAt, file]);
 
   // The shortcuts listen only while focus is somewhere in the player.
   const box = useRef<HTMLDivElement>(null);
@@ -235,7 +278,7 @@ export function useTranscriptPlayback({
               if (pending.current !== null) {
                 element.currentTime = pending.current;
                 pending.current = null;
-                void element.play().catch(() => undefined);
+                if (pendingPlay.current) void element.play().catch(() => undefined);
               }
             }}
             onTimeUpdate={(event) => track(event.currentTarget)}
@@ -271,6 +314,42 @@ export function useTranscriptPlayback({
             />
             {t("flow_transcript_audio_unsupported")}
           </audio>
+          <div className="flex flex-wrap items-center gap-1">
+            <IconButton
+              label={t("flow_transcript_audio_back", { seconds: NUDGE_SECONDS })}
+              icon={<RotateCcw aria-hidden="true" />}
+              variant="ghost"
+              size="sm"
+              onClick={() => skip(-NUDGE_SECONDS)}
+            />
+            <IconButton
+              label={t("flow_transcript_audio_forward", { seconds: NUDGE_SECONDS })}
+              icon={<RotateCw aria-hidden="true" />}
+              variant="ghost"
+              size="sm"
+              onClick={() => skip(NUDGE_SECONDS)}
+            />
+            {fileCount > 1 ? (
+              <>
+                <Button
+                  label={t("flow_transcript_audio_previous_part")}
+                  icon={<ChevronLeft aria-hidden="true" />}
+                  variant="ghost"
+                  size="sm"
+                  isDisabled={file === 0}
+                  onClick={() => goToPart(file - 1)}
+                />
+                <Button
+                  label={t("flow_transcript_audio_next_part")}
+                  endContent={<ChevronRight aria-hidden="true" />}
+                  variant="ghost"
+                  size="sm"
+                  isDisabled={file + 1 >= fileCount}
+                  onClick={() => goToPart(file + 1)}
+                />
+              </>
+            ) : null}
+          </div>
           <div className="flex flex-wrap items-end gap-3">
             <Selector
               label={t("flow_transcript_audio_rate")}

@@ -462,19 +462,24 @@ export function transcriptWordsQueryOptions(flowId: string, runId: string, stepI
   });
 }
 
-/** A short-lived path (through the app's proxy) that plays an audio file the run received. */
-export async function inputFilePlaybackPath(
+/**
+ * A short-lived path (through the app's proxy) that plays an audio file the
+ * run received, and when it runs out (epoch ms; null when the core did not
+ * say).
+ */
+export async function inputFilePlayback(
   flowId: string,
   runId: string,
   fileId: string
-): Promise<string> {
+): Promise<{ path: string; expiresAt: number | null }> {
   const signed = await unwrap(
     browserApi.POST("/api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/", {
       params: { path: { id: flowId, run_id: runId, file_id: fileId } },
       body: { content_disposition: "inline", expires_in: 3600 }
     })
   );
-  return proxiedDownloadPath(signed.url, fileId);
+  const expiresAt = Number.isFinite(signed.expires_at) ? signed.expires_at * 1000 : null;
+  return { path: proxiedDownloadPath(signed.url, fileId), expiresAt };
 }
 
 export function transcriptCorrectionsQueryOptions(flowId: string, runId: string) {
