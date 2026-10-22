@@ -27,6 +27,7 @@ from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_definition_access import (
+    flow_permissions,
     require_flow_current_definition_access,
     require_flow_edit_access,
     require_flow_publish_access,
@@ -172,7 +173,15 @@ async def create_flow(
     if owns_audit:
         await audit.log()
 
-    return assembler.to_public(created)
+    return assembler.to_public(
+        created,
+        permissions=flow_permissions(
+            container,
+            flow=created,
+            actor=access_context.actor,
+            scope_filter=access_context.scope_filter,
+        ),
+    )
 
 
 async def get_flow(id: UUID, request: Request, container: Container) -> FlowPublic:
@@ -181,9 +190,7 @@ async def get_flow(id: UUID, request: Request, container: Container) -> FlowPubl
         container,
         flow_id=id,
     )
-    assembler = FlowAssembler()
-
-    return assembler.to_public(access_context.flow)
+    return _flow_public(container, access_context.flow, access_context)
 
 
 async def update_flow(
@@ -315,7 +322,7 @@ async def _write_definition(
             ),
         )
 
-    return assembler.to_public(updated)
+    return _flow_public(container, updated, access_context)
 
 
 async def publish_flow(
@@ -325,7 +332,7 @@ async def publish_flow(
     *,
     expected_revision: int | None = None,
 ) -> FlowPublic:
-    await require_flow_publish_access(request, container, flow_id=id)
+    access = await require_flow_publish_access(request, container, flow_id=id)
     if expected_revision is not None:
         await container.flow_service().reserve_draft_revision(
             flow_id=id, expected_revision=expected_revision
@@ -345,7 +352,7 @@ async def publish_flow(
     )
     if owns_audit:
         await audit.log()
-    return FlowAssembler().to_public(published)
+    return _flow_public(container, published, access)
 
 
 async def unpublish_flow(
@@ -355,7 +362,7 @@ async def unpublish_flow(
     *,
     expected_revision: int | None = None,
 ) -> FlowPublic:
-    await require_flow_unpublish_access(request, container, flow_id=id)
+    access = await require_flow_unpublish_access(request, container, flow_id=id)
     if expected_revision is not None:
         await container.flow_service().reserve_draft_revision(
             flow_id=id, expected_revision=expected_revision
@@ -375,7 +382,24 @@ async def unpublish_flow(
     )
     if owns_audit:
         await audit.log()
-    return FlowAssembler().to_public(unpublished)
+    return _flow_public(container, unpublished, access)
+
+
+def _flow_public(
+    container: Container,
+    flow: Flow,
+    access: flow_access_context.FlowAccessContext,
+) -> FlowPublic:
+    """``flow`` with the permissions of the caller the access was checked for."""
+
+    actor = access.actor
+    assert actor is not None, "a resolved flow access context carries its actor"
+    return FlowAssembler().to_public(
+        flow,
+        permissions=flow_permissions(
+            container, flow=flow, actor=actor, scope_filter=access.scope_filter
+        ),
+    )
 
 
 async def apply_editor_update(
@@ -443,16 +467,15 @@ async def apply_editor_update(
             update=flow_assistant_update_command(new_step.assistant),
             classification_judged_by_flow_update=True,
         )
-        step_request = FlowStepCreateRequest.model_validate(
-            {
-                **new_step.configuration.model_dump(exclude_unset=True),
-                "assistant_id": assistant.id,
+        new_flow_steps.append(
+            new_flow_step(
+                new_step.configuration,
+                assistant_id=assistant.id,
                 # Numbered with the others below.
-                "step_order": len(access.flow.steps) + index + 1,
-                "user_description": new_step.name,
-            }
+                step_order=len(access.flow.steps) + index + 1,
+                name=new_step.name,
+            )
         )
-        new_flow_steps.append(FlowAssembler().to_domain_step(step_request))
         audit.add(
             tenant_id=user.tenant_id,
             actor_id=user.id,
@@ -470,7 +493,7 @@ async def apply_editor_update(
     if replaces_steps:
         placed = _replacement_placement(definition, access.flow.steps)
     elif edits_steps:
-        placed = _sparse_placement(
+        placed = sparse_placement(
             update=update,
             changed=changed,
             saved_steps=access.flow.steps,
@@ -745,7 +768,27 @@ def _replacement_placement(
     return placed
 
 
-def _sparse_placement(
+def new_flow_step(
+    configuration: FlowEditorStepPatch,
+    *,
+    assistant_id: UUID,
+    step_order: int,
+    name: str | None,
+) -> FlowStep:
+    """A new step of an editor update, as its request validates it."""
+
+    step_request = FlowStepCreateRequest.model_validate(
+        {
+            **configuration.model_dump(exclude_unset=True),
+            "assistant_id": assistant_id,
+            "step_order": step_order,
+            "user_description": name,
+        }
+    )
+    return FlowAssembler().to_domain_step(step_request)
+
+
+def sparse_placement(
     *,
     update: "FlowEditorUpdateRequest",
     changed: Mapping[UUID, FlowEditorStepPatch],

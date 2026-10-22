@@ -6,19 +6,12 @@ transcription-wizard rules, and exposes the public API
 (`resolve_capability_for_tuple`, `coverage_report`, `projection_cells`,
 `projection_values`).
 
-The manifest is the one owner of capability membership. Three projections
+The manifest is the one owner of capability membership. Two projections
 read it: the tuple shapes its rules admit as persisted step shapes
 (inspectable; this includes image shapes the runtime still rejects as
-unsupported input), the cells an authoring spec can carry (editable_existing)
-and what the AI Builder may propose (proposable_new). No projection promises
-that a flow using a cell is accepted: whole-flow acceptance belongs to the
-platform validators. Every vocabulary on the AI Builder wire derives from
-`projection_values`, or from `projection_cells` for document delivery modes;
-the one typed literal of those modes is pinned equal by a test.
-
-Engine-truth only: no Pattern Registry, no AI Builder, no planner prose.
-Planner-facing copy and strategy live on the Pattern Registry and
-Question Catalog.
+unsupported input) and the cells an authoring spec can carry
+(editable_existing). No projection promises that a flow using a cell is
+accepted: whole-flow acceptance belongs to the platform validators.
 """
 
 from __future__ import annotations
@@ -473,22 +466,21 @@ _OUTPUT_MODE_CAPABILITY_SEED: Mapping[
 )
 
 
-# Output modes and input sources the AI Builder never proposes; the engine
-# still runs them and the platform preserves saved steps that use them.
+# Output modes and input sources that are not exposed: an author configures
+# them by hand; the engine runs them and the platform preserves saved steps
+# that use them.
 _NOT_EXPOSED_OUTPUT_MODES: Mapping[FlowOutputMode, str] = MappingProxyType(
     {
         FlowOutputMode.COPY_INPUT: (
-            "JSON copying is authored by hand; the Builder preserves saved steps but does not propose this mode."
+            "JSON copying is configured by hand in the editor or a flow package."
         ),
         FlowOutputMode.HTTP_POST: (
             "HTTP delivery is configured by hand in the editor: its config holds "
-            "credentials that an authoring spec never carries, and the Builder "
-            "neither proposes nor edits it."
+            "credentials that an authoring spec never carries."
         ),
         FlowOutputMode.SPEAKER_MAPPING: (
-            "The planner never authors it: the Builder backend inserts it after "
-            "transcription when the user asks to name the speakers, and people "
-            "add it by hand in the editor."
+            "Speaker naming is added by hand after a transcription step, when "
+            "the speakers of the transcript are to be named."
         ),
     }
 )
@@ -497,13 +489,11 @@ _NOT_EXPOSED_INPUT_SOURCES: Mapping[FlowInputSource, str] = MappingProxyType(
     {
         FlowInputSource.HTTP_GET: (
             "HTTP input is configured by hand in the editor: its config holds "
-            "credentials that an authoring spec never carries, and the Builder "
-            "neither proposes nor edits it."
+            "credentials that an authoring spec never carries."
         ),
         FlowInputSource.TOOL: (
-            "A tool input names one governed MCP tool by its id, which the model "
-            "never writes: a proposed step reads a tool through its typed "
-            "tool_use, which the step compiler turns into the configuration."
+            "A tool input names one governed MCP tool by its id, which an author "
+            "picks from the tools the flow's space offers."
         ),
     }
 )
@@ -1048,13 +1038,11 @@ class CapabilityProjection(StrEnum):
     step shapes, HTTP and image included. Image shapes are persisted shapes the
     runtime still rejects as unsupported input; whole-flow acceptance belongs to
     the platform validators. ``EDITABLE_EXISTING``: the inspectable cells an
-    authoring spec can carry. ``PROPOSABLE_NEW``: the cells the AI Builder may
-    propose from scratch.
+    authoring spec can carry.
     """
 
     INSPECTABLE = "inspectable"
     EDITABLE_EXISTING = "editable_existing"
-    PROPOSABLE_NEW = "proposable_new"
 
 
 CapabilityAxis = Literal["input_source", "input_type", "output_type", "output_mode"]
@@ -1091,10 +1079,6 @@ _AUTHORING_VALUES: Mapping[CapabilityAxis, frozenset[str]] = MappingProxyType(
 def projection_cells(projection: CapabilityProjection) -> frozenset[TupleSpec]:
     """The cells one projection admits; derived, never listed by hand."""
 
-    if projection is CapabilityProjection.PROPOSABLE_NEW:
-        return frozenset(
-            cell for cell in _LEGAL_CELLS if _classify_cell(*cell)[0] == "exposed"
-        )
     if projection is CapabilityProjection.INSPECTABLE:
         return frozenset(_LEGAL_CELLS)
     return frozenset(

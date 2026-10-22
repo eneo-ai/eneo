@@ -39,6 +39,13 @@ export function makeFlow(overrides: Partial<FlowPublic> = {}): FlowPublic {
     draft_revision: 4,
     metadata_json: null,
     run_history_retention: { state: "off" } as FlowPublic["run_history_retention"],
+    permissions: {
+      can_edit: true,
+      can_publish: true,
+      can_delete: true,
+      can_run: true,
+      can_view_runs: true
+    },
     steps: [makeStep()],
     ...overrides
   };

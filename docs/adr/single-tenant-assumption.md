@@ -3,8 +3,9 @@
 - **Status:** Accepted
 - **Date:** 2026-10-01
 - **Decision owners:** Product and architecture
-- **Scope:** New backend, frontend, settings, and documentation work in Flow and
-  the Flow AI Builder; existing code is not rewritten by this record
+- **Scope:** New backend, frontend, settings, and documentation work in Flow
+  (the Flow AI Builder this record also named has since been removed);
+  existing code is not rewritten by this record
 
 ## Context
 

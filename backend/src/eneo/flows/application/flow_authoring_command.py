@@ -1,26 +1,14 @@
+"""Create a draft flow from an authoring spec, as a flow package installs one."""
+
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Annotated, Literal, TypeAlias
+from typing import TYPE_CHECKING, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from eneo.flows.application.flow_authoring_origin_policy import (
-    FlowAuthoringOriginPolicy,
-    NoopFlowAuthoringOriginPolicy,
-)
-from eneo.flows.application.flow_authoring_refusal import (
-    FlowAuthoringRefusalCode,
-    FlowAuthoringRefusalException,
-)
 from eneo.flows.application.flow_draft_materialization import (
-    AssistantField,
-    FlowDraftChangeSet,
-    FlowDraftMaterializationProgress,
-    FlowDraftStepChangeKind,
-    StepColumn,
     compile_flow_draft_changeset,
 )
 from eneo.flows.application.flow_draft_materialization_executor import (
@@ -28,12 +16,7 @@ from eneo.flows.application.flow_draft_materialization_executor import (
     index_and_validate_changeset_resource_bindings,
 )
 from eneo.flows.application.flow_service import FlowService
-from eneo.flows.domain.flow import Flow
-from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_api_exceptions import FlowBadRequestException
-from eneo.flows.flow_authoring_spec import (
-    FlowDraftSpecCore,
-)
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore
 from eneo.flows.flow_resource_bindings import (
     FlowResourceBindingSource,
     LocalResourceBinding,
@@ -52,16 +35,6 @@ class FlowPackageAuthoringOrigin(BaseModel):
     content_checksum: str
 
 
-FlowAuthoringOrigin: TypeAlias = FlowPackageAuthoringOrigin
-
-
-class TemplateAttachmentIntent(BaseModel):
-    """Internal intent resolved into a Flow-owned asset during materialization."""
-
-    file_id: UUID
-    terminal_plan_step_ref: str
-
-
 class TemplateImportIntent(BaseModel):
     """Verified template bytes to create within the new Flow's transaction."""
 
@@ -74,68 +47,10 @@ class CreateFlowAuthoringCommand(BaseModel):
     kind: Literal["create"] = "create"
     space_id: UUID
     spec: FlowDraftSpecCore
-    origin: FlowAuthoringOrigin
+    origin: FlowPackageAuthoringOrigin
     resource_bindings: tuple[LocalResourceBinding, ...] = ()
     default_transcription_model_id: UUID | None = None
-    template_attachment_intent: TemplateAttachmentIntent | None = None
     template_imports: tuple[TemplateImportIntent, ...] = ()
-
-
-class EditFlowAuthoringCommand(BaseModel):
-    kind: Literal["edit"] = "edit"
-    space_id: UUID
-    flow_id: UUID
-    expected_revision: int
-    spec: FlowDraftSpecCore
-    removed_existing_step_refs: frozenset[str]
-    updated_existing_step_refs: frozenset[str]
-    # Per updated step, the assistant fields the edit changes; a step absent
-    # here (a rename, say) makes no assistant update.
-    updated_assistant_fields: dict[str, frozenset[AssistantField]]
-    # Per updated step, the columns of its row the edit writes from the spec;
-    # every other column, and every column of a step absent here, is written
-    # as saved.
-    updated_step_fields: dict[str, frozenset[StepColumn]]
-    origin: FlowAuthoringOrigin
-    resource_bindings: tuple[LocalResourceBinding, ...] = ()
-    default_transcription_model_id: UUID | None = None
-    template_attachment_intent: TemplateAttachmentIntent | None = None
-
-
-FlowAuthoringCommand: TypeAlias = Annotated[
-    CreateFlowAuthoringCommand | EditFlowAuthoringCommand,
-    Field(discriminator="kind"),
-]
-
-
-@dataclass(frozen=True, slots=True)
-class FlowAuthoringStepPreview:
-    ref: str
-    change_kind: FlowDraftStepChangeKind
-
-
-@dataclass(frozen=True, slots=True)
-class FlowAuthoringPreview:
-    kind: Literal["create", "edit"]
-    flow_id: UUID | None
-    base_revision: int | None
-    spec_hash: str
-    steps_created: int
-    steps_updated: int
-    steps_removed: int
-    assistants_to_create: int
-    assistants_to_update: int
-    resource_bindings_count: int
-    step_changes: tuple[FlowAuthoringStepPreview, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class PreparedFlowAuthoring:
-    command: FlowAuthoringCommand
-    spec: FlowDraftSpecCore
-    current_flow: Flow | None
-    changeset: FlowDraftChangeSet
-    preview: FlowAuthoringPreview
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,199 +59,46 @@ class FlowAuthoringResult:
     flow_name: str
     draft_revision: int
     steps_created: int
-    steps_updated: int
-    steps_removed: int
-    command_spec_hash: str
 
 
 class FlowAuthoringCommandService:
     def __init__(self, materializer: FlowDraftMaterializer | None = None) -> None:
         self._materializer = materializer or FlowDraftMaterializer()
 
-    async def prepare(
+    async def apply(
         self,
         *,
-        command: FlowAuthoringCommand,
+        command: CreateFlowAuthoringCommand,
         flow_service: FlowService,
-        origin_policy: FlowAuthoringOriginPolicy | None = None,
-    ) -> PreparedFlowAuthoring:
-        current_flow = await _load_current_flow(
-            command=command,
-            flow_service=flow_service,
-        )
-        policy = origin_policy or NoopFlowAuthoringOriginPolicy()
-        spec = policy.effective_spec(
-            spec=command.spec,
-            current_flow=current_flow,
-        )
+        template_asset_service: "FlowTemplateAssetService | None" = None,
+    ) -> FlowAuthoringResult:
         changeset = compile_flow_draft_changeset(
-            spec,
-            current_flow,
-            removed_existing_step_refs=_removed_existing_step_refs(command),
-            updated_existing_step_refs=_updated_existing_step_refs(command),
-            updated_assistant_fields=_updated_assistant_fields(command),
-            updated_step_fields=_updated_step_fields(command),
+            command.spec,
             default_transcription_model_id=command.default_transcription_model_id,
         )
         # Before anything is written: the materializer creates assistants ahead
         # of the flow, so a spec over the limit must not get that far.
         validate_step_count(len(changeset.compiled_steps))
-        changeset = policy.stamp_metadata(
-            changeset=changeset,
-        )
         index_and_validate_changeset_resource_bindings(
             changeset=changeset,
             resource_bindings=command.resource_bindings,
         )
-        return PreparedFlowAuthoring(
-            command=command,
-            spec=spec,
-            current_flow=current_flow,
-            changeset=changeset,
-            preview=_build_preview(
-                command=command,
-                spec=spec,
-                current_flow=current_flow,
-                changeset=changeset,
-            ),
-        )
-
-    async def apply(
-        self,
-        *,
-        command: FlowAuthoringCommand,
-        flow_service: FlowService,
-        origin_policy: FlowAuthoringOriginPolicy | None = None,
-        template_asset_service: "FlowTemplateAssetService | None" = None,
-        progress_callback: Callable[[FlowDraftMaterializationProgress], None]
-        | None = None,
-    ) -> FlowAuthoringResult:
-        prepared = await self.prepare(
-            command=command,
-            flow_service=flow_service,
-            origin_policy=origin_policy,
-        )
-        return await self.apply_prepared(
-            prepared=prepared,
-            flow_service=flow_service,
-            template_asset_service=template_asset_service,
-            progress_callback=progress_callback,
-        )
-
-    async def apply_prepared(
-        self,
-        *,
-        prepared: PreparedFlowAuthoring,
-        flow_service: FlowService,
-        template_asset_service: "FlowTemplateAssetService | None" = None,
-        progress_callback: Callable[[FlowDraftMaterializationProgress], None]
-        | None = None,
-    ) -> FlowAuthoringResult:
         _assert_active_transaction(flow_service)
         materialized = await self._materializer.execute(
-            changeset=prepared.changeset,
+            changeset=changeset,
             flow_service=flow_service,
-            space_id=prepared.command.space_id,
-            flow_id=_target_flow_id(prepared.command),
-            expected_revision=_expected_revision(prepared.command),
-            resource_bindings=prepared.command.resource_bindings,
+            space_id=command.space_id,
+            resource_bindings=command.resource_bindings,
             binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
-            template_attachment_intent=(prepared.command.template_attachment_intent),
-            template_imports=(
-                prepared.command.template_imports
-                if isinstance(prepared.command, CreateFlowAuthoringCommand)
-                else ()
-            ),
+            template_imports=command.template_imports,
             template_asset_service=template_asset_service,
-            progress_callback=progress_callback,
         )
         return FlowAuthoringResult(
             flow_id=materialized.flow_id,
             flow_name=materialized.flow_name,
             draft_revision=materialized.draft_revision,
             steps_created=materialized.steps_created,
-            steps_updated=materialized.steps_updated,
-            steps_removed=materialized.steps_removed,
-            command_spec_hash=prepared.spec.spec_hash(),
         )
-
-
-async def _load_current_flow(
-    *,
-    command: FlowAuthoringCommand,
-    flow_service: FlowService,
-) -> Flow | None:
-    if command.kind == "create":
-        return None
-
-    current_flow = await flow_service.get_flow(command.flow_id)
-    if current_flow.space_id != command.space_id:
-        raise FlowAuthoringRefusalException(
-            "Flow space does not match the authoring command space.",
-            code=FlowAuthoringRefusalCode.FLOW_SPACE_MISMATCH,
-            context={
-                "flow_id": str(command.flow_id),
-                "flow_space_id": str(current_flow.space_id),
-                "command_space_id": str(command.space_id),
-            },
-        )
-    if current_flow.published_version is not None:
-        raise FlowAuthoringRefusalException(
-            "Flow is currently published. Unpublish the flow before applying changes.",
-            code=FlowAuthoringRefusalCode.FLOW_IS_PUBLISHED,
-            context={
-                "flow_id": str(current_flow.id),
-                "published_version": current_flow.published_version,
-            },
-        )
-    if current_flow.draft_revision != command.expected_revision:
-        raise FlowBadRequestException(
-            "Flödet ändrades av en annan användare. "
-            "Dina ändringar beräknas mot den nya versionen.",
-            code=FlowApiErrorCode.STALE_REVISION,
-            context={
-                "flow_id": str(command.flow_id),
-                "expected_revision": command.expected_revision,
-                "actual_revision": current_flow.draft_revision,
-            },
-        )
-    return current_flow
-
-
-def _build_preview(
-    *,
-    command: FlowAuthoringCommand,
-    spec: FlowDraftSpecCore,
-    current_flow: Flow | None,
-    changeset: FlowDraftChangeSet,
-) -> FlowAuthoringPreview:
-    return FlowAuthoringPreview(
-        kind=command.kind,
-        flow_id=_target_flow_id(command),
-        base_revision=None if current_flow is None else current_flow.draft_revision,
-        spec_hash=spec.spec_hash(),
-        steps_created=sum(
-            1
-            for step in changeset.compiled_steps
-            if step.change_kind == FlowDraftStepChangeKind.ADDED
-        ),
-        steps_updated=sum(
-            1
-            for step in changeset.compiled_steps
-            if step.change_kind == FlowDraftStepChangeKind.MODIFIED
-        ),
-        steps_removed=len(changeset.removed_existing_step_refs),
-        assistants_to_create=len(changeset.assistants_to_create),
-        assistants_to_update=len(changeset.assistants_to_update),
-        resource_bindings_count=len(command.resource_bindings),
-        step_changes=tuple(
-            FlowAuthoringStepPreview(
-                ref=step.existing_step_ref or step.plan_step_ref,
-                change_kind=step.change_kind,
-            )
-            for step in changeset.compiled_steps
-        ),
-    )
 
 
 def _assert_active_transaction(flow_service: FlowService) -> None:
@@ -352,57 +114,10 @@ def _assert_active_transaction(flow_service: FlowService) -> None:
     raise RuntimeError("Flow authoring apply requires an active transaction.")
 
 
-def _removed_existing_step_refs(command: FlowAuthoringCommand) -> frozenset[str]:
-    if command.kind == "create":
-        return frozenset()
-    return command.removed_existing_step_refs
-
-
-def _updated_existing_step_refs(
-    command: FlowAuthoringCommand,
-) -> frozenset[str] | None:
-    if command.kind == "create":
-        return None
-    return command.updated_existing_step_refs
-
-
-def _updated_assistant_fields(
-    command: FlowAuthoringCommand,
-) -> dict[str, frozenset[AssistantField]] | None:
-    if command.kind == "create":
-        return None
-    return command.updated_assistant_fields
-
-
-def _updated_step_fields(
-    command: FlowAuthoringCommand,
-) -> dict[str, frozenset[StepColumn]] | None:
-    if command.kind == "create":
-        return None
-    return command.updated_step_fields
-
-
-def _target_flow_id(command: FlowAuthoringCommand) -> UUID | None:
-    if command.kind == "create":
-        return None
-    return command.flow_id
-
-
-def _expected_revision(command: FlowAuthoringCommand) -> int | None:
-    if command.kind == "create":
-        return None
-    return command.expected_revision
-
-
 __all__ = [
     "CreateFlowAuthoringCommand",
-    "EditFlowAuthoringCommand",
-    "FlowAuthoringCommand",
     "FlowAuthoringCommandService",
-    "FlowAuthoringOrigin",
-    "FlowAuthoringPreview",
     "FlowAuthoringResult",
-    "FlowAuthoringStepPreview",
     "FlowPackageAuthoringOrigin",
-    "PreparedFlowAuthoring",
+    "TemplateImportIntent",
 ]

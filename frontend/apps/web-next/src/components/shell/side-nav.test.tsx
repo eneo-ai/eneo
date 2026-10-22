@@ -453,7 +453,12 @@ describe("DesktopSideNav (admin)", () => {
     setRoute("/admin/flow-settings");
     renderInApp(<DesktopSideNav variant="admin" navId="side-nav" />, {
       queryClient: seededClient(),
-      appContext: testAppContext({ permissions: ["admin"], featureFlags: { flows: true } })
+      // The tenant's switch decides: this admin may not see flows themselves.
+      appContext: testAppContext({
+        permissions: ["admin"],
+        settings: { flows_enabled: true },
+        featureFlags: { flows: false }
+      })
     });
     const governance = within(screen.getByRole("navigation", { name: "Administration" })).getByRole(
       "group",

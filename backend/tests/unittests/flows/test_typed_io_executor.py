@@ -4944,6 +4944,7 @@ async def test_document_outputs_generate_downloadable_artifacts(
     )
 
 
+@pytest.mark.usefixtures("shared_document_runtime")
 @pytest.mark.asyncio
 async def test_docx_output_handles_empty_assistant_response(user):
     """Empty markdown output should still create a valid DOCX artifact."""

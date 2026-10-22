@@ -194,7 +194,7 @@ def _evidence_export_payload(
             "detail_mode": "redacted",
             "redaction_applied": True,
             "masked_fields_count": 0,
-            "redaction_policy_version": "flow-evidence-redaction.v3",
+            "redaction_policy_version": "flow-evidence-redaction.v4",
             "retention_state_summary": {
                 "tracking_state": "not_tracked",
                 "note": (
@@ -246,7 +246,7 @@ def _evidence_export_payload(
         },
         "redaction": {
             "applied": True,
-            "policy_version": "flow-evidence-redaction.v3",
+            "policy_version": "flow-evidence-redaction.v4",
             "masked_fields_count": 0,
             "masked_paths": [],
             "masked_fields": [],

@@ -215,7 +215,7 @@ export default function ShellCommandPalette({
   const router = useRouter();
   const pathname = usePathname();
   const queryClient = useQueryClient();
-  const { can, settings, featureFlags } = useAppContext();
+  const { can, settings } = useAppContext();
   const entriesById = useRef(new Map<string, PaletteEntry>());
   const currentSpaceRouteId = spaceRouteIdFromPath(pathname);
 
@@ -223,7 +223,8 @@ export default function ShellCommandPalette({
   const isAdmin = can("admin");
   const canManageModules = can("modules");
   const usingTemplates = Boolean(settings.using_templates);
-  const flowsEnabled = featureFlags.flows;
+  // The tenant's switch: the admin pages need no flow permission of the admin.
+  const flowsEnabled = settings.flows_enabled === true;
 
   // Loads (from the query cache) when the palette opens and on every query.
   const searchSource = useMemo<SearchSource<PaletteItem>>(() => {

@@ -8,7 +8,7 @@ You are in the integration step of the consumer journey, where the published des
 
 The examples include paths, headers, request bodies, status values and error codes for this workflow. Use your deployment's `/openapi.json` for its supported operations and exact request and response contracts, including transcript editing and regeneration, review edits and signed input-file downloads.
 
-Flows themselves are authored by people in the Eneo Builder. This page never asks you to create or edit a flow; it assumes someone has already published one.
+Flows themselves are authored by people in the Eneo flow editor. This page never asks you to create or edit a flow; it assumes someone has already published one.
 
 Use the reference for the full field catalog: [Flow Runtime API Reference](/guides/flows-api-guide). Use the [Flow error reference](/guides/flows/reference/errors) for the Flow-specific code catalog.
 
@@ -2056,7 +2056,7 @@ The inline limit is **8 MiB of UTF-8 bytes**, configured through `FLOW_MAX_INLIN
 
 Structured output uses the same 8 MiB ceiling, measured as serialized JSON including its framing. Retained rejected-output previews also use 8 MiB and end on a complete UTF-8 character. PDF extraction has an independent **128 MiB** ceiling for extracted text, including page markers; increasing the inline limit does not change it. Material-backed processing follows the effective file allowance, while structured output still has the inline ceiling.
 
-### Execution, PDF extraction, and Builder
+### Execution and PDF extraction
 
 | Setting                                       | Default               | Applies to                                                                                                                                                                                                                                                             |
 | --------------------------------------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -2076,12 +2076,11 @@ The 8-hour invocation default must land after heartbeat-based recovery (`eneo-dg
 
 This table checks workloads against the default limits. It does not establish provider throughput or extraction time for every document.
 
-| Workload                                 | Limits it touches                                                                | Default admission                                                                                                                                                                                                          |
-| ---------------------------------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 5-hour recording at 128 kbps             | Audio upload, decoded duration/bytes, transcript bytes, shared invocation budget | About 275 MiB (288 MB) compressed fits the 384 MiB audio ceiling; 5 hours fits the duration ceiling. Decoded audio must stay within 2 GiB and transcript text within 8 MiB; all steps share 8 hours.                       |
-| 2000-page PDF                            | File upload, page count, extracted text, extraction timeout                      | Up to 256 MiB uploaded, 2000 pages, 128 MiB extracted text, and 900 s extraction. Page count alone does not determine file size or processing time.                                                                        |
-| 300 documents                            | Runtime file count, per-file bytes, mapped provider calls, structured output     | Fits the default 1000-file count and 1000-call mapped-step budget for one call per document, including room for fallback. Each file and the combined structured output must fit their respective byte limits.              |
-| 17-step Builder package with attachments | Proposal silence/whole-call deadlines, attachment count, selected model context  | Step count does not consume attachment slots. Up to 100 Builder session attachments remain subject to tenant policy and model context; a streaming proposal has a 300 s silence deadline and an 1800 s whole-call ceiling. |
+| Workload                     | Limits it touches                                                                | Default admission                                                                                                                                                                                             |
+| ---------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 5-hour recording at 128 kbps | Audio upload, decoded duration/bytes, transcript bytes, shared invocation budget | About 275 MiB (288 MB) compressed fits the 384 MiB audio ceiling; 5 hours fits the duration ceiling. Decoded audio must stay within 2 GiB and transcript text within 8 MiB; all steps share 8 hours.          |
+| 2000-page PDF                | File upload, page count, extracted text, extraction timeout                      | Up to 256 MiB uploaded, 2000 pages, 128 MiB extracted text, and 900 s extraction. Page count alone does not determine file size or processing time.                                                           |
+| 300 documents                | Runtime file count, per-file bytes, mapped provider calls, structured output     | Fits the default 1000-file count and 1000-call mapped-step budget for one call per document, including room for fallback. Each file and the combined structured output must fit their respective byte limits. |
 
 ### Review checkpoints
 

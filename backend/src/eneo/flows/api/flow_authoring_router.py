@@ -19,6 +19,7 @@ from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_definition_access import (
     SERVICE_KEY_ADMIN_REQUIRED_MESSAGE,
+    flow_permissions,
     require_flow_delete_access,
     require_flow_published_runtime_access,
 )
@@ -387,9 +388,21 @@ async def list_flows(
         offset=offset,
     )
     page_items = flows[:limit]
+    scope_filter = flow_access_context.get_scope_filter(request)
     return {
         "count": len(page_items),
-        "items": [assembler.to_sparse_public(flow) for flow in page_items],
+        "items": [
+            assembler.to_sparse_public(
+                flow,
+                permissions=flow_permissions(
+                    container,
+                    flow=flow,
+                    actor=spaces.get(flow.space_id),
+                    scope_filter=scope_filter,
+                ),
+            )
+            for flow in page_items
+        ],
         "has_more": len(flows) > limit,
     }
 

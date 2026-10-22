@@ -1,10 +1,10 @@
-"""The capability manifest owns three projections of one contract.
+"""The capability manifest owns two projections of one contract.
 
 inspectable: the tuple shapes the manifest rules admit as persisted step
 shapes, including HTTP and image shapes (image is still rejected at graph
 validation as unsupported input). editable_existing: the cells an authoring
-spec can carry. proposable_new: the cells the AI Builder may propose. Each is derived from the same legality functions; the checks below
-recompute legality independently of the manifest.
+spec can carry. Both are derived from the same legality functions; the checks
+below recompute legality independently of the manifest.
 """
 
 from __future__ import annotations
@@ -118,12 +118,11 @@ def test_http_cells_stay_inspectable() -> None:
     assert any(FlowInputType.IMAGE in cell for cell in inspectable)
 
 
-def test_a_tool_input_is_inspectable_as_text_or_json_and_never_proposed() -> None:
-    # Kills the mutants that offer the tool source to the Builder's proposals
-    # (its cells joining PROPOSABLE_NEW, which the pinned size also catches),
-    # admit a tool step that reads a file type, or list as legal a tool step in
-    # a mode that never reads its input (template_fill), which the step
-    # validation refuses. A spec carries every tool cell but HTTP delivery.
+def test_a_tool_input_is_inspectable_as_text_or_json() -> None:
+    # Kills the mutants that admit a tool step that reads a file type, or list
+    # as legal a tool step in a mode that never reads its input
+    # (template_fill), which the step validation refuses. A spec carries every
+    # tool cell but HTTP delivery.
     tool = {
         cell
         for cell in projection_cells(CapabilityProjection.INSPECTABLE)
@@ -134,7 +133,6 @@ def test_a_tool_input_is_inspectable_as_text_or_json_and_never_proposed() -> Non
     assert FlowOutputMode.TEMPLATE_FILL not in {cell[3] for cell in tool}
     carried = tool & projection_cells(CapabilityProjection.EDITABLE_EXISTING)
     assert {cell[3] for cell in tool - carried} == {FlowOutputMode.HTTP_POST}
-    assert not tool & projection_cells(CapabilityProjection.PROPOSABLE_NEW)
 
 
 def test_editable_existing_is_what_an_authoring_spec_can_carry() -> None:
@@ -165,26 +163,13 @@ def test_speaker_mapping_is_editable_only_on_the_transcript_step_source(
     assert (cell in projection_cells(CapabilityProjection.INSPECTABLE)) is editable
 
 
-def test_proposable_new_is_what_the_builder_may_author_from_scratch() -> None:
-    proposable = projection_cells(CapabilityProjection.PROPOSABLE_NEW)
-    assert (len(proposable), len(_triples(proposable))) == (59, 32)
-    for cell in proposable:
-        assert FlowInputSource.HTTP_GET not in cell
-        assert FlowInputSource.TOOL not in cell
-        assert FlowOutputMode.HTTP_POST not in cell
-        assert FlowOutputMode.SPEAKER_MAPPING not in cell
-        assert FlowOutputMode.COPY_INPUT not in cell
-        assert FlowInputType.IMAGE not in cell
-
-
 def test_projections_nest() -> None:
     inspectable = projection_cells(CapabilityProjection.INSPECTABLE)
     editable = projection_cells(CapabilityProjection.EDITABLE_EXISTING)
-    proposable = projection_cells(CapabilityProjection.PROPOSABLE_NEW)
-    assert proposable < editable < inspectable
+    assert editable < inspectable
 
 
-def test_coverage_report_exposed_is_exactly_proposable_new() -> None:
+def test_coverage_report_counts_every_cell_once() -> None:
     report = coverage_report()
     assert dict(report.by_classification) == {
         "exposed": 59,
@@ -210,45 +195,11 @@ def test_projection_values_follow_enum_declaration_order(
     assert projection_values(projection, AXES[axis_index]) == expected
 
 
-def test_proposable_vocabulary_values() -> None:
-    values = {
-        axis: projection_values(CapabilityProjection.PROPOSABLE_NEW, axis)
-        for axis in AXES
-    }
-    assert values == {
-        "input_source": ("flow_input", "previous_step", "all_previous_steps"),
-        "input_type": ("text", "json", "audio", "document", "file", "any"),
-        "output_type": ("text", "json", "pdf", "docx"),
-        "output_mode": (
-            "pass_through",
-            "compose_text",
-            "transcribe_only",
-            "template_fill",
-            "render_verbatim",
-        ),
-    }
-
-
-def test_editable_vocabulary_adds_hand_authored_modes() -> None:
-    proposable = projection_values(CapabilityProjection.PROPOSABLE_NEW, "output_mode")
-    editable = projection_values(CapabilityProjection.EDITABLE_EXISTING, "output_mode")
-    assert set(editable) - set(proposable) == {"speaker_mapping", "copy_input"}
-    assert set(
-        projection_values(CapabilityProjection.EDITABLE_EXISTING, "input_source")
-    ) - set(projection_values(CapabilityProjection.PROPOSABLE_NEW, "input_source")) == {
-        "tool"
-    }
-    for axis in ("input_type", "output_type"):
-        assert projection_values(
-            CapabilityProjection.EDITABLE_EXISTING, axis
-        ) == projection_values(CapabilityProjection.PROPOSABLE_NEW, axis)
-
-
 def test_every_axis_value_outside_the_authoring_enums_has_a_not_exposed_reason() -> (
     None
 ):
     """The exposure states the truth: a legal cell holding http_get, http_post
-    or image is not proposable, with a stated reason, never silently."""
+    or image is not exposed, with a stated reason, never silently."""
     outside = [cell for cell in LEGAL_CELLS if not _authorable(cell)]
     assert outside
     for cell in outside:
@@ -330,7 +281,7 @@ def test_descriptions_are_distinct_facts_not_placeholders() -> None:
     assert not any("Seeded from" in description for description in descriptions)
 
 
-def test_http_post_exposure_matches_the_builder_vocabulary() -> None:
+def test_http_post_is_not_exposed_and_says_why() -> None:
     capability = CAPABILITY_REGISTRY["output_mode_http_post"]
     assert capability.exposure == "not_exposed"
     assert capability.not_exposed_reason
@@ -339,24 +290,24 @@ def test_http_post_exposure_matches_the_builder_vocabulary() -> None:
 # -- Readers ------------------------------------------------------------------
 
 
-def test_resolution_inside_the_authoring_enums_follows_proposable_new() -> None:
-    proposable = projection_cells(CapabilityProjection.PROPOSABLE_NEW)
-    authorable = [cell for cell in ALL_CELLS if _authorable(cell)]
-    for cell in authorable:
+def test_an_exposed_cell_resolves_to_its_input_and_output_mode_capabilities() -> None:
+    resolved_cells = 0
+    for cell in ALL_CELLS:
         resolved = resolve_capability_for_tuple(
             input_source=cell[0],
             input_type=cell[1],
             output_type=cell[2],
             output_mode=cell[3],
         )
-        if cell in proposable:
-            assert resolved is not None
-            assert [capability.id for capability in resolved] == [
-                f"input_{cell[1].value}",
-                f"output_mode_{cell[3].value}",
-            ]
-        else:
-            assert resolved is None
+        if resolved is None:
+            continue
+        resolved_cells += 1
+        assert _authorable(cell)
+        assert [capability.id for capability in resolved] == [
+            f"input_{cell[1].value}",
+            f"output_mode_{cell[3].value}",
+        ]
+    assert resolved_cells == coverage_report().by_classification["exposed"]
 
 
 def test_http_cells_no_longer_resolve() -> None:

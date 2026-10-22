@@ -43,8 +43,9 @@ export type AdminNavGroup = {
  * Anslutningar (what Eneo talks to) and Organisation (who and what it
  * manages). Every admin route is here, with the same gating as before:
  * templates only when the tenant uses templates, modules only with the
- * modules permission, flows only when the tenant has flows (the app
- * context's `featureFlags.flows`; the admin layout admits admins only). No
+ * modules permission, flows only when the tenant has them switched on
+ * (`settings.flows_enabled`, whatever the admin's own flow permissions; the
+ * admin layout admits admins only). No
  * group exceeds seven items, so none needs to collapse. The admin layout
  * still redirects non-admins.
  */

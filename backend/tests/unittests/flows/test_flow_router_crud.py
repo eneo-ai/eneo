@@ -1240,7 +1240,7 @@ async def test_get_flow_allows_admin_service_key_principal(monkeypatch):
 
     assert result.id == flow.id
     assert result.steps[0].id == flow.steps[0].id
-    actor.can_read_flow.assert_called_once_with(flow)
+    actor.can_read_flow.assert_any_call(flow)
 
 
 @pytest.mark.asyncio

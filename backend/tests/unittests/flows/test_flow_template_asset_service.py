@@ -190,6 +190,7 @@ async def test_template_asset_operations_require_persisted_parent_flow_id(
     file_service.prepare_document_upload.assert_not_called()
 
 
+@pytest.mark.usefixtures("shared_document_runtime")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("operation", "template_bytes", "error_code"),
@@ -281,6 +282,7 @@ async def test_get_asset_with_file_hydrates_relationship_content(
     )
 
 
+@pytest.mark.usefixtures("shared_document_runtime")
 @pytest.mark.asyncio
 async def test_upload_asset_persists_docx_template_bytes_and_body_placeholder(
     user,
@@ -344,6 +346,7 @@ async def test_upload_asset_persists_docx_template_bytes_and_body_placeholder(
     assert asset.placeholders == ["Body"]
 
 
+@pytest.mark.usefixtures("shared_document_runtime")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("payload", "error_code"),
@@ -388,6 +391,7 @@ async def test_upload_asset_rejects_invalid_docx_before_file_persistence(
     template_asset_repo.create.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("shared_document_runtime")
 @pytest.mark.asyncio
 async def test_create_from_existing_attached_file_reuses_authorized_file(user) -> None:
     template_bytes = _build_template_bytes()
@@ -491,6 +495,7 @@ async def test_create_from_existing_attached_file_rejects_missing_content(user) 
     template_asset_repo.create.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("shared_document_runtime")
 @pytest.mark.asyncio
 async def test_create_from_existing_attached_file_reuses_active_same_file_asset(
     user,

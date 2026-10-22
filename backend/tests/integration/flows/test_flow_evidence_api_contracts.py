@@ -2034,7 +2034,7 @@ async def test_flow_run_evidence_export_returns_redacted_json_attachment(
     ]
     assert payload["summary"]["step_overview"][0]["output_summary"] is None
     assert payload["redaction"]["applied"] is True
-    assert payload["redaction"]["policy_version"] == "flow-evidence-redaction.v3"
+    assert payload["redaction"]["policy_version"] == "flow-evidence-redaction.v4"
     assert payload["redaction"]["masked_fields_count"] >= 1
     assert (
         "bundle.run.input_payload_json.api_key" in payload["redaction"]["masked_paths"]

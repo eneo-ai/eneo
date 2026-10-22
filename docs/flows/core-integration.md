@@ -125,6 +125,50 @@ Changing a published flow or one of its step assistants is refused with
 `flow_unpublish_required`, unpublishing a flow that is not published with
 `flow_not_published`.
 
+### Caller permissions on a flow
+
+`FlowPublic` and `FlowSparsePublic` carry `permissions` (`can_edit`,
+`can_publish`, `can_delete`, `can_run`, `can_view_runs`) for the caller.
+`flow_definition_access.flow_permissions` decides them with the checks the
+endpoints make, run without raising: editing, publishing and deleting as
+`require_flow_edit_access`, `require_flow_publish_access` and
+`require_flow_delete_access` (the action's permission, the space's permission
+and the draft-ownership rule), running as run creation and reading runs as the
+run list (`enforce_flow_scope`, through `check_flow_scope`). The flow's state is
+not part of them: a published flow still says `can_edit` for its owner, and
+the edit answers `flow_unpublish_required`.
+`tests/integration/flows/test_flow_permissions.py` checks each flag against
+its endpoint for the owner, another editor, a viewer, a user outside the space
+and a space-scoped service key.
+
+### Allowed step kinds
+
+`GET /flows/{id}/step-kinds/` answers, for each place a step can be added and
+for each saved step turned to another kind, which of the editor's step kinds
+(`ai`, `structured`, `compose`, `document`, `template`, `transcribe`,
+`speakers`, `review`, `fetch_http`, `tool`, `send_http`) the draft allows and
+why it refuses the others. The kinds and their starting configurations live
+in `flows/domain/step_kinds.py`; a step added first takes the run's input over
+from the step that was first, and an audio kind turns transcription on. Each
+kind's change is built as the editor update makes it and judged by that save's
+placement, read following, inactive-setting cleanup and step rules
+(`flows/application/flow_step_kinds.py`, sharing `sparse_placement`,
+`new_flow_step`, `steps_as_written`, `draft_write_metadata` and
+`draft_step_refusals` with the save), so `allowed` is true exactly when the
+save accepts the change and `refusals` are its errors (`code`, `issue_code`,
+the step). `tests/unit/flows/application/test_flow_step_kinds.py` sends every
+answer through `apply_editor_update` and checks that the save agrees. Not
+judged: the new step's name, the URL or tool the author enters, and the checks
+against the space (assistants, classification, transcription service). The
+work grows with the square of the step count; `position` and `step_id` narrow
+the answer to one place.
+
+The core is the judge, so some answers differ from the web-next copy of the
+rules: a speaker mapping may follow any step (web-next asks
+for a transcription step before it), and a step can be added before a first
+step that takes uploads beside a text input (web-next refuses whenever the
+first step takes uploads; the core refuses only an upload input type).
+
 The `flows_core` gate authenticates in its own session and commits before the
 route's container authenticates. Sharing a request with a function-scoped
 route, an open gate transaction held the row of a legacy key hash it had just
@@ -208,6 +252,16 @@ permissions out of every role; its downgrade recreates the tables empty and
 grants the permissions to Owner roles again. Audit action types and the
 `ai_builder` resource binding source stay for the rows already written;
 `metadata_json.ai_builder` is dropped when a flow is read and refused on write.
+
+What only the builder used went after it: the edit path of the authoring
+command (it now only creates a draft, as a flow package install does), the
+edit compilation and saved-step carrying of the draft materialization, the
+authoring snapshot, the template attachment (a package's template imports
+stay, in `flow_template_import_materialization.py`), the origin policy, the
+capability manifest's `proposable_new` projection and the unused
+`observability/failure_events.py`. The template asset service's
+`create_from_existing_attached_file` has no production caller left; tests
+still use it to make an asset from a saved file.
 
 ## Documents
 

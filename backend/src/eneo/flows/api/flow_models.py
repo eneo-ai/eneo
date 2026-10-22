@@ -338,6 +338,13 @@ FLOW_SPARSE_PUBLIC_EXAMPLE: dict[str, Any] = {
             "flow": {"mode": "preserve", "days": 30},
         },
     },
+    "permissions": {
+        "can_edit": True,
+        "can_publish": True,
+        "can_delete": True,
+        "can_run": True,
+        "can_view_runs": True,
+    },
     "created_at": "2026-03-17T09:30:00Z",
     "updated_at": "2026-03-17T10:00:00Z",
 }
@@ -879,6 +886,60 @@ class FlowStepPublic(BaseModel):
     updated_at: datetime | None = None
 
 
+class FlowPermissionsPublic(BaseModel):
+    """What the caller may do with the flow: whether the access checks of
+    each action let this caller through. The flow's state is the action's own
+    concern: publishing an invalid draft, editing a published flow or running
+    an unpublished one answers 400 with its own code."""
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={"example": FLOW_SPARSE_PUBLIC_EXAMPLE["permissions"]},
+    )
+
+    can_edit: bool = Field(
+        description=(
+            "Change the draft (`PATCH /flows/{id}/`, `PATCH /flows/{id}/editor/`): "
+            "`flows_manage`, the space's permission to edit flows, and being "
+            "the draft's owner, a space owner or a tenant admin. Never for a "
+            "service key."
+        ),
+        examples=[True],
+    )
+    can_publish: bool = Field(
+        description=(
+            "Publish and unpublish (`POST /flows/{id}/publish/`, "
+            "`/unpublish/`): as `can_edit`, with the space's permission to "
+            "publish flows."
+        ),
+        examples=[True],
+    )
+    can_delete: bool = Field(
+        description=(
+            "Delete the flow (`DELETE /flows/{id}/`): as `can_edit`, with the "
+            "space's permission to delete flows."
+        ),
+        examples=[False],
+    )
+    can_run: bool = Field(
+        description=(
+            "Start runs and upload their files (`POST /flows/{id}/runs/`): "
+            "`flows_run` and read access to the flow; a service key in scope "
+            "only for a published flow."
+        ),
+        examples=[True],
+    )
+    can_view_runs: bool = Field(
+        description=(
+            "Read the flow's runs (`GET /flows/{id}/runs/` and a run's status, "
+            "steps and evidence): `flows_view` (or a service key in scope) and "
+            "read access to the flow. Which runs the list shows follows the "
+            "run rules."
+        ),
+        examples=[True],
+    )
+
+
 class FlowSparsePublic(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
@@ -915,6 +976,13 @@ class FlowSparsePublic(BaseModel):
     metadata_json: dict[str, Any] | None = None
     run_history_retention: FlowRunRetentionProjection = Field(
         description=FLOW_RUN_RETENTION_PROJECTION_DESCRIPTION,
+    )
+    permissions: FlowPermissionsPublic = Field(
+        description=(
+            "What the caller may do with this flow, by the same access checks "
+            "the actions make, so a client can leave out what would be refused "
+            "with 403."
+        ),
     )
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -2573,7 +2641,7 @@ FLOW_RUN_RESULT_FILE_EXAMPLE: dict[str, Any] = {
     "ordinal": 0,
     "source": "declared_artifact",
     "name": "case-summary.pdf",
-    "checksum": "artifact-checksum",
+    "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
     "size": 14012,
     "mimetype": "application/pdf",
     "file_type": "document",
@@ -2952,7 +3020,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                     "detail_mode": "redacted",
                     "redaction_applied": True,
                     "masked_fields_count": 2,
-                    "redaction_policy_version": "flow-evidence-redaction.v3",
+                    "redaction_policy_version": "flow-evidence-redaction.v4",
                     "retention_state_summary": {
                         "tracking_state": "not_tracked",
                         "note": (
@@ -3011,7 +3079,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                             "name": "case-summary.pdf",
                             "mimetype": "application/pdf",
                             "size": 14012,
-                            "checksum": "artifact-checksum",
+                            "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
                             "file_type": "document",
                             "availability": "available",
                         }
@@ -3097,7 +3165,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                                 "name": "case-summary.pdf",
                                 "mimetype": "application/pdf",
                                 "size": 14012,
-                                "checksum": "artifact-checksum",
+                                "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
                                 "file_type": "document",
                                 "availability": "available",
                             }
@@ -3190,7 +3258,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                                     "name": "case-summary.pdf",
                                     "mimetype": "application/pdf",
                                     "size": 14012,
-                                    "checksum": "artifact-checksum",
+                                    "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
                                     "file_type": "document",
                                     "availability": "available",
                                 }
@@ -3267,7 +3335,7 @@ class FlowRunEvidenceExportResponse(BaseModel):
                 },
                 "redaction": {
                     "applied": True,
-                    "policy_version": "flow-evidence-redaction.v3",
+                    "policy_version": "flow-evidence-redaction.v4",
                     "masked_fields_count": 2,
                     "masked_paths": [
                         "bundle.run.input_payload_json.api_key",

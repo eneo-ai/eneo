@@ -45,7 +45,12 @@ function respond(usage: unknown = USAGE) {
 
 function show({ flows = true, permissions = ["admin"] as Permission[] } = {}) {
   return renderInApp(<FlowUsageSection serverId="server-1" />, {
-    appContext: testAppContext({ permissions, featureFlags: { flows } })
+    // The tenant's switch decides; the admin holds no flow permission here.
+    appContext: testAppContext({
+      permissions,
+      settings: { flows_enabled: flows },
+      featureFlags: { flows: false }
+    })
   });
 }
 
@@ -91,6 +96,11 @@ describe("FlowUsageSection", () => {
     expect(
       await screen.findByText("Inget publicerat flöde använder serverns verktyg.")
     ).toBeTruthy();
+  });
+
+  it("shows the usage to an admin without flows_view", async () => {
+    show({ permissions: ["admin"] });
+    expect(await screen.findByRole("button", { name: /Används av 102/ })).toBeTruthy();
   });
 
   it("asks nothing when the tenant has no flows", () => {

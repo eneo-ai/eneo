@@ -25,28 +25,15 @@ from eneo.database.tables.flow_tables import (
 from eneo.database.tables.spaces_table import Spaces
 from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
-from eneo.flows.application.flow_authoring_command import TemplateAttachmentIntent
-from eneo.flows.application.flow_draft_materialization import (
-    FlowDraftChangeSet,
-    FlowDraftCompiledStep,
-    FlowDraftStepChangeKind,
-    compile_flow_draft_changeset,
-)
-from eneo.flows.application.flow_template_attachment_materialization import (
-    materialize_template_attachment,
-)
 from eneo.flows.domain.flow import FlowStep
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_authoring_spec import (
-    AssistantSpec,
-    FlowDraftSpecCore,
-    InputSource,
-    InputType,
-    OutputMode,
-    OutputType,
-    StepSpec,
+from eneo.flows.flow_resource_bindings import (
+    FlowResourceBindingSource,
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
 )
-from eneo.flows.flow_resource_bindings import FlowResourceBindingSource
 from eneo.flows.flow_template_asset_service import (
     AttachedTemplateFileUnavailableError,
 )
@@ -96,32 +83,6 @@ async def _save_template_file(container, *, name: str, content: bytes):
             ),
         )
     )
-
-
-def _template_changeset():
-    spec = FlowDraftSpecCore(
-        flow_name="Template flow",
-        steps=[
-            StepSpec(
-                plan_step_ref="step_a",
-                name="Prepare",
-                assistant_spec=AssistantSpec(instructions="Prepare content."),
-                input_source=InputSource.FLOW_INPUT,
-                input_type=InputType.TEXT,
-            ),
-            StepSpec(
-                plan_step_ref="step_b",
-                name="Fill",
-                assistant_spec=AssistantSpec(instructions="Fill template."),
-                input_source=InputSource.PREVIOUS_STEP,
-                input_type=InputType.TEXT,
-                output_mode=OutputMode.TEMPLATE_FILL,
-                output_type=OutputType.DOCX,
-                output_config={"bindings": {"case_id": "{{ flow_input.case_id }}"}},
-            ),
-        ],
-    )
-    return compile_flow_draft_changeset(spec, current_flow=None)
 
 
 async def _create_flow_and_file(
@@ -551,48 +512,8 @@ async def test_template_promotion_lock_serializes_both_file_delete_race_orders(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_changed_template_contract_rolls_back_promoted_asset(
-    db_container,
-) -> None:
-    async with db_container() as setup_container:
-        user, _space, flow, file = await _create_flow_and_file(
-            setup_container,
-            placeholder="customer.name",
-        )
-
-    async with db_container(user=user) as container:
-        with pytest.raises(BadRequestException) as exc_info:
-            async with container.session().begin_nested():
-                await materialize_template_attachment(
-                    intent=TemplateAttachmentIntent(
-                        file_id=file.id,
-                        terminal_plan_step_ref="step_b",
-                    ),
-                    changeset=_template_changeset(),
-                    flow_id=flow.id,
-                    template_asset_service=container.flow_template_asset_service(),
-                )
-
-        assert exc_info.value.code == "architecture_materialization_failed"
-        asset_count = await container.session().scalar(
-            sa.select(sa.func.count(FlowTemplateAssets.id)).where(
-                FlowTemplateAssets.flow_id == flow.id,
-                FlowTemplateAssets.file_id == file.id,
-            )
-        )
-        assert asset_count == 0
-        assert (
-            await container.session().scalar(
-                sa.select(Files.id).where(Files.id == file.id)
-            )
-            == file.id
-        )
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
 @pytest.mark.parametrize("mapping_case", ["valid", "missing", "structured"])
-async def test_materialized_template_attachment_publish_validates_controls_and_pins_identity(
+async def test_a_template_fill_publish_validates_controls_and_pins_identity(
     db_container,
     mapping_case: str,
 ) -> None:
@@ -608,9 +529,23 @@ async def test_materialized_template_attachment_publish_validates_controls_and_p
         )
 
     async with db_container(user=user) as container:
-        changeset = FlowDraftChangeSet(
-            flow_name=flow.name,
-            flow_description="",
+        asset = await container.flow_template_asset_service().create_from_existing_attached_file(
+            flow_id=flow.id, file_id=file.id
+        )
+        assistant, _ = await container.flow_service().create_flow_assistant(
+            flow_id=flow.id,
+            name="template-fill",
+        )
+        bindings = {
+            "case_id": "{{ flow_input.case_id }}",
+            "body": "{{ flow_input.body }}",
+        }
+        if mapping_case == "missing":
+            del bindings["body"]
+        elif mapping_case == "structured":
+            bindings["body"] = "{{flow_input}}"
+        updated = await container.flow_service().update_flow(
+            flow_id=flow.id,
             metadata_json={
                 "form_schema": {
                     "fields": [
@@ -619,10 +554,9 @@ async def test_materialized_template_attachment_publish_validates_controls_and_p
                     ]
                 }
             },
-            compiled_steps=[
-                FlowDraftCompiledStep(
-                    plan_step_ref="step_a",
-                    change_kind=FlowDraftStepChangeKind.ADDED,
+            steps=[
+                FlowStep(
+                    assistant_id=assistant.id,
                     step_order=1,
                     user_description="Fill template",
                     input_source="flow_input",
@@ -630,55 +564,26 @@ async def test_materialized_template_attachment_publish_validates_controls_and_p
                     output_mode="template_fill",
                     output_type="docx",
                     output_config={
-                        "bindings": {
-                            "case_id": "{{ flow_input.case_id }}",
-                            "body": "{{ flow_input.body }}",
-                        }
+                        "bindings": bindings,
+                        "template_asset_id": str(asset.id),
                     },
-                )
-            ],
-        )
-        materialized = await materialize_template_attachment(
-            intent=TemplateAttachmentIntent(
-                file_id=file.id,
-                terminal_plan_step_ref="step_a",
-            ),
-            changeset=changeset,
-            flow_id=flow.id,
-            template_asset_service=container.flow_template_asset_service(),
-        )
-        assistant, _ = await container.flow_service().create_flow_assistant(
-            flow_id=flow.id,
-            name="template-fill",
-        )
-        terminal = materialized.changeset.compiled_steps[0]
-        output_config = dict(terminal.output_config or {})
-        bindings = dict(output_config["bindings"])
-        if mapping_case == "missing":
-            del bindings["body"]
-        elif mapping_case == "structured":
-            bindings["body"] = "{{flow_input}}"
-        output_config["bindings"] = bindings
-        updated = await container.flow_service().update_flow(
-            flow_id=flow.id,
-            metadata_json=materialized.changeset.metadata_json,
-            steps=[
-                FlowStep(
-                    assistant_id=assistant.id,
-                    step_order=terminal.step_order,
-                    user_description=terminal.user_description,
-                    input_source=terminal.input_source,
-                    input_type=terminal.input_type,
-                    output_mode=terminal.output_mode,
-                    output_type=terminal.output_type,
-                    output_config=output_config,
                 )
             ],
         )
         await container.flow_service().replace_resource_bindings(
             flow_id=flow.id,
-            bindings=(materialized.binding,),
-            source=FlowResourceBindingSource.AI_BUILDER,
+            bindings=(
+                LocalResourceBinding(
+                    slot_ref=ResourceSlotRef(
+                        kind=ResourceSlotKind.TEMPLATE_ASSET,
+                        slot="document-template",
+                        label=asset.name,
+                    ),
+                    local_kind=LocalResourceKind.TEMPLATE_ASSET,
+                    local_id=asset.id,
+                ),
+            ),
+            source=FlowResourceBindingSource.PACKAGE_IMPORT,
         )
 
         if mapping_case != "valid":
@@ -707,7 +612,7 @@ async def test_materialized_template_attachment_publish_validates_controls_and_p
         )
         assert isinstance(definition, dict)
         output_config = definition["steps"][0]["output_config"]
-        assert output_config["template_asset_id"] == str(materialized.binding.local_id)
+        assert output_config["template_asset_id"] == str(asset.id)
         assert output_config["template_checksum"] == file.checksum
         assert output_config["placeholders"] == ["case_id", "body"]
         assert output_config["bindings"] == {
@@ -719,7 +624,7 @@ async def test_materialized_template_attachment_publish_validates_controls_and_p
             pinned_file,
         ) = await container.flow_template_asset_service().get_asset_with_file(
             flow_id=flow.id,
-            asset_id=materialized.binding.local_id,
+            asset_id=asset.id,
         )
         assert pinned_file.blob is not None
         rendered, _mime = await render_docx_template(

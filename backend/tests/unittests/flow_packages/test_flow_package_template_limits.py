@@ -36,9 +36,8 @@ from eneo.flows.application.flow_authoring_command import TemplateImportIntent
 from eneo.flows.application.flow_draft_materialization import (
     FlowDraftChangeSet,
     FlowDraftCompiledStep,
-    FlowDraftStepChangeKind,
 )
-from eneo.flows.application.flow_template_attachment_materialization import (
+from eneo.flows.application.flow_template_import_materialization import (
     materialize_template_imports,
 )
 from eneo.flows.enums import FlowOutputMode
@@ -341,7 +340,6 @@ def _changeset(count: int) -> FlowDraftChangeSet:
     steps = [
         FlowDraftCompiledStep(
             plan_step_ref=f"s{index}",
-            change_kind=FlowDraftStepChangeKind.ADDED,
             step_order=index + 1,
             user_description=None,
             input_source="flow_input",

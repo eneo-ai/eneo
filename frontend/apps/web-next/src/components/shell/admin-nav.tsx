@@ -22,11 +22,11 @@ export function AdminTopContent() {
 export function AdminSections() {
   const t = useTranslations();
   const pathname = usePathname();
-  const { settings, can, featureFlags } = useAppContext();
+  const { settings, can } = useAppContext();
   const groups = adminNavGroups({
     usingTemplates: Boolean(settings.using_templates),
     canManageModules: can("modules"),
-    flowsEnabled: featureFlags.flows
+    flowsEnabled: settings.flows_enabled === true
   });
 
   return (

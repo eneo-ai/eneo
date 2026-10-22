@@ -9,6 +9,7 @@ from fastapi import Request
 
 from eneo.actors.actors.space_actor import SpaceActor, SpaceRole
 from eneo.authentication.access_denial_code import AccessDenialCode
+from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_runtime_paths import (
     build_published_flow_runtime_endpoint_template,
@@ -26,7 +27,7 @@ from eneo.main.exceptions import NotFoundException
 from eneo.roles.permissions import Permission
 
 if TYPE_CHECKING:
-    from eneo.flows.domain.flow import Flow
+    from eneo.flows.domain.flow import Flow, FlowSparse
     from eneo.spaces.space import Space
 
 
@@ -88,10 +89,7 @@ def _require_flow_reader_actor(
     return actor
 
 
-def _can_override_flow_owner(
-    container: Container,
-    access_context: flow_access_context.FlowAccessContext,
-) -> bool:
+def _can_override_flow_owner(container: Container, actor: SpaceActor | None) -> bool:
     # Current draft-governance policy is intentionally narrow:
     # - the draft owner always keeps edit authority
     # - tenant admins may override draft ownership tenant-wide
@@ -100,7 +98,6 @@ def _can_override_flow_owner(
     user = container.user()
     if Permission.ADMIN in user.permissions:
         return True
-    actor = access_context.actor
     if actor is None:
         return False
     return actor.get_current_role() == SpaceRole.OWNER
@@ -117,15 +114,16 @@ class FlowOwnerRequiredException(FlowUnauthorizedException):
 
 def ensure_can_mutate_flow_draft(
     container: Container,
-    access_context: flow_access_context.FlowAccessContext,
+    *,
+    flow: FlowSparse,
+    actor: SpaceActor | None,
 ) -> None:
     """Enforce the current human draft-ownership override rules for flow authoring."""
     user = container.user()
-    flow = access_context.flow
     owner_user_id = flow.owner_user_id or flow.created_by_user_id
     if owner_user_id == user.id:
         return
-    if _can_override_flow_owner(container, access_context):
+    if _can_override_flow_owner(container, actor):
         return
     raise FlowOwnerRequiredException()
 
@@ -202,15 +200,126 @@ async def _require_flow_draft_mutation_access(
         required_access=FlowApiAction.EDIT,
         allow_service_key_principals=allow_service_key_principals,
     )
-    actor = access_context.actor
+    _ensure_can_mutate(
+        container,
+        flow=access_context.flow,
+        actor=access_context.actor,
+        can_mutate=can_mutate,
+        permission_message=permission_message,
+    )
+    return access_context
+
+
+def _ensure_can_mutate(
+    container: Container,
+    *,
+    flow: FlowSparse,
+    actor: SpaceActor | None,
+    can_mutate: Callable[[SpaceActor], bool],
+    permission_message: str,
+) -> None:
     if actor is None or not can_mutate(actor):
         raise FlowUnauthorizedException(
             permission_message,
             code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
             context={"auth_layer": "space_membership"},
         )
-    ensure_can_mutate_flow_draft(container, access_context)
-    return access_context
+    ensure_can_mutate_flow_draft(container, flow=flow, actor=actor)
+
+
+def _can_edit(actor: SpaceActor) -> bool:
+    return actor.can_edit_flows()
+
+
+def _can_delete(actor: SpaceActor) -> bool:
+    return actor.can_delete_flows()
+
+
+def _can_publish(actor: SpaceActor) -> bool:
+    return actor.can_publish_flows()
+
+
+_EDIT_PERMISSION_MESSAGE = "You do not have permission to edit flows in this space."
+_DELETE_PERMISSION_MESSAGE = "You do not have permission to delete flows in this space."
+_PUBLISH_PERMISSION_MESSAGE = (
+    "You do not have permission to publish flows in this space."
+)
+
+
+@dataclass(frozen=True, slots=True)
+class FlowPermissions:
+    """What a caller may do with a flow: whether each action's access checks
+    let them through. The flow's state (published or not) is the action's
+    own concern."""
+
+    can_edit: bool
+    can_publish: bool
+    can_delete: bool
+    can_run: bool
+    can_view_runs: bool
+
+
+def flow_permissions(
+    container: Container,
+    *,
+    flow: FlowSparse,
+    actor: SpaceActor | None,
+    scope_filter: ScopeFilter,
+) -> FlowPermissions:
+    """The caller's permissions on ``flow`` in its space, as ``actor`` holds
+    them, by the checks the endpoints make: editing, publishing and deleting
+    as ``require_flow_edit_access``, ``require_flow_publish_access`` and
+    ``require_flow_delete_access``; running as run creation, and reading runs
+    as the run list, through ``enforce_flow_scope``."""
+
+    def allowed(check: Callable[[], None]) -> bool:
+        try:
+            check()
+        except (FlowUnauthorizedException, NotFoundException):
+            return False
+        return True
+
+    def mutation(can_mutate: Callable[[SpaceActor], bool], message: str) -> bool:
+        def check() -> None:
+            flow_access_context.check_flow_access(
+                container,
+                flow,
+                scope_filter=scope_filter,
+                required_access=FlowApiAction.EDIT,
+            )
+            _ensure_can_mutate(
+                container,
+                flow=flow,
+                actor=actor,
+                can_mutate=can_mutate,
+                permission_message=message,
+            )
+
+        return allowed(check)
+
+    def scoped(action: FlowApiAction, *, published_for_service_key: bool) -> bool:
+        reader = actor
+        if reader is None:
+            return False
+        return allowed(
+            lambda: flow_access_context.check_flow_scope(
+                container,
+                flow,
+                actor=reader,
+                scope_filter=scope_filter,
+                required_access=action,
+                allow_service_key_principals=True,
+                require_published_for_service_key=published_for_service_key,
+            )
+        )
+
+    return FlowPermissions(
+        can_edit=mutation(_can_edit, _EDIT_PERMISSION_MESSAGE),
+        can_publish=mutation(_can_publish, _PUBLISH_PERMISSION_MESSAGE),
+        can_delete=mutation(_can_delete, _DELETE_PERMISSION_MESSAGE),
+        can_run=scoped(FlowApiAction.RUN, published_for_service_key=True),
+        can_view_runs=scoped(FlowApiAction.VIEW, published_for_service_key=False),
+    )
 
 
 async def require_flow_edit_access(
@@ -224,8 +333,8 @@ async def require_flow_edit_access(
         request,
         container,
         flow_id=flow_id,
-        can_mutate=lambda actor: actor.can_edit_flows(),
-        permission_message="You do not have permission to edit flows in this space.",
+        can_mutate=_can_edit,
+        permission_message=_EDIT_PERMISSION_MESSAGE,
         allow_service_key_principals=allow_service_key_principals,
     )
 
@@ -240,8 +349,8 @@ async def require_flow_delete_access(
         request,
         container,
         flow_id=flow_id,
-        can_mutate=lambda actor: actor.can_delete_flows(),
-        permission_message="You do not have permission to delete flows in this space.",
+        can_mutate=_can_delete,
+        permission_message=_DELETE_PERMISSION_MESSAGE,
     )
 
 
@@ -255,8 +364,8 @@ async def require_flow_publish_access(
         request,
         container,
         flow_id=flow_id,
-        can_mutate=lambda actor: actor.can_publish_flows(),
-        permission_message="You do not have permission to publish flows in this space.",
+        can_mutate=_can_publish,
+        permission_message=_PUBLISH_PERMISSION_MESSAGE,
     )
 
 
@@ -270,16 +379,18 @@ async def require_flow_unpublish_access(
         request,
         container,
         flow_id=flow_id,
-        can_mutate=lambda actor: actor.can_publish_flows(),
+        can_mutate=_can_publish,
         permission_message="You do not have permission to unpublish flows in this space.",
     )
 
 
 __all__ = [
     "FlowOwnerRequiredException",
+    "FlowPermissions",
     "PublishedFlowRuntimeAccess",
     "SERVICE_KEY_ADMIN_REQUIRED_MESSAGE",
     "ensure_can_mutate_flow_draft",
+    "flow_permissions",
     "require_flow_current_definition_access",
     "require_flow_delete_access",
     "require_flow_edit_access",
