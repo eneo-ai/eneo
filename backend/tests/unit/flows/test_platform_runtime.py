@@ -28,9 +28,13 @@ from eneo.tasks.contracts import (
     TaskEnqueueStatus,
 )
 from eneo.tasks.routing import (
+    FLOW_DELIVER_AUDIT_OUTBOX_TASK,
     FLOW_DELIVER_WEBHOOK_OUTBOX_TASK,
     FLOW_DRAIN_RETIRED_RUNS_TASK,
     FLOW_EXECUTE_TASK,
+    FLOW_RECONCILE_REVIEW_EXPIRY_TASK,
+    FLOW_RECONCILE_RUNNING_TASK,
+    FLOW_REDISPATCH_STALE_QUEUED_TASK,
     TASK_CAPACITY_BY_NAME,
     task_queue_routing,
 )
@@ -170,7 +174,22 @@ def test_platform_workers_isolate_execution_from_maintenance_capacity() -> None:
     ] == [FLOW_EXECUTE_TASK]
     assert PlatformExecutionWorkerSettings.cron_jobs == []
     assert PlatformMaintenanceWorkerSettings.functions == []
-    assert len(PlatformMaintenanceWorkerSettings.cron_jobs) == 6
+    # Every recovery and delivery job is scheduled on the maintenance worker:
+    # stale running runs, expired reviews, lost queued deliveries, retired
+    # runs, and the audit and webhook outboxes.
+    maintenance_jobs = [job.name for job in PlatformMaintenanceWorkerSettings.cron_jobs]
+    assert sorted(maintenance_jobs) == sorted(
+        [
+            FLOW_RECONCILE_RUNNING_TASK,
+            FLOW_RECONCILE_REVIEW_EXPIRY_TASK,
+            FLOW_REDISPATCH_STALE_QUEUED_TASK,
+            FLOW_DRAIN_RETIRED_RUNS_TASK,
+            FLOW_DELIVER_AUDIT_OUTBOX_TASK,
+            FLOW_DELIVER_WEBHOOK_OUTBOX_TASK,
+        ]
+    )
+    for name in maintenance_jobs:
+        assert TASK_CAPACITY_BY_NAME[name] is TaskCapacityClass.MAINTENANCE, name
     assert PlatformExecutionWorkerSettings.queue_name != (
         PlatformMaintenanceWorkerSettings.queue_name
     )
