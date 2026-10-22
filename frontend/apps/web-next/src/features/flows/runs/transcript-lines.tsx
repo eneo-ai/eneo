@@ -804,9 +804,9 @@ export function TranscriptLines({
   }, [unsaved]);
 
   /** What the document listeners read: the latest lines, corrections and player. */
-  const latest = useRef({ shown, editing, seek: playback?.seek });
+  const latest = useRef({ shown, editing, seek: playback?.seek, announce, t });
   useEffect(() => {
-    latest.current = { shown, editing, seek: playback?.seek };
+    latest.current = { shown, editing, seek: playback?.seek, announce, t };
   });
 
   // Text marked in the transcript: the toolbar acts on it once it is inside one transcript.
@@ -846,13 +846,13 @@ export function TranscriptLines({
         setPickProblem(null);
         return;
       }
-      if (!had) announce(t("flow_transcript_selection_announce"));
+      if (!had) latest.current.announce(latest.current.t("flow_transcript_selection_announce"));
       had = true;
       setPicked(spans);
     };
     document.addEventListener("selectionchange", onChange);
     return () => document.removeEventListener("selectionchange", onChange);
-  }, [markable, announce, t]);
+  }, [markable]);
 
   // A click on a word (not the end of marking text) plays from that word. The
   // pointer's shortcut: the keyboard plays a line from its time.
