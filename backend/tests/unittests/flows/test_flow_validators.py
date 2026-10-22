@@ -143,6 +143,70 @@ def test_malformed_section_config_returns_structured_authoring_error(processing)
     assert runtime_variables_for_step(input_config) == RESERVED_RUNTIME_VARIABLES
 
 
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"output_type": "text"},
+        {"output_type": "json"},
+        {"output_mode": "http_post", "output_config": {"url": "https://example.com"}},
+    ],
+)
+def test_long_material_is_accepted_on_a_completion_step(updates):
+    step = _step(input_config={"long_material": {"mode": "digest"}}, **updates)
+
+    _validate_step_mapped_execution(step=flow_step_validation_view_from_flow_step(step))
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {"output_mode": "compose_text", "output_type": "text"},
+        {"input_config": {"text_processing": {"mode": "summarize"}}},
+        {
+            "step_order": 2,
+            "input_source": "previous_step",
+            "input_type": "json",
+            "input_config": {"item_map": {"enabled": True, "max_items": 2}},
+        },
+        {
+            "input_type": "document",
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "execution_mode": "per_source",
+                    "max_files": 2,
+                }
+            },
+        },
+    ],
+)
+def test_long_material_needs_a_plain_completion_step(updates):
+    step = _step(**updates)
+    step.input_config = {
+        **(step.input_config or {}),
+        "long_material": {"mode": "digest"},
+    }
+
+    with pytest.raises(FlowStepValidationError, match="long_material") as exc_info:
+        _validate_step_mapped_execution(
+            step=flow_step_validation_view_from_flow_step(step)
+        )
+
+    assert exc_info.value.code == FlowGraphIssueCode.FLOW_STEP_INVALID.value
+
+
+@pytest.mark.parametrize(
+    "long_material", [{"mode": "truncate"}, {"mode": "digest", "reader": "small"}]
+)
+def test_malformed_long_material_config_is_refused(long_material):
+    step = _step(input_config={"long_material": long_material})
+
+    with pytest.raises(FlowStepValidationError, match="long_material"):
+        _validate_step_mapped_execution(
+            step=flow_step_validation_view_from_flow_step(step)
+        )
+
+
 def _form_metadata(*field_names: str) -> dict:
     return {
         "form_schema": {
