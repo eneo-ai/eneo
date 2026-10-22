@@ -7,6 +7,7 @@ import {
   metadataWithSettings,
   persistedFormFields,
   renamedFormFields,
+  restrictedBeforeApproval,
   suggestedFieldName,
   type FormFieldDraft
 } from "./flow-form-fields";
@@ -111,6 +112,19 @@ describe("metadataWithSettings", () => {
     expect(metadataWithSettings(null, [], false)).toEqual({});
     expect(evidenceExportAllowed(metadataWithSettings(null, [], true))).toBe(true);
     expect(evidenceExportAllowed({ evidence_policy: { allow_export: "yes" } })).toBe(false);
+  });
+});
+
+describe("restrictedBeforeApproval", () => {
+  it("holds for a sensitive flow seen only by the uploader and reviewers before approval", () => {
+    const policy = { sensitive: true, pre_approval_visibility: "uploader_and_reviewers" };
+    expect(restrictedBeforeApproval({ care_data_policy: policy })).toBe(true);
+    expect(restrictedBeforeApproval({ care_data_policy: { ...policy, sensitive: false } })).toBe(
+      false
+    );
+    expect(restrictedBeforeApproval({ care_data_policy: { sensitive: true } })).toBe(false);
+    expect(restrictedBeforeApproval({ care_data_policy: [] })).toBe(false);
+    expect(restrictedBeforeApproval(null)).toBe(false);
   });
 });
 

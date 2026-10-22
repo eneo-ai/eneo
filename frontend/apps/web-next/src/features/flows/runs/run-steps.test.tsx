@@ -55,6 +55,36 @@ describe("RunSteps", () => {
   });
 });
 
+describe("RunSteps output", () => {
+  it("renders a step's text as Markdown and keeps its line breaks", async () => {
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
+      [
+        makeRunStep(1, {
+          output_payload_json: {
+            text: "## Beslut\n\nAnsökan **beviljas**.\n\n- Bygglov\n- Marklov\n\nTalare 1: Hej\nTalare 2: Hej igen"
+          }
+        })
+      ]
+    );
+    const { container } = renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+    expect(await within(card).findByRole("heading", { name: "Beslut" })).toBeTruthy();
+    expect(within(card).getByText("beviljas").outerHTML).toMatch(/strong/);
+    expect(
+      within(card)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent)
+    ).toEqual(["Bygglov", "Marklov"]);
+    // Lines written one under the other stay that way.
+    const lines = within(card).getByText(/Talare 1: Hej/);
+    expect(lines.tagName).toBe("P");
+    expect(lines.textContent).toBe("Talare 1: Hej\nTalare 2: Hej igen");
+    expect(lines.closest(".eneo-answer")?.className).toContain("[&_p]:whitespace-pre-line");
+    await expectNoAxeViolations(container);
+  });
+});
+
 describe("RunSteps copying", () => {
   it("copies a step's output, its structured value as JSON", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);

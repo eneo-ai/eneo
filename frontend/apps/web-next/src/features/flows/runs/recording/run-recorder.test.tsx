@@ -299,6 +299,7 @@ describe("RunRecorder in the start dialog", () => {
     expect(FakeUpload.sent[0]!.name).toMatch(/^recording-[0-9a-f-]+-seg00-.*Z\.webm$/);
     expect(button(dialog, messages.flow_transcript_rec_continue)).toBeTruthy();
 
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
     fireEvent.click(button(dialog, messages.flow_runs_start_submit));
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
     expect(startBody()?.step_inputs).toEqual({ "step-1": { file_ids: ["file-1"] } });
@@ -318,6 +319,7 @@ describe("RunRecorder in the start dialog", () => {
     await waitFor(() => expect(FakeUpload.sent).toHaveLength(2));
     expect(FakeUpload.sent[1]!.name).toMatch(/-seg01-/);
 
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
     fireEvent.click(button(dialog, messages.flow_runs_start_submit));
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
     expect(startBody()?.step_inputs).toEqual({
@@ -331,7 +333,7 @@ describe("RunRecorder in the start dialog", () => {
     const { dialog } = await openDialog(audioContract());
     fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
     await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
-    fireEvent.click(button(dialog, messages.flow_runs_start_submit));
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
     expect(await within(dialog).findByText(messages.flow_transcript_rec_stop_first)).toBeTruthy();
     expect(startBody()).toBeUndefined();
   });
@@ -407,6 +409,7 @@ describe("RunRecorder in the start dialog", () => {
     await waitFor(() => expect(socket.texts).toEqual([{ type: "stop", produced_samples: 1600 }]));
 
     // The run waits for the final text, which names the stored transcript.
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
     fireEvent.click(button(dialog, messages.flow_runs_start_submit));
     act(() => {
       socket.receive({
@@ -604,6 +607,7 @@ describe("Keeping a recording on the device", () => {
     );
     await waitFor(() => expect(device.db.parts.size).toBe(3));
 
+    fireEvent.click(button(dialog, messages.flow_runs_summary_next));
     fireEvent.click(button(dialog, messages.flow_runs_start_submit));
     await waitFor(() => expect(onStarted).toHaveBeenCalled());
     expect(startBody()?.step_inputs).toEqual({

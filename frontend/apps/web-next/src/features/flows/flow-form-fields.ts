@@ -1,8 +1,9 @@
 /**
- * The flow's run form (`metadata_json.form_schema.fields`) and its evidence
- * export switch (`metadata_json.evidence_policy.allow_export`), as the
- * reference editor reads and writes them (`flowFormSchema.ts`,
- * `flowEvidencePolicy.ts` in apps/web). Pure and unit-tested.
+ * The flow's run form (`metadata_json.form_schema.fields`), its evidence
+ * export switch (`metadata_json.evidence_policy.allow_export`) and its care
+ * data policy (`metadata_json.care_data_policy`), as the reference editor
+ * reads and writes them (`flowFormSchema.ts`, `flowEvidencePolicy.ts`,
+ * `flowCareDataPolicy.ts` in apps/web). Pure and unit-tested.
  */
 
 export const FORM_FIELD_TYPES = [
@@ -206,6 +207,15 @@ export function formFieldProblems(fields: readonly FormFieldDraft[]): FormFieldP
 export function evidenceExportAllowed(metadata: Metadata): boolean {
   const policy = isRecord(metadata?.evidence_policy) ? metadata.evidence_policy : {};
   return policy.allow_export === true;
+}
+
+/**
+ * A sensitive flow whose material only the uploader and the reviewers may
+ * handle until its result is approved.
+ */
+export function restrictedBeforeApproval(metadata: Metadata): boolean {
+  const policy = isRecord(metadata?.care_data_policy) ? metadata.care_data_policy : {};
+  return policy.sensitive === true && policy.pre_approval_visibility === "uploader_and_reviewers";
 }
 
 /**

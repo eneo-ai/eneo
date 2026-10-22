@@ -17,6 +17,7 @@ import { QuietBanner } from "@/components/astryx/banner";
 import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { toast } from "@/lib/toast";
+import { restrictedBeforeApproval } from "../flow-form-fields";
 import type { FlowPublic } from "../flows-api";
 import { RecordingKeeper } from "./recording/recording-keeper";
 import { RunRecorder, type RecorderHandle } from "./recording/run-recorder";
@@ -55,13 +56,14 @@ import {
   type RunCreateRequest,
   type RunPublic
 } from "./runs-api";
-import { withRunLabel } from "./start-run-checks";
+import { startSummary, withRunLabel, type StartSummary } from "./start-run-checks";
 import {
   RunLabelField,
   ReuseLastInput,
   TemplateReadiness,
   useAudioLengthCheck
 } from "./start-run-extras";
+import { StartRunSummary } from "./start-run-summary";
 import { useRuntimeUploads } from "./use-runtime-uploads";
 
 type ServerProblems = {
@@ -71,12 +73,16 @@ type ServerProblems = {
 
 const NO_SERVER_PROBLEMS: ServerProblems = { fields: {}, inputs: {} };
 
-/** What the dialog asks of its form before it closes. */
+/** What the dialog asks of its form. */
 type StartRunFormHandle = {
   /** A recording runs, or recorded parts would be thrown away with the form. */
   holdsRecording: () => boolean;
+  /** Something is filled in or uploaded that closing the form would throw away. */
+  holdsInput: () => boolean;
   /** The form's recordings are thrown away, from this device too. */
   discardRecordings: () => void;
+  /** Moves focus to the form's first control, after going back from the summary. */
+  focusForm: () => void;
 };
 
 /** The record without `key`. */
@@ -85,7 +91,7 @@ function without(record: Record<string, string>, key: string): Record<string, st
 }
 
 /** The notices that keep the flow from running, or that the person should know first. */
-function ContractNotices({ contract }: { contract: RunContract }) {
+function ContractNotices({ flow, contract }: { flow: FlowPublic; contract: RunContract }) {
   const t = useTranslations();
   const classification = contract.security_classification;
   const labels = contract.transcription?.speaker_labels;
@@ -97,6 +103,14 @@ function ContractNotices({ contract }: { contract: RunContract }) {
           status="info"
           title={t("flow_runs_classification_title", { name: classification.name })}
           description={classification.description?.trim() || undefined}
+          collapsible={false}
+        />
+      ) : null}
+      {restrictedBeforeApproval(flow.metadata_json) ? (
+        <QuietBanner
+          status="warning"
+          title={t("flow_runs_sensitive_title")}
+          description={t("flow_runs_sensitive_body")}
           collapsible={false}
         />
       ) : null}
@@ -141,6 +155,8 @@ function StartRunForm({
   flow,
   contract,
   formId,
+  reviewing,
+  onReview,
   onPendingChange,
   onStarted,
   onSaveForLater,
@@ -149,6 +165,10 @@ function StartRunForm({
   flow: FlowPublic;
   contract: RunContract;
   formId: string;
+  /** The summary shows: the form is hidden, and sending it starts the run. */
+  reviewing: boolean;
+  /** Shows the summary of what the form sends, or (null) the form again. */
+  onReview: (summary: StartSummary | null) => void;
   onPendingChange: (pending: boolean) => void;
   onStarted: (run: RunPublic) => void;
   /** Closes the form; its recordings stay on the device to continue later. */
@@ -172,13 +192,6 @@ function StartRunForm({
 
   // The form's recordings, kept on the device until the run takes them or they are thrown away.
   const [keeper] = useState(() => new RecordingKeeper(flow.id));
-
-  useImperativeHandle(handleRef, () => ({
-    holdsRecording: () =>
-      [...recorders.current.values()].some((recorder) => recorder.busy()) ||
-      Object.values(uploads).some((entries) => entries.some((entry) => entry.recording)),
-    discardRecordings: () => void keeper.forgetAll()
-  }));
 
   function recorderRef(stepId: string) {
     return (handle: RecorderHandle | null) => {
@@ -238,6 +251,22 @@ function StartRunForm({
   }
 
   const [runLabel, setRunLabel] = useState("");
+
+  useImperativeHandle(handleRef, () => ({
+    holdsRecording: () =>
+      [...recorders.current.values()].some((recorder) => recorder.busy()) ||
+      Object.values(uploads).some((entries) => entries.some((entry) => entry.recording)),
+    holdsInput: () =>
+      Object.values(values).some((value) =>
+        Array.isArray(value) ? value.some((item) => item.trim()) : value.trim() !== ""
+      ) ||
+      freeText.trim() !== "" ||
+      runLabel.trim() !== "" ||
+      Object.values(uploads).some((entries) => entries.length > 0),
+    discardRecordings: () => void keeper.forgetAll(),
+    focusForm: () => void focusFirstControl(formId)
+  }));
+
   const screenAudio = useAudioLengthCheck((stepId, message) =>
     setServer((current) => ({ ...current, inputs: { ...current.inputs, [stepId]: message } }))
   );
@@ -265,6 +294,8 @@ function StartRunForm({
       const message = refusalText(error, t);
       const targets = refusalTargets(error, contract);
       const first = targets[0];
+      // The person fixes what the core refused in the form.
+      onReview(null);
       if (first?.kind === "field") {
         flushSync(() =>
           setServer((current) => ({
@@ -298,9 +329,13 @@ function StartRunForm({
     }
   });
 
-  async function submit(event: React.SubmitEvent<HTMLFormElement>) {
+  function submit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (start.isPending || waitingForText) return;
+    if (reviewing) {
+      void startNow();
+      return;
+    }
     const foundFields = fieldProblems(fields, values);
     const foundInputs = inputProblems(contract, uploads);
     flushSync(() => {
@@ -334,6 +369,11 @@ function StartRunForm({
       showFormProblem(t("flow_runs_blocked"));
       return;
     }
+    // Everything can be sent: the person sees what before the run starts.
+    onReview(startSummary(contract, { runLabel, values, freeText, uploads }));
+  }
+
+  async function startNow() {
     // The final text of a recording heard whole may spare the run transcribing it again.
     const handles = [...recorders.current.values()];
     if (handles.some((recorder) => recorder.finishing())) {
@@ -368,13 +408,15 @@ function StartRunForm({
   const maxSpeakerOption = contract.transcription?.max_speakers;
 
   return (
+    // Kept while the summary shows: the uploads and recordings live in it.
     <form
       id={formId}
+      hidden={reviewing}
       noValidate
-      onSubmit={(event) => void submit(event)}
+      onSubmit={submit}
       className="flex flex-col gap-5"
     >
-      <ContractNotices contract={contract} />
+      <ContractNotices flow={flow} contract={contract} />
       <div
         ref={summaryRef}
         tabIndex={-1}
@@ -519,7 +561,8 @@ function StartRunForm({
  * each step's files (uploaded as they are picked), the transcription choices
  * the flow offers, and what keeps it from running. Problems show at the
  * field they concern, focus moves to the first, and a refusal from the core
- * lands at the field it names.
+ * lands at the field it names. A form that can be sent shows a summary of
+ * what the run is sent before it starts, as the dialog's last step.
  */
 export function StartRunDialog({
   flow,
@@ -536,13 +579,40 @@ export function StartRunDialog({
   const formId = useId();
   const [pending, setPending] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
+  // What closing would throw away: a recording, or what was filled in and uploaded.
+  const [closeLoses, setCloseLoses] = useState<"recording" | "input">("recording");
+  // What the run is sent, while the summary step shows; null on the form.
+  const [summary, setSummary] = useState<StartSummary | null>(null);
+  // Opened again, the dialog starts at the form.
+  const [shownOpen, setShownOpen] = useState(open);
+  if (shownOpen !== open) {
+    setShownOpen(open);
+    setSummary(null);
+  }
+  const summaryHeading = useRef<HTMLHeadingElement>(null);
   const form = useRef<StartRunFormHandle>(null);
   const contract = useQuery({ ...runContractQueryOptions(flow.id), enabled: open });
+
+  function review(next: StartSummary | null) {
+    flushSync(() => setSummary(next));
+    if (next) summaryHeading.current?.focus();
+  }
+
+  function backToForm() {
+    review(null);
+    form.current?.focusForm();
+  }
 
   function requestOpenChange(next: boolean) {
     if (!next && pending) return;
     // A recording exists only in this form: closing it throws the recording away.
     if (!next && form.current?.holdsRecording()) {
+      setCloseLoses("recording");
+      setConfirmClose(true);
+      return;
+    }
+    if (!next && form.current?.holdsInput()) {
+      setCloseLoses("input");
       setConfirmClose(true);
       return;
     }
@@ -563,18 +633,29 @@ export function StartRunDialog({
       );
     } else {
       content = (
-        <StartRunForm
-          flow={flow}
-          contract={contract.data}
-          formId={formId}
-          onPendingChange={setPending}
-          onStarted={onStarted}
-          onSaveForLater={() => {
-            toast.success(t("flow_transcript_save_later_done"));
-            onOpenChange(false);
-          }}
-          handleRef={form}
-        />
+        <>
+          {summary ? (
+            <StartRunSummary
+              summary={summary}
+              headingRef={summaryHeading}
+              notices={<ContractNotices flow={flow} contract={contract.data} />}
+            />
+          ) : null}
+          <StartRunForm
+            flow={flow}
+            contract={contract.data}
+            formId={formId}
+            reviewing={summary !== null}
+            onReview={review}
+            onPendingChange={setPending}
+            onStarted={onStarted}
+            onSaveForLater={() => {
+              toast.success(t("flow_transcript_save_later_done"));
+              onOpenChange(false);
+            }}
+            handleRef={form}
+          />
+        </>
       );
     }
   }
@@ -601,17 +682,27 @@ export function StartRunDialog({
             open ? (
               <LayoutFooter>
                 <div className="flex flex-wrap justify-end gap-2">
-                  <Button
-                    label={t("cancel")}
-                    isDisabled={pending}
-                    onClick={() => requestOpenChange(false)}
-                  />
+                  {summary ? (
+                    <Button
+                      key="back"
+                      label={t("back")}
+                      isDisabled={pending}
+                      onClick={backToForm}
+                    />
+                  ) : (
+                    <Button
+                      key="cancel"
+                      label={t("cancel")}
+                      isDisabled={pending}
+                      onClick={() => requestOpenChange(false)}
+                    />
+                  )}
                   {contract.data ? (
                     <Button
                       type="submit"
                       form={formId}
                       variant="primary"
-                      label={t("flow_runs_start_submit")}
+                      label={summary ? t("flow_runs_start_submit") : t("flow_runs_summary_next")}
                       isLoading={pending}
                       isInterruptible
                     />
@@ -625,13 +716,22 @@ export function StartRunDialog({
       <AlertDialog
         isOpen={confirmClose}
         onOpenChange={setConfirmClose}
-        title={t("flow_transcript_close_title")}
-        description={t("flow_transcript_close_body")}
-        actionLabel={t("flow_transcript_close_confirm")}
-        cancelLabel={t("flow_transcript_close_cancel")}
+        {...(closeLoses === "recording"
+          ? {
+              title: t("flow_transcript_close_title"),
+              description: t("flow_transcript_close_body"),
+              actionLabel: t("flow_transcript_close_confirm"),
+              cancelLabel: t("flow_transcript_close_cancel")
+            }
+          : {
+              title: t("flow_run_dialog_close_confirm_title"),
+              description: t("flow_run_dialog_close_confirm_message"),
+              actionLabel: t("flow_run_dialog_close_confirm_discard"),
+              cancelLabel: t("flow_run_dialog_close_confirm_keep")
+            })}
         onAction={() => {
           setConfirmClose(false);
-          form.current?.discardRecordings();
+          if (closeLoses === "recording") form.current?.discardRecordings();
           onOpenChange(false);
         }}
       />

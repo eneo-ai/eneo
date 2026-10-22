@@ -443,7 +443,11 @@ export function FlowPage({ flowId }: { flowId: string }) {
             className="flex min-w-0 flex-col gap-6"
           >
             {tab === "runs" ? (
-              <FlowRunsList flowId={flow.id} spaceRouteId={routeId} />
+              <FlowRunsList
+                flowId={flow.id}
+                spaceRouteId={routeId}
+                publishedVersion={flow.published_version ?? null}
+              />
             ) : openedStep?.id ? (
               <section
                 ref={editorRef}

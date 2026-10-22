@@ -18,7 +18,11 @@ import type { RunStep } from "./runs-api";
 
 const INPUT_FORMATS: ReadonlySet<string> = new Set(["audio", "document", "file"]);
 
-/** How a step read long material: in one go, or part by part and where each part sat. */
+/**
+ * How a step read long material: in one go, or part by part, where each part
+ * sat and whether the result keeps an entry per part or summarized them
+ * into one.
+ */
 export function StepSectionReading({ payload }: { payload: RunStep["output_payload_json"] }) {
   const t = useTranslations();
   const reading = sectionReading(payload);
@@ -29,7 +33,11 @@ export function StepSectionReading({ payload }: { payload: RunStep["output_paylo
       <p className="text-ax-text-secondary m-0 text-sm">
         {count === 1
           ? t("flow_run_sections_read_one")
-          : t("flow_run_journey_sections_read", { count })}
+          : reading.result === "per_part"
+            ? t("flow_run_sections_read_each", { count })
+            : reading.result === "one"
+              ? t("flow_run_sections_read_summarized", { count })
+              : t("flow_run_journey_sections_read", { count })}
       </p>
       {count > 1 ? (
         <p className="text-ax-text-secondary m-0 text-xs">

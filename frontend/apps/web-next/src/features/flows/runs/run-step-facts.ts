@@ -15,8 +15,25 @@ function asObject(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-/** Where each part of a step that read its material part by part sits, in percent. */
-export type SectionReading = { ranges: { from: number; to: number }[] };
+/**
+ * How a step read its material part by part: where each part sits, in
+ * percent, and what the result holds. `result` is `per_part` when it holds
+ * one entry per part and `one` when the parts were summarized into a single
+ * entry (the two text processing modes, as their output shows them), or
+ * null when the parts or the entries cannot be counted.
+ */
+export type SectionReading = {
+  ranges: { from: number; to: number }[];
+  result: "per_part" | "one" | null;
+};
+
+/** The entries of a section-processed result: its one list (`{ items: [...] }`). */
+function resultEntries(structured: unknown): number | null {
+  const record = asObject(structured);
+  if (!record) return null;
+  const lists = Object.values(record).filter(Array.isArray);
+  return lists.length === 1 && Object.keys(record).length === 1 ? lists[0]!.length : null;
+}
 
 export function sectionReading(payload: RunStep["output_payload_json"]): SectionReading | null {
   const manifest = asObject(asObject(payload)?.section_manifest);
@@ -32,7 +49,17 @@ export function sectionReading(payload: RunStep["output_payload_json"]): Section
       to: Math.round((core.end_char / length) * 100)
     });
   }
-  return ranges.length > 0 ? { ranges } : null;
+  if (ranges.length === 0) return null;
+  const entries = resultEntries(asObject(payload)?.structured);
+  const result =
+    ranges.length < 2 || entries === null
+      ? null
+      : entries === ranges.length
+        ? "per_part"
+        : entries === 1
+          ? "one"
+          : null;
+  return { ranges, result };
 }
 
 /**

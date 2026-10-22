@@ -25,8 +25,26 @@ describe("sectionReading", () => {
       ranges: [
         { from: 0, to: 25 },
         { from: 25, to: 100 }
-      ]
+      ],
+      result: null
     });
+  });
+
+  it("tells a result kept per part from one summarized, by the entries it holds", () => {
+    const manifest = {
+      character_length: 300,
+      sections: [0, 100, 200].map((start) => ({
+        core: { start_char: start, end_char: start + 100 }
+      }))
+    };
+    const read = (structured: unknown) =>
+      sectionReading({ section_manifest: manifest, structured })?.result;
+    expect(read({ items: [{ a: 1 }, { a: 2 }, { a: 3 }] })).toBe("per_part");
+    expect(read({ items: [{ a: 6 }] })).toBe("one");
+    // Entries that match neither, or a result without one list, say nothing.
+    expect(read({ items: [{ a: 1 }, { a: 2 }] })).toBeNull();
+    expect(read({ items: [], note: "x" })).toBeNull();
+    expect(read(undefined)).toBeNull();
   });
 
   it("reads a malformed manifest as nothing", () => {

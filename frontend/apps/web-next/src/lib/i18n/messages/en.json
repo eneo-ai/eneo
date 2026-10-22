@@ -8998,5 +8998,19 @@
   "flow_error_flow_authoring_model_below_classification": "The model is not approved for the space's security classification. Choose another model or use the default.",
   "flow_error_flow_authoring_model_without_tools": "The model cannot use tools, which the chat needs to read and change the flow. Choose another model.",
   "flow_error_flow_authoring_model_unavailable": "The model is not enabled in the organisation. Choose another model.",
-  "flow_error_flow_authoring_reasoning_effort_unsupported": "The model does not offer that reasoning effort. Choose another level or the model's default."
+  "flow_error_flow_authoring_reasoning_effort_unsupported": "The model does not offer that reasoning effort. Choose another level or the model's default.",
+  "flow_runs_sensitive_title": "Sensitive flow: limited access before approval",
+  "flow_runs_sensitive_body": "Until the result is finally approved, only the person who uploaded the material and specifically authorised reviewers may handle the content and evidence.",
+  "flow_runs_summary_next": "Review",
+  "flow_runs_summary_title": "Included in this run",
+  "flow_runs_summary_ready": "Everything required is ready. Check the details and start the run, or go back to change them.",
+  "flow_runs_summary_empty": "Nothing is filled in for this run.",
+  "flow_run_sections_read_each": "Read part by part: {count} parts. Each part gave one entry in the result, in the order of the material.",
+  "flow_run_sections_read_summarized": "Read part by part: {count} parts, summarized step by step into one result.",
+  "flow_editor_tools_long_material_result": "Result",
+  "flow_editor_tools_long_material_result_digest": "One combined answer from the parts' notes",
+  "flow_run_dialog_close_confirm_title": "Close without running the flow?",
+  "flow_run_dialog_close_confirm_message": "Uploaded files and filled-in fields are lost if you close the dialog.",
+  "flow_run_dialog_close_confirm_discard": "Close anyway",
+  "flow_run_dialog_close_confirm_keep": "Keep filling in"
 }

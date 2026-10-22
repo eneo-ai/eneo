@@ -32,6 +32,7 @@ import {
 } from "./run-step-extras";
 import { runtimeInputSummary, speakerMapping } from "./run-step-facts";
 import { StepSpeakerMapping } from "./run-step-speakers";
+import { RunText } from "./run-text";
 import type { RunStep } from "./runs-api";
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -64,7 +65,8 @@ function stepDurationMs(result: RunStep): number | null {
 
 /**
  * What a step produced, with a button that copies it: the speakers a
- * speaker-mapping step named, a structured value (marked as JSON), or text.
+ * speaker-mapping step named, a structured value (marked as JSON), or text
+ * (rendered as Markdown, its line breaks kept).
  */
 function StepOutput({ flowId, runId, result }: { flowId: string; runId: string; result: RunStep }) {
   const t = useTranslations();
@@ -86,7 +88,7 @@ function StepOutput({ flowId, runId, result }: { flowId: string; runId: string; 
           </div>
         ) : (
           <div className="flex flex-col gap-1">
-            <p className="text-ax-text text-sm break-words whitespace-pre-wrap">{text}</p>
+            <RunText text={text ?? ""} />
             {payload?.text_overflow ? (
               <p className="text-ax-text-secondary text-xs">{t("flow_runs_output_overflow")}</p>
             ) : null}

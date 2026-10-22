@@ -1,16 +1,18 @@
 import {
   isMultiValue,
   orderedFields,
+  orderedInputs,
   takesFreeText,
   type FieldValue,
-  type FormValues
+  type FormValues,
+  type UploadsByStep
 } from "./run-contract";
-import type { RunContract, RunCreateRequest, RuntimeInput } from "./runs-api";
+import type { RunContract, RunCreateRequest, RunFormField, RuntimeInput } from "./runs-api";
 
 /**
  * Pure rules for the start dialog's extras: the run's own name, the audio
- * check against the length one file of an input can hold, and the form as a
- * previous run filled it.
+ * check against the length one file of an input can hold, the form as a
+ * previous run filled it, and the summary shown before the run starts.
  */
 
 /** The most characters a run's name may have, as the core counts them (code points). */
@@ -112,4 +114,67 @@ export function takesReusableInput(
   contract: Pick<RunContract, "form_fields" | "steps_requiring_input">
 ): boolean {
   return (contract.form_fields ?? []).length > 0 || takesFreeText(contract);
+}
+
+/** What the run is sent, as the summary before starting lists it. */
+export type StartSummary = {
+  /** The run's name, or null when it has none. */
+  runLabel: string | null;
+  /** The form fields given a value, in form order, each value as one line of text. */
+  fields: { field: RunFormField; value: string }[];
+  /** The free text, or null when the form takes none or it is blank. */
+  freeText: string | null;
+  /** The stored files of each step that has any, in step order. */
+  files: { input: RuntimeInput; files: { key: string; name: string; size: number }[] }[];
+};
+
+function shownValue(field: RunFormField, value: FieldValue | undefined): string {
+  if (isMultiValue(field)) {
+    const items = Array.isArray(value) ? value : [];
+    return items
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0)
+      .join(", ");
+  }
+  return typeof value === "string" ? value.trim() : "";
+}
+
+/**
+ * The summary before starting: the run's name, the fields given a value, the
+ * free text and the files, as the start request will send them. Empty
+ * optional fields are left out, as they carry no answer.
+ */
+export function startSummary(
+  contract: Pick<RunContract, "form_fields" | "steps_requiring_input">,
+  choices: { runLabel: string; values: FormValues; freeText: string; uploads: UploadsByStep }
+): StartSummary {
+  const fields = orderedFields(contract).flatMap((field) => {
+    const value = shownValue(field, choices.values[field.name]);
+    return value ? [{ field, value }] : [];
+  });
+  const freeText = takesFreeText(contract) ? choices.freeText.trim() : "";
+  const files = orderedInputs(contract).flatMap((input) => {
+    const stored = (choices.uploads[input.step_id] ?? []).flatMap((entry) =>
+      entry.state === "done" && entry.fileId
+        ? [{ key: entry.key, name: entry.name, size: entry.size }]
+        : []
+    );
+    return stored.length > 0 ? [{ input, files: stored }] : [];
+  });
+  return {
+    runLabel: choices.runLabel.trim() || null,
+    fields,
+    freeText: freeText || null,
+    files
+  };
+}
+
+/** Whether the summary has nothing to list. */
+export function summaryIsEmpty(summary: StartSummary): boolean {
+  return (
+    summary.runLabel === null &&
+    summary.fields.length === 0 &&
+    summary.freeText === null &&
+    summary.files.length === 0
+  );
 }

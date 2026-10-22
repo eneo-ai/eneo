@@ -3618,5 +3618,19 @@
   "flow_error_flow_authoring_model_below_classification": "Modellen är inte godkänd för ytans säkerhetsklassning. Välj en annan modell eller använd standard.",
   "flow_error_flow_authoring_model_without_tools": "Modellen kan inte använda verktyg, och det behöver chatten för att läsa och ändra flödet. Välj en annan modell.",
   "flow_error_flow_authoring_model_unavailable": "Modellen är inte aktiverad i organisationen. Välj en annan modell.",
-  "flow_error_flow_authoring_reasoning_effort_unsupported": "Modellen har inte den resonemangsnivån. Välj en annan nivå eller modellens standard."
+  "flow_error_flow_authoring_reasoning_effort_unsupported": "Modellen har inte den resonemangsnivån. Välj en annan nivå eller modellens standard.",
+  "flow_runs_sensitive_title": "Känsligt flöde: begränsad åtkomst före godkännande",
+  "flow_runs_sensitive_body": "Innan resultatet är slutligt godkänt får bara den som laddade upp underlaget och särskilt behöriga granskare hantera innehållet och bevisunderlaget.",
+  "flow_runs_summary_next": "Granska",
+  "flow_runs_summary_title": "Det här följer med i körningen",
+  "flow_runs_summary_ready": "Allt som krävs är klart. Kontrollera uppgifterna och starta körningen, eller gå tillbaka och ändra.",
+  "flow_runs_summary_empty": "Inget är ifyllt för den här körningen.",
+  "flow_run_sections_read_each": "Läst del för del: {count} delar. Varje del gav en post i resultatet, i samma ordning som i underlaget.",
+  "flow_run_sections_read_summarized": "Läst del för del: {count} delar, sammanfattade stegvis till ett resultat.",
+  "flow_editor_tools_long_material_result": "Resultat",
+  "flow_editor_tools_long_material_result_digest": "Ett samlat svar utifrån delarnas anteckningar",
+  "flow_run_dialog_close_confirm_title": "Stäng utan att köra flödet?",
+  "flow_run_dialog_close_confirm_message": "Uppladdade filer och ifyllda fält försvinner om du stänger dialogen.",
+  "flow_run_dialog_close_confirm_discard": "Stäng ändå",
+  "flow_run_dialog_close_confirm_keep": "Fortsätt fylla i"
 }

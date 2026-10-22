@@ -11,19 +11,17 @@ import {
   useSuspenseQuery
 } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
-import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { ListError } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
-import { EneoApiError } from "@/lib/api/errors";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { CopyableValue } from "@/features/chat/debug-section";
 import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
@@ -39,8 +37,9 @@ import { refusalText, runErrorText } from "./run-messages";
 import { progressSignature, runStepViews, tokenTotal, type RunStepView } from "./run-progress";
 import { RunLiveProgress } from "./run-live-progress";
 import { RunKnowledge } from "./run-knowledge";
-import { startedByUser, starterName } from "./run-starter";
+import { starterName } from "./run-starter";
 import { RunSteps, stepTitle } from "./run-steps";
+import { RunText } from "./run-text";
 import { RunTrace } from "./run-trace";
 import { RunTranscripts } from "./run-transcript";
 import { reviewTranscriptTarget, transcriptTargets } from "./transcript";
@@ -49,33 +48,25 @@ import {
   canRedispatch,
   createPollClock,
   isAwaitingReview,
-  isCancellable,
   runDurationMs,
   runStatusView,
   shouldPoll
 } from "./run-status";
+import { CancelRunButton, RetryRunButton, runActions, type RunActionNotice } from "./run-actions";
 import { ReviewPanel } from "./review-panel";
 import {
   activeReviewQueryOptions,
-  cancelRun,
   getRunGraph,
   getRunStatus,
-  newIdempotencyKey,
   redispatchRun,
-  retryRun,
   runDetailQueryOptions,
   runKeys,
   runStepsQueryOptions,
   type RunDetail,
   type RunSummary
 } from "./runs-api";
-import { runHref } from "./runs-list";
 
-type Notice = {
-  status: "error" | "warning" | "info" | "success";
-  title: string;
-  description?: string;
-};
+type Notice = RunActionNotice;
 
 /** The files the run's final result carries. */
 function resultFileIds(result: RunDetail["result"]): Set<string> {
@@ -120,11 +111,11 @@ function RunResult({ flowId, run }: { flowId: string; run: RunDetail }) {
   }
   switch (result.kind) {
     case "inline_text":
-      return <p className="text-ax-text text-sm break-words whitespace-pre-wrap">{result.text}</p>;
+      return <RunText text={result.text} />;
     case "file_backed_text":
       return (
         <div className="flex flex-col gap-2">
-          <p className="text-ax-text text-sm break-words whitespace-pre-wrap">{result.preview}</p>
+          <RunText text={result.preview} />
           <p className="text-ax-text-secondary text-xs">{t("flow_runs_output_overflow")}</p>
           <RunFiles
             flowId={flowId}
@@ -272,7 +263,6 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
-  const router = useRouter();
   const { routeId } = useSpace();
   const { can, user } = useAppContext();
   const spaceName = useSpaceDisplayName();
@@ -280,8 +270,9 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
   const [clock] = useState(() => createPollClock());
   const [notice, setNotice] = useState<Notice | null>(null);
-  const [confirmCancel, setConfirmCancel] = useState(false);
-  const retryKey = useRef<string | null>(null);
+  // A cancelled run's button goes: focus moves to the page's heading.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const rescue = useFocusRescue();
   const lastStatus = useRef<string | null>(null);
 
   const progress = useQuery({
@@ -354,56 +345,6 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     }
   }
 
-  const cancel = useMutation({
-    mutationFn: () => cancelRun(flowId, runId),
-    onSuccess: (run) => {
-      setConfirmCancel(false);
-      void refresh();
-      void queryClient.invalidateQueries({ queryKey: runKeys.list(flowId) });
-      // Cancelling a run that already ended returns it unchanged.
-      if (run.status === "cancelled") announce(t("flow_runs_cancel_done"));
-      else {
-        setNotice({
-          status: "info",
-          title: t("flow_runs_cancel_already_ended", {
-            status: t(runStatusView(run.status).labelKey)
-          })
-        });
-      }
-    },
-    onError: (error) => {
-      setConfirmCancel(false);
-      setNotice({
-        status: "error",
-        title: t("flow_runs_cancel_failed"),
-        description: refusalText(error, t)
-      });
-    }
-  });
-
-  const retry = useMutation({
-    mutationFn: () => {
-      // One key per retry of this run: a lost response replays the same child.
-      retryKey.current ??= newIdempotencyKey();
-      return retryRun(flowId, runId, retryKey.current);
-    },
-    onSuccess: (child) => {
-      void queryClient.invalidateQueries({ queryKey: runKeys.list(flowId) });
-      announce(t("flow_runs_retry_started", { order: child.first_executed_step_order }));
-      router.push(runHref(routeId, flowId, child.run.id));
-    },
-    onError: (error) => {
-      if (error instanceof EneoApiError && error.reason === "flow_run_idempotency_conflict") {
-        retryKey.current = null;
-      }
-      setNotice({
-        status: "error",
-        title: t("flow_runs_retry_failed"),
-        description: refusalText(error, t)
-      });
-    }
-  });
-
   const redispatch = useMutation({
     mutationFn: (run: RunSummary) => redispatchRun(flowId, run),
     onSuccess: (answer) => {
@@ -429,16 +370,14 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     run?.run_label?.trim() ||
     (time ? t("flow_runs_run_title", { time }) : t("flow_runs_run_title_plain"));
 
-  const canRun = can("flows_run");
-  const isCurrentVersion = summary ? summary.flow_version === flow.published_version : false;
-  const offersRetry = canRun && status === "failed";
   // Retrying needs the principal that started the run; said up front, not on refusal.
-  const retryNeedsStarter =
-    offersRetry &&
-    isCurrentVersion &&
-    summary !== undefined &&
-    startedByUser(summary, user.id) === false;
-  const offersCancel = status !== null && isCancellable(status);
+  const offers = summary
+    ? runActions(summary, {
+        canRun: can("flows_run"),
+        userId: user.id,
+        publishedVersion: flow.published_version
+      })
+    : null;
   const offersRedispatch =
     summary !== undefined &&
     progress.data !== undefined &&
@@ -463,24 +402,21 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
           isInterruptible
         />
       ) : null}
-      {offersRetry && isCurrentVersion && !retryNeedsStarter ? (
-        <Button
-          label={t("flow_runs_retry")}
+      {offers?.retry ? (
+        <RetryRunButton
+          spaceRouteId={routeId}
+          flowId={flowId}
+          runId={runId}
+          report={setNotice}
           variant="primary"
-          onClick={() => {
-            if (!retry.isPending) retry.mutate();
-          }}
-          isLoading={retry.isPending}
-          isInterruptible
         />
       ) : null}
-      {offersCancel ? (
-        <Button
-          label={t("flow_runs_cancel")}
-          variant="destructive"
-          onClick={() => setConfirmCancel(true)}
-          isLoading={cancel.isPending}
-          isInterruptible
+      {offers?.cancel ? (
+        <CancelRunButton
+          flowId={flowId}
+          runId={runId}
+          report={setNotice}
+          onCancelled={() => rescue(() => headingRef.current)}
         />
       ) : null}
     </div>
@@ -494,6 +430,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
       <div className="border-ax-border flex flex-col gap-3 border-b px-6 pt-4 pb-3">
         <PageHeader
           title={title}
+          headingRef={headingRef}
           breadcrumbs={[
             { label: spaceName, href: spaceLandingHref(sections, routeId) },
             { label: t("flows"), href: `/spaces/${routeId}/flows` },
@@ -523,10 +460,10 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
             </span>
           </div>
         ) : null}
-        {offersRetry && !isCurrentVersion ? (
+        {offers?.retryHeldBack === "version_changed" ? (
           <p className="text-ax-text-secondary text-sm">{t("flow_runs_retry_version_changed")}</p>
         ) : null}
-        {retryNeedsStarter ? (
+        {summary && offers?.retryHeldBack === "starter_only" ? (
           <p className="text-ax-text-secondary text-sm">
             {t("flow_runs_retry_starter_only", { name: starterName(summary, t) })}
           </p>
@@ -700,18 +637,6 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
           </>
         )}
       </div>
-
-      <ConfirmDialogControlled
-        open={confirmCancel}
-        onOpenChange={(open) => {
-          if (!cancel.isPending) setConfirmCancel(open);
-        }}
-        title={t("flow_runs_cancel_title")}
-        description={t("flow_runs_cancel_description")}
-        confirmLabel={t("flow_runs_cancel")}
-        pending={cancel.isPending}
-        onConfirm={() => cancel.mutate()}
-      />
     </div>
   );
 }
