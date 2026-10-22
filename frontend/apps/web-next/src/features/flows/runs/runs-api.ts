@@ -433,3 +433,35 @@ export function editTranscriptCorrections(
     })
   );
 }
+
+export type LiveTranscriptionSession = Schema<"FlowLiveTranscriptionSessionPublic">;
+
+/**
+ * Admits a live transcript of a recording for one audio step: a single-use
+ * ticket for the socket. `recordingId` names a recording whose transcript the
+ * core may store when the session hears all of it.
+ */
+export function openLiveTranscription(
+  flowId: string,
+  stepId: string,
+  recordingId?: string
+): Promise<LiveTranscriptionSession> {
+  return unwrap(
+    browserApi.POST("/api/v1/flows/{id}/steps/{step_id}/live-transcription-sessions/", {
+      params: { path: { id: flowId, step_id: stepId } },
+      body: recordingId ? { recording_id: recordingId } : null
+    })
+  );
+}
+
+/**
+ * The live transcription socket on the app's own origin: the browser never
+ * reaches the backend directly, and `src/proxy.ts` hands this one path over
+ * to it (the REST proxy cannot carry a WebSocket).
+ */
+export function liveSocketUrl(
+  websocketPath: string,
+  location: Pick<Location, "protocol" | "host"> = window.location
+): string {
+  return `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/api/eneo${websocketPath}`;
+}
