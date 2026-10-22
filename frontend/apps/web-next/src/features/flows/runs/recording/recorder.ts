@@ -195,12 +195,17 @@ export class AudioRecorder {
 
   constructor(
     options: RecordingOptions,
-    callbacks: RecorderCallbacks,
+    callbacks: RecorderCallbacks = { onPart: () => undefined },
     environment: RecorderEnvironment = browserEnvironment()
   ) {
     this.#options = options;
     this.#callbacks = callbacks;
     this.#env = environment;
+  }
+
+  /** Who hears of parts, the audio graph and pauses from now on. */
+  setCallbacks(callbacks: RecorderCallbacks): void {
+    this.#callbacks = callbacks;
   }
 
   subscribe = (listener: () => void): (() => void) => {
@@ -441,7 +446,7 @@ export class AudioRecorder {
       const durationMs = Math.max(0, this.recordedMs() - part.startedAtMs);
       const file = this.#partFile(part, durationMs);
       // Parts arrive in recording order, whichever file is built first.
-      void Promise.all([previous, file]).then(([, built]) => {
+      void Promise.all([previous, file.catch(() => null)]).then(([, built]) => {
         this.#pendingHandovers -= 1;
         if (built && !this.#disposed && this.#session) {
           this.#callbacks.onPart({
@@ -463,7 +468,12 @@ export class AudioRecorder {
     const [first, ...rest] = part.chunks;
     if (!first) return null;
     const type = part.recorder.mimeType || first.type || this.#options.mimeType || "audio/webm";
-    const head = await withRecordedDuration(first, durationMs, type);
+    let head: Blob = first;
+    try {
+      head = await withRecordedDuration(first, durationMs, type);
+    } catch {
+      // The header stays as recorded: players then guess the length.
+    }
     const blob = new Blob([head, ...rest], { type });
     const name = partFileName(this.#session?.sessionId ?? "", part.index, part.capturedAt, type);
     return new File([blob], name, { type });

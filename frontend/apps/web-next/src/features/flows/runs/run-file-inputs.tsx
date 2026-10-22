@@ -4,7 +4,7 @@ import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { FileInput } from "@astryxdesign/core/FileInput";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
-import { CircleAlert, CircleCheck, X } from "lucide-react";
+import { CircleAlert, CircleCheck, Download, RotateCw, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { formatBytes } from "@/lib/format";
 import type { InputProblem, UploadEntry } from "./run-contract";
@@ -38,7 +38,27 @@ export function inputProblemText(
   }
 }
 
-function UploadRow({ entry, onRemove }: { entry: UploadEntry; onRemove: () => void }) {
+/** Hands a file the form keeps to the person, as a download. */
+export function saveFile(file: File) {
+  const url = URL.createObjectURL(file);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = file.name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function UploadRow({
+  entry,
+  onRemove,
+  onRetry,
+  onSave
+}: {
+  entry: UploadEntry;
+  onRemove: () => void;
+  onRetry: (() => void) | null;
+  onSave: (() => void) | null;
+}) {
   const t = useTranslations();
   const locale = useLocale();
   const percent = Math.round((entry.progress ?? 0) * 100);
@@ -71,7 +91,30 @@ function UploadRow({ entry, onRemove }: { entry: UploadEntry; onRemove: () => vo
         {entry.state === "failed" && entry.problem ? (
           <span className="text-ax-error text-xs">{entry.problem}</span>
         ) : null}
+        {entry.state === "failed" && entry.retryable && entry.recording ? (
+          <span className="text-ax-text-secondary text-xs">
+            {t("flow_transcript_upload_offline_hint")}
+          </span>
+        ) : null}
       </span>
+      {onRetry ? (
+        <IconButton
+          label={t("flow_transcript_upload_retry", { name: entry.name })}
+          icon={<RotateCw aria-hidden="true" />}
+          variant="ghost"
+          size="sm"
+          onClick={onRetry}
+        />
+      ) : null}
+      {onSave ? (
+        <IconButton
+          label={t("flow_transcript_upload_save", { name: entry.name })}
+          icon={<Download aria-hidden="true" />}
+          variant="ghost"
+          size="sm"
+          onClick={onSave}
+        />
+      ) : null}
       <IconButton
         label={
           entry.state === "uploading"
@@ -100,7 +143,10 @@ export function RunFileInput({
   message,
   onAdd,
   onRemove,
-  singleRecording
+  onRetry,
+  fileOf,
+  singleRecording,
+  recorder
 }: {
   formId: string;
   input: RuntimeInput;
@@ -108,7 +154,13 @@ export function RunFileInput({
   message: string | null;
   onAdd: (files: File[]) => void;
   onRemove: (key: string) => void;
+  /** Sends a failed file again. */
+  onRetry?: (key: string) => void;
+  /** The file the form keeps for an entry, which the person may save. */
+  fileOf?: (key: string) => File | null;
   singleRecording: { offered: boolean; value: boolean; onChange: (value: boolean) => void };
+  /** Records the step's audio instead of picking files. */
+  recorder?: React.ReactNode;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -138,10 +190,28 @@ export function RunFileInput({
         width="100%"
         {...(input.required ? { isRequired: true } : { isOptional: true })}
       />
+      {recorder}
       {entries.length > 0 ? (
         <ul aria-label={t("flow_runs_input_files_label", { input: label })} className="m-0 p-0">
           {entries.map((entry) => (
-            <UploadRow key={entry.key} entry={entry} onRemove={() => onRemove(entry.key)} />
+            <UploadRow
+              key={entry.key}
+              entry={entry}
+              onRemove={() => onRemove(entry.key)}
+              onRetry={
+                entry.state === "failed" && entry.retryable && onRetry
+                  ? () => onRetry(entry.key)
+                  : null
+              }
+              onSave={
+                entry.recording && fileOf
+                  ? () => {
+                      const file = fileOf(entry.key);
+                      if (file) saveFile(file);
+                    }
+                  : null
+              }
+            />
           ))}
         </ul>
       ) : null}

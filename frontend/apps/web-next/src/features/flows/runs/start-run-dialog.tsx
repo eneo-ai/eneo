@@ -1,5 +1,6 @@
 "use client";
 
+import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
@@ -7,16 +8,19 @@ import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { TextArea } from "@astryxdesign/core/TextArea";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useId, useRef, useState } from "react";
+import { useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import type { FlowPublic } from "../flows-api";
+import { RunRecorder, type RecorderHandle } from "./recording/run-recorder";
 import {
   blockingTemplates,
+  doneKeys,
   exceedsAggregate,
   fieldProblems,
   inputProblems,
@@ -57,6 +61,12 @@ type ServerProblems = {
 };
 
 const NO_SERVER_PROBLEMS: ServerProblems = { fields: {}, inputs: {} };
+
+/** What the dialog asks of its form before it closes. */
+type StartRunFormHandle = {
+  /** A recording runs, or recorded parts would be thrown away with the form. */
+  holdsRecording: () => boolean;
+};
 
 /** The record without `key`. */
 function without(record: Record<string, string>, key: string): Record<string, string> {
@@ -120,22 +130,43 @@ function StartRunForm({
   contract,
   formId,
   onPendingChange,
-  onStarted
+  onStarted,
+  handleRef
 }: {
   flow: FlowPublic;
   contract: RunContract;
   formId: string;
   onPendingChange: (pending: boolean) => void;
   onStarted: (run: RunPublic) => void;
+  handleRef?: Ref<StartRunFormHandle>;
 }) {
   const t = useTranslations();
+  const announce = useAnnounce();
   const queryClient = useQueryClient();
   const summaryRef = useRef<HTMLDivElement>(null);
   const lastRequest = useRef<{ body: string; key: string } | null>(null);
-  const { uploads, add, remove, claim } = useRuntimeUploads(
+  const { uploads, add, remove, retry, fileOf, claim } = useRuntimeUploads(
     flow.id,
     contract.runtime_upload_policy
   );
+  // Each audio step's recorder, asked from the event handlers below.
+  const recorders = useRef(new Map<string, RecorderHandle>());
+  const [waitingForText, setWaitingForText] = useState(false);
+  // The step whose recording ran when the person tried to start the run.
+  const [stopFirst, setStopFirst] = useState<string | null>(null);
+
+  useImperativeHandle(handleRef, () => ({
+    holdsRecording: () =>
+      [...recorders.current.values()].some((recorder) => recorder.busy()) ||
+      Object.values(uploads).some((entries) => entries.some((entry) => entry.recording))
+  }));
+
+  function recorderRef(stepId: string) {
+    return (handle: RecorderHandle | null) => {
+      if (handle) recorders.current.set(stepId, handle);
+      else recorders.current.delete(stepId);
+    };
+  }
   const [values, setValues] = useState<FormValues>({});
   const [freeText, setFreeText] = useState("");
   const [singleRecording, setSingleRecording] = useState<ReadonlySet<string>>(new Set());
@@ -163,6 +194,7 @@ function StartRunForm({
   }
 
   function inputMessage(stepId: string): string | null {
+    if (stopFirst === stepId) return t("flow_transcript_rec_stop_first");
     const input = inputs.find((candidate) => candidate.step_id === stepId);
     const issue = inputIssues[stepId];
     if (input && issue) return inputProblemText(input, issue, t);
@@ -239,9 +271,9 @@ function StartRunForm({
     }
   });
 
-  function submit(event: React.SubmitEvent<HTMLFormElement>) {
+  async function submit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (start.isPending) return;
+    if (start.isPending || waitingForText) return;
     const foundFields = fieldProblems(fields, values);
     const foundInputs = inputProblems(contract, uploads);
     flushSync(() => {
@@ -251,6 +283,13 @@ function StartRunForm({
     const firstField = fields.find((field) => foundFields[field.name]);
     if (firstField) {
       focusFirstControl(fieldAnchorId(formId, firstField.name));
+      return;
+    }
+    // A recording still running is not a file yet.
+    const recording = inputs.find((input) => recorders.current.get(input.step_id)?.busy());
+    if (recording) {
+      flushSync(() => setStopFirst(recording.step_id));
+      focusFirstControl(inputAnchorId(formId, recording.step_id));
       return;
     }
     const firstInput = inputs.find((input) => foundInputs[input.step_id]);
@@ -268,6 +307,24 @@ function StartRunForm({
       showFormProblem(t("flow_runs_blocked"));
       return;
     }
+    // The final text of a recording heard whole may spare the run transcribing it again.
+    const handles = [...recorders.current.values()];
+    if (handles.some((recorder) => recorder.finishing())) {
+      setWaitingForText(true);
+      onPendingChange(true);
+      announce(t("flow_transcript_live_waiting"));
+      await Promise.all(handles.map((recorder) => recorder.settled()));
+      setWaitingForText(false);
+      onPendingChange(false);
+    }
+    const liveTranscripts = Object.fromEntries(
+      inputs.flatMap((input) => {
+        const id = recorders.current
+          .get(input.step_id)
+          ?.liveTranscriptFor(doneKeys(uploads[input.step_id]));
+        return id ? [[input.step_id, id]] : [];
+      })
+    );
     start.mutate(
       runRequest(contract, {
         values,
@@ -275,7 +332,8 @@ function StartRunForm({
         uploads,
         singleRecording,
         speakerLabels,
-        maxSpeakers
+        maxSpeakers,
+        liveTranscripts
       })
     );
   }
@@ -283,7 +341,12 @@ function StartRunForm({
   const maxSpeakerOption = contract.transcription?.max_speakers;
 
   return (
-    <form id={formId} noValidate onSubmit={submit} className="flex flex-col gap-5">
+    <form
+      id={formId}
+      noValidate
+      onSubmit={(event) => void submit(event)}
+      className="flex flex-col gap-5"
+    >
       <ContractNotices contract={contract} />
       <div
         ref={summaryRef}
@@ -340,6 +403,27 @@ function StartRunForm({
             clearInputProblem(input.step_id);
             remove(input.step_id, key);
           }}
+          onRetry={(key) => {
+            clearInputProblem(input.step_id);
+            retry(input.step_id, key);
+          }}
+          fileOf={fileOf}
+          recorder={
+            input.input_format === "audio" ? (
+              <RunRecorder
+                flowId={flow.id}
+                input={input}
+                live={contract.transcription?.live}
+                entries={uploads[input.step_id] ?? []}
+                onPart={(file, recording, label) => {
+                  clearInputProblem(input.step_id);
+                  setStopFirst((current) => (current === input.step_id ? null : current));
+                  return add(input, [file], { recording, label })[0]?.key;
+                }}
+                handleRef={recorderRef(input.step_id)}
+              />
+            ) : null
+          }
           singleRecording={{
             offered: offersSingleRecording(contract, input, uploads[input.step_id]),
             value: singleRecording.has(input.step_id),
@@ -404,10 +488,17 @@ export function StartRunDialog({
   const t = useTranslations();
   const formId = useId();
   const [pending, setPending] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
+  const form = useRef<StartRunFormHandle>(null);
   const contract = useQuery({ ...runContractQueryOptions(flow.id), enabled: open });
 
   function requestOpenChange(next: boolean) {
     if (!next && pending) return;
+    // A recording exists only in this form: closing it throws the recording away.
+    if (!next && form.current?.holdsRecording()) {
+      setConfirmClose(true);
+      return;
+    }
     onOpenChange(next);
   }
 
@@ -431,52 +522,67 @@ export function StartRunDialog({
           formId={formId}
           onPendingChange={setPending}
           onStarted={onStarted}
+          handleRef={form}
         />
       );
     }
   }
 
   return (
-    <Dialog
-      isOpen={open}
-      onOpenChange={requestOpenChange}
-      purpose="form"
-      width={640}
-      maxHeight="85dvh"
-    >
-      <Layout
-        height="auto"
-        header={
-          <DialogHeader
-            title={t("flow_runs_start_title", { name: flow.name })}
-            onOpenChange={requestOpenChange}
-          />
-        }
-        content={open ? <LayoutContent>{content}</LayoutContent> : null}
-        footer={
-          open ? (
-            <LayoutFooter>
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button
-                  label={t("cancel")}
-                  isDisabled={pending}
-                  onClick={() => requestOpenChange(false)}
-                />
-                {contract.data ? (
+    <>
+      <Dialog
+        isOpen={open}
+        onOpenChange={requestOpenChange}
+        purpose="form"
+        width={640}
+        maxHeight="85dvh"
+      >
+        <Layout
+          height="auto"
+          header={
+            <DialogHeader
+              title={t("flow_runs_start_title", { name: flow.name })}
+              onOpenChange={requestOpenChange}
+            />
+          }
+          content={open ? <LayoutContent>{content}</LayoutContent> : null}
+          footer={
+            open ? (
+              <LayoutFooter>
+                <div className="flex flex-wrap justify-end gap-2">
                   <Button
-                    type="submit"
-                    form={formId}
-                    variant="primary"
-                    label={t("flow_runs_start_submit")}
-                    isLoading={pending}
-                    isInterruptible
+                    label={t("cancel")}
+                    isDisabled={pending}
+                    onClick={() => requestOpenChange(false)}
                   />
-                ) : null}
-              </div>
-            </LayoutFooter>
-          ) : null
-        }
+                  {contract.data ? (
+                    <Button
+                      type="submit"
+                      form={formId}
+                      variant="primary"
+                      label={t("flow_runs_start_submit")}
+                      isLoading={pending}
+                      isInterruptible
+                    />
+                  ) : null}
+                </div>
+              </LayoutFooter>
+            ) : null
+          }
+        />
+      </Dialog>
+      <AlertDialog
+        isOpen={confirmClose}
+        onOpenChange={setConfirmClose}
+        title={t("flow_transcript_close_title")}
+        description={t("flow_transcript_close_body")}
+        actionLabel={t("flow_transcript_close_confirm")}
+        cancelLabel={t("flow_transcript_close_cancel")}
+        onAction={() => {
+          setConfirmClose(false);
+          onOpenChange(false);
+        }}
       />
-    </Dialog>
+    </>
   );
 }
