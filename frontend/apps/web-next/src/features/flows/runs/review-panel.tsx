@@ -391,6 +391,7 @@ export function ReviewPanel({
           id={`${baseId}-editor`}
           schema={draft.schema}
           value={draft.value}
+          original={checkpoint.original_payload_json?.structured}
           problem={problem?.field === null ? problem.message : null}
           onChange={(value) => setDraft({ ...draft, value })}
         />
