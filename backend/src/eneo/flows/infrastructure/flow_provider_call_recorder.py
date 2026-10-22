@@ -10,6 +10,7 @@ from sqlalchemy.exc import OperationalError
 from eneo.database.database import sessionmanager
 from eneo.flows.domain.provider_call import (
     CompletionProviderCallRequest,
+    DigestCallInput,
     ProviderCall,
     ProviderCallCompletion,
     ProviderCallReason,
@@ -88,6 +89,7 @@ class FlowProviderCallRecorder:
         resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
         summarization_input: SummarizationCallInput | None = None,
         summarization: SummarizationProvenance | None = None,
+        digest_call: DigestCallInput | None = None,
     ):
         self.run_id = run_id
         self.step_id = step_id
@@ -100,6 +102,7 @@ class FlowProviderCallRecorder:
         self.resolved_input_edge_indexes = resolved_input_edge_indexes
         self.summarization_input = summarization_input
         self.summarization = summarization
+        self.digest_call = digest_call
         self._started_evidence: dict[UUID, tuple[int, str]] = {}
 
     async def started(self, request: ProviderCallRequestFacts) -> UUID:
@@ -163,6 +166,7 @@ class FlowProviderCallRecorder:
             call_reason=_flow_call_reason(request.reason),
             mapped_call=self.mapped_call,
             summarization_input=self.summarization_input,
+            digest_call=self.digest_call,
         )
 
     async def accepted(self, call_id: UUID, provider_response_id: str) -> None:

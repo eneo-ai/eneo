@@ -42,7 +42,7 @@ from eneo.flows.citation_sidecar import (
 )
 from eneo.flows.domain.flow import FlowRun, FlowStepResult, FlowStepResultStatus
 from eneo.flows.domain.mapped_execution_policy import SummarizationBudget
-from eneo.flows.domain.provider_call import SummarizationCallInput
+from eneo.flows.domain.provider_call import DigestCallInput, SummarizationCallInput
 from eneo.flows.domain.rag_evidence import (
     RAG_RETRIEVAL_FAIL_CLOSED_STATUSES,
     build_step_result_citation_state,
@@ -333,6 +333,7 @@ class BuildProviderCallObserverFn(Protocol):
         completion_model_id: UUID,
         summarization_input: SummarizationCallInput | None = None,
         summarization: SummarizationProvenance | None = None,
+        digest_call: DigestCallInput | None = None,
     ) -> ProviderCallObserver: ...
 
 
@@ -399,6 +400,8 @@ class StepExecutionRuntimeDeps:
     persist_summarization: (
         Callable[[SummarizationProvenance], Awaitable[None]] | None
     ) = None
+    # Set on the calls of a long-material digest; recorded on each call's receipt.
+    digest_call: DigestCallInput | None = None
 
 
 def _resolve_litellm_model_name(assistant: RuntimeAssistantProtocol) -> str | None:
@@ -674,7 +677,14 @@ async def call_assistant_with_timeout(
             raise FlowRuntimeInvariantError(
                 "Provider I/O requires a resolved completion model."
             )
-        if prepared.summarization_input is None:
+        if prepared.summarization_input is None and deps.digest_call is not None:
+            provider_call_observer = deps.build_provider_call_observer(
+                deps.mapped_call_context,
+                prepared.resolved_input_edge_indexes,
+                completion_model.id,
+                digest_call=deps.digest_call,
+            )
+        elif prepared.summarization_input is None:
             provider_call_observer = deps.build_provider_call_observer(
                 deps.mapped_call_context,
                 prepared.resolved_input_edge_indexes,

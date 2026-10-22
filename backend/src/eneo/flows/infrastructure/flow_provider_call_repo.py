@@ -93,14 +93,23 @@ class FlowProviderCallEvidenceMeasurement:
 
 def _provider_call_evidence_logical_bytes() -> ColumnElement[int]:
     # Measure variable-size evidence before admitting rows to a bounded page.
-    return sa.func.coalesce(
-        sa.func.octet_length(
-            sa.cast(sa.func.to_jsonb(FlowProviderCalls.mapped_source_id), sa.Text)
-        ),
-        0,
-    ) + sa.func.coalesce(
-        sa.func.octet_length(sa.cast(FlowProviderCalls.summarization_input, sa.Text)),
-        0,
+    return (
+        sa.func.coalesce(
+            sa.func.octet_length(
+                sa.cast(sa.func.to_jsonb(FlowProviderCalls.mapped_source_id), sa.Text)
+            ),
+            0,
+        )
+        + sa.func.coalesce(
+            sa.func.octet_length(
+                sa.cast(FlowProviderCalls.summarization_input, sa.Text)
+            ),
+            0,
+        )
+        + sa.func.coalesce(
+            sa.func.octet_length(sa.cast(FlowProviderCalls.digest_call, sa.Text)),
+            0,
+        )
     )
 
 
@@ -967,6 +976,12 @@ class FlowProviderCallRepository:
                     and request.summarization_input is not None
                     else None
                 ),
+                digest_call=(
+                    request.digest_call.model_dump(mode="json")
+                    if isinstance(request, CompletionProviderCallRequest)
+                    and request.digest_call is not None
+                    else None
+                ),
                 call_reason=(
                     request.call_reason.value
                     if isinstance(request, CompletionProviderCallRequest)
@@ -1172,6 +1187,7 @@ def _to_evidence(
         {
             "event_id": call.id,
             "summarization_input": call.summarization_input,
+            "digest_call": call.digest_call,
             "attempt_id": call.flow_step_attempt_id,
             "step_id": step_id,
             "step_order": step_order,

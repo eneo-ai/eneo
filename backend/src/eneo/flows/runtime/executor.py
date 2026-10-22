@@ -1642,7 +1642,8 @@ class FlowRunExecutor:
             resolved_input_edge_indexes,
             completion_model_id,
             summarization_input=None,
-            summarization=None: FlowProviderCallRecorder(
+            summarization=None,
+            digest_call=None: FlowProviderCallRecorder(
                 run_id=run.id,
                 step_id=step.step_id,
                 attempt_no=attempt_no,
@@ -1654,6 +1655,7 @@ class FlowRunExecutor:
                 resolved_input_edge_indexes=resolved_input_edge_indexes,
                 summarization_input=summarization_input,
                 summarization=summarization,
+                digest_call=digest_call,
             ),
             persist_summarization=partial(
                 self._persist_summarization,

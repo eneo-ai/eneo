@@ -154,6 +154,47 @@ class SummarizationCallInput(BaseModel):
     max_input_tokens: int = Field(strict=True, ge=1)
 
 
+DigestCallStage = Literal["map", "reduce", "final"]
+
+
+class DigestCallInput(BaseModel):
+    """The part of a long-material digest one provider call performed.
+
+    ``map`` reads one segment of one source and takes notes; ``reduce``
+    merges notes taken from the sources it lists; ``final`` is the step's own
+    call over the merged notes. Source indexes are the 1-based positions of
+    the step's sources in its ``long_material`` coverage record.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    stage: DigestCallStage
+    source_indexes: tuple[Annotated[int, Field(strict=True, ge=1)], ...] = Field(
+        description="Sources whose text or notes the call read, ascending."
+    )
+    segment_index: int | None = Field(default=None, strict=True, ge=1)
+    segment_count: int | None = Field(default=None, strict=True, ge=1)
+
+    @model_validator(mode="after")
+    def validate_stage_shape(self) -> "DigestCallInput":
+        if list(self.source_indexes) != sorted(set(self.source_indexes)):
+            raise ValueError("Digest source indexes must be ascending and unique.")
+        if self.stage == "map":
+            if len(self.source_indexes) != 1:
+                raise ValueError("A map call reads exactly one source.")
+            if (
+                self.segment_index is None
+                or self.segment_count is None
+                or self.segment_index > self.segment_count
+            ):
+                raise ValueError("A map call names its segment within the source.")
+        elif self.segment_index is not None or self.segment_count is not None:
+            raise ValueError("Only a map call reads a segment.")
+        elif self.stage == "reduce" and not self.source_indexes:
+            raise ValueError("A reduce call merges notes of at least one source.")
+        return self
+
+
 class CompletionProviderCallRequest(BaseModel):
     """Credential-free identity facts for one outbound completion request."""
 
@@ -172,6 +213,7 @@ class CompletionProviderCallRequest(BaseModel):
     call_reason: ProviderCallReason = ProviderCallReason.INITIAL
     mapped_call: MappedProviderCallProvenance | None = None
     summarization_input: SummarizationCallInput | None = None
+    digest_call: DigestCallInput | None = None
 
     @model_validator(mode="after")
     def validate_capabilities_match_response_format(
@@ -280,6 +322,7 @@ class ProviderCall(BaseModel):
     requested_capabilities: ProviderCallRequestedCapabilities
     resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes
     summarization_input: SummarizationCallInput | None = None
+    digest_call: DigestCallInput | None = None
     call_reason: ProviderCallReason
     mapped_execution_mode: Literal["per_item", "per_source"] | None
     mapped_item_index: int | None = Field(default=None, ge=1)
@@ -326,6 +369,14 @@ class ProviderCallEvidence(BaseModel):
 
     event_id: UUID
     summarization_input: SummarizationCallInput | None = None
+    digest_call: DigestCallInput | None = Field(
+        default=None,
+        description=(
+            "Set on the calls of a long-material digest: the stage (map, reduce "
+            "or final), the sources the call read by their index in the step's "
+            "long_material record, and for a map call its segment."
+        ),
+    )
     attempt_id: UUID
     step_id: UUID
     step_order: int = Field(ge=1)

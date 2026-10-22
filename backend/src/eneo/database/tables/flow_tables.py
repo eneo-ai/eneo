@@ -1394,6 +1394,11 @@ class FlowProviderCalls(BasePublic):
     summarization_input: Mapped[Optional[dict[str, object]]] = mapped_column(
         JSONB(none_as_null=True)
     )
+    # A long-material digest call: its stage, the sources it read and, for a
+    # map call, its segment. References only; the text stays out.
+    digest_call: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB(none_as_null=True)
+    )
     ordinal: Mapped[int] = mapped_column(nullable=False)
     call_kind: Mapped[str] = mapped_column(sa.String(32), nullable=False)
     status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
