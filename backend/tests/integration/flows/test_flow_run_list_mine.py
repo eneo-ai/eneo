@@ -218,6 +218,24 @@ async def test_search_matches_run_labels_and_starter_names_ignoring_case(
     )
 
 
+async def test_the_list_and_the_status_poll_name_each_run_by_its_label(
+    client: AsyncClient, history: RunHistory
+):
+    headers = {"Authorization": f"Bearer {history.admin_token}"}
+
+    page = await _runs(client, history, headers)
+    assert [item["run_label"] for item in page["items"]] == [
+        "case 7",
+        None,
+        "Case 100% done",
+    ]
+    status = await client.get(
+        f"{history.runs_path}{history.oldest_admin_run_id}/status/", headers=headers
+    )
+    assert status.status_code == 200, status.text
+    assert status.json()["run_label"] == "Case 100% done"
+
+
 async def test_search_never_reads_run_content(
     client: AsyncClient, history: RunHistory, db_container
 ):

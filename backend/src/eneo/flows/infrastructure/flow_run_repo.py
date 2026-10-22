@@ -572,6 +572,7 @@ _FLOW_RUN_STATUS_COLUMNS = (
     FlowRuns.finished_at,
     FlowRuns.job_id,
     FlowRuns.evidence_classification_level,
+    FlowRuns.run_label,
     FlowRuns.created_at,
     FlowRuns.updated_at,
 )

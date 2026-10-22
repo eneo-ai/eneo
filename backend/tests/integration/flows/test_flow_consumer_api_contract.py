@@ -1376,7 +1376,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert "input_payload_json" not in immediate_poll
     assert "result" not in immediate_poll
     assert "result_files" not in immediate_poll
-    assert "run_label" not in immediate_poll
+    assert immediate_poll["run_label"] == "Årende ä ö"
     assert "error" not in immediate_poll
 
     immediate_detail_response = await client.get(
@@ -1458,7 +1458,7 @@ async def test_flow_consumer_runtime_routes_support_start_replay_poll_and_steps(
     assert "input_payload_json" not in list_payload["items"][0]
     assert "result" not in list_payload["items"][0]
     assert "result_files" not in list_payload["items"][0]
-    assert "run_label" not in list_payload["items"][0]
+    assert list_payload["items"][0]["run_label"] == "Årende ä ö"
     assert "error" not in list_payload["items"][0]
 
     detail_response = await client.get(

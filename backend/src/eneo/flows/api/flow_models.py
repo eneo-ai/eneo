@@ -377,6 +377,7 @@ FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE: dict[str, Any] = {
     "purpose": "production",
     "principal_type": "user",
     "started_by": FLOW_RUN_STARTED_BY_PUBLIC_EXAMPLE,
+    "run_label": "Case 123",
     "tenant_id": "00000000-0000-0000-0000-000000000010",
     "trace_id": "00000000-0000-0000-0000-000000000302",
     "revision": 1,
@@ -398,7 +399,6 @@ FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE: dict[str, Any] = {
 
 FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     **FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE,
-    "run_label": "Case 123",
     "error": None,
     "input_payload_json": {"employee_name": "Alex Example"},
     "speaker_labels": None,
@@ -1002,7 +1002,9 @@ class FlowRunCreateRequest(BaseModel):
         description=(
             "Caller-supplied run label. Normalized to Unicode NFC and trimmed on "
             "creation; must contain 1–120 characters and no line breaks or control "
-            "characters. Omitted or null labels are stored as null."
+            "characters. Omitted or null labels are stored as null. The label is "
+            "run metadata: the content-free list and status reads return it and "
+            "the list searches it, so name the run rather than describe its content."
         ),
     )
     expected_flow_version: int | None = Field(
@@ -1473,6 +1475,19 @@ class FlowRunSummaryPublic(BaseModel):
             "principal."
         ),
     )
+    run_label: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=ONE_LINE_TEXT_MAX_CHARS,
+        description=(
+            "The run's name, as the caller supplied it on creation (NFC, trimmed, "
+            "one line). It is run metadata, not run content: it is returned by the "
+            "content-free list and status reads and matched by the list's "
+            "`search`, so it should name the run (a case number, a meeting), not "
+            "carry what the run is about. Null when the run was started without one."
+        ),
+        examples=["Case 123"],
+    )
     tenant_id: UUID = Field(description="Tenant that owns the run and its data.")
     trace_id: UUID = Field(
         description=(
@@ -1634,12 +1649,6 @@ class FlowRunPublic(FlowRunSummaryPublic):
         json_schema_extra={"example": FLOW_RUN_PUBLIC_EXAMPLE},
     )
 
-    run_label: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=ONE_LINE_TEXT_MAX_CHARS,
-        description="Caller-supplied run label, available only through audited reads.",
-    )
     error: FlowRunError | None = Field(
         default=None,
         description=(

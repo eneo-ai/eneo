@@ -259,7 +259,7 @@ _FLOW_RUN_LIST_DESCRIPTION = """
     Accepted input, terminal errors, terminal output, result-file metadata, provider usage, and
     webhook deliveries are deliberately omitted so background history refresh does not expose
     or repeatedly read sensitive content. Retrieve one run's audited detail when that content
-    is needed.
+    is needed. The caller-supplied `run_label` is run metadata and is included.
 
     Current runtime visibility is policy-based: callers always list their own runs, tenant admins
     can list runs across the tenant, same-space admins and owners can list run metadata for flows

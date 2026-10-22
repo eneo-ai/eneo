@@ -5118,7 +5118,7 @@ export interface paths {
      *         Accepted input, terminal errors, terminal output, result-file metadata, provider usage, and
      *         webhook deliveries are deliberately omitted so background history refresh does not expose
      *         or repeatedly read sensitive content. Retrieve one run's audited detail when that content
-     *         is needed.
+     *         is needed. The caller-supplied `run_label` is run metadata and is included.
      *
      *         Current runtime visibility is policy-based: callers always list their own runs, tenant admins
      *         can list runs across the tenant, same-space admins and owners can list run metadata for flows
@@ -20878,7 +20878,7 @@ export interface components {
       max_speakers?: number | null;
       /**
        * Run Label
-       * @description Caller-supplied run label. Normalized to Unicode NFC and trimmed on creation; must contain 1–120 characters and no line breaks or control characters. Omitted or null labels are stored as null.
+       * @description Caller-supplied run label. Normalized to Unicode NFC and trimmed on creation; must contain 1–120 characters and no line breaks or control characters. Omitted or null labels are stored as null. The label is run metadata: the content-free list and status reads return it and the list searches it, so name the run rather than describe its content.
        */
       run_label?: string | null;
       /**
@@ -21578,7 +21578,8 @@ export interface components {
       revision: number;
       /**
        * Run Label
-       * @description Caller-supplied run label, available only through audited reads.
+       * @description The run's name, as the caller supplied it on creation (NFC, trimmed, one line). It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run was started without one.
+       * @example Case 123
        */
       run_label?: string | null;
       /**
@@ -23125,6 +23126,7 @@ export interface components {
      *           "principal_type": "user",
      *           "purpose": "production",
      *           "revision": 1,
+     *           "run_label": "Case 123",
      *           "started_by": {
      *             "display_name": "Alex Example",
      *             "email": "alex.example@example.com",
@@ -23329,7 +23331,8 @@ export interface components {
       revision: number;
       /**
        * Run Label
-       * @description Caller-supplied run label, available only through audited reads.
+       * @description The run's name, as the caller supplied it on creation (NFC, trimmed, one line). It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run was started without one.
+       * @example Case 123
        */
       run_label?: string | null;
       /**
@@ -25033,6 +25036,7 @@ export interface components {
      *       "principal_type": "user",
      *       "purpose": "production",
      *       "revision": 1,
+     *       "run_label": "Case 123",
      *       "started_by": {
      *         "display_name": "Alex Example",
      *         "email": "alex.example@example.com",
@@ -25129,6 +25133,12 @@ export interface components {
        * @description Monotonic run lifecycle compare token.
        */
       revision: number;
+      /**
+       * Run Label
+       * @description The run's name, as the caller supplied it on creation (NFC, trimmed, one line). It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run was started without one.
+       * @example Case 123
+       */
+      run_label?: string | null;
       /**
        * Started At
        * @description When a worker began executing the first step. Null while queued.
@@ -59430,6 +59440,7 @@ export interface operations {
            *           "principal_type": "user",
            *           "purpose": "production",
            *           "revision": 1,
+           *           "run_label": "Case 123",
            *           "started_by": {
            *             "display_name": "Alex Example",
            *             "email": "alex.example@example.com",
