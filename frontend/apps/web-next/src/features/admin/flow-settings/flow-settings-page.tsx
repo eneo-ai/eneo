@@ -9,7 +9,7 @@ import { useState } from "react";
 import { flushSync } from "react-dom";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
-import { Button } from "@/components/ui/button";
+import { Button } from "@astryxdesign/core/Button";
 import { useFieldFocus } from "@/features/admin/models/provider-form-fields";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -285,15 +285,17 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
           <p className="text-sm font-medium">{statusText}</p>
           <div className="flex gap-2">
             <Button
-              variant="outline"
-              disabled={dirty.length === 0 || busy !== null}
+              label={t("discard_changes")}
+              isDisabled={dirty.length === 0 || busy !== null}
               onClick={discard}
-            >
-              {t("discard_changes")}
-            </Button>
-            <Button aria-busy={busy === "save" || undefined} onClick={save}>
-              {busy === "save" ? t("flow_admin_saving") : t("flow_admin_save")}
-            </Button>
+            />
+            <Button
+              label={busy === "save" ? t("flow_admin_saving") : t("flow_admin_save")}
+              variant="primary"
+              isLoading={busy === "save"}
+              isInterruptible
+              onClick={save}
+            />
           </div>
         </div>
       </div>

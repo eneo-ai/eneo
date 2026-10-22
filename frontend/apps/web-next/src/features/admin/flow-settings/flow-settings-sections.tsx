@@ -7,7 +7,7 @@ import { useState } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { Switch } from "@/components/astryx/switch";
 import { SettingsGroup } from "@/components/composites/settings-rows";
-import { Button } from "@/components/ui/button";
+import { Button } from "@astryxdesign/core/Button";
 import { formatBytes } from "@/lib/format";
 import {
   DOCUMENT_RENDER_KEYS,
@@ -162,13 +162,12 @@ export function RunLimitSection({
         <div>
           {/* Sends null whatever the field shows: a value capacity limits looks equal to it. */}
           <Button
-            variant="outline"
+            label={t("flow_admin_use_capacity")}
             size="sm"
-            aria-busy={busy || undefined}
+            isLoading={busy}
+            isInterruptible
             onClick={onFollowCapacity}
-          >
-            {t("flow_admin_use_capacity")}
-          </Button>
+          />
         </div>
       ) : null}
     </SettingsGroup>
@@ -294,15 +293,17 @@ export function MappedSection({
       ) : (
         <div>
           <Button
-            variant="link"
-            className="h-auto px-0"
-            aria-busy={busy || undefined}
+            label={
+              deploymentDefault !== null
+                ? t("flow_admin_mapped_restore_value", { value: deploymentDefault })
+                : t("flow_admin_mapped_restore")
+            }
+            variant="ghost"
+            size="sm"
+            isLoading={busy}
+            isInterruptible
             onClick={onRestoreDefault}
-          >
-            {deploymentDefault !== null
-              ? t("flow_admin_mapped_restore_value", { value: deploymentDefault })
-              : t("flow_admin_mapped_restore")}
-          </Button>
+          />
         </div>
       )}
       <SettingNumberField
