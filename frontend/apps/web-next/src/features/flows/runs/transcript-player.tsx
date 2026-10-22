@@ -2,11 +2,14 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
+import { useHotkeys } from "@astryxdesign/core/hooks";
+import { Kbd } from "@astryxdesign/core/Kbd";
+import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
 import { Play } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { refusalText } from "./run-messages";
 import { inputFilePlaybackPath, transcriptWordsQueryOptions } from "./runs-api";
@@ -20,8 +23,11 @@ import {
 } from "./transcript-playback";
 
 export type Playback = {
-  /** Plays file `fileIndex` from `time` seconds, loading it first when needed. */
-  seek: (fileIndex: number, time: number) => void;
+  /**
+   * Plays file `fileIndex` from `time` seconds, loading it first when
+   * needed; stops at `until` seconds when given (a speaker's sample).
+   */
+  seek: (fileIndex: number, time: number, until?: number) => void;
   /** The line playing, by position in the lines, and its word; -1 for none. */
   activeLine: number;
   activeWord: number;
@@ -34,6 +40,18 @@ export type Playback = {
 
 const NO_WORDS: ReadonlyMap<number, PlacedWord[]> = new Map();
 
+/** The speeds the player offers; 1 is as recorded. */
+export const PLAYBACK_RATES = [0.75, 1, 1.25, 1.5, 2] as const;
+/** How far J and L skip, in seconds. */
+export const SKIP_SECONDS = 10;
+
+/** How many placed words the aligner spread over their window instead of finding them. */
+export function uncertainWordCount(words: ReadonlyMap<number, readonly PlacedWord[]>): number {
+  let count = 0;
+  for (const line of words.values()) for (const word of line) if (word.uncertain) count += 1;
+  return count;
+}
+
 /**
  * Plays a transcript's audio with its lines: a click on a line, or on a word
  * where the transcription stored word timings, plays from there; the line
@@ -41,19 +59,27 @@ const NO_WORDS: ReadonlyMap<number, PlacedWord[]> = new Map();
  * person turns that off. The audio is the run's own input file, signed for
  * playback when it is first played (and again when the link has run out).
  * The marks are visual only: a screen reader is not told of every word.
+ *
+ * The speed can be changed, and while focus is in the player J, K and L skip
+ * back, play or pause, and skip forward (single letters a screen reader's
+ * browse mode keeps for itself only reach the player in its focus mode, so
+ * they never stand in for the controls).
  */
 export function useTranscriptPlayback({
   flowId,
   runId,
   target,
   lines,
-  sourceHash
+  sourceHash,
+  eagerWords = false
 }: {
   flowId: string;
   runId: string;
   target: TranscriptTarget;
   lines: readonly ShownSegment[];
   sourceHash: string;
+  /** Reads the word timings before the audio plays, for a reviewer. */
+  eagerWords?: boolean;
 }): Playback | null {
   const t = useTranslations();
   const baseId = useId();
@@ -67,11 +93,16 @@ export function useTranscriptPlayback({
   const [loading, setLoading] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [follow, setFollow] = useState(true);
+  const [rate, setRate] = useState(1);
+  const [focused, setFocused] = useState(false);
   const [position, setPosition] = useState({ line: -1, word: -1 });
+  /** Where playback of the loaded file stops by itself (a sample); null to play on. */
+  const stopAt = useRef<number | null>(null);
+  const shortcutsId = `${baseId}-shortcuts`;
   const started = src !== null;
   const words = useQuery({
     ...transcriptWordsQueryOptions(flowId, runId, target.stepId),
-    enabled: started
+    enabled: started || eagerWords
   });
   const placed = words.data ? wordsByLine(lines, words.data, sourceHash) : NO_WORDS;
 
@@ -95,7 +126,8 @@ export function useTranscriptPlayback({
     }
   }
 
-  function seek(fileIndex: number, time: number) {
+  function seek(fileIndex: number, time: number, until?: number) {
+    stopAt.current = until ?? null;
     const element = audio.current;
     if (!element || !src || fileIndex !== file) {
       void load(fileIndex, time);
@@ -105,8 +137,49 @@ export function useTranscriptPlayback({
     void element.play().catch(() => undefined);
   }
 
+  function skip(seconds: number) {
+    const element = audio.current;
+    if (!element) return;
+    const end = Number.isFinite(element.duration) ? element.duration : Infinity;
+    element.currentTime = Math.min(end, Math.max(0, element.currentTime + seconds));
+  }
+
+  function toggle() {
+    const element = audio.current;
+    if (!element) return;
+    if (element.paused) void element.play().catch(() => undefined);
+    else element.pause();
+  }
+
+  // The shortcuts listen only while focus is somewhere in the player.
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = box.current;
+    if (!element) return;
+    const enter = () => setFocused(true);
+    const leave = (event: FocusEvent) => {
+      if (!element.contains(event.relatedTarget as Node | null)) setFocused(false);
+    };
+    element.addEventListener("focusin", enter);
+    element.addEventListener("focusout", leave);
+    return () => {
+      element.removeEventListener("focusin", enter);
+      element.removeEventListener("focusout", leave);
+    };
+  }, []);
+
+  useHotkeys([
+    { keys: "j", onPress: () => skip(-SKIP_SECONDS), isDisabled: !focused || !src },
+    { keys: "k", onPress: toggle, isDisabled: !focused || !src },
+    { keys: "l", onPress: () => skip(SKIP_SECONDS), isDisabled: !focused || !src }
+  ]);
+
   function track(element: HTMLAudioElement) {
     const time = element.currentTime;
+    if (stopAt.current !== null && time >= stopAt.current) {
+      stopAt.current = null;
+      element.pause();
+    }
     const line = activeLine(lines, file, time);
     const own = line >= 0 ? placed.get(lines[line]!.index) : undefined;
     const word = own ? activeWord(own, time) : -1;
@@ -123,7 +196,7 @@ export function useTranscriptPlayback({
   if (fileCount === 0) return null;
 
   const player = (
-    <div className="flex flex-col gap-2">
+    <div ref={box} className="flex flex-col gap-2">
       {problem ? (
         <QuietBanner
           status="error"
@@ -133,7 +206,12 @@ export function useTranscriptPlayback({
         />
       ) : null}
       {src ? (
-        <div className="flex flex-col gap-2">
+        <div
+          role="group"
+          aria-label={t("flow_transcript_player_label")}
+          aria-describedby={shortcutsId}
+          className="flex flex-col gap-2"
+        >
           {fileCount > 1 ? (
             <Text type="supporting">
               {t("flow_transcript_audio_part", { part: file + 1, count: fileCount })}
@@ -152,6 +230,7 @@ export function useTranscriptPlayback({
             className="w-full"
             onLoadedMetadata={(event) => {
               const element = event.currentTarget;
+              element.playbackRate = rate;
               resigned.current = false;
               if (pending.current !== null) {
                 element.currentTime = pending.current;
@@ -192,12 +271,37 @@ export function useTranscriptPlayback({
             />
             {t("flow_transcript_audio_unsupported")}
           </audio>
-          <CheckboxInput
-            label={t("flow_transcript_audio_follow")}
-            value={follow}
-            onChange={setFollow}
-            size="sm"
-          />
+          <div className="flex flex-wrap items-end gap-3">
+            <Selector
+              label={t("flow_transcript_audio_rate")}
+              value={String(rate)}
+              onChange={(value) => {
+                const next = Number(value);
+                if (!Number.isFinite(next)) return;
+                setRate(next);
+                if (audio.current) audio.current.playbackRate = next;
+              }}
+              options={PLAYBACK_RATES.map((value) => ({
+                value: String(value),
+                label: t("flow_transcript_audio_rate_value", { rate: value })
+              }))}
+              size="sm"
+            />
+            <CheckboxInput
+              label={t("flow_transcript_audio_follow")}
+              value={follow}
+              onChange={setFollow}
+              size="sm"
+            />
+          </div>
+          <Text type="supporting" as="p" id={shortcutsId}>
+            {t.rich("flow_transcript_audio_shortcuts", {
+              j: () => <Kbd keys="j" />,
+              k: () => <Kbd keys="k" />,
+              l: () => <Kbd keys="l" />,
+              seconds: SKIP_SECONDS
+            })}
+          </Text>
         </div>
       ) : (
         <div>

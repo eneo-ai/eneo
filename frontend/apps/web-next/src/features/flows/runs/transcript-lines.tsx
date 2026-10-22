@@ -11,9 +11,9 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { Token } from "@astryxdesign/core/Token";
-import { Pencil } from "lucide-react";
+import { Download, Pencil, Volume2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { clockTime, type ShownSegment, type TranscriptTarget } from "./transcript";
@@ -25,12 +25,13 @@ import {
   withSpeaker,
   type CorrectionSet
 } from "./transcript-corrections";
-import { useTranscriptPlayback } from "./transcript-player";
+import { saveText, transcriptText } from "./transcript-export";
+import { uncertainWordCount, useTranscriptPlayback } from "./transcript-player";
 import { textRuns, type PlacedWord, type TextRun } from "./transcript-playback";
 import { overlapDetectionUnavailable, overlaps, type Overlap } from "./transcript-overlaps";
 import { partAttributes, selectedSpans, type SelectedSpan } from "./transcript-selection";
 import { SelectionToolbar } from "./transcript-selection-toolbar";
-import { SpeakerBadge } from "./transcript-speakers";
+import { SpeakerBadge, speakerText } from "./transcript-speakers";
 import { SuggestionsDialog } from "./transcript-suggestions-dialog";
 import {
   suggestionsFor,
@@ -394,11 +395,14 @@ function LineText({
                   data-word={run.word}
                   data-seek={word.start}
                   data-file={segment.fileIndex}
-                  className={
-                    active && run.word === activeWord
-                      ? "bg-ax-accent-muted cursor-pointer rounded-sm"
-                      : "cursor-pointer"
-                  }
+                  className={[
+                    "cursor-pointer",
+                    active && run.word === activeWord ? "bg-ax-accent-muted rounded-sm" : "",
+                    // Where the aligner only guessed the word's time.
+                    word.uncertain ? "underline decoration-wavy underline-offset-2" : ""
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
                 >
                   {run.text}
                 </span>
@@ -667,6 +671,57 @@ function OverlapReview({
   );
 }
 
+/** A line to hear a speaker by: theirs, said with confidence, with words in it. */
+function sampleLine(shown: readonly ShownSegment[], label: string): ShownSegment | undefined {
+  return shown.find(
+    (segment) =>
+      segment.label === label &&
+      segment.parts.length === 1 &&
+      !segment.unsure &&
+      segment.decision !== "unresolved" &&
+      /[\p{L}\p{N}]/u.test(segment.text)
+  );
+}
+
+/**
+ * A short sample of each speaker's voice: their first line said with
+ * confidence, from just before it starts to just after it ends. It helps
+ * tell the speakers apart before naming them or reassigning their lines.
+ */
+function SpeakerSamples({
+  shown,
+  onPlay
+}: {
+  shown: readonly ShownSegment[];
+  onPlay: (fileIndex: number, time: number, until?: number) => void;
+}) {
+  const t = useTranslations();
+  const headingId = useId();
+  const samples = [...new Set(shown.flatMap((segment) => (segment.label ? [segment.label] : [])))]
+    .map((label) => ({ label, line: sampleLine(shown, label) }))
+    .filter((sample): sample is { label: string; line: ShownSegment } => Boolean(sample.line));
+  if (samples.length === 0) return null;
+  return (
+    <div role="group" aria-labelledby={headingId} className="flex flex-wrap items-center gap-2">
+      <Text type="supporting" id={headingId}>
+        {t("flow_transcript_samples")}
+      </Text>
+      {samples.map(({ label, line }) => (
+        <Button
+          key={label}
+          label={t("flow_transcript_sample_listen", {
+            name: speakerText(label, { [label]: line.name }, t)
+          })}
+          icon={<Volume2 aria-hidden="true" />}
+          size="sm"
+          variant="ghost"
+          onClick={() => onPlay(line.fileIndex, Math.max(0, line.start - 0.5), line.end + 0.5)}
+        />
+      ))}
+    </div>
+  );
+}
+
 /**
  * The lines of one transcript, with its audio player above them. Someone who
  * may correct the transcript corrects a line's text in place; the line then
@@ -698,7 +753,14 @@ export function TranscriptLines({
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
-  const playback = useTranscriptPlayback({ flowId, runId, target, lines: shown, sourceHash });
+  const playback = useTranscriptPlayback({
+    flowId,
+    runId,
+    target,
+    lines: shown,
+    sourceHash,
+    eagerWords: editing !== null
+  });
   const [open, setOpen] = useState<number | null>(null);
   const [view, setView] = useState<View>("lines");
   const [suggesting, setSuggesting] = useState<{
@@ -894,6 +956,12 @@ export function TranscriptLines({
         }}
       />
       {playback?.player}
+      {playback ? <SpeakerSamples shown={shown} onPlay={playback.seek} /> : null}
+      {playback && uncertainWordCount(playback.words) > 0 ? (
+        <Text type="supporting" as="p">
+          {t("flow_transcript_uncertain_words", { count: uncertainWordCount(playback.words) })}
+        </Text>
+      ) : null}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <ToggleButtonGroup
           label={t("flow_transcript_view_label")}
@@ -910,11 +978,29 @@ export function TranscriptLines({
           <ToggleButton value="lines" label={t("flow_transcript_view_lines")} />
           <ToggleButton value="turns" label={t("flow_transcript_view_turns")} />
         </ToggleButtonGroup>
-        {corrected > 0 ? (
-          <Text type="supporting">
-            {t("flow_transcript_corrected_count", { count: corrected })}
-          </Text>
-        ) : null}
+        <div className="flex flex-wrap items-center gap-3">
+          {corrected > 0 ? (
+            <Text type="supporting">
+              {t("flow_transcript_corrected_count", { count: corrected })}
+            </Text>
+          ) : null}
+          <Button
+            label={t("flow_transcript_export")}
+            icon={<Download aria-hidden="true" />}
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              saveText(
+                transcriptText(shown, {
+                  part: (number) => t("flow_transcript_audio_part_heading", { part: number }),
+                  unknownSpeaker: t("flow_runs_transcript_unknown_speaker"),
+                  unsureSpeaker: t("flow_transcript_speaker_unresolved")
+                }),
+                t("flow_transcript_export_file")
+              )
+            }
+          />
+        </div>
       </div>
       {editing ? (
         <Text type="supporting" as="p">
