@@ -48,7 +48,10 @@ from eneo.main.exceptions import (
     ErrorCodes,
 )
 from eneo.main.models import OffsetPaginatedResponse
-from eneo.server.dependencies.container import get_container
+from eneo.server.dependencies.container import (
+    get_container,
+    get_container_for_explicit_transaction,
+)
 
 router = APIRouter()
 
@@ -58,6 +61,11 @@ router = APIRouter()
 # be told the flow does not exist.
 _MUTATING_CONTAINER = get_container(
     with_user=True, with_module_user=True, transaction_scope="function"
+)
+# An authoring change commits in the route (`authoring_transaction`), so its
+# audit entries are logged after the commit and a refused change logs none.
+_AUTHORING_CONTAINER = get_container_for_explicit_transaction(
+    with_user=True, with_module_user=True
 )
 
 _FLOW_AUTHORING_FORBIDDEN_DESCRIPTION = (
@@ -244,11 +252,12 @@ _FLOW_NAME_TAKEN_RESPONSE = error_response(
 async def create_flow(
     request: Request,
     flow_in: FlowCreateRequest,
-    container: Container = Depends(_MUTATING_CONTAINER),
+    container: Container = Depends(_AUTHORING_CONTAINER),
 ):
-    return await authoring_operations.create_flow(
-        request=request, container=container, flow_in=flow_in
-    )
+    async with authoring_operations.authoring_transaction(container):
+        return await authoring_operations.create_flow(
+            request=request, container=container, flow_in=flow_in
+        )
 
 
 @router.get(
@@ -584,11 +593,12 @@ async def update_flow(
     ],
     request: Request,
     flow_in: FlowUpdateRequest,
-    container: Container = Depends(_MUTATING_CONTAINER),
+    container: Container = Depends(_AUTHORING_CONTAINER),
 ):
-    return await authoring_operations.update_flow(
-        id=id, request=request, container=container, flow_in=flow_in
-    )
+    async with authoring_operations.authoring_transaction(container):
+        return await authoring_operations.update_flow(
+            id=id, request=request, container=container, flow_in=flow_in
+        )
 
 
 @router.delete(
@@ -725,12 +735,16 @@ async def publish_flow(
         UUID, Path(description="Identifier of the draft flow definition to publish.")
     ],
     request: Request,
-    container: Container = Depends(_MUTATING_CONTAINER),
+    container: Container = Depends(_AUTHORING_CONTAINER),
     expected_revision: Annotated[int | None, Query(ge=0)] = None,
 ):
-    return await authoring_operations.publish_flow(
-        id=id, request=request, container=container, expected_revision=expected_revision
-    )
+    async with authoring_operations.authoring_transaction(container):
+        return await authoring_operations.publish_flow(
+            id=id,
+            request=request,
+            container=container,
+            expected_revision=expected_revision,
+        )
 
 
 @router.post(
@@ -778,12 +792,16 @@ async def unpublish_flow(
         Path(description="Identifier of the published flow definition to unpublish."),
     ],
     request: Request,
-    container: Container = Depends(_MUTATING_CONTAINER),
+    container: Container = Depends(_AUTHORING_CONTAINER),
     expected_revision: Annotated[int | None, Query(ge=0)] = None,
 ):
-    return await authoring_operations.unpublish_flow(
-        id=id, request=request, container=container, expected_revision=expected_revision
-    )
+    async with authoring_operations.authoring_transaction(container):
+        return await authoring_operations.unpublish_flow(
+            id=id,
+            request=request,
+            container=container,
+            expected_revision=expected_revision,
+        )
 
 
 __all__ = ["router"]
@@ -841,8 +859,9 @@ async def update_flow_editor(
     id: UUID,
     request: Request,
     update: FlowEditorUpdateRequest,
-    container: Container = Depends(_MUTATING_CONTAINER),
+    container: Container = Depends(_AUTHORING_CONTAINER),
 ) -> FlowPublic:
-    return await authoring_operations.apply_editor_update(
-        id=id, request=request, update=update, container=container
-    )
+    async with authoring_operations.authoring_transaction(container):
+        return await authoring_operations.apply_editor_update(
+            id=id, request=request, update=update, container=container
+        )

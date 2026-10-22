@@ -80,21 +80,28 @@ async def _call(
         require_authoring_edit,
         scoped_request,
     )
+    from eneo.flows.application.flow_authoring_operations import (
+        authoring_transaction,
+    )
 
     try:
-        # Refusals are caught outside this block so failed writes roll back.
-        async with internal_tool_context(ctx) as scope:
+        # Refusals are caught outside this block so failed writes roll back;
+        # the change's audit entries are logged once it has committed.
+        async with internal_tool_context(ctx, transactional=False) as scope:
             if scope.session_id is None:
                 raise NotFoundException("Flow authoring chat not found.")
-            chat = await load_authoring_chat(
-                scope.container,
-                session_id=scope.session_id,
-                assistant_id=scope.assistant_id,
-                lock=editing,
-            )
-            if editing:
-                await require_authoring_edit(scope.container, chat)
-            return await operation(scope.container, chat, scoped_request(chat.space_id))
+            async with authoring_transaction(scope.container):
+                chat = await load_authoring_chat(
+                    scope.container,
+                    session_id=scope.session_id,
+                    assistant_id=scope.assistant_id,
+                    lock=editing,
+                )
+                if editing:
+                    await require_authoring_edit(scope.container, chat)
+                return await operation(
+                    scope.container, chat, scoped_request(chat.space_id)
+                )
     except (
         BadRequestException,
         NotFoundException,

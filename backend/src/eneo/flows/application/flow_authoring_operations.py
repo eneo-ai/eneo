@@ -2,16 +2,22 @@
 
 The existing core access policies, service validation, snapshots and audit remain
 one path. Callers own a transaction; exceptions must reach its context manager.
+A caller that opens it with ``authoring_transaction`` has the change's audit
+entries logged after the commit; otherwise an operation logs them once every
+check that can refuse the change has passed.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import AsyncGenerator, Mapping
+from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import replace
 from typing import Any, cast
 from uuid import UUID
 
 from fastapi import Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -134,8 +140,8 @@ async def create_flow(
         raise _flow_name_taken_conflict() from exc
 
     created_flow_id = created.require_persisted_id()
-    audit_service = container.audit_service()
-    await audit_service.log_async(
+    audit, owns_audit = _change_audit(container)
+    audit.add(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.FLOW_CREATED,
@@ -150,7 +156,7 @@ async def create_flow(
     )
     overrides = _classification_override_step_orders(flow_in)
     if overrides:
-        await audit_service.log_async(
+        audit.add(
             tenant_id=user.tenant_id,
             actor_id=user.id,
             action=ActionType.FLOW_CLASSIFICATION_OVERRIDE,
@@ -163,6 +169,8 @@ async def create_flow(
                 changes={"step_orders": overrides},
             ),
         )
+    if owns_audit:
+        await audit.log()
 
     return assembler.to_public(created)
 
@@ -201,7 +209,7 @@ async def update_flow(
     reservation = await container.flow_service().reserve_draft_revision(
         flow_id=id, expected_revision=expected_revision
     )
-    audit = _AuditEntries(container)
+    audit, owns_audit = _change_audit(container)
     definition = flow_in.model_copy(update={"expected_revision": expected_revision})
     replaces_steps = "steps" in flow_in.model_fields_set
     placed = (
@@ -234,7 +242,8 @@ async def update_flow(
         audit=audit,
         steps_override=steps_override,
     )
-    await audit.log()
+    if owns_audit:
+        await audit.log()
     return updated
 
 
@@ -324,7 +333,8 @@ async def publish_flow(
 
     published = await container.flow_service().publish_flow(flow_id=id)
     user = container.user()
-    await container.audit_service().log_async(
+    audit, owns_audit = _change_audit(container)
+    audit.add(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.FLOW_PUBLISHED,
@@ -333,6 +343,8 @@ async def publish_flow(
         description=f"Published flow '{published.name}' as version {published.published_version}",
         metadata=AuditMetadata.standard(actor=user, target=published),
     )
+    if owns_audit:
+        await audit.log()
     return FlowAssembler().to_public(published)
 
 
@@ -351,7 +363,8 @@ async def unpublish_flow(
 
     unpublished = await container.flow_service().unpublish_flow(flow_id=id)
     user = container.user()
-    await container.audit_service().log_async(
+    audit, owns_audit = _change_audit(container)
+    audit.add(
         tenant_id=user.tenant_id,
         actor_id=user.id,
         action=ActionType.FLOW_UNPUBLISHED,
@@ -360,6 +373,8 @@ async def unpublish_flow(
         description=f"Unpublished flow '{unpublished.name}'",
         metadata=AuditMetadata.standard(actor=user, target=unpublished),
     )
+    if owns_audit:
+        await audit.log()
     return FlowAssembler().to_public(unpublished)
 
 
@@ -379,7 +394,7 @@ async def apply_editor_update(
     reservation = await service.reserve_draft_revision(
         flow_id=id, expected_revision=update.expected_revision
     )
-    audit = _AuditEntries(container)
+    audit, owns_audit = _change_audit(container)
     user = container.user()
     copies = _copy_on_write_changes(update, access.flow.steps)
     for change in update.assistants:
@@ -528,7 +543,8 @@ async def apply_editor_update(
         unchanged_step_ids=unchanged_ids,
         steps_override=steps_override,
     )
-    await audit.log()
+    if owns_audit:
+        await audit.log()
     return updated
 
 
@@ -615,9 +631,9 @@ async def _give_steps_their_copies(
 
 
 class _AuditEntries:
-    """The audit entries of one authoring change. They are logged once the
-    change has passed every check that can refuse it, so a refused change,
-    which its transaction rolls back, leaves no entry behind."""
+    """The audit entries of one authoring change, logged only once the change
+    is saved: a refused change, which its transaction rolls back, leaves no
+    entry behind."""
 
     def __init__(self, container: Container) -> None:
         self._container = container
@@ -631,6 +647,39 @@ class _AuditEntries:
         entries, self._entries = self._entries, []
         for entry in entries:
             await audit_service.log_async(**entry)
+
+
+_HELD_AUDIT: ContextVar[_AuditEntries | None] = ContextVar(
+    "held_flow_authoring_audit", default=None
+)
+
+
+@asynccontextmanager
+async def authoring_transaction(container: Container) -> AsyncGenerator[None]:
+    """One authoring change in a transaction of its own, for a caller that has
+    none open. The audit entries of the change are held while it runs and
+    logged once the transaction has committed; a change that is refused, and
+    rolled back, logs none."""
+
+    entries = _AuditEntries(container)
+    token = _HELD_AUDIT.set(entries)
+    try:
+        async with cast(AsyncSession, container.session()).begin():
+            yield
+    finally:
+        _HELD_AUDIT.reset(token)
+    await entries.log()
+
+
+def _change_audit(container: Container) -> tuple[_AuditEntries, bool]:
+    """Where an operation puts its audit entries: those of the surrounding
+    ``authoring_transaction``, logged after its commit, or its own, which it
+    logs once every check has passed (``True``)."""
+
+    held = _HELD_AUDIT.get()
+    if held is not None:
+        return held, False
+    return _AuditEntries(container), True
 
 
 def _as_read(step: FlowStep) -> FlowStep:
