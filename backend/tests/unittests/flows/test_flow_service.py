@@ -890,6 +890,7 @@ async def test_publish_flow_accepts_reads_the_run_collects(
     version_repo.create.assert_awaited_once()
 
 
+@pytest.mark.usefixtures("shared_document_runtime")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "binding",
@@ -1568,6 +1569,7 @@ async def test_get_flow_assistant_snapshots_batches_and_deduplicates_assistant_i
     )
 
 
+@pytest.mark.usefixtures("shared_document_runtime")
 @pytest.mark.asyncio
 async def test_publish_flow_pins_template_metadata_for_template_fill(user):
     flow_repo = AsyncMock()
@@ -1625,6 +1627,7 @@ async def test_publish_flow_pins_template_metadata_for_template_fill(user):
     assert output_config["placeholders"] == ["section"]
 
 
+@pytest.mark.usefixtures("shared_document_runtime")
 @pytest.mark.asyncio
 async def test_publish_flow_preserves_template_placeholder_order(user):
     flow_repo = AsyncMock()
@@ -1727,6 +1730,7 @@ async def test_update_flow_allows_incomplete_template_fill_during_draft_editing(
     assert updated.steps[0].output_config == {"bindings": {}}
 
 
+@pytest.mark.usefixtures("shared_document_runtime")
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("asset_error", "expected_code"),
@@ -1800,6 +1804,7 @@ async def test_publish_flow_rejects_invalid_template_before_version_write(
     version_repo.create.assert_not_awaited()
 
 
+@pytest.mark.usefixtures("shared_document_runtime")
 @pytest.mark.asyncio
 async def test_publish_flow_allows_explicit_empty_template_binding(user):
     flow_repo = AsyncMock()
