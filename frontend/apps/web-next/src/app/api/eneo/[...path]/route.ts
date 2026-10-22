@@ -51,7 +51,9 @@ const FORWARDED_RESPONSE_HEADERS = [
   "accept-ranges",
   "content-range",
   "x-trace-id",
-  "x-correlation-id"
+  "x-correlation-id",
+  // What a flow package export left out (its MCP connections).
+  "eneo-package-omitted-mcp-assistant-count"
 ];
 
 async function proxyRequest(request: NextRequest): Promise<Response> {

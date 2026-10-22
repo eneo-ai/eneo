@@ -37,6 +37,7 @@ import {
   type FlowStep
 } from "./flows-api";
 import { FlowChatPanel } from "./flow-chat-panel";
+import { FlowPackageExportDialog } from "./flow-package-export-dialog";
 import { stepLabel } from "./flow-labels";
 import { flowRefusalMessage, STALE_REVISION } from "./flow-refusals";
 import { FlowSettings } from "./flow-settings";
@@ -97,6 +98,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const [addAt, setAddAt] = useState<number | null>(null);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const [tab, setTab] = useState<PageTab>(
@@ -269,6 +271,12 @@ export function FlowPage({ flowId }: { flowId: string }) {
             label={t("flow_runs_start")}
             variant="primary"
             onClick={() => setStarting(true)}
+          />
+        ) : null}
+        {canManage ? (
+          <Button
+            label={t("flow_editor_tools_package_export")}
+            onClick={() => setExporting(true)}
           />
         ) : null}
         {canManage && isPublished ? (
@@ -474,6 +482,9 @@ export function FlowPage({ flowId }: { flowId: string }) {
             router.push(runHref(routeId, flow.id, run.id));
           }}
         />
+      ) : null}
+      {canManage ? (
+        <FlowPackageExportDialog flow={flow} open={exporting} onOpenChange={setExporting} />
       ) : null}
       <ConfirmDialogControlled
         open={confirmUnpublish}
