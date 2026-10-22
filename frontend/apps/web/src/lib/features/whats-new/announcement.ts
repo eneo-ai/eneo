@@ -1,5 +1,5 @@
 import { visibleEntries } from "@eneo/whats-new";
-import type { Release, ReleaseEntry } from "@eneo/whats-new";
+import type { PermissionCheck, Release, ReleaseEntry } from "@eneo/whats-new";
 
 export const ANNOUNCEMENT_ENTRIES = 4;
 
@@ -9,9 +9,9 @@ export const ANNOUNCEMENT_ENTRIES = 4;
  */
 export function announcementSummary(
   release: Release,
-  isAdmin: boolean
+  can: PermissionCheck
 ): { entries: ReleaseEntry[]; more: number; total: number } {
-  const all = visibleEntries(release, isAdmin);
+  const all = visibleEntries(release, can);
   const entries = all.slice(0, ANNOUNCEMENT_ENTRIES);
   return { entries, more: all.length - entries.length, total: all.length };
 }
