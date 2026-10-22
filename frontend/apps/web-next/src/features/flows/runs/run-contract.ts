@@ -33,6 +33,18 @@ export type UploadEntry = {
   progress?: number;
   /** Why the upload failed, as a sentence. */
   problem?: string;
+  /** The failure may pass (the network, a timeout, a busy server): the same file can be sent again. */
+  retryable?: boolean;
+  /** A part of a recording made in the form, rather than a picked file. */
+  recording?: RecordingPartInfo;
+};
+
+/** Which recording a recorded file belongs to, and where in it. */
+export type RecordingPartInfo = {
+  sessionId: string;
+  /** The part's place in the recording, from 0. */
+  index: number;
+  durationMs: number;
 };
 
 export type UploadsByStep = Record<string, readonly UploadEntry[]>;
@@ -155,6 +167,23 @@ function doneFiles(uploads: readonly UploadEntry[] | undefined): string[] {
   );
 }
 
+/** The keys of a step's stored files, in order. */
+export function doneKeys(uploads: readonly UploadEntry[] | undefined): string[] {
+  return (uploads ?? []).flatMap((entry) =>
+    entry.state === "done" && entry.fileId ? [entry.key] : []
+  );
+}
+
+/**
+ * Whether a step's stored files are the parts of one recording made in the
+ * form: more than one, every one recorded, all in the same recording.
+ */
+export function recordedAsOne(uploads: readonly UploadEntry[] | undefined): boolean {
+  const done = (uploads ?? []).filter((entry) => entry.state === "done" && entry.fileId);
+  const [first, ...rest] = done.map((entry) => entry.recording?.sessionId);
+  return first !== undefined && rest.length > 0 && rest.every((session) => session === first);
+}
+
 /** Whether a step's files can be sent, and if not, why. */
 export function inputProblem(
   input: RuntimeInput,
@@ -239,7 +268,9 @@ export function offersSingleRecording(
   return (
     contract.transcription?.single_recording === true &&
     input.input_format === "audio" &&
-    doneFiles(uploads).length > 1
+    doneFiles(uploads).length > 1 &&
+    // A recording made in the form is sent as one without asking.
+    !recordedAsOne(uploads)
   );
 }
 
@@ -253,6 +284,12 @@ export type RunChoices = {
   speakerLabels: boolean | null;
   /** The person's speaker bound, or null to leave it to the form or the flow. */
   maxSpeakers: number | null;
+  /**
+   * The stored live transcript of a step whose one file is a recording the
+   * live text heard whole, by step id: the run uses it instead of
+   * transcribing the file again.
+   */
+  liveTranscripts?: Readonly<Record<string, string>>;
 };
 
 /** The request that starts the run, pinned to the contract's published version. */
@@ -261,11 +298,23 @@ export function runRequest(contract: RunContract, choices: RunChoices): RunCreat
     orderedInputs(contract).flatMap((input) => {
       const fileIds = doneFiles(choices.uploads[input.step_id]);
       if (fileIds.length === 0) return [];
+      const uploads = choices.uploads[input.step_id];
       const single =
-        choices.singleRecording.has(input.step_id) &&
-        offersSingleRecording(contract, input, choices.uploads[input.step_id]);
+        (choices.singleRecording.has(input.step_id) &&
+          offersSingleRecording(contract, input, uploads)) ||
+        (contract.transcription?.single_recording === true &&
+          input.input_format === "audio" &&
+          recordedAsOne(uploads));
+      const liveTranscript = fileIds.length === 1 ? choices.liveTranscripts?.[input.step_id] : null;
       return [
-        [input.step_id, { file_ids: fileIds, ...(single ? { single_recording: true } : {}) }]
+        [
+          input.step_id,
+          {
+            file_ids: fileIds,
+            ...(single ? { single_recording: true } : {}),
+            ...(liveTranscript ? { live_transcript_id: liveTranscript } : {})
+          }
+        ]
       ];
     })
   );

@@ -4,6 +4,8 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { useAnnounce } from "@astryxdesign/core/hooks";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
@@ -15,6 +17,8 @@ import { ClientTime } from "@/components/composites/client-time";
 import { EneoApiError } from "@/lib/api/errors";
 import { focusFirstControl } from "./run-form-fields";
 import { JsonValue } from "./run-json";
+import { ReviewTranscript } from "./run-transcript";
+import type { TranscriptTarget } from "./transcript";
 import { isStaleRefusal, refusalText } from "./run-messages";
 import {
   draftChanged,
@@ -160,10 +164,13 @@ export function ReviewPanel({
   checkpoint,
   mayReview,
   now,
-  onStale
+  onStale,
+  transcript = null
 }: {
   checkpoint: ReviewCheckpoint;
   mayReview: boolean;
+  /** The transcript the review is about, corrected in the review before approving. */
+  transcript?: TranscriptTarget | null;
   /** The time the run's status was last read, for the deadline. */
   now: number;
   /** Someone else changed the checkpoint first; the page says so while it reads it again. */
@@ -387,6 +394,23 @@ export function ReviewPanel({
       problem?.field === null &&
       (draft.kind === "fields" || draft.kind === "speakers") ? (
         <p className="text-ax-error text-sm">{problem.message}</p>
+      ) : null}
+
+      {transcript ? (
+        <div className="flex flex-col gap-2">
+          <Heading level={3}>{t("flow_transcript_review_heading")}</Heading>
+          <Text type="supporting" as="p">
+            {options.canDecide
+              ? t("flow_transcript_review_hint")
+              : t("flow_transcript_review_read")}
+          </Text>
+          <ReviewTranscript
+            flowId={checkpoint.flow_id}
+            runId={checkpoint.flow_run_id}
+            target={transcript}
+            mayEdit={options.canDecide}
+          />
+        </div>
       ) : null}
 
       {rejecting ? (

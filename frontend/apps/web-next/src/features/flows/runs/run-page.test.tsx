@@ -532,6 +532,458 @@ describe("FlowRunPage", () => {
       });
     });
 
+    it("plays the audio from a line or a word and marks the line playing", async () => {
+      answerAudioRun();
+      state.routes["POST /api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/"] =
+        () => ({
+          body: {
+            url: "http://backend:8000/api/v1/files/audio-1/download/?token=t0k3n",
+            expires_at: "2026-10-21T10:00:00Z"
+          }
+        });
+      state.routes["GET /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-words/"] =
+        () => ({
+          body: {
+            alignment: "provider_words",
+            created_at: "2026-10-21T09:00:00Z",
+            flow_run_id: "run-1",
+            step_id: "step-1",
+            segments_hash: "hash-1",
+            stale: false,
+            segments: [
+              {
+                segment_index: 1,
+                words: [{ word: "Tack.", start: 65.5, end: 66, probability: 0.9 }]
+              }
+            ]
+          }
+        });
+      const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+      const { container } = renderRun(["flows_view"]);
+
+      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      fireEvent.click(within(lines).getByRole("button", { name: /^Spela från 1:05/ }));
+      const audio = await screen.findByLabelText<HTMLAudioElement>(
+        messages.flow_transcript_audio_label
+      );
+      expect(audio.getAttribute("src")).toBe(
+        "/api/eneo/api/v1/files/audio-1/download/?token=t0k3n"
+      );
+      fireEvent.loadedMetadata(audio);
+      expect(audio.currentTime).toBe(65);
+      expect(play).toHaveBeenCalled();
+
+      Object.defineProperty(audio, "currentTime", {
+        configurable: true,
+        writable: true,
+        value: 65.7
+      });
+      fireEvent.timeUpdate(audio);
+      const playing = within(lines).getByRole("button", { name: /^Spela från 1:05/ });
+      await waitFor(() => expect(playing.getAttribute("aria-current")).toBe("time"));
+      expect(
+        within(lines)
+          .getByRole("button", { name: /^Spela från 0:00/ })
+          .getAttribute("aria-current")
+      ).toBeNull();
+      // The word playing is marked for the eye only, once the word timings came.
+      await waitFor(() => {
+        fireEvent.timeUpdate(audio);
+        expect(within(playing).getByText("Tack.").className).toContain("bg-ax-accent-muted");
+      });
+      expect(container.querySelector("[aria-live] [data-word]")).toBeNull();
+      await expectNoAxeViolations(container);
+      play.mockRestore();
+    });
+
+    it("corrects a line's text, shows it corrected and reverts the correction", async () => {
+      answerAudioRun();
+      let revision = 0;
+      state.routes[EDIT] = (init: { body: Record<string, unknown> }) => {
+        revision += 1;
+        return {
+          body: {
+            flow_run_id: "run-1",
+            step_id: "step-1",
+            created_at: "2026-10-21T09:00:00Z",
+            updated_at: "2026-10-21T09:00:00Z",
+            edited_by_principal_type: "user",
+            schema_version: 3,
+            segments_hash: "hash-1",
+            stale: false,
+            revision,
+            occurrences: init.body.occurrences,
+            speaker_edits: init.body.speaker_edits,
+            speaker_names: init.body.speaker_names ?? {}
+          }
+        };
+      };
+      const { container } = renderRun(["flows_view", "flows_manage"]);
+      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+
+      fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
+      const field = within(lines).getByLabelText("Texten på raden 1:05");
+      expect(document.activeElement).toBe(field);
+      await expectNoAxeViolations(container);
+      fireEvent.change(field, { target: { value: "Tack så mycket." } });
+      fireEvent.click(
+        within(lines).getByRole("button", { name: messages.flow_transcript_line_save })
+      );
+
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_line_saved)
+      );
+      expect(calls(EDIT)[0]?.init.body).toEqual({
+        expected_revision: null,
+        segments_hash: "hash-1",
+        schema_version: 3,
+        occurrences: [
+          { segment_index: 1, char_start: 4, char_end: 5, original: ".", corrected: " så mycket." }
+        ],
+        speaker_edits: [],
+        speaker_names: {}
+      });
+      expect(await within(lines).findByText(/Tack så mycket\./)).toBeTruthy();
+      expect(within(lines).getByText(messages.flow_transcript_line_corrected)).toBeTruthy();
+      // Focus goes back to the line's edit button.
+      expect(document.activeElement).toBe(
+        within(lines).getByRole("button", { name: "Rätta raden 1:05" })
+      );
+
+      fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
+      expect(within(lines).getByText("Ursprunglig text: Tack.")).toBeTruthy();
+      fireEvent.click(
+        within(lines).getByRole("button", { name: messages.flow_transcript_line_revert })
+      );
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_line_reverted)
+      );
+      expect(calls(EDIT)[1]?.init.body).toMatchObject({ expected_revision: 1, occurrences: [] });
+      await waitFor(() =>
+        expect(within(lines).queryByText(messages.flow_transcript_line_corrected)).toBeNull()
+      );
+    });
+
+    it("gives a line, or a marked part of it, to another speaker", async () => {
+      answerAudioRun();
+      let revision = 0;
+      state.routes[EDIT] = (init: { body: Record<string, unknown> }) => {
+        revision += 1;
+        return {
+          body: {
+            flow_run_id: "run-1",
+            step_id: "step-1",
+            created_at: "2026-10-21T09:00:00Z",
+            updated_at: "2026-10-21T09:00:00Z",
+            edited_by_principal_type: "user",
+            schema_version: 3,
+            segments_hash: "hash-1",
+            stale: false,
+            revision,
+            occurrences: init.body.occurrences,
+            speaker_edits: init.body.speaker_edits,
+            speaker_names: init.body.speaker_names ?? {}
+          }
+        };
+      };
+      const { container } = renderRun(["flows_view", "flows_manage"]);
+      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+
+      // The whole line, unsure.
+      fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
+      await expectNoAxeViolations(container);
+      fireEvent.click(within(lines).getByLabelText(messages.flow_transcript_speaker_unsure));
+      fireEvent.click(
+        within(lines).getByRole("button", { name: messages.flow_transcript_speaker_apply })
+      );
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_speaker_saved)
+      );
+      expect(calls(EDIT)[0]?.init.body).toMatchObject({
+        speaker_edits: [
+          {
+            segment_index: 1,
+            char_start: null,
+            char_end: null,
+            original: null,
+            original_speaker: "SPEAKER_01",
+            speaker: "SPEAKER_00",
+            decision: "unresolved"
+          }
+        ]
+      });
+      expect(
+        await within(lines).findByText(messages.flow_transcript_speaker_unresolved)
+      ).toBeTruthy();
+
+      // The marked part of a line.
+      fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 0:00" }));
+      const field = within(lines).getByLabelText<HTMLTextAreaElement>("Texten på raden 0:00");
+      field.setSelectionRange(0, 4);
+      fireEvent.click(
+        within(lines).getByRole("radio", { name: messages.flow_transcript_speaker_scope_selection })
+      );
+      fireEvent.click(
+        within(lines).getByRole("button", { name: messages.flow_transcript_speaker_apply })
+      );
+      await waitFor(() => expect(calls(EDIT)).toHaveLength(2));
+      expect(calls(EDIT)[1]?.init.body).toMatchObject({
+        expected_revision: 1,
+        speaker_edits: [
+          {
+            segment_index: 0,
+            char_start: 0,
+            char_end: 4,
+            original: "Välk",
+            original_speaker: "SPEAKER_00",
+            speaker: "SPEAKER_01",
+            decision: "confirmed"
+          },
+          { segment_index: 1, speaker: "SPEAKER_00", decision: "unresolved" }
+        ]
+      });
+      expect(await within(lines).findByText("Välk")).toBeTruthy();
+      expect(within(lines).getByText("omna.")).toBeTruthy();
+    });
+
+    it("shows the corrections' history and starts a run from the reviewed transcript", async () => {
+      answerAudioRun();
+      const saved = {
+        flow_run_id: "run-1",
+        step_id: "step-1",
+        created_at: "2026-10-21T09:00:00Z",
+        updated_at: "2026-10-21T09:00:00Z",
+        edited_by_principal_type: "user",
+        schema_version: 3,
+        segments_hash: "hash-1",
+        stale: false,
+        revision: 2,
+        occurrences: [
+          { segment_index: 1, char_start: 0, char_end: 4, original: "Tack", corrected: "Tackar" }
+        ],
+        speaker_edits: [],
+        speaker_names: { SPEAKER_00: "Anna" }
+      };
+      state.routes[CORRECTIONS] = () => ({ body: [saved] });
+      state.routes[
+        "GET /api/v1/flows/{id}/runs/{run_id}/transcript-corrections/{step_id}/revisions"
+      ] = () => ({
+        body: {
+          baseline: {
+            revision: 0,
+            occurrences_json: [],
+            speaker_edits_json: [],
+            speaker_names: {}
+          },
+          truncated: false,
+          next_after_revision: null,
+          items: [
+            {
+              id: "rev-2",
+              correction_set_id: "set-1",
+              created_at: "2026-10-21T09:00:00Z",
+              edited_by_principal_type: "user",
+              edited_by_user_id: "user-1",
+              edited_by_service_id: null,
+              flow_id: "flow-1",
+              flow_run_id: "run-1",
+              step_id: "step-1",
+              tenant_id: "tenant-1",
+              revision: 2,
+              segments_hash: "hash-1",
+              occurrences_json: [{}],
+              speaker_edits_json: [],
+              speaker_names: { SPEAKER_00: "Anna" }
+            }
+          ]
+        }
+      });
+      const REGENERATE =
+        "POST /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-regenerations/";
+      state.routes[REGENERATE] = () => ({
+        status: 201,
+        body: {
+          run: { ...makeRunSummary({ id: "run-2", status: "queued" }) },
+          created: true,
+          source_run_id: "run-1",
+          correction_revision: 2,
+          first_regenerated_step_id: "step-2"
+        }
+      });
+      const { container } = renderRun(["flows_view", "flows_manage"]);
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: messages.flow_transcript_history_heading })
+      );
+      const history = await screen.findByRole("list", {
+        name: messages.flow_transcript_history_heading
+      });
+      expect(within(history).getByText(/Version 2/)).toBeTruthy();
+      expect(within(history).getByText(/· du$/)).toBeTruthy();
+      expect(within(history).getByText("1 texträttning, 0 talarbyten, 1 namn")).toBeTruthy();
+      await expectNoAxeViolations(container);
+
+      fireEvent.click(screen.getByRole("button", { name: messages.flow_transcript_regenerate }));
+      expect(await screen.findByText(messages.flow_transcript_regenerate_started)).toBeTruthy();
+      const call = calls(REGENERATE)[0];
+      expect(call?.init.body).toEqual({
+        expected_run_revision: 3,
+        expected_correction_revision: 2,
+        segments_hash: "hash-1"
+      });
+      expect(
+        (call?.init as { params?: { header?: Record<string, string> } }).params?.header?.[
+          "Idempotency-Key"
+        ]
+      ).toBeTruthy();
+      expect(
+        screen
+          .getByRole("link", { name: messages.flow_transcript_regenerate_open })
+          .getAttribute("href")
+      ).toBe("/spaces/space-1/flows/flow-1/runs/run-2");
+    });
+
+    it("marks where more than one voice spoke and lets the reviewer decide the speaker", async () => {
+      answerAudioRun();
+      const source = state.routes[SOURCE]!({} as never).body as Record<string, unknown>;
+      const segments = source.segments as Record<string, unknown>[];
+      state.routes[SOURCE] = () => ({
+        body: {
+          ...source,
+          speaker_review: {
+            files: [
+              {
+                file_index: 0,
+                overlap_detection: "available",
+                overlaps: [{ id: "f:o1", start: 64, end: 67, detected_speaker_count: 2 }]
+              }
+            ]
+          },
+          segments: [
+            segments[0],
+            { ...segments[1], overlap_ids: ["f:o1"], speaker_attribution: "provisional" }
+          ]
+        }
+      });
+      let revision = 0;
+      state.routes[EDIT] = (init: { body: Record<string, unknown> }) => {
+        revision += 1;
+        return {
+          body: {
+            flow_run_id: "run-1",
+            step_id: "step-1",
+            created_at: "2026-10-21T09:00:00Z",
+            updated_at: "2026-10-21T09:00:00Z",
+            edited_by_principal_type: "user",
+            schema_version: 3,
+            segments_hash: "hash-1",
+            stale: false,
+            revision,
+            occurrences: init.body.occurrences,
+            speaker_edits: init.body.speaker_edits,
+            speaker_names: init.body.speaker_names ?? {}
+          }
+        };
+      };
+      const { container } = renderRun(["flows_view", "flows_manage"]);
+
+      expect(
+        await screen.findByText("Ett ställe med överlappande tal behöver kontrolleras")
+      ).toBeTruthy();
+      const places = screen.getByRole("list", { name: messages.flow_transcript_overlap_list });
+      expect(within(places).getByText("2 röster")).toBeTruthy();
+      const lines = screen.getByRole("list", { name: messages.flow_runs_transcript_lines });
+      expect(within(lines).getByText(messages.flow_transcript_overlap_line)).toBeTruthy();
+      expect(within(lines).getByText(messages.flow_transcript_speaker_unresolved)).toBeTruthy();
+      await expectNoAxeViolations(container);
+
+      fireEvent.click(within(places).getByRole("button", { name: "Gå till 1:04–1:07" }));
+      expect(document.activeElement).toBe(
+        within(lines).getByRole("button", { name: /^Spela från 1:05/ })
+      );
+
+      fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
+      fireEvent.click(within(lines).getByRole("button", { name: "Behåll SPEAKER_01 som talare" }));
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_speaker_confirmed)
+      );
+      expect(calls(EDIT)[0]?.init.body).toMatchObject({
+        speaker_edits: [
+          {
+            segment_index: 1,
+            char_start: null,
+            original_speaker: "SPEAKER_01",
+            speaker: "SPEAKER_01",
+            decision: "confirmed"
+          }
+        ]
+      });
+      expect(await screen.findByText(messages.flow_transcript_overlap_done)).toBeTruthy();
+      expect(within(lines).queryByText(messages.flow_transcript_speaker_unresolved)).toBeNull();
+    });
+
+    it("corrects the transcript inside a review of it, before approving", async () => {
+      answerAudioRun();
+      const waiting = makeRunSummary({ status: "awaiting_review", finished_at: null });
+      state.routes[STATUS] = () => ({ body: waiting });
+      state.routes[DETAIL] = () => ({ body: makeRunDetail({ ...waiting, result: null }) });
+      state.routes[REVIEW] = () => ({
+        body: makeCheckpoint({
+          step_id: "step-1",
+          step_order: 1,
+          step_label: "Transkribera",
+          current_payload_json: { text: "Välkomna. Tack." },
+          original_payload_json: { text: "Välkomna. Tack." }
+        })
+      });
+      state.routes[EDIT] = (init: { body: Record<string, unknown> }) => ({
+        body: {
+          flow_run_id: "run-1",
+          step_id: "step-1",
+          created_at: "2026-10-21T09:00:00Z",
+          updated_at: "2026-10-21T09:00:00Z",
+          edited_by_principal_type: "user",
+          schema_version: 3,
+          segments_hash: "hash-1",
+          stale: false,
+          revision: 1,
+          occurrences: init.body.occurrences,
+          speaker_edits: init.body.speaker_edits,
+          speaker_names: init.body.speaker_names ?? {}
+        }
+      });
+      const { container } = renderRun(["flows_view", "flows_manage"]);
+
+      const panel = await screen.findByRole("region", { name: "Granska steg 1: Transkribera" });
+      const lines = await within(panel).findByRole("list", {
+        name: messages.flow_runs_transcript_lines
+      });
+      // The transcript shows once, in the review.
+      expect(
+        screen.getAllByRole("list", { name: messages.flow_runs_transcript_lines })
+      ).toHaveLength(1);
+      await expectNoAxeViolations(container);
+
+      fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
+      fireEvent.change(within(lines).getByLabelText("Texten på raden 1:05"), {
+        target: { value: "Tackar." }
+      });
+      fireEvent.click(
+        within(lines).getByRole("button", { name: messages.flow_transcript_line_save })
+      );
+      await waitFor(() =>
+        expect(state.announce).toHaveBeenCalledWith(messages.flow_transcript_line_saved)
+      );
+      expect(calls(EDIT)[0]?.init.body).toMatchObject({
+        occurrences: [
+          { segment_index: 1, char_start: 4, char_end: 5, original: ".", corrected: "ar." }
+        ]
+      });
+      expect(
+        within(panel).getByRole("button", { name: messages.flow_runs_review_approve })
+      ).toBeTruthy();
+    });
+
     it("lets only someone who may review name the speakers", async () => {
       answerAudioRun();
       renderRun(["flows_view", "flows_run"]);

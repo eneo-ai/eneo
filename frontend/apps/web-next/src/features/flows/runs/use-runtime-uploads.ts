@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiErrorFromResponse, EneoApiError } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import type { Schema } from "@/lib/api/models";
-import type { UploadEntry, UploadsByStep } from "./run-contract";
+import type { RecordingPartInfo, UploadEntry, UploadsByStep } from "./run-contract";
 import { refusalText, type Translator } from "./run-messages";
 import { deleteRuntimeFile, type RuntimeInput, type UploadedFile } from "./runs-api";
 
@@ -107,6 +107,15 @@ class UploadNetworkError extends Error {
   }
 }
 
+/** A failure that may pass: the same file can be sent again (the network, a timeout, a busy server). */
+function passes(error: unknown): boolean {
+  if (error instanceof UploadTimeoutError || error instanceof UploadNetworkError) return true;
+  return (
+    error instanceof EneoApiError &&
+    (error.status === 408 || error.status === 429 || error.status >= 500)
+  );
+}
+
 function uploadProblem(error: unknown, input: RuntimeInput, t: Translator, locale: string) {
   if (error instanceof UploadTimeoutError) return t("flow_runs_upload_stalled");
   if (error instanceof UploadNetworkError) return t("flow_runs_upload_network");
@@ -118,6 +127,9 @@ function uploadProblem(error: unknown, input: RuntimeInput, t: Translator, local
   return refusalText(error, t);
 }
 
+/** What else a file added to the form is: a recording's part, with the name the form shows. */
+export type AddedFileInfo = { recording?: RecordingPartInfo; label?: string };
+
 /**
  * The files of a run form, per step, from the moment they are picked until
  * the run starts. Each file uploads as soon as it is picked; one the step
@@ -125,6 +137,10 @@ function uploadProblem(error: unknown, input: RuntimeInput, t: Translator, local
  * removed from the form, or left behind when the form closes without
  * starting a run, is deleted again, since nothing else would ever use it.
  * Files the started run took (`claim`) stay.
+ *
+ * A failed upload keeps its file, so it can be sent again (`retry`); a
+ * recording made in the form exists nowhere else, so its parts are sent
+ * again by themselves when the browser is back online.
  */
 export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefined) {
   const t = useTranslations();
@@ -133,6 +149,7 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
   const [uploads, setUploads] = useState<UploadsByStep>({});
   const current = useRef<UploadsByStep>({});
   const inFlight = useRef(new Map<string, AbortController>());
+  const files = useRef(new Map<string, { input: RuntimeInput; file: File }>());
   const claimed = useRef(false);
   const mounted = useRef(true);
 
@@ -182,7 +199,18 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
         (progress) => update(input.step_id, entry.key, { progress }),
         abort
       );
-      if (update(input.step_id, entry.key, { state: "done", fileId: stored.id, progress: 1 })) {
+      if (
+        update(input.step_id, entry.key, {
+          state: "done",
+          fileId: stored.id,
+          progress: 1,
+          problem: undefined,
+          retryable: undefined
+        })
+      ) {
+        // Stored: nothing will send it again. A recording's part stays, so it
+        // can still be saved as a file: it exists nowhere else on the device.
+        if (!entry.recording) files.current.delete(entry.key);
         announce(t("flow_runs_upload_finished", { name: entry.name }));
       } else {
         // Removed while it was uploading: the stored file is not wanted.
@@ -192,7 +220,8 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
       if (abort.signal.aborted && !(error instanceof UploadTimeoutError)) return;
       const failed = update(input.step_id, entry.key, {
         state: "failed",
-        problem: uploadProblem(error, input, t, locale)
+        problem: uploadProblem(error, input, t, locale),
+        retryable: passes(error)
       });
       if (failed) announce(t("flow_runs_upload_failed", { name: entry.name }));
     } finally {
@@ -201,20 +230,23 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
   }
 
   /** Takes picked files for a step: uploads those it can take, refuses the rest at once. */
-  function add(input: RuntimeInput, files: readonly File[]) {
+  function add(input: RuntimeInput, picked: readonly File[], info: AddedFileInfo = {}) {
     const existing = current.current[input.step_id] ?? [];
     let slots =
       input.max_files == null
         ? Infinity
         : input.max_files - existing.filter((entry) => entry.state !== "failed").length;
     const started: { entry: UploadEntry; file: File }[] = [];
-    const added = files.map((file): UploadEntry => {
+    const added = picked.map((file): UploadEntry => {
       const base = {
         key: crypto.randomUUID(),
-        name: file.name,
+        name: info.label ?? file.name,
         size: file.size,
-        mimetype: file.type
+        mimetype: file.type,
+        ...(info.recording ? { recording: info.recording } : {})
       };
+      // A recording's part is kept even when it is refused: it exists nowhere else.
+      if (info.recording) files.current.set(base.key, { input, file });
       const refuse = (problem: string): UploadEntry => ({ ...base, state: "failed", problem });
       if (file.size === 0) return refuse(t("flow_error_flow_runtime_file_empty"));
       if (!acceptsType(input.accepted_mimetypes ?? [], file.type)) {
@@ -230,6 +262,7 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
       }
       slots -= 1;
       const entry: UploadEntry = { ...base, state: "uploading", progress: 0 };
+      files.current.set(entry.key, { input, file });
       started.push({ entry, file });
       return entry;
     });
@@ -243,6 +276,7 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
     const entry = current.current[stepId]?.find((candidate) => candidate.key === key);
     if (!entry) return;
     inFlight.current.get(key)?.abort();
+    files.current.delete(key);
     if (entry.fileId) forget(entry.fileId);
     replace({
       ...current.current,
@@ -250,10 +284,50 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
     });
   }
 
+  /** Sends a failed file again, when the step still has room for it. */
+  function retry(stepId: string, key: string) {
+    const entry = current.current[stepId]?.find((candidate) => candidate.key === key);
+    const kept = files.current.get(key);
+    if (!entry || entry.state !== "failed" || !kept) return;
+    const { input, file } = kept;
+    const taken = (current.current[stepId] ?? []).filter(
+      (candidate) => candidate.state !== "failed"
+    ).length;
+    if (input.max_files != null && taken >= input.max_files) {
+      update(stepId, key, {
+        problem: t("flow_runs_upload_too_many", { count: input.max_files }),
+        retryable: false
+      });
+      return;
+    }
+    update(stepId, key, { state: "uploading", progress: 0, problem: undefined });
+    void upload(input, { ...entry, state: "uploading" }, file);
+  }
+
+  /** The file behind an entry, while the form keeps it (a recording's part, a failed upload). */
+  function fileOf(key: string): File | null {
+    return files.current.get(key)?.file ?? null;
+  }
+
+  // Back online: a recording's parts that failed on the way are sent again.
+  useEffect(() => {
+    const resend = () => {
+      for (const [stepId, entries] of Object.entries(current.current)) {
+        for (const entry of entries) {
+          if (entry.state === "failed" && entry.retryable && entry.recording) {
+            retry(stepId, entry.key);
+          }
+        }
+      }
+    };
+    window.addEventListener("online", resend);
+    return () => window.removeEventListener("online", resend);
+  });
+
   /** The run took the files: leaving the form no longer deletes them. */
   function claim() {
     claimed.current = true;
   }
 
-  return { uploads, add, remove, claim };
+  return { uploads, add, remove, retry, fileOf, claim };
 }

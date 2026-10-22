@@ -11,6 +11,8 @@ import { QuietBanner } from "@/components/astryx/banner";
 import { TextInput } from "@/components/astryx/text-input";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
+import { useAppContext } from "@/components/providers/app-context";
+import { useSpace } from "@/features/spaces/use-space";
 import { isStaleRefusal, refusalText } from "./run-messages";
 import {
   editTranscriptCorrections,
@@ -19,12 +21,19 @@ import {
   transcriptQueryOptions
 } from "./runs-api";
 import {
-  clockTime,
+  correctionSet,
+  editRequest,
+  knownSpeakers,
+  type EditRequest
+} from "./transcript-corrections";
+import { CorrectionHistory, RegenerateFromTranscript } from "./transcript-history";
+import { TranscriptLines } from "./transcript-lines";
+import { runHref } from "./runs-list";
+import {
   parseSegments,
   shownSegments,
   speakerLabels,
   speakerNamesRequest,
-  type ShownSegment,
   type TranscriptCorrections,
   type TranscriptTarget
 } from "./transcript";
@@ -129,33 +138,15 @@ function SpeakerNames({
   );
 }
 
-function SegmentLine({ segment, multiFile }: { segment: ShownSegment; multiFile: boolean }) {
-  const t = useTranslations();
-  const speaker = segment.name ?? segment.label ?? t("flow_runs_transcript_unknown_speaker");
-  return (
-    <li className="grid gap-x-3 gap-y-0.5 py-1.5 sm:grid-cols-[minmax(6rem,max-content)_1fr]">
-      <span className="text-ax-text-secondary text-xs tabular-nums sm:pt-0.5">
-        {multiFile
-          ? t("flow_runs_transcript_time_in_file", {
-              file: segment.fileIndex + 1,
-              time: clockTime(segment.start)
-            })
-          : clockTime(segment.start)}
-      </span>
-      <span className="text-ax-text text-sm break-words">
-        <span className="font-semibold">{speaker}:</span> {segment.text}
-      </span>
-    </li>
-  );
-}
-
 function StepTranscript({
   flowId,
   runId,
   target,
   corrections,
   mayEdit,
-  runCompleted
+  runCompleted,
+  runRevision,
+  review = false
 }: {
   flowId: string;
   runId: string;
@@ -163,9 +154,28 @@ function StepTranscript({
   corrections: TranscriptCorrections | null;
   mayEdit: boolean;
   runCompleted: boolean;
+  runRevision: number | null;
+  /** Shown in a review checkpoint: the lines can be corrected before the run goes on. */
+  review?: boolean;
 }) {
   const t = useTranslations();
+  const announce = useAnnounce();
+  const { user } = useAppContext();
+  const userId = user.id;
+  const { routeId } = useSpace();
+  const queryClient = useQueryClient();
   const source = useQuery(transcriptQueryOptions(flowId, runId, target));
+  const correctionsKey = transcriptCorrectionsQueryOptions(flowId, runId).queryKey;
+  const save = useMutation({
+    mutationFn: (body: EditRequest) =>
+      editTranscriptCorrections(flowId, runId, target.stepId, body),
+    onSuccess: (saved) => {
+      // The step's set as saved; the others stay as they are.
+      queryClient.setQueryData(correctionsKey, (current) =>
+        current ? [...current.filter((item) => item.step_id !== target.stepId), saved] : [saved]
+      );
+    }
+  });
 
   if (source.isPending) return <LoadingState rows={3} label={t("flow_runs_transcript_loading")} />;
   if (source.isError) {
@@ -191,8 +201,39 @@ function StepTranscript({
   const shown = shownSegments(segments, corrections);
   const labels = speakerLabels(shown);
   const multiFile = new Set(shown.map((segment) => segment.fileIndex)).size > 1;
+  const sourceHash = source.data.sourceHash;
+  const editable = mayEdit && (runCompleted || review) && !corrections?.stale;
   return (
-    <div className="flex flex-col gap-4">
+    <TranscriptLines
+      flowId={flowId}
+      runId={runId}
+      target={target}
+      shown={shown}
+      sourceHash={sourceHash}
+      multiFile={multiFile}
+      speakerReview={source.data.speakerReview}
+      editing={
+        editable
+          ? {
+              set: correctionSet(corrections, segments),
+              speakers: knownSpeakers(segments, corrections?.speaker_edits ?? []),
+              saving: save.isPending,
+              save: async (next, done) => {
+                try {
+                  await save.mutateAsync(editRequest(corrections, next, segments, sourceHash));
+                  announce(done);
+                  return null;
+                } catch (error) {
+                  if (isStaleRefusal(error)) {
+                    void queryClient.invalidateQueries({ queryKey: correctionsKey });
+                  }
+                  return refusalText(error, t);
+                }
+              }
+            }
+          : null
+      }
+    >
       {corrections?.stale ? (
         <QuietBanner
           status="warning"
@@ -201,7 +242,23 @@ function StepTranscript({
           collapsible={false}
         />
       ) : null}
-      {mayEdit && runCompleted && labels.length > 0 ? (
+      {mayEdit && runCompleted && !review && corrections && !corrections.stale ? (
+        <div className="flex flex-col gap-3">
+          <CorrectionHistory flowId={flowId} runId={runId} stepId={target.stepId} userId={userId} />
+          {runRevision !== null ? (
+            <RegenerateFromTranscript
+              flowId={flowId}
+              runId={runId}
+              stepId={target.stepId}
+              runRevision={runRevision}
+              correctionRevision={corrections.revision}
+              sourceHash={sourceHash}
+              runHref={(id) => runHref(routeId, flowId, id)}
+            />
+          ) : null}
+        </div>
+      ) : null}
+      {mayEdit && runCompleted && !review && labels.length > 0 ? (
         <SpeakerNames
           key={`${corrections?.revision ?? 0}`}
           flowId={flowId}
@@ -212,21 +269,17 @@ function StepTranscript({
           sourceHash={source.data.sourceHash}
         />
       ) : null}
-      <ol aria-label={t("flow_runs_transcript_lines")} className="m-0 flex flex-col p-0">
-        {shown.map((segment) => (
-          <SegmentLine key={segment.index} segment={segment} multiFile={multiFile} />
-        ))}
-      </ol>
-    </div>
+    </TranscriptLines>
   );
 }
 
 /**
  * The transcripts of a run's audio steps: each line with its time and
- * speaker, with the saved corrections and speaker names applied. Someone
- * who may review flows can name the speakers once the run has completed;
- * the names are saved with the run's other transcript corrections, which
- * are kept as they are.
+ * speaker, with the saved corrections and speaker names applied, playable
+ * from any line. Someone who may review flows can, once the run has
+ * completed, correct a line's text (and revert it) and name the speakers;
+ * each change is saved with the step's other corrections, which are kept as
+ * they are.
  */
 export function RunTranscripts({
   flowId,
@@ -234,7 +287,8 @@ export function RunTranscripts({
   targets,
   labelFor,
   mayEdit,
-  runCompleted
+  runCompleted,
+  runRevision = null
 }: {
   flowId: string;
   runId: string;
@@ -242,6 +296,8 @@ export function RunTranscripts({
   labelFor: (target: TranscriptTarget) => string;
   mayEdit: boolean;
   runCompleted: boolean;
+  /** The run's revision, which starting a run from its reviewed transcript is fenced by. */
+  runRevision?: number | null;
 }) {
   const t = useTranslations();
   const corrections = useQuery({
@@ -272,9 +328,54 @@ export function RunTranscripts({
             corrections={corrections.data.find((item) => item.step_id === target.stepId) ?? null}
             mayEdit={mayEdit}
             runCompleted={runCompleted}
+            runRevision={runRevision}
           />
         </section>
       ))}
     </div>
+  );
+}
+
+/**
+ * The transcript a review checkpoint is about, inside the review: someone
+ * who may decide the review corrects its lines and speakers before
+ * approving, and the corrections are saved with the run, so they hold for
+ * the steps after the review and for the finished run.
+ */
+export function ReviewTranscript({
+  flowId,
+  runId,
+  target,
+  mayEdit
+}: {
+  flowId: string;
+  runId: string;
+  target: TranscriptTarget;
+  mayEdit: boolean;
+}) {
+  const t = useTranslations();
+  const corrections = useQuery(transcriptCorrectionsQueryOptions(flowId, runId));
+  if (corrections.isPending) return <LoadingState rows={2} />;
+  if (corrections.isError) {
+    return (
+      <ListError
+        error={corrections.error}
+        title={t("flow_runs_transcript_failed")}
+        onRetry={() => void corrections.refetch()}
+        isRetrying={corrections.isFetching}
+      />
+    );
+  }
+  return (
+    <StepTranscript
+      flowId={flowId}
+      runId={runId}
+      target={target}
+      corrections={corrections.data.find((item) => item.step_id === target.stepId) ?? null}
+      mayEdit={mayEdit}
+      runCompleted={false}
+      runRevision={null}
+      review
+    />
   );
 }

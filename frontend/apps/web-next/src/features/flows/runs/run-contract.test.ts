@@ -10,6 +10,7 @@ import {
   offersMaxSpeakers,
   offersSingleRecording,
   orderedFields,
+  recordedAsOne,
   refusalTargets,
   runRequest,
   speakersBlockRun,
@@ -195,6 +196,43 @@ describe("runRequest", () => {
     expect(labelsSpeakers(contract, null)).toBe(false);
     expect(offersMaxSpeakers(contract, null)).toBe(false);
     expect(offersSingleRecording(contract, audio, [done("f1")])).toBe(false);
+  });
+
+  it("sends the parts of one recording made in the form as one, without asking", () => {
+    const part = (fileId: string, index: number): UploadEntry => ({
+      ...done(fileId),
+      recording: { sessionId: "rec-1", index, durationMs: 60_000 }
+    });
+    const parts = [part("f1", 0), part("f2", 1)];
+    expect(recordedAsOne(parts)).toBe(true);
+    expect(recordedAsOne([part("f1", 0), done("f2")])).toBe(false);
+    expect(offersSingleRecording(contract, audio, parts)).toBe(false);
+    const body = runRequest(contract, {
+      values: { ärende: "Bygglov" },
+      freeText: "",
+      uploads: { s1: parts },
+      singleRecording: new Set(),
+      speakerLabels: null,
+      maxSpeakers: null
+    });
+    expect(body.step_inputs).toEqual({ s1: { file_ids: ["f1", "f2"], single_recording: true } });
+  });
+
+  it("sends a live transcript only with the step's one file", () => {
+    const choices = {
+      values: { ärende: "Bygglov" },
+      freeText: "",
+      singleRecording: new Set<string>(),
+      speakerLabels: null,
+      maxSpeakers: null,
+      liveTranscripts: { s1: "transcript-1" }
+    };
+    expect(runRequest(contract, { ...choices, uploads: { s1: [done("f1")] } }).step_inputs).toEqual(
+      { s1: { file_ids: ["f1"], live_transcript_id: "transcript-1" } }
+    );
+    expect(
+      runRequest(contract, { ...choices, uploads: { s1: [done("f1"), done("f2")] } }).step_inputs
+    ).toEqual({ s1: { file_ids: ["f1", "f2"] } });
   });
 });
 
