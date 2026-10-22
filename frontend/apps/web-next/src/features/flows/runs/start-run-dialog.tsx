@@ -449,6 +449,10 @@ function StartRunForm({
                 keeper={keeper}
                 publishedFlowVersion={contract.published_flow_version ?? null}
                 onSaveForLater={onSaveForLater}
+                onDiscard={(keys) => {
+                  clearInputProblem(input.step_id);
+                  for (const key of keys) remove(input.step_id, key);
+                }}
                 handleRef={recorderRef(input.step_id)}
               />
             ) : null

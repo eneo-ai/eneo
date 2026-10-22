@@ -19,6 +19,7 @@ import {
   useSyncExternalStore,
   type Ref
 } from "react";
+import { flushSync } from "react-dom";
 import { QuietBanner } from "@/components/astryx/banner";
 import { EneoApiError } from "@/lib/api/errors";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
@@ -30,6 +31,7 @@ import {
   type RuntimeInput
 } from "../runs-api";
 import { AutoRestart, type RestartOutcome } from "./auto-restart";
+import { DiscardRecording } from "./discard-recording";
 import { LiveTranscript, type LiveSnapshot } from "./live-transcript";
 import {
   contractSnapshot,
@@ -269,6 +271,7 @@ export function RunRecorder({
   keeper,
   publishedFlowVersion,
   onSaveForLater,
+  onDiscard,
   handleRef
 }: {
   flowId: string;
@@ -283,6 +286,8 @@ export function RunRecorder({
   publishedFlowVersion: number | null;
   /** Closes the form and keeps the recording on the device to continue later. */
   onSaveForLater?: () => void;
+  /** Takes the step's recorded parts (by entry key) off the form, stopping or deleting their uploads. */
+  onDiscard?: (keys: readonly string[]) => void;
   handleRef?: Ref<RecorderHandle>;
 }) {
   const t = useTranslations();
@@ -569,6 +574,8 @@ export function RunRecorder({
   const degradation = keeper.available ? keeper.degradation(stepId) : "failed";
 
   const laterId = useId();
+  const startButton = useRef<HTMLButtonElement>(null);
+  const [discardProblem, setDiscardProblem] = useState(false);
   const [filesFull, setFilesFull] = useState(false);
   const [backlogFull, setBacklogFull] = useState(false);
   const limits = recordingLimits(input, options.audioBitsPerSecond);
@@ -617,6 +624,39 @@ export function RunRecorder({
         awaitingUpload: awaitingUpload(latestEntries.current)
       })
     });
+  }
+
+  /**
+   * Throws the step's whole recording away: its parts leave the form (their
+   * uploads stop or are deleted) and nothing of it stays on the device. The
+   * next recording starts a new one.
+   */
+  async function discardRecording() {
+    const parts = latestEntries.current.filter((entry) => entry.recording);
+    const sessions = new Set(parts.map((entry) => entry.recording!.sessionId));
+    if (session) sessions.add(session);
+    const forgotten = await Promise.all(
+      [...sessions].map((sessionId) => keeper.forgetSession(stepId, sessionId))
+    );
+    restart.cancel();
+    live.discard();
+    recorder.dismiss();
+    liveEntry.current = null;
+    flushSync(() => {
+      onDiscard?.(parts.map((entry) => entry.key));
+      setSession(null);
+      setHandled((current) => new Set([...current, ...sessions]));
+      setLastPart((previous) => {
+        if (previous) URL.revokeObjectURL(previous.url);
+        return null;
+      });
+      setFilesFull(false);
+      setBacklogFull(false);
+      setDiscardProblem(forgotten.some((done) => !done));
+    });
+    // The button and its dialog are gone: recording again is what comes next.
+    startButton.current?.focus();
+    announce(t("flow_transcript_discard_done"));
   }
 
   useEffect(() => {
@@ -748,6 +788,14 @@ export function RunRecorder({
           collapsible={false}
         />
       ) : null}
+      {discardProblem ? (
+        <QuietBanner
+          status="warning"
+          title={t("flow_transcript_discard_partly_title")}
+          description={t("flow_transcript_discard_partly")}
+          collapsible={false}
+        />
+      ) : null}
       {filesFull ? (
         <QuietBanner
           status="warning"
@@ -801,6 +849,7 @@ export function RunRecorder({
       <div className="flex flex-wrap items-center gap-3">
         {phase === "idle" || phase === "starting" ? (
           <Button
+            ref={startButton}
             label={continues ? t("flow_transcript_rec_continue") : t("flow_transcript_rec_start")}
             icon={<Mic aria-hidden="true" />}
             variant="primary"
@@ -893,6 +942,10 @@ export function RunRecorder({
             {laterBlocked ?? t("flow_transcript_save_later_hint")}
           </Text>
         </div>
+      ) : null}
+
+      {onDiscard && phase === "idle" && recorded.length > 0 ? (
+        <DiscardRecording onDiscard={discardRecording} />
       ) : null}
 
       {running ? <LevelMeter recorder={recorder} hint={snapshot.micHint} /> : null}

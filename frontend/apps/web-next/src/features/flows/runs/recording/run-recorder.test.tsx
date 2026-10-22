@@ -640,6 +640,53 @@ describe("Keeping a recording on the device", () => {
     expect(await within(again).findByText(messages.flow_transcript_resume_title)).toBeTruthy();
   });
 
+  it("throws the whole recording away after asking, its uploads and what the device kept", async () => {
+    installBrowser();
+    grantMicrophone();
+    const { dialog } = await openDialog(audioContract());
+    await recordAndStop(dialog);
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(1));
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+    await within(dialog).findByText(/^Inspelning, del 2/);
+    await waitFor(() => expect(device.db.parts.size).toBe(2));
+
+    fireEvent.click(button(dialog, messages.flow_transcript_discard));
+    const confirm = await screen.findByRole("alertdialog", {
+      name: messages.flow_transcript_discard_title
+    });
+    await expectNoAxeViolations(document.body);
+    fireEvent.click(
+      within(confirm).getByRole("button", { name: messages.flow_transcript_discard })
+    );
+
+    await waitFor(() => expect(within(dialog).queryByText(/^Inspelning, del/)).toBeNull());
+    expect(device.db.parts.size).toBe(0);
+    const deleted = api.stub.calls
+      .filter((call) => call.method === "DELETE")
+      .map((call) => call.init);
+    expect(deleted).toEqual([
+      { params: { path: { id: "flow-1", file_id: "file-1" } } },
+      { params: { path: { id: "flow-1", file_id: "file-2" } } }
+    ]);
+    // A new recording starts from the first part, and focus waits on its button.
+    const start = button(dialog, messages.flow_transcript_rec_start);
+    expect(document.activeElement).toBe(start);
+    expect(
+      within(dialog).queryByRole("button", { name: messages.flow_transcript_discard })
+    ).toBeNull();
+    fireEvent.click(start);
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_stop });
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+    await within(dialog).findByText(/^Inspelning, del 1/);
+    await waitFor(() => expect(FakeUpload.sent).toHaveLength(3));
+    expect(FakeUpload.sent[2]!.name).toMatch(/-seg00-/);
+    expect(FakeUpload.sent[2]!.name.split("-seg")[0]).not.toBe(
+      FakeUpload.sent[0]!.name.split("-seg")[0]
+    );
+  });
+
   it("throws the recording away from the device when the form closes without it", async () => {
     installBrowser();
     grantMicrophone();
