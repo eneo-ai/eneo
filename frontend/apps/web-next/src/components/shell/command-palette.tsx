@@ -215,7 +215,7 @@ export default function ShellCommandPalette({
   const router = useRouter();
   const pathname = usePathname();
   const queryClient = useQueryClient();
-  const { can, settings } = useAppContext();
+  const { can, settings, featureFlags } = useAppContext();
   const entriesById = useRef(new Map<string, PaletteEntry>());
   const currentSpaceRouteId = spaceRouteIdFromPath(pathname);
 
@@ -223,6 +223,7 @@ export default function ShellCommandPalette({
   const isAdmin = can("admin");
   const canManageModules = can("modules");
   const usingTemplates = Boolean(settings.using_templates);
+  const flowsEnabled = featureFlags.flows;
 
   // Loads (from the query cache) when the palette opens and on every query.
   const searchSource = useMemo<SearchSource<PaletteItem>>(() => {
@@ -236,7 +237,7 @@ export default function ShellCommandPalette({
     const permissions: PalettePermissions = {
       canCreateSpace,
       isAdmin,
-      adminGroups: adminNavGroups({ usingTemplates, canManageModules })
+      adminGroups: adminNavGroups({ usingTemplates, canManageModules, flowsEnabled })
     };
     const toItems = (entries: PaletteEntry[]): PaletteItem[] => {
       for (const entry of entries) entriesById.current.set(entry.id, entry);
@@ -259,7 +260,8 @@ export default function ShellCommandPalette({
     canCreateSpace,
     isAdmin,
     canManageModules,
-    usingTemplates
+    usingTemplates,
+    flowsEnabled
   ]);
 
   function run(id: string) {
