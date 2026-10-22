@@ -1,5 +1,3 @@
-# MIT License
-
 from typing import Any, cast
 
 import sqlalchemy as sa

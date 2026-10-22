@@ -141,7 +141,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const { view } = shown;
   const { tab } = view;
 
-  const { progress, queued } = useSyncProgress();
+  const { progress, queued, loaded: progressLoaded } = useSyncProgress();
   const summary = summarizeSource(source.items, progress, queued);
   const syncActive = isSyncActive(summary);
   const multiple = source.items.length > 1;
@@ -172,7 +172,11 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const skippedTotal = skippedLoaded
     ? source.items.reduce((sum, item) => sum + (skippedByItem[item.id]?.total ?? 0), 0)
     : null;
-  useSourceAnnouncements(source.name, summary, problems ? problemCount : null);
+  useSourceAnnouncements(
+    source.name,
+    progressLoaded ? summary : null,
+    problems ? problemCount : null
+  );
 
   const listHref = `/spaces/${routeId}/knowledge?tab=integrations`;
   const adminIntegrationsUrl = hydrated

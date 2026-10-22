@@ -12,7 +12,7 @@ export const load: PageLoad = async (event) => {
     error(400, { status: 400, code: 0, message: m.admin_users_search_hint() });
   }
 
-  const [response, passwordPolicy] = await Promise.all([
+  const [response, passwordPolicy, passwordLifecyclePolicy] = await Promise.all([
     eneo.users.list({
       includeDetails: true,
       search_email: query.search || undefined,
@@ -21,7 +21,10 @@ export const load: PageLoad = async (event) => {
       state_filter: query.tab,
       page: query.page
     }),
-    eneo.users.passwordPolicy()
+    eneo.users.passwordPolicy(),
+    // Non-essential: the panel is hidden rather than blocking user management
+    // (older backend during a rolling deploy, or a failure on this one call).
+    eneo.users.getPasswordLifecyclePolicy().catch(() => null)
   ]);
   const passwordCapability = normalizeLocalPasswordCapability(passwordPolicy);
   if (passwordCapability.source !== "eneo") {
@@ -36,6 +39,7 @@ export const load: PageLoad = async (event) => {
 
   return {
     passwordCapability,
+    passwordLifecyclePolicy,
     query,
     users: response.items,
     pagination: response.metadata,
