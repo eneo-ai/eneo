@@ -52,3 +52,15 @@ async def test_a_tenant_with_the_flag_reaches_the_flow_surface(
     response = await _call(client, method, path, admin_user_api_key.key)
 
     assert response.status_code != 404
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_the_settings_report_whether_the_tenant_has_flows(
+    client: AsyncClient, db_container, admin_user, admin_user_api_key, enabled
+):
+    await _set_flag(db_container, admin_user.tenant_id, enabled=enabled)
+
+    response = await _call(client, "GET", "/api/v1/settings/", admin_user_api_key.key)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["flows_enabled"] is enabled

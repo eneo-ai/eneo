@@ -18,6 +18,9 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   RUN_REQUIRED_STEP_INPUT_MISSING: "flow_run_required_step_input_missing";
   DOCUMENT_RUNTIME_REQUIRED: "flow_document_runtime_required";
   STEP_READ_LOST_PRODUCER: "flow_step_read_lost_producer";
+  UNPUBLISH_REQUIRED: "flow_unpublish_required";
+  FORM_FIELD_STILL_READ: "flow_form_field_still_read";
+  FORM_FIELD_RENAME_INVALID: "flow_form_field_rename_invalid";
   RUN_RUNTIME_INPUT_DISABLED: "flow_run_runtime_input_disabled";
   RUN_TOP_LEVEL_FILE_IDS_NOT_SUPPORTED: "flow_run_top_level_file_ids_not_supported";
   RUN_IDEMPOTENCY_CONFLICT: "flow_run_idempotency_conflict";
@@ -256,6 +259,9 @@ export type FlowApiErrorCode =
   | "flow_run_required_step_input_missing"
   | "flow_document_runtime_required"
   | "flow_step_read_lost_producer"
+  | "flow_unpublish_required"
+  | "flow_form_field_still_read"
+  | "flow_form_field_rename_invalid"
   | "flow_run_runtime_input_disabled"
   | "flow_run_top_level_file_ids_not_supported"
   | "flow_run_idempotency_conflict"

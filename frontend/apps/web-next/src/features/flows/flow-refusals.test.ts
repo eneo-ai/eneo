@@ -36,6 +36,84 @@ describe("flowRefusalMessage", () => {
     expect(flowRefusalMessage(error, steps, tEn)).toContain("Step 2: Skriv svar reads");
   });
 
+  it("says which of the two steps the change moved, or that it removes the producer", () => {
+    const read = { step_id: "step-2", step_order: 2, site: "prompt", reads_step: 1 };
+    expect(
+      flowRefusalMessage(
+        refusal("flow_step_read_lost_producer", { ...read, reason: "producer_removed" }),
+        steps,
+        t
+      )
+    ).toBe(
+      "Steg 2: Skriv svar läser Steg 1: Sammanfatta i sin instruktion, och ändringen tar bort det steget. Ändra först vad Steg 2: Skriv svar läser."
+    );
+    expect(
+      flowRefusalMessage(
+        refusal("flow_step_read_lost_producer", { ...read, reason: "producer_moved_after_reader" }),
+        steps,
+        t
+      )
+    ).toContain("flyttar det steget efter Steg 2: Skriv svar");
+    expect(
+      flowRefusalMessage(
+        refusal("flow_step_read_lost_producer", {
+          ...read,
+          reason: "reader_moved_before_producer"
+        }),
+        steps,
+        tEn
+      )
+    ).toContain("the change moves Step 2: Skriv svar before that step");
+  });
+
+  it("names the name a renamed step was read by", () => {
+    const error = refusal("flow_step_read_lost_producer", {
+      step_order: 2,
+      site: "input_bindings.question",
+      reads_step: 1,
+      reads_name: "Sammanfatta",
+      reason: "producer_renamed"
+    });
+    expect(flowRefusalMessage(error, steps, t)).toContain(
+      "med namnet ”Sammanfatta” i sitt underlag"
+    );
+  });
+
+  it("keeps the general sentence for a reason it does not know", () => {
+    const error = refusal("flow_step_read_lost_producer", {
+      step_order: 2,
+      site: "prompt",
+      reads_step: 1,
+      reason: "something_new"
+    });
+    expect(flowRefusalMessage(error, steps, t)).toContain(
+      "eller få Steg 2: Skriv svar att läsa ett annat steg"
+    );
+  });
+
+  it("names the steps that still read a form field the change removes", () => {
+    const error = refusal("flow_form_field_still_read", {
+      fields: ["kommun"],
+      readers: [
+        { field: "kommun", step_id: "step-1", step_order: 1, site: "prompt" },
+        { field: "kommun", step_id: "step-2", step_order: 2, site: "input_bindings.question" }
+      ]
+    });
+    expect(flowRefusalMessage(error, steps, t)).toBe(
+      "Formulärfältet kommun läses av Steg 1: Sammanfatta, Steg 2: Skriv svar. Ändra först vad stegen läser, eller byt namn på fältet i stället för att ta bort det."
+    );
+    expect(flowRefusalMessage(error, steps, tEn)).toContain("The form field kommun is read by");
+  });
+
+  it("says when the flow is published, or no longer published", () => {
+    expect(flowRefusalMessage(refusal("flow_unpublish_required"), steps, t)).toBe(
+      t("flow_error_flow_unpublish_required")
+    );
+    expect(flowRefusalMessage(refusal("flow_not_published"), steps, t)).toMatch(
+      /inte publicerat längre/
+    );
+  });
+
   it("falls back to the step number when the step is gone", () => {
     const error = refusal("flow_step_read_lost_producer", {
       step_order: 7,

@@ -217,3 +217,17 @@ export function reviewOptions(
     expired
   };
 }
+
+/**
+ * The most characters a rejection reason may have, as the reject request's
+ * `reason` declares (`maxLength`). The core counts the trimmed reason in
+ * code points, so the check here does too.
+ */
+export const REJECT_REASON_MAX_LENGTH = 1024;
+
+/** Why a rejection reason would be refused, or null when it would be accepted. */
+export function rejectReasonProblem(reason: string): "required" | "too_long" | null {
+  const trimmed = reason.trim();
+  if (!trimmed) return "required";
+  return Array.from(trimmed).length > REJECT_REASON_MAX_LENGTH ? "too_long" : null;
+}

@@ -19,6 +19,7 @@ import {
   formFieldsOf,
   hasOptions,
   metadataWithSettings,
+  renamedFormFields,
   suggestedFieldName,
   type FormFieldDraft,
   type FormFieldProblem,
@@ -203,6 +204,7 @@ export function FlowSettings({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [fields, setFields] = useState<FormFieldDraft[]>([]);
+  const [savedFields, setSavedFields] = useState<FormFieldDraft[]>([]);
   const [allowExport, setAllowExport] = useState(false);
   const [showProblems, setShowProblems] = useState(false);
   const nextKey = useRef(0);
@@ -213,7 +215,9 @@ export function FlowSettings({
   function startEditing() {
     setName(flow.name);
     setDescription(flow.description ?? "");
-    setFields(formFieldsOf(flow.metadata_json));
+    const saved = formFieldsOf(flow.metadata_json);
+    setSavedFields(saved);
+    setFields(saved);
     setAllowExport(evidenceExportAllowed(flow.metadata_json));
     setShowProblems(false);
     setEditing(true);
@@ -253,10 +257,12 @@ export function FlowSettings({
       return;
     }
     setSaving(true);
+    const renames = renamedFormFields(savedFields, fields);
     const saved = await onSave({
       name: name.trim(),
       description: description.trim() || null,
-      metadata_json: metadataWithSettings(flow.metadata_json, fields, allowExport)
+      metadata_json: metadataWithSettings(flow.metadata_json, fields, allowExport),
+      ...(Object.keys(renames).length > 0 ? { form_field_renames: renames } : {})
     });
     setSaving(false);
     if (saved) stopEditing();

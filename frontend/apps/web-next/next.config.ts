@@ -24,6 +24,19 @@ const nextConfig: NextConfig = {
   // handler runs. src/proxy.ts keeps the strip-slash redirect for page routes.
   skipTrailingSlashRedirect: true,
 
+  turbopack: {
+    resolveAlias: {
+      // @streamdown/code imports Shiki's full `bundledLanguages` (235
+      // grammars), and Turbopack compiles every lazy grammar chunk in dev:
+      // about 40% of a chat route's client output. The web bundle keeps 57
+      // common languages (Python, SQL, shell, JS/TS, JSON, YAML, XML, C/C++,
+      // Java, PHP, CSV, …); fences in any other language fall back to plain
+      // text. The key matches `shiki` exactly, so `shiki/engine/javascript`
+      // still resolves normally.
+      shiki: "shiki/bundle/web"
+    }
+  },
+
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   }

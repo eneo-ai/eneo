@@ -72,6 +72,7 @@ from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
     parse_resolved_input_edges,
 )
+from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileRef
 from eneo.flows.flow_run_step_inputs import (
     FlowRunStepInputFiles,
     normalize_step_inputs_payload,
@@ -4906,9 +4907,22 @@ async def test_list_step_results_with_files_composes_per_step_views(user):
         step_result_3,
     ]
     flow_run_repo.list_result_files.return_value = [file_2, orphan_file, file_1]
-    flow_run_repo.list_current_step_input_file_ids_by_step_result_id.return_value = {
-        step_result_1_id: (runtime_input_file_id,),
-        uuid4(): (orphan_runtime_input_file_id,),
+    unreadable_runtime_input_file_id = uuid4()
+    named_input = FlowRunStepInputFileRef(
+        file_id=runtime_input_file_id, name="underlag.pdf", mimetype="application/pdf"
+    )
+    flow_run_repo.list_current_step_input_file_refs_by_step_result_id.return_value = {
+        step_result_1_id: (
+            named_input,
+            FlowRunStepInputFileRef(
+                file_id=unreadable_runtime_input_file_id, name=None, mimetype=None
+            ),
+        ),
+        uuid4(): (
+            FlowRunStepInputFileRef(
+                file_id=orphan_runtime_input_file_id, name="x.pdf", mimetype=None
+            ),
+        ),
     }
 
     result = await service.list_step_results_with_files(
@@ -4927,15 +4941,20 @@ async def test_list_step_results_with_files_composes_per_step_views(user):
     assert orphan_file not in result[0].result_files
     assert orphan_file not in result[1].result_files
     assert orphan_file not in result[2].result_files
-    assert result[0].runtime_input_file_ids == (runtime_input_file_id,)
+    assert result[0].runtime_input_file_ids == (
+        runtime_input_file_id,
+        unreadable_runtime_input_file_id,
+    )
+    assert result[0].runtime_input_files == (named_input,)
     assert result[1].runtime_input_file_ids == ()
+    assert result[1].runtime_input_files == ()
     assert result[2].runtime_input_file_ids == ()
     flow_run_repo.get.assert_awaited_once_with(
         run_id=run.id,
         tenant_id=user.tenant_id,
         flow_id=run.flow_id,
     )
-    flow_run_repo.list_current_step_input_file_ids_by_step_result_id.assert_awaited_once_with(
+    flow_run_repo.list_current_step_input_file_refs_by_step_result_id.assert_awaited_once_with(
         run_id=run.id,
         tenant_id=user.tenant_id,
         step_results=[step_result_1, step_result_2, step_result_3],

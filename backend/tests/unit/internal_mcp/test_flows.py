@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.flows.application import flow_authoring_chat
+from eneo.flows.application import flow_authoring_chat, flow_authoring_operations
 from eneo.internal_mcp import flows
 from eneo.internal_mcp.foundation import ToolContext
 from eneo.main.exceptions import BadRequestException
@@ -57,28 +57,47 @@ def test_model_can_change_an_uncredentialed_destination():
     )
 
 
-async def test_failed_mutation_rolls_back_before_its_error_is_converted(monkeypatch):
-    order = []
-    container = MagicMock()
-    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=True)
+def _transaction_container(order: list[str]) -> MagicMock:
+    """A container whose session records how its transaction ends."""
 
     @asynccontextmanager
-    async def context(_ctx):
+    async def begin():
         try:
-            yield ToolContext(container, SimpleNamespace(), uuid4(), uuid4())
+            yield
         except Exception:
             order.append("rollback")
             raise
         else:
             order.append("commit")
 
-    monkeypatch.setattr(flows, "internal_tool_context", context)
+    container = MagicMock()
+    container.session.return_value.begin = begin
+    container.audit_service.return_value.log_async = AsyncMock(
+        side_effect=lambda **_: order.append("audit")
+    )
+    return container
+
+
+def _tool_context(container: MagicMock, session_id=None):
+    @asynccontextmanager
+    async def context(_ctx, **_):
+        yield ToolContext(container, SimpleNamespace(), uuid4(), session_id or uuid4())
+
+    return context
+
+
+async def test_failed_mutation_rolls_back_before_its_error_is_converted(monkeypatch):
+    order: list[str] = []
+    container = _transaction_container(order)
+    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=True)
+    monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
     load = AsyncMock(return_value=chat)
     monkeypatch.setattr(flow_authoring_chat, "load_authoring_chat", load)
     monkeypatch.setattr(flow_authoring_chat, "require_authoring_edit", AsyncMock())
 
     async def operation(*_):
         order.append("write")
+        flow_authoring_operations._change_audit(container)[0].add(action="never")  # pyright: ignore[reportPrivateUsage]
         raise BadRequestException("stale", code="stale_revision")
 
     result = await flows._call(MagicMock(), operation, editing=True)
@@ -88,9 +107,30 @@ async def test_failed_mutation_rolls_back_before_its_error_is_converted(monkeypa
     assert load.await_args.kwargs["lock"] is True
 
 
+async def test_a_saved_change_is_audited_after_its_commit(monkeypatch):
+    order: list[str] = []
+    container = _transaction_container(order)
+    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=True)
+    monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
+    monkeypatch.setattr(
+        flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
+    )
+    monkeypatch.setattr(flow_authoring_chat, "require_authoring_edit", AsyncMock())
+
+    async def operation(*_):
+        order.append("write")
+        flow_authoring_operations._change_audit(container)[0].add(action="saved")  # pyright: ignore[reportPrivateUsage]
+        return flows.page_result({"saved": True}, flow_id=chat.flow_id)
+
+    result = await flows._call(MagicMock(), operation, editing=True)
+    assert result.isError is not True
+    # The tenant's audit settings are read in a transaction of their own.
+    assert order == ["write", "commit", "audit", "commit"]
+
+
 async def test_unbound_token_cannot_read_or_write_any_flow(monkeypatch):
     @asynccontextmanager
-    async def context(_ctx):
+    async def context(_ctx, **_):
         yield ToolContext(MagicMock(), SimpleNamespace(), uuid4(), None)
 
     monkeypatch.setattr(flows, "internal_tool_context", context)
@@ -101,11 +141,9 @@ async def test_unbound_token_cannot_read_or_write_any_flow(monkeypatch):
 
 
 async def test_view_mode_never_reaches_the_mutating_operation(monkeypatch):
-    @asynccontextmanager
-    async def context(_ctx):
-        yield ToolContext(MagicMock(), SimpleNamespace(), uuid4(), uuid4())
-
-    monkeypatch.setattr(flows, "internal_tool_context", context)
+    monkeypatch.setattr(
+        flows, "internal_tool_context", _tool_context(_transaction_container([]))
+    )
     monkeypatch.setattr(
         flow_authoring_chat,
         "load_authoring_chat",

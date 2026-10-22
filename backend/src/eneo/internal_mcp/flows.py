@@ -85,21 +85,28 @@ async def _call(
         require_authoring_edit,
         scoped_request,
     )
+    from eneo.flows.application.flow_authoring_operations import (
+        authoring_transaction,
+    )
 
     try:
-        # Refusals are caught outside this block so failed writes roll back.
-        async with internal_tool_context(ctx) as scope:
+        # Refusals are caught outside this block so failed writes roll back;
+        # the change's audit entries are logged once it has committed.
+        async with internal_tool_context(ctx, transactional=False) as scope:
             if scope.session_id is None:
                 raise NotFoundException("Flow authoring chat not found.")
-            chat = await load_authoring_chat(
-                scope.container,
-                session_id=scope.session_id,
-                assistant_id=scope.assistant_id,
-                lock=editing,
-            )
-            if editing:
-                await require_authoring_edit(scope.container, chat)
-            return await operation(scope.container, chat, scoped_request(chat.space_id))
+            async with authoring_transaction(scope.container):
+                chat = await load_authoring_chat(
+                    scope.container,
+                    session_id=scope.session_id,
+                    assistant_id=scope.assistant_id,
+                    lock=editing,
+                )
+                if editing:
+                    await require_authoring_edit(scope.container, chat)
+                return await operation(
+                    scope.container, chat, scoped_request(chat.space_id)
+                )
     except (
         BadRequestException,
         NotFoundException,
@@ -226,15 +233,24 @@ async def read_flow(ctx: Context, offset: int = 0) -> CallToolResult:
 async def update_flow_settings(
     ctx: Context, expected_revision: int, changes: dict[str, Any]
 ) -> CallToolResult:
-    """Change flow name, description or metadata_json, preserving all other fields."""
+    """Change flow name, description or metadata_json, preserving all other fields.
+    To rename a run form field, send the new metadata_json with
+    form_field_renames ({"old name": "new name"}): the steps' reads of the field
+    follow it. A field a step reads cannot be removed."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_models import FlowEditorUpdateRequest
         from eneo.flows.application.flow_authoring_operations import apply_editor_update
 
-        if set(changes) - {"name", "description", "metadata_json"}:
+        if set(changes) - {
+            "name",
+            "description",
+            "metadata_json",
+            "form_field_renames",
+        }:
             raise BadRequestException(
-                "Only name, description and metadata_json can be changed here."
+                "Only name, description, metadata_json and form_field_renames "
+                "can be changed here."
             )
         flow = await apply_editor_update(
             chat.flow_id,
@@ -348,7 +364,11 @@ async def update_step(
     assistant_changes: dict[str, Any] | None = None,
 ) -> CallToolResult:
     """Patch one saved step and optionally its assistant in one revision. Use core
-    field names; input_config is replaced whole (long material: input_config.long_material)."""
+    field names; input_config is replaced whole (long material:
+    input_config.long_material). Renaming the step (user_description) rewrites
+    the reads of its old name in every step. When other steps share the step's
+    assistant, the step gets its own copy with assistant_changes and the others
+    keep theirs; the result names the step's assistant_id."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_models import (
@@ -379,7 +399,11 @@ async def update_step(
             []
             if assistant_changes is None
             else [
-                {"assistant_id": str(step.assistant_id), "changes": assistant_changes}
+                {
+                    "assistant_id": str(step.assistant_id),
+                    "step_id": str(step_id),
+                    "changes": assistant_changes,
+                }
             ]
         )
         updated = await apply_editor_update(
@@ -395,8 +419,13 @@ async def update_step(
             ),
             container,
         )
+        saved_step = next(item for item in updated.steps if item.id == step_id)
         return page_result(
-            {"saved": True, "step_id": str(step_id)},
+            {
+                "saved": True,
+                "step_id": str(step_id),
+                "assistant_id": str(saved_step.assistant_id),
+            },
             flow_id=chat.flow_id,
             revision=updated.draft_revision,
         )

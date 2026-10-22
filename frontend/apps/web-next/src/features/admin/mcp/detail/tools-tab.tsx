@@ -41,6 +41,7 @@ import {
   updateTenantToolEnabled
 } from "../mcp";
 import { readableParams, toolRisk } from "../mcp-helpers";
+import { FlowUsageSection } from "./flow-usage-section";
 
 function RiskChip({ tool }: { tool: McpServerTool }) {
   const t = useTranslations();
@@ -349,6 +350,8 @@ export function ToolsTab({ serverId }: { serverId: string }) {
           {sync.isPending ? t("syncing") : t("sync_tools")}
         </Button>
       </div>
+
+      <FlowUsageSection serverId={serverId} />
 
       {isPending ? (
         <Skeleton className="h-40 w-full" />

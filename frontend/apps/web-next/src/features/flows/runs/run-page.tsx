@@ -34,6 +34,7 @@ import { JsonValue } from "./run-json";
 import { refusalText, runErrorText } from "./run-messages";
 import { progressSignature, runStepViews, tokenTotal } from "./run-progress";
 import { RunKnowledge } from "./run-knowledge";
+import { startedByUser, starterName } from "./run-starter";
 import { RunSteps, stepTitle } from "./run-steps";
 import { RunTranscripts } from "./run-transcript";
 import { transcriptTargets } from "./transcript";
@@ -229,7 +230,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const queryClient = useQueryClient();
   const router = useRouter();
   const { routeId } = useSpace();
-  const { can } = useAppContext();
+  const { can, user } = useAppContext();
   const spaceName = useSpaceDisplayName();
   const sections = useSpaceSections();
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
@@ -366,6 +367,12 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const canRun = can("flows_run");
   const isCurrentVersion = summary ? summary.flow_version === flow.published_version : false;
   const offersRetry = canRun && status === "failed";
+  // Retrying needs the principal that started the run; said up front, not on refusal.
+  const retryNeedsStarter =
+    offersRetry &&
+    isCurrentVersion &&
+    summary !== undefined &&
+    startedByUser(summary, user.id) === false;
   const offersCancel = status !== null && isCancellable(status);
   const offersRedispatch =
     summary !== undefined &&
@@ -384,7 +391,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
           isInterruptible
         />
       ) : null}
-      {offersRetry && isCurrentVersion ? (
+      {offersRetry && isCurrentVersion && !retryNeedsStarter ? (
         <Button
           label={t("flow_runs_retry")}
           variant="primary"
@@ -440,14 +447,17 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
               {t("flow_runs_version", { version: summary.flow_version })}
             </span>
             <span className="text-ax-text-secondary">
-              {summary.principal_type === "service_key"
-                ? t("flow_runs_started_by_service_key")
-                : t("flow_runs_started_by_person")}
+              {t("flow_runs_started_by_named", { name: starterName(summary, t) })}
             </span>
           </div>
         ) : null}
         {offersRetry && !isCurrentVersion ? (
           <p className="text-ax-text-secondary text-sm">{t("flow_runs_retry_version_changed")}</p>
+        ) : null}
+        {retryNeedsStarter ? (
+          <p className="text-ax-text-secondary text-sm">
+            {t("flow_runs_retry_starter_only", { name: starterName(summary, t) })}
+          </p>
         ) : null}
         {notice ? (
           <QuietBanner

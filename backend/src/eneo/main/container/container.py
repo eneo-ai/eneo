@@ -157,6 +157,7 @@ from eneo.flows.infrastructure.flow_run_retention_policy_repo import (
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
+from eneo.flows.infrastructure.flow_run_starter_repo import FlowRunStarterRepository
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
@@ -948,6 +949,10 @@ class Container(containers.DeclarativeContainer):
     )
     flow_provider_call_repo = providers.Factory(
         FlowProviderCallRepository,
+        session=session,
+    )
+    flow_run_starter_repo = providers.Factory(
+        FlowRunStarterRepository,
         session=session,
     )
     flow_run_review_checkpoint_repo = providers.Factory(

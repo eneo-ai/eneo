@@ -48,7 +48,10 @@ from eneo.main.exceptions import (
     ErrorCodes,
 )
 from eneo.main.models import OffsetPaginatedResponse
-from eneo.server.dependencies.container import get_container
+from eneo.server.dependencies.container import (
+    get_container,
+    get_container_for_explicit_transaction,
+)
 
 router = APIRouter()
 
@@ -58,6 +61,11 @@ router = APIRouter()
 # be told the flow does not exist.
 _MUTATING_CONTAINER = get_container(
     with_user=True, with_module_user=True, transaction_scope="function"
+)
+# An authoring change commits in the route (`authoring_transaction`), so its
+# audit entries are logged after the commit and a refused change logs none.
+_AUTHORING_CONTAINER = get_container_for_explicit_transaction(
+    with_user=True, with_module_user=True
 )
 
 _FLOW_AUTHORING_FORBIDDEN_DESCRIPTION = (
@@ -100,6 +108,108 @@ _FLOW_PUBLISHED_RUNTIME_DESCRIPTION = (
 
 _PUBLISHED_FLOW_RUNTIME_OPERATION_ID = "get_published_flow_runtime"
 _FLOW_NAME_TAKEN_MESSAGE = "A flow with this name already exists in this space."
+_STEP_READ_LOST_PRODUCER_EXAMPLE: dict[str, object] = {
+    "summary": "A step reads a step the change removes",
+    "value": {
+        "message": (
+            "Write (step 3) reads a step this change removes: step 2 in its "
+            "prompt. Change that read first, or keep each step before the "
+            "steps that read it."
+        ),
+        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+        "code": FlowApiErrorCode.STEP_READ_LOST_PRODUCER.value,
+        "context": {
+            "step_id": "00000000-0000-0000-0000-000000000103",
+            "step_order": 3,
+            "site": "prompt",
+            "reads_step": 2,
+            "reason": "producer_removed",
+        },
+    },
+}
+_STEP_READ_LOST_PRODUCER_DESCRIPTION = (
+    "a change would make a step read another step than it reads now "
+    "(`flow_step_read_lost_producer`). Its `context` names the reading step "
+    "(`step_id`, `step_order`), where the read is (`site`), the saved order of "
+    "the step it reads (`reads_step`, with `reads_name` for a read by step "
+    "name) and `reason`: `producer_removed` (the change removes that step), "
+    "`producer_moved_after_reader` (it moves that step to or after the "
+    "reader), `reader_moved_before_producer` (it moves the reader to or before "
+    "that step), `producer_renamed` (the step loses the name the read uses, "
+    "or another step takes it) or `would_read_another_step` (a read that "
+    "named no step it could read would come to name one)"
+)
+_FORM_FIELD_REFUSALS_DESCRIPTION = (
+    "A saved run form field the new `metadata_json.form_schema` drops, and "
+    "`form_field_renames` does not rename, is refused with "
+    "`flow_form_field_still_read` while a step reads it; `context.readers` "
+    "lists each read (`field`, `step_id`, `step_order`, `site`). A rename the "
+    "forms do not describe is refused with `flow_form_field_rename_invalid` "
+    "(`context`: `from`, `to`, `problem`). A published flow is refused with "
+    "`flow_unpublish_required`."
+)
+_FORM_FIELD_STILL_READ_EXAMPLE: dict[str, object] = {
+    "summary": "A step still reads the form field the change removes",
+    "value": {
+        "message": (
+            "This change removes the form field 'kommun', which steps still "
+            "read: Write (step 3) reads 'kommun' in its prompt. Change those "
+            "reads first, or rename the field with form_field_renames so they "
+            "follow it."
+        ),
+        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+        "code": FlowApiErrorCode.FORM_FIELD_STILL_READ.value,
+        "context": {
+            "fields": ["kommun"],
+            "readers": [
+                {
+                    "field": "kommun",
+                    "step_id": "00000000-0000-0000-0000-000000000103",
+                    "step_order": 3,
+                    "site": "prompt",
+                }
+            ],
+        },
+    },
+}
+_FORM_FIELD_RENAME_INVALID_EXAMPLE: dict[str, object] = {
+    "summary": "form_field_renames names a field the saved form does not have",
+    "value": {
+        "message": (
+            "form_field_renames renames 'kommunn' to 'ort', which the form does "
+            "not allow (unknown_field). Rename each saved field once, to its "
+            "name in metadata_json.form_schema."
+        ),
+        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+        "code": FlowApiErrorCode.FORM_FIELD_RENAME_INVALID.value,
+        "context": {"from": "kommunn", "to": "ort", "problem": "unknown_field"},
+    },
+}
+_UNPUBLISH_REQUIRED_EXAMPLE: dict[str, object] = {
+    "summary": "The flow is published",
+    "value": {
+        "message": "Cannot mutate a published flow. Unpublish first.",
+        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+        "code": FlowApiErrorCode.UNPUBLISH_REQUIRED.value,
+    },
+}
+_STALE_REVISION_EXAMPLE: dict[str, object] = {
+    "summary": "The draft changed since it was read",
+    "value": {
+        "message": "The flow draft changed since it was read.",
+        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+        "code": FlowApiErrorCode.STALE_REVISION.value,
+    },
+}
+_DRAFT_CHANGE_REFUSAL_EXAMPLES: dict[str, dict[str, object]] = {
+    FlowApiErrorCode.STALE_REVISION.value: _STALE_REVISION_EXAMPLE,
+    FlowApiErrorCode.STEP_READ_LOST_PRODUCER.value: _STEP_READ_LOST_PRODUCER_EXAMPLE,
+    FlowApiErrorCode.FORM_FIELD_STILL_READ.value: _FORM_FIELD_STILL_READ_EXAMPLE,
+    FlowApiErrorCode.FORM_FIELD_RENAME_INVALID.value: _FORM_FIELD_RENAME_INVALID_EXAMPLE,
+    FlowApiErrorCode.UNPUBLISH_REQUIRED.value: _UNPUBLISH_REQUIRED_EXAMPLE,
+}
+
+
 _FLOW_NAME_TAKEN_RESPONSE = error_response(
     description="Another active flow in the space already has this name.",
     message=_FLOW_NAME_TAKEN_MESSAGE,
@@ -142,11 +252,12 @@ _FLOW_NAME_TAKEN_RESPONSE = error_response(
 async def create_flow(
     request: Request,
     flow_in: FlowCreateRequest,
-    container: Container = Depends(_MUTATING_CONTAINER),
+    container: Container = Depends(_AUTHORING_CONTAINER),
 ):
-    return await authoring_operations.create_flow(
-        request=request, container=container, flow_in=flow_in
-    )
+    async with authoring_operations.authoring_transaction(container):
+        return await authoring_operations.create_flow(
+            request=request, container=container, flow_in=flow_in
+        )
 
 
 @router.get(
@@ -434,15 +545,27 @@ async def get_published_flow_runtime(
     operation_id="update_flow",
     summary="Update Flow",
     description=(
-        "Update a draft flow definition, including steps and metadata. "
+        "Update a draft flow definition, including steps and metadata. `steps`, "
+        "when sent, replaces the step list: a step that keeps its `id` moves to "
+        "its `step_order`, a step without an `id` is new, and a saved step left "
+        "out is removed. A read column (`input_bindings`, `input_config`, "
+        "`output_config`) a step sends as it was read is the saved one, and its "
+        "reads of other steps follow the change (`step_N` is renumbered, a read "
+        "by step name follows a rename); one it sends changed is taken as given. "
+        "Prompts of the step assistants follow in the same revision. A rename of "
+        "a run form field (`form_field_renames`) takes its reads along. "
         "Operational retention is managed separately by Organization administrators. "
         f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
     ),
     responses={
         400: error_response(
-            description="The submitted draft flow update is invalid or the flow cannot be updated in its current state.",
-            message="Flow update is invalid.",
-            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            description=(
+                "The submitted draft flow update is invalid, the draft moved on "
+                "since `expected_revision` (`stale_revision`), or "
+                f"{_STEP_READ_LOST_PRODUCER_DESCRIPTION}. "
+                f"{_FORM_FIELD_REFUSALS_DESCRIPTION}"
+            ),
+            examples=_DRAFT_CHANGE_REFUSAL_EXAMPLES,
         ),
         403: error_response(
             description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
@@ -470,11 +593,12 @@ async def update_flow(
     ],
     request: Request,
     flow_in: FlowUpdateRequest,
-    container: Container = Depends(_MUTATING_CONTAINER),
+    container: Container = Depends(_AUTHORING_CONTAINER),
 ):
-    return await authoring_operations.update_flow(
-        id=id, request=request, container=container, flow_in=flow_in
-    )
+    async with authoring_operations.authoring_transaction(container):
+        return await authoring_operations.update_flow(
+            id=id, request=request, container=container, flow_in=flow_in
+        )
 
 
 @router.delete(
@@ -611,12 +735,16 @@ async def publish_flow(
         UUID, Path(description="Identifier of the draft flow definition to publish.")
     ],
     request: Request,
-    container: Container = Depends(_MUTATING_CONTAINER),
+    container: Container = Depends(_AUTHORING_CONTAINER),
     expected_revision: Annotated[int | None, Query(ge=0)] = None,
 ):
-    return await authoring_operations.publish_flow(
-        id=id, request=request, container=container, expected_revision=expected_revision
-    )
+    async with authoring_operations.authoring_transaction(container):
+        return await authoring_operations.publish_flow(
+            id=id,
+            request=request,
+            container=container,
+            expected_revision=expected_revision,
+        )
 
 
 @router.post(
@@ -631,9 +759,13 @@ async def publish_flow(
     ),
     responses={
         400: error_response(
-            description="The flow cannot be unpublished in its current state.",
-            message="Flow cannot be unpublished in its current state.",
+            description=(
+                "The flow cannot be unpublished in its current state: it is not "
+                "published (`flow_not_published`)."
+            ),
+            message="Flow is not published.",
             eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FlowApiErrorCode.FLOW_NOT_PUBLISHED,
         ),
         403: error_response(
             description=_FLOW_AUTHORING_FORBIDDEN_DESCRIPTION,
@@ -660,12 +792,16 @@ async def unpublish_flow(
         Path(description="Identifier of the published flow definition to unpublish."),
     ],
     request: Request,
-    container: Container = Depends(_MUTATING_CONTAINER),
+    container: Container = Depends(_AUTHORING_CONTAINER),
     expected_revision: Annotated[int | None, Query(ge=0)] = None,
 ):
-    return await authoring_operations.unpublish_flow(
-        id=id, request=request, container=container, expected_revision=expected_revision
-    )
+    async with authoring_operations.authoring_transaction(container):
+        return await authoring_operations.unpublish_flow(
+            id=id,
+            request=request,
+            container=container,
+            expected_revision=expected_revision,
+        )
 
 
 __all__ = ["router"]
@@ -681,46 +817,24 @@ __all__ = ["router"]
         "assistants in a single revision: flow settings, sparse step edits, new "
         "steps with their assistants, and `step_order` to move, insert or remove "
         "steps. The change is fenced on `expected_revision` and either saves as "
-        "a whole or not at all. Reads of a step that moves follow it; a change "
-        "that removes a step another step reads, or moves it after that step, is "
-        "refused with `flow_step_read_lost_producer`. "
+        "a whole or not at all, and its audit entries are logged only once it "
+        "has passed every check. Reads of a step that moves follow it, reads of "
+        "a renamed step or run form field (`definition.form_field_renames`) "
+        "follow the new name; a change that would make a step read another step "
+        "than it reads now is refused with `flow_step_read_lost_producer`. An "
+        "assistant change with `step_id` gives that step its own copy of an "
+        "assistant it shares with other steps. "
         f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
     ),
     responses={
         400: error_response(
             description=(
                 "The change is invalid, the draft moved on since "
-                "`expected_revision` (`stale_revision`), or a step would lose a "
-                "step it reads (`flow_step_read_lost_producer`)."
+                "`expected_revision` (`stale_revision`), or "
+                f"{_STEP_READ_LOST_PRODUCER_DESCRIPTION}. "
+                f"{_FORM_FIELD_REFUSALS_DESCRIPTION}"
             ),
-            examples={
-                FlowApiErrorCode.STALE_REVISION.value: {
-                    "summary": "The draft changed since it was read",
-                    "value": {
-                        "message": "The flow draft changed since it was read.",
-                        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
-                        "code": FlowApiErrorCode.STALE_REVISION.value,
-                    },
-                },
-                FlowApiErrorCode.STEP_READ_LOST_PRODUCER.value: {
-                    "summary": "A step reads a step the change removes",
-                    "value": {
-                        "message": (
-                            "Write (step 3) reads a step this change removes: "
-                            "step 2 in its prompt. Change that read first, or "
-                            "keep each step before the steps that read it."
-                        ),
-                        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
-                        "code": FlowApiErrorCode.STEP_READ_LOST_PRODUCER.value,
-                        "context": {
-                            "step_id": "00000000-0000-0000-0000-000000000103",
-                            "step_order": 3,
-                            "site": "prompt",
-                            "reads_step": 2,
-                        },
-                    },
-                },
-            },
+            examples=_DRAFT_CHANGE_REFUSAL_EXAMPLES,
         ),
         403: error_response(
             description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
@@ -745,8 +859,9 @@ async def update_flow_editor(
     id: UUID,
     request: Request,
     update: FlowEditorUpdateRequest,
-    container: Container = Depends(_MUTATING_CONTAINER),
+    container: Container = Depends(_AUTHORING_CONTAINER),
 ) -> FlowPublic:
-    return await authoring_operations.apply_editor_update(
-        id=id, request=request, update=update, container=container
-    )
+    async with authoring_operations.authoring_transaction(container):
+        return await authoring_operations.apply_editor_update(
+            id=id, request=request, update=update, container=container
+        )

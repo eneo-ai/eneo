@@ -27,6 +27,7 @@ from eneo.flows.api.flow_models import (
     FlowRunEvidenceResponse,
     FlowRunPublic,
 )
+from eneo.flows.api.flow_run_started_by import started_by_for_run
 from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_EVIDENCE_EXPORT_PATH,
     FLOW_RUN_EVIDENCE_PATH,
@@ -231,6 +232,10 @@ async def get_flow_run_evidence(
                 run.input_payload_json
             )
             run_payload["max_speakers"] = read_max_speakers(run.input_payload_json)
+            started_by = await started_by_for_run(container, run)
+            run_payload["started_by"] = (
+                started_by.model_dump(mode="json") if started_by is not None else None
+            )
             run_payload["result"] = (
                 redact_payload(projected_result.model_dump(mode="json"))
                 if projected_result is not None

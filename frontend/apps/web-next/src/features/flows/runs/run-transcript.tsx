@@ -188,11 +188,6 @@ function StepTranscript({
     );
   }
   const segments = parseSegments(source.data.segments);
-  if (!segments) {
-    return (
-      <p className="text-ax-text-secondary text-sm">{t("flow_runs_transcript_unavailable")}</p>
-    );
-  }
   const shown = shownSegments(segments, corrections);
   const labels = speakerLabels(shown);
   const multiFile = new Set(shown.map((segment) => segment.fileIndex)).size > 1;

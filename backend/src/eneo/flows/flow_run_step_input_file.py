@@ -8,6 +8,17 @@ from eneo.files.file_models import FileType
 from eneo.json_types import JsonObject
 
 
+class FlowRunStepInputFileRef(BaseModel):
+    """A file a step received, named for display. Name and MIME type are
+    null when the file row cannot be read in the run's tenant."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    file_id: UUID
+    name: str | None
+    mimetype: str | None
+
+
 class FlowRunStepInputFileMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

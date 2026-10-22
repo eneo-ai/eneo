@@ -12,6 +12,19 @@ type Translator = {
 export const STALE_REVISION = "stale_revision";
 /** A step would lose (or change) a step it reads. */
 export const READ_LOST_PRODUCER = "flow_step_read_lost_producer";
+/** The change removes a run form field a step still reads. */
+export const FORM_FIELD_STILL_READ = "flow_form_field_still_read";
+/** The flow is not published (an unpublish of a flow someone else unpublished). */
+export const NOT_PUBLISHED = "flow_not_published";
+
+/** What happened to the read, as the core names it in `context.reason`. */
+const READ_REASONS = new Set([
+  "producer_removed",
+  "producer_moved_after_reader",
+  "reader_moved_before_producer",
+  "producer_renamed",
+  "would_read_another_step"
+]);
 
 /** Where in a step a read sits, as the core names it (`prompt`, `input_bindings.question`). */
 function siteLabel(site: unknown, t: Translator): string {
@@ -58,12 +71,38 @@ export function flowRefusalMessage(
 
   if (code === STALE_REVISION) return t("flows_refusal_stale_revision");
   if (code === READ_LOST_PRODUCER) {
-    return t("flows_refusal_read_lost_producer", {
+    const values = {
       reader: labelAt(steps, context.step_order, t, context.step_id),
       producer: labelAt(steps, context.reads_step, t),
-      site: siteLabel(context.site, t)
+      site: siteLabel(context.site, t),
+      name: typeof context.reads_name === "string" ? context.reads_name : ""
+    };
+    const reason = typeof context.reason === "string" ? context.reason : null;
+    if (reason && READ_REASONS.has(reason) && (reason !== "producer_renamed" || values.name)) {
+      return t(`flows_refusal_read_${reason}`, values);
+    }
+    return t("flows_refusal_read_lost_producer", values);
+  }
+  if (code === FORM_FIELD_STILL_READ) {
+    const fields = Array.isArray(context.fields)
+      ? context.fields.filter((field): field is string => typeof field === "string")
+      : [];
+    const readers = Array.isArray(context.readers) ? context.readers : [];
+    const readerLabels = [
+      ...new Set(
+        readers.map((reader) => {
+          const item = (reader ?? {}) as Record<string, unknown>;
+          return labelAt(steps, item.step_order, t, item.step_id);
+        })
+      )
+    ];
+    return t("flows_refusal_form_field_still_read", {
+      count: Math.max(fields.length, 1),
+      fields: fields.join(", "),
+      readers: readerLabels.length > 0 ? readerLabels.join(", ") : t("flows_refusal_some_step")
     });
   }
+  if (code === NOT_PUBLISHED) return t("flows_refusal_not_published");
   if (code === "insufficient_space_permission") return t("flows_refusal_no_permission");
 
   const catalogKey = code ? `flow_error_${code}` : null;

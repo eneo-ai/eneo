@@ -3,6 +3,7 @@ import { browserApi, type EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { proxiedDownloadPath } from "@/features/files/signed-file-url";
+import { OMISSION_REASON, type TranscriptSourceSegment } from "./transcript";
 
 /**
  * The flow-core run endpoints the run screens use: the run contract, uploads,
@@ -355,11 +356,11 @@ export async function getTranscriptSource(
   target: { stepId: string; attemptNo: number },
   signal?: AbortSignal
 ): Promise<
-  | { status: "present"; segments: unknown[]; sourceHash: string }
+  | { status: "present"; segments: TranscriptSourceSegment[]; sourceHash: string }
   | { status: "omitted"; tooLarge: boolean }
   | { status: "unavailable" }
 > {
-  const segments: unknown[] = [];
+  const segments: TranscriptSourceSegment[] = [];
   let sourceHash: string | null = null;
   let start = 0;
   for (;;) {
@@ -380,8 +381,10 @@ export async function getTranscriptSource(
         }
       )
     );
-    // Reason 1 is a source too large to page; 2 and 3 have no lines to page.
-    if (page.status === "omitted") return { status: "omitted", tooLarge: page.reason === 1 };
+    // A source too large to page; the other reasons have no lines to page.
+    if (page.status === "omitted") {
+      return { status: "omitted", tooLarge: page.reason === OMISSION_REASON.TOO_LARGE };
+    }
     if (page.status !== "present") return { status: "unavailable" };
     sourceHash ??= page.source_hash;
     segments.push(...page.segments);

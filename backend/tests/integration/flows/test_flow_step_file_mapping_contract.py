@@ -781,6 +781,20 @@ async def test_current_step_input_file_read_model_uses_relational_current_attemp
                 "before_cursor_execute",
                 count_step_input_metadata_selects,
             )
+        refs_by_step_result_id = (
+            await run_repo.list_current_step_input_file_refs_by_step_result_id(
+                run_id=run.id,
+                tenant_id=admin_user.tenant_id,
+                step_results=step_results,
+            )
+        )
+        cross_tenant_refs = (
+            await run_repo.list_current_step_input_file_refs_by_step_result_id(
+                run_id=run.id,
+                tenant_id=uuid4(),
+                step_results=step_results,
+            )
+        )
         cross_tenant_metadata = (
             await run_repo.list_current_step_input_file_metadata_by_step_result_id(
                 run_id=run.id,
@@ -839,6 +853,18 @@ async def test_current_step_input_file_read_model_uses_relational_current_attemp
     ] == ["current-a.pdf"]
     assert cross_tenant_metadata == {}
     assert no_current_attempt_metadata == {}
+    assert {
+        step_result_id: [(ref.file_id, ref.name, ref.mimetype) for ref in refs]
+        for step_result_id, refs in refs_by_step_result_id.items()
+    } == {
+        step_result_id_by_order[1]: [
+            (file_b_id, "current-b.pdf", "application/pdf"),
+            (file_a_id, "current-a.pdf", "application/pdf"),
+        ],
+        step_result_id_by_order[2]: [(file_c_id, "current-c.pdf", "application/pdf")],
+        step_result_id_by_order[3]: [(file_a_id, "current-a.pdf", "application/pdf")],
+    }
+    assert cross_tenant_refs == {}
 
 
 @pytest.mark.asyncio

@@ -448,6 +448,37 @@ describe("DesktopSideNav (admin)", () => {
     // Only the landing is current on /admin.
     expect(currentLinks()).toEqual([within(navigation).getByRole("link", { name: "Översikt" })]);
   });
+
+  it("lists the flow settings under Styrning only when the tenant has flows", () => {
+    setRoute("/admin/flow-settings");
+    renderInApp(<DesktopSideNav variant="admin" navId="side-nav" />, {
+      queryClient: seededClient(),
+      appContext: testAppContext({ permissions: ["admin"], featureFlags: { flows: true } })
+    });
+    const governance = within(screen.getByRole("navigation", { name: "Administration" })).getByRole(
+      "group",
+      { name: "Styrning" }
+    );
+    const flows = within(governance).getByRole("link", { name: "Flöden" });
+    expect(flows.getAttribute("href")).toBe("/admin/flow-settings");
+    expect(flows.getAttribute("aria-current")).toBe("page");
+    expect(
+      within(governance)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href"))
+    ).toEqual([
+      "/admin/personal-assistant",
+      "/admin/prompt-library",
+      "/admin/skills",
+      "/admin/flow-settings",
+      "/admin/security-classifications",
+      "/admin/audit-logs"
+    ]);
+    cleanup();
+
+    renderNav({ variant: "admin", permissions: ["admin"] });
+    expect(screen.queryByRole("link", { name: "Flöden" })).toBeNull();
+  });
 });
 
 describe("help centre link", () => {

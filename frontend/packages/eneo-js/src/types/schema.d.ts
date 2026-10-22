@@ -4827,7 +4827,7 @@ export interface paths {
     head?: never;
     /**
      * Update Flow
-     * @description Update a draft flow definition, including steps and metadata. Operational retention is managed separately by Organization administrators. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
+     * @description Update a draft flow definition, including steps and metadata. `steps`, when sent, replaces the step list: a step that keeps its `id` moves to its `step_order`, a step without an `id` is new, and a saved step left out is removed. A read column (`input_bindings`, `input_config`, `output_config`) a step sends as it was read is the saved one, and its reads of other steps follow the change (`step_N` is renumbered, a read by step name follows a rename); one it sends changed is taken as given. Prompts of the step assistants follow in the same revision. A rename of a run form field (`form_field_renames`) takes its reads along. Operational retention is managed separately by Organization administrators. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     patch: operations["update_flow"];
     trace?: never;
@@ -4935,7 +4935,7 @@ export interface paths {
     head?: never;
     /**
      * Update Flow and Step Assistants
-     * @description Apply one editor change to a draft flow and its flow-managed step assistants in a single revision: flow settings, sparse step edits, new steps with their assistants, and `step_order` to move, insert or remove steps. The change is fenced on `expected_revision` and either saves as a whole or not at all. Reads of a step that moves follow it; a change that removes a step another step reads, or moves it after that step, is refused with `flow_step_read_lost_producer`. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
+     * @description Apply one editor change to a draft flow and its flow-managed step assistants in a single revision: flow settings, sparse step edits, new steps with their assistants, and `step_order` to move, insert or remove steps. The change is fenced on `expected_revision` and either saves as a whole or not at all, and its audit entries are logged only once it has passed every check. Reads of a step that moves follow it, reads of a renamed step or run form field (`definition.form_field_renames`) follow the new name; a change that would make a step read another step than it reads now is refused with `flow_step_read_lost_producer`. An assistant change with `step_id` gives that step its own copy of an assistant it shares with other steps. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     patch: operations["update_flow_editor"];
     trace?: never;
@@ -17981,6 +17981,9 @@ export interface components {
       | "flow_run_required_step_input_missing"
       | "flow_document_runtime_required"
       | "flow_step_read_lost_producer"
+      | "flow_unpublish_required"
+      | "flow_form_field_still_read"
+      | "flow_form_field_rename_invalid"
       | "flow_run_runtime_input_disabled"
       | "flow_run_top_level_file_ids_not_supported"
       | "flow_run_idempotency_conflict"
@@ -18607,6 +18610,12 @@ export interface components {
        */
       assistant_id: string;
       changes: components["schemas"]["FlowAssistantUpdateRequest"];
+      /**
+       * Step Id
+       * @description The step whose assistant this changes. When other steps share the assistant, this step gets its own copy of it with the change, and the other steps keep the assistant as it was; the saved revision shows the step with its new `assistant_id`. Without `step_id` the change reaches every step that uses the assistant.
+       * @example 00000000-0000-0000-0000-000000000102
+       */
+      step_id?: string | null;
     };
     /** FlowEditorNewStep */
     FlowEditorNewStep: {
@@ -21421,10 +21430,17 @@ export interface components {
      *         "employee_name": "Alex Example"
      *       },
      *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "principal_type": "user",
      *       "purpose": "production",
      *       "result_files": [],
      *       "revision": 1,
      *       "run_label": "Case 123",
+     *       "started_by": {
+     *         "display_name": "Alex Example",
+     *         "email": "alex.example@example.com",
+     *         "id": "00000000-0000-0000-0000-000000000030",
+     *         "principal_type": "user"
+     *       },
      *       "status": "queued",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -21575,6 +21591,8 @@ export interface components {
        * @description When a worker began executing the first step. Null while queued.
        */
       started_at?: string | null;
+      /** @description Who started the run, by id and name. It is shown to every caller who may see the run: the starter, tenant admins, and admins and owners of the flow's space. A service key sees only runs it started, so only its own name. Null when the run has no resolved principal. */
+      started_by?: components["schemas"]["FlowRunStartedByPublic"] | null;
       /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, or redispatch. */
       status: components["schemas"]["FlowRunStatus"];
       /**
@@ -22127,6 +22145,7 @@ export interface components {
      *             "employee_name": "Alex Example"
      *           },
      *           "job_id": "00000000-0000-0000-0000-000000000401",
+     *           "principal_type": "user",
      *           "purpose": "production",
      *           "result_files": [],
      *           "revision": 1,
@@ -22195,7 +22214,7 @@ export interface components {
      *           }
      *         ]
      *       },
-     *       "content_hash": "e66736c443a4e643e6c96219794d20973c17376047c8754bf57b7bd48e255cb7",
+     *       "content_hash": "9ab52b60d68fafc0fa838e1e7d141c372506a72e3e263d556af75ee560367a8f",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "actor": {
@@ -22231,7 +22250,7 @@ export interface components {
      *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
-     *         "content_hash": "e66736c443a4e643e6c96219794d20973c17376047c8754bf57b7bd48e255cb7",
+     *         "content_hash": "9ab52b60d68fafc0fa838e1e7d141c372506a72e3e263d556af75ee560367a8f",
      *         "content_hash_input": "redacted",
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
@@ -22843,10 +22862,17 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "principal_type": "user",
      *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 1,
      *         "run_label": "Case 123",
+     *         "started_by": {
+     *           "display_name": "Alex Example",
+     *           "email": "alex.example@example.com",
+     *           "id": "00000000-0000-0000-0000-000000000030",
+     *           "principal_type": "user"
+     *         },
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -23108,10 +23134,17 @@ export interface components {
      *         "employee_name": "Alex Example"
      *       },
      *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "principal_type": "user",
      *       "purpose": "production",
      *       "result_files": [],
      *       "revision": 1,
      *       "run_label": "Case 123",
+     *       "started_by": {
+     *         "display_name": "Alex Example",
+     *         "email": "alex.example@example.com",
+     *         "id": "00000000-0000-0000-0000-000000000030",
+     *         "principal_type": "user"
+     *       },
      *       "status": "queued",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -23249,6 +23282,8 @@ export interface components {
        * @description When a worker began executing the first step. Null while queued.
        */
       started_at?: string | null;
+      /** @description Who started the run, by id and name. It is shown to every caller who may see the run: the starter, tenant admins, and admins and owners of the flow's space. A service key sees only runs it started, so only its own name. Null when the run has no resolved principal. */
+      started_by?: components["schemas"]["FlowRunStartedByPublic"] | null;
       /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, or redispatch. */
       status: components["schemas"]["FlowRunStatus"];
       /**
@@ -23323,10 +23358,17 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "principal_type": "user",
      *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 1,
      *         "run_label": "Case 123",
+     *         "started_by": {
+     *           "display_name": "Alex Example",
+     *           "email": "alex.example@example.com",
+     *           "id": "00000000-0000-0000-0000-000000000030",
+     *           "principal_type": "user"
+     *         },
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -23693,10 +23735,17 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "principal_type": "user",
      *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 1,
      *         "run_label": "Case 123",
+     *         "started_by": {
+     *           "display_name": "Alex Example",
+     *           "email": "alex.example@example.com",
+     *           "id": "00000000-0000-0000-0000-000000000030",
+     *           "principal_type": "user"
+     *         },
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -24195,7 +24244,8 @@ export interface components {
       expected_checkpoint_revision: number;
       /**
        * Reason
-       * @description Human-readable rejection reason stored with the run audit trail. Blank reasons return `400` with code `flow_review_reject_reason_required`; reasons longer than 1024 characters return `400` with code `flow_review_reject_reason_too_long`.
+       * @description Human-readable rejection reason stored with the run audit trail. Surrounding whitespace is trimmed before the reason is checked and stored. Blank reasons return `400` with code `flow_review_reject_reason_required`; reasons longer than 1024 characters (Unicode code points) after trimming return `400` with code `flow_review_reject_reason_too_long` and `context.max_length`.
+       * @example The summary names the wrong case number.
        */
       reason: string;
     };
@@ -24275,10 +24325,17 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "principal_type": "user",
      *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 2,
      *         "run_label": "Case 123",
+     *         "started_by": {
+     *           "display_name": "Alex Example",
+     *           "email": "alex.example@example.com",
+     *           "id": "00000000-0000-0000-0000-000000000030",
+     *           "principal_type": "user"
+     *         },
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -24296,6 +24353,46 @@ export interface components {
      */
     FlowRunReviewCheckpointState:
       "awaiting_review" | "edited" | "approved" | "rejected" | "resumed" | "cancelled" | "expired";
+    /**
+     * FlowRunStartedByPublic
+     * @example {
+     *       "display_name": "Alex Example",
+     *       "email": "alex.example@example.com",
+     *       "id": "00000000-0000-0000-0000-000000000030",
+     *       "principal_type": "user"
+     *     }
+     * @example {
+     *       "display_name": "Alex Example",
+     *       "email": "alex.example@example.com",
+     *       "id": "00000000-0000-0000-0000-000000000030",
+     *       "principal_type": "user"
+     *     }
+     * @example {
+     *       "display_name": "Case intake integration",
+     *       "id": "00000000-0000-0000-0000-000000000040",
+     *       "principal_type": "service_key"
+     *     }
+     */
+    FlowRunStartedByPublic: {
+      /**
+       * Display Name
+       * @description Name to show for the starter: the user's username, else their email, or the service key's name. Null when the account can no longer be read.
+       */
+      display_name: string | null;
+      /**
+       * Email
+       * @description The user's email. Always null for a service key.
+       */
+      email?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       * @description For `user`, the user's id. For `service_key`, the id of the service principal behind the key, which stays the same when the key is rotated. Compare it with your own id to tell whether you started the run: retrying a failed run requires the principal that started it.
+       */
+      id: string;
+      /** @description Who started the run: `user` for a person (also through a module session or a personal API key) or `service_key` for a service key. */
+      principal_type: components["schemas"]["PrincipalType"];
+    };
     /**
      * FlowRunStatus
      * @enum {string}
@@ -24417,6 +24514,32 @@ export interface components {
       /** @description Flow run status value this capability row describes. */
       status: components["schemas"]["FlowRunStatus"];
     };
+    /**
+     * FlowRunStepInputFilePublic
+     * @example {
+     *       "file_id": "00000000-0000-0000-0000-000000000701",
+     *       "mimetype": "audio/mpeg",
+     *       "name": "annual-review.mp3"
+     *     }
+     */
+    FlowRunStepInputFilePublic: {
+      /**
+       * File Id
+       * Format: uuid
+       * @description The file's id, as listed in `runtime_input_file_ids`. Download it with the run's input-file signed URL endpoint.
+       */
+      file_id: string;
+      /**
+       * Mimetype
+       * @description The file's MIME type, or null when none was recorded.
+       */
+      mimetype: string | null;
+      /**
+       * Name
+       * @description The file's name as it was uploaded.
+       */
+      name: string;
+    };
     /** FlowRunStepKnowledgeTrace */
     FlowRunStepKnowledgeTrace: {
       rag: components["schemas"]["FlowRunDebugRag"];
@@ -24459,6 +24582,13 @@ export interface components {
      *       "result_files": [],
      *       "runtime_input_file_ids": [
      *         "00000000-0000-0000-0000-000000000701"
+     *       ],
+     *       "runtime_input_files": [
+     *         {
+     *           "file_id": "00000000-0000-0000-0000-000000000701",
+     *           "mimetype": "audio/mpeg",
+     *           "name": "annual-review.mp3"
+     *         }
      *       ],
      *       "started_at": "2026-03-17T10:05:05Z",
      *       "status": "completed",
@@ -24649,6 +24779,11 @@ export interface components {
        */
       runtime_input_file_ids?: string[];
       /**
+       * Runtime Input Files
+       * @description Name and MIME type of each file in `runtime_input_file_ids`, in the same order, for files in the run's tenant. Read by the step outputs endpoint; null in evidence reads, which carry the same names in `input_payload_json.runtime_input.files`.
+       */
+      runtime_input_files?: components["schemas"]["FlowRunStepInputFilePublic"][] | null;
+      /**
        * Runtime Input Single Recording
        * @description Whether the run submitted this step's files as the parts of one recording (`single_recording`). Send it again when starting a new run with the same files, where the run contract offers it.
        * @default false
@@ -24791,8 +24926,15 @@ export interface components {
      *       "flow_version": 3,
      *       "id": "00000000-0000-0000-0000-000000000301",
      *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "principal_type": "user",
      *       "purpose": "production",
      *       "revision": 1,
+     *       "started_by": {
+     *         "display_name": "Alex Example",
+     *         "email": "alex.example@example.com",
+     *         "id": "00000000-0000-0000-0000-000000000030",
+     *         "principal_type": "user"
+     *       },
      *       "status": "queued",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -24888,6 +25030,8 @@ export interface components {
        * @description When a worker began executing the first step. Null while queued.
        */
       started_at?: string | null;
+      /** @description Who started the run, by id and name. It is shown to every caller who may see the run: the starter, tenant admins, and admins and owners of the flow's space. A service key sees only runs it started, so only its own name. Null when the run has no resolved principal. */
+      started_by?: components["schemas"]["FlowRunStartedByPublic"] | null;
       /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, or redispatch. */
       status: components["schemas"]["FlowRunStatus"];
       /**
@@ -27222,10 +27366,17 @@ export interface components {
      *           "employee_name": "Alex Example"
      *         },
      *         "job_id": "00000000-0000-0000-0000-000000000401",
+     *         "principal_type": "user",
      *         "purpose": "production",
      *         "result_files": [],
      *         "revision": 1,
      *         "run_label": "Case 123",
+     *         "started_by": {
+     *           "display_name": "Alex Example",
+     *           "email": "alex.example@example.com",
+     *           "id": "00000000-0000-0000-0000-000000000030",
+     *           "principal_type": "user"
+     *         },
      *         "status": "queued",
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -32426,6 +32577,16 @@ export interface components {
        * @description The `draft_revision` the editor read before making these changes. When set, the update is refused with `400` and code `stale_revision` if the draft has moved on since; when omitted the write is fenced on the revision read at the start of this request.
        */
       expected_revision?: number | null;
+      /**
+       * Form Field Renames
+       * @description Run form fields this update renames, from the saved name to the name the field has in `metadata_json.form_schema`. Every read of a renamed field in the steps (prompts, input bindings, HTTP requests, template bindings, tool arguments) follows it. A saved field the new form no longer has and this map does not name is removed, and the update is refused with `flow_form_field_still_read` while a step reads it. A rename the form does not describe is refused with `flow_form_field_rename_invalid`.
+       * @example {
+       *       "kommun": "ort"
+       *     }
+       */
+      form_field_renames?: {
+        [key: string]: string;
+      } | null;
       /** Metadata Json */
       metadata_json?: {
         [key: string]: unknown;
@@ -32903,10 +33064,8 @@ export interface components {
       segments: components["schemas"]["TranscriptSourceSegmentPublic"][];
       /** Source Hash */
       source_hash: string;
-      /** Speaker Review */
-      speaker_review?: {
-        [key: string]: unknown;
-      } | null;
+      /** @description Speaker review detail, on the first page only (`start_segment_index=0`); null when none was stored. */
+      speaker_review?: components["schemas"]["TranscriptSpeakerReviewPublic"] | null;
       /** Start Segment Index */
       start_segment_index: number;
       /**
@@ -34928,6 +35087,13 @@ export interface components {
        * @default false
        */
       file_references_enabled?: boolean;
+      /**
+       * Flows Enabled
+       * @description Read-only: whether flows are switched on for the tenant (the `flows_core` feature). When false every flow endpoint answers `404`. It says nothing about the caller's own access: showing or running flows still needs the `flows_view` and `flows_run` permissions.
+       * @default false
+       * @example true
+       */
+      flows_enabled?: boolean;
       /**
        * Object Content Enabled
        * @default false
@@ -37870,14 +38036,20 @@ export interface components {
     };
     /** TranscriptSegmentWordsPublic */
     TranscriptSegmentWordsPublic: {
-      /** Overlap Ids */
+      /**
+       * Overlap Ids
+       * @description The segment's `overlap_ids` from the transcript source: overlaps in its speaker review the segment falls in.
+       */
       overlap_ids?: string[];
       /**
        * Segment Index
        * @description Index into the step's stored `transcription.segments` array.
        */
       segment_index: number;
-      /** Speaker Attribution */
+      /**
+       * Speaker Attribution
+       * @description The segment's `speaker_attribution` from the transcript source (`provisional` when overlapping speech made the speaker uncertain), or null when the speaker service did not mark it.
+       */
       speaker_attribution?: string | null;
       /** Words */
       words: components["schemas"]["TranscriptWordPublic"][];
@@ -37900,13 +38072,67 @@ export interface components {
     };
     /**
      * TranscriptSourceOmissionReason
+     * @description Why a transcript source component was not stored, sent as its number:
+     *     `1` TOO_LARGE (over its byte bound), `2` NO_SEGMENTS (the transcription
+     *     produced no structured lines), `3` SEGMENTS_UNAVAILABLE (word timings
+     *     without the lines they anchor to).
      * @enum {integer}
      */
     TranscriptSourceOmissionReason: 1 | 2 | 3;
-    /** TranscriptSourceSegmentPublic */
+    /**
+     * TranscriptSourceSegmentPublic
+     * @description One structured transcript line as it is stored. Keys not listed here
+     *     are passed through unchanged.
+     * @example {
+     *       "end": 3.2,
+     *       "file_index": 0,
+     *       "segment_index": 0,
+     *       "speaker": "SPEAKER_00",
+     *       "start": 0,
+     *       "text": "Vi ses imorgon."
+     *     }
+     */
     TranscriptSourceSegmentPublic: {
-      /** Segment Index */
+      /**
+       * End
+       * @description Seconds from the start of that audio file.
+       */
+      end: number;
+      /**
+       * File Index
+       * @description Which uploaded audio file the times belong to, counted from 0 in upload order. A multi-file transcript restarts its times at 0 for each file.
+       */
+      file_index: number;
+      /**
+       * Overlap Ids
+       * @description Overlaps in `speaker_review` this line falls in, by their `id`. Present only on lines the speaker service marked.
+       */
+      overlap_ids?: string[];
+      /**
+       * Segment Index
+       * @description Absolute index of the line in the attempt's transcript source. Corrections and word timings address lines by this index.
+       */
       segment_index: number;
+      /**
+       * Speaker
+       * @description Diarization label of the line (`SPEAKER_00`), or null when the transcription labelled no speakers. Names given to speakers are transcript corrections, not part of the source.
+       */
+      speaker: string | null;
+      /**
+       * Speaker Attribution
+       * @description How sure the speaker service is of the line's speaker; `provisional` means overlapping speech made the speaker uncertain. Present only on lines the speaker service marked.
+       */
+      speaker_attribution?: string | null;
+      /**
+       * Start
+       * @description Seconds from the start of that audio file.
+       */
+      start: number;
+      /**
+       * Text
+       * @description The line's text as the transcription produced it.
+       */
+      text: string;
     } & {
       [key: string]: unknown;
     };
@@ -37955,6 +38181,93 @@ export interface components {
        * @description The label the content is reassigned to. A label not present in the transcript is allowed (splitting a merged speaker). A speaker-mapping step that runs after the split names it like any other label; while its review is open, the reviewer can name it in that review.
        */
       speaker: string | null;
+    };
+    /** TranscriptSpeakerOverlapPublic */
+    TranscriptSpeakerOverlapPublic: {
+      /**
+       * Detected Speaker Count
+       * @description How many voices the speaker service heard in the overlap.
+       */
+      detected_speaker_count?: number | null;
+      /**
+       * End
+       * @description Seconds from the start of its audio file.
+       */
+      end: number;
+      /**
+       * Id
+       * @description Overlap id, prefixed with its audio file's id. Lines in the overlap list it in their `overlap_ids`.
+       */
+      id: string;
+      /**
+       * Start
+       * @description Seconds from the start of its audio file.
+       */
+      start: number;
+    } & {
+      [key: string]: unknown;
+    };
+    /** TranscriptSpeakerReviewFilePublic */
+    TranscriptSpeakerReviewFilePublic: {
+      /**
+       * File Id
+       * @description Id of that audio file.
+       */
+      file_id?: string | null;
+      /**
+       * File Index
+       * @description The audio file this review covers, counted from 0 in upload order.
+       */
+      file_index: number;
+      /**
+       * Overlap Detection
+       * @description Whether the speaker service looked for overlapping speech: `available` or `unavailable`.
+       */
+      overlap_detection?: string | null;
+      /**
+       * Overlaps
+       * @description Stretches where more than one voice was heard.
+       */
+      overlaps?: components["schemas"]["TranscriptSpeakerOverlapPublic"][];
+      /**
+       * Version
+       * @description Version of the speaker service's review contract.
+       */
+      version?: number | null;
+    } & {
+      [key: string]: unknown;
+    };
+    /**
+     * TranscriptSpeakerReviewPublic
+     * @description The speaker service's review detail, passed through as it was stored;
+     *     members not listed here are kept.
+     * @example {
+     *       "files": [
+     *         {
+     *           "file_id": "00000000-0000-0000-0000-000000000701",
+     *           "file_index": 0,
+     *           "overlap_detection": "available",
+     *           "overlaps": [
+     *             {
+     *               "detected_speaker_count": 2,
+     *               "end": 1.5,
+     *               "id": "00000000-0000-0000-0000-000000000701:overlap_0000",
+     *               "start": 1
+     *             }
+     *           ],
+     *           "version": 1
+     *         }
+     *       ]
+     *     }
+     */
+    TranscriptSpeakerReviewPublic: {
+      /**
+       * Files
+       * @description One review per audio file the speaker service labelled.
+       */
+      files: components["schemas"]["TranscriptSpeakerReviewFilePublic"][];
+    } & {
+      [key: string]: unknown;
     };
     /**
      * TranscriptWordPublic
@@ -57688,19 +58001,12 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
-      /** @description The submitted draft flow update is invalid or the flow cannot be updated in its current state. */
+      /** @description The submitted draft flow update is invalid, the draft moved on since `expected_revision` (`stale_revision`), or a change would make a step read another step than it reads now (`flow_step_read_lost_producer`). Its `context` names the reading step (`step_id`, `step_order`), where the read is (`site`), the saved order of the step it reads (`reads_step`, with `reads_name` for a read by step name) and `reason`: `producer_removed` (the change removes that step), `producer_moved_after_reader` (it moves that step to or after the reader), `reader_moved_before_producer` (it moves the reader to or before that step), `producer_renamed` (the step loses the name the read uses, or another step takes it) or `would_read_another_step` (a read that named no step it could read would come to name one). A saved run form field the new `metadata_json.form_schema` drops, and `form_field_renames` does not rename, is refused with `flow_form_field_still_read` while a step reads it; `context.readers` lists each read (`field`, `step_id`, `step_order`, `site`). A rename the forms do not describe is refused with `flow_form_field_rename_invalid` (`context`: `from`, `to`, `problem`). A published flow is refused with `flow_unpublish_required`. */
       400: {
         headers: {
           [name: string]: unknown;
         };
         content: {
-          /**
-           * @example {
-           *       "code": "bad_request",
-           *       "eneo_error_code": 9007,
-           *       "message": "Flow update is invalid."
-           *     }
-           */
           "application/json": components["schemas"]["GeneralError"];
         };
       };
@@ -57997,7 +58303,7 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description A step of the flow (`context.reason` `step_reference`) or a run that has not finished (`unfinished_run_reference`, with `context.flow_version`) still uses the assistant. A published flow is refused with 400 `bad_request`. */
+      /** @description A step of the flow (`context.reason` `step_reference`) or a run that has not finished (`unfinished_run_reference`, with `context.flow_version`) still uses the assistant. A published flow is refused with `flow_unpublish_required`. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -58130,7 +58436,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowAssistantUpdatePublic"];
         };
       };
-      /** @description The flow's draft has moved on since `expected_revision` (or since the revision this request read); nothing is written. A published flow is refused with 400 `bad_request`. */
+      /** @description The flow's draft has moved on since `expected_revision` (or since the revision this request read); nothing is written. A published flow is refused with `flow_unpublish_required`. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -58408,7 +58714,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
-      /** @description The change is invalid, the draft moved on since `expected_revision` (`stale_revision`), or a step would lose a step it reads (`flow_step_read_lost_producer`). */
+      /** @description The change is invalid, the draft moved on since `expected_revision` (`stale_revision`), or a change would make a step read another step than it reads now (`flow_step_read_lost_producer`). Its `context` names the reading step (`step_id`, `step_order`), where the read is (`site`), the saved order of the step it reads (`reads_step`, with `reads_name` for a read by step name) and `reason`: `producer_removed` (the change removes that step), `producer_moved_after_reader` (it moves that step to or after the reader), `reader_moved_before_producer` (it moves the reader to or before that step), `producer_renamed` (the step loses the name the read uses, or another step takes it) or `would_read_another_step` (a read that named no step it could read would come to name one). A saved run form field the new `metadata_json.form_schema` drops, and `form_field_renames` does not rename, is refused with `flow_form_field_still_read` while a step reads it; `context.readers` lists each read (`field`, `step_id`, `step_order`, `site`). A rename the forms do not describe is refused with `flow_form_field_rename_invalid` (`context`: `from`, `to`, `problem`). A published flow is refused with `flow_unpublish_required`. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -59029,8 +59335,15 @@ export interface operations {
            *           "flow_version": 3,
            *           "id": "00000000-0000-0000-0000-000000000301",
            *           "job_id": "00000000-0000-0000-0000-000000000401",
+           *           "principal_type": "user",
            *           "purpose": "production",
            *           "revision": 1,
+           *           "started_by": {
+           *             "display_name": "Alex Example",
+           *             "email": "alex.example@example.com",
+           *             "id": "00000000-0000-0000-0000-000000000030",
+           *             "principal_type": "user"
+           *           },
            *           "status": "queued",
            *           "tenant_id": "00000000-0000-0000-0000-000000000010",
            *           "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -60048,10 +60361,17 @@ export interface operations {
            *           "employee_name": "Alex Example"
            *         },
            *         "job_id": "00000000-0000-0000-0000-000000000401",
+           *         "principal_type": "user",
            *         "purpose": "production",
            *         "result_files": [],
            *         "revision": 1,
            *         "run_label": "Case 123",
+           *         "started_by": {
+           *           "display_name": "Alex Example",
+           *           "email": "alex.example@example.com",
+           *           "id": "00000000-0000-0000-0000-000000000030",
+           *           "principal_type": "user"
+           *         },
            *         "status": "queued",
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -60493,10 +60813,17 @@ export interface operations {
            *           "employee_name": "Alex Example"
            *         },
            *         "job_id": "00000000-0000-0000-0000-000000000401",
+           *         "principal_type": "user",
            *         "purpose": "production",
            *         "result_files": [],
            *         "revision": 2,
            *         "run_label": "Case 123",
+           *         "started_by": {
+           *           "display_name": "Alex Example",
+           *           "email": "alex.example@example.com",
+           *           "id": "00000000-0000-0000-0000-000000000030",
+           *           "principal_type": "user"
+           *         },
            *         "status": "queued",
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -61028,10 +61355,17 @@ export interface operations {
            *           "employee_name": "Alex Example"
            *         },
            *         "job_id": "00000000-0000-0000-0000-000000000401",
+           *         "principal_type": "user",
            *         "purpose": "production",
            *         "result_files": [],
            *         "revision": 2,
            *         "run_label": "Case 123",
+           *         "started_by": {
+           *           "display_name": "Alex Example",
+           *           "email": "alex.example@example.com",
+           *           "id": "00000000-0000-0000-0000-000000000030",
+           *           "principal_type": "user"
+           *         },
            *         "status": "queued",
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -61399,10 +61733,17 @@ export interface operations {
            *           "employee_name": "Alex Example"
            *         },
            *         "job_id": "00000000-0000-0000-0000-000000000401",
+           *         "principal_type": "user",
            *         "purpose": "production",
            *         "result_files": [],
            *         "revision": 1,
            *         "run_label": "Case 123",
+           *         "started_by": {
+           *           "display_name": "Alex Example",
+           *           "email": "alex.example@example.com",
+           *           "id": "00000000-0000-0000-0000-000000000030",
+           *           "principal_type": "user"
+           *         },
            *         "status": "queued",
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "trace_id": "00000000-0000-0000-0000-000000000302",
@@ -62848,7 +63189,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowPublic"];
         };
       };
-      /** @description The flow cannot be unpublished in its current state. */
+      /** @description The flow cannot be unpublished in its current state: it is not published (`flow_not_published`). */
       400: {
         headers: {
           [name: string]: unknown;
@@ -62856,9 +63197,9 @@ export interface operations {
         content: {
           /**
            * @example {
-           *       "code": "bad_request",
+           *       "code": "flow_not_published",
            *       "eneo_error_code": 9007,
-           *       "message": "Flow cannot be unpublished in its current state."
+           *       "message": "Flow is not published."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];

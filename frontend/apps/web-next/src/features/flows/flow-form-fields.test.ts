@@ -6,6 +6,7 @@ import {
   formFieldsOf,
   metadataWithSettings,
   persistedFormFields,
+  renamedFormFields,
   suggestedFieldName,
   type FormFieldDraft
 } from "./flow-form-fields";
@@ -110,5 +111,26 @@ describe("metadataWithSettings", () => {
     expect(metadataWithSettings(null, [], false)).toEqual({});
     expect(evidenceExportAllowed(metadataWithSettings(null, [], true))).toBe(true);
     expect(evidenceExportAllowed({ evidence_policy: { allow_export: "yes" } })).toBe(false);
+  });
+});
+
+describe("renamedFormFields", () => {
+  it("maps each saved field whose name changed to its new name", () => {
+    const saved = [
+      draft({ key: "saved-0", name: "kommun" }),
+      draft({ key: "saved-1", name: "namn" })
+    ];
+    const fields = [
+      draft({ key: "saved-0", name: " ort " }),
+      draft({ key: "saved-1", name: "namn" }),
+      draft({ key: "new-1", name: "datum_for_besok" })
+    ];
+    expect(renamedFormFields(saved, fields)).toEqual({ kommun: "ort" });
+  });
+
+  it("names no rename for a removed field or a field still without a name", () => {
+    const saved = [draft({ key: "saved-0", name: "kommun" })];
+    expect(renamedFormFields(saved, [])).toEqual({});
+    expect(renamedFormFields(saved, [draft({ key: "saved-0", name: "  " })])).toEqual({});
   });
 });

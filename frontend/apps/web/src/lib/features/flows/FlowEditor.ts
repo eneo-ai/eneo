@@ -184,6 +184,12 @@ function createFlowEditor(data: FlowEditorInitData) {
         flow: resource,
         update: cleanChanges
       })) as Flow;
+      if (cleanChanges.steps) {
+        // Saving the steps can rewrite the step assistants' prompts (reads of
+        // moved, renamed or removed steps follow them), so they are read again.
+        assistantSaveManager.invalidate((updated.steps ?? []).map((step) => step.assistant_id));
+        assistantReloadRevision.update((revision) => revision + 1);
+      }
 
       for (const step of get(editor.state.update).steps ?? []) {
         if (!step.id?.startsWith("_temp_")) continue;
@@ -1132,8 +1138,10 @@ function createFlowEditor(data: FlowEditorInitData) {
 
   async function applyStepsWithSafeOrderRemap(nextSteps: FlowStep[]): Promise<void> {
     const previousSteps = [...(get(editor.state.update).steps ?? [])];
-    const { rewrittenSteps, remapByOldOrder, deletedOrders, impactedDeletedBindingOrders } =
-      computeStepOrderRemap(previousSteps, nextSteps);
+    const { rewrittenSteps, deletedOrders, impactedDeletedBindingOrders } = computeStepOrderRemap(
+      previousSteps,
+      nextSteps
+    );
     const impactedDeletedReferences = new Set<number>(impactedDeletedBindingOrders);
 
     editor.state.update.update((resource) => ({
@@ -1156,7 +1164,9 @@ function createFlowEditor(data: FlowEditorInitData) {
       const promptText = typeof prompt?.text === "string" ? prompt.text : "";
       if (!promptText) continue;
 
-      const remapped = remapStepOrderTemplateTokens(promptText, remapByOldOrder, deletedOrders);
+      // The core renumbers a prompt's reads of moved steps when it saves the
+      // new order, so a prompt changes here only where it reads a removed step.
+      const remapped = remapStepOrderTemplateTokens(promptText, new Map(), deletedOrders);
       if (!remapped.changed) continue;
 
       const nextPrompt = {

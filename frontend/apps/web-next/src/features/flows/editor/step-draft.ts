@@ -128,8 +128,9 @@ export function buildEditorUpdate(params: {
   const { flow, stepId, stepPatch, assistantId, assistantUpdate, draft } = params;
   const update: EditorUpdate = { expected_revision: flow.draft_revision, definition: {} };
   if (stepPatch) update.step_edits = [{ step_id: stepId, changes: stepPatch }];
+  // Naming the step gives it its own copy when other steps share the assistant.
   if (assistantUpdate)
-    update.assistants = [{ assistant_id: assistantId, changes: assistantUpdate }];
+    update.assistants = [{ assistant_id: assistantId, step_id: stepId, changes: assistantUpdate }];
   if (stepPatch && takesAudio(draft) && !transcriptionEnabled(flow.metadata_json)) {
     update.definition = { metadata_json: withTranscriptionEnabled(flow.metadata_json) };
   }

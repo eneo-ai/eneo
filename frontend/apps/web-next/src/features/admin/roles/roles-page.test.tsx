@@ -178,6 +178,33 @@ describe("role administration", () => {
     expect(refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("names the flow permissions and says what each allows", async () => {
+    get.mockImplementation((path: string) =>
+      path === "/api/v1/roles/"
+        ? ok(roleResponse)
+        : path === "/api/v1/roles/permissions/"
+          ? ok(
+              ["flows_view", "flows_run", "flows_manage", "flows_trace"].map((name) => ({
+                name,
+                description: `${name} (backend)`
+              }))
+            )
+          : ok([])
+    );
+    show();
+    await screen.findByText("Everyone");
+    fireEvent.click(screen.getByRole("button", { name: "create_role" }));
+    const dialog = screen.getByRole("dialog");
+
+    for (const name of ["flows_view", "flows_run", "flows_manage", "flows_trace"]) {
+      expect(within(dialog).getByText(`flow_admin_permission_${name}`)).toBeTruthy();
+      expect(within(dialog).getByText(`flow_admin_permission_${name}_description`)).toBeTruthy();
+      expect(within(dialog).queryByText(`${name} (backend)`)).toBeNull();
+    }
+    expect(within(dialog).queryByText(/^Flows (view|run|manage|trace)$/)).toBeNull();
+    await expectNoAxeViolations(dialog);
+  });
+
   it("keeps user navigation as a link and returns focus to the role menu trigger", async () => {
     show();
     const row = (await screen.findByText("Manager")).closest("article");
