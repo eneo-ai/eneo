@@ -85,6 +85,7 @@ from eneo.flows.flow_run_payload_validation import (
     ensure_inline_payload_size_allowed,
     reject_reserved_input_payload_keys,
 )
+from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileRef
 from eneo.flows.flow_run_step_inputs import (
     FlowRunStepInputFileProjection,
     FlowRunStepInputs,
@@ -142,6 +143,7 @@ class FlowRunStepResultWithFiles:
     step_result: FlowStepResult
     runtime_input_file_ids: Sequence[UUID]
     result_files: Sequence[FlowRunStepResultFile]
+    runtime_input_files: Sequence[FlowRunStepInputFileRef] = ()
 
 
 @dataclass(frozen=True)
@@ -1137,12 +1139,10 @@ class FlowRunService:
             run_id=run.id,
             tenant_id=self.user.tenant_id,
         )
-        runtime_input_file_ids_by_step_result_id = (
-            await self.flow_run_repo.list_current_step_input_file_ids_by_step_result_id(
-                run_id=run.id,
-                tenant_id=self.user.tenant_id,
-                step_results=step_results,
-            )
+        runtime_input_files_by_step_result_id = await self.flow_run_repo.list_current_step_input_file_refs_by_step_result_id(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+            step_results=step_results,
         )
         result_files_by_step_result_id = _result_files_by_step_result_id(result_files)
         views: list[FlowRunStepResultWithFiles] = []
@@ -1158,14 +1158,21 @@ class FlowRunService:
                     )
                 )
                 continue
+            runtime_input_files = runtime_input_files_by_step_result_id.get(
+                result_id, ()
+            )
             views.append(
                 FlowRunStepResultWithFiles(
                     step_result=result,
-                    runtime_input_file_ids=runtime_input_file_ids_by_step_result_id.get(
-                        result_id, ()
+                    runtime_input_file_ids=tuple(
+                        file.file_id for file in runtime_input_files
                     ),
                     result_files=tuple(
                         result_files_by_step_result_id.get(result_id, ())
+                    ),
+                    # A file the caller's tenant cannot read keeps its id only.
+                    runtime_input_files=tuple(
+                        file for file in runtime_input_files if file.name is not None
                     ),
                 )
             )

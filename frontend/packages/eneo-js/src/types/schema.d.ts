@@ -24476,6 +24476,32 @@ export interface components {
       /** @description Flow run status value this capability row describes. */
       status: components["schemas"]["FlowRunStatus"];
     };
+    /**
+     * FlowRunStepInputFilePublic
+     * @example {
+     *       "file_id": "00000000-0000-0000-0000-000000000701",
+     *       "mimetype": "audio/mpeg",
+     *       "name": "annual-review.mp3"
+     *     }
+     */
+    FlowRunStepInputFilePublic: {
+      /**
+       * File Id
+       * Format: uuid
+       * @description The file's id, as listed in `runtime_input_file_ids`. Download it with the run's input-file signed URL endpoint.
+       */
+      file_id: string;
+      /**
+       * Mimetype
+       * @description The file's MIME type, or null when none was recorded.
+       */
+      mimetype: string | null;
+      /**
+       * Name
+       * @description The file's name as it was uploaded.
+       */
+      name: string;
+    };
     /** FlowRunStepKnowledgeTrace */
     FlowRunStepKnowledgeTrace: {
       rag: components["schemas"]["FlowRunDebugRag"];
@@ -24518,6 +24544,13 @@ export interface components {
      *       "result_files": [],
      *       "runtime_input_file_ids": [
      *         "00000000-0000-0000-0000-000000000701"
+     *       ],
+     *       "runtime_input_files": [
+     *         {
+     *           "file_id": "00000000-0000-0000-0000-000000000701",
+     *           "mimetype": "audio/mpeg",
+     *           "name": "annual-review.mp3"
+     *         }
      *       ],
      *       "started_at": "2026-03-17T10:05:05Z",
      *       "status": "completed",
@@ -24704,6 +24737,11 @@ export interface components {
        * @description File ids submitted as runtime input for the current attempt of this step result.
        */
       runtime_input_file_ids?: string[];
+      /**
+       * Runtime Input Files
+       * @description Name and MIME type of each file in `runtime_input_file_ids`, in the same order, for files in the run's tenant. Read by the step outputs endpoint; null in evidence reads, which carry the same names in `input_payload_json.runtime_input.files`.
+       */
+      runtime_input_files?: components["schemas"]["FlowRunStepInputFilePublic"][] | null;
       /**
        * Runtime Input Single Recording
        * @description Whether the run submitted this step's files as the parts of one recording (`single_recording`). Send it again when starting a new run with the same files, where the run contract offers it.

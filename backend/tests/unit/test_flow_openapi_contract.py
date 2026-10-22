@@ -3715,6 +3715,12 @@ def test_openapi_flow_run_step_public_exposes_runtime_input_file_ids(
     single_recording = step_result["properties"]["runtime_input_single_recording"]
     assert single_recording["type"] == "boolean"
     assert "one recording" in single_recording["description"]
+    runtime_input_files = step_result["properties"]["runtime_input_files"]
+    assert "runtime_input_files" not in step_result.get("required", [])
+    assert "same order" in runtime_input_files["description"]
+    file_schema = schemas["FlowRunStepInputFilePublic"]
+    assert set(file_schema["required"]) == {"file_id", "name", "mimetype"}
+    assert file_schema.get("additionalProperties") is False
 
 
 @pytest.mark.parametrize(

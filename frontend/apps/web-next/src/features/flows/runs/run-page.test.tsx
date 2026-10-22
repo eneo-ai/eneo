@@ -150,6 +150,33 @@ describe("FlowRunPage", () => {
     ).toBeTruthy();
   });
 
+  it("names the files a step received, with a download for each", async () => {
+    answerRun(makeRunSummary());
+    state.routes[STEPS] = () => ({
+      body: [
+        makeRunStep(1, {
+          runtime_input_file_ids: ["file-a", "file-b"],
+          runtime_input_files: [
+            { file_id: "file-a", name: "underlag.pdf", mimetype: "application/pdf" }
+          ]
+        }),
+        makeRunStep(2)
+      ]
+    });
+    const { container } = renderRun();
+
+    const first = await screen.findByRole("article", { name: "Steg 1: Sammanfatta" });
+    const files = await within(first).findByRole("list", {
+      name: messages.flow_runs_step_input_files
+    });
+    expect(within(files).getByText("underlag.pdf")).toBeTruthy();
+    expect(within(files).getByText("PDF")).toBeTruthy();
+    expect(within(files).getByText("Fil 2")).toBeTruthy();
+    expect(within(files).getByRole("button", { name: "Ladda ned underlag.pdf" })).toBeTruthy();
+    expect(within(files).getByRole("button", { name: "Ladda ned fil 2" })).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
   it("says up front that only the one who started a failed run can run it again", async () => {
     answerRun(
       makeRunSummary({

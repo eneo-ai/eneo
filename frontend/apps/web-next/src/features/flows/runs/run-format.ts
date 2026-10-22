@@ -1,5 +1,5 @@
 import { formatBytes } from "@/lib/format";
-import type { RuntimeInput } from "./runs-api";
+import type { RunStep, RuntimeInput } from "./runs-api";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
@@ -42,6 +42,28 @@ const TYPE_NAMES: Record<string, string> = {
 
 export function typeNames(mimetypes: readonly string[]): string[] {
   return [...new Set(mimetypes.map((type) => TYPE_NAMES[type.toLowerCase()] ?? type))];
+}
+
+/** A file a step received: its name and type name where the core named it. */
+export type StepInputFile = { fileId: string; name: string | null; typeName: string | null };
+
+/**
+ * The files a step received, in the order of `runtime_input_file_ids`, each
+ * with the name and type the step result gives for it (none for a file the
+ * core did not name).
+ */
+export function stepInputFiles(
+  step: Pick<RunStep, "runtime_input_file_ids" | "runtime_input_files">
+): StepInputFile[] {
+  const named = new Map((step.runtime_input_files ?? []).map((file) => [file.file_id, file]));
+  return (step.runtime_input_file_ids ?? []).map((fileId) => {
+    const file = named.get(fileId);
+    return {
+      fileId,
+      name: file?.name.trim() || null,
+      typeName: file?.mimetype ? (typeNames([file.mimetype])[0] ?? null) : null
+    };
+  });
 }
 
 /** What a step takes, in one line: "PDF, Word (.docx) · högst 25 MB per fil · högst 3 filer". */

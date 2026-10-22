@@ -14,6 +14,7 @@ from eneo.flows.api.flow_models import (
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
     FlowRunStartedByPublic,
+    FlowRunStepInputFilePublic,
     FlowRunStepPublic,
     FlowRunSummaryPublic,
     FlowRunTokenUsagePublic,
@@ -60,6 +61,7 @@ from eneo.flows.flow_run_input_envelope import (
     read_semantic_flow_input_payload,
     read_speaker_labels_choice,
 )
+from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileRef
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.flows.http_transport import redact_persisted_config
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
@@ -222,6 +224,7 @@ class FlowAssembler:
         result: FlowStepResult,
         *,
         runtime_input_file_ids: Sequence[UUID] = (),
+        runtime_input_files: Sequence[FlowRunStepInputFileRef] | None = None,
         runtime_input_single_recording: bool = False,
         result_files: Sequence[FlowRunStepResultFile] = (),
         transcript_source: "TranscriptSourceReference | None" = None,
@@ -241,6 +244,19 @@ class FlowAssembler:
                 "input_payload_json": input_payload,
                 "diagnostics": _project_step_diagnostics(result),
                 "runtime_input_file_ids": list(runtime_input_file_ids),
+                "runtime_input_files": (
+                    [
+                        FlowRunStepInputFilePublic(
+                            file_id=file.file_id,
+                            name=file.name,
+                            mimetype=file.mimetype,
+                        )
+                        for file in runtime_input_files
+                        if file.name is not None
+                    ]
+                    if runtime_input_files is not None
+                    else None
+                ),
                 "runtime_input_single_recording": runtime_input_single_recording,
                 "result_files": list(result_files),
             }

@@ -802,6 +802,45 @@ async def test_flow_run_steps_endpoint_rejects_view_only_access_to_other_users_r
     assert payload["code"] == "flow_run_access_denied"
 
 
+async def test_step_outputs_name_the_input_files_next_to_their_ids(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _owner, owner_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    run_path = f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}"
+    headers = {"Authorization": f"Bearer {owner_token}"}
+
+    response = await client.get(f"{run_path}/steps/", headers=headers)
+
+    assert response.status_code == 200, response.text
+    (step,) = [item for item in response.json() if item["step_id"] == seeded["step_id"]]
+    (file_id,) = step["runtime_input_file_ids"]
+    assert step["runtime_input_files"] == [
+        {"file_id": file_id, "name": "underlag.pdf", "mimetype": "application/pdf"}
+    ]
+    evidence = await client.get(f"{run_path}/evidence/", headers=headers)
+    assert evidence.status_code == 200, evidence.text
+    (evidence_step,) = [
+        item
+        for item in evidence.json()["step_results"]
+        if item["step_id"] == seeded["step_id"]
+    ]
+    assert evidence_step["runtime_input_file_ids"] == [file_id]
+    assert evidence_step["runtime_input_files"] is None
+
+
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_flow_run_evidence_endpoint_requires_trace_permission(

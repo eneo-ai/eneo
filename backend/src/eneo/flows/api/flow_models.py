@@ -452,6 +452,13 @@ FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
     "input_text_aliases": [],
     "effective_prompt_truncated": False,
     "runtime_input_file_ids": ["00000000-0000-0000-0000-000000000701"],
+    "runtime_input_files": [
+        {
+            "file_id": "00000000-0000-0000-0000-000000000701",
+            "name": "annual-review.mp3",
+            "mimetype": "audio/mpeg",
+        }
+    ],
     "output_payload_json": {"text": "Hello and welcome to the annual review..."},
     "result_files": [],
     "current_attempt_no": 1,
@@ -471,6 +478,15 @@ FLOW_RUN_STEP_PUBLIC_EXAMPLE: dict[str, Any] = {
     "created_at": "2026-03-17T10:05:05Z",
     "updated_at": "2026-03-17T10:05:30Z",
 }
+
+# Evidence step records name their input files inside
+# `input_payload_json.runtime_input.files` instead.
+FLOW_RUN_EVIDENCE_STEP_EXAMPLE: dict[str, Any] = {
+    key: value
+    for key, value in FLOW_RUN_STEP_PUBLIC_EXAMPLE.items()
+    if key != "runtime_input_files"
+}
+
 
 FLOW_RUN_REDISPATCH_RESPONSE_EXAMPLE: dict[str, Any] = {
     "run": FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE,
@@ -1888,6 +1904,30 @@ def _empty_runtime_input_file_ids() -> list[UUID]:
     return []
 
 
+class FlowRunStepInputFilePublic(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {
+                "file_id": "00000000-0000-0000-0000-000000000701",
+                "name": "annual-review.mp3",
+                "mimetype": "audio/mpeg",
+            }
+        },
+    )
+
+    file_id: UUID = Field(
+        description=(
+            "The file's id, as listed in `runtime_input_file_ids`. Download it "
+            "with the run's input-file signed URL endpoint."
+        ),
+    )
+    name: str = Field(description="The file's name as it was uploaded.")
+    mimetype: str | None = Field(
+        description="The file's MIME type, or null when none was recorded.",
+    )
+
+
 class FlowRunStepPublic(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
@@ -1907,6 +1947,15 @@ class FlowRunStepPublic(BaseModel):
         default_factory=_empty_runtime_input_file_ids,
         description=(
             "File ids submitted as runtime input for the current attempt of this step result."
+        ),
+    )
+    runtime_input_files: list[FlowRunStepInputFilePublic] | None = Field(
+        default=None,
+        description=(
+            "Name and MIME type of each file in `runtime_input_file_ids`, in the "
+            "same order, for files in the run's tenant. Read by the step outputs "
+            "endpoint; null in evidence reads, which carry the same names in "
+            "`input_payload_json.runtime_input.files`."
         ),
     )
     runtime_input_single_recording: bool = Field(
@@ -2749,7 +2798,7 @@ class FlowRunEvidenceResponse(BaseModel):
                     "current_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
                 },
                 "definition_snapshot": FLOW_PUBLISHED_DEFINITION_EXAMPLE,
-                "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
+                "step_results": [FLOW_RUN_EVIDENCE_STEP_EXAMPLE],
                 "step_attempts": [],
                 "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
                 "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
@@ -2796,7 +2845,7 @@ FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE: dict[str, Any] = {
         "current_checksum": FLOW_PUBLISHED_DEFINITION_EXAMPLE_CHECKSUM,
     },
     "definition_snapshot": FLOW_PUBLISHED_DEFINITION_EXAMPLE,
-    "step_results": [FLOW_RUN_STEP_PUBLIC_EXAMPLE],
+    "step_results": [FLOW_RUN_EVIDENCE_STEP_EXAMPLE],
     "step_attempts": [],
     "result_files": [FLOW_RUN_RESULT_FILE_EXAMPLE],
     "review_checkpoints": [FLOW_RUN_REVIEW_CHECKPOINT_EVIDENCE_EXAMPLE],
