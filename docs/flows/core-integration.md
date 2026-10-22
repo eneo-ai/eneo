@@ -95,9 +95,7 @@ assistant's prompt; a read of a run form field is `flow_input.<name>`,
   it was read (stored credentials as sentinels) is the saved one and its reads
   follow the change; one it sends changed is taken as given. Unknown or
   repeated ids and step orders that are not 1 to n are refused by the save as
-  before. The Svelte editor no longer renumbers prompts itself (it would do it
-  twice); it marks reads of a removed step as before and reloads the step
-  assistants after a save of the steps.
+  before.
 - Renaming a step: reads of the old name in every step follow the new one,
   several renames in one edit at once (two steps may swap names).
 - Renaming a run form field: `form_field_renames` (`{"old": "new"}`, on the
@@ -139,7 +137,9 @@ not part of them: a published flow still says `can_edit` for its owner, and
 the edit answers `flow_unpublish_required`.
 `tests/integration/flows/test_flow_permissions.py` checks each flag against
 its endpoint for the owner, another editor, a viewer, a user outside the space
-and a space-scoped service key.
+and a space-scoped service key. web-next shows a flow's controls by these flags
+(deletion in the flows list; editing, export, publishing, runs and the
+authoring chat on the flow page) and still explains a 403 in words.
 
 ### Allowed step kinds
 
@@ -163,11 +163,12 @@ against the space (assistants, classification, transcription service). The
 work grows with the square of the step count; `position` and `step_id` narrow
 the answer to one place.
 
-The core is the judge, so some answers differ from the web-next copy of the
-rules: a speaker mapping may follow any step (web-next asks
-for a transcription step before it), and a step can be added before a first
-step that takes uploads beside a text input (web-next refuses whenever the
-first step takes uploads; the core refuses only an upload input type).
+The core is the judge: a speaker mapping may follow any step, and a step can
+be added before a first step that takes uploads beside a text input (the core
+refuses only an upload input type). web-next's add-step dialog and its speaker
+step shortcut ask for the place (`position`), offer the kinds it allows,
+explain the refusals from their codes and add the step with the answer's
+configuration and step edits; it keeps no copy of these rules.
 
 The `flows_core` gate authenticates in its own session and commits before the
 route's container authenticates. Sharing a request with a function-scoped
@@ -185,9 +186,11 @@ assistant as it was; the saved revision shows the step with its new
 retention, logging), so copying asks only for the right to create assistants in
 the space. The chat's `update_step` tool always names its step; web-next's
 step editor does too. A change without `step_id` reaches every step that uses
-the assistant, as before. The classification preview still judges a change of
-a shared assistant on all its steps; the save judges each step with the
-assistant it ends up with.
+the assistant, as before. A classification preview candidate takes `step_id`
+with the same meaning: the step is explained with its own copy of the shared
+assistant, made from the assistant as the other candidates leave it, and the
+other steps with the assistant as it was, so the preview judges what the save
+will. web-next's step editor names its step in the preview as in the save.
 
 ### Audit of an authoring change
 
@@ -262,6 +265,23 @@ capability manifest's `proposable_new` projection and the unused
 `observability/failure_events.py`. The template asset service's
 `create_from_existing_attached_file` has no production caller left; tests
 still use it to make an asset from a saved file.
+
+### Svelte flow screens removed
+
+Flows are built, run and administered in web-next only. The SvelteKit app's
+space flow pages, editor, run views and `lib/features/flows`, the admin Flow
+settings page (with its retention, legal hold, upload, run time and source
+text tabs) and the old flow admin redirects, the MCP server flow usage list,
+and the recording support only the flow run dialog used are gone, with their
+tests, Playwright specs and messages. The space menu's Flows entry opens
+web-next's flows page when `NEW_APP_URL` is set and is left out otherwise; the
+admin area is for admins again, without the retention-only entry. web-next
+keeps every string it reads: the keys only it still used moved to its
+`extra/` catalog. The SDK lost the settings client's flow wrappers and the MCP
+`flowUsage` wrapper; its flows client stays for applications that run flows.
+Run-history retention and legal holds have no screen in either app: they are
+set through the API (see the retention guide) until the platform initiative
+under Open decisions settles them. The backend is unchanged.
 
 ## Documents
 

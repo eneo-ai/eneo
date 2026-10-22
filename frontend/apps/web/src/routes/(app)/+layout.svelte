@@ -22,11 +22,6 @@
   import { initFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte.js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import {
-    adminHomeHref,
-    canOpenAdmin,
-    retentionAccess
-  } from "$lib/features/flows/retentionAccess";
 
   export let data;
 
@@ -62,14 +57,10 @@
   $: contentLink = $page.url.pathname + "#content";
   $: currentRoute = $page.url.pathname;
 
-  const flowWorkspaceRoute = "/(app)/spaces/[spaceId]/flows/[flowId]";
-  $: usesWideFlowWorkspace = $page.route.id === flowWorkspaceRoute;
-
   $: isPersonal = currentRoute.startsWith("/spaces/personal");
   $: isOrganization = currentRoute.startsWith("/spaces/organization");
   $: isSpacesGeneric = currentRoute.startsWith("/spaces") && !isPersonal && !isOrganization;
   const canBrowseOrganization = user.hasPermission("admin");
-  const adminAccess = retentionAccess(user.hasPermission);
 </script>
 
 <!-- eslint-disable svelte/no-navigation-without-resolve -- in-page anchor -->
@@ -103,7 +94,6 @@
      Public pages keep the tap default because their loads (logout, login with
      clear_cookies) change cookies. In-shell links to those pages opt out. -->
 <div
-  class:flow-workspace-shell={usesWideFlowWorkspace}
   class="bg-secondary mx-auto flex min-h-[100svh] w-full max-w-[2000px] flex-col p-0 md:px-4 md:pt-3"
   data-sveltekit-preload-data="hover"
 >
@@ -170,10 +160,10 @@
       <div aria-hidden="true" class="flex-grow"></div>
 
       <!-- Toggle -->
-      {#if canOpenAdmin(adminAccess)}
+      {#if user.hasPermission("admin")}
         <!-- eslint-disable svelte/no-navigation-without-resolve -- localizeHref handles routing -->
         <a
-          href={localizeHref(adminHomeHref(adminAccess))}
+          href={localizeHref("/admin")}
           data-current={currentRoute.startsWith("/admin") ? "page" : undefined}>{m.admin()}</a
         >
         <!-- eslint-enable svelte/no-navigation-without-resolve -->
@@ -220,11 +210,5 @@
     box-shadow: 0px 14px 12px 2px rgba(0, 0, 0, 0.1);
     border: 0.5px solid var(--border-stronger);
     border-bottom: 0px;
-  }
-
-  @media (min-width: 2400px) {
-    .flow-workspace-shell {
-      max-width: 2560px;
-    }
   }
 </style>

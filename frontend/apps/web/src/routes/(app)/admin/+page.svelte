@@ -216,17 +216,6 @@
             {m.api_keys_manage_all()}
           </a>
         </Settings.Row>
-        <Settings.Row
-          title={m.flow_settings_title()}
-          description={m.flow_settings_hub_description()}
-        >
-          <a
-            href={resolve("/(app)/admin/flow-settings")}
-            class="text-accent-default hover:text-accent-default/80 text-sm font-medium"
-          >
-            {m.flow_settings_open()}
-          </a>
-        </Settings.Row>
       </Settings.Group>
       <Settings.Group title={m.model_pricing()}>
         <Settings.Row

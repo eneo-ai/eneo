@@ -43,11 +43,16 @@
 
   export let space: SpaceMenuContext;
 
-  const { user } = getAppContext();
+  const { user, environment } = getAppContext();
 
   $: section = $page.url.pathname.split("/")[3];
   $: chatPartnerIsDefined = $page.url.searchParams.get("type") !== null;
   $: isOrgSpace = space.organization === true;
+  // Flows are worked with in the new app, so the menu links there when the
+  // deployment has one (NEW_APP_URL) and leaves the entry out otherwise.
+  $: newAppFlowsHref = environment.newAppUrl
+    ? `${environment.newAppUrl.replace(/\/+$/, "")}/spaces/${space.routeId}/flows`
+    : null;
 </script>
 
 <Navigation.Menu>
@@ -90,10 +95,10 @@
       label={m.apps()}
     />
   {/if}
-  {#if !isOrgSpace && space.hasPermission("read", "app") && user.hasPermission("flows_view")}
+  {#if !isOrgSpace && newAppFlowsHref && space.hasPermission("read", "app") && user.hasPermission("flows_view")}
     <Navigation.Link
-      href={localizeHref(`/spaces/${space.routeId}/flows`)}
-      isActive={section === "flows"}
+      href={newAppFlowsHref}
+      isActive={false}
       icon={IconWorkflow}
       label={m.flows()}
     />

@@ -159,50 +159,8 @@ export type WebsiteInfoBlobPage =
   components["schemas"]["CursorPaginatedResponse_InfoBlobPublicNoText_"];
 export type WebsiteBulkActionError = components["schemas"]["WebsiteBulkActionError"];
 export type Settings = components["schemas"]["SettingsPublic"];
-export type FlowInputLimits = components["schemas"]["FlowInputLimitsPublic"];
-export type FlowInputLimitsUpdate = components["schemas"]["FlowInputLimitsUpdate"];
-export type FlowRuntimePolicy = components["schemas"]["FlowRuntimePolicyPublic"];
-export type FlowRuntimePolicyUpdate = components["schemas"]["FlowRuntimePolicyUpdate"];
-export type FlowMappedExecutionPolicy = components["schemas"]["FlowMappedExecutionPolicyPublic"];
-export type FlowMappedExecutionPolicyUpdate =
-  components["schemas"]["FlowMappedExecutionPolicyUpdate"];
-export type FlowRagEvidencePolicy = components["schemas"]["FlowRagEvidencePolicyPublic"];
-export type FlowRagEvidencePolicyUpdate = components["schemas"]["FlowRagEvidencePolicyUpdate"];
-export type FlowEvidencePolicy = components["schemas"]["FlowEvidencePolicyPublic"];
-export type FlowRetentionPolicy = components["schemas"]["FlowRetentionPolicyPublic"];
-export type FlowRetentionPolicyUpdate = components["schemas"]["FlowRetentionPolicyUpdate"];
-export type FlowRunRetentionMode = components["schemas"]["FlowRunRetentionMode"];
-export type FlowRunRetentionPolicy = components["schemas"]["FlowRunRetentionPolicy"];
-export type FlowRunRetentionPolicySettings =
-  components["schemas"]["FlowRunRetentionPolicySettings"];
-export type FlowRunRetentionSpaceTarget = components["schemas"]["FlowRunRetentionSpaceTarget"];
-export type FlowRunRetentionSpaceTargetPage =
-  components["schemas"]["FlowRunRetentionSpaceTargetPage"];
-export type FlowRunRetentionFlowTarget = components["schemas"]["FlowRunRetentionFlowTarget"];
-export type FlowRunRetentionFlowTargetPage =
-  components["schemas"]["FlowRunRetentionFlowTargetPage"];
-export type FlowRunRetentionReviewItem = components["schemas"]["FlowRunRetentionReviewItem"];
-export type FlowRunRetentionReviewPage = components["schemas"]["FlowRunRetentionReviewPage"];
-export type FlowRetentionHold = components["schemas"]["FlowRetentionHold"];
-export type FlowRetentionHoldPage = components["schemas"]["FlowRetentionHoldPage"];
-export type FlowRetentionHoldPlacement = components["schemas"]["FlowRetentionHoldPlacement"];
-export type FlowRetentionHoldReviewLimit = components["schemas"]["FlowRetentionHoldReviewLimit"];
 export type FlowRunStatusCapabilities = components["schemas"]["FlowRunStatusCapabilitiesPublic"];
 export type FlowRunStatusCapability = components["schemas"]["FlowRunStatusCapabilityPublic"];
-// SEAM: tracked in batch-5 journal; delete when schema.d.ts includes FlowDocumentRenderLimitsPublic.
-export type FlowDocumentRenderLimits = {
-  max_source_chars: number;
-  max_blocks: number;
-  max_text_chars: number;
-  max_table_rows: number;
-  max_table_columns: number;
-  max_table_cells: number;
-  max_cell_chars: number;
-  max_list_items: number;
-  max_structured_nodes: number;
-  max_structured_depth: number;
-  max_object_fields: number;
-};
 export type WhatsNewState = components["schemas"]["WhatsNewStatePublic"];
 // The API has one website shape; there is no sparse schema to name.
 export type WebsiteSparse = components["schemas"]["WebsitePublic"];
@@ -386,9 +344,6 @@ export type FlowTranscriptSourceOmissionReason =
 export type FlowTranscriptSegmentWords = components["schemas"]["TranscriptSegmentWordsPublic"];
 export type FlowTranscriptWord = components["schemas"]["TranscriptWordPublic"];
 export type FlowRunEvidence = components["schemas"]["FlowRunEvidenceResponse"];
-export type FlowRunEvidenceWithTypedSteps = Omit<FlowRunEvidence, "step_results"> & {
-  step_results: FlowRunStep[];
-};
 export type FlowProviderCallEvidence = components["schemas"]["ProviderCallEvidence"];
 export type FlowProviderCallEvidencePage = components["schemas"]["ProviderCallEvidencePage"];
 export type FlowRunEvidenceExport = components["schemas"]["FlowRunEvidenceExportResponse"];

@@ -6026,7 +6026,7 @@ export interface paths {
     put?: never;
     /**
      * Preview Security Classification
-     * @description Explain, step by step, what the security classification rule makes of the submitted editor state: the level each step's inputs carry, which earlier steps it reads, the level of the server of the tool it reads, the level its model must clear, the models of the space that qualify, the level its output carries, the lowest output override the rule accepts, and the violation a save would be refused with. `steps` and `assistants` are the editor's unsaved state in the shape a flow update and an assistant update accept; omit them to explain the saved draft. The rule is the one a save applies, so a candidate reported without a violation is not refused for classification by a save. The preview does not report what the tool decision refuses at publish: a tool whose server has a lower classification than the space is refused there with `typed_io_tool_not_allowed`. This endpoint does not save the flow or any assistant and writes no audit record. It reads the flow's assistants, so it needs the same permission as reading them: editing flows in the space.
+     * @description Explain, step by step, what the security classification rule makes of the submitted editor state: the level each step's inputs carry, which earlier steps it reads, the level of the server of the tool it reads, the level its model must clear, the models of the space that qualify, the level its output carries, the lowest output override the rule accepts, and the violation a save would be refused with. `steps` and `assistants` are the editor's unsaved state in the shape a flow update and an assistant update accept; omit them to explain the saved draft. An assistant change with `step_id` means what it means in `PATCH /flows/{id}/editor/`: when other steps share the assistant, that step is explained with its own copy of it with the change. The rule is the one a save applies, so a candidate reported without a violation is not refused for classification by a save. The preview does not report what the tool decision refuses at publish: a tool whose server has a lower classification than the space is refused there with `typed_io_tool_not_allowed`. This endpoint does not save the flow or any assistant and writes no audit record. It reads the flow's assistants, so it needs the same permission as reading them: editing flows in the space.
      */
     post: operations["preview_flow_security_classification"];
     delete?: never;
@@ -26175,13 +26175,32 @@ export interface components {
        */
       pending_count?: number;
     };
-    /** FlowSecurityClassificationAssistantCandidate */
+    /**
+     * FlowSecurityClassificationAssistantCandidate
+     * @example {
+     *       "assistant_id": "00000000-0000-0000-0000-000000000002",
+     *       "step_id": "00000000-0000-0000-0000-000000000102",
+     *       "update": {
+     *         "completion_model": {
+     *           "id": "00000000-0000-0000-0000-000000000031"
+     *         }
+     *       }
+     *     }
+     */
     FlowSecurityClassificationAssistantCandidate: {
       /**
        * Assistant Id
        * Format: uuid
+       * @description The flow-managed assistant the unsaved change is to.
+       * @example 00000000-0000-0000-0000-000000000002
        */
       assistant_id: string;
+      /**
+       * Step Id
+       * @description The step whose assistant this changes, as `step_id` of an assistant change in `PATCH /flows/{id}/editor/`. When other candidate steps share the assistant, this step is explained with its own copy of it with the change, and the other steps with the assistant as it was (after any change without `step_id`). Without `step_id` the change reaches every step that uses the assistant. The step must be a candidate step that uses `assistant_id`.
+       * @example 00000000-0000-0000-0000-000000000102
+       */
+      step_id?: string | null;
       update: components["schemas"]["FlowAssistantUpdateRequest"];
     };
     /**
@@ -26210,6 +26229,24 @@ export interface components {
      *             "required_level": 2,
      *             "source_step_orders": []
      *           }
+     *         },
+     *         {
+     *           "effective_output_level": 2,
+     *           "external_source_level": null,
+     *           "input_level": 2,
+     *           "knowledge_level": null,
+     *           "model_level": 2,
+     *           "output_floor": 2,
+     *           "qualifying_model_ids": [
+     *             "00000000-0000-0000-0000-000000000031"
+     *           ],
+     *           "reads": [
+     *             1
+     *           ],
+     *           "required_model_level": 2,
+     *           "step_id": "00000000-0000-0000-0000-000000000102",
+     *           "step_order": 2,
+     *           "violation": null
      *         }
      *       ]
      *     }
@@ -26227,6 +26264,7 @@ export interface components {
      *       "assistants": [
      *         {
      *           "assistant_id": "00000000-0000-0000-0000-000000000002",
+     *           "step_id": "00000000-0000-0000-0000-000000000102",
      *           "update": {
      *             "completion_model": {
      *               "id": "00000000-0000-0000-0000-000000000031"
@@ -26244,6 +26282,16 @@ export interface components {
      *           "output_type": "text",
      *           "step_order": 1,
      *           "user_description": "Summarize the case file"
+     *         },
+     *         {
+     *           "assistant_id": "00000000-0000-0000-0000-000000000002",
+     *           "id": "00000000-0000-0000-0000-000000000102",
+     *           "input_source": "previous_step",
+     *           "input_type": "text",
+     *           "output_mode": "pass_through",
+     *           "output_type": "text",
+     *           "step_order": 2,
+     *           "user_description": "Draft the reply"
      *         }
      *       ]
      *     }
@@ -26251,7 +26299,7 @@ export interface components {
     FlowSecurityClassificationPreviewRequest: {
       /**
        * Assistants
-       * @description Unsaved changes to the flow-managed assistants the steps use, in the shape an assistant update accepts. Only the model, the knowledge and the prompt affect the result. At most one entry per assistant, and no more entries than a flow can have steps.
+       * @description Unsaved changes to the flow-managed assistants the steps use, in the shape an assistant update accepts. Only the model, the knowledge and the prompt affect the result. At most one entry per assistant and `step_id`, and no more entries than a flow can have steps.
        */
       assistants?: components["schemas"]["FlowSecurityClassificationAssistantCandidate"][];
       /**
@@ -63186,6 +63234,24 @@ export interface operations {
            *             "required_level": 2,
            *             "source_step_orders": []
            *           }
+           *         },
+           *         {
+           *           "effective_output_level": 2,
+           *           "external_source_level": null,
+           *           "input_level": 2,
+           *           "knowledge_level": null,
+           *           "model_level": 2,
+           *           "output_floor": 2,
+           *           "qualifying_model_ids": [
+           *             "00000000-0000-0000-0000-000000000031"
+           *           ],
+           *           "reads": [
+           *             1
+           *           ],
+           *           "required_model_level": 2,
+           *           "step_id": "00000000-0000-0000-0000-000000000102",
+           *           "step_order": 2,
+           *           "violation": null
            *         }
            *       ]
            *     }
@@ -63193,7 +63259,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowSecurityClassificationPreviewPublic"];
         };
       };
-      /** @description The candidate state cannot be evaluated: a step names an assistant the flow does not manage, an assistant change names an assistant no candidate step uses, or the steps, submitted or saved, are more than a flow can have (`flow_step_limit_exceeded`, with `step_count` and `max_steps` in the context). */
+      /** @description The candidate state cannot be evaluated: a step names an assistant the flow does not manage, an assistant change names an assistant no candidate step uses or a step that does not use its assistant, or the steps, submitted or saved, are more than a flow can have (`flow_step_limit_exceeded`, with `step_count` and `max_steps` in the context). */
       400: {
         headers: {
           [name: string]: unknown;

@@ -18,7 +18,6 @@
   import type { Eneo, components } from "@eneo/eneo-js";
   import { builtinToolCatalogLabels } from "$lib/features/chat/internalToolLabels";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
-  import MCPServerFlowUsage from "./MCPServerFlowUsage.svelte";
 
   type MCPTool = components["schemas"]["MCPServerToolPublic"];
 
@@ -92,12 +91,6 @@
       tool.title ??
       tool.name
     );
-  }
-
-  // A published flow may still call a tool the server no longer lists.
-  function toolLabelById(toolId: string): string {
-    const tool = tools.find((t) => t.id === toolId);
-    return tool ? toolLabel(tool) : m.mcp_flow_usage_tool_not_listed();
   }
 
   function toolDescription(tool: MCPTool): string | null {
@@ -354,8 +347,6 @@
       <span>{syncing ? m.syncing() : m.sync_tools()}</span>
     </Button>
   </div>
-
-  <MCPServerFlowUsage {mcpServerId} {eneoClient} toolLabel={toolLabelById} />
 
   <!-- Pending changes banner -->
   {#if hasPendingChanges}

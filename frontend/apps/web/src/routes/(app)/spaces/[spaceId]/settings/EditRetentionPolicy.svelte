@@ -27,10 +27,3 @@
 >
   <RetentionPolicyInput bind:value={$update.data_retention_days} {labelId} {descriptionId} />
 </Settings.Row>
-
-<!-- Flow run history is governed by its own policy (administration), not by the value above. -->
-<Settings.Row
-  title={m.space_flow_retention_title()}
-  description={m.space_flow_retention_description()}
-  fullWidth
-/>

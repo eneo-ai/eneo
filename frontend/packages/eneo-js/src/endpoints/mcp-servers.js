@@ -373,20 +373,6 @@ export function initMCPServers(client) {
     },
 
     /**
-     * The published flows that call a tool of an MCP server (admin only): a
-     * total count and the first part of the list.
-     * @param {Object} params
-     * @param {string} params.mcp_server_id The MCP server ID
-     * @throws {EneoError}
-     * */
-    flowUsage: async ({ mcp_server_id }) => {
-      return client.fetch("/api/v1/mcp-servers/{mcp_server_id}/flow-usage", {
-        method: "get",
-        params: { path: { mcp_server_id } }
-      });
-    },
-
-    /**
      * What a tool's interactive view (MCP App) may do: its size, the hosts it
      * may reach and the permissions it asks for (admin only). Describes the
      * view awaiting approval when there is one, otherwise the approved view.

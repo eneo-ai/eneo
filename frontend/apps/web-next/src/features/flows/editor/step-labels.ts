@@ -107,6 +107,10 @@ export function meaningLabel(
       return t("flow_step_editor_variable_date");
     case "section_index":
       return t("flow_step_editor_variable_section_index");
+    case "section_index_unavailable":
+      return t("flow_step_editor_read_section_index_unavailable");
+    case "fields_of_text":
+      return t("flow_step_editor_read_fields_of_text", { step: step(meaning.order) });
     case "step_answer":
       return t("flow_editor_tools_preview_read_step", {
         step: step(meaning.order),
@@ -126,6 +130,28 @@ export function meaningLabel(
       return t("flow_editor_tools_preview_read_missing", { order: meaning.order });
     case "other":
       return token;
+  }
+}
+
+/** What to change about a reference that reads nothing useful where it stands, or null. */
+export function readWarning(
+  meaning: ReadMeaning,
+  flow: Pick<FlowPublic, "steps">,
+  t: T
+): string | null {
+  switch (meaning.kind) {
+    case "fields_of_text":
+      return t("flow_step_editor_reference_warning_fields_of_text", {
+        step: stepLabel(
+          meaning.order,
+          flow.steps.find((item) => item.step_order === meaning.order)?.user_description,
+          t
+        )
+      });
+    case "section_index_unavailable":
+      return t("flow_step_editor_reference_warning_section_index");
+    default:
+      return null;
   }
 }
 

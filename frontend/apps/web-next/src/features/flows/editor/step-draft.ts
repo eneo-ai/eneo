@@ -163,9 +163,11 @@ function promptReads(prompt: string): string {
 /**
  * The classification preview of the draft: every step as saved with this
  * step's draft in place, and the assistant's model, knowledge and prompt as
- * drafted. The rule reads the prompt only for the steps it refers to, so the
- * preview sends those references alone: typing prose asks nothing, a new or
- * removed reference asks again.
+ * drafted. The assistant change names the step, as the save does, so a step
+ * that shares its assistant is explained with its own copy and the other
+ * steps with the assistant as saved. The rule reads the prompt only for the
+ * steps it refers to, so the preview sends those references alone: typing
+ * prose asks nothing, a new or removed reference asks again.
  */
 export function classificationPreviewRequest(params: {
   flow: FlowPublic;
@@ -199,7 +201,8 @@ export function classificationPreviewRequest(params: {
   }
   return {
     steps: steps as never,
-    assistants: Object.keys(update).length > 0 ? [{ assistant_id: assistantId, update }] : []
+    assistants:
+      Object.keys(update).length > 0 ? [{ assistant_id: assistantId, step_id: stepId, update }] : []
   };
 }
 

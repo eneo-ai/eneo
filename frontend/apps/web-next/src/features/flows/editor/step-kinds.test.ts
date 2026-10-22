@@ -1,19 +1,14 @@
+import { createTranslator } from "next-intl";
 import { describe, expect, it } from "vitest";
-import { readRuntimeInput } from "./step-configs";
-import {
-  initialConfiguration,
-  kindBlock,
-  newStepUpdate,
-  STEP_KINDS,
-  uniqueStepName,
-  type StepKind
-} from "./step-kinds";
-import { chainIssue, outputModeIssue } from "./step-rules";
-import type { FlowStep, InputSource, InputType, OutputMode, OutputType } from "./step-types";
-import { makeFlow, makeStep } from "./testing/fixtures";
+import messages from "@/lib/i18n/messages/sv.json";
+import type { Translator } from "./field-problems";
+import { kindRefusalText, newStepUpdate, uniqueStepName } from "./step-kinds";
+import { makeFlow, makeKindOption, makeKindRefusal, makeStep } from "./testing/fixtures";
+
+const t = createTranslator({ locale: "sv", messages }) as unknown as Translator;
 
 const OPTIONS = {
-  name: "Nytt steg",
+  name: "  Nytt steg ",
   url: "https://api.example.org/arenden",
   tool: { mcp_server_id: "server-1", tool_id: "tool-1", arguments: {} }
 };
@@ -32,128 +27,128 @@ const twoSteps = makeFlow({
   ]
 });
 
-describe("the first configuration of each kind", () => {
-  const places: [string, number][] = [
-    ["first in an empty flow", 1],
-    ["between two steps", 2],
-    ["last", 3]
-  ];
-  for (const [place, position] of places) {
-    const flow = position === 1 ? makeFlow({ steps: [] }) : twoSteps;
-    for (const kind of STEP_KINDS) {
-      if (kindBlock(flow, position, kind) !== null) continue;
-      it(`is valid for ${kind} ${place}`, () => {
-        const config = initialConfiguration(flow, position, kind, OPTIONS);
-        const step = {
-          input_source: config.input_source as InputSource,
-          input_type: config.input_type as InputType,
-          output_mode: config.output_mode as OutputMode,
-          output_type: config.output_type as OutputType,
-          input_bindings: null
-        };
-        const previous = flow.steps.find((item) => item.step_order === position - 1) ?? null;
-        const isLast = position === flow.steps.length + 1;
-        expect(chainIssue(step, position, previous?.output_type ?? null)).toBeNull();
-        expect(outputModeIssue(step, isLast)).toBeNull();
-      });
-    }
-  }
-
-  it("transcribes uploaded audio", () => {
-    const config = initialConfiguration(makeFlow({ steps: [] }), 1, "transcribe", OPTIONS);
-    expect(config).toMatchObject({ input_type: "audio", output_mode: "transcribe_only" });
-    expect(readRuntimeInput(config.input_config)).toMatchObject({
-      enabled: true,
-      inputFormat: "audio"
-    });
-  });
-});
-
-describe("where a kind fits", () => {
-  const transcript = makeFlow({
-    steps: [makeStep({ input_type: "audio", output_mode: "transcribe_only" })]
-  });
-  const blocks: [string, Parameters<typeof kindBlock>, ReturnType<typeof kindBlock>][] = [
-    ["transcription after step 1", [twoSteps, 2, "transcribe"], "first_only"],
-    ["speakers without a transcript before", [twoSteps, 2, "speakers"], "needs_transcript_before"],
-    ["speakers after a transcript", [transcript, 2, "speakers"], null],
-    ["review as the first step", [makeFlow({ steps: [] }), 1, "review"], "needs_step_before"],
-    ["HTTP delivery before another step", [twoSteps, 2, "send_http"], "must_be_last"],
-    [
-      "a document before a step that reads JSON",
-      [twoSteps, 2, "document"],
-      "next_step_cannot_read"
-    ],
-    ["a text answer before a step that reads JSON", [twoSteps, 2, "ai"], null]
-  ];
-  for (const [label, args, block] of blocks) {
-    it(`${label}: ${block ?? "fits"}`, () => expect(kindBlock(...args)).toBe(block));
-  }
-
-  it("nothing follows a step that sends over HTTP", () => {
-    const flow = makeFlow({
-      steps: [
-        makeStep({
-          output_mode: "http_post",
-          output_config: { url: "https://x", auth: { mode: "none" } }
-        })
-      ]
-    });
-    expect(kindBlock(flow, 2, "ai")).toBe("after_outbound_step");
-  });
-
-  it("nothing goes before a first step that takes uploads", () => {
-    const flow = makeFlow({ steps: [makeStep({ input_type: "document" })] });
-    expect(kindBlock(flow, 1, "ai")).toBe("first_step_takes_uploads");
-  });
-});
-
 describe("newStepUpdate", () => {
-  it("places the new step among every saved step, fenced on the read revision", () => {
-    const update = newStepUpdate(twoSteps, 2, "ai", OPTIONS);
-    expect(update).toEqual({
+  it("adds the core's configuration among every saved step, fenced on the read revision", () => {
+    const option = makeKindOption("ai", { configuration: { input_type: "json" } });
+    expect(newStepUpdate(twoSteps, 2, option, OPTIONS)).toEqual({
       expected_revision: 4,
       definition: {},
-      new_steps: [
-        {
-          name: "Nytt steg",
-          configuration: {
-            input_source: "previous_step",
-            input_type: "json",
-            output_mode: "pass_through",
-            output_type: "text"
-          },
-          assistant: {}
-        }
-      ],
+      new_steps: [{ name: "Nytt steg", configuration: option.configuration, assistant: {} }],
       step_order: [{ step_id: "step-1" }, { new_step: 0 }, { step_id: "step-2" }]
     });
   });
 
-  it("hands the flow's input to a step added first and turns the old first step to read it", () => {
-    const flow = makeFlow({ steps: [makeStep({ input_type: "json" }) as FlowStep] });
-    const update = newStepUpdate(flow, 1, "document", { ...OPTIONS, format: "pdf" });
+  it("makes the saved steps' changes the core gives, and puts the chosen format in", () => {
+    const flow = makeFlow({ steps: [makeStep({ input_type: "json" })] });
+    const handOver = { step_id: "step-1", changes: { input_source: "previous_step" } };
+    const option = makeKindOption("document", {
+      configuration: {
+        input_source: "flow_input",
+        output_mode: "render_verbatim",
+        output_type: "docx"
+      },
+      step_edits: [handOver]
+    });
+    const update = newStepUpdate(flow, 1, option, { ...OPTIONS, format: "pdf" });
     expect(update.new_steps?.[0]?.configuration).toMatchObject({
       input_source: "flow_input",
       output_mode: "render_verbatim",
       output_type: "pdf"
     });
     expect(update.step_order).toEqual([{ new_step: 0 }, { step_id: "step-1" }]);
-    expect(update.step_edits).toEqual([
-      { step_id: "step-1", changes: { input_source: "previous_step", input_type: "text" } }
-    ]);
+    expect(update.step_edits).toEqual([handOver]);
   });
 
-  it("turns transcription on for a flow's first audio step", () => {
-    const update = newStepUpdate(
-      makeFlow({ steps: [] }),
-      1,
-      "transcribe" satisfies StepKind,
-      OPTIONS
-    );
+  it("turns transcription on when the core says the step needs it", () => {
+    const option = makeKindOption("transcribe", { turns_on_transcription: true });
+    const update = newStepUpdate(makeFlow({ steps: [] }), 1, option, OPTIONS);
     expect(update.definition).toEqual({
       metadata_json: { wizard: { transcription_enabled: true } }
     });
+  });
+
+  it("puts the entered address and tool into the core's request settings", () => {
+    const http = { url: "", auth: { mode: "none" }, timeout_seconds: 30 };
+    const fetch = makeKindOption("fetch_http", {
+      configuration: { input_source: "http_get", input_config: http }
+    });
+    const send = makeKindOption("send_http", {
+      configuration: { output_mode: "http_post", output_config: http }
+    });
+    const tool = makeKindOption("tool", { configuration: { input_source: "tool" } });
+    const configurationOf = (option: typeof fetch) =>
+      newStepUpdate(twoSteps, 3, option, OPTIONS).new_steps?.[0]?.configuration;
+
+    expect(configurationOf(fetch)?.input_config).toEqual({ ...http, url: OPTIONS.url });
+    expect(configurationOf(send)?.output_config).toEqual({ ...http, url: OPTIONS.url });
+    expect(configurationOf(tool)?.input_config).toEqual({ tool: OPTIONS.tool });
+  });
+});
+
+describe("kindRefusalText", () => {
+  const text = (refusal: Parameters<typeof makeKindRefusal>[0], position = 2) =>
+    kindRefusalText(makeKindRefusal(refusal), position, twoSteps, t);
+  const terminal = "flow_http_post_output_must_be_terminal";
+  const cases: [string, Parameters<typeof makeKindRefusal>[0], number, string][] = [
+    [
+      "a step that sends over HTTP before another",
+      { issue_code: terminal, step_order: 2 },
+      2,
+      messages.flow_step_editor_kind_block_must_be_last
+    ],
+    [
+      "a step after one that sends over HTTP",
+      { issue_code: terminal, step_order: 2, step_id: "step-2" },
+      3,
+      messages.flow_step_editor_kind_block_after_outbound_step
+    ],
+    [
+      "an answer the step after cannot read",
+      { issue_code: "typed_io_incompatible_type_chain", step_order: 3, step_id: "step-2" },
+      2,
+      messages.flow_step_editor_kind_block_next_step_cannot_read
+    ],
+    [
+      "a step that reads the run's input after step 1",
+      { issue_code: "typed_io_flow_input_position_invalid", step_order: 2 },
+      2,
+      messages.flow_step_editor_kind_block_first_only
+    ],
+    [
+      "a step that needs one before it",
+      { issue_code: "typed_io_missing_previous_step", step_order: 1 },
+      1,
+      messages.flow_step_editor_kind_block_needs_step_before
+    ],
+    [
+      "a step before the one that takes uploads",
+      { issue_code: "typed_io_audio_source_unsupported", step_order: 2, step_id: "step-1" },
+      1,
+      messages.flow_step_editor_kind_block_first_step_takes_uploads
+    ]
+  ];
+  for (const [label, refusal, position, expected] of cases) {
+    it(`says so for ${label}`, () => expect(text(refusal, position)).toBe(expected));
+  }
+
+  it("names another step a refusal is about, with the catalog's sentence", () => {
+    const message = text({
+      code: "flow_review_policy_outbound_output_unsupported",
+      issue_code: "flow_review_policy_outbound_output_unsupported",
+      step_order: 4,
+      step_id: "step-2"
+    });
+    expect(message).toContain("Steg 2: Skriv svar");
+    expect(message).toContain(messages.flow_validation_msg_review_policy_outbound_unsupported);
+  });
+
+  it("falls back to the flow error catalog, then to a plain refusal", () => {
+    expect(text({ code: "flow_unpublish_required", issue_code: null, step_order: null })).toBe(
+      messages.flow_error_flow_unpublish_required
+    );
+    expect(text({ code: "something_new", issue_code: null, step_order: 2 })).toBe(
+      messages.flow_step_editor_kind_block_refused
+    );
   });
 });
 

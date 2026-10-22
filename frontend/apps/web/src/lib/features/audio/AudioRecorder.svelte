@@ -5,6 +5,35 @@
   // (the live preview tapping it) before it starts anyway.
   export const AUDIO_GRAPH_PREPARATION_MS = 2_000;
 
+  // The recorder's own audio graph, handed to a listener such as a live preview.
+  export type RecorderAudioGraph = {
+    context: AudioContext;
+    source: MediaStreamAudioSourceNode;
+  };
+
+  // What the recorder tells a journal about the segment it records.
+  export type RecorderJournal = {
+    begin(partId: string, mimeType: string): void;
+    append(partId: string, blob: Blob): void;
+    // The recorder went away while recording: the part stays, to be rebuilt later.
+    leave(partId: string): void;
+    discard(partId: string): void;
+  };
+
+  // Chromium's MediaRecorder drops the last 9-71 ms before stop() (measured
+  // 2026-09-23: the audio still waiting for its next Opus packet), so a rotated
+  // recorder keeps capturing this long after the next one starts: the two files
+  // overlap instead of leaving a gap.
+  export const ROTATION_OVERLAP_MS = 150;
+
+  export function generateSessionId(): string {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+    const rand = () => Math.random().toString(16).slice(2, 10);
+    return `${rand()}${rand()}-${rand()}-${rand()}-${rand()}-${rand()}${rand()}${rand()}`;
+  }
+
   // What the dialog's recording session calls on the recorder.
   export type RecorderHandle = {
     startExternal: () => Promise<void>;
@@ -39,10 +68,7 @@
   } from "./audioRecordingOptions";
   import { buildRecordedAudioFile } from "./recordedAudioFile";
   import { downloadRecordedAudioFile } from "./downloadRecordedAudioFile";
-  import type { RecorderJournal } from "./recordingJournal";
-  import { generateSessionId, ROTATION_OVERLAP_MS } from "./recordingSession";
   import { withRecordedDuration } from "./webmDuration";
-  import type { RecorderAudioGraph } from "./live/LiveTranscriptPreview.svelte";
 
   // Every stop reports once. `blob` is null when nothing was captured, so a
   // caller still hears a failure to retry, or the user's own stop.

@@ -209,8 +209,15 @@ function unavailableMessage(error: unknown, t: ReturnType<typeof useTranslations
  */
 export function FlowChatPanel({ flow, onFlowMayHaveChanged, onRefused }: ChatPanelProps) {
   const t = useTranslations();
-  const chat = useQuery(authoringChatQueryOptions(flow.id));
-  const unavailable = chat.isError ? unavailableMessage(chat.error, t) : null;
+  // The chat needs edit access; without it the core would refuse it (a 403
+  // still says so, should the flag be out of date).
+  const mayEdit = flow.permissions.can_edit;
+  const chat = useQuery({ ...authoringChatQueryOptions(flow.id), enabled: mayEdit });
+  const unavailable = !mayEdit
+    ? t("flows_chat_no_access")
+    : chat.isError
+      ? unavailableMessage(chat.error, t)
+      : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -225,9 +232,11 @@ export function FlowChatPanel({ flow, onFlowMayHaveChanged, onRefused }: ChatPan
         </div>
         {chat.data ? <EditModeSwitch chat={chat.data} onRefused={onRefused} /> : null}
       </div>
-      {chat.isPending ? (
+      {chat.data ? (
+        <AuthoringConversation chat={chat.data} onFlowMayHaveChanged={onFlowMayHaveChanged} />
+      ) : mayEdit && !chat.isError ? (
         <LoadingState label={t("flows_chat_loading")} rows={3} className="p-4" />
-      ) : chat.isError ? (
+      ) : (
         <div className="p-4">
           {unavailable ? (
             <QuietBanner
@@ -244,8 +253,6 @@ export function FlowChatPanel({ flow, onFlowMayHaveChanged, onRefused }: ChatPan
             />
           )}
         </div>
-      ) : (
-        <AuthoringConversation chat={chat.data} onFlowMayHaveChanged={onFlowMayHaveChanged} />
       )}
     </div>
   );
