@@ -4,8 +4,9 @@ import type { RunStep } from "./runs-api";
  * What a step result records about how it worked, read from the payloads
  * the step results already carry: how it read long material part by part,
  * the answer it gave that was not accepted, the document template it
- * filled, and what was sent in at run time. A malformed record reads as
- * nothing rather than as a wrong fact.
+ * filled, what was sent in at run time, how it transcribed audio and whom
+ * it named as the speakers. A malformed record reads as nothing rather than
+ * as a wrong fact.
  */
 
 function asObject(value: unknown): Record<string, unknown> | null {
@@ -97,4 +98,124 @@ export function runtimeInputSummary(
     extractedTextLength: typeof length === "number" && length >= 0 ? length : null,
     inputFormat: typeof format === "string" && format ? format : null
   };
+}
+
+function count(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function word(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+/** How a step transcribed its audio (`input_payload_json.transcription`). */
+export type TranscriptionFacts = {
+  files: number | null;
+  language: string | null;
+  elapsedMs: number | null;
+  model: string | null;
+  /** The speaker identification service that labelled the speakers, by its name then. */
+  speakerService: string | null;
+  transcriptBytes: number | null;
+  estimatedTokens: number | null;
+  /**
+   * Whether speakers were labelled: `labelled`, `reduced_precision` (labelled
+   * per passage, since the service could not place each word), `skipped`
+   * (the transcription gave no text), or null when none was asked for.
+   */
+  speakers: "labelled" | "reduced_precision" | "skipped" | null;
+  speakersElapsedMs: number | null;
+};
+
+export function transcriptionFacts(
+  result: Pick<RunStep, "input_payload_json">
+): TranscriptionFacts | null {
+  const record = asObject(asObject(result.input_payload_json)?.transcription);
+  if (!record) return null;
+  const diarization = record.diarization;
+  const alignment = record.alignment;
+  const fileIds = Array.isArray(record.file_ids) ? record.file_ids.length : null;
+  return {
+    files: count(record.files_count) ?? fileIds,
+    language: word(record.language),
+    elapsedMs: count(record.elapsed_ms),
+    model: word(record.model),
+    speakerService: word(record.speaker_service),
+    transcriptBytes: count(record.transcript_bytes),
+    estimatedTokens: count(record.estimated_tokens),
+    speakers:
+      diarization === "external"
+        ? alignment === "segment_split" || alignment === "segment_only"
+          ? "reduced_precision"
+          : "labelled"
+        : typeof diarization === "string" && diarization.startsWith("skipped")
+          ? "skipped"
+          : null,
+    speakersElapsedMs: count(record.diarization_elapsed_ms)
+  };
+}
+
+export type SpeakerConfidence = "low" | "medium" | "high";
+
+/** One diarized speaker of a speaker-mapping step and whom the step named. */
+export type SpeakerRow = {
+  label: string;
+  name: string | null;
+  confidence: SpeakerConfidence;
+  evidence: string;
+};
+
+/**
+ * The speakers a speaker-mapping step named: one row per diarized label in
+ * the step's inventory (`speaker_mapping.inventory`, the discriminator: plain
+ * JSON with a `speakers` key is not a mapping), with the name, confidence and
+ * evidence it proposed (`structured.speakers`), and the transcription step
+ * the mapping was made from.
+ */
+export function speakerMapping(
+  payload: RunStep["output_payload_json"]
+): { rows: SpeakerRow[]; sourceStepId: string | null } | null {
+  const extension = asObject(asObject(payload)?.speaker_mapping);
+  if (!extension) return null;
+  const proposals = new Map<string, Record<string, unknown>>();
+  const speakers = asObject(asObject(payload)?.structured)?.speakers;
+  for (const item of Array.isArray(speakers) ? speakers : []) {
+    const entry = asObject(item);
+    if (entry && typeof entry.label === "string") proposals.set(entry.label, entry);
+  }
+  const rows: SpeakerRow[] = [];
+  for (const item of Array.isArray(extension.inventory) ? extension.inventory : []) {
+    const label = asObject(item)?.label;
+    if (typeof label !== "string") continue;
+    const proposal = proposals.get(label);
+    const confidence = proposal?.confidence;
+    rows.push({
+      label,
+      name: word(proposal?.name),
+      confidence: confidence === "high" || confidence === "medium" ? confidence : "low",
+      evidence: typeof proposal?.evidence === "string" ? proposal.evidence.trim() : ""
+    });
+  }
+  if (rows.length === 0) return null;
+  return { rows, sourceStepId: word(extension.source_step_id) };
+}
+
+/**
+ * The rows with the names a person gave later (kept with the transcript's
+ * corrections): a string replaces the step's name, null clears it, a label
+ * left out keeps it. A row keeps the step's confidence and evidence while it
+ * names its speaker as the step did; a name a person gave is as certain as a
+ * name gets, and a cleared one is unknown. The core stores names by the
+ * same rule.
+ */
+export function withGivenNames(
+  rows: readonly SpeakerRow[],
+  names: Readonly<Record<string, string | null>>
+): SpeakerRow[] {
+  return rows.map((row) => {
+    if (!(row.label in names)) return row;
+    const name = names[row.label]?.trim() || null;
+    if (name === row.name) return row;
+    return { ...row, name, confidence: name ? "high" : "low", evidence: "" };
+  });
 }

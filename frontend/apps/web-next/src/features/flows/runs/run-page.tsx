@@ -621,6 +621,8 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                     flowId={flowId}
                     runId={runId}
                     steps={runStepViews(progress.data.graph, steps.data)}
+                    runStatus={status}
+                    canReadEvidence={run?.evidence_access.can_read_evidence ?? false}
                   />
                 </>
               )}

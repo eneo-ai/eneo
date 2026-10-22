@@ -1,3 +1,4 @@
+import { isTerminal } from "./run-status";
 import type { RunGraph, RunStep } from "./runs-api";
 
 /** One step of a run as the run page shows it: the run's own version of the step and its result. */
@@ -126,4 +127,19 @@ export function nextStepOrder(
   if (blocked) return null;
   const next = steps.find((step) => step.status === null || WAITING_STEP_STATUSES.has(step.status));
   return next?.order ?? null;
+}
+
+/**
+ * Whether a step of a run that has ended never ran: it did not complete and
+ * has no start time. The core records the steps after a failure as failed
+ * without one, so they read as "did not run" and the run's error stays on
+ * the step that failed (the core's evidence summary counts them as
+ * `not_run` by the same rule).
+ */
+export function stepNeverRan(
+  step: Pick<RunStepView, "status" | "result">,
+  runStatus: string | null | undefined
+): boolean {
+  if (!runStatus || !isTerminal(runStatus) || step.status === "completed") return false;
+  return !step.result?.started_at;
 }

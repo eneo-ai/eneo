@@ -75,6 +75,13 @@ const UNKNOWN_VIEW: StatusView = {
   isPulsing: false
 };
 
+/** How a step of an ended run that never ran shows (`stepNeverRan`). */
+export const NOT_RUN_STEP_VIEW: StatusView = {
+  tone: "neutral",
+  labelKey: "flow_run_more_step_not_run",
+  isPulsing: false
+};
+
 /** How a run's status shows: its text (which carries the meaning) and the dot's tone. */
 export function runStatusView(status: string): StatusView {
   return RUN_STATUS_VIEWS[status as RunStatus] ?? UNKNOWN_VIEW;

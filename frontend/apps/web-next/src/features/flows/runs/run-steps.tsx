@@ -1,6 +1,7 @@
 "use client";
 
 import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Token } from "@astryxdesign/core/Token";
 import { useLocale, useTranslations } from "next-intl";
 import { QuietBanner } from "@/components/astryx/banner";
 import { StatusLabel } from "@/components/composites/status-label";
@@ -14,19 +15,23 @@ import {
   nextStepOrder,
   outputStructured,
   outputText,
+  stepNeverRan,
   tokenTotal,
   type RunStepView
 } from "./run-progress";
 import { RunFiles, RunInputFiles } from "./run-files";
-import { stepStatusView } from "./run-status";
+import { NOT_RUN_STEP_VIEW, stepStatusView } from "./run-status";
+import { StepAttempts } from "./run-step-attempts";
 import { StepPromptDetails } from "./run-step-details";
 import {
   StepRejectedOutput,
   StepRuntimeInputSummary,
   StepSectionReading,
-  StepTemplateProvenance
+  StepTemplateProvenance,
+  StepTranscriptionFacts
 } from "./run-step-extras";
-import { runtimeInputSummary } from "./run-step-facts";
+import { runtimeInputSummary, speakerMapping } from "./run-step-facts";
+import { StepSpeakerMapping } from "./run-step-speakers";
 import type { RunStep } from "./runs-api";
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -57,8 +62,11 @@ function stepDurationMs(result: RunStep): number | null {
   return Number.isFinite(ms) && ms >= 0 ? ms : null;
 }
 
-/** What a step produced, its text or its structured value, with a button that copies it. */
-function StepOutput({ result }: { result: RunStep }) {
+/**
+ * What a step produced, with a button that copies it: the speakers a
+ * speaker-mapping step named, a structured value (marked as JSON), or text.
+ */
+function StepOutput({ flowId, runId, result }: { flowId: string; runId: string; result: RunStep }) {
   const t = useTranslations();
   const payload = result.output_payload_json;
   const structured = outputStructured(payload);
@@ -69,8 +77,13 @@ function StepOutput({ result }: { result: RunStep }) {
   return (
     <div className="flex items-start gap-2">
       <div className="min-w-0 flex-1">
-        {structured !== undefined ? (
-          <JsonValue value={structured} />
+        {speakerMapping(payload) ? (
+          <StepSpeakerMapping flowId={flowId} runId={runId} payload={payload} />
+        ) : structured !== undefined ? (
+          <div className="flex flex-col items-start gap-1">
+            <Token size="sm" label={t("flow_run_more_json")} />
+            <JsonValue value={structured} />
+          </div>
         ) : (
           <div className="flex flex-col gap-1">
             <p className="text-ax-text text-sm break-words whitespace-pre-wrap">{text}</p>
@@ -89,16 +102,21 @@ function StepCard({
   flowId,
   runId,
   step,
-  isNext
+  isNext,
+  notRun,
+  canReadEvidence
 }: {
   flowId: string;
   runId: string;
   step: RunStepView;
   isNext: boolean;
+  /** The run ended without the step starting. */
+  notRun: boolean;
+  canReadEvidence: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const view = stepStatusView(step.status);
+  const view = notRun ? NOT_RUN_STEP_VIEW : stepStatusView(step.status);
   const result = step.result;
   const duration = result ? stepDurationMs(result) : null;
   const tokens = result ? tokenTotal(result.num_tokens_input, result.num_tokens_output) : null;
@@ -144,7 +162,7 @@ function StepCard({
             .join(" · ")}
         </p>
       ) : null}
-      {result?.status === "failed" ? (
+      {result?.status === "failed" && !notRun ? (
         <QuietBanner
           status="error"
           title={t("flow_runs_step_failed_title")}
@@ -156,7 +174,7 @@ function StepCard({
           collapsible={false}
         />
       ) : null}
-      {result?.status === "failed" ? (
+      {result?.status === "failed" && !notRun ? (
         <StepRejectedOutput payload={result.output_payload_json} />
       ) : null}
       {warnings.length > 0 ? (
@@ -169,7 +187,7 @@ function StepCard({
       {result?.long_material ? <LongMaterialCoverage coverage={result.long_material} /> : null}
       {result && result.status === "completed" ? (
         <div className="flex flex-col gap-2">
-          <StepOutput result={result} />
+          <StepOutput flowId={flowId} runId={runId} result={result} />
           <StepSectionReading payload={result.output_payload_json} />
           <StepTemplateProvenance payload={result.output_payload_json} />
           <RunFiles
@@ -194,6 +212,7 @@ function StepCard({
           />
         </div>
       ) : null}
+      {result ? <StepTranscriptionFacts result={result} /> : null}
       {result?.input_payload_json && Object.keys(result.input_payload_json).length > 0 ? (
         <Collapsible
           defaultIsOpen={false}
@@ -209,6 +228,9 @@ function StepCard({
         </Collapsible>
       ) : null}
       {result ? <StepPromptDetails result={result} /> : null}
+      {canReadEvidence && result?.started_at ? (
+        <StepAttempts flowId={flowId} runId={runId} order={step.order} title={title} />
+      ) : null}
     </article>
   );
 }
@@ -216,20 +238,29 @@ function StepCard({
 /**
  * The run's steps in order, each with its status, how long it took and the
  * tokens it used in and out, what it produced (text, a structured value,
- * files; how it read long material and the document template it filled),
- * the sources it cited, what was sent in at run time, and why it failed when
- * it did, with the answer it gave that was not accepted. A running
- * step says what it is doing and the step next in turn says so. Each card
- * can be gone to (`showRunStep`), as the failure notice does.
+ * the speakers it named, files; how it read long material and the document
+ * template it filled), the sources it cited, what was sent in at run time,
+ * how it transcribed audio, and why it failed when it did, with the answer
+ * it gave that was not accepted. A step of an ended run that never started
+ * reads "did not run". A running step says what it is doing and the step
+ * next in turn says so. A caller who may read the evidence can open each
+ * step's attempts. Each card can be gone to (`showRunStep`), as the failure
+ * notice does.
  */
 export function RunSteps({
   flowId,
   runId,
-  steps
+  steps,
+  runStatus = null,
+  canReadEvidence = false
 }: {
   flowId: string;
   runId: string;
   steps: readonly RunStepView[];
+  /** The run's status, to tell a step that never ran from one that failed. */
+  runStatus?: string | null;
+  /** The core would let the caller read the run's evidence (its attempts). */
+  canReadEvidence?: boolean;
 }) {
   const t = useTranslations();
   if (steps.length === 0) {
@@ -240,7 +271,14 @@ export function RunSteps({
     <ol className="m-0 flex flex-col gap-3 p-0">
       {steps.map((step) => (
         <li key={step.order} className="list-none">
-          <StepCard flowId={flowId} runId={runId} step={step} isNext={step.order === next} />
+          <StepCard
+            flowId={flowId}
+            runId={runId}
+            step={step}
+            isNext={step.order === next}
+            notRun={stepNeverRan(step, runStatus)}
+            canReadEvidence={canReadEvidence}
+          />
         </li>
       ))}
     </ol>

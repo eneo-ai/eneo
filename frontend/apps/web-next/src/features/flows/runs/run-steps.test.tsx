@@ -3,11 +3,12 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
 import { makeRunGraph, makeRunStep } from "./run-fixtures";
 import { RunLiveProgress } from "./run-live-progress";
 import { runStepViews } from "./run-progress";
 import { RunSteps } from "./run-steps";
+import { runKeys, transcriptCorrectionsQueryOptions, type RunEvidence } from "./runs-api";
 
 vi.mock("@/lib/api/browser", () => ({ browserApi: {} }));
 
@@ -180,5 +181,178 @@ describe("RunSteps step details", () => {
     ]);
     renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
     expect(screen.getByText(/Utläst text: 1\s234 tecken · Format: Dokument/)).toBeTruthy();
+  });
+});
+
+describe("RunSteps after a failure", () => {
+  it("says the steps after the failed one did not run, and keeps the error on the failed one", async () => {
+    const steps = runStepViews(
+      makeRunGraph([
+        { order: 1, label: "Sammanfatta", status: "failed" },
+        { order: 2, label: "Skriv svar", status: "failed" }
+      ]),
+      [
+        makeRunStep(1, { status: "failed", error_code: "flow_provider_rate_limited" }),
+        makeRunStep(2, {
+          status: "failed",
+          started_at: null,
+          finished_at: null,
+          error_code: "flow_provider_rate_limited",
+          output_payload_json: null
+        })
+      ]
+    );
+    const { container } = renderInApp(
+      <RunSteps flowId="flow-1" runId="run-1" steps={steps} runStatus="failed" />
+    );
+    const failed = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+    expect(within(failed).getByText(messages.flow_runs_step_failed_title)).toBeTruthy();
+    const after = screen.getByRole("article", { name: "Steg 2: Skriv svar" });
+    expect(within(after).getByText(messages.flow_run_more_step_not_run)).toBeTruthy();
+    expect(within(after).queryByText(messages.flow_runs_step_status_failed)).toBeNull();
+    expect(within(after).queryByText(messages.flow_runs_step_failed_title)).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+});
+
+describe("RunSteps transcription and speakers", () => {
+  it("says how a step transcribed its audio", () => {
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Transkribera", status: "completed" }]),
+      [
+        makeRunStep(1, {
+          input_payload_json: {
+            transcription: {
+              files_count: 1,
+              language: "sv",
+              elapsed_ms: 65_000,
+              model: "speech-large",
+              diarization: "external",
+              alignment: "segment_split"
+            }
+          }
+        })
+      ]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    expect(screen.getByText(messages.flow_run_more_transcription)).toBeTruthy();
+    expect(screen.getByText(messages.flow_run_more_transcription_model)).toBeTruthy();
+    expect(screen.getByText(messages.flow_run_more_transcription_language)).toBeTruthy();
+    expect(screen.getByText("1 min 5 s")).toBeTruthy();
+    expect(screen.getByText(messages.flow_run_more_speakers_reduced)).toBeTruthy();
+  });
+
+  it("shows whom a speaker-mapping step named, with the names given in the transcript since", async () => {
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(transcriptCorrectionsQueryOptions("flow-1", "run-1").queryKey, [
+      {
+        flow_run_id: "run-1",
+        step_id: "step-1",
+        revision: 2,
+        stale: false,
+        occurrences: [],
+        speaker_names: { SPEAKER_01: "Bo Ek" },
+        edited_by_principal_type: "user",
+        created_at: "2026-10-21T08:02:00Z",
+        updated_at: "2026-10-21T08:02:00Z"
+      }
+    ]);
+    const steps = runStepViews(makeRunGraph([{ order: 2, label: "Namnge", status: "completed" }]), [
+      makeRunStep(2, {
+        output_payload_json: {
+          speaker_mapping: {
+            source_step_id: "step-1",
+            inventory: [{ label: "SPEAKER_00" }, { label: "SPEAKER_01" }]
+          },
+          structured: {
+            speakers: [
+              {
+                label: "SPEAKER_00",
+                name: "Anna Lind",
+                confidence: "medium",
+                evidence: "Hälsar som Anna."
+              },
+              { label: "SPEAKER_01", name: null, confidence: "low" }
+            ]
+          }
+        }
+      })
+    ]);
+    const { container } = renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />, {
+      queryClient
+    });
+    const speakers = screen.getByRole("list", { name: messages.flow_run_more_speakers });
+    const rows = within(speakers).getAllByRole("listitem");
+    expect(within(rows[0]!).getByText("Anna Lind")).toBeTruthy();
+    expect(within(rows[0]!).getByText(messages.flow_run_more_confidence_medium)).toBeTruthy();
+    expect(within(rows[0]!).getByText("Hälsar som Anna.")).toBeTruthy();
+    expect(within(rows[1]!).getByText("Bo Ek")).toBeTruthy();
+    expect(within(rows[1]!).getByText(messages.flow_run_more_confidence_high)).toBeTruthy();
+    // The mapping is shown as speakers, not as its JSON.
+    expect(screen.queryByText(messages.flow_run_more_json)).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+
+  it("marks a structured output as JSON", () => {
+    const steps = runStepViews(makeRunGraph([{ order: 1, label: "Fält", status: "completed" }]), [
+      makeRunStep(1, { output_payload_json: { structured: { mottagare: "Anna" } } })
+    ]);
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    expect(screen.getByText(messages.flow_run_more_json)).toBeTruthy();
+    expect(screen.getByText("mottagare")).toBeTruthy();
+  });
+});
+
+describe("RunSteps attempts", () => {
+  it("lists a step's attempts in its card when opened, for a caller who may read the evidence", async () => {
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(runKeys.evidence("flow-1", "run-1"), {
+      step_attempts: [
+        {
+          id: "a-1",
+          step_order: 1,
+          attempt_no: 1,
+          status: "failed",
+          error_code: "flow_provider_rate_limited"
+        },
+        {
+          id: "a-2",
+          step_order: 1,
+          attempt_no: 2,
+          status: "completed",
+          response_model: "model-large"
+        },
+        { id: "b-1", step_order: 2, attempt_no: 1, status: "completed" }
+      ]
+    } as unknown as RunEvidence);
+    const steps = runStepViews(
+      makeRunGraph([
+        { order: 1, label: "Sammanfatta", status: "completed" },
+        { order: 2, label: "Skriv svar", status: "completed" }
+      ]),
+      [makeRunStep(1), makeRunStep(2)]
+    );
+    const { container } = renderInApp(
+      <RunSteps flowId="flow-1" runId="run-1" steps={steps} canReadEvidence />,
+      { queryClient }
+    );
+    const card = screen.getByRole("article", { name: "Steg 1: Sammanfatta" });
+    expect(within(card).queryByRole("list", { name: /Försök i/ })).toBeNull();
+    fireEvent.click(within(card).getByRole("button", { name: messages.flow_run_more_attempts }));
+    const attempts = await within(card).findByRole("list", {
+      name: messages.flow_run_more_attempts_of.replace("{step}", "Steg 1: Sammanfatta")
+    });
+    expect(within(attempts).getAllByRole("listitem")).toHaveLength(2);
+    expect(within(attempts).getByText(/Modell model-large/)).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
+  it("does not offer the attempts to a caller who may not read the evidence", () => {
+    const steps = runStepViews(
+      makeRunGraph([{ order: 1, label: "Sammanfatta", status: "completed" }]),
+      [makeRunStep(1)]
+    );
+    renderInApp(<RunSteps flowId="flow-1" runId="run-1" steps={steps} />);
+    expect(screen.queryByRole("button", { name: messages.flow_run_more_attempts })).toBeNull();
   });
 });
