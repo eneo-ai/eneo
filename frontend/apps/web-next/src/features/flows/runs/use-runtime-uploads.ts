@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { apiErrorFromResponse, EneoApiError } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import type { Schema } from "@/lib/api/models";
+import { UploadRetries } from "./recording/upload-retry";
 import type { RecordingPartInfo, UploadEntry, UploadsByStep } from "./run-contract";
 import { refusalText, type Translator } from "./run-messages";
 import { deleteRuntimeFile, type RuntimeInput, type UploadedFile } from "./runs-api";
@@ -139,8 +140,9 @@ export type AddedFileInfo = { recording?: RecordingPartInfo; label?: string };
  * Files the started run took (`claim`) stay.
  *
  * A failed upload keeps its file, so it can be sent again (`retry`); a
- * recording made in the form exists nowhere else, so its parts are sent
- * again by themselves when the browser is back online.
+ * recording made in the form exists nowhere else, so a part whose upload
+ * failed for a reason that passes is sent again by itself after growing
+ * waits, and at once when the browser is back online (`UploadRetries`).
  */
 export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefined) {
   const t = useTranslations();
@@ -152,6 +154,15 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
   const files = useRef(new Map<string, { input: RuntimeInput; file: File }>());
   const claimed = useRef(false);
   const mounted = useRef(true);
+  // Created once; an automatic attempt sends through the latest render's `send`.
+  const latestSend = useRef<(stepId: string, key: string) => void>(() => undefined);
+  const [retries] = useState(
+    () =>
+      new UploadRetries((key) => {
+        const kept = files.current.get(key);
+        if (kept) latestSend.current(kept.input.step_id, key);
+      })
+  );
 
   function replace(next: UploadsByStep) {
     current.current = next;
@@ -178,6 +189,7 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
     const entriesNow = current;
     return () => {
       mounted.current = false;
+      retries.dispose();
       for (const controller of controllers.values()) controller.abort();
       controllers.clear();
       if (claimed.current) return;
@@ -185,7 +197,7 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
         for (const entry of entries) if (entry.fileId) forgetRuntimeFile(flowId, entry.fileId);
       }
     };
-  }, [flowId]);
+  }, [flowId, retries]);
 
   async function upload(input: RuntimeInput, entry: UploadEntry, file: File) {
     const abort = new AbortController();
@@ -199,13 +211,15 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
         (progress) => update(input.step_id, entry.key, { progress }),
         abort
       );
+      retries.reset(entry.key);
       if (
         update(input.step_id, entry.key, {
           state: "done",
           fileId: stored.id,
           progress: 1,
           problem: undefined,
-          retryable: undefined
+          retryable: undefined,
+          nextRetryAt: undefined
         })
       ) {
         // Stored: nothing will send it again. A recording's part stays, so it
@@ -218,12 +232,17 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
       }
     } catch (error) {
       if (abort.signal.aborted && !(error instanceof UploadTimeoutError)) return;
+      const retryable = passes(error);
+      // A recorded part goes again by itself; a picked file waits for the person.
+      const nextRetryAt = entry.recording && retryable ? retries.failed(entry.key) : undefined;
       const failed = update(input.step_id, entry.key, {
         state: "failed",
         problem: uploadProblem(error, input, t, locale),
-        retryable: passes(error)
+        retryable,
+        nextRetryAt
       });
       if (failed) announce(t("flow_runs_upload_failed", { name: entry.name }));
+      else retries.reset(entry.key);
     } finally {
       inFlight.current.delete(entry.key);
     }
@@ -276,6 +295,7 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
     const entry = current.current[stepId]?.find((candidate) => candidate.key === key);
     if (!entry) return;
     inFlight.current.get(key)?.abort();
+    retries.reset(key);
     files.current.delete(key);
     if (entry.fileId) forget(entry.fileId);
     replace({
@@ -284,8 +304,13 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
     });
   }
 
-  /** Sends a failed file again, when the step still has room for it. */
+  /** Sends a failed file again, when the step still has room for it; its automatic waits start over. */
   function retry(stepId: string, key: string) {
+    retries.reset(key);
+    send(stepId, key);
+  }
+
+  function send(stepId: string, key: string) {
     const entry = current.current[stepId]?.find((candidate) => candidate.key === key);
     const kept = files.current.get(key);
     if (!entry || entry.state !== "failed" || !kept) return;
@@ -294,35 +319,38 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
       (candidate) => candidate.state !== "failed"
     ).length;
     if (input.max_files != null && taken >= input.max_files) {
+      retries.reset(key);
       update(stepId, key, {
         problem: t("flow_runs_upload_too_many", { count: input.max_files }),
-        retryable: false
+        retryable: false,
+        nextRetryAt: undefined
       });
       return;
     }
-    update(stepId, key, { state: "uploading", progress: 0, problem: undefined });
+    update(stepId, key, {
+      state: "uploading",
+      progress: 0,
+      problem: undefined,
+      nextRetryAt: undefined
+    });
     void upload(input, { ...entry, state: "uploading" }, file);
   }
+
+  useEffect(() => {
+    latestSend.current = send;
+  });
 
   /** The file behind an entry, while the form keeps it (a recording's part, a failed upload). */
   function fileOf(key: string): File | null {
     return files.current.get(key)?.file ?? null;
   }
 
-  // Back online: a recording's parts that failed on the way are sent again.
+  // Back online: a recording's parts waiting for their next attempt go now.
   useEffect(() => {
-    const resend = () => {
-      for (const [stepId, entries] of Object.entries(current.current)) {
-        for (const entry of entries) {
-          if (entry.state === "failed" && entry.retryable && entry.recording) {
-            retry(stepId, entry.key);
-          }
-        }
-      }
-    };
+    const resend = () => retries.online();
     window.addEventListener("online", resend);
     return () => window.removeEventListener("online", resend);
-  });
+  }, [retries]);
 
   /** The run took the files: leaving the form no longer deletes them. */
   function claim() {

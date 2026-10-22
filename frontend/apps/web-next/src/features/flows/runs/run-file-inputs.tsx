@@ -7,6 +7,7 @@ import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { CircleAlert, CircleCheck, Download, RotateCw, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { formatBytes } from "@/lib/format";
+import { UploadRetryHint } from "./recording/upload-retry-hint";
 import type { InputProblem, UploadEntry } from "./run-contract";
 import { inputLimitsText } from "./run-format";
 import type { RuntimeInput } from "./runs-api";
@@ -93,7 +94,7 @@ function UploadRow({
         ) : null}
         {entry.state === "failed" && entry.retryable && entry.recording ? (
           <span className="text-ax-text-secondary text-xs">
-            {t("flow_transcript_upload_offline_hint")}
+            <UploadRetryHint nextRetryAt={entry.nextRetryAt} />
           </span>
         ) : null}
       </span>

@@ -10642,6 +10642,8 @@
   "flow_transcript_discard_done": "The recording was discarded.",
   "flow_transcript_discard_partly_title": "The recording is still in the browser",
   "flow_transcript_discard_partly": "The recording was removed from the form but could not be removed from this browser. It may be offered again the next time you open the flow, and you can discard it then.",
+  "flow_transcript_upload_retry_at": "Trying again at {time}, or as soon as the connection is back.",
+  "flow_transcript_upload_retry_exhausted": "No more automatic attempts. Choose Try again, or save the part as a file.",
   "flow_transcript_play_from": "Play from",
   "flow_transcript_audio_play": "Play the audio",
   "flow_transcript_audio_label": "The transcript's audio",

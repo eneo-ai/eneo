@@ -2957,6 +2957,8 @@
   "flow_transcript_discard_done": "Inspelningen är slängd.",
   "flow_transcript_discard_partly_title": "Inspelningen finns kvar i webbläsaren",
   "flow_transcript_discard_partly": "Inspelningen är borttagen från formuläret men kunde inte tas bort från den här webbläsaren. Den kan erbjudas igen nästa gång du öppnar flödet, och då kan du slänga den.",
+  "flow_transcript_upload_retry_at": "Nytt försök kl. {time}, eller så fort anslutningen är tillbaka.",
+  "flow_transcript_upload_retry_exhausted": "Inga fler automatiska försök. Välj Försök igen, eller spara delen som fil.",
   "flow_transcript_play_from": "Spela från",
   "flow_transcript_audio_play": "Spela upp ljudet",
   "flow_transcript_audio_label": "Ljudet till transkriptionen",

@@ -358,9 +358,8 @@ describe("RunRecorder in the start dialog", () => {
     FakeUpload.failNext = true;
     const { dialog } = await openDialog(audioContract());
     await recordAndStop(dialog);
-    expect(
-      await within(dialog).findByText(messages.flow_transcript_upload_offline_hint)
-    ).toBeTruthy();
+    // It goes again by itself a few seconds later, or as soon as the browser is back online.
+    expect(await within(dialog).findByText(/^Nytt försök kl\. \d\d:\d\d:\d\d/)).toBeTruthy();
     const retry = within(dialog).getByRole("button", {
       name: /^Försök igen med Inspelning, del 1/
     });
@@ -549,9 +548,7 @@ describe("The recording's health", () => {
       fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
       await within(dialog).findByText(new RegExp(`^Inspelning, del ${part}`));
       await waitFor(() =>
-        expect(
-          within(dialog).getAllByText(messages.flow_transcript_upload_offline_hint)
-        ).toHaveLength(part)
+        expect(within(dialog).getAllByText(/^Nytt försök kl\./)).toHaveLength(part)
       );
     }
     fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));

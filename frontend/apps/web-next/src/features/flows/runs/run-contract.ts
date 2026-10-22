@@ -35,6 +35,11 @@ export type UploadEntry = {
   problem?: string;
   /** The failure may pass (the network, a timeout, a busy server): the same file can be sent again. */
   retryable?: boolean;
+  /**
+   * A recorded part that failed and goes again by itself: when (epoch ms),
+   * or null once no automatic attempt is left.
+   */
+  nextRetryAt?: number | null;
   /** A part of a recording made in the form, rather than a picked file. */
   recording?: RecordingPartInfo;
 };
