@@ -41,6 +41,7 @@ import { RunLiveProgress } from "./run-live-progress";
 import { RunKnowledge } from "./run-knowledge";
 import { startedByUser, starterName } from "./run-starter";
 import { RunSteps, stepTitle } from "./run-steps";
+import { RunText } from "./run-text";
 import { RunTrace } from "./run-trace";
 import { RunTranscripts } from "./run-transcript";
 import { reviewTranscriptTarget, transcriptTargets } from "./transcript";
@@ -120,11 +121,11 @@ function RunResult({ flowId, run }: { flowId: string; run: RunDetail }) {
   }
   switch (result.kind) {
     case "inline_text":
-      return <p className="text-ax-text text-sm break-words whitespace-pre-wrap">{result.text}</p>;
+      return <RunText text={result.text} />;
     case "file_backed_text":
       return (
         <div className="flex flex-col gap-2">
-          <p className="text-ax-text text-sm break-words whitespace-pre-wrap">{result.preview}</p>
+          <RunText text={result.preview} />
           <p className="text-ax-text-secondary text-xs">{t("flow_runs_output_overflow")}</p>
           <RunFiles
             flowId={flowId}
