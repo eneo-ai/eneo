@@ -31,9 +31,10 @@ def _step(
     output_mode: FlowOutputMode = FlowOutputMode.PASS_THROUGH,
     prompt_text: str | None = None,
     user_description: str | None = None,
+    step_id: UUID | None = None,
 ) -> SuggestionStep:
     return SuggestionStep(
-        id=_IDS[order],
+        id=step_id or _IDS[order],
         step_order=order,
         user_description=user_description or f"Steg {order}",
         input_source=FlowInputSource.FLOW_INPUT if order == 1 else input_source,
@@ -392,13 +393,110 @@ def test_the_fingerprint_follows_the_premise() -> None:
         FlowSuggestionCode.DUPLICATE_READ,
         [_IDS[2], _IDS[1]],
         {
-            "producer_step_order": 1,
-            "sites": [
-                {"channel": "input", "site": "input_source"},
-                {"channel": "prompt", "site": "assistant_prompt:step_1.output.text"},
+            "producer": str(_IDS[1]),
+            "reads": [
+                {"channel": "input", "selector": [], "site": "input_source"},
+                {"channel": "prompt", "selector": [], "site": "assistant_prompt"},
             ],
         },
     )
+    # Another selector of the same producer, and another producer, are
+    # other premises.
+    field = _only(
+        _analyze([_step(1), _step(2, prompt_text="{{ step_1.output.structured.a }}")])
+    )
+    assert field.fingerprint != before.fingerprint
+    other_producer = _only(
+        _analyze(
+            [
+                _step(1),
+                _step(2, step_id=_IDS[40]),
+                _step(3, prompt_text="{{ step_2.output.text }}"),
+            ]
+        )
+    )
+    assert other_producer.fingerprint != before.fingerprint
+
+
+_PRODUCER, _READER, _OTHER = _IDS[50], _IDS[51], _IDS[52]
+
+
+def _reader(order: int, producer_order: int) -> SuggestionStep:
+    """A step that reads the producer in its question and its prompt."""
+    read = f"{{{{ step_{producer_order}.output.text }}}}"
+    return _step(
+        order,
+        step_id=_READER,
+        input_bindings={"question": read},
+        prompt_text=f"Svara.\n{read}",
+        user_description="Svar",
+    )
+
+
+def _producer(order: int, name: str = "Brev") -> SuggestionStep:
+    return _step(order, step_id=_PRODUCER, user_description=name)
+
+
+def _other(order: int) -> SuggestionStep:
+    return _step(order, step_id=_OTHER, user_description="Annat")
+
+
+def test_the_fingerprint_holds_when_steps_are_renumbered() -> None:
+    before = _only(_analyze([_other(1), _producer(2), _reader(3, 2)]))
+
+    # The earlier unrelated step removed: the reads follow, step 2 becomes 1.
+    removed = _only(_analyze([_producer(1), _reader(2, 1)]))
+    # A step inserted between them, and the producer moved after it.
+    inserted = _only(_analyze([_producer(1), _other(2), _reader(3, 1)]))
+    moved = _only(_analyze([_other(1), _producer(2), _step(3), _reader(4, 2)]))
+
+    assert removed.fingerprint == before.fingerprint
+    assert inserted.fingerprint == before.fingerprint
+    assert moved.fingerprint == before.fingerprint
+    assert removed.params["producer_step_order"] == 1
+    assert before.params["producer_step_order"] == 2
+
+
+def test_the_fingerprint_holds_when_a_step_read_by_name_is_renamed() -> None:
+    def reading_by_name(name: str) -> list[SuggestionStep]:
+        read = f"{{{{ {name}.output.text }}}}"
+        return [
+            _producer(1, name),
+            _step(
+                2,
+                step_id=_READER,
+                input_bindings={"question": read},
+                prompt_text=read,
+            ),
+        ]
+
+    by_order = _only(_analyze([_producer(1), _reader(2, 1)]))
+    before = _only(_analyze(reading_by_name("Brev")))
+    renamed = _only(_analyze(reading_by_name("Brevet")))
+
+    assert renamed.fingerprint == before.fingerprint
+    # A read by name and a read by order of the same step are one premise.
+    assert before.fingerprint == by_order.fingerprint
+
+
+def test_two_duplicates_on_one_step_have_their_own_fingerprints() -> None:
+    first, second = _duplicates(
+        _analyze(
+            [
+                _step(1),
+                _step(2),
+                _step(
+                    3,
+                    prompt_text=(
+                        "{{ step_2.output.text }}\n"
+                        "{{ step_1.output.text }}\n{{ step_1.output.text }}"
+                    ),
+                ),
+            ]
+        )
+    )
+
+    assert first.fingerprint != second.fingerprint
 
 
 def test_suggestions_are_ordered_by_level_then_step_order() -> None:
