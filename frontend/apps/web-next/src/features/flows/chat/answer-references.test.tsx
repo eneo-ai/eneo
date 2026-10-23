@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { createRef, useState, type Ref } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MessageResponse } from "@/components/ai-elements/message";
+import { Composer, type ComposerHandle } from "@/features/chat/composer";
+import { useAttachments } from "@/features/chat/use-attachments";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { makeFlow, makeStep } from "../flow-fixtures";
 import { referenceComponents, referenceRemarkPlugins } from "./answer-references";
-import { FlowReferences } from "./reference-pill";
+import { FlowReferences, insertMessage } from "./reference-pill";
 
 afterEach(cleanup);
 
@@ -101,6 +104,72 @@ describe("references in an answer", () => {
   it("has no axe violations", async () => {
     const { container } = renderAnswer(
       "Läser @[Extrahera](step:step-1) och {{step_1.output.text}}."
+    );
+    await expectNoAxeViolations(container);
+  });
+});
+
+/** The flow chat's composer as the person sees it, reporting its value. */
+function ComposerHarness({
+  inputRef,
+  onChange,
+  onSubmit
+}: {
+  inputRef: Ref<ComposerHandle>;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  const [value, setValue] = useState("");
+  const attachments = useAttachments({ type: "assistant", id: "assistant-chat", name: "Flöde" });
+  return (
+    <FlowReferences flow={flow} onShowStep={() => true}>
+      <Composer
+        value={value}
+        onChange={(next) => {
+          setValue(next);
+          onChange(next);
+        }}
+        onSubmit={onSubmit}
+        canSubmit={value.trim().length > 0}
+        busy={false}
+        onStop={vi.fn()}
+        label="Meddelande till flödeschatten"
+        placeholder="Fråga om flödet"
+        attachments={attachments}
+        onOpenFileDialog={vi.fn()}
+        inputRef={inputRef}
+      />
+    </FlowReferences>
+  );
+}
+
+describe("insertMessage", () => {
+  it("puts a prepared message in the composer, steps as pills, and sends nothing", async () => {
+    const ref = createRef<ComposerHandle>();
+    const onChange = vi.fn();
+    const onSubmit = vi.fn();
+    const { container } = renderInApp(
+      <ComposerHarness inputRef={ref} onChange={onChange} onSubmit={onSubmit} />
+    );
+    const text =
+      "Förklara förslaget och föreslå en ändring. Steg: @[Bedömning](step:step-3) @[Extrahera](step:step-1)";
+
+    act(() => insertMessage(ref.current!, text, flow));
+
+    const textbox = screen.getByRole("textbox");
+    expect(
+      [...textbox.querySelectorAll("[data-astryx-token-value]")].map((token) =>
+        token.getAttribute("data-astryx-token-value")
+      )
+    ).toEqual(["@[Bedömning](step:step-3)", "@[Extrahera](step:step-1)"]);
+    // The message travels as written (each pill brings its own space, which
+    // Astryx writes as a no-break space); the person sends it when they choose.
+    const value = onChange.mock.lastCall?.[0] as string;
+    expect(value.replace(/\s+/g, " ").trim()).toBe(text);
+    expect(document.activeElement).toBe(textbox);
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Skicka meddelande" }).hasAttribute("disabled")).toBe(
+      false
     );
     await expectNoAxeViolations(container);
   });

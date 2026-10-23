@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testQueryClient } from "@/test/render";
 import messages from "@/lib/i18n/messages/sv.json";
+import type { SuggestionFix } from "../flow-suggestion-item";
 import type { FlowPublic } from "./step-types";
 import { makeAssistant, makeFlow, makeStep } from "./testing/fixtures";
 
@@ -19,7 +21,7 @@ vi.mock("@/lib/api/browser", async () => {
   return { browserApi: api.stub.client };
 });
 
-import { FlowStepEditor } from "./flow-step-editor";
+import { FlowStepEditor, type EditorLeave, type StepNavigation } from "./flow-step-editor";
 
 const EDITOR = "PATCH /api/v1/flows/{id}/editor/";
 const ASSISTANT = "GET /api/v1/flows/{id}/assistants/{assistant_id}/";
@@ -65,7 +67,14 @@ function patchBodies() {
 
 function renderEditor(
   flow: FlowPublic,
-  overrides: { readOnly?: boolean; space?: ReturnType<typeof makeSpace> } = {}
+  overrides: {
+    readOnly?: boolean;
+    space?: ReturnType<typeof makeSpace>;
+    onAskChat?: (text: string) => void;
+    suggestionFix?: SuggestionFix;
+    navigation?: StepNavigation;
+    leaveRef?: React.Ref<EditorLeave>;
+  } = {}
 ) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(["spaces", "space-1"], overrides.space ?? makeSpace());
@@ -78,6 +87,10 @@ function renderEditor(
       readOnly={overrides.readOnly ?? false}
       onSaved={onSaved}
       onCancel={onCancel}
+      onAskChat={overrides.onAskChat}
+      suggestionFix={overrides.suggestionFix}
+      navigation={overrides.navigation}
+      leaveRef={overrides.leaveRef}
     />,
     { queryClient }
   );
@@ -150,6 +163,165 @@ describe("FlowStepEditor", () => {
         step_edits: [{ step_id: "step-1", changes: { user_description: "Sammanfatta ärendet" } }]
       }
     ]);
+  });
+
+  it("shows the open step's suggestions at the top, and asks for them again after a save", async () => {
+    const SUGGESTIONS = "GET /api/v1/flows/{id}/suggestions/";
+    const about = (stepId: string, code: string, fingerprint: string) => ({
+      code,
+      fingerprint,
+      steps: [stepId, "step-1"],
+      params: { producer_step_order: 1, reads: [] },
+      message: "A suggestion.",
+      impact: { basis: "definition", level: "high" },
+      fix: { kind: "assisted" }
+    });
+    api.routes[SUGGESTIONS] = () => ({
+      body: {
+        flow_id: "flow-1",
+        draft_revision: 4,
+        items: [
+          about("step-2", "duplicate_read", "a".repeat(64)),
+          about("step-1", "some_later_code", "b".repeat(64))
+        ]
+      }
+    });
+    const second = makeStep({
+      id: "step-2",
+      assistant_id: "assistant-2",
+      step_order: 2,
+      user_description: "Skriv svar",
+      input_source: "previous_step"
+    });
+    const flow = makeFlow({ steps: [makeStep(), second] });
+    api.routes[EDITOR] = () => ({
+      body: makeFlow({ draft_revision: 5, steps: [makeStep(), second] })
+    });
+    const onAskChat = vi.fn();
+    const { container } = renderEditor(flow, { onAskChat });
+
+    const section = await screen.findByRole("region", { name: "Förslag för steget (1)" });
+    expect(screen.queryByText("Svaret från steg 1 skickas två gånger")).toBeNull();
+    await expectNoAxeViolations(container);
+    fireEvent.click(
+      within(section).getByRole("button", {
+        name: "Fråga assistenten om ”Förslag”"
+      })
+    );
+    expect(onAskChat).toHaveBeenCalledWith(expect.stringContaining("(some_later_code)"));
+    // Only the open step is open: no way to open it again from here.
+    expect(within(section).queryByRole("button", { name: /^Öppna/ })).toBeNull();
+    // Without a way to fix it, nothing offers to.
+    expect(within(section).queryByRole("button", { name: /^Åtgärda/ })).toBeNull();
+
+    const fetched = () =>
+      api.stub.calls.filter((call) => `${call.method} ${call.path}` === SUGGESTIONS).length;
+    expect(fetched()).toBe(1);
+    fireEvent.change(await nameField(), { target: { value: "Sammanfatta ärendet" } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    // The saved revision keys the suggestions anew.
+    await waitFor(() => expect(fetched()).toBe(2));
+  });
+
+  it("offers Åtgärda on the open step, and holds it while the step has unsaved changes", async () => {
+    api.routes["GET /api/v1/flows/{id}/suggestions/"] = () => ({
+      body: {
+        flow_id: "flow-1",
+        draft_revision: 4,
+        items: [
+          {
+            code: "some_later_code",
+            fingerprint: "b".repeat(64),
+            steps: ["step-1"],
+            params: {},
+            message: "A suggestion.",
+            impact: { basis: "definition", level: "high" },
+            fix: { kind: "patch", patch: {} }
+          }
+        ]
+      }
+    });
+    const fix = { onFix: vi.fn(async () => true), pending: false };
+    const { container } = renderEditor(makeFlow(), { suggestionFix: fix });
+
+    const button = await screen.findByRole("button", { name: "Åtgärda ”Förslag”" });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(await nameField(), { target: { value: "Sammanfatta ärendet" } });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(true));
+    const reason = screen.getByText(messages.flow_suggestions_fix_blocked_unsaved);
+    expect(button.getAttribute("aria-describedby")).toBe(reason.id);
+    fireEvent.click(button);
+    expect(fix.onFix).not.toHaveBeenCalled();
+    await expectNoAxeViolations(container);
+
+    // Undone, it is offered again and fixes the one suggestion.
+    fireEvent.change(await nameField(), { target: { value: "Sammanfatta" } });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+    await waitFor(() => expect(fix.onFix).toHaveBeenCalledWith(["b".repeat(64)]));
+  });
+
+  it("leads back to all steps and on to the neighbouring ones from the top", async () => {
+    const onGo = vi.fn();
+    const navigation: StepNavigation = {
+      position: 1,
+      count: 2,
+      previous: null,
+      next: { id: "step-2", name: "Skriv svar" },
+      onGo
+    };
+    const { onCancel, container } = renderEditor(makeFlow(), { navigation });
+    await nameField();
+    const bar = screen.getByRole("navigation", { name: "Stegen" });
+    expect(within(bar).getByText("Steg 1 av 2")).toBeTruthy();
+    // Disabled at the first step, so the bar does not move.
+    expect(
+      (within(bar).getByRole("button", { name: "Föregående steg" }) as HTMLButtonElement).disabled
+    ).toBe(true);
+    fireEvent.click(within(bar).getByRole("button", { name: "Nästa steg: Skriv svar" }));
+    expect(onGo).toHaveBeenCalledWith("step-2");
+    fireEvent.click(within(bar).getByRole("button", { name: "Alla steg" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    await expectNoAxeViolations(container);
+  });
+
+  it("asks before unsaved changes are left, by every way out", async () => {
+    const onGo = vi.fn();
+    const leaveRef = createRef<EditorLeave>();
+    const { onCancel } = renderEditor(makeFlow(), {
+      leaveRef,
+      navigation: {
+        position: 1,
+        count: 2,
+        previous: null,
+        next: { id: "step-2", name: "Skriv svar" },
+        onGo
+      }
+    });
+    fireEvent.change(await nameField(), { target: { value: "Sammanfatta ärendet" } });
+    expect(leaveRef.current?.isDirty()).toBe(true);
+
+    for (const name of ["Alla steg", "Nästa steg: Skriv svar", messages.cancel]) {
+      fireEvent.click(screen.getByRole("button", { name }));
+      const dialog = await screen.findByRole("alertdialog", {
+        name: "Lämna steget utan att spara?"
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: messages.cancel }));
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("alertdialog", { name: "Lämna steget utan att spara?" })
+        ).toBeNull()
+      );
+    }
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(onGo).not.toHaveBeenCalled();
+
+    // The page's own way out (browser Back) asks the same, and goes on when told.
+    const proceed = vi.fn();
+    act(() => leaveRef.current?.requestLeave(proceed));
+    const dialog = await screen.findByRole("alertdialog", { name: "Lämna steget utan att spara?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lämna utan att spara" }));
+    expect(proceed).toHaveBeenCalledTimes(1);
   });
 
   it("reads long material in parts as one step setting, and explains what it costs", async () => {
