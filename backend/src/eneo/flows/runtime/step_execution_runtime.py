@@ -85,6 +85,7 @@ from eneo.flows.runtime.execution_heartbeat import (
     FlowExecutionOwnershipLost,
     execution_ownership_is_lost,
 )
+from eneo.flows.runtime.forwarding_capture import record_completed_model_call
 from eneo.flows.runtime.inherited_citations import (
     build_inherited_citation_prompt_appendix,
     collect_inherited_citation_context,
@@ -857,7 +858,7 @@ async def call_assistant_with_timeout(
                 )
             if llm_task in done:
                 try:
-                    return llm_task.result()
+                    response = llm_task.result()
                 except UnknownModelCapacityError as exc:
                     raise _typed_missing_capacity_error(
                         exc,
@@ -873,6 +874,11 @@ async def call_assistant_with_timeout(
                         deps=deps,
                         effective_prompt=prompt_override,
                     ) from exc
+                record_completed_model_call(
+                    edge_indexes=prepared.resolved_input_edge_indexes,
+                    output_text=_completion_output_text(response),
+                )
+                return response
             if cancel_watcher is not None and cancel_watcher in done:
                 if cancel_watcher.result():
                     await _cancel_llm_task_with_grace()
@@ -918,6 +924,15 @@ async def call_assistant_with_timeout(
                 await cancel_watcher
         if state.in_flight_llm_task is llm_task:
             state.in_flight_llm_task = None
+
+
+def _completion_output_text(response: Any) -> str:
+    completion = getattr(response, "completion", None)
+    if isinstance(completion, str):
+        return completion
+    if isinstance(completion, Completion):
+        return completion.text or ""
+    return ""
 
 
 def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:

@@ -187,6 +187,11 @@ from eneo.flows.runtime.execution_heartbeat import (
 from eneo.flows.runtime.execution_state_builder import build_run_execution_state
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
 from eneo.flows.runtime.flow_runtime_trace import trace_flow_step
+from eneo.flows.runtime.forwarding_capture import (
+    ForwardingCapture,
+    forwarding_capture_scope,
+    hold_attempt_edges,
+)
 from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.http_audit import (
     AuditedToolCall,
@@ -1367,6 +1372,70 @@ class FlowRunExecutor:
         version_metadata: dict[str, Any] | None = None,
         attempt_no: int,
     ) -> StepExecutionResult:
+        # The attempt's forwarding facts are measured on its first model call
+        # and recorded once it ends, also when it fails: they describe what the
+        # call received and returned. A cancelled attempt records none.
+        with forwarding_capture_scope() as capture:
+            try:
+                result = await self._execute_step_attempt(
+                    step=step,
+                    run=run,
+                    state=state,
+                    version_metadata=version_metadata,
+                    attempt_no=attempt_no,
+                )
+            except Exception:
+                await self._record_forwarding_facts(
+                    capture, run=run, step=step, attempt_no=attempt_no
+                )
+                raise
+            await self._record_forwarding_facts(
+                capture, run=run, step=step, attempt_no=attempt_no
+            )
+            return result
+
+    async def _record_forwarding_facts(
+        self,
+        capture: ForwardingCapture,
+        *,
+        run: FlowRun,
+        step: RuntimeStep,
+        attempt_no: int,
+    ) -> None:
+        """Store the attempt's forwarding facts on its resolved inputs, in a
+        short transaction of its own so the run's transaction is untouched.
+        Never raises: the facts are advisory and a step never fails on them."""
+        facts = capture.facts()
+        if facts is None:
+            return
+        try:
+            async with sessionmanager.session() as session, session.begin():
+                await FlowRunRepository(session=session).record_forwarding_facts(
+                    run_id=run.id,
+                    step_id=step.step_id,
+                    attempt_no=attempt_no,
+                    tenant_id=run.tenant_id,
+                    facts=facts,
+                )
+        except Exception as exc:
+            logger.warning(
+                "flow_executor.forwarding_facts_not_recorded run_id=%s "
+                "step_order=%d attempt_no=%d error_type=%s",
+                run.id,
+                step.step_order,
+                attempt_no,
+                type(exc).__name__,
+            )
+
+    async def _execute_step_attempt(
+        self,
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        state: RunExecutionState | None = None,
+        version_metadata: dict[str, Any] | None = None,
+        attempt_no: int,
+    ) -> StepExecutionResult:
         if state is None:
             state = RunExecutionState(
                 flow_id=run.flow_id,
@@ -1911,6 +1980,7 @@ class FlowRunExecutor:
             resolved_input = with_transcript_source_reference(
                 resolved_input, pending_source[0]
             )
+        hold_attempt_edges(resolved_input_edges.edges)
         activated = await self.flow_run_repo.activate_step_attempt(
             run_id=run.id,
             step_id=step.step_id,
