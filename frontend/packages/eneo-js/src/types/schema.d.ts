@@ -27908,7 +27908,16 @@ export interface components {
      *     ``params``; ``message`` is for API and chat consumers.
      * @enum {string}
      */
-    FlowSuggestionCode: "duplicate_read";
+    FlowSuggestionCode:
+      | "duplicate_read"
+      | "broad_all_previous_steps"
+      | "whole_structured_read"
+      | "unread_contract_fields"
+      | "unread_result"
+      | "relay_step"
+      | "per_item_prompt_read"
+      | "repeated_long_material"
+      | "unused_form_field";
     /** FlowSuggestionFixPublic */
     FlowSuggestionFixPublic: {
       /**
@@ -27918,6 +27927,27 @@ export interface components {
        * @enum {string}
        */
       kind: "patch" | "assisted" | "advice";
+      /**
+       * Patch
+       * @description Present exactly when `kind` is `patch`: the editor update that makes the fix, without `expected_revision` (`definition`, `step_edits`, `assistants`, `step_order`, whichever it needs), as `PATCH /api/v1/flows/{id}/editor/` takes it once the draft revision is added. Steps and assistants are named by id; an assistant change names its step, so an assistant other steps share is copied for that step. The patch was applied to the draft in memory and passes publish's step rules wherever the draft does; it is for the `draft_revision` of this answer.
+       * @example {
+       *       "assistants": [
+       *         {
+       *           "assistant_id": "00000000-0000-0000-0000-000000000202",
+       *           "changes": {
+       *             "prompt": {
+       *               "text": "Sammanfatta."
+       *             }
+       *           },
+       *           "step_id": "00000000-0000-0000-0000-000000000102"
+       *         }
+       *       ],
+       *       "definition": {}
+       *     }
+       */
+      patch?: {
+        [key: string]: unknown;
+      } | null;
     };
     /** FlowSuggestionImpactPublic */
     FlowSuggestionImpactPublic: {
@@ -27930,7 +27960,7 @@ export interface components {
       basis: "definition";
       /**
        * Level
-       * @description How much the suggestion is worth acting on: `high` when a whole result reaches the model twice, `medium` when it does through `all_previous_steps`, `low` when one read is contained in another.
+       * @description How much the suggestion is worth acting on, judged from the definition: `high` when a whole result reaches a model twice or once per item, `medium` for a duplicate through `all_previous_steps`, unread contract fields or results, derived results taken together and material digested twice, `low` for the rest (a read contained in another, a broad or whole read, a relay, an unused form field).
        * @example high
        * @enum {string}
        */
@@ -27942,7 +27972,21 @@ export interface components {
      *       "code": "duplicate_read",
      *       "fingerprint": "9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a",
      *       "fix": {
-     *         "kind": "patch"
+     *         "kind": "patch",
+     *         "patch": {
+     *           "assistants": [
+     *             {
+     *               "assistant_id": "00000000-0000-0000-0000-000000000202",
+     *               "changes": {
+     *                 "prompt": {
+     *                   "text": "Sammanfatta."
+     *                 }
+     *               },
+     *               "step_id": "00000000-0000-0000-0000-000000000102"
+     *             }
+     *           ],
+     *           "definition": {}
+     *         }
      *       },
      *       "impact": {
      *         "basis": "definition",
@@ -27964,6 +28008,9 @@ export interface components {
      *             "selector": [],
      *             "site": "assistant_prompt:step_1.output.text"
      *           }
+     *         ],
+     *         "redundant_reads": [
+     *           1
      *         ]
      *       },
      *       "steps": [
@@ -27974,7 +28021,7 @@ export interface components {
      */
     FlowSuggestionPublic: {
       /**
-       * @description What the suggestion is about. `duplicate_read`: the same earlier step reaches the step's model twice, through its input and its prompt or twice in one of them.
+       * @description What the suggestion is about. `duplicate_read`: the same earlier step reaches the step's model twice, through its input and its prompt or twice in one of them. `broad_all_previous_steps`: a step takes every earlier step, where one is derived from another it also gets, or three or more of them. `whole_structured_read`: a step reads all of a JSON result with four or more fields. `unread_contract_fields`: fields of a step's contract no later step reads. `unread_result`: a step whose result no later step reads. `relay_step`: a step that only passes another result on. `per_item_prompt_read`: a step that runs once per item with a whole earlier result in its prompt. `repeated_long_material`: two steps digest the same source as long material. `unused_form_field`: a run form field no step reads.
        * @example duplicate_read
        */
       code: components["schemas"]["FlowSuggestionCode"];
@@ -27993,14 +28040,14 @@ export interface components {
       message: string;
       /**
        * Params
-       * @description Typed per code, for a client to render its own text from. For `duplicate_read`: `producer_step_order`, `producer_step_id`, `contained` (one read is a field of what the other already carries) and `reads`, each with `channel` (`input` or `prompt`), `site` (`input_source`, `input_bindings.question`, `input_bindings.source_refs[N]`, `assistant_prompt:<expression>`) and `selector` (empty for the whole text, `["structured", ...]` for a structured value or a path in it).
+       * @description Typed per code, for a client to render its own text from. For `duplicate_read`: `producer_step_order`, `producer_step_id`, `contained` (one read is a field of what the other already carries), `redundant_reads` (the indexes in `reads` of the reads the others already carry, never a whole read next to a narrower one) and `reads`, each with `channel` (`input` or `prompt`), `site` (`input_source`, `input_bindings.question`, `input_bindings.source_refs[N]`, `assistant_prompt:<expression>`) and `selector` (empty for the whole text, `["structured", ...]` for a structured value or a path in it). `broad_all_previous_steps`: `earlier_step_count`, `derived` (`step_order`, `from_step_order`) and `suggested_source_refs` (`step_order`, `step_id` of the earlier steps the prompt does not already read). `whole_structured_read`: `producer_step_order`, `producer_step_id`, `fields` and `reads`. `unread_contract_fields`: `fields` (unread) and `read_fields`. `unread_result`: `remove_patch`, the editor update that removes the step, checked like `fix.patch` and left out when it would not publish. `relay_step`: `source_step_order`, `source_step_id` (null when the relay copies the run input) and `readers` (`step_order`, `step_id`, `sites`). `per_item_prompt_read`: `execution_mode`, `producer_step_order`, `producer_step_id`, `reads`. `repeated_long_material`: `earlier_step_order`, `earlier_step_id`, `shared_step_orders`, `shares_run_input`. `unused_form_field`: `field`.
        */
       params: {
         [key: string]: unknown;
       };
       /**
        * Steps
-       * @description The steps the suggestion is about; the first is the step it is shown on, the second the step that is read twice.
+       * @description The steps the suggestion is about; the first is the step it is shown on, the second, when there is one, the step it reads, copies or shares a source with. Empty for `unused_form_field`, which is about the run form.
        */
       steps: string[];
     };
@@ -28014,7 +28061,21 @@ export interface components {
      *           "code": "duplicate_read",
      *           "fingerprint": "9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a",
      *           "fix": {
-     *             "kind": "patch"
+     *             "kind": "patch",
+     *             "patch": {
+     *               "assistants": [
+     *                 {
+     *                   "assistant_id": "00000000-0000-0000-0000-000000000202",
+     *                   "changes": {
+     *                     "prompt": {
+     *                       "text": "Sammanfatta."
+     *                     }
+     *                   },
+     *                   "step_id": "00000000-0000-0000-0000-000000000102"
+     *                 }
+     *               ],
+     *               "definition": {}
+     *             }
      *           },
      *           "impact": {
      *             "basis": "definition",
@@ -28036,6 +28097,9 @@ export interface components {
      *                 "selector": [],
      *                 "site": "assistant_prompt:step_1.output.text"
      *               }
+     *             ],
+     *             "redundant_reads": [
+     *               1
      *             ]
      *           },
      *           "steps": [
@@ -64393,7 +64457,21 @@ export interface operations {
            *           "code": "duplicate_read",
            *           "fingerprint": "9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a",
            *           "fix": {
-           *             "kind": "patch"
+           *             "kind": "patch",
+           *             "patch": {
+           *               "assistants": [
+           *                 {
+           *                   "assistant_id": "00000000-0000-0000-0000-000000000202",
+           *                   "changes": {
+           *                     "prompt": {
+           *                       "text": "Sammanfatta."
+           *                     }
+           *                   },
+           *                   "step_id": "00000000-0000-0000-0000-000000000102"
+           *                 }
+           *               ],
+           *               "definition": {}
+           *             }
            *           },
            *           "impact": {
            *             "basis": "definition",
@@ -64415,6 +64493,9 @@ export interface operations {
            *                 "selector": [],
            *                 "site": "assistant_prompt:step_1.output.text"
            *               }
+           *             ],
+           *             "redundant_reads": [
+           *               1
            *             ]
            *           },
            *           "steps": [

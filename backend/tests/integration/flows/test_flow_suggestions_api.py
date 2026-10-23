@@ -108,8 +108,28 @@ async def test_a_prompt_read_of_the_input_step_is_one_suggestion(
         "assistant_prompt:step_1.output.text",
     ]
     assert item["impact"] == {"basis": "definition", "level": "high"}
-    assert item["fix"] == {"kind": "patch"}
+    assert item["fix"]["kind"] == "patch"
     assert item["message"].startswith("Step 2 reads step 1 twice")
+
+
+async def test_the_patch_is_the_editor_update_that_removes_the_prompt_read(
+    client: AsyncClient, tracer: Tracer
+):
+    response = await client.get(
+        f"/api/v1/flows/{tracer.flow_id}/suggestions/", headers=tracer.headers
+    )
+
+    assert response.status_code == 200, response.text
+    (item,) = response.json()["items"]
+    patch = item["fix"]["patch"]
+    assert set(patch) == {"definition", "assistants"}
+    assert patch["definition"] == {}
+    (change,) = patch["assistants"]
+    # Named by the step, so a shared assistant would be copied for it.
+    assert change["step_id"] == str(tracer.step_ids[1])
+    assert change["changes"] == {
+        "prompt": {"text": "Sammanfatta.", "description": None}
+    }
 
 
 async def test_no_suggestion_without_the_prompt_read(
