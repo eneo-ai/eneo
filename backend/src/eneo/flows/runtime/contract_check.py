@@ -33,6 +33,23 @@ _NOT_JSON_CODE: Mapping[ContractSide, FlowApiErrorCode] = MappingProxyType(
 )
 
 
+def not_checked_message(
+    label: str, subject: str, target: str, *, timed_out: bool
+) -> str:
+    """The message of typed_io_contract_not_checked: a check that did not
+    finish says nothing about whether ``subject`` fits ``target``."""
+    return (
+        f"{label}: {subject} could not be checked against {target}"
+        + (
+            " within the time limit, which a larger value or a contract "
+            "with more work per item reaches sooner"
+            if timed_out
+            else ""
+        )
+        + "; it was not found invalid."
+    )
+
+
 async def check_contract_in_child(
     value: JsonValue,
     schema: Mapping[str, object],
@@ -55,14 +72,12 @@ async def check_contract_in_child(
         ) from None
     if isinstance(finding, ArgumentCheckUnfinished):
         raise TypedIOValidationException(
-            f"{label}: the value could not be checked against the contract"
-            + (
-                " within the time limit, which a larger value or a contract "
-                "with more work per item reaches sooner"
-                if finding.timed_out
-                else ""
-            )
-            + "; it was not found invalid.",
+            not_checked_message(
+                label,
+                "the value",
+                "the contract",
+                timed_out=finding.timed_out,
+            ),
             code=FlowApiErrorCode.TYPED_IO_CONTRACT_NOT_CHECKED.value,
         )
     raise_contract_finding(finding, schema, label=label, side=side)

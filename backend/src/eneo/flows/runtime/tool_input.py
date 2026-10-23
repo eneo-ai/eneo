@@ -73,6 +73,7 @@ from eneo.flows.output_processing import (
     raise_contract_finding,
     refuse_unknown_dialect,
 )
+from eneo.flows.runtime.contract_check import not_checked_message
 from eneo.flows.runtime.egress.http import VettedClientFactory
 from eneo.flows.runtime.egress.policy import (
     Deadline,
@@ -524,10 +525,13 @@ async def _refuse_arguments_outside_the_schema(
         ) from None
     if isinstance(result, ArgumentCheckUnfinished):
         raise _refusal(
-            f"Step {step.step_order}: the tool's arguments could not be checked "
-            "against its input schema"
-            + (" within the time limit." if result.timed_out else "."),
-            FlowApiErrorCode.TYPED_IO_TOOL_INVALID_SCHEMA,
+            not_checked_message(
+                f"Step {step.step_order}",
+                "the tool's arguments",
+                "its input schema",
+                timed_out=result.timed_out,
+            ),
+            FlowApiErrorCode.TYPED_IO_CONTRACT_NOT_CHECKED,
             step_order=step.step_order,
         )
     try:

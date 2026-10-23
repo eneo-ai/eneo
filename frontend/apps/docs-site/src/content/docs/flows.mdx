@@ -286,7 +286,8 @@ in a separate checking process with a time limit, for an AI step's answer as
 for a `copy_input` value. The limit counts from when the check is asked, so
 time spent waiting for other checks on the same worker is part of it. A value
 that cannot be checked in time fails the step with
-`typed_io_contract_not_checked`; it was not found invalid. When an AI step's
+`typed_io_contract_not_checked`; it was not found invalid. The same holds for
+the arguments of a tool call, checked against the tool's input schema. When an AI step's
 answer is checked against a contract and holds a number JSON does not allow
 (`NaN` or an infinity), the step fails with `typed_io_output_parse_failed`.
 

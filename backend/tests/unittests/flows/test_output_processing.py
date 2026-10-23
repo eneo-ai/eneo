@@ -103,6 +103,27 @@ def test_parse_json_output_error_code():
     assert exc_info.value.code == "typed_io_output_parse_failed"
 
 
+_TOO_DEEP = "[" * 100_000 + "]" * 100_000
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param(_TOO_DEEP, id="bare"),
+        pytest.param("Here is the answer: " + _TOO_DEEP, id="after-prose"),
+        pytest.param("```json\n" + _TOO_DEEP + "\n```", id="fenced"),
+        pytest.param('{"a": ' * 100_000, id="unclosed-objects"),
+    ],
+)
+def test_parse_json_output_nested_too_deep_is_a_typed_parse_failure(text):
+    # The decoder's RecursionError must not escape as an untyped error: the
+    # step then ends with the typed parse code and its rejected-output evidence.
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        parse_json_output(text)
+    assert exc_info.value.code == "typed_io_output_parse_failed"
+    assert "nested too deep" in str(exc_info.value)
+
+
 # --- validate_against_contract ---
 
 

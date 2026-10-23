@@ -42,6 +42,7 @@ from eneo.flows.flow_run_provenance import (
 from eneo.flows.output_processing import validate_against_contract
 from eneo.flows.runtime import executor as executor_module
 from eneo.flows.runtime import tool_argument_check
+from eneo.flows.runtime import tool_input as tool_input_module
 from eneo.flows.runtime.egress.policy import (
     DestinationUnresolvable,
     FlowDestinationPolicy,
@@ -57,6 +58,7 @@ from eneo.flows.runtime.step_execution_runtime import (
     prepare_step_execution,
 )
 from eneo.flows.runtime.tool_argument_check import (
+    ArgumentCheckUnfinished,
     ToolArgumentChecker,
     ToolArgumentCheckFailed,
 )
@@ -946,10 +948,11 @@ async def test_an_argument_check_past_its_limit_ends_off_the_event_loop(
     elapsed = time.monotonic() - started
     beating.cancel()
 
-    assert refused.code == "typed_io_tool_invalid_schema"
+    assert refused.code == "typed_io_contract_not_checked"
     assert str(refused) == (
         "Step 2: the tool's arguments could not be checked against its input "
-        "schema within the time limit."
+        "schema within the time limit, which a larger value or a contract with "
+        "more work per item reaches sooner; it was not found invalid."
     )
     # The check's limit, and the start of a new child (about 0.15 s).
     assert elapsed < limit + 1.0
@@ -1005,10 +1008,35 @@ async def test_a_check_that_raises_in_its_process_could_not_check_the_arguments(
 
     refused = await _refused(executor, step, _running(user))
 
-    assert refused.code == "typed_io_tool_invalid_schema"
+    assert refused.code == "typed_io_contract_not_checked"
     assert str(refused) == (
-        "Step 2: the tool's arguments could not be checked against its input schema."
+        "Step 2: the tool's arguments could not be checked against its input "
+        "schema; it was not found invalid."
     )
+
+
+@pytest.mark.parametrize("timed_out", [True, False])
+async def test_an_unfinished_argument_check_is_not_the_servers_schema_fault(
+    user, monkeypatch, timed_out: bool
+) -> None:
+    # An argument check that did not finish (queued behind a slow check, or
+    # raised in its process) says nothing about the MCP server's schema: it
+    # is typed_io_contract_not_checked, as for a step's contract.
+    monkeypatch.setattr(
+        tool_input_module,
+        "check_tool_arguments",
+        AsyncMock(return_value=ArgumentCheckUnfinished(timed_out=timed_out)),
+    )
+    facts = _facts(input_schema={"type": "object"})
+    caller = _answered({"ok": True})
+    executor = _tool_executor(user, _Facts(facts), caller)
+
+    refused = await _refused(executor, _tool_step(facts), _running(user))
+
+    assert refused.code == "typed_io_contract_not_checked"
+    assert "it was not found invalid" in str(refused)
+    assert ("within the time limit" in str(refused)) is timed_out
+    assert caller.calls == []
 
 
 def _nested(depth: int) -> object:
