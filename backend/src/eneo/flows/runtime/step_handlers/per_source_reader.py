@@ -41,6 +41,10 @@ from eneo.flows.runtime.step_execution_runtime import (
     preview_step_execution_context,
     resolve_json_response_format_plan,
 )
+from eneo.flows.runtime.step_failure_evidence import (
+    attach_failure_evidence,
+    failure_evidence,
+)
 from eneo.flows.runtime.step_handlers.base import (
     ActivatePreparedAssistantStepsFn,
     ListStepInputFileIdsFn,
@@ -273,10 +277,10 @@ async def execute_per_source_reader(
         # The calls that completed really did retrieve; publish them as a
         # partial envelope so the failed attempt records what it read, also
         # under the executor's backstop cancellation.
-        mapped_evidence.admit(getattr(exc, "rag_metadata", None))
+        mapped_evidence.admit(failure_evidence(exc).rag_metadata)
         partial = mapped_evidence.partial_payload()
         if partial is not None:
-            setattr(exc, "rag_metadata", partial)
+            attach_failure_evidence(exc, rag_metadata=partial)
         raise
 
 

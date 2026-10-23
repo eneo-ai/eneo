@@ -23,6 +23,7 @@ from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_run_error import FlowRunErrorDetails
 from eneo.flows.runtime.step_deadline import current_step_deadline_scope
 from eneo.flows.runtime.step_execution_runtime import build_output_payload
+from eneo.flows.runtime.step_failure_evidence import failure_evidence
 from eneo.flows.runtime.step_handlers.text_sections import (
     prepare_text_processing_call,
     prepare_text_sections,
@@ -855,8 +856,8 @@ async def test_section_aggregate_overflow_stops_before_the_next_call(user):
     assert details.completed_items == len(questions) == 4
     assert details.total_items == progress[0][1]
     assert details.total_items > 4
-    assert exc_info.value.completed_items == 4
-    assert exc_info.value.total_items == details.total_items
+    assert failure_evidence(exc_info.value).completed_items == 4
+    assert failure_evidence(exc_info.value).total_items == details.total_items
 
 
 @pytest.mark.parametrize("binding", [None, "repeat", "prompt_only"])

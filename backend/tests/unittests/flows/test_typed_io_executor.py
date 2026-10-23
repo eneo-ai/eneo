@@ -69,6 +69,7 @@ from eneo.flows.runtime.step_execution_runtime import (
     build_output_payload,
     json_mode_cache_key,
 )
+from eneo.flows.runtime.step_failure_evidence import failure_evidence
 from eneo.flows.runtime.step_input_resolution import (
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER,
@@ -490,7 +491,7 @@ async def test_mapped_structured_budget_refuses_enriched_output_with_evidence(
     assert error.value.context["measured_bytes"] > 6000
     assert error.value.context["ceiling_bytes"] == 6000
     assert assistant.get_response.await_count == completed
-    evidence = error.value.rag_metadata
+    evidence = failure_evidence(error.value).rag_metadata
     assert len(evidence["items" if mode == "per_item" else "sources"]) == completed
     run_repo.update_step_result.assert_not_awaited()
     assert run.output_payload_json is None

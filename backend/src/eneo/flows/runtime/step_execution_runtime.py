@@ -106,6 +106,11 @@ from eneo.flows.runtime.step_deadline import (
     record_step_phase,
     settle_provider_request,
 )
+from eneo.flows.runtime.step_failure_evidence import (
+    attach_failure_evidence,
+    failure_evidence,
+    rejected_output_of,
+)
 from eneo.flows.runtime.step_input_resolution import (
     RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
     enforce_inline_input_cap,
@@ -531,19 +536,17 @@ def attach_typed_failure_context(
     effective_prompt: str,
     rejected_output: str | None = None,
 ) -> TypedIOValidationException:
-    existing_payload = getattr(exc, "input_payload_json", None)
-    if not isinstance(existing_payload, dict):
+    if exc.input_payload_json is None:
         payload = dict(input_payload_for_result)
         payload.setdefault("text", "")
         payload.setdefault("source_text", payload.get("text", ""))
         payload.setdefault("input_source", "")
         payload.setdefault("used_question_binding", False)
-        setattr(exc, "input_payload_json", payload)
-    existing_prompt = getattr(exc, "effective_prompt", None)
-    if not isinstance(existing_prompt, str):
-        setattr(exc, "effective_prompt", effective_prompt)
-    if getattr(exc, "rejected_output", None) is None and rejected_output is not None:
-        setattr(exc, "rejected_output", rejected_output)
+        exc.input_payload_json = payload
+    if exc.effective_prompt is None:
+        exc.effective_prompt = effective_prompt
+    if rejected_output is not None and rejected_output_of(exc) is None:
+        attach_failure_evidence(exc, rejected_output=rejected_output)
     return exc
 
 
@@ -928,7 +931,7 @@ def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
         )
     except TypedIOValidationException as exc:
         if output.rag_metadata is not None:
-            setattr(exc, "rag_metadata", output.rag_metadata)
+            attach_failure_evidence(exc, rag_metadata=output.rag_metadata)
         raise
     payload: dict[str, Any] = {
         "text": output.persisted_text,
@@ -1372,11 +1375,8 @@ async def prepare_step_execution(
             ),
         )
     except TypedIOValidationException as exc:
-        contract_validation_payload = getattr(exc, "contract_validation", None)
-        if isinstance(contract_validation_payload, dict):
-            input_payload_for_result["contract_validation"] = (
-                contract_validation_payload
-            )
+        if exc.contract_validation is not None:
+            input_payload_for_result["contract_validation"] = exc.contract_validation
         raise attach_typed_failure_context(
             exc,
             input_payload_for_result=input_payload_for_result,
@@ -1695,9 +1695,11 @@ async def complete_step_execution(
         rag_metadata = captured_rag.get("rag")
         if (
             isinstance(rag_metadata, dict)
-            and getattr(exc, "rag_metadata", None) is None
+            and failure_evidence(exc).rag_metadata is None
         ):
-            setattr(exc, "rag_metadata", rag_metadata)
+            attach_failure_evidence(
+                exc, rag_metadata=cast(dict[str, Any], rag_metadata)
+            )
         raise
 
 

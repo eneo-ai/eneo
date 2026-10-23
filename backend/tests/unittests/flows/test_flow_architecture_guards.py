@@ -1192,3 +1192,61 @@ def test_schema_engine_scanner_detects_every_way_to_build_a_validator():
         "def f(error: jsonschema.ValidationError): ...\n"
     )
     assert _schema_engine_uses(allowed) == []
+
+
+# Failure evidence an error carries to the attempt writer has one typed owner;
+# the names it replaced, and the TypedIOValidationException / deadline fields
+# that are now read as typed attributes, must not come back as string lookups.
+STEP_FAILURE_EVIDENCE_OWNER = "runtime/step_failure_evidence.py"
+STEP_FAILURE_EVIDENCE_ATTRIBUTE_NAMES = frozenset(
+    {
+        "rag_metadata",
+        "completed_items",
+        "total_items",
+        "rejected_output",
+        "requested_model",
+        "provider",
+        "input_payload_json",
+        "effective_prompt",
+        "contract_validation",
+        "step_phase",
+        "provider_work_may_have_completed",
+    }
+)
+
+
+def _string_keyed_failure_evidence_lines(tree: ast.AST) -> list[int]:
+    return sorted(
+        node.lineno
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id in {"getattr", "setattr", "hasattr", "delattr"}
+        and len(node.args) >= 2
+        and isinstance(node.args[1], ast.Constant)
+        and node.args[1].value in STEP_FAILURE_EVIDENCE_ATTRIBUTE_NAMES
+    )
+
+
+def test_step_failure_evidence_travels_only_through_its_owner():
+    offenders = [
+        f"{_relative_flow_path(path)}:{lineno}"
+        for path in _flow_python_files()
+        if _relative_flow_path(path) != STEP_FAILURE_EVIDENCE_OWNER
+        for lineno in _string_keyed_failure_evidence_lines(ast.parse(path.read_text()))
+    ]
+    assert offenders == [], (
+        "Attach failure evidence with attach_failure_evidence and read it with "
+        "failure_evidence (runtime/step_failure_evidence.py): " + ", ".join(offenders)
+    )
+
+
+def test_failure_evidence_scanner_detects_string_keyed_attributes():
+    tree = ast.parse(
+        "setattr(exc, 'rag_metadata', {})\n"
+        "getattr(exc.__cause__, 'completed_items', None)\n"
+        "hasattr(exc, 'rejected_output')\n"
+        "getattr(model, 'provider_type', None)\n"
+        "exc.effective_prompt = 'x'\n"
+    )
+    assert _string_keyed_failure_evidence_lines(tree) == [1, 2, 3]

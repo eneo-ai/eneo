@@ -86,6 +86,10 @@ from eneo.flows.runtime.step_execution_runtime import (
     prepare_step_execution,
     preview_step_execution_context,
 )
+from eneo.flows.runtime.step_failure_evidence import (
+    failure_evidence,
+    rejected_output_of,
+)
 from eneo.flows.runtime.step_result_builder import build_completed_step_result
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.main.exceptions import (
@@ -2053,7 +2057,7 @@ async def test_complete_step_execution_translates_context_window_failure():
             deps=deps,
         )
 
-    assert getattr(exc_info.value, "rejected_output", None) is None
+    assert rejected_output_of(exc_info.value) is None
     assert (
         exc_info.value.code
         == FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW.value
@@ -2122,7 +2126,7 @@ async def test_complete_step_execution_translates_missing_capacity():
             deps=deps,
         )
 
-    assert getattr(exc_info.value, "rejected_output", None) is None
+    assert rejected_output_of(exc_info.value) is None
     assert exc_info.value.code == "flow_model_capacity_undeclared"
     assert "max_output_tokens" in str(exc_info.value)
     assert getattr(exc_info.value, "effective_prompt") == "Prompt"
@@ -2229,7 +2233,7 @@ async def test_complete_step_execution_shares_deadline_across_json_mode_retry(
             deps=deps,
         )
 
-    assert getattr(exc_info.value, "rejected_output", None) is None
+    assert rejected_output_of(exc_info.value) is None
     assert exc_info.value.code == "flow_step_timeout"
     # The request was in flight when the budget ran out, so the refusal says
     # the provider may still complete and bill it.
@@ -2293,7 +2297,7 @@ async def test_complete_step_execution_keeps_retrieval_evidence_when_finalizatio
             step=step, run=run, state=state, prepared=prepared, deps=deps
         )
 
-    assert getattr(exc_info.value, "rag_metadata") == retrieved
+    assert failure_evidence(exc_info.value).rag_metadata == retrieved
 
 
 @pytest.mark.asyncio
@@ -2373,7 +2377,7 @@ async def test_complete_step_execution_fast_fails_when_deadline_already_exhauste
             deps=deps,
         )
 
-    assert getattr(exc_info.value, "rejected_output", None) is None
+    assert rejected_output_of(exc_info.value) is None
     assert exc_info.value.code == "flow_step_timeout"
     assert assistant.get_response.await_count == 1, (
         "Retry must not dispatch a second LLM call when the deadline "
@@ -2436,7 +2440,7 @@ async def test_complete_step_execution_times_out_llm_request():
             deps=deps,
         )
 
-    assert getattr(exc_info.value, "rejected_output", None) is None
+    assert rejected_output_of(exc_info.value) is None
     assert exc_info.value.code == "flow_step_timeout"
     assert getattr(exc_info.value, "effective_prompt") == "Prompt"
     failed_input_payload = getattr(exc_info.value, "input_payload_json")
@@ -3781,7 +3785,7 @@ def test_build_output_payload_refuses_oversized_structured_output(monkeypatch):
         "measured_bytes": 32,
         "ceiling_bytes": 20,
     }
-    assert error.value.rag_metadata == {"status": "success"}
+    assert failure_evidence(error.value).rag_metadata == {"status": "success"}
 
 
 def test_build_output_payload_excludes_artifact_display_keys():
@@ -4120,7 +4124,7 @@ async def test_rejected_completion_attaches_exact_text_without_output_artifact(t
     assert isinstance(caught.value, StepOutputValidationException)
     assert caught.value.rejected_completion.finish_reason == "stop"
     assert caught.value.rejected_completion.provider_response_id == "rejected-json"
-    assert getattr(caught.value, "rejected_output", None) == text
+    assert rejected_output_of(caught.value) == text
     assert caught.value.effective_prompt == "Return JSON"
     cap.assert_not_called()
 
@@ -4340,7 +4344,7 @@ async def test_reduced_cap_terminal_reason_controls_flow_consumption(
             assert retained.evidence.tail.isspace()
             assert text.endswith(retained.evidence.tail)
             assert text.startswith(retained.text)
-        assert getattr(error, "rejected_output", None) is None
+        assert rejected_output_of(error) is None
         process_output.assert_not_awaited()
         apply_cap.assert_not_awaited()
         failure = build_typed_failure_plan(

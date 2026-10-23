@@ -103,7 +103,7 @@ async def validate_input_contract(
                 "input before contract validation.",
                 code=FlowApiErrorCode.TYPED_IO_INVALID_JSON_INPUT.value,
             )
-            setattr(exc, "contract_validation", contract_validation)
+            exc.contract_validation = contract_validation
             raise exc
 
         contract_validation = {
@@ -120,7 +120,7 @@ async def validate_input_contract(
                 side="input",
             )
         except TypedIOValidationException as exc:
-            setattr(exc, "contract_validation", contract_validation)
+            exc.contract_validation = contract_validation
             raise
         return contract_validation
 
@@ -140,7 +140,7 @@ async def validate_input_contract(
                 ),
                 code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
             )
-            setattr(exc, "contract_validation", contract_validation)
+            exc.contract_validation = contract_validation
             raise exc
         try:
             await check_contract_in_child(
@@ -150,7 +150,7 @@ async def validate_input_contract(
                 side="input",
             )
         except TypedIOValidationException as exc:
-            setattr(exc, "contract_validation", contract_validation)
+            exc.contract_validation = contract_validation
             raise
         return contract_validation
 

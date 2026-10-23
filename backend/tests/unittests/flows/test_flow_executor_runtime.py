@@ -106,6 +106,10 @@ from eneo.flows.runtime.step_execution_runtime import (
     build_output_payload,
     derive_rag_retrieval_query,
 )
+from eneo.flows.runtime.step_failure_evidence import (
+    attach_failure_evidence,
+    failure_evidence,
+)
 from eneo.flows.runtime.step_input_resolution import resolve_input_source_text
 from eneo.main.exceptions import (
     BadRequestException,
@@ -2624,14 +2628,9 @@ async def test_rejected_completion_is_saved_as_failure_with_known_provider_outco
 
 
 @pytest.mark.asyncio
-async def test_typed_validation_failure_persists_model_telemetry(user):
-    """flow_step_attempts must record requested_model/provider on typed failure.
-
-    The flow_llm_request_timeout path (per-step LLM timeout) raises a typed
-    exception. Without telemetry plumbed through finish_attempt, the
-    persisted row shows requested_model=null/provider=null — making it
-    impossible to triage which model wedged the run after the fact.
-    """
+async def test_a_typed_llm_timeout_says_provider_work_may_have_started(user):
+    """A per-step LLM timeout cannot tell whether the provider did the work, so
+    the attempt and the run both say a retry can repeat (and pay for) it."""
     executor, flow_repo, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
     running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
@@ -2675,8 +2674,6 @@ async def test_typed_validation_failure_persists_model_telemetry(user):
         "Step 1: LLM request exceeded 600s timeout.",
         code="flow_llm_request_timeout",
     )
-    setattr(typed_exc, "requested_model", "openai/gpt-5.4-nano")
-    setattr(typed_exc, "provider", "openai")
     executor._execute_step = AsyncMock(side_effect=typed_exc)
 
     await executor.execute(
@@ -2689,8 +2686,6 @@ async def test_typed_validation_failure_persists_model_telemetry(user):
     )
 
     finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
-    assert finish_kwargs["requested_model"] == "openai/gpt-5.4-nano"
-    assert finish_kwargs["provider"] == "openai"
     assert "Provider work may or may not have started" in finish_kwargs["error_message"]
     terminal_error = executor.flow_run_terminalizer.terminalize_run.await_args.kwargs[
         "error"
@@ -2699,19 +2694,12 @@ async def test_typed_validation_failure_persists_model_telemetry(user):
 
 
 @pytest.mark.asyncio
-async def test_typed_validation_failure_partial_typed_exc_falls_back_field_independently(
+async def test_a_typed_failure_before_its_attempt_starts_names_the_cached_model(
     user,
 ):
-    """Each telemetry field falls back from state independently.
-
-    `_handle_typed_step_failure` reads `requested_model` and `provider`
-    from the typed exception's attached attributes and falls back to
-    `state.assistant_cache` for the assistant we just tried. The
-    fallback must apply per-field — if only `provider` is attached
-    (e.g. the timeout fired before the LLM client returned a model
-    name), the persisted attempt row must still get `requested_model`
-    from the assistant cache rather than null.
-    """
+    """Preparation can fail after the assistant is loaded but before the
+    attempt start is written; the attempt row still names the model and
+    provider, from the assistant cache, so a stuck run can be triaged."""
     executor, flow_repo, flow_run_repo, _ = _build_executor(user)
     flow_run_repo.finish_attempt = AsyncMock()
     flow_run_repo.save_step_result = AsyncMock()
@@ -2761,7 +2749,6 @@ async def test_typed_validation_failure_partial_typed_exc_falls_back_field_indep
         "Step 1: LLM request exceeded 600s timeout.",
         code="flow_llm_request_timeout",
     )
-    setattr(typed_exc, "provider", "openai")
 
     await executor._handle_typed_step_failure(
         run_id=run_id,
@@ -2775,11 +2762,7 @@ async def test_typed_validation_failure_partial_typed_exc_falls_back_field_indep
     )
 
     finish_kwargs = flow_run_repo.finish_attempt.await_args.kwargs
-    assert finish_kwargs["requested_model"] == "openai/gpt-5.4-nano", (
-        "requested_model was None on typed_exc, so must fall back to "
-        "state.assistant_cache. Without per-field fallback the column "
-        "stays null and triage of stuck runs becomes impossible."
-    )
+    assert finish_kwargs["requested_model"] == "openai/gpt-5.4-nano"
     assert finish_kwargs["provider"] == "openai"
 
 
@@ -2835,7 +2818,7 @@ async def test_a_step_without_a_completion_model_that_fails_before_it_starts_nam
         "Step 1: the input is larger than this step can read.",
         code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
     )
-    setattr(typed_exc, "effective_prompt", "Never sent to a model")
+    typed_exc.effective_prompt = "Never sent to a model"
 
     await executor._handle_typed_step_failure(
         run_id=run_id,
@@ -5736,7 +5719,9 @@ async def test_execute_step_backstop_fails_typed_with_completed_call_evidence(
             try:
                 await asyncio.sleep(5)
             except asyncio.CancelledError as exc:
-                setattr(exc, "rag_metadata", {"status": "partial", "calls": 1})
+                attach_failure_evidence(
+                    exc, rag_metadata={"status": "partial", "calls": 1}
+                )
                 raise
             raise AssertionError("the backstop must cancel the handler")
 
@@ -5751,7 +5736,10 @@ async def test_execute_step_backstop_fails_typed_with_completed_call_evidence(
     assert "Step 3: execution budget of 0.05s exhausted during step execution" in str(
         exc_info.value
     )
-    assert getattr(exc_info.value, "rag_metadata") == {"status": "partial", "calls": 1}
+    assert failure_evidence(exc_info.value).rag_metadata == {
+        "status": "partial",
+        "calls": 1,
+    }
     assert executor._active_step_deadline is None
 
 
@@ -5776,7 +5764,7 @@ async def test_execute_step_leaves_an_inner_timeout_alone_inside_the_grace(
         async def execute(self, **_kwargs):
             clock["now"] = 5.0  # past the budget, inside the backstop grace
             inner = TimeoutError("some inner wait")
-            setattr(inner, "rag_metadata", {"status": "retrieved"})
+            attach_failure_evidence(inner, rag_metadata={"status": "retrieved"})
             raise inner
 
     executor._build_step_handler = MagicMock(return_value=_Handler())
@@ -5786,7 +5774,7 @@ async def test_execute_step_leaves_an_inner_timeout_alone_inside_the_grace(
             step=step, run=run, state=_empty_execution_state(), attempt_no=1
         )
 
-    assert getattr(exc_info.value, "rag_metadata") == {"status": "retrieved"}
+    assert failure_evidence(exc_info.value).rag_metadata == {"status": "retrieved"}
 
 
 @pytest.mark.asyncio
@@ -5855,7 +5843,7 @@ async def test_execute_step_refuses_a_result_that_completed_after_the_budget(
     assert exc_info.value.code == "flow_step_timeout"
     assert "during finalization" in str(exc_info.value)
     # What the late result retrieved is still the failed attempt's evidence.
-    assert getattr(exc_info.value, "rag_metadata") == {
+    assert failure_evidence(exc_info.value).rag_metadata == {
         "status": "retrieved",
         "chunk_count": 3,
     }

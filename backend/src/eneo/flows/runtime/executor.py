@@ -237,6 +237,11 @@ from eneo.flows.runtime.step_execution_runtime import (
     execution_hash,
     prepare_step_execution,
 )
+from eneo.flows.runtime.step_failure_evidence import (
+    attach_failure_evidence,
+    failure_evidence,
+    rejected_output_of,
+)
 from eneo.flows.runtime.step_handlers import resolve_handler_mode
 from eneo.flows.runtime.step_handlers.base import PreparedAssistantStep, StepHandler
 from eneo.flows.runtime.step_handlers.compose_text import ComposeTextStepHandler
@@ -626,6 +631,23 @@ def _attempt_start_for_step(
     if state is None:
         return None
     return state.attempt_start_by_step.get(step.step_id)
+
+
+def _failed_item_counts(exc: BaseException | None) -> tuple[int | None, int | None]:
+    """Mapped item progress at failure.
+
+    A mapped handler records its counts on the error as it leaves, so they win
+    over the step-progress snapshot a deadline error took when it was raised.
+    """
+    evidence = failure_evidence(exc)
+    deadline = exc if isinstance(exc, StepDeadlineExceeded) else None
+    completed_items = evidence.completed_items
+    if completed_items is None and deadline is not None:
+        completed_items = deadline.completed_items
+    total_items = evidence.total_items
+    if total_items is None and deadline is not None:
+        total_items = deadline.total_items
+    return completed_items, total_items
 
 
 def _pre_attempt_start_model_from_state_cache(
@@ -1186,24 +1208,18 @@ class FlowRunExecutor:
                 )
             except TypedIOValidationException as typed_exc:
                 contract_diag: dict[str, Any] | None = None
-                failed_input_payload = getattr(typed_exc, "input_payload_json", None)
+                failed_input_payload = typed_exc.input_payload_json
                 resolved_input_source = step.input_source
-                if isinstance(failed_input_payload, dict):
-                    failed_input_payload_dict = cast(
-                        dict[str, Any], failed_input_payload
-                    )
-                    raw_contract_diag = failed_input_payload_dict.get(
-                        "contract_validation"
-                    )
+                if failed_input_payload is not None:
+                    raw_contract_diag = failed_input_payload.get("contract_validation")
                     contract_diag = (
                         cast(dict[str, Any], raw_contract_diag)
                         if isinstance(raw_contract_diag, dict)
                         else None
                     )
-                    payload_source = failed_input_payload_dict.get("input_source")
+                    payload_source = failed_input_payload.get("input_source")
                     if isinstance(payload_source, str) and payload_source:
                         resolved_input_source = payload_source
-                    failed_input_payload = failed_input_payload_dict
                 else:
                     failed_input_payload = build_default_failed_input_payload(
                         input_source=step.input_source
@@ -1236,9 +1252,7 @@ class FlowRunExecutor:
                     attempt_no=attempt_no,
                     claimed=claimed_result,
                     typed_exc=typed_exc,
-                    failed_input_payload=cast(
-                        dict[str, Any] | None, failed_input_payload
-                    ),
+                    failed_input_payload=failed_input_payload,
                     state=state,
                 )
             except Exception as exc:
@@ -1438,8 +1452,8 @@ class FlowRunExecutor:
                                 self.max_inline_text_bytes
                             )
                     except TypedIOValidationException as exc:
-                        prompt = getattr(exc, "effective_prompt", None)
-                        if isinstance(prompt, str):
+                        prompt = exc.effective_prompt
+                        if prompt is not None:
                             exc.effective_prompt = utf8_prefix(
                                 prompt, max_bytes=self.max_inline_text_bytes
                             )
@@ -1463,13 +1477,15 @@ class FlowRunExecutor:
                         # the runtime and the mapped handlers hang their
                         # completed-call evidence on that cancellation (or on
                         # the error itself).
-                        partial_evidence = getattr(exc, "rag_metadata", None)
+                        partial_evidence = failure_evidence(exc).rag_metadata
                         if partial_evidence is None:
-                            partial_evidence = getattr(
-                                exc.__cause__, "rag_metadata", None
-                            )
+                            partial_evidence = failure_evidence(
+                                exc.__cause__
+                            ).rag_metadata
                         if partial_evidence is not None:
-                            setattr(typed, "rag_metadata", partial_evidence)
+                            attach_failure_evidence(
+                                typed, rag_metadata=partial_evidence
+                            )
                         raise typed from exc
                     record_step_phase(FlowStepPhase.FINALIZATION)
                     if deadline.expired():
@@ -1482,7 +1498,9 @@ class FlowRunExecutor:
                             provider_request_in_flight=False,
                         )
                         if result.output.rag_metadata is not None:
-                            setattr(late, "rag_metadata", result.output.rag_metadata)
+                            attach_failure_evidence(
+                                late, rag_metadata=result.output.rag_metadata
+                            )
                         raise late
                 step_span.set_result(status="completed")
                 return result
@@ -2246,9 +2264,7 @@ class FlowRunExecutor:
         # preparation interpolates one for every step and attaches it to what
         # it refuses.
         failed_prompt = (
-            getattr(typed_exc, "effective_prompt", None)
-            if step.may_call_completion_provider
-            else ""
+            typed_exc.effective_prompt if step.may_call_completion_provider else ""
         )
         error_code = typed_io_failure_code(typed_exc.code)
         rejected_completion = (
@@ -2260,7 +2276,7 @@ class FlowRunExecutor:
             step_order=step.step_order,
             error_code=error_code,
             error_message=str(typed_exc),
-            contract_validation=getattr(typed_exc, "contract_validation", None),
+            contract_validation=typed_exc.contract_validation,
         )
         if isinstance(typed_exc, StepDeadlineExceeded):
             error_message = str(typed_exc)
@@ -2280,6 +2296,8 @@ class FlowRunExecutor:
                 step=step,
                 completion_received=rejected_completion is not None,
             )
+        deadline = typed_exc if isinstance(typed_exc, StepDeadlineExceeded) else None
+        completed_items, total_items = _failed_item_counts(typed_exc)
         failure_plan = build_typed_failure_plan(
             claimed=claimed,
             error_code=error_code,
@@ -2287,14 +2305,16 @@ class FlowRunExecutor:
             input_payload_json=failed_input_payload,
             effective_prompt=failed_prompt if isinstance(failed_prompt, str) else None,
             run_error_message=run_error_message,
-            rejected_output=getattr(typed_exc, "rejected_output", None),
+            rejected_output=rejected_output_of(typed_exc),
             rejected_completion=rejected_completion,
             max_inline_text_bytes=self.max_inline_text_bytes,
-            step_phase=getattr(typed_exc, "step_phase", None),
-            completed_items=getattr(typed_exc, "completed_items", None),
-            total_items=getattr(typed_exc, "total_items", None),
-            provider_work_may_have_completed=getattr(
-                typed_exc, "provider_work_may_have_completed", None
+            step_phase=deadline.step_phase if deadline is not None else None,
+            completed_items=completed_items,
+            total_items=total_items,
+            provider_work_may_have_completed=(
+                deadline.provider_work_may_have_completed
+                if deadline is not None
+                else None
             ),
             run_error_details=(
                 typed_exc.run_error_details
@@ -2304,21 +2324,12 @@ class FlowRunExecutor:
         )
         await self._rollback()
         attempt_start = _attempt_start_for_step(state=state, step=step)
-        requested_model = getattr(typed_exc, "requested_model", None)
-        provider = getattr(typed_exc, "provider", None)
-        if requested_model is None or provider is None:
-            state_model, state_provider = (
-                (
-                    attempt_start.requested_model,
-                    attempt_start.provider,
-                )
-                if attempt_start is not None
-                else _pre_attempt_start_model_from_state_cache(state=state, step=step)
-            )
-            if requested_model is None:
-                requested_model = state_model
-            if provider is None:
-                provider = state_provider
+        evidence = failure_evidence(typed_exc)
+        requested_model, provider = (
+            (attempt_start.requested_model, attempt_start.provider)
+            if attempt_start is not None
+            else _pre_attempt_start_model_from_state_cache(state=state, step=step)
+        )
         self._attach_pending_transcript_source(failure_plan.failed_result, attempt_no)
         await self.flow_run_repo.finish_attempt(
             run_id=run_id,
@@ -2329,12 +2340,10 @@ class FlowRunExecutor:
             error_code=failure_plan.error_code.value,
             error_message=failure_plan.error_message,
             rejected_completion=rejected_completion,
-            requested_model=requested_model
-            if isinstance(requested_model, str)
-            else None,
-            provider=provider if isinstance(provider, str) else None,
+            requested_model=requested_model,
+            provider=provider,
             provenance_json=build_incomplete_attempt_provenance(
-                rag_metadata=getattr(typed_exc, "rag_metadata", None),
+                rag_metadata=evidence.rag_metadata,
             ),
             attempt_input=build_terminal_attempt_input(
                 start=attempt_start,
@@ -2403,11 +2412,9 @@ class FlowRunExecutor:
         evidence_persistence_error = (
             exc if isinstance(exc, ProviderCallEvidencePersistenceError) else None
         )
+        completed_items, total_items = _failed_item_counts(exc)
         run_error_details = FlowRunErrorDetails.from_budget_context(
-            {
-                "completed_items": getattr(exc, "completed_items", None),
-                "total_items": getattr(exc, "total_items", None),
-            }
+            {"completed_items": completed_items, "total_items": total_items}
         )
         if evidence_persistence_error is not None:
             run_error_details = (run_error_details or FlowRunErrorDetails()).model_copy(
@@ -2503,7 +2510,7 @@ class FlowRunExecutor:
             requested_model=requested_model,
             provider=provider,
             provenance_json=build_incomplete_attempt_provenance(
-                rag_metadata=getattr(exc, "rag_metadata", None),
+                rag_metadata=failure_evidence(exc).rag_metadata,
             ),
             attempt_input=build_terminal_attempt_input(
                 start=attempt_start,

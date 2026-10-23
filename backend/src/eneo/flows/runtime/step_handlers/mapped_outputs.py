@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, cast
 
 from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptMappedAdmission,
@@ -17,6 +17,10 @@ from eneo.flows.domain.rag_evidence import (
 from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.domain.runtime import StepDiagnostic, StepExecutionOutput
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.runtime.step_failure_evidence import (
+    attach_failure_evidence,
+    failure_evidence,
+)
 from eneo.main.exceptions import TypedIOValidationException
 
 
@@ -142,5 +146,5 @@ def carry_call_evidence(exc: BaseException, rag_metadata: object) -> None:
     Used where a call has already retrieved and then fails — including output
     validation that runs after the call itself succeeded.
     """
-    if isinstance(rag_metadata, dict) and getattr(exc, "rag_metadata", None) is None:
-        setattr(exc, "rag_metadata", rag_metadata)
+    if isinstance(rag_metadata, dict) and failure_evidence(exc).rag_metadata is None:
+        attach_failure_evidence(exc, rag_metadata=cast(dict[str, Any], rag_metadata))

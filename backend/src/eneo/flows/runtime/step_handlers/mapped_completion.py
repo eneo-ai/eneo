@@ -39,6 +39,10 @@ from eneo.flows.runtime.step_execution_runtime import (
     attach_typed_failure_context,
     complete_step_execution,
 )
+from eneo.flows.runtime.step_failure_evidence import (
+    attach_failure_evidence,
+    failure_evidence,
+)
 from eneo.flows.runtime.step_handlers.base import (
     ActivatePreparedAssistantStepsFn,
     PreviewAssistantStepFn,
@@ -288,18 +292,19 @@ async def execute_section_completion(
                     output_budget.set_failure_progress(
                         exc, completed_items=completed_items + 1
                     )
-                    completed_items = exc.context["completed_items"]
+                    completed_items = cast(int, exc.context["completed_items"])
                 attach_typed_failure_context(
                     exc,
                     input_payload_for_result=base.prepared.input_payload_for_result,
                     effective_prompt=base.prepared.effective_prompt,
                 )
-            setattr(exc, "completed_items", completed_items)
-            setattr(exc, "total_items", total)
-            evidence.admit(getattr(exc, "rag_metadata", None))
+            attach_failure_evidence(
+                exc, completed_items=completed_items, total_items=total
+            )
+            evidence.admit(failure_evidence(exc).rag_metadata)
             partial = evidence.partial_payload()
             if partial is not None:
-                setattr(exc, "rag_metadata", partial)
+                attach_failure_evidence(exc, rag_metadata=partial)
             if budget is not None and not folding:
                 await persist_summarization(
                     base=base,
