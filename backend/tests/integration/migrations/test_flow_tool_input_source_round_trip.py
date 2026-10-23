@@ -16,6 +16,7 @@ import sqlalchemy as sa
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -114,28 +115,29 @@ def test_the_input_source_check_gains_and_loses_the_tool_value(test_settings):
     )
     conn.autocommit = True
     try:
-        command.upgrade(cfg, REVISION)
-        assert _input_source_check(conn) == (True, True)
-        _store_a_tool_step(conn)
+        with at_revision(cfg, REVISION):
+            try:
+                assert _input_source_check(conn) == (True, True)
+                _store_a_tool_step(conn)
 
-        _downgrade_stops_at_a_held_lock(cfg, test_settings)
-        assert _input_source_check(conn) == (True, True)
+                _downgrade_stops_at_a_held_lock(cfg, test_settings)
+                assert _input_source_check(conn) == (True, True)
 
-        with pytest.raises(RuntimeError, match="1 flow step"):
-            command.downgrade(cfg, PRE_REVISION)
-        assert _input_source_check(conn) == (True, True)
+                with pytest.raises(RuntimeError, match="1 flow step"):
+                    command.downgrade(cfg, PRE_REVISION)
+                assert _input_source_check(conn) == (True, True)
 
-        with conn.cursor() as cur:
-            cur.execute("DELETE FROM flow_steps WHERE input_source = 'tool'")
-        command.downgrade(cfg, PRE_REVISION)
-        assert _input_source_check(conn) == (False, True)
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM flow_steps WHERE input_source = 'tool'")
+                command.downgrade(cfg, PRE_REVISION)
+                assert _input_source_check(conn) == (False, True)
 
-        command.upgrade(cfg, REVISION)
-        assert _input_source_check(conn) == (True, True)
+                command.upgrade(cfg, REVISION)
+                assert _input_source_check(conn) == (True, True)
+            finally:
+                with conn.cursor() as cur:
+                    cur.execute("SET session_replication_role = replica")
+                    cur.execute("DELETE FROM flow_steps WHERE input_source = 'tool'")
+                    cur.execute("SET session_replication_role = DEFAULT")
     finally:
-        with conn.cursor() as cur:
-            cur.execute("SET session_replication_role = replica")
-            cur.execute("DELETE FROM flow_steps WHERE input_source = 'tool'")
-            cur.execute("SET session_replication_role = DEFAULT")
-        command.upgrade(cfg, "head")
         conn.close()

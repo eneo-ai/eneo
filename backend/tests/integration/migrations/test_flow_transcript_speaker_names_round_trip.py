@@ -13,6 +13,7 @@ import pytest
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -77,33 +78,33 @@ def test_speaker_names_columns_come_and_go_with_the_revision(test_settings):
     expected = {table: ("jsonb", "NO", "'{}'::jsonb") for table in TABLES}
     try:
         # A fresh database has no schema yet; one at head is past the revision.
-        command.upgrade(cfg, REVISION)
-        command.downgrade(cfg, PRE_REVISION)
-        assert _speaker_names_columns(conn) == {}
-        _store_a_correction_set(conn)
+        with at_revision(cfg, PRE_REVISION):
+            try:
+                assert _speaker_names_columns(conn) == {}
+                _store_a_correction_set(conn)
 
-        command.upgrade(cfg, REVISION)
-        assert _speaker_names_columns(conn) == expected
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT speaker_names FROM flow_transcript_corrections "
-                "WHERE step_id = %s",
-                (STEP_ID,),
-            )
-            assert cur.fetchall() == [({},)]
+                command.upgrade(cfg, REVISION)
+                assert _speaker_names_columns(conn) == expected
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT speaker_names FROM flow_transcript_corrections "
+                        "WHERE step_id = %s",
+                        (STEP_ID,),
+                    )
+                    assert cur.fetchall() == [({},)]
 
-        command.downgrade(cfg, PRE_REVISION)
-        assert _speaker_names_columns(conn) == {}
+                command.downgrade(cfg, PRE_REVISION)
+                assert _speaker_names_columns(conn) == {}
 
-        command.upgrade(cfg, REVISION)
-        assert _speaker_names_columns(conn) == expected
+                command.upgrade(cfg, REVISION)
+                assert _speaker_names_columns(conn) == expected
+            finally:
+                with conn.cursor() as cur:
+                    cur.execute("SET session_replication_role = replica")
+                    cur.execute(
+                        "DELETE FROM flow_transcript_corrections WHERE step_id = %s",
+                        (STEP_ID,),
+                    )
+                    cur.execute("SET session_replication_role = DEFAULT")
     finally:
-        with conn.cursor() as cur:
-            cur.execute("SET session_replication_role = replica")
-            cur.execute(
-                "DELETE FROM flow_transcript_corrections WHERE step_id = %s",
-                (STEP_ID,),
-            )
-            cur.execute("SET session_replication_role = DEFAULT")
-        command.upgrade(cfg, "head")
         conn.close()

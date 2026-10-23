@@ -13,6 +13,7 @@ import pytest
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -52,14 +53,13 @@ def test_audio_seconds_column_upgrades_and_downgrades(test_settings):
     )
     conn.autocommit = True
     try:
-        command.upgrade(cfg, REVISION)
-        assert "audio_seconds" in _columns(conn)
+        with at_revision(cfg, REVISION):
+            assert "audio_seconds" in _columns(conn)
 
-        command.downgrade(cfg, PRE_REVISION)
-        assert "audio_seconds" not in _columns(conn)
+            command.downgrade(cfg, PRE_REVISION)
+            assert "audio_seconds" not in _columns(conn)
 
-        command.upgrade(cfg, REVISION)
-        assert "audio_seconds" in _columns(conn)
+            command.upgrade(cfg, REVISION)
+            assert "audio_seconds" in _columns(conn)
     finally:
-        command.upgrade(cfg, "head")
         conn.close()

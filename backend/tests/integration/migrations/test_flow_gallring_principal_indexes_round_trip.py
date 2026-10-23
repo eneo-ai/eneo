@@ -6,6 +6,10 @@ flows-owned tables: after the revision there is no difference, and before it the
 only differences are the new indexes. The new indexes are also compared by their
 normalized DDL text (columns, expressions and predicate), so a wrong column in an
 IS NOT NULL predicate fails.
+
+The revision also indexes builder_client_errors.user_id. That table left the ORM
+with the AI Builder (202610212200 drops it), so its index is compared with the
+definition the revision creates instead.
 """
 
 from __future__ import annotations
@@ -23,6 +27,7 @@ from alembic import command
 from alembic.config import Config
 from eneo.database.tables import flow_tables
 from eneo.database.tables.base_class import Base
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -47,9 +52,8 @@ _PRINCIPAL_COLUMNS = {
         "edited_by_service_id",
     ),
     "flow_run_review_checkpoint_edits": ("edited_by_user_id", "edited_by_service_id"),
-    "builder_client_errors": ("user_id",),
 }
-NEW_INDEX_NAMES = frozenset(
+ORM_INDEX_NAMES = frozenset(
     {
         "ix_flow_provider_calls_resolved_inputs_attempt_id",
         "ix_flow_runtime_uploaded_files_created_at_file_id",
@@ -60,6 +64,14 @@ NEW_INDEX_NAMES = frozenset(
         ),
     }
 )
+# New indexes of tables a later revision drops, so the ORM no longer declares them.
+_RETIRED_TABLE_INDEXES = {
+    "ix_builder_client_errors_user_id": (
+        "CREATE INDEX ix_builder_client_errors_user_id ON builder_client_errors "
+        "(user_id) WHERE user_id IS NOT NULL"
+    ),
+}
+NEW_INDEX_NAMES = ORM_INDEX_NAMES | _RETIRED_TABLE_INDEXES.keys()
 
 
 def _alembic_cfg(database_url: str) -> Config:
@@ -90,10 +102,10 @@ def round_trip_db(test_settings):
         password=test_settings.postgres_password,
     )
     conn.autocommit = True
-    command.upgrade(cfg, REVISION)
     engine = sa.create_engine(test_settings.sync_database_url)
     try:
-        yield {"conn": conn, "cfg": cfg, "engine": engine}
+        with at_revision(cfg, REVISION):
+            yield {"conn": conn, "cfg": cfg, "engine": engine}
     finally:
         engine.dispose()
         conn.close()
@@ -180,9 +192,12 @@ def _definition_drift(conn) -> dict[str, tuple[str, str]]:
         )
         for table in _flow_owned_tables()
         for index in table.indexes
-        if index.name in NEW_INDEX_NAMES
+        if index.name in ORM_INDEX_NAMES
     }
-    assert set(declared) == NEW_INDEX_NAMES, "every new index must be ORM-declared"
+    assert set(declared) == ORM_INDEX_NAMES, (
+        "every live-table index must be ORM-declared"
+    )
+    declared.update(_RETIRED_TABLE_INDEXES)
     return {
         name: (declared[name], actual.get(name, "<missing>"))
         for name in declared
@@ -220,7 +235,12 @@ def test_downgrade_removes_exactly_the_new_indexes_and_upgrade_restores_them(
     command.downgrade(cfg, PRE_REVISION)
     drift = _index_drift(engine)
     assert set(drift.values()) == {"missing"}
-    assert set(drift) == NEW_INDEX_NAMES
+    assert set(drift) == ORM_INDEX_NAMES
+    assert {
+        name
+        for name, (_, actual) in _definition_drift(conn).items()
+        if actual == "<missing>"
+    } == NEW_INDEX_NAMES
 
     command.upgrade(cfg, REVISION)
     assert _index_drift(engine) == {}
