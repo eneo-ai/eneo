@@ -20,6 +20,7 @@ from eneo.internal_mcp.foundation import (
 )
 from eneo.main.exceptions import (
     BadRequestException,
+    ConflictException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -115,6 +116,7 @@ async def _call(
                 )
     except (
         BadRequestException,
+        ConflictException,
         NotFoundException,
         UnauthorizedException,
         ValidationError,
@@ -665,8 +667,9 @@ async def read_flow_suggestions(ctx: Context, offset: int = 0) -> CallToolResult
     an impact level and how it is acted on (fix.kind). It reports only what
     the definition proves: the reads publish and the runtime resolve, no
     judgement of prompt text, no run content. Suggestions never block
-    publishing and the tool changes nothing; a change the user agrees to is
-    made with update_step in edit mode. Works in view mode."""
+    publishing and the tool changes nothing: a fix the user agrees to is
+    made with apply_flow_suggestions when its fix.kind is patch, otherwise
+    with update_step, both in edit mode. Works in view mode."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_suggestions_router import get_flow_suggestions
@@ -682,6 +685,51 @@ async def read_flow_suggestions(ctx: Context, offset: int = 0) -> CallToolResult
         )
 
     return await _call(ctx, operation)
+
+
+@mcp.tool()
+async def apply_flow_suggestions(
+    ctx: Context, fingerprints: list[str], expected_revision: int
+) -> CallToolResult:
+    """Apply the fixes of suggestions read_flow_suggestions reported, after the
+    user agreed to them: only suggestions whose fix.kind is patch, named by
+    fingerprint, with the draft_revision of that answer. All of them are
+    applied or none; one call for every fix the user agreed to. Refused with
+    flow_suggestion_stale when the draft no longer has one of them (read the
+    suggestions again) and flow_suggestion_not_patchable for any other fix
+    kind: propose that change and make it with update_step. The result lists
+    the fingerprints applied, those an earlier fix of the call resolved
+    (skipped) and the new draft_revision."""
+
+    async def operation(container, chat, request):
+        from eneo.flows.api.flow_suggestion_apply_models import (
+            FlowSuggestionsApplyRequest,
+        )
+        from eneo.flows.application.flow_suggestion_apply import (
+            apply_flow_suggestions as apply,
+        )
+
+        body = FlowSuggestionsApplyRequest.model_validate(
+            {"fingerprints": fingerprints, "expected_revision": expected_revision}
+        )
+        result = await apply(
+            chat.flow_id,
+            request,
+            fingerprints=body.fingerprints,
+            expected_revision=body.expected_revision,
+            container=container,
+        )
+        return page_result(
+            {
+                "saved": True,
+                "applied": list(result.applied),
+                "skipped": list(result.skipped),
+            },
+            flow_id=chat.flow_id,
+            revision=result.flow.draft_revision,
+        )
+
+    return await _call(ctx, operation, editing=True)
 
 
 @mcp.tool()

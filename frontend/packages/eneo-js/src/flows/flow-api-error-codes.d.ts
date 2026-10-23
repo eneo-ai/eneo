@@ -21,6 +21,8 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   UNPUBLISH_REQUIRED: "flow_unpublish_required";
   FORM_FIELD_STILL_READ: "flow_form_field_still_read";
   FORM_FIELD_RENAME_INVALID: "flow_form_field_rename_invalid";
+  SUGGESTION_STALE: "flow_suggestion_stale";
+  SUGGESTION_NOT_PATCHABLE: "flow_suggestion_not_patchable";
   AUTHORING_CHAT_NO_MODEL: "flow_authoring_chat_no_model";
   AUTHORING_MODEL_NOT_IN_SPACE: "flow_authoring_model_not_in_space";
   AUTHORING_MODEL_BELOW_CLASSIFICATION: "flow_authoring_model_below_classification";
@@ -269,6 +271,8 @@ export type FlowApiErrorCode =
   | "flow_unpublish_required"
   | "flow_form_field_still_read"
   | "flow_form_field_rename_invalid"
+  | "flow_suggestion_stale"
+  | "flow_suggestion_not_patchable"
   | "flow_authoring_chat_no_model"
   | "flow_authoring_model_not_in_space"
   | "flow_authoring_model_below_classification"

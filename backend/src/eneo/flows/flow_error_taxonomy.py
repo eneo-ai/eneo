@@ -112,6 +112,20 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Rename each saved field once, to its name in the new form; problem in the error context says what is wrong.",
         user_action="Reload the flow and rename the field again.",
     ),
+    FlowApiErrorCode.SUGGESTION_STALE: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The draft no longer has the suggestion the fingerprint names: a change since it was read fixed it or removed its premise.",
+        consumer_action="Read the suggestions again and apply one of those, or none if the list no longer has it.",
+        user_action="Reload the suggestions; this one no longer applies.",
+    ),
+    FlowApiErrorCode.SUGGESTION_NOT_PATCHABLE: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The suggestion the fingerprint names has no mechanical fix: its fix kind is assisted or advice.",
+        consumer_action="Make the change it describes as an editor update instead; fix_kind in the error context says which kind it is.",
+        user_action="Make the change yourself in the editor, or ask the flow assistant to make it.",
+    ),
     FlowApiErrorCode.AUTHORING_CHAT_NO_MODEL: _entry(
         category="Flow authoring",
         surfaced_through="API error response",
