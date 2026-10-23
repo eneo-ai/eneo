@@ -315,3 +315,145 @@ async def test_apply_flow_suggestions_reports_a_stale_suggestion(monkeypatch):
 
     assert result.isError is True
     assert json.loads(result.content[0].text)["code"] == "flow_suggestion_stale"
+
+
+# --- Suggestions a chat change introduces ------------------------------------
+
+
+_DUPLICATE_PROMPT = "Sammanfatta.\n{{ step_1.output.text }}"
+
+
+def _draft(prompt: str):
+    """A two-step draft, its step 2 prompt as given, with fixed ids so the
+    draft before and after a change are the same steps."""
+    from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
+    from tests.unit.flows.application.test_flow_suggestion_service import (
+        _flow,
+        _step,
+    )
+
+    steps = [
+        _step(1, id=_DRAFT_IDS[0], assistant_id=_DRAFT_IDS[2]),
+        _step(2, id=_DRAFT_IDS[1], assistant_id=_DRAFT_IDS[3]),
+    ]
+    prompts = {
+        _DRAFT_IDS[2]: StoredAssistantPrompt(text="Läs brevet.", description=None),
+        _DRAFT_IDS[3]: StoredAssistantPrompt(text=prompt, description=None),
+    }
+    return _flow(steps), prompts
+
+
+_DRAFT_IDS = [uuid4() for _ in range(4)]
+
+
+def _changing_chat(monkeypatch, *, before: str, after: str, fail: bool = False):
+    """A chat in edit mode whose update_step saves the draft from ``before``
+    to ``after`` (the step 2 prompt); ``fail`` breaks the analysis."""
+    container = _transaction_container([])
+    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=True)
+    monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
+    monkeypatch.setattr(
+        flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
+    )
+    monkeypatch.setattr(flow_authoring_chat, "require_authoring_edit", AsyncMock())
+    drafts = [_draft(before), _draft(after)]
+    service = container.flow_service.return_value
+    service.get_flow = AsyncMock(side_effect=[flow for flow, _ in drafts])
+    service.get_flow_assistant_prompts = (
+        AsyncMock(side_effect=RuntimeError("unreadable"))
+        if fail
+        else AsyncMock(side_effect=[prompts for _, prompts in drafts])
+    )
+    saved_step = SimpleNamespace(id=_DRAFT_IDS[1], assistant_id=_DRAFT_IDS[3])
+    read = MagicMock(id=_DRAFT_IDS[1], assistant_id=_DRAFT_IDS[3])
+    read.model_dump.return_value = {}
+    monkeypatch.setattr(
+        flow_authoring_operations,
+        "get_flow",
+        AsyncMock(return_value=SimpleNamespace(steps=[read])),
+    )
+    save = AsyncMock(return_value=SimpleNamespace(steps=[saved_step], draft_revision=5))
+    monkeypatch.setattr(flow_authoring_operations, "apply_editor_update", save)
+    return save
+
+
+async def _update_step():
+    result = await flows.update_step(
+        MagicMock(),
+        expected_revision=4,
+        step_id=_DRAFT_IDS[1],
+        changes={"user_description": "Steg 2"},
+    )
+    assert result.isError is not True
+    return json.loads(result.content[0].text)
+
+
+async def test_a_change_that_adds_a_duplicate_read_reports_it(monkeypatch):
+    _changing_chat(monkeypatch, before="Sammanfatta.", after=_DUPLICATE_PROMPT)
+
+    page = await _update_step()
+
+    (introduced,) = page["introduced_suggestions"]
+    assert introduced["code"] == "duplicate_read"
+    assert introduced["fix_kind"] == "patch"
+    assert introduced["steps"] == [
+        {"step_order": 2, "name": "Steg 2"},
+        {"step_order": 1, "name": "Steg 1"},
+    ]
+    assert "patch" not in introduced
+    assert page["suggestion_count"] == 1
+    assert json.loads(page["content"])["saved"] is True
+
+
+async def test_a_change_that_adds_nothing_reports_an_empty_list(monkeypatch):
+    _changing_chat(monkeypatch, before=_DUPLICATE_PROMPT, after=_DUPLICATE_PROMPT)
+
+    page = await _update_step()
+
+    assert page["introduced_suggestions"] == []
+    assert page["suggestion_count"] == 1
+
+
+async def test_a_change_that_fixes_a_suggestion_reports_none_and_fewer(monkeypatch):
+    _changing_chat(monkeypatch, before=_DUPLICATE_PROMPT, after="Sammanfatta.")
+
+    page = await _update_step()
+
+    assert page["introduced_suggestions"] == []
+    assert page["suggestion_count"] == 0
+
+
+async def test_a_failed_analysis_still_saves_and_reports_nothing(monkeypatch, caplog):
+    save = _changing_chat(
+        monkeypatch, before="Sammanfatta.", after=_DUPLICATE_PROMPT, fail=True
+    )
+
+    page = await _update_step()
+
+    save.assert_awaited_once()
+    assert json.loads(page["content"])["saved"] is True
+    assert "introduced_suggestions" not in page
+    assert "suggestion_count" not in page
+    # Logged by its kind, without the content it read.
+    assert "could not be computed" in caplog.text
+    assert "unreadable" not in caplog.text
+
+
+def test_every_draft_changing_tool_reports_introduced_suggestions():
+    import inspect
+
+    changing = {
+        name
+        for name, tool in vars(flows).items()
+        if inspect.iscoroutinefunction(tool)
+        and "changes_draft=True" in inspect.getsource(tool)
+    }
+
+    assert changing == {
+        "update_flow_settings",
+        "update_step",
+        "add_step",
+        "move_step",
+        "remove_step",
+        "apply_flow_suggestions",
+    }

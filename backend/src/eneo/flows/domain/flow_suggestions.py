@@ -23,6 +23,7 @@ from eneo.flows.domain.flow_suggestion_input_rules import (
     whole_structured_reads,
 )
 from eneo.flows.domain.flow_suggestion_model import (
+    FLOW_SUGGESTION_AUTHORING_RULES,
     LEVEL_RANK,
     MAX_FLOW_SUGGESTIONS,
     DraftReads,
@@ -223,6 +224,7 @@ def _duplicate_read_message(
 
 
 __all__ = [
+    "FLOW_SUGGESTION_AUTHORING_RULES",
     "MAX_FLOW_SUGGESTIONS",
     "FlowSuggestion",
     "FlowSuggestionCode",

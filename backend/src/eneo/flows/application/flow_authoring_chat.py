@@ -8,6 +8,7 @@ but only the current one is ever answered or sent to the model, because
 
 from __future__ import annotations
 
+import textwrap
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -34,6 +35,10 @@ from eneo.flows.api.flow_definition_access import (
     require_flow_edit_access,
 )
 from eneo.flows.application.feature_gate import require_flows_enabled
+from eneo.flows.domain.flow_suggestions import (
+    FLOW_SUGGESTION_AUTHORING_RULES,
+    FlowSuggestionCode,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_authoring_chat_policy import resolve_flow_authoring_chat_model_id
@@ -53,7 +58,7 @@ def _session(container: Container) -> AsyncSession:
     return cast(AsyncSession, container.session())
 
 
-AUTHORING_INSTRUCTIONS = """Help the user configure this flow through the flow tools.
+_AUTHORING_BASICS = """Help the user configure this flow through the flow tools.
 Read the saved definition and revision before changing it. Preserve settings the
 user has not asked to change. The tools take the flow's own fields: input_source,
 input_type, output_mode and output_type describe a step. Never invent step kinds.
@@ -107,17 +112,51 @@ depend on read_tool_options. When a tool refuses a change, the refusal names
 what to fix: correct it and try again rather than concluding that the change
 is impossible, and do not rely on an earlier refusal in this conversation
 without calling the tool again.
-When the user asks to optimize or simplify the flow or make it cheaper, call
+"""
+
+_SUGGESTIONS_INTRODUCED = """After a change, the tool result lists under introduced_suggestions the
+suggestions the change introduced against these rules. Resolve each in the same
+turn, with
+apply_flow_suggestions for a fix whose fix.kind is patch and otherwise by
+adjusting the step with update_step, unless the user explicitly asked for that
+shape. Then tell the user in one plain sentence what you adjusted and why.
+"""
+
+_SUGGESTIONS_ON_REQUEST = """When the user asks to optimize or simplify the flow or make it cheaper, call
 read_flow_suggestions first. Explain each finding in plain words with its
 impact: which step receives which earlier result twice and through which
 reads. Never claim a duplication the tool did not report, and never say the
 flow is free of them beyond what it reported. Suggestions never block
-publishing. Change nothing until the user agrees, and then only what they
-agreed to. A finding whose fix.kind is patch is fixed with
-apply_flow_suggestions in edit mode, every agreed fix in one call; when the
-user asks to fix everything, that means every patch fix the tool reported.
-Any other finding you propose as a concrete change and make with update_step.
+publishing. For these findings about the flow as it was, change nothing until
+the user agrees, and then only what they agreed to. A finding whose fix.kind is
+patch is fixed with apply_flow_suggestions in edit mode, every agreed fix in one
+call; when the user asks to fix everything, that means every patch fix the tool
+reported. Any other finding you propose as a concrete change and make with
+update_step.
 """
+
+
+def _suggestion_rules() -> str:
+    """The catalogue's authoring rules, one per suggestion code."""
+    return "".join(
+        textwrap.fill(
+            FLOW_SUGGESTION_AUTHORING_RULES[code],
+            width=80,
+            initial_indent="- ",
+            subsequent_indent="  ",
+        )
+        + "\n"
+        for code in FlowSuggestionCode
+    )
+
+
+AUTHORING_INSTRUCTIONS = (
+    _AUTHORING_BASICS
+    + "Design every step by these rules from the start:\n"
+    + _suggestion_rules()
+    + _SUGGESTIONS_INTRODUCED
+    + _SUGGESTIONS_ON_REQUEST
+)
 
 
 class FlowAuthoringChatPublic(BaseModel):

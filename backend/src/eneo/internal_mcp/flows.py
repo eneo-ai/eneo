@@ -4,8 +4,9 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Awaitable, Callable
-from typing import Any, Literal
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from mcp.server.fastmcp import Context, FastMCP
@@ -24,6 +25,8 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     name="Eneo Flows",
@@ -86,7 +89,12 @@ async def _call(
     operation: Callable[..., Awaitable[CallToolResult]],
     *,
     editing: bool = False,
+    changes_draft: bool = False,
 ) -> CallToolResult:
+    """Run ``operation`` for the chat's flow in one authoring transaction.
+    ``editing`` requires edit mode; ``changes_draft`` (which implies it)
+    also reports the suggestions the change introduced (``_with_introduced``).
+    """
     from eneo.flows.application.flow_authoring_chat import (
         load_authoring_chat,
         require_authoring_edit,
@@ -107,12 +115,17 @@ async def _call(
                     scope.container,
                     session_id=scope.session_id,
                     assistant_id=scope.assistant_id,
-                    lock=editing,
+                    lock=editing or changes_draft,
                 )
-                if editing:
+                if editing or changes_draft:
                     await require_authoring_edit(scope.container, chat)
-                return await operation(
-                    scope.container, chat, scoped_request(chat.space_id)
+                request = scoped_request(chat.space_id)
+                if not changes_draft:
+                    return await operation(scope.container, chat, request)
+                before = await _draft_suggestions(scope.container, chat.flow_id)
+                result = await operation(scope.container, chat, request)
+                return await _with_introduced(
+                    result, scope.container, chat.flow_id, before
                 )
     except (
         BadRequestException,
@@ -147,6 +160,70 @@ async def _call(
                 )
             ],
         )
+
+
+async def _draft_suggestions(container, flow_id: UUID):
+    """The draft's static suggestions and its steps, read in a savepoint of
+    the change's transaction; None when they cannot be computed. A failure
+    is logged by its kind only and never fails the change."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from eneo.flows.application.flow_suggestion_service import (
+        list_flow_suggestions,
+    )
+
+    try:
+        async with cast(AsyncSession, container.session()).begin_nested():
+            flow = await container.flow_service().get_flow(flow_id)
+            return flow.steps, await list_flow_suggestions(
+                container=container, flow=flow
+            )
+    except Exception as exc:  # noqa: BLE001 - the change must not depend on it
+        logger.warning(
+            "Flow suggestions could not be computed around a chat change",
+            extra={"flow_id": str(flow_id), "error_type": type(exc).__name__},
+        )
+        return None
+
+
+async def _with_introduced(
+    result: CallToolResult, container, flow_id: UUID, before
+) -> CallToolResult:
+    """``result`` with the suggestions the change introduced
+    (``introduced_suggestions``, in short) and the draft's
+    ``suggestion_count`` added to its page; ``result`` unchanged when either
+    side could not be computed."""
+    from eneo.flows.application.flow_suggestion_service import (
+        MAX_REPORTED_INTRODUCED,
+        introduced_suggestions,
+        suggestion_summary,
+    )
+
+    if before is None or result.isError or not result.content:
+        return result
+    after = await _draft_suggestions(container, flow_id)
+    if after is None:
+        return result
+    steps, suggestions = after
+    content = result.content[0]
+    if not isinstance(content, TextContent):
+        return result
+    page = json.loads(content.text)
+    introduced = [
+        suggestion_summary(suggestion, steps)
+        for suggestion in introduced_suggestions(before[1], suggestions)
+    ]
+    page["introduced_suggestions"] = introduced[:MAX_REPORTED_INTRODUCED]
+    page["suggestion_count"] = len(suggestions)
+    while (
+        len(json.dumps(page, ensure_ascii=False)) > default_page_cap()
+        and page["introduced_suggestions"]
+    ):
+        page["introduced_suggestions"] = page["introduced_suggestions"][:-1]
+    result.content = [
+        TextContent(type="text", text=json.dumps(page, ensure_ascii=False))
+    ]
+    return result
 
 
 async def _call_runtime(
@@ -272,7 +349,7 @@ async def update_flow_settings(
             {"saved": True}, flow_id=chat.flow_id, revision=flow.draft_revision
         )
 
-    return await _call(ctx, operation, editing=True)
+    return await _call(ctx, operation, changes_draft=True)
 
 
 @mcp.tool()
@@ -459,7 +536,7 @@ async def update_step(
             revision=updated.draft_revision,
         )
 
-    return await _call(ctx, operation, editing=True)
+    return await _call(ctx, operation, changes_draft=True)
 
 
 @mcp.tool()
@@ -517,7 +594,7 @@ async def add_step(
             revision=updated.draft_revision,
         )
 
-    return await _call(ctx, operation, editing=True)
+    return await _call(ctx, operation, changes_draft=True)
 
 
 @mcp.tool()
@@ -538,7 +615,7 @@ async def move_step(
         ids.insert(_index_at(position, len(ids) + 1), step_id)
         return await _save_order(container, chat, request, expected_revision, ids)
 
-    return await _call(ctx, operation, editing=True)
+    return await _call(ctx, operation, changes_draft=True)
 
 
 @mcp.tool()
@@ -558,7 +635,7 @@ async def remove_step(
         ids.remove(step_id)
         return await _save_order(container, chat, request, expected_revision, ids)
 
-    return await _call(ctx, operation, editing=True)
+    return await _call(ctx, operation, changes_draft=True)
 
 
 def _index_at(position: int, places: int) -> int:
@@ -729,7 +806,7 @@ async def apply_flow_suggestions(
             revision=result.flow.draft_revision,
         )
 
-    return await _call(ctx, operation, editing=True)
+    return await _call(ctx, operation, changes_draft=True)
 
 
 @mcp.tool()
