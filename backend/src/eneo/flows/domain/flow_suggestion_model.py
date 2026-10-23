@@ -154,7 +154,13 @@ def suggestion_fingerprint(
     premise: Mapping[str, object],
 ) -> str:
     """The identity of a suggestion: its code, the steps it is about and the
-    read shape that triggered it, hashed as canonical JSON."""
+    read shape that triggered it, hashed as canonical JSON.
+
+    Steps are named by id and reads by ``read_premise``, never by step order
+    or expression text: a step removed, inserted or moved before them, or a
+    rename, rewrites the orders and the expressions but leaves the premise as
+    it was. A premise that changes (a read removed, read from another step,
+    another selector) changes the fingerprint."""
 
     return canonical_json_hash(
         {
@@ -163,6 +169,37 @@ def suggestion_fingerprint(
             "premise": premise,
         }
     )
+
+
+RUN_INPUT_PRODUCER = "run_input"
+_SOURCE_REF_SITE_PREFIX = "input_bindings.source_refs["
+
+
+def read_site_kind(site: str) -> str:
+    """Where a read is written, without what renumbering or renaming steps
+    rewrites: a prompt read without its expression, a source reference
+    without its index (the producer and selector name the reference)."""
+    if site.startswith(PROMPT_READ_SITE_PREFIX):
+        return PROMPT_READ_SITE_PREFIX.removesuffix(":")
+    if site.startswith(_SOURCE_REF_SITE_PREFIX):
+        return _SOURCE_REF_SITE_PREFIX.removesuffix("[")
+    return site
+
+
+def read_premise(read: StepRead) -> dict[str, object]:
+    """A read as a premise: its channel, the kind of site and its selector.
+    The producer is named by the caller, by id."""
+    return {
+        "channel": read.channel,
+        "site": read_site_kind(read.site),
+        "selector": list(read.selector),
+    }
+
+
+def read_premises(reads: Sequence[StepRead]) -> list[dict[str, object]]:
+    """``reads`` as premises, in an order that does not depend on where they
+    are written."""
+    return sorted((read_premise(read) for read in reads), key=canonical_json_hash)
 
 
 def make_suggestion(
@@ -174,10 +211,16 @@ def make_suggestion(
     message: str,
     level: FlowSuggestionLevel,
     fix: FlowSuggestionFix,
+    identity_steps: Sequence[UUID] | None = None,
 ) -> FlowSuggestion:
+    """``identity_steps``, when given, are the steps the fingerprint names
+    in place of ``steps``: a suggestion that names a step for the reader
+    without that step being part of its premise."""
     return FlowSuggestion(
         code=code,
-        fingerprint=suggestion_fingerprint(code, steps, premise),
+        fingerprint=suggestion_fingerprint(
+            code, steps if identity_steps is None else identity_steps, premise
+        ),
         steps=tuple(steps),
         params=params,
         message=message,
@@ -248,6 +291,14 @@ class DraftReads:
 
     def step_at(self, order: int) -> SuggestionStep | None:
         return next((step for step in self.steps if step.step_order == order), None)
+
+    def producer_key(self, order: int) -> str:
+        """The producer at ``order`` as a premise names it: the step's id, or
+        the run input (order 0)."""
+        step = self.step_at(order)
+        if step is None:
+            return RUN_INPUT_PRODUCER if order == 0 else f"missing:{order}"
+        return str(step.id)
 
     def model_reads(self, step: SuggestionStep) -> tuple[StepRead, ...]:
         """The reads that reach the step's model: its input and its prompt."""

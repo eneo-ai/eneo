@@ -77,7 +77,7 @@ _FLOW_AUTHORING_FORBIDDEN_DESCRIPTION = (
     "principal calls flow authoring endpoints that require a user principal."
 )
 
-_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION = (
+FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION = (
     "Forbidden. Machine-readable codes include `insufficient_scope` when the API key "
     "space scope does not match the flow, `insufficient_space_permission` when the "
     "caller lacks the required shared-space role, `flow_owner_required` when the "
@@ -202,7 +202,7 @@ _STALE_REVISION_EXAMPLE: dict[str, object] = {
         "code": FlowApiErrorCode.STALE_REVISION.value,
     },
 }
-_DRAFT_CHANGE_REFUSAL_EXAMPLES: dict[str, dict[str, object]] = {
+DRAFT_CHANGE_REFUSAL_EXAMPLES: dict[str, dict[str, object]] = {
     FlowApiErrorCode.STALE_REVISION.value: _STALE_REVISION_EXAMPLE,
     FlowApiErrorCode.STEP_READ_LOST_PRODUCER.value: _STEP_READ_LOST_PRODUCER_EXAMPLE,
     FlowApiErrorCode.FORM_FIELD_STILL_READ.value: _FORM_FIELD_STILL_READ_EXAMPLE,
@@ -305,7 +305,7 @@ async def create_flow(
             code=FlowApiErrorCode.SERVICE_KEY_SPACE_ID_REQUIRED,
         ),
         403: error_response(
-            description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
+            description=FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
             code=AccessDenialCode.INSUFFICIENT_SCOPE,
@@ -578,10 +578,10 @@ async def get_published_flow_runtime(
                 f"{_STEP_READ_LOST_PRODUCER_DESCRIPTION}. "
                 f"{_FORM_FIELD_REFUSALS_DESCRIPTION}"
             ),
-            examples=_DRAFT_CHANGE_REFUSAL_EXAMPLES,
+            examples=DRAFT_CHANGE_REFUSAL_EXAMPLES,
         ),
         403: error_response(
-            description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
+            description=FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
             code=AccessDenialCode.INSUFFICIENT_SCOPE,
@@ -847,10 +847,10 @@ __all__ = ["router"]
                 f"{_STEP_READ_LOST_PRODUCER_DESCRIPTION}. "
                 f"{_FORM_FIELD_REFUSALS_DESCRIPTION}"
             ),
-            examples=_DRAFT_CHANGE_REFUSAL_EXAMPLES,
+            examples=DRAFT_CHANGE_REFUSAL_EXAMPLES,
         ),
         403: error_response(
-            description=_FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
+            description=FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
             message="API key space scope does not match requested flow.",
             eneo_error_code=ErrorCodes.UNAUTHORIZED,
             code=AccessDenialCode.INSUFFICIENT_SCOPE,

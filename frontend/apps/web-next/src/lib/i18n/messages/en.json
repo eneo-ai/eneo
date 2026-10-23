@@ -8675,6 +8675,8 @@
   "flow_error_flow_run_required_step_input_missing": "Required files are missing. Add them and start the run again.",
   "flow_error_flow_document_runtime_required": "Documents cannot be created right now because document rendering is not set up. Ask an administrator to configure it.",
   "flow_error_flow_step_read_lost_producer": "A step would read another step than it reads now, because this change removes, renames or moves a step it reads. Change what the step reads first, or keep each step before the steps that use it.",
+  "flow_error_flow_suggestion_not_patchable": "This suggestion cannot be fixed automatically. Ask the assistant or change the step yourself.",
+  "flow_error_flow_suggestion_stale": "The suggestion no longer applies because the flow has changed. Look at the suggestions again and try once more.",
   "flow_error_flow_unpublish_required": "The flow is published and cannot be changed. Unpublish it first, then make the change again.",
   "flow_error_flow_form_field_still_read": "A step still reads the form field this change removes. Change what the step reads first, or rename the field instead of removing it.",
   "flow_error_flow_form_field_rename_invalid": "The form field could not be renamed because the form changed meanwhile. Reload the flow and rename the field again.",

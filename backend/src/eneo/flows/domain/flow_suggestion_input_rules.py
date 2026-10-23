@@ -23,6 +23,7 @@ from eneo.flows.domain.flow_suggestion_model import (
     join_descriptions,
     make_suggestion,
     read_payload,
+    read_premises,
     uses_completion_model,
 )
 from eneo.flows.domain.long_material import long_material_config
@@ -90,7 +91,10 @@ def broad_all_previous_steps(draft: DraftReads) -> list[FlowSuggestion]:
                 FlowSuggestionCode.BROAD_ALL_PREVIOUS_STEPS,
                 steps=(step.id,),
                 premise={
-                    "derived": [list(pair) for pair in derived],
+                    "derived": sorted(
+                        [draft.producer_key(later), draft.producer_key(source)]
+                        for later, source in derived
+                    ),
                     "broad": broad,
                 },
                 params={
@@ -165,11 +169,8 @@ def whole_structured_reads(draft: DraftReads) -> list[FlowSuggestion]:
                     FlowSuggestionCode.WHOLE_STRUCTURED_READ,
                     steps=(step.id, producer.id),
                     premise={
-                        "producer_step_order": producer_order,
-                        "sites": [
-                            {"channel": read.channel, "site": read.site}
-                            for read in reads
-                        ],
+                        "producer": draft.producer_key(producer_order),
+                        "reads": read_premises(reads),
                     },
                     params={
                         "producer_step_order": producer_order,
@@ -210,9 +211,9 @@ def per_item_prompt_reads(draft: DraftReads) -> list[FlowSuggestion]:
                     FlowSuggestionCode.PER_ITEM_PROMPT_READ,
                     steps=(step.id, *((producer.id,) if producer is not None else ())),
                     premise={
-                        "producer_step_order": producer_order,
+                        "producer": draft.producer_key(producer_order),
                         "execution_mode": mode,
-                        "sites": [read.site for read in reads],
+                        "reads": read_premises(reads),
                     },
                     params={
                         "execution_mode": mode,
@@ -271,7 +272,9 @@ def repeated_long_material(draft: DraftReads) -> list[FlowSuggestion]:
                     FlowSuggestionCode.REPEATED_LONG_MATERIAL,
                     steps=(step.id, earlier.id),
                     premise={
-                        "shared_step_orders": shared,
+                        "shared_producers": sorted(
+                            draft.producer_key(order) for order in shared
+                        ),
                         "shares_run_input": shares_run_input,
                     },
                     params={

@@ -403,13 +403,21 @@ def _flow_public(
 
 
 async def apply_editor_update(
-    id: UUID, request: Request, update: "FlowEditorUpdateRequest", container: Container
+    id: UUID,
+    request: Request,
+    update: "FlowEditorUpdateRequest",
+    container: Container,
+    *,
+    audit_context: Mapping[str, str] | None = None,
 ) -> FlowPublic:
     """Reserve the core revision before any child write; one commit and audit.
 
     Exceptions must escape the caller's transaction. A failed definition
     validation therefore also rolls back assistant changes, and the audit
     entries of the change are logged only once every check has passed.
+    ``audit_context`` is merged into the metadata extra of every audit entry
+    the change writes, for a caller that makes the change on someone's
+    behalf (an applied suggestion names itself there).
     """
     from eneo.flows.api.flow_assistant_router import flow_assistant_update_command
 
@@ -419,6 +427,8 @@ async def apply_editor_update(
         flow_id=id, expected_revision=update.expected_revision
     )
     audit, owns_audit = _change_audit(container)
+    if audit_context:
+        audit = audit.with_extra(audit_context)
     user = container.user()
     copies = _copy_on_write_changes(update, access.flow.steps)
     for change in update.assistants:
@@ -662,11 +672,29 @@ class _AuditEntries:
     is saved: a refused change, which its transaction rolls back, leaves no
     entry behind."""
 
-    def __init__(self, container: Container) -> None:
+    def __init__(
+        self,
+        container: Container,
+        *,
+        entries: list[dict[str, Any]] | None = None,
+        extra: Mapping[str, str] | None = None,
+    ) -> None:
         self._container = container
-        self._entries: list[dict[str, Any]] = []
+        self._entries: list[dict[str, Any]] = [] if entries is None else entries
+        self._extra: dict[str, str] = dict(extra or {})
+
+    def with_extra(self, extra: Mapping[str, str]) -> _AuditEntries:
+        """The same entries, each one added through the result carrying
+        ``extra`` in its metadata extra (over a key the entry sets itself)."""
+        return _AuditEntries(
+            self._container, entries=self._entries, extra={**self._extra, **extra}
+        )
 
     def add(self, **entry: Any) -> None:
+        if self._extra:
+            metadata = dict(entry.get("metadata") or {})
+            metadata["extra"] = {**(metadata.get("extra") or {}), **self._extra}
+            entry["metadata"] = metadata
         self._entries.append(entry)
 
     def __bool__(self) -> bool:
@@ -674,7 +702,8 @@ class _AuditEntries:
 
     async def log(self) -> None:
         audit_service = self._container.audit_service()
-        entries, self._entries = self._entries, []
+        entries = list(self._entries)
+        self._entries.clear()
         for entry in entries:
             await audit_service.log_async(**entry)
 

@@ -8675,6 +8675,8 @@
   "flow_error_flow_run_required_step_input_missing": "Filer som krävs saknas. Lägg till filerna och starta körningen igen.",
   "flow_error_flow_document_runtime_required": "Dokument kan inte skapas just nu eftersom dokumentgenereringen inte är konfigurerad. Be en administratör att konfigurera den.",
   "flow_error_flow_step_read_lost_producer": "Ett steg skulle läsa ett annat steg än i dag, eftersom ändringen tar bort, byter namn på eller flyttar ett steg som det läser. Ändra först vad steget läser, eller behåll varje steg före de steg som använder det.",
+  "flow_error_flow_suggestion_not_patchable": "Det här förslaget kan inte åtgärdas automatiskt. Fråga assistenten eller ändra steget själv.",
+  "flow_error_flow_suggestion_stale": "Förslaget gäller inte längre eftersom flödet har ändrats. Titta på förslagen igen och försök på nytt.",
   "flow_error_flow_unpublish_required": "Flödet är publicerat och kan inte ändras. Avpublicera det först och gör sedan ändringen igen.",
   "flow_error_flow_form_field_still_read": "Ett steg läser fortfarande formulärfältet som ändringen tar bort. Ändra först vad steget läser, eller byt namn på fältet i stället för att ta bort det.",
   "flow_error_flow_form_field_rename_invalid": "Formulärfältet kunde inte byta namn eftersom formuläret ändrades under tiden. Läs in flödet igen och byt namn på fältet en gång till.",

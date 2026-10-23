@@ -19,6 +19,7 @@ from eneo.flows.domain.flow_suggestion_model import (
     SuggestionStep,
     exact_expression,
     make_suggestion,
+    read_premise,
     uses_completion_model,
 )
 from eneo.flows.domain.flow_suggestion_patches import (
@@ -37,6 +38,7 @@ from eneo.flows.input_binding_contract_rules import (
 from eneo.flows.step_lineage import (
     INPUT_SOURCE_READ_SITE,
     STRUCTURED_SELECTOR_HEAD,
+    StepRead,
 )
 
 # A result in these output types is a document the run delivers.
@@ -180,7 +182,7 @@ def relay_steps(draft: DraftReads) -> list[FlowSuggestion]:
         readers = draft.readers_of(relay.step_order)
         if not readers or draft.unreadable_after(relay.step_order):
             continue
-        source_order, site = source
+        source_order, source_read = source
         source_step = draft.step_at(source_order) if source_order else None
         patch = (
             relay_patch(draft, relay, source_order)
@@ -195,7 +197,15 @@ def relay_steps(draft: DraftReads) -> list[FlowSuggestion]:
             make_suggestion(
                 FlowSuggestionCode.RELAY_STEP,
                 steps=(relay.id, *((source_step.id,) if source_step else ())),
-                premise={"source_step_order": source_order or None, "site": site},
+                # The relay is the finding: which step it passes on follows
+                # the steps before it (removing an earlier relay makes it
+                # pass on that relay's source), so only whether it passes on
+                # a step or the run input, and how it reads it, are premise.
+                identity_steps=(relay.id,),
+                premise={
+                    "source": "step" if source_step is not None else "run_input",
+                    "read": read_premise(source_read),
+                },
                 params={
                     "source_step_order": source_order or None,
                     "source_step_id": str(source_step.id) if source_step else None,
@@ -224,9 +234,11 @@ def relay_steps(draft: DraftReads) -> list[FlowSuggestion]:
     return suggestions
 
 
-def _relay_source(draft: DraftReads, step: SuggestionStep) -> tuple[int, str] | None:
+def _relay_source(
+    draft: DraftReads, step: SuggestionStep
+) -> tuple[int, StepRead] | None:
     """What a relay passes on: the order of the step it copies whole (0 for
-    the run input) and where it reads it; None when the step is no relay."""
+    the run input) and the read; None when the step is no relay."""
     mode = FlowOutputMode(step.output_mode)
     if (
         mode not in _RELAY_MODES
@@ -245,7 +257,7 @@ def _relay_source(draft: DraftReads, step: SuggestionStep) -> tuple[int, str] | 
         if source is FlowInputSource.FLOW_INPUT and not has_explicit_underlag(
             step.input_bindings
         ):
-            return 0, INPUT_SOURCE_READ_SITE
+            return 0, StepRead("input", 0, (), INPUT_SOURCE_READ_SITE)
         return None
     if len(reads) != 1 or reads[0].selector not in ((), (STRUCTURED_SELECTOR_HEAD,)):
         return None
@@ -253,7 +265,7 @@ def _relay_source(draft: DraftReads, step: SuggestionStep) -> tuple[int, str] | 
         FlowInputSource.PREVIOUS_STEP
     ):
         return None
-    return reads[0].step_order, reads[0].site
+    return reads[0].step_order, reads[0]
 
 
 def unused_form_fields(draft: DraftReads) -> list[FlowSuggestion]:

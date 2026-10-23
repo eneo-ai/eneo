@@ -112,8 +112,11 @@ read_flow_suggestions first. Explain each finding in plain words with its
 impact: which step receives which earlier result twice and through which
 reads. Never claim a duplication the tool did not report, and never say the
 flow is free of them beyond what it reported. Suggestions never block
-publishing. A change the user agrees to is made with update_step in edit
-mode: remove the redundant read the suggestion names and keep the other.
+publishing. Change nothing until the user agrees, and then only what they
+agreed to. A finding whose fix.kind is patch is fixed with
+apply_flow_suggestions in edit mode, every agreed fix in one call; when the
+user asks to fix everything, that means every patch fix the tool reported.
+Any other finding you propose as a concrete change and make with update_step.
 """
 
 

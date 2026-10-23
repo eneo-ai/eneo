@@ -6195,6 +6195,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/{id}/suggestions/apply/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Apply Flow Suggestions
+     * @description Apply the fixes of one or more suggestions of the draft, all of them or none: for each, the editor update in its `fix.patch`. One fix is a list of one; at most 50. The batch is fenced on `expected_revision` and the suggestions are computed again on the draft as it is saved, so it is made only while they still hold: a fingerprint the draft does not have (a change since it was read fixed it or removed what it was about) refuses the batch with `flow_suggestion_stale`, and one whose `fix.kind` is `assisted` or `advice` with `flow_suggestion_not_patchable`. The fixes are applied in the order the suggestions are listed, and after each one the suggestions are computed again, so two fixes of the same prompt both land; a suggestion an earlier fix of the batch made go away is skipped and listed under `skipped`. Each fix is the same change `PATCH /api/v1/flows/{id}/editor/` makes with that body: the same revision fence, reads that follow a moved or removed step, a copy for a step whose assistant other steps share, classification, and audit entries logged once the batch has saved, which here also name the suggestion (`origin: suggestion`, `suggestion_code`, `suggestion_fingerprint`). Each fix is a draft revision of its own; `flow.draft_revision` is the one after the last. It needs the permission to edit the flow.
+     */
+    post: operations["apply_flow_suggestions"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/template-files/": {
     parameters: {
       query?: never;
@@ -18113,6 +18133,8 @@ export interface components {
       | "flow_unpublish_required"
       | "flow_form_field_still_read"
       | "flow_form_field_rename_invalid"
+      | "flow_suggestion_stale"
+      | "flow_suggestion_not_patchable"
       | "flow_authoring_chat_no_model"
       | "flow_authoring_model_not_in_space"
       | "flow_authoring_model_below_classification"
@@ -28050,6 +28072,141 @@ export interface components {
        * @description The steps the suggestion is about; the first is the step it is shown on, the second, when there is one, the step it reads, copies or shares a source with. Empty for `unused_form_field`, which is about the run form.
        */
       steps: string[];
+    };
+    /**
+     * FlowSuggestionsAppliedPublic
+     * @description The flow after the batch and what became of each suggestion.
+     * @example {
+     *       "applied": [
+     *         "9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a"
+     *       ],
+     *       "flow": {
+     *         "created_at": "2026-03-17T09:30:00Z",
+     *         "created_by_user_id": "00000000-0000-0000-0000-000000000030",
+     *         "delivery": "artifact",
+     *         "description": "Transcribe a review conversation and return a PDF summary.",
+     *         "draft_revision": 3,
+     *         "id": "00000000-0000-0000-0000-000000000001",
+     *         "input_type": "audio",
+     *         "metadata_json": {
+     *           "wizard": {
+     *             "transcription_enabled": true
+     *           }
+     *         },
+     *         "name": "Employee Review Summary",
+     *         "output_type": "pdf",
+     *         "owner_user_id": "00000000-0000-0000-0000-000000000030",
+     *         "permissions": {
+     *           "can_delete": true,
+     *           "can_edit": true,
+     *           "can_publish": true,
+     *           "can_run": true,
+     *           "can_view_runs": true
+     *         },
+     *         "published_version": 3,
+     *         "run_history_retention": {
+     *           "contributors": {
+     *             "flow": {
+     *               "days": 30,
+     *               "mode": "preserve"
+     *             },
+     *             "organization": {
+     *               "days": 90,
+     *               "mode": "preserve"
+     *             },
+     *             "space": {
+     *               "days": 14,
+     *               "mode": "review_required"
+     *             }
+     *           },
+     *           "effective_days": 30,
+     *           "mode": "preserve",
+     *           "source": "flow",
+     *           "state": "configured"
+     *         },
+     *         "space_id": "00000000-0000-0000-0000-000000000020",
+     *         "space_name": "HR",
+     *         "step_count": 2,
+     *         "steps": [
+     *           {
+     *             "assistant_id": "00000000-0000-0000-0000-000000000201",
+     *             "created_at": "2026-03-17T09:30:00Z",
+     *             "id": "00000000-0000-0000-0000-000000000101",
+     *             "input_source": "flow_input",
+     *             "input_type": "audio",
+     *             "output_mode": "transcribe_only",
+     *             "output_type": "text",
+     *             "step_order": 1,
+     *             "updated_at": "2026-03-17T09:30:00Z",
+     *             "user_description": "Transcribe uploaded audio into Swedish text."
+     *           },
+     *           {
+     *             "assistant_id": "00000000-0000-0000-0000-000000000202",
+     *             "created_at": "2026-03-17T09:30:00Z",
+     *             "id": "00000000-0000-0000-0000-000000000102",
+     *             "input_source": "previous_step",
+     *             "input_type": "text",
+     *             "output_mode": "pass_through",
+     *             "output_type": "pdf",
+     *             "step_order": 2,
+     *             "updated_at": "2026-03-17T09:30:00Z",
+     *             "user_description": "Summarize the transcription into a PDF for HR follow-up."
+     *           }
+     *         ],
+     *         "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *         "updated_at": "2026-03-17T10:00:00Z"
+     *       },
+     *       "skipped": [
+     *         "4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b"
+     *       ]
+     *     }
+     */
+    FlowSuggestionsAppliedPublic: {
+      /**
+       * Applied
+       * @description The fingerprints whose fixes were applied, in that order.
+       * @example [
+       *       "9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a"
+       *     ]
+       */
+      applied: string[];
+      /** @description The flow as the editor update answers with it, after the last fix of the batch. */
+      flow: components["schemas"]["FlowPublic"];
+      /**
+       * Skipped
+       * @description The fingerprints the draft no longer had once an earlier fix of the batch was applied: that fix resolved them, or changed the steps they were about. Read the suggestions again for what is left.
+       * @example [
+       *       "4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b"
+       *     ]
+       */
+      skipped: string[];
+    };
+    /**
+     * FlowSuggestionsApplyRequest
+     * @description The suggestions to apply and the draft revision they were read at.
+     * @example {
+     *       "expected_revision": 4,
+     *       "fingerprints": [
+     *         "9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a",
+     *         "4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b4c7e0d2b"
+     *       ]
+     *     }
+     */
+    FlowSuggestionsApplyRequest: {
+      /**
+       * Expected Revision
+       * @description The `draft_revision` of the suggestions answer the fingerprints come from. The batch is fenced on it, as an editor update is.
+       * @example 4
+       */
+      expected_revision: number;
+      /**
+       * Fingerprints
+       * @description The `fingerprint` of each suggestion to apply, each once. One fix is a list of one. They are applied in the order the suggestions are listed, whatever the order here.
+       * @example [
+       *       "9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a"
+       *     ]
+       */
+      fingerprints: string[];
     };
     /**
      * FlowSuggestionsPublic
@@ -64541,6 +64698,95 @@ export interface operations {
            *       "message": "Flow not found."
            *     }
            */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  apply_flow_suggestions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowSuggestionsApplyRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowSuggestionsAppliedPublic"];
+        };
+      };
+      /** @description The draft moved on since `expected_revision` (`stale_revision`), the flow is published (`flow_unpublish_required`), or the editor update refuses a fix, with the codes `PATCH .../editor/` documents. Nothing of the batch is saved. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller lacks the required shared-space role, `flow_owner_required` when the caller is not allowed to override another member's draft, and the current fail-closed `flow_service_key_principal_not_supported` when a service-key principal calls flow authoring endpoints before first-class support lands. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_space_permission",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to edit flows in this space."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The draft does not have a suggestion the batch names (`flow_suggestion_stale`, with the `fingerprints` it lacks in `context`), or the fix of one is not a patch (`flow_suggestion_not_patchable`, with its `fingerprint`, `suggestion_code` and `fix_kind` in `context`). Nothing of the batch is saved. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
           "application/json": components["schemas"]["GeneralError"];
         };
       };

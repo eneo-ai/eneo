@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Request, status
+from fastapi import APIRouter, Body, Depends, Path, Request, status
 
 from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
@@ -12,18 +12,71 @@ from eneo.authentication.endpoint_access import (
     endpoint_access,
 )
 from eneo.flows.api.flow_api_common import error_response
+from eneo.flows.api.flow_authoring_router import (
+    DRAFT_CHANGE_REFUSAL_EXAMPLES,
+    FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
+)
 from eneo.flows.api.flow_definition_access import require_flow_edit_access
+from eneo.flows.api.flow_suggestion_apply_models import (
+    MAX_APPLIED_SUGGESTIONS,
+    FlowSuggestionsAppliedPublic,
+    FlowSuggestionsApplyRequest,
+)
 from eneo.flows.api.flow_suggestions_models import (
     FLOW_SUGGESTIONS_EXAMPLE,
     FlowSuggestionsPublic,
 )
+from eneo.flows.application import flow_authoring_operations as authoring_operations
+from eneo.flows.application import flow_suggestion_apply
 from eneo.flows.application.flow_suggestion_service import list_flow_suggestions
 from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes
-from eneo.server.dependencies.container import get_container
+from eneo.server.dependencies.container import (
+    get_container,
+    get_container_for_explicit_transaction,
+)
 
 router = APIRouter()
+
+# Applying suggestions is an editor change: it commits in the route
+# (`authoring_transaction`), so its audit entries are logged after the commit
+# and a refused change logs none.
+_AUTHORING_CONTAINER = get_container_for_explicit_transaction(
+    with_user=True, with_module_user=True
+)
+
+_SUGGESTION_STALE_EXAMPLE: dict[str, object] = {
+    "summary": "The draft no longer has the suggestion",
+    "value": {
+        "message": (
+            "The draft no longer has this suggestion. Read the suggestions again."
+        ),
+        "eneo_error_code": int(ErrorCodes.CONFLICT),
+        "code": FlowApiErrorCode.SUGGESTION_STALE.value,
+        "context": {
+            "fingerprint": "9b2d3f1a" * 8,
+            "fingerprints": ["9b2d3f1a" * 8],
+        },
+    },
+}
+_SUGGESTION_NOT_PATCHABLE_EXAMPLE: dict[str, object] = {
+    "summary": "The suggestion has no fix that can be applied as it is",
+    "value": {
+        "message": (
+            "This suggestion has no fix that can be applied as it is. Make the "
+            "change it describes in the editor."
+        ),
+        "eneo_error_code": int(ErrorCodes.CONFLICT),
+        "code": FlowApiErrorCode.SUGGESTION_NOT_PATCHABLE.value,
+        "context": {
+            "fingerprint": "9b2d3f1a" * 8,
+            "suggestion_code": "whole_structured_read",
+            "fix_kind": "assisted",
+        },
+    },
+}
 
 
 @router.get(
@@ -94,6 +147,100 @@ async def get_flow_suggestions(
         flow_id=flow.require_persisted_id(),
         draft_revision=flow.draft_revision,
         suggestions=suggestions,
+    )
+
+
+@router.post(
+    "/{id}/suggestions/apply/",
+    response_model=FlowSuggestionsAppliedPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="apply_flow_suggestions",
+    summary="Apply Flow Suggestions",
+    description=(
+        "Apply the fixes of one or more suggestions of the draft, all of them "
+        "or none: for each, the editor update in its `fix.patch`. One fix is "
+        f"a list of one; at most {MAX_APPLIED_SUGGESTIONS}. The batch is "
+        "fenced on `expected_revision` and the suggestions are computed again "
+        "on the draft as it is saved, so it is made only while they still "
+        "hold: a fingerprint the draft does not have (a change since it was "
+        "read fixed it or removed what it was about) refuses the batch with "
+        "`flow_suggestion_stale`, and one whose `fix.kind` is `assisted` or "
+        "`advice` with `flow_suggestion_not_patchable`. The fixes are applied "
+        "in the order the suggestions are listed, and after each one the "
+        "suggestions are computed again, so two fixes of the same prompt both "
+        "land; a suggestion an earlier fix of the batch made go away is "
+        "skipped and listed under `skipped`. Each fix is the same change "
+        "`PATCH /api/v1/flows/{id}/editor/` makes with that body: the same "
+        "revision fence, reads that follow a moved or removed step, a copy "
+        "for a step whose assistant other steps share, classification, and "
+        "audit entries logged once the batch has saved, which here also name "
+        "the suggestion (`origin: suggestion`, `suggestion_code`, "
+        "`suggestion_fingerprint`). Each fix is a draft revision of its own; "
+        "`flow.draft_revision` is the one after the last. "
+        "It needs the permission to edit the flow."
+    ),
+    responses={
+        400: error_response(
+            description=(
+                "The draft moved on since `expected_revision` "
+                "(`stale_revision`), the flow is published "
+                "(`flow_unpublish_required`), or the editor update refuses a "
+                "fix, with the codes `PATCH .../editor/` documents. Nothing "
+                "of the batch is saved."
+            ),
+            examples=DRAFT_CHANGE_REFUSAL_EXAMPLES,
+        ),
+        403: error_response(
+            description=FLOW_DRAFT_MUTATION_FORBIDDEN_DESCRIPTION,
+            message="You do not have permission to edit flows in this space.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
+            context={"auth_layer": "space_membership"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+        409: error_response(
+            description=(
+                "The draft does not have a suggestion the batch names "
+                "(`flow_suggestion_stale`, with the `fingerprints` it lacks in "
+                "`context`), or the fix of one is not a patch "
+                "(`flow_suggestion_not_patchable`, with its `fingerprint`, "
+                "`suggestion_code` and `fix_kind` in `context`). Nothing of "
+                "the batch is saved."
+            ),
+            examples={
+                FlowApiErrorCode.SUGGESTION_STALE.value: _SUGGESTION_STALE_EXAMPLE,
+                FlowApiErrorCode.SUGGESTION_NOT_PATCHABLE.value: (
+                    _SUGGESTION_NOT_PATCHABLE_EXAMPLE
+                ),
+            },
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
+async def apply_flow_suggestions(
+    id: Annotated[UUID, Path(description="Identifier of the draft flow.")],
+    request: Request,
+    body: Annotated[FlowSuggestionsApplyRequest, Body()],
+    container: Container = Depends(_AUTHORING_CONTAINER),
+) -> FlowSuggestionsAppliedPublic:
+    async with authoring_operations.authoring_transaction(container):
+        result = await flow_suggestion_apply.apply_flow_suggestions(
+            id,
+            request,
+            fingerprints=body.fingerprints,
+            expected_revision=body.expected_revision,
+            container=container,
+        )
+    return FlowSuggestionsAppliedPublic(
+        flow=result.flow, applied=list(result.applied), skipped=list(result.skipped)
     )
 
 

@@ -343,6 +343,25 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             "creates or updates"
         ),
     ),
+    "apply_flow_suggestions": _configurable(
+        (
+            ActionType.FLOW_UPDATED,
+            ActionType.ASSISTANT_UPDATED,
+            ActionType.ASSISTANT_CREATED,
+        ),
+        owner="flow_suggestion_apply.apply_flow_suggestions",
+        metadata_keys=(
+            *_FLOW_METADATA,
+            "changed_fields",
+            "origin",
+            "suggestion_code",
+            "suggestion_fingerprint",
+        ),
+        idempotency=(
+            "the editor update's events for each applied fix, each naming its "
+            "suggestion; a refused batch emits none"
+        ),
+    ),
     "get_or_create_flow_authoring_chat": _configurable(
         ActionType.FLOW_AUTHORING_CHAT_CREATED,
         owner="flow_authoring_chat.get_or_create_authoring_chat",

@@ -39,6 +39,7 @@ from eneo.flows.domain.flow_suggestion_model import (
     join_descriptions,
     make_suggestion,
     read_payload,
+    read_premises,
     suggestion_fingerprint,
     uses_completion_model,
 )
@@ -145,10 +146,8 @@ def _duplicate_reads(draft: DraftReads, step: SuggestionStep) -> list[FlowSugges
                 FlowSuggestionCode.DUPLICATE_READ,
                 steps=step_ids,
                 premise={
-                    "producer_step_order": producer_order,
-                    "sites": [
-                        {"channel": read.channel, "site": read.site} for read in group
-                    ],
+                    "producer": draft.producer_key(producer_order),
+                    "reads": read_premises(group),
                 },
                 params={
                     "producer_step_order": producer_order,

@@ -227,3 +227,66 @@ async def test_an_assistant_change_for_a_step_with_its_own_assistant_edits_it_in
     service.copy_reserved_flow_assistant.assert_not_awaited()
     call = service.update_reserved_flow_assistant.await_args
     assert call.kwargs["assistant_id"] == flow.steps[0].assistant_id
+
+
+async def test_an_audit_context_names_itself_in_every_entry_of_the_change():
+    container, _, flow = editor_context()
+    context = {"origin": "suggestion", "suggestion_code": "duplicate_read"}
+    await apply_editor_update(
+        flow.id,
+        _request(),
+        FlowEditorUpdateRequest.model_validate(
+            {
+                "expected_revision": 4,
+                "definition": {"description": "New description"},
+                "assistants": [
+                    {
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "changes": {"prompt": {"text": "new"}},
+                    }
+                ],
+            }
+        ),
+        container,
+        audit_context=context,
+    )
+    entries = [
+        call.kwargs for call in container.audit_service().log_async.await_args_list
+    ]
+    assert [entry["action"] for entry in entries] == [
+        ActionType.ASSISTANT_UPDATED,
+        ActionType.FLOW_UPDATED,
+    ]
+    # The context wins over the entry's own origin and keeps its other keys.
+    assistant_extra = entries[0]["metadata"]["extra"]
+    assert assistant_extra == {"flow_id": str(flow.id), **context}
+    assert entries[1]["metadata"]["extra"] == context
+
+
+async def test_without_an_audit_context_the_entries_are_as_the_editor_writes_them():
+    container, _, flow = editor_context()
+    await apply_editor_update(
+        flow.id,
+        _request(),
+        FlowEditorUpdateRequest.model_validate(
+            {
+                "expected_revision": 4,
+                "definition": {"description": "New description"},
+                "assistants": [
+                    {
+                        "assistant_id": str(flow.steps[0].assistant_id),
+                        "changes": {"prompt": {"text": "new"}},
+                    }
+                ],
+            }
+        ),
+        container,
+    )
+    entries = [
+        call.kwargs for call in container.audit_service().log_async.await_args_list
+    ]
+    assert entries[0]["metadata"]["extra"] == {
+        "flow_id": str(flow.id),
+        "origin": "flow_managed",
+    }
+    assert "extra" not in entries[1]["metadata"]
