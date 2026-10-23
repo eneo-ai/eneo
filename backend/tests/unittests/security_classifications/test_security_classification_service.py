@@ -1,6 +1,4 @@
 # Copyright (c) 2025 Sundsvalls Kommun
-#
-# Licensed under the MIT License.
 
 import uuid
 from unittest.mock import AsyncMock, MagicMock

@@ -20,7 +20,7 @@ vi.mock("./tour", () => ({ runTour: vi.fn(() => Promise.resolve("unavailable")) 
 vi.mock("@eneo/whats-new", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@eneo/whats-new")>();
   const release = actual.latestRelease()!;
-  const tourEntry = actual.visibleEntries(release, false)[0]!;
+  const tourEntry = actual.visibleEntries(release, () => false)[0]!;
   const withTour = {
     ...release,
     entries: release.entries.map((entry) =>
@@ -33,7 +33,7 @@ vi.mock("@eneo/whats-new", async (importOriginal) => {
 });
 
 const latest = latestRelease()!;
-const count = visibleEntries(latest, false).length;
+const count = visibleEntries(latest, () => false).length;
 
 afterEach(() => {
   cleanup();

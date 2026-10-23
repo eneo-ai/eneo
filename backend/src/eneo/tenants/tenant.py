@@ -85,6 +85,7 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
         ge=MIN_RETENTION_DAYS,
         le=MAX_RETENTION_DAYS,
     )
+    password_policy: dict[str, Any] = Field(default_factory=dict)
     favorite_providers: list[str] = Field(default_factory=list)
 
     @field_validator("favorite_providers")

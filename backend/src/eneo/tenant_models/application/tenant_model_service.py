@@ -1,5 +1,3 @@
-# MIT License
-
 """Tenant-model orchestration service.
 
 Pulls the create/update/delete business logic out of the five tenant

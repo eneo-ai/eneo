@@ -3665,5 +3665,13 @@
   "flow_run_more_run_id_hint": "Körningens id. Det behövs till exempel när en rättslig spärr ska gälla enskilda körningar.",
   "flow_run_more_trace_id_hint": "En unik referens till körningens loggar. Uppge den om du kontaktar supporten om körningen.",
   "chat_debug_value_about": "Förklaring: {label}",
-  "flow_runs_usage_tokens_explainer": "Tokens är de små textbitar som AI-modellen läser och skriver. Antalet räknar alla anrop till modellen, även nya försök, och kommer från tjänsten eller är uppskattat. Ofullständigt betyder att antalet saknas för minst ett anrop."
+  "flow_runs_usage_tokens_explainer": "Tokens är de små textbitar som AI-modellen läser och skriver. Antalet räknar alla anrop till modellen, även nya försök, och kommer från tjänsten eller är uppskattat. Ofullständigt betyder att antalet saknas för minst ett anrop.",
+  "integration_source_collapse_folder": "Fäll ihop {name}",
+  "integration_source_expand_folder": "Fäll ut {name}",
+  "duration": "Varaktighet",
+  "pages_succeeded": "{count} sidor lyckades",
+  "files_succeeded": "{count} filer lyckades",
+  "pages_and_files_succeeded": "{pages} sidor och {files} filer lyckades",
+  "pages_unchanged_count": "{count} sidor oförändrade",
+  "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv."
 }

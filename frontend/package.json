@@ -41,6 +41,7 @@
     "node": ">=18"
   },
   "resolutions": {
+    "katex": "0.18.11",
     "cookie": "0.7.2",
     "esbuild": ">0.25.0",
     "prettier": "3.9.4",

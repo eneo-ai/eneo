@@ -1200,6 +1200,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/password-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get tenant password lifecycle policy
+     * @description Get when local Eneo passwords in the current tenant must be replaced: after an administrator sets one, and after a maximum age.
+     */
+    get: operations["get_password_policy_api_v1_admin_password_policy_get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update tenant password lifecycle policy
+     * @description Update when local Eneo passwords in the current tenant must be replaced. Only the given fields change; a null max_age_days disables rotation.
+     */
+    patch: operations["update_password_policy_api_v1_admin_password_policy_patch"];
+    trace?: never;
+  };
   "/api/v1/admin/predefined-roles/": {
     parameters: {
       query?: never;
@@ -11582,6 +11606,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/websites/{id}/content-folders/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get Content Folders */
+    get: operations["get_content_folders_api_v1_websites__id__content_folders__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/websites/{id}/info-blobs/": {
     parameters: {
       query?: never;
@@ -17209,7 +17250,8 @@ export interface components {
       | 9065
       | 9066
       | 9067
-      | 9069;
+      | 9069
+      | 9070;
     /** EvidenceArtifactAvailabilitySummary */
     EvidenceArtifactAvailabilitySummary: {
       /** Artifact Count */
@@ -33731,6 +33773,46 @@ export interface components {
       new_password: string;
     };
     /**
+     * PasswordLifecyclePolicy
+     * @description Tenant policy for when a local password must be replaced.
+     *
+     *     Stored as ``tenants.password_policy`` (JSONB). Missing keys fall back to
+     *     these defaults, so rows written before a key existed keep working.
+     *
+     *     A password someone else set is always one-time and is not a tenant
+     *     choice; only the sysadmin API and the deployment seed may opt a single
+     *     account out (``password_change_required``).
+     */
+    PasswordLifecyclePolicy: {
+      /**
+       * Max Age Days
+       * @description Days a local password stays valid before the account must choose a new one at its next password login. Unset disables rotation.
+       */
+      max_age_days?: number | null;
+    };
+    /** PasswordLifecyclePolicyUpdate */
+    PasswordLifecyclePolicyUpdate: {
+      /** Max Age Days */
+      max_age_days?: number | null;
+    };
+    /**
+     * PasswordStatusPublic
+     * @description Where a local password stands against the tenant lifecycle policy.
+     *
+     *     ``change_required`` is true only when the current session is blocked
+     *     until the password is replaced; the dates are reported regardless.
+     */
+    PasswordStatusPublic: {
+      /** Change Required */
+      change_required: boolean;
+      /** Changed At */
+      changed_at?: string | null;
+      /** Expires At */
+      expires_at?: string | null;
+      /** Reason */
+      reason?: ("admin_set" | "expired") | null;
+    };
+    /**
      * PatchFederationRequest
      * @description Request model for partially updating the current tenant federation config.
      */
@@ -38741,6 +38823,10 @@ export interface components {
       modules?: components["schemas"]["ModuleInDB"][];
       /** Name */
       name: string;
+      /** Password Policy */
+      password_policy?: {
+        [key: string]: unknown;
+      };
       /** Privacy Policy */
       privacy_policy?: string | null;
       /**
@@ -39929,6 +40015,11 @@ export interface components {
        */
       password?: string | null;
       /**
+       * Password Change Required
+       * @description Whether the account must replace the given password at its first password login. Unset follows the tenant password policy; false skips this initial change. The tenant's max_age_days still applies.
+       */
+      password_change_required?: boolean | null;
+      /**
        * Quota Limit
        * @description Storage limit in bytes (minimum 1000 bytes = 1KB)
        * @example 50000000
@@ -39973,6 +40064,13 @@ export interface components {
       id: string;
       /** Is Active */
       is_active: boolean;
+      /**
+       * Password Change Required
+       * @default false
+       */
+      password_change_required?: boolean;
+      /** Password Changed At */
+      password_changed_at?: string | null;
       /** Quota Limit */
       quota_limit: number | null;
       /**
@@ -40138,6 +40236,8 @@ export interface components {
       password_change:
         | components["schemas"]["EneoPasswordChangeCapabilityPublic"]
         | components["schemas"]["ExternalPasswordChangeCapabilityPublic"];
+      /** @description Lifecycle of the local Eneo password against the tenant policy. Absent for accounts without a local password. */
+      password_status?: components["schemas"]["PasswordStatusPublic"] | null;
       /** Quota Limit */
       quota_limit?: number | null;
       /**
@@ -40271,6 +40371,13 @@ export interface components {
       id: string;
       /** Is Active */
       is_active: boolean;
+      /**
+       * Password Change Required
+       * @default false
+       */
+      password_change_required?: boolean;
+      /** Password Changed At */
+      password_changed_at?: string | null;
       /** Quota Limit */
       quota_limit: number | null;
       /**
@@ -40327,6 +40434,13 @@ export interface components {
       id: string;
       /** Is Active */
       is_active: boolean;
+      /**
+       * Password Change Required
+       * @default false
+       */
+      password_change_required?: boolean;
+      /** Password Changed At */
+      password_changed_at?: string | null;
       /** Quota Limit */
       quota_limit: number | null;
       /**
@@ -40594,6 +40708,25 @@ export interface components {
       | "crawl_stop_requested"
       | "crawl_active"
       | "crawl_cleanup_pending";
+    /**
+     * WebsiteContentFolderPublic
+     * @description A directory prefix in indexed resource URLs; counts include descendants.
+     */
+    WebsiteContentFolderPublic: {
+      /** Count */
+      count: number;
+      /** Has Children */
+      has_children: boolean;
+      /** Path */
+      path: string;
+    };
+    /** WebsiteContentFoldersPublic */
+    WebsiteContentFoldersPublic: {
+      /** Items */
+      items: components["schemas"]["WebsiteContentFolderPublic"][];
+      /** Next Cursor */
+      next_cursor: string | null;
+    };
     /** WebsiteCreate */
     WebsiteCreate: {
       /** @default crawl */
@@ -45208,6 +45341,104 @@ export interface operations {
       };
       /** @description Service Unavailable */
       503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_password_policy_api_v1_admin_password_policy_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PasswordLifecyclePolicy"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_password_policy_api_v1_admin_password_policy_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["PasswordLifecyclePolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PasswordLifecyclePolicy"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
         headers: {
           [name: string]: unknown;
         };
@@ -81725,6 +81956,69 @@ export interface operations {
       };
     };
   };
+  get_content_folders_api_v1_websites__id__content_folders__get: {
+    parameters: {
+      query?: {
+        prefix?: string;
+        cursor?: string | null;
+        limit?: number;
+      };
+      header?: never;
+      path: {
+        /** @description Unique identifier of the website */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["WebsiteContentFoldersPublic"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_info_blobs_api_v1_websites__id__info_blobs__get: {
     parameters: {
       query?: never;
@@ -81789,6 +82083,8 @@ export interface operations {
       query?: {
         limit?: number;
         cursor?: string | null;
+        q?: string;
+        prefix?: string;
       };
       header?: never;
       path: {

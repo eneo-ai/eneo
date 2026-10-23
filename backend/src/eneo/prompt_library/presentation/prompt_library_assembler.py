@@ -1,6 +1,4 @@
 # Copyright (c) 2026 Sundsvalls Kommun
-#
-# Licensed under the MIT License.
 
 
 from eneo.prompt_library.domain.prompt_library import (

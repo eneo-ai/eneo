@@ -1,5 +1,3 @@
-# MIT License
-
 """Helpers for validating tenant-scoped security classification references.
 
 The tenant model routers (completion / embedding / transcription) all need

@@ -63,7 +63,9 @@ function classify(rawFiles) {
   const frontendE2e = full || backend || frontend || files.some(isE2eFile);
   const webNextE2e = full || backend || webNext || files.some(isE2eFile);
   const schema = full || backend || files.some(isSchemaFile);
-  const scripts = full || whatsNewContract || files.some(isScriptTestFile);
+  // The news vocabulary contract test also depends on the backend permission enum.
+  const scripts = full || whatsNewContract || files.some(isScriptTestFile)
+    || files.includes("backend/src/eneo/roles/permissions.py");
   const routeMetadata = full || backend || files.includes("scripts/check_route_metadata.py");
   const dockerBackend = full || backend;
   const dockerFrontend = full || frontend;
@@ -191,6 +193,12 @@ function runSelfTest() {
   assert.equal(classify(["backend/src/eneo/server/main.py"]).schema, true);
   assert.equal(classify(["backend/src/eneo/server/main.py"]).route_metadata, true);
   assert.equal(classify(["backend/src/eneo/server/main.py"]).docker_backend, true);
+  assert.equal(classify(["backend/src/eneo/server/main.py"]).scripts, false);
+  assert.equal(
+    classify(["backend/src/eneo/roles/permissions.py"]).scripts,
+    true,
+    "permission changes must check the What's new vocabulary against the backend",
+  );
 
   assert.equal(classify(["scripts/backend_test_shard.py"]).backend, true);
   assert.equal(classify(["tool-runtime/src/tools/documents/control.ts"]).backend, true);

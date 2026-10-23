@@ -106,8 +106,11 @@ export function hasUnseenRelease(seenVersion, latest = latestRelease()) {
 
 /**
  * @param {import("./index").Release} release
- * @param {boolean} isAdmin
+ * @param {import("./index").PermissionCheck} can
  */
-export function visibleEntries(release, isAdmin) {
-  return release.entries.filter((entry) => isAdmin || (entry.audience ?? "all") === "all");
+export function visibleEntries(release, can) {
+  return release.entries.filter(
+    (entry) =>
+      (entry.audience !== "admin" || can("admin")) && (!entry.permissions || can(entry.permissions))
+  );
 }

@@ -8,7 +8,10 @@ import psycopg2
 from psycopg2 import sql
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from eneo.users.password import validate_new_local_password
+from eneo.users.password import (
+    PasswordPolicyViolationError,
+    validate_new_local_password,
+)
 
 
 # Configuration
@@ -26,6 +29,9 @@ class Settings(BaseSettings):
     default_user_name: Optional[str] = None
     default_user_email: Optional[str] = None
     default_user_password: Optional[str] = None
+    # The seeded password comes from the environment, so by default the
+    # account must choose its own at its first login. Test stacks opt out.
+    default_user_password_change_required: bool = True
 
     public_origin: Optional[str] = None
 
@@ -78,7 +84,14 @@ def create_salt_and_hashed_password(plaintext_password: str):
 
 # Add tenant and user
 def add_tenant_user(
-    conn, tenant_name, quota_limit, user_name, user_email, user_password
+    conn,
+    tenant_name,
+    quota_limit,
+    user_name,
+    user_email,
+    user_password,
+    *,
+    password_change_required: bool = True,
 ):
     try:
         cur = conn.cursor()
@@ -124,13 +137,30 @@ def add_tenant_user(
                     f"{tenant_name}. Set DEFAULT_USER_EMAIL to that address or "
                     "choose another DEFAULT_USER_NAME."
                 )
-            salt, hashed_pass = create_salt_and_hashed_password(user_password)
+            try:
+                salt, hashed_pass = create_salt_and_hashed_password(user_password)
+            except PasswordPolicyViolationError as e:
+                # Caught by the generic handler below, this left a fresh
+                # install with no tenant or user and a zero exit status.
+                raise SystemExit(
+                    f"Refusing to create default user {user_email}: "
+                    f"DEFAULT_USER_PASSWORD is not accepted. {e}"
+                ) from e
             add_user_query = sql.SQL(
-                "INSERT INTO users (username, email, password, salt, tenant_id, used_tokens, state) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id"
+                "INSERT INTO users (username, email, password, salt, tenant_id, used_tokens, state, password_changed_at, password_change_required) VALUES (%s, %s, %s, %s, %s, %s, %s, now(), %s) RETURNING id"
             )
             cur.execute(
                 add_user_query,
-                (user_name, user_email, hashed_pass, salt, tenant_id, 0, "active"),
+                (
+                    user_name,
+                    user_email,
+                    hashed_pass,
+                    salt,
+                    tenant_id,
+                    0,
+                    "active",
+                    password_change_required,
+                ),
             )
             user_id = cur.fetchone()[0]
         else:
@@ -299,6 +329,7 @@ if __name__ == "__main__":
             settings.default_user_name,
             settings.default_user_email,
             settings.default_user_password,
+            password_change_required=settings.default_user_password_change_required,
         )
 
     # Register PUBLIC_ORIGIN for CORS (idempotent; runs even when the default

@@ -18,6 +18,8 @@ from eneo.database.tables.info_blobs_table import (
     InfoBlobs,
     InfoBlobVersionState,
     active_info_blob_version,
+    website_navigation_path,
+    website_path_below,
     website_source_url_equals,
 )
 from eneo.database.tables.integration_table import IntegrationKnowledge
@@ -87,6 +89,21 @@ class WebsiteInfoBlobPage:
     items: list[InfoBlobInDBNoText]
     total_count: int
     next_cursor: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class WebsiteContentFolder:
+    """A URL prefix, not a page-to-document ownership relationship."""
+
+    path: str
+    count: int
+    has_children: bool
+
+
+@dataclass(frozen=True, slots=True)
+class WebsiteContentFolderPage:
+    items: list[WebsiteContentFolder]
+    next_cursor: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +180,13 @@ def _title_or_path_matches(q: str, url_anchor: str | None) -> ColumnElement[bool
             ),
             else_=InfoBlobs.url,
         )
+    return _title_or_url_matches(q, path)
+
+
+def _title_or_url_matches(
+    q: str, path: _Column | ColumnElement[str]
+) -> ColumnElement[bool]:
+    """``q`` in the title, or in ``path``: the searchable part of the URL."""
     needles = [q]
     if (encoded := quote(q, safe="/")) != q:
         needles.append(encoded)
@@ -1034,11 +1058,20 @@ class InfoBlobRepository:
         *,
         limit: int,
         cursor: UUID | None = None,
+        q: str = "",
+        prefix: str = "",
     ) -> WebsiteInfoBlobPage:
-        conditions = (
+        conditions = [
             InfoBlobs.website_id == website_id,
             active_info_blob_version(),
-        )
+        ]
+        if q.strip():
+            conditions.append(
+                _title_or_url_matches(q.strip(), self._website_search_path(prefix))
+            )
+        if prefix:
+            # URL paths are case sensitive; the range compares them byte by byte.
+            conditions.append(website_path_below(prefix))
         total_count = await self.session.scalar(
             sa.select(sa.func.count()).select_from(InfoBlobs).where(*conditions)
         )
@@ -1064,6 +1097,80 @@ class InfoBlobRepository:
             items=items,
             total_count=total_count or 0,
             next_cursor=items[-1].id if has_more else None,
+        )
+
+    @staticmethod
+    def _website_search_path(prefix: str) -> ColumnElement[str]:
+        """The URL below the selected directory, or below the origin.
+
+        The scheme and host are never searched, so the website's own name does
+        not match every resource. Mirrors ``url_anchor`` for integrations.
+        """
+        url = website_navigation_path()
+        if prefix:
+            return sa.func.substr(url, len(prefix) + 1)
+        return sa.func.regexp_replace(url, r"^https?://[^/]+", "")
+
+    async def get_website_folders(
+        self,
+        website_id: UUID,
+        *,
+        prefix: str = "",
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> WebsiteContentFolderPage:
+        """List one level across the entire active index, with bounded output.
+
+        Below a directory, ``ix_info_blobs_active_website_path`` limits the
+        grouping to that directory's rows. The website level groups every
+        active row of the website, so its cost grows with the website's size,
+        not with the page returned.
+        """
+        url = website_navigation_path()
+        conditions = [
+            InfoBlobs.website_id == website_id,
+            active_info_blob_version(),
+            url.op("~")(r"^https?://[^/]+"),
+        ]
+        if prefix:
+            remainder = sa.func.substr(url, len(prefix) + 1)
+            conditions.extend(
+                [
+                    website_path_below(prefix),
+                    sa.func.strpos(remainder, "/") > 0,
+                    sa.func.split_part(remainder, "/", 1) != "",
+                ]
+            )
+            path = sa.literal(prefix) + sa.func.split_part(remainder, "/", 1) + "/"
+            tail = sa.func.substr(remainder, sa.func.strpos(remainder, "/") + 1)
+        else:
+            origin = sa.func.substring(url, r"^https?://[^/]+")
+            path = origin + "/"
+            tail = sa.func.substr(url, sa.func.length(origin) + 2)
+
+        groups = (
+            sa.select(
+                path.label("path"),
+                sa.func.count().label("item_count"),
+                sa.func.bool_or(sa.func.strpos(tail, "/") > 1).label("has_children"),
+            )
+            .where(*conditions)
+            .group_by(path)
+            .subquery()
+        )
+        query = sa.select(groups).order_by(groups.c.path).limit(limit + 1)
+        if cursor is not None:
+            query = query.where(groups.c.path > cursor)
+        rows = (await self.session.execute(query)).all()
+        items = [
+            WebsiteContentFolder(
+                path=row.path, count=row.item_count, has_children=row.has_children
+            )
+            for row in rows[:limit]
+        ]
+        return WebsiteContentFolderPage(
+            items=items,
+            next_cursor=items[-1].path if len(rows) > limit else None,
         )
 
     @staticmethod
