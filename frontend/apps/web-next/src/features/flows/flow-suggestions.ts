@@ -3,7 +3,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import type { FlowStep } from "./flows-api";
-import { stepMention } from "./chat/references";
+import { stepMention, valueReference } from "./chat/references";
 
 /**
  * The core's suggestions for a draft (`GET /flows/{id}/suggestions/`): where
@@ -63,7 +63,10 @@ export function duplicateReads(params: Record<string, unknown>): DuplicateRead[]
   });
 }
 
-/** "som indata (föregående steg)", "i prompten ({{ step_1.output.text }})", ... */
+/**
+ * "som indata (föregående steg)", "i prompten ({{step_1.output.text}})", ...
+ * A value read is written as the chat writes it, so it shows as its pill.
+ */
 export function readText(
   read: DuplicateRead,
   t: Translate,
@@ -81,7 +84,7 @@ export function readText(
   }
   if (read.site.startsWith(PROMPT_SITE_PREFIX)) {
     const expression = read.site.slice(PROMPT_SITE_PREFIX.length);
-    return t("flow_suggestion_read_prompt", { token: `{{ ${expression} }}` });
+    return t("flow_suggestion_read_prompt", { token: valueReference(expression.trim()) });
   }
   return t("flow_suggestion_read_other", { site: read.site });
 }
@@ -94,20 +97,43 @@ function joinReads(parts: string[], t: Translate): string {
 }
 
 /**
+ * A step the suggestion names, as the chat writes it (`@[Name](step:<id>)`,
+ * a pill), or "steg 2" when the draft does not have it.
+ */
+function producerText(
+  params: Record<string, unknown>,
+  steps: readonly FlowStep[],
+  t: Translate
+): string {
+  const order = typeof params.producer_step_order === "number" ? params.producer_step_order : 0;
+  const step = steps.find((candidate) =>
+    typeof params.producer_step_id === "string"
+      ? candidate.id === params.producer_step_id
+      : candidate.step_order === order
+  );
+  return step?.id
+    ? stepMention({ id: step.id, user_description: step.user_description })
+    : t("flow_suggestion_producer_order", { order });
+}
+
+/**
  * The title and explanation of a suggestion, from its code and params. The
  * step it is shown on, when known, says how its input reads the earlier step.
+ * Steps and values are written as the flow chat writes them, so
+ * `ReferenceText` shows them as the chat's pills (`referencePlainText` gives
+ * the words for an accessible name).
  */
 export function suggestionText(
   suggestion: FlowSuggestion,
   t: Translate,
-  step?: Pick<FlowStep, "input_source">
+  step?: Pick<FlowStep, "input_source">,
+  steps: readonly FlowStep[] = []
 ): SuggestionText {
   const code: string = suggestion.code;
   switch (code) {
     case "duplicate_read": {
       const params = suggestion.params;
-      const producer =
-        typeof params.producer_step_order === "number" ? params.producer_step_order : 0;
+      const producer = producerText(params, steps, t);
       const contained = params.contained === true;
       const reads = joinReads(
         duplicateReads(params).map((read) => readText(read, t, step)),
@@ -177,7 +203,7 @@ export function suggestionRequest(
     step.id ? [stepMention({ id: step.id, user_description: step.user_description })] : []
   );
   return t("flow_suggestion_ask_request", {
-    title: suggestionText(suggestion, t, named[0]).title,
+    title: suggestionText(suggestion, t, named[0], steps).title,
     code: suggestion.code,
     // Pills in the composer, side by side; a pill brings its own space.
     steps: mentions.join(" ")
