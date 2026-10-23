@@ -247,3 +247,71 @@ async def test_read_flow_suggestions_reports_the_drafts_suggestions_in_view_mode
     # A read: the tool asks the router for this chat's flow and needs no edit mode.
     assert read.await_args.kwargs["id"] == chat.flow_id
     edit.assert_not_awaited()
+
+
+def _apply_chat(monkeypatch, *, editing: bool):
+    from eneo.flows.application import flow_suggestion_apply
+
+    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=editing)
+    monkeypatch.setattr(
+        flows, "internal_tool_context", _tool_context(_transaction_container([]))
+    )
+    monkeypatch.setattr(
+        flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
+    )
+    if editing:
+        monkeypatch.setattr(flow_authoring_chat, "require_authoring_edit", AsyncMock())
+    apply = AsyncMock(
+        return_value=flow_suggestion_apply.AppliedSuggestions(
+            flow=SimpleNamespace(draft_revision=6),  # pyright: ignore[reportArgumentType]
+            applied=("a",),
+            skipped=("b",),
+        )
+    )
+    monkeypatch.setattr(flow_suggestion_apply, "apply_flow_suggestions", apply)
+    return chat, apply
+
+
+async def test_apply_flow_suggestions_is_refused_outside_edit_mode(monkeypatch):
+    _, apply = _apply_chat(monkeypatch, editing=False)
+
+    result = await flows.apply_flow_suggestions(
+        MagicMock(), fingerprints=["a"], expected_revision=4
+    )
+
+    assert result.isError is True
+    apply.assert_not_awaited()
+
+
+async def test_apply_flow_suggestions_applies_the_batch_in_edit_mode(monkeypatch):
+    chat, apply = _apply_chat(monkeypatch, editing=True)
+
+    result = await flows.apply_flow_suggestions(
+        MagicMock(), fingerprints=["a", "b"], expected_revision=4
+    )
+
+    assert result.isError is not True
+    page = json.loads(result.content[0].text)
+    assert page["draft_revision"] == 6
+    assert json.loads(page["content"]) == {
+        "saved": True,
+        "applied": ["a"],
+        "skipped": ["b"],
+    }
+    assert apply.await_args.args[0] == chat.flow_id
+    assert apply.await_args.kwargs["fingerprints"] == ["a", "b"]
+    assert apply.await_args.kwargs["expected_revision"] == 4
+
+
+async def test_apply_flow_suggestions_reports_a_stale_suggestion(monkeypatch):
+    from eneo.main.exceptions import ConflictException
+
+    _, apply = _apply_chat(monkeypatch, editing=True)
+    apply.side_effect = ConflictException("gone", code="flow_suggestion_stale")
+
+    result = await flows.apply_flow_suggestions(
+        MagicMock(), fingerprints=["a"], expected_revision=4
+    )
+
+    assert result.isError is True
+    assert json.loads(result.content[0].text)["code"] == "flow_suggestion_stale"

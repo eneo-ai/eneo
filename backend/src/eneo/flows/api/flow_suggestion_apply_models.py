@@ -4,7 +4,7 @@ from typing import Annotated, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
-from eneo.flows.api.flow_models import FlowPublic
+from eneo.flows.api.flow_models import FLOW_PUBLIC_EXAMPLE, FlowPublic
 
 MAX_APPLIED_SUGGESTIONS = 50
 
@@ -55,6 +55,16 @@ class FlowSuggestionsApplyRequest(BaseModel):
 
 class FlowSuggestionsAppliedPublic(BaseModel):
     """The flow after the batch and what became of each suggestion."""
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "flow": FLOW_PUBLIC_EXAMPLE,
+                "applied": [_FINGERPRINT],
+                "skipped": [_OTHER_FINGERPRINT],
+            }
+        }
+    )
 
     flow: FlowPublic = Field(
         description=(
