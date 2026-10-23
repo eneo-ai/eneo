@@ -17,6 +17,7 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { flowAssistantQueryOptions } from "./editor/editor-api";
 import { stepUsesModel } from "./editor/step-rules";
 import type { FlowStep } from "./flows-api";
+import type { StepChange } from "./flow-changes";
 import { inputTypeLabel, producesLabel, readLabel, stepLabel } from "./flow-labels";
 import { stepName, stepReaders, stepReads, type StepPrompts } from "./flow-steps";
 
@@ -63,6 +64,7 @@ function StepCard({
   index,
   canEdit,
   speakerOffer,
+  change,
   actions
 }: {
   step: FlowStep;
@@ -71,6 +73,8 @@ function StepCard({
   index: number;
   canEdit: boolean;
   speakerOffer: SpeakerStepOffer | null;
+  /** What the chat just did to this step, while the mark lasts. */
+  change: StepChange | null;
   actions: StepActions & { onAskRemove: (step: FlowStep) => void };
 }) {
   const t = useTranslations();
@@ -84,6 +88,10 @@ function StepCard({
     <article
       id={stepCardId(id)}
       aria-labelledby={titleId}
+      data-highlight={change ? "" : undefined}
+      // Named for the view transition that moves, shows and hides the cards
+      // when the chat's tools change the flow.
+      style={id ? { viewTransitionName: `flow-step-${id}` } : undefined}
       className="border-ax-border bg-ax-card rounded-ax-container data-[highlight]:border-ax-accent flex flex-col gap-3 border p-4 transition-colors"
     >
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
@@ -94,12 +102,22 @@ function StepCard({
             </span>
             <span className="text-base">{stepName(step) ?? t("flows_step_unnamed")}</span>
           </Heading>
-          {review ? (
-            <span>
-              <Badge
-                variant="warning"
-                label={review === "edit" ? t("flows_review_edit") : t("flows_review_view")}
-              />
+          {review || change ? (
+            <span className="flex flex-wrap gap-1.5">
+              {review ? (
+                <Badge
+                  variant="warning"
+                  label={review === "edit" ? t("flows_review_edit") : t("flows_review_view")}
+                />
+              ) : null}
+              {change ? (
+                <Token
+                  size="sm"
+                  color="blue"
+                  label={t(`flows_step_change_${change}`)}
+                  className="motion-safe:animate-in motion-safe:fade-in"
+                />
+              ) : null}
             </span>
           ) : null}
         </div>
@@ -241,6 +259,7 @@ export function FlowStepList({
   canEdit,
   headingRef,
   speakerOffer = null,
+  changes = null,
   ...actions
 }: StepActions & {
   flowId: string;
@@ -248,6 +267,8 @@ export function FlowStepList({
   canEdit: boolean;
   headingRef: React.Ref<HTMLHeadingElement>;
   speakerOffer?: SpeakerStepOffer | null;
+  /** The steps the chat just added, changed or moved, by id, while the mark lasts. */
+  changes?: ReadonlyMap<string, StepChange> | null;
 }) {
   const t = useTranslations();
   const headingId = useId();
@@ -303,6 +324,7 @@ export function FlowStepList({
                 index={index}
                 canEdit={canEdit}
                 speakerOffer={speakerOffer}
+                change={(step.id && changes?.get(step.id)) || null}
                 actions={{ ...actions, onAskRemove: setRemoving }}
               />
             </li>

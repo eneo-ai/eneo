@@ -9,11 +9,12 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
+import { unwrap } from "@/lib/api/errors";
 import { focusAfterRemoval } from "@/lib/focus-after-removal";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
@@ -37,6 +38,7 @@ import {
   type FlowPublic,
   type FlowStep
 } from "./flows-api";
+import { describeChanges, diffFlowSteps, hasChanges, type StepChange } from "./flow-changes";
 import { FlowChatPanel } from "./flow-chat-panel";
 import { FlowDraftCheck } from "./flow-draft-check-panel";
 import { FlowPackageExportDialog } from "./flow-package-export-dialog";
@@ -60,6 +62,8 @@ type EditorChange = Omit<FlowEditorUpdate, "expected_revision" | "definition"> &
 };
 
 const CHAT_WIDTH_STORAGE_KEY = "eneo:flow-chat-width";
+/** How long a card the chat touched stays marked. */
+const CHAT_CHANGE_MARK_MS = 8000;
 
 /** After a move the moved step's button keeps focus; at an end, where it is disabled, its twin. */
 function focusMoveControl(stepId: string, delta: -1 | 1) {
@@ -198,20 +202,45 @@ export function FlowPage({ flowId }: { flowId: string }) {
   });
 
   /** After the chat's tools ran or it answered: reread the flow and say when it changed. */
+  // The cards the chat's tools touched last, marked for a while.
+  const [chatChanges, setChatChanges] = useState<ReadonlyMap<string, StepChange> | null>(null);
+  useEffect(() => {
+    if (!chatChanges) return;
+    const timer = window.setTimeout(() => setChatChanges(null), CHAT_CHANGE_MARK_MS);
+    return () => window.clearTimeout(timer);
+  }, [chatChanges]);
+
   const refreshFromChat = useCallback(async () => {
     const before = queryClient.getQueryData<FlowPublic>(flowKeys.flow(flowId));
     try {
-      const after = await queryClient.query({
-        ...flowQueryOptions(browserApi, flowId),
-        staleTime: 0
-      });
+      const after = await unwrap(
+        browserApi.GET("/api/v1/flows/{id}/", { params: { path: { id: flowId } } })
+      );
       const changed =
         before !== undefined &&
         (after.draft_revision !== before.draft_revision ||
           after.published_version !== before.published_version);
+      const changes = before ? diffFlowSteps(before, after) : null;
+      const apply = () =>
+        flushSync(() => {
+          queryClient.setQueryData(flowKeys.flow(flowId), after);
+          setChatChanges(changes && hasChanges(changes) ? changes.steps : null);
+        });
+      // The cards move, appear and leave with a view transition where the
+      // browser has one and the person has not asked for less motion.
+      if (
+        changes &&
+        hasChanges(changes) &&
+        typeof document.startViewTransition === "function" &&
+        !window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ) {
+        document.startViewTransition(apply);
+      } else {
+        apply();
+      }
       if (changed) {
         void queryClient.invalidateQueries({ queryKey: flowKeys.list(after.space_id) });
-        announce(t("flows_chat_changed_flow"));
+        announce((changes && describeChanges(changes, after, t)) ?? t("flows_chat_changed_flow"));
       }
     } catch {
       // The next action reads the flow again; a failed reread is not news.
@@ -520,6 +549,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                   flowId={flow.id}
                   steps={steps}
                   canEdit={canEdit}
+                  changes={chatChanges}
                   headingRef={stepsHeadingRef}
                   onOpen={openStep}
                   onMove={moveStep}

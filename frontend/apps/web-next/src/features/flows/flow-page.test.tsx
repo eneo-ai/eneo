@@ -477,7 +477,9 @@ describe("FlowPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
 
     expect(await screen.findByText("Granska svaret")).toBeTruthy();
-    expect(state.announce).toHaveBeenCalledWith("Flödet uppdaterades från chatten");
+    expect(state.announce).toHaveBeenCalledWith("Chatten lade till Steg 3: Granska svaret.");
+    // The new card is marked, for a while.
+    expect(screen.getByText("Tillagt av chatten")).toBeTruthy();
 
     // An answer that changed nothing is not news.
     state.announce.mockClear();
