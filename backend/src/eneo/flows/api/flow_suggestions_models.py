@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Self
+from typing import Any, Self, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -26,6 +26,7 @@ _DUPLICATE_READ_EXAMPLE: JsonDict = {
         "producer_step_order": 1,
         "producer_step_id": _FIRST_STEP_ID,
         "contained": False,
+        "redundant_reads": [1],
         "reads": [
             {"channel": "input", "site": "input_source", "selector": []},
             {
@@ -41,8 +42,26 @@ _DUPLICATE_READ_EXAMPLE: JsonDict = {
         "twice on every run."
     ),
     "impact": {"basis": "definition", "level": "high"},
-    "fix": {"kind": "patch"},
+    "fix": {
+        "kind": "patch",
+        "patch": {
+            "definition": {},
+            "assistants": [
+                {
+                    "assistant_id": "00000000-0000-0000-0000-000000000202",
+                    "step_id": _SECOND_STEP_ID,
+                    "changes": {
+                        "prompt": {"text": "Sammanfatta.", "description": None}
+                    },
+                }
+            ],
+        },
+    },
 }
+
+_PATCH_EXAMPLE: JsonDict = cast(
+    JsonDict, cast(JsonDict, _DUPLICATE_READ_EXAMPLE["fix"])["patch"]
+)
 
 FLOW_SUGGESTIONS_EXAMPLE: JsonDict = {
     "flow_id": _FLOW_ID,
@@ -61,9 +80,13 @@ class FlowSuggestionImpactPublic(BaseModel):
     )
     level: FlowSuggestionLevel = Field(
         description=(
-            "How much the suggestion is worth acting on: `high` when a whole "
-            "result reaches the model twice, `medium` when it does through "
-            "`all_previous_steps`, `low` when one read is contained in another."
+            "How much the suggestion is worth acting on, judged from the "
+            "definition: `high` when a whole result reaches a model twice or "
+            "once per item, `medium` for a duplicate through "
+            "`all_previous_steps`, unread contract fields or results, derived "
+            "results taken together and material digested twice, `low` for the "
+            "rest (a read contained in another, a broad or whole read, a "
+            "relay, an unused form field)."
         ),
         examples=["high"],
     )
@@ -78,6 +101,21 @@ class FlowSuggestionFixPublic(BaseModel):
         ),
         examples=["patch"],
     )
+    patch: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Present exactly when `kind` is `patch`: the editor update that "
+            "makes the fix, without `expected_revision` (`definition`, "
+            "`step_edits`, `assistants`, `step_order`, whichever it needs), "
+            "as `PATCH /api/v1/flows/{id}/editor/` takes it once the draft "
+            "revision is added. Steps and assistants are named by id; an "
+            "assistant change names its step, so an assistant other steps "
+            "share is copied for that step. The patch was applied to the "
+            "draft in memory and passes publish's step rules wherever the "
+            "draft does; it is for the `draft_revision` of this answer."
+        ),
+        examples=[_PATCH_EXAMPLE],
+    )
 
 
 class FlowSuggestionPublic(BaseModel):
@@ -87,7 +125,17 @@ class FlowSuggestionPublic(BaseModel):
         description=(
             "What the suggestion is about. `duplicate_read`: the same earlier "
             "step reaches the step's model twice, through its input and its "
-            "prompt or twice in one of them."
+            "prompt or twice in one of them. `broad_all_previous_steps`: a "
+            "step takes every earlier step, where one is derived from another "
+            "it also gets, or three or more of them. `whole_structured_read`: "
+            "a step reads all of a JSON result with four or more fields. "
+            "`unread_contract_fields`: fields of a step's contract no later "
+            "step reads. `unread_result`: a step whose result no later step "
+            "reads. `relay_step`: a step that only passes another result on. "
+            "`per_item_prompt_read`: a step that runs once per item with a "
+            "whole earlier result in its prompt. `repeated_long_material`: two "
+            "steps digest the same source as long material. "
+            "`unused_form_field`: a run form field no step reads."
         ),
         examples=["duplicate_read"],
     )
@@ -102,7 +150,9 @@ class FlowSuggestionPublic(BaseModel):
     steps: list[UUID] = Field(
         description=(
             "The steps the suggestion is about; the first is the step it is "
-            "shown on, the second the step that is read twice."
+            "shown on, the second, when there is one, the step it reads, "
+            "copies or shares a source with. Empty for `unused_form_field`, "
+            "which is about the run form."
         ),
     )
     params: dict[str, Any] = Field(
@@ -110,11 +160,28 @@ class FlowSuggestionPublic(BaseModel):
             "Typed per code, for a client to render its own text from. For "
             "`duplicate_read`: `producer_step_order`, `producer_step_id`, "
             "`contained` (one read is a field of what the other already "
-            "carries) and `reads`, each with `channel` (`input` or `prompt`), "
+            "carries), `redundant_reads` (the indexes in `reads` of the reads "
+            "the others already carry, never a whole read next to a narrower "
+            "one) and `reads`, each with `channel` (`input` or `prompt`), "
             "`site` (`input_source`, `input_bindings.question`, "
             "`input_bindings.source_refs[N]`, `assistant_prompt:<expression>`) "
             'and `selector` (empty for the whole text, `["structured", ...]` '
-            "for a structured value or a path in it)."
+            "for a structured value or a path in it). "
+            "`broad_all_previous_steps`: `earlier_step_count`, `derived` "
+            "(`step_order`, `from_step_order`) and `suggested_source_refs` "
+            "(`step_order`, `step_id` of the earlier steps the prompt does not "
+            "already read). `whole_structured_read`: `producer_step_order`, "
+            "`producer_step_id`, `fields` and `reads`. "
+            "`unread_contract_fields`: `fields` (unread) and `read_fields`. "
+            "`unread_result`: `remove_patch`, the editor update that removes "
+            "the step, checked like `fix.patch` and left out when it would "
+            "not publish. `relay_step`: `source_step_order`, `source_step_id` "
+            "(null when the relay copies the run input) and `readers` "
+            "(`step_order`, `step_id`, `sites`). `per_item_prompt_read`: "
+            "`execution_mode`, `producer_step_order`, `producer_step_id`, "
+            "`reads`. `repeated_long_material`: `earlier_step_order`, "
+            "`earlier_step_id`, `shared_step_orders`, `shares_run_input`. "
+            "`unused_form_field`: `field`."
         ),
     )
     message: str = Field(
@@ -134,7 +201,14 @@ class FlowSuggestionPublic(BaseModel):
             impact=FlowSuggestionImpactPublic(
                 basis=suggestion.impact.basis, level=suggestion.impact.level
             ),
-            fix=FlowSuggestionFixPublic(kind=suggestion.fix.kind),
+            fix=FlowSuggestionFixPublic(
+                kind=suggestion.fix.kind,
+                patch=(
+                    dict(suggestion.fix.patch)
+                    if suggestion.fix.patch is not None
+                    else None
+                ),
+            ),
         )
 
 
