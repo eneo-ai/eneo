@@ -118,9 +118,9 @@ export function ReferencePill({
           : "blue";
   const icon =
     tone === "missing" ? (
-      <CircleAlert aria-hidden="true" />
+      <CircleAlert aria-hidden="true" className="size-3.5" />
     ) : tone === "warning" ? (
-      <TriangleAlert aria-hidden="true" />
+      <TriangleAlert aria-hidden="true" className="size-3.5" />
     ) : undefined;
   return (
     <Token
@@ -128,7 +128,8 @@ export function ReferencePill({
       color={color}
       icon={icon}
       label={referenceLabel(reference, refs.flow, t)}
-      className={cn("align-baseline", className)}
+      // In running text: centred on the line, never cut short by the line's width.
+      className={cn("max-w-none align-middle", className)}
     />
   );
 }
@@ -151,7 +152,7 @@ export function ReferencePillButton({ reference }: { reference: Reference }) {
       aria-haspopup="dialog"
       aria-expanded={open}
       onClick={(event) => refs.openCard(reference, event.currentTarget)}
-      className="focus-visible:outline-ring rounded-ax-inner inline-flex align-baseline focus-visible:outline-2 focus-visible:outline-offset-2"
+      className="focus-visible:outline-ring rounded-ax-inner inline-block align-middle focus-visible:outline-2 focus-visible:outline-offset-2"
     >
       <ReferencePill reference={reference} />
     </button>
