@@ -4,7 +4,7 @@
   "private": true,
   "license": "MIT",
   "type": "module",
-  "packageManager": "bun@1.3.14",
+  "packageManager": "bun@1.4.4",
   "scripts": {
     "start": "bun src/main.ts",
     "dev": "bun run build:views && bun run build:prelude && bun --watch src/main.ts",
