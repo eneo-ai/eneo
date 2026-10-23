@@ -16,7 +16,11 @@ from eneo.flows.http_transport import (
     sends_http_config,
 )
 from eneo.flows.http_transport.authored_config import ConfigPath
-from eneo.flows.input_binding_contract_rules import effective_question_binding
+from eneo.flows.input_binding_contract_rules import (
+    effective_question_binding,
+    question_binding,
+    source_ref_bindings,
+)
 from eneo.flows.template_reference_analyzer import TemplateReference, analyze_template
 from eneo.flows.variable_resolver import decimal_number
 
@@ -111,6 +115,259 @@ def resolve_upstream_step_orders(
     return []
 
 
+ReadChannel = Literal["input", "prompt", "config"]
+"""Where a read enters a step: ``input`` is the step input (the question
+binding or the source refs when present, otherwise ``input_source``),
+``prompt`` an interpolation in the step assistant's prompt, ``config`` a
+template the runtime fills in the step's configuration (template-fill
+bindings, HTTP requests, tool arguments). The first two reach the step's
+model; the third forwards data without reaching it."""
+
+# The site of a prompt read, as the runtime records the edge of that read
+# (``interpolate_with_evidence`` with ``binding_ref="assistant_prompt"``), so
+# measured evidence and the definition name the same read.
+PROMPT_READ_SITE_PREFIX = "assistant_prompt:"
+# The site of the implicit input a step without underlag reads.
+INPUT_SOURCE_READ_SITE = "input_source"
+# The selector of a whole structured value, and the head of a structured path.
+STRUCTURED_SELECTOR_HEAD = "structured"
+
+
+@dataclass(frozen=True, slots=True)
+class StepRead:
+    """One read a step makes of an earlier step's result.
+
+    ``selector`` is what it reads of that result: ``()`` the whole text,
+    ``("structured",)`` the whole structured value, ``("structured", "a",
+    "b")`` a structured path, any other tail its segments. ``site`` is where
+    the read is written: ``input_source``, ``input_bindings.question``,
+    ``input_bindings.source_refs[2]``, ``assistant_prompt:<expression>``,
+    ``output_config.bindings.x``, ``input_config.url``,
+    ``input_config.tool.arguments.name``; the column alone when a
+    configuration cannot be read and counts as every earlier step.
+    """
+
+    channel: ReadChannel
+    step_order: int
+    selector: tuple[str, ...]
+    site: str
+
+
+def step_reads_by_channel(
+    *,
+    input_source: FlowInputSource | str,
+    step_order: int,
+    input_bindings: object,
+    prompt_template: str | None,
+    output_mode: FlowOutputMode | str,
+    input_config: Mapping[str, object] | None,
+    output_config: Mapping[str, object] | None,
+    step_ref_mapping: dict[str, int],
+    max_prior_step_order: int,
+) -> tuple[StepRead, ...]:
+    """Every read the step makes of an earlier step, typed by channel.
+
+    The one place that says what a step reads and where: the merged resolvers
+    (``resolve_step_input_orders``, ``resolve_step_upstream_orders``) are
+    the sorted set of ``step_order`` over its channels, so they cannot drift
+    from it. Input and prompt reads come first, in the order they are
+    written; configuration reads follow, ``output_config`` before
+    ``input_config``. ``input_source`` and ``output_mode`` fail closed as in
+    the resolvers.
+    """
+    reads = list(
+        _model_channel_reads(
+            input_source=input_source,
+            step_order=step_order,
+            input_bindings=input_bindings,
+            prompt_template=prompt_template,
+            step_ref_mapping=step_ref_mapping,
+            max_prior_step_order=max_prior_step_order,
+        )
+    )
+    source = FlowInputSource(input_source)
+    mode = FlowOutputMode(output_mode)
+    configs: tuple[tuple[ConfigColumn, Mapping[str, object] | None], ...] = (
+        ("output_config", output_config),
+        ("input_config", input_config),
+    )
+    for column, config in configs:
+        channel = config_channel(
+            column=column,
+            config=config,
+            input_source=source,
+            output_mode=mode,
+            step_order=step_order,
+        )
+        if channel is not None:
+            reads.extend(
+                _config_channel_reads(
+                    channel,
+                    step_ref_mapping=step_ref_mapping,
+                    max_prior_step_order=max_prior_step_order,
+                )
+            )
+    return tuple(reads)
+
+
+def _model_channel_reads(
+    *,
+    input_source: FlowInputSource | str,
+    step_order: int,
+    input_bindings: object,
+    prompt_template: str | None,
+    step_ref_mapping: dict[str, int],
+    max_prior_step_order: int,
+) -> list[StepRead]:
+    """The ``input`` and ``prompt`` reads: what reaches the step's model."""
+    source = FlowInputSource(input_source)
+    reads: list[StepRead] = []
+    if effective_question_binding(input_bindings) is not None:
+        # Explicit underlag is the whole step input. The question and each
+        # source ref are read where they are written; their expressions are
+        # exactly those of the lowered question the runtime interpolates.
+        question = question_binding(input_bindings)
+        if question is not None:
+            reads.extend(
+                _template_reads(
+                    "input",
+                    question,
+                    site="input_bindings.question",
+                    context_step_order=step_order,
+                    step_ref_mapping=step_ref_mapping,
+                    max_prior_step_order=max_prior_step_order,
+                )
+            )
+        for index, ref in enumerate(source_ref_bindings(input_bindings)):
+            reads.extend(
+                _template_reads(
+                    "input",
+                    ref.template_expression(),
+                    site=f"input_bindings.source_refs[{index}]",
+                    context_step_order=step_order,
+                    step_ref_mapping=step_ref_mapping,
+                    max_prior_step_order=max_prior_step_order,
+                )
+            )
+    elif source is FlowInputSource.PREVIOUS_STEP and step_order > 1:
+        reads.append(StepRead("input", step_order - 1, (), INPUT_SOURCE_READ_SITE))
+    elif source is FlowInputSource.ALL_PREVIOUS_STEPS and step_order > 1:
+        reads.extend(
+            StepRead("input", order, (), INPUT_SOURCE_READ_SITE)
+            for order in range(1, step_order)
+        )
+    if prompt_template:
+        for reference in analyze_template(
+            prompt_template, step_refs=step_ref_mapping, form_field_names=set()
+        ):
+            read = _reference_read(
+                "prompt",
+                reference,
+                site=f"{PROMPT_READ_SITE_PREFIX}{reference.expression}",
+                step_order=step_order,
+                max_prior_step_order=max_prior_step_order,
+            )
+            if read is not None:
+                reads.append(read)
+    return reads
+
+
+def _config_channel_reads(
+    channel: ConfigChannel,
+    *,
+    step_ref_mapping: dict[str, int],
+    max_prior_step_order: int,
+) -> list[StepRead]:
+    if channel.sites is None:
+        return [
+            StepRead("config", order, (), channel.column)
+            for order in range(1, max_prior_step_order + 1)
+        ]
+    reads: list[StepRead] = []
+    for path, template in channel.sites:
+        site = ".".join((channel.column, *(str(segment) for segment in path)))
+        reads.extend(
+            _template_reads(
+                "config",
+                template,
+                site=site,
+                context_step_order=channel.context_step_order,
+                step_ref_mapping=step_ref_mapping,
+                max_prior_step_order=max_prior_step_order,
+            )
+        )
+    return reads
+
+
+def _template_reads(
+    channel: ReadChannel,
+    template: str,
+    *,
+    site: str,
+    context_step_order: int,
+    step_ref_mapping: dict[str, int],
+    max_prior_step_order: int,
+) -> list[StepRead]:
+    """The reads of ``template``, read in the variable context of step
+    ``context_step_order`` (which decides what ``föregående_steg`` names)."""
+    reads: list[StepRead] = []
+    for reference in analyze_template(
+        template, step_refs=step_ref_mapping, form_field_names=set()
+    ):
+        read = _reference_read(
+            channel,
+            reference,
+            site=site,
+            step_order=context_step_order,
+            max_prior_step_order=max_prior_step_order,
+        )
+        if read is not None:
+            reads.append(read)
+    return reads
+
+
+def _reference_read(
+    channel: ReadChannel,
+    reference: TemplateReference,
+    *,
+    site: str,
+    step_order: int,
+    max_prior_step_order: int,
+) -> StepRead | None:
+    """The read ``reference`` makes in step ``step_order``, or None when it
+    names no step with a result, by the rule of ``resolve_reference_step_orders``."""
+    referenced_order = referenced_step_order(reference, step_order=step_order)
+    if (
+        not isinstance(referenced_order, int)
+        or not 1 <= referenced_order <= max_prior_step_order
+    ):
+        return None
+    return StepRead(channel, referenced_order, read_selector(reference), site)
+
+
+def read_selector(reference: TemplateReference) -> tuple[str, ...]:
+    """What a step reference reads of the step's result: ``()`` for its text
+    (bare, ``output``, ``output.text`` and ``föregående_steg``),
+    ``("structured", ...)`` for the structured value or a path in it, and
+    the tail's segments for anything else."""
+    if reference.head == PREVIOUS_STEP_TEXT_ALIAS and not reference.tail:
+        return ()
+    if reference.tail in {"", "output", "output.text"}:
+        return ()
+    if reference.tail == f"output.{STRUCTURED_SELECTOR_HEAD}":
+        return (STRUCTURED_SELECTOR_HEAD,)
+    if reference.structured_path is not None:
+        return (STRUCTURED_SELECTOR_HEAD, *reference.structured_path)
+    return tuple(reference.tail.split("."))
+
+
+def _channel_orders(
+    reads: Iterable[StepRead], channels: Iterable[ReadChannel]
+) -> list[int]:
+    wanted = set(channels)
+    return sorted({read.step_order for read in reads if read.channel in wanted})
+
+
 def resolve_step_input_orders(
     *,
     input_source: FlowInputSource | str,
@@ -125,39 +382,20 @@ def resolve_step_input_orders(
     The step input is the explicit underlag when present, otherwise the
     implicit source. The assistant prompt is a second input channel: its step
     references are interpolated into the prompt regardless of the input, so
-    they always join the set.
+    they always join the set. The set is the ``input`` and ``prompt`` reads
+    of ``step_reads_by_channel``.
     """
-    question_template = effective_question_binding(input_bindings)
-    binding_references = (
-        analyze_template(
-            question_template,
-            step_refs=step_ref_mapping,
-            form_field_names=set(),
-        )
-        if question_template is not None
-        else None
-    )
-    orders = set(
-        resolve_upstream_step_orders(
+    return _channel_orders(
+        _model_channel_reads(
             input_source=input_source,
             step_order=step_order,
-            binding_references=binding_references,
+            input_bindings=input_bindings,
+            prompt_template=prompt_template,
+            step_ref_mapping=step_ref_mapping,
             max_prior_step_order=max_prior_step_order,
-        )
+        ),
+        ("input", "prompt"),
     )
-    if prompt_template:
-        orders.update(
-            resolve_reference_step_orders(
-                references=analyze_template(
-                    prompt_template,
-                    step_refs=step_ref_mapping,
-                    form_field_names=set(),
-                ),
-                step_order=step_order,
-                max_prior_step_order=max_prior_step_order,
-            )
-        )
-    return sorted(orders)
 
 
 def resolve_step_upstream_orders(
@@ -186,40 +424,22 @@ def resolve_step_upstream_orders(
     cannot run with it, and a classification check must not take "unreadable"
     for "reads nothing". ``output_mode`` is a ``FlowOutputMode`` or the value it
     is stored as; anything else raises ``ValueError`` like ``input_source``.
+    The set is every channel of ``step_reads_by_channel``.
     """
-    orders = set(
-        resolve_step_input_orders(
+    return _channel_orders(
+        step_reads_by_channel(
             input_source=input_source,
             step_order=step_order,
             input_bindings=input_bindings,
             prompt_template=prompt_template,
+            output_mode=output_mode,
+            input_config=input_config,
+            output_config=output_config,
             step_ref_mapping=step_ref_mapping,
             max_prior_step_order=max_prior_step_order,
-        )
+        ),
+        ("input", "prompt", "config"),
     )
-    source = FlowInputSource(input_source)
-    mode = FlowOutputMode(output_mode)
-    configs: tuple[tuple[ConfigColumn, Mapping[str, object] | None], ...] = (
-        ("output_config", output_config),
-        ("input_config", input_config),
-    )
-    for column, config in configs:
-        channel = config_channel(
-            column=column,
-            config=config,
-            input_source=source,
-            output_mode=mode,
-            step_order=step_order,
-        )
-        if channel is not None:
-            orders.update(
-                _channel_step_orders(
-                    channel,
-                    step_ref_mapping=step_ref_mapping,
-                    max_prior_step_order=max_prior_step_order,
-                )
-            )
-    return sorted(orders)
 
 
 def resolve_tool_argument_orders(
