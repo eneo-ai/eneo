@@ -6151,6 +6151,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/{id}/suggestions/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Flow Suggestions
+     * @description What the draft could do cheaper or simpler, judged from the saved definition: where a step's model receives the same earlier result twice (`duplicate_read`), through its input (`previous_step`, `all_previous_steps`, a question or source references) and a read of the same step in its assistant's prompt, or twice in one of them. The reads are the ones publish and the runtime resolve, so a suggestion states what the definition proves and nothing it does not: no prompt is judged by a model, no run content is read, and a read of a field next to a read of the whole result is reported as `contained` rather than guessed at. Each suggestion names its steps, a `fingerprint` that is stable across unrelated edits, an `impact` level and how it is acted on (`fix.kind`). Suggestions never block publishing and never change the flow: acting on one is a separate, explicit editor update. The answer judges `draft_revision`; read again after a save. It reads the prompts of the flow's assistants, so it needs the permission to edit the flow.
+     */
+    get: operations["get_flow_suggestions"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/{id}/template-files/": {
     parameters: {
       query?: never;
@@ -27839,6 +27859,170 @@ export interface components {
       timeout_seconds?: number | null;
       /** User Description */
       user_description?: string | null;
+    };
+    /**
+     * FlowSuggestionCode
+     * @description The closed set of suggestions. Clients render text from the code and
+     *     ``params``; ``message`` is for API and chat consumers.
+     * @enum {string}
+     */
+    FlowSuggestionCode: "duplicate_read";
+    /** FlowSuggestionFixPublic */
+    FlowSuggestionFixPublic: {
+      /**
+       * Kind
+       * @description How the suggestion is acted on: `patch`, a mechanical edit the core can make; `assisted`, a change that needs judgement, for the authoring chat to propose; `advice`, explained only.
+       * @example patch
+       * @enum {string}
+       */
+      kind: "patch" | "assisted" | "advice";
+    };
+    /** FlowSuggestionImpactPublic */
+    FlowSuggestionImpactPublic: {
+      /**
+       * Basis
+       * @description What the impact is judged from: `definition`, the draft alone, which proves the duplication but not its size.
+       * @example definition
+       * @constant
+       */
+      basis: "definition";
+      /**
+       * Level
+       * @description How much the suggestion is worth acting on: `high` when a whole result reaches the model twice, `medium` when it does through `all_previous_steps`, `low` when one read is contained in another.
+       * @example high
+       * @enum {string}
+       */
+      level: "high" | "medium" | "low";
+    };
+    /**
+     * FlowSuggestionPublic
+     * @example {
+     *       "code": "duplicate_read",
+     *       "fingerprint": "9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a",
+     *       "fix": {
+     *         "kind": "patch"
+     *       },
+     *       "impact": {
+     *         "basis": "definition",
+     *         "level": "high"
+     *       },
+     *       "message": "Step 2 reads step 1 twice, as its input (previous_step) and in its prompt ({{ step_1.output.text }}), so its model receives the same text twice on every run.",
+     *       "params": {
+     *         "contained": false,
+     *         "producer_step_id": "00000000-0000-0000-0000-000000000101",
+     *         "producer_step_order": 1,
+     *         "reads": [
+     *           {
+     *             "channel": "input",
+     *             "selector": [],
+     *             "site": "input_source"
+     *           },
+     *           {
+     *             "channel": "prompt",
+     *             "selector": [],
+     *             "site": "assistant_prompt:step_1.output.text"
+     *           }
+     *         ]
+     *       },
+     *       "steps": [
+     *         "00000000-0000-0000-0000-000000000102",
+     *         "00000000-0000-0000-0000-000000000101"
+     *       ]
+     *     }
+     */
+    FlowSuggestionPublic: {
+      /**
+       * @description What the suggestion is about. `duplicate_read`: the same earlier step reaches the step's model twice, through its input and its prompt or twice in one of them.
+       * @example duplicate_read
+       */
+      code: components["schemas"]["FlowSuggestionCode"];
+      /**
+       * Fingerprint
+       * @description The suggestion's identity: a hash of its code, the steps it is about and the reads that triggered it. The same across edits that do not touch them; gone when the premise is.
+       * @example 9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a
+       */
+      fingerprint: string;
+      fix: components["schemas"]["FlowSuggestionFixPublic"];
+      impact: components["schemas"]["FlowSuggestionImpactPublic"];
+      /**
+       * Message
+       * @description One English sentence saying what was found, for API and chat consumers.
+       */
+      message: string;
+      /**
+       * Params
+       * @description Typed per code, for a client to render its own text from. For `duplicate_read`: `producer_step_order`, `producer_step_id`, `contained` (one read is a field of what the other already carries) and `reads`, each with `channel` (`input` or `prompt`), `site` (`input_source`, `input_bindings.question`, `input_bindings.source_refs[N]`, `assistant_prompt:<expression>`) and `selector` (empty for the whole text, `["structured", ...]` for a structured value or a path in it).
+       */
+      params: {
+        [key: string]: unknown;
+      };
+      /**
+       * Steps
+       * @description The steps the suggestion is about; the first is the step it is shown on, the second the step that is read twice.
+       */
+      steps: string[];
+    };
+    /**
+     * FlowSuggestionsPublic
+     * @example {
+     *       "draft_revision": 4,
+     *       "flow_id": "00000000-0000-0000-0000-000000000001",
+     *       "items": [
+     *         {
+     *           "code": "duplicate_read",
+     *           "fingerprint": "9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a",
+     *           "fix": {
+     *             "kind": "patch"
+     *           },
+     *           "impact": {
+     *             "basis": "definition",
+     *             "level": "high"
+     *           },
+     *           "message": "Step 2 reads step 1 twice, as its input (previous_step) and in its prompt ({{ step_1.output.text }}), so its model receives the same text twice on every run.",
+     *           "params": {
+     *             "contained": false,
+     *             "producer_step_id": "00000000-0000-0000-0000-000000000101",
+     *             "producer_step_order": 1,
+     *             "reads": [
+     *               {
+     *                 "channel": "input",
+     *                 "selector": [],
+     *                 "site": "input_source"
+     *               },
+     *               {
+     *                 "channel": "prompt",
+     *                 "selector": [],
+     *                 "site": "assistant_prompt:step_1.output.text"
+     *               }
+     *             ]
+     *           },
+     *           "steps": [
+     *             "00000000-0000-0000-0000-000000000102",
+     *             "00000000-0000-0000-0000-000000000101"
+     *           ]
+     *         }
+     *       ]
+     *     }
+     */
+    FlowSuggestionsPublic: {
+      /**
+       * Draft Revision
+       * @description The draft revision the suggestions judge.
+       * @example 4
+       */
+      draft_revision: number;
+      /**
+       * Flow Id
+       * Format: uuid
+       * @description The flow.
+       * @example 00000000-0000-0000-0000-000000000001
+       */
+      flow_id: string;
+      /**
+       * Items
+       * @description The suggestions, by impact level (high, medium, low), then step order; at most 50. Empty when the draft gives none.
+       */
+      items: components["schemas"]["FlowSuggestionPublic"][];
     };
     /**
      * FlowTemplateAssetPublic
@@ -63935,6 +64119,114 @@ export interface operations {
            *       "code": "unsupported_media_type",
            *       "eneo_error_code": 9014,
            *       "message": "Unsupported file type 'application/pdf' for flow input type 'audio'. Allowed types: audio/mpeg, audio/wav."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_flow_suggestions: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The draft's suggestions, possibly none. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "draft_revision": 4,
+           *       "flow_id": "00000000-0000-0000-0000-000000000001",
+           *       "items": [
+           *         {
+           *           "code": "duplicate_read",
+           *           "fingerprint": "9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a9b2d3f1a",
+           *           "fix": {
+           *             "kind": "patch"
+           *           },
+           *           "impact": {
+           *             "basis": "definition",
+           *             "level": "high"
+           *           },
+           *           "message": "Step 2 reads step 1 twice, as its input (previous_step) and in its prompt ({{ step_1.output.text }}), so its model receives the same text twice on every run.",
+           *           "params": {
+           *             "contained": false,
+           *             "producer_step_id": "00000000-0000-0000-0000-000000000101",
+           *             "producer_step_order": 1,
+           *             "reads": [
+           *               {
+           *                 "channel": "input",
+           *                 "selector": [],
+           *                 "site": "input_source"
+           *               },
+           *               {
+           *                 "channel": "prompt",
+           *                 "selector": [],
+           *                 "site": "assistant_prompt:step_1.output.text"
+           *               }
+           *             ]
+           *           },
+           *           "steps": [
+           *             "00000000-0000-0000-0000-000000000102",
+           *             "00000000-0000-0000-0000-000000000101"
+           *           ]
+           *         }
+           *       ]
+           *     }
+           */
+          "application/json": components["schemas"]["FlowSuggestionsPublic"];
+        };
+      };
+      /** @description Forbidden. Machine-readable codes include `insufficient_scope` when the API key space scope does not match the flow, `insufficient_space_permission` when the caller may not edit flows in the space, and `flow_owner_required` when another member owns the draft. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_space_permission",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to edit flows in this space."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Flow not found in tenant scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow not found."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
