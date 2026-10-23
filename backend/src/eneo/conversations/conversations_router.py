@@ -357,7 +357,7 @@ async def chat(
     - SSEFirstChunk: Initial response with metadata
     - SSEError: Error events (API errors, authentication failures, rate limits, etc.)
     """
-    _reject_retired_group_chat(request.group_chat_id)
+    _reject_retired_group_chat(request.retired_group_chat_id)
     if request.require_tool_approval and not request.stream:
         raise HTTPException(
             status_code=400,
@@ -514,7 +514,7 @@ async def preflight_tokens(
         # Fail-open: preflight is best-effort UX, not a security-critical path.
         logger.warning("Preflight rate limiter unavailable", exc_info=True)
 
-    _reject_retired_group_chat(request.group_chat_id)
+    _reject_retired_group_chat(request.retired_group_chat_id)
     session = cast(AsyncSession, container.session())
     async with session.begin():
         await _validate_conversation_scope(

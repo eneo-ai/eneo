@@ -34,9 +34,18 @@ class _ConversationTarget(BaseModel):
         ),
     )
 
+    @property
+    def retired_group_chat_id(self) -> Optional[UUID]:
+        """The deprecated target, read without pydantic's deprecation warning.
+
+        Attribute access on a deprecated field warns on every read; the test
+        suite treats warnings as errors and the router reads this per request.
+        """
+        return self.__dict__.get("group_chat_id")
+
     @model_validator(mode="after")
     def _validate_exactly_one_target(self) -> "_ConversationTarget":
-        if self.group_chat_id is not None:
+        if self.retired_group_chat_id is not None:
             # The router answers 410 group_chats_retired; a 422 here would hide it.
             return self
         ids = [
