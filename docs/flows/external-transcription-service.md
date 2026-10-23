@@ -87,8 +87,11 @@ Transcripts above the inline text limit are stored once as a generated plain-tex
 file. An unchanged `transcribe_only` output reuses that file. If an input binding
 changes the output, for example by adding a heading, the output follows the usual
 inline limit and gets a separate file when it exceeds the limit. Later steps read
-the complete output through `previous_step`; `{{transkribering}}` always resolves
-the raw transcript. File-backed outputs keep bounded previews. Section processing
+the complete output through `previous_step`; `{{transkribering}}` resolves the
+run's transcript, not the step's output. A `speaker_mapping` step, and a reviewer's
+correction of it, replace that transcript with the named text only while it is
+still the inline transcript the speaker step read; a file-backed transcript, or one
+an input binding changed, stays raw. File-backed outputs keep bounded previews. Section processing
 gives each model call only its selected section. The existing material size and
 model context limits still apply. Segment and word timing limits are unchanged.
 
