@@ -106,17 +106,18 @@ def _evidence_export_change(
 async def create_flow(
     request: Request, flow_in: FlowCreateRequest, container: Container
 ) -> FlowPublic:
-    access_context = await flow_access_context.resolve_space_access_context(
+    scope_filter = flow_access_context.get_scope_filter(request)
+    actor = await flow_access_context.resolve_space_actor(
         request,
         container,
         space_id=flow_in.space_id,
         required_access=FlowApiAction.EDIT,
         scope_mismatch_message=(
-            f"API key is scoped to space '{flow_access_context.get_scope_filter(request).space_id}'. "
+            f"API key is scoped to space '{scope_filter.space_id}'. "
             f"Cannot create flow in space '{flow_in.space_id}'."
         ),
     )
-    if not access_context.actor.can_create_flows():
+    if not actor.can_create_flows():
         raise FlowUnauthorizedException(
             "You do not have permission to create flows in this space.",
             code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
@@ -160,8 +161,8 @@ async def create_flow(
         permissions=flow_permissions(
             container,
             flow=created,
-            actor=access_context.actor,
-            scope_filter=access_context.scope_filter,
+            actor=actor,
+            scope_filter=scope_filter,
         ),
     )
 

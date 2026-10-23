@@ -124,7 +124,7 @@ async def create_flow_live_transcription_session(
 ) -> FlowLiveTranscriptionSessionPublic:
     session = cast(AsyncSession, container.session())
     async with session.begin():
-        space = await flow_access_context.enforce_flow_scope(
+        access = await flow_access_context.enforce_flow_scope(
             request,
             container,
             flow_id=id,
@@ -135,7 +135,7 @@ async def create_flow_live_transcription_session(
         live = await container.flow_live_transcription_session_service().open_session(
             flow_id=id,
             step_id=step_id,
-            space=space,
+            space=await container.space_service().get_space(access.flow.space_id),
             recording_id=body.recording_id if body else None,
         )
         user = container.user()

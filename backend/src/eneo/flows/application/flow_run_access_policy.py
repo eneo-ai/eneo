@@ -19,7 +19,6 @@ from eneo.flows.flow_evidence_policy import (
     EvidenceCapabilityLevel,
     FlowEvidencePolicy,
     FlowHistoryAccessContext,
-    classification_level_for_space,
     resolve_flow_evidence_policy,
     resolve_service_key_evidence_capability,
 )
@@ -31,7 +30,7 @@ from eneo.roles.permissions import Permission
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
-    from eneo.actors.actors.space_actor import SpaceActor
+    from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceActor
     from eneo.spaces.space import Space
 
 
@@ -67,11 +66,13 @@ class FlowRunEvidenceAccess:
 
 
 class FlowRunSpaceServiceProtocol(Protocol):
-    async def get_space(self, space_id: UUID) -> "Space": ...
+    async def get_space(self, id: UUID) -> "Space": ...
+
+    async def get_space_access_facts(self, id: UUID) -> "SpaceAccessFacts": ...
 
 
 class FlowRunActorManagerProtocol(Protocol):
-    def get_space_actor_from_space(self, space: "Space") -> "SpaceActor": ...
+    def get_space_actor(self, space: "SpaceAccessFacts") -> "SpaceActor": ...
 
 
 class FlowRunAccessPolicy:
@@ -169,9 +170,11 @@ class FlowRunAccessPolicy:
         cached_access = self._space_access_by_flow_id.get(flow_id)
         if cached_access is not None:
             return cached_access
-        space = await self.space_service.get_space(context.space_id)
-        actor = self.actor_manager.get_space_actor_from_space(space)
-        access = (actor, classification_level_for_space(space))
+        # The caller's own facts decide the role; the flow context already
+        # carries the space's classification, so no space is loaded.
+        facts = await self.space_service.get_space_access_facts(context.space_id)
+        actor = self.actor_manager.get_space_actor(facts)
+        access = (actor, context.classification_level)
         self._space_access_by_flow_id[flow_id] = access
         return access
 

@@ -916,10 +916,8 @@ class SpaceRepository:
         space_id: UUID,
         *,
         hidden_assistant_ids: HiddenAssistantSelection = frozenset(),
-        with_mcp_tools: bool = True,
     ) -> Sequence[Assistants]:
-        """The space's assistants; without ``with_mcp_tools`` their MCP
-        servers are loaded without tools."""
+        """The space's assistants, their MCP servers with their tools."""
         stmt = (
             sa.select(Assistants)
             .execution_options(populate_existing=True)
@@ -970,7 +968,7 @@ class SpaceRepository:
 
         # For each assistant, load MCP servers with tools and apply space+assistant overrides
         for assistant in assistants:
-            if with_mcp_tools and assistant.mcp_servers:
+            if assistant.mcp_servers:
                 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
                     MCPServerMapper,
                 )
@@ -1279,18 +1277,11 @@ class SpaceRepository:
         query: sa.Select[tuple[Spaces]],
         *,
         hidden_assistant_ids: HiddenAssistantSelection = frozenset(),
-        with_mcp_catalog: bool = True,
         with_document_counts: bool = False,
     ) -> Space | None:
         """Load the space with its visible assistants and, of the hidden ones,
         only ``hidden_assistant_ids``: building every hidden assistant of a
-        space made each write to one of them cost the whole space.
-
-        Without ``with_mcp_catalog`` no MCP tool is read and no MCP server
-        but those its assistants attach: the space's MCP lists are empty, its
-        assistants' servers carry no tools and no capability availability is
-        computed, so such a space is for ``get_access_facts`` only and never
-        leaves this repository."""
+        space made each write to one of them cost the whole space."""
         entry_in_db = await self._get_record_with_options(query)
         if not entry_in_db:
             return
@@ -1347,8 +1338,6 @@ class SpaceRepository:
         )
         mcp_servers_db: Sequence[MCPServersTable] = (
             (await self.session.execute(mcp_servers_query)).scalars().all()
-            if with_mcp_catalog
-            else ()
         )
 
         # Convert to domain entities
@@ -1395,7 +1384,6 @@ class SpaceRepository:
         assistants = await self._get_assistants(
             space_id=entry_in_db.id,
             hidden_assistant_ids=hidden_assistant_ids,
-            with_mcp_tools=with_mcp_catalog,
         )
         unloaded_hidden_assistant_ids = (
             await self._unloaded_hidden_assistant_ids(
@@ -1436,8 +1424,6 @@ class SpaceRepository:
             security_classification=entry_in_db.security_classification,
             unloaded_hidden_assistant_ids=unloaded_hidden_assistant_ids,
         )
-        if not with_mcp_catalog:
-            return space
         from eneo.mcp_servers.application.capability_resolver import (
             capability_availability,
         )
@@ -1589,20 +1575,6 @@ class SpaceRepository:
             raise NotFoundException()
 
         return space
-
-    async def get_access_facts(self, id: UUID) -> SpaceAccessFacts:
-        """What ``SpaceActor`` decides on for the space ``one`` loads, read
-        the same way but without the MCP catalog: no MCP tool and no MCP
-        server but those the space's assistants attach. No permission
-        decision reads the catalog, and it grows with every server and tool
-        a tenant registers."""
-        space = await self._get_from_query(
-            self._in_caller_tenant(sa.select(Spaces).where(Spaces.id == id)),
-            with_mcp_catalog=False,
-        )
-        if space is None:
-            raise NotFoundException()
-        return SpaceAccessFacts.from_space(space)
 
     async def get_applications_projection(
         self, id: UUID

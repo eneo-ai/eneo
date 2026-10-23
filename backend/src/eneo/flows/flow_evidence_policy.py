@@ -303,9 +303,3 @@ def resolve_service_key_evidence_capability(
     if level is ResourcePermissionLevel.READ:
         return EvidenceCapabilityLevel.VIEW
     return EvidenceCapabilityLevel.NONE
-
-
-def classification_level_for_space(space: Any) -> int:
-    classification = getattr(space, "security_classification", None)
-    level = getattr(classification, "security_level", None)
-    return level if isinstance(level, int) else 0

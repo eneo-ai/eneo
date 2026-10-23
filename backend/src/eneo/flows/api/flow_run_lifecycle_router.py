@@ -325,7 +325,7 @@ principals can cancel only their own runs.
 )
 async def get_flow_run_status_capabilities(
     _container: Container = Depends(
-        get_container(with_user=True, with_module_user=True, with_upload_admission=True)
+        get_container(with_user=True, with_module_user=True)
     ),
 ) -> FlowRunStatusCapabilitiesPublic:
     return flow_run_status_capabilities_public()
@@ -360,7 +360,7 @@ async def get_flow_run_status_capabilities(
 )
 async def get_flow_run_capacity(
     container: Container = Depends(
-        get_container(with_user=True, with_module_user=True, with_upload_admission=True)
+        get_container(with_user=True, with_module_user=True)
     ),
 ) -> FlowRunCapacityPublic:
     capacity = await container.flow_run_service().runtime_capacity()
@@ -664,7 +664,7 @@ async def list_flow_runs(
         Query(description="`desc` (the default) or `asc`.", examples=["desc"]),
     ] = "desc",
     container: Container = Depends(
-        get_container(with_user=True, with_module_user=True, with_upload_admission=True)
+        get_container(with_user=True, with_module_user=True)
     ),
 ):
     await flow_access_context.enforce_flow_scope(
@@ -739,7 +739,7 @@ async def get_flow_run_status(
     run_id: Annotated[UUID, Path(description="Identifier of the run to poll.")],
     request: Request,
     container: Container = Depends(
-        get_container(with_user=True, with_module_user=True, with_upload_admission=True)
+        get_container(with_user=True, with_module_user=True)
     ),
 ):
     await flow_access_context.enforce_flow_scope(
@@ -807,7 +807,6 @@ async def get_flow_run(
         get_container_for_explicit_transaction(
             with_user=True,
             with_module_user=True,
-            with_upload_admission=True,
         )
     ),
 ):

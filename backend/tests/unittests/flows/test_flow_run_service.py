@@ -162,11 +162,12 @@ def _flow_repo() -> AsyncMock:
     return AsyncMock()
 
 
-def _seed_flow_repo(flow_repo, flow) -> None:
+def _seed_flow_repo(flow_repo, flow, *, classification_level: int = 0) -> None:
     """Answer both flow reads the access policy makes with the real flow.
 
     The disclosure decision reads a narrow typed evidence-access context; a
-    double that returned a mock there would withhold every passage.
+    double that returned a mock there would withhold every passage. The
+    context carries the space's classification, as the policy reads it.
     """
     flow_repo.get.return_value = flow
     flow_repo.lock_publication_pointer.return_value = flow.published_version
@@ -178,7 +179,7 @@ def _seed_flow_repo(flow_repo, flow) -> None:
         retired=False,
         sensitive=evidence_facts.sensitive,
         evidence_export_allowed=evidence_facts.export_allowed,
-        classification_level=0,
+        classification_level=classification_level,
     )
 
 
@@ -2347,12 +2348,11 @@ async def test_list_runs_keeps_service_keys_scoped_even_with_space_admin_role(us
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
     flow_run_repo.list_statuses.return_value = []
     _seed_flow_repo(flow_repo, flow)
-    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
         user=service_user,
         flow_repo=flow_repo,
@@ -2391,11 +2391,10 @@ async def test_list_runs_space_admin_sees_every_run_of_the_flow_unless_mine(user
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
     flow_run_repo.list_statuses.return_value = []
-    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
@@ -2675,7 +2674,7 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
-    actor_manager.get_space_actor_from_space.return_value = SimpleNamespace(
+    actor_manager.get_space_actor.return_value = SimpleNamespace(
         get_current_role=lambda: "admin"
     )
     flow = _exportable_flow(user)
@@ -2691,10 +2690,7 @@ async def test_export_evidence_json_rejects_service_key_raw_export_in_classifica
     )
     version = _version(user=user, flow=flow, version=1)
     _seed_flow_repo(flow_repo, flow)
-    space_service.get_space.return_value = SimpleNamespace(
-        id=flow.space_id,
-        security_classification=SimpleNamespace(security_level=3),
-    )
+    _seed_flow_repo(flow_repo, flow, classification_level=3)
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
@@ -2797,7 +2793,7 @@ async def test_export_evidence_json_refuses_a_space_admin_while_export_is_off(
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
-    actor_manager.get_space_actor_from_space.return_value = SimpleNamespace(
+    actor_manager.get_space_actor.return_value = SimpleNamespace(
         get_current_role=lambda: "admin"
     )
     flow = _flow(user=user)
@@ -2807,7 +2803,6 @@ async def test_export_evidence_json_refuses_a_space_admin_while_export_is_off(
     )
     flow_run_repo.get.return_value = run
     _seed_flow_repo(flow_repo, flow)
-    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
@@ -2989,14 +2984,13 @@ async def test_get_run_rejects_other_service_key_run_even_with_space_admin_role(
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
     run = _run(user=other_user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
     _seed_flow_repo(flow_repo, flow)
-    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
         user=service_user,
         flow_repo=flow_repo,
@@ -3107,14 +3101,13 @@ async def test_get_run_allows_space_admin_to_view_other_users_run_status(user):
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
     run = _run(user=other_user, flow_id=flow.id)
     flow_run_repo.get.return_value = run
     _seed_flow_repo(flow_repo, flow)
-    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
@@ -3144,7 +3137,7 @@ async def test_list_step_results_allows_space_admin_for_other_users_run_content(
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
@@ -3152,7 +3145,6 @@ async def test_list_step_results_allows_space_admin_for_other_users_run_content(
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []
     _seed_flow_repo(flow_repo, flow)
-    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_service(
         user=user,
         flow_repo=flow_repo,
@@ -3357,7 +3349,7 @@ async def test_get_evidence_allows_space_admin_for_other_users_run(user):
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _flow(user=user)
     _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
@@ -3367,7 +3359,6 @@ async def test_get_evidence_allows_space_admin_for_other_users_run(user):
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
-    space_service.get_space.return_value = SimpleNamespace(id=flow.space_id)
     service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
@@ -3401,7 +3392,7 @@ async def test_export_evidence_json_rejects_space_admin_raw_export_in_classifica
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "admin")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _exportable_flow(user)
     _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
@@ -3409,10 +3400,7 @@ async def test_export_evidence_json_rejects_space_admin_raw_export_in_classifica
     flow_run_repo.get.return_value = run
     _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
-    space_service.get_space.return_value = SimpleNamespace(
-        id=flow.space_id,
-        security_classification=SimpleNamespace(security_level=3),
-    )
+    _seed_flow_repo(flow_repo, flow, classification_level=3)
     service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
@@ -3447,7 +3435,7 @@ async def test_export_evidence_json_allows_space_owner_raw_export_in_classificat
     space_service = AsyncMock()
     actor_manager = MagicMock()
     actor = SimpleNamespace(get_current_role=lambda: "owner")
-    actor_manager.get_space_actor_from_space.return_value = actor
+    actor_manager.get_space_actor.return_value = actor
     flow = _exportable_flow(user)
     _seed_flow_repo(flow_repo, flow)
     other_user = SimpleNamespace(id=uuid4(), tenant_id=user.tenant_id)
@@ -3457,10 +3445,7 @@ async def test_export_evidence_json_allows_space_owner_raw_export_in_classificat
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
-    space_service.get_space.return_value = SimpleNamespace(
-        id=flow.space_id,
-        security_classification=SimpleNamespace(security_level=3),
-    )
+    _seed_flow_repo(flow_repo, flow, classification_level=3)
     service = _flow_run_evidence_service(
         user=user,
         flow_repo=flow_repo,
@@ -3503,7 +3488,7 @@ async def test_export_evidence_json_allows_run_owner_raw_export_in_classificatio
     flow_version_repo = AsyncMock()
     space_service = AsyncMock()
     actor_manager = MagicMock()
-    actor_manager.get_space_actor_from_space.return_value = SimpleNamespace(
+    actor_manager.get_space_actor.return_value = SimpleNamespace(
         get_current_role=lambda: "viewer"
     )
     flow = _exportable_flow(trace_user)
@@ -3513,10 +3498,7 @@ async def test_export_evidence_json_allows_run_owner_raw_export_in_classificatio
     flow_run_repo.list_step_attempts.return_value = _attempts_page([])
     _seed_flow_repo(flow_repo, flow)
     flow_version_repo.get.return_value = _version(user=trace_user, flow=flow, version=1)
-    space_service.get_space.return_value = SimpleNamespace(
-        id=flow.space_id,
-        security_classification=SimpleNamespace(security_level=3),
-    )
+    _seed_flow_repo(flow_repo, flow, classification_level=3)
     service = _flow_run_evidence_service(
         user=trace_user,
         flow_repo=flow_repo,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
@@ -63,6 +63,7 @@ from eneo.flows.published_runtime import (
 )
 from eneo.flows.runtime.live_transcription.admission import resolve_live_transcription
 from eneo.flows.transcription_config import (
+    FlowTranscriptionConfig,
     FlowTranscriptionConfigError,
     SpeakerServiceGap,
     parse_transcription_config,
@@ -280,19 +281,37 @@ def speaker_service_gap_in_space(
     when one would. A flow that transcribes nothing, or whose transcription
     choice is unreadable, never asks its space and reads as having chosen no
     service."""
-    try:
-        config = parse_transcription_config({"wizard": wizard_metadata})
-    except FlowTranscriptionConfigError:
-        return SpeakerServiceGap.NOT_CHOSEN
-    if not config.enabled:
+    config = _transcription_choice(wizard_metadata)
+    if config is None:
         return SpeakerServiceGap.NOT_CHOSEN
     return resolve_speaker_service(config, space).gap
 
 
-def speakers_identifiable_in_space(
-    wizard_metadata: FlowPersistedJsonObject | None, space: Space
+async def speakers_identifiable(
+    wizard_metadata: FlowPersistedJsonObject | None,
+    *,
+    load_space: Callable[[], Awaitable[Space]],
 ) -> bool:
-    return speaker_service_gap_in_space(wizard_metadata, space) is None
+    """Whether a connected service would label this flow's speakers, as
+    ``speaker_service_gap_in_space`` decides it, for a caller that has not
+    loaded the space: it is read only when the flow chose a speaker service,
+    the one case the answer depends on it."""
+    config = _transcription_choice(wizard_metadata)
+    if config is None or config.speaker_service_id is None:
+        return False
+    return resolve_speaker_service(config, await load_space()).gap is None
+
+
+def _transcription_choice(
+    wizard_metadata: FlowPersistedJsonObject | None,
+) -> FlowTranscriptionConfig | None:
+    """The flow's transcription choice; None when it transcribes nothing or
+    the choice is unreadable."""
+    try:
+        config = parse_transcription_config({"wizard": wizard_metadata})
+    except FlowTranscriptionConfigError:
+        return None
+    return config if config.enabled else None
 
 
 def speaker_labels_option(

@@ -285,10 +285,11 @@ class SpaceService:
         return space
 
     async def get_space_access_facts(self, id: UUID) -> "SpaceAccessFacts":
-        """The facts ``get_space``'s caller decides permissions on, with
-        ``get_space``'s refusals, for a caller that needs nothing else of the
-        space: they are read without the MCP catalog (``get_access_facts``)."""
-        access = await self.repo.get_access_facts(id)
+        """The facts ``get_space``'s caller decides their own permissions on,
+        with ``get_space``'s refusals, for a caller that needs nothing else of
+        the space: only the caller's membership and key scope are read, never
+        the space aggregate (``SpaceRepository.get_space_access_facts``)."""
+        access = await self.repo.get_space_access_facts(id)
         _require_space_read(self.actor_manager.get_space_actor(access))
         return access
 

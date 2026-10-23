@@ -107,7 +107,7 @@ def _policy_with_space(
     )
     space_service = AsyncMock()
     actor_manager = MagicMock()
-    actor_manager.get_space_actor_from_space.return_value = SimpleNamespace(
+    actor_manager.get_space_actor.return_value = SimpleNamespace(
         get_current_role=lambda: role
     )
     flow_repo.get.return_value = flow
@@ -120,7 +120,7 @@ def _policy_with_space(
         evidence_export_allowed=evidence_export_allowed,
         classification_level=security_level,
     )
-    space_service.get_space.return_value = space
+    space_service.get_space_access_facts.return_value = space
     return FlowRunAccessPolicy(
         user=user,
         flow_repo=flow_repo,
@@ -748,7 +748,7 @@ async def test_disclosure_never_reads_the_space_through_the_membership_check(
 
     await policy.passage_disclosure_for_run(run, access_kind="evidence_view")
 
-    cast(AsyncMock, space_service).get_space.assert_not_awaited()
+    cast(AsyncMock, space_service).get_space_access_facts.assert_not_awaited()
     cast(AsyncMock, policy.flow_repo).get.assert_not_awaited()
 
 
@@ -1058,7 +1058,7 @@ async def test_space_and_flow_context_lookups_are_cached_per_flow(user) -> None:
 
     for _ in range(2):
         assert await policy.load_space_access(flow_id=context.flow_id) == (
-            policy.actor_manager.get_space_actor_from_space.return_value,
+            policy.actor_manager.get_space_actor.return_value,
             2,
         )
         assert (
@@ -1066,11 +1066,12 @@ async def test_space_and_flow_context_lookups_are_cached_per_flow(user) -> None:
             == context
         )
 
-    # The space and the flow row are each read once; the live aggregate never.
+    # The caller's facts and the flow row are each read once; no space
+    # aggregate and no flow aggregate.
     cast(AsyncMock, flow_repo.get).assert_not_awaited()
-    cast(AsyncMock, policy.space_service.get_space).assert_awaited_once_with(
-        context.space_id
-    )
+    cast(
+        AsyncMock, policy.space_service.get_space_access_facts
+    ).assert_awaited_once_with(context.space_id)
     cast(AsyncMock, flow_repo.get_history_access_context).assert_awaited_once_with(
         flow_id=context.flow_id,
         tenant_id=user.tenant_id,
@@ -1098,7 +1099,7 @@ async def test_live_read_refuses_a_retired_flow_whose_space_a_history_read_cache
     actor, _level = await policy.load_space_access(
         flow_id=retired.flow_id, history=True
     )
-    assert actor is policy.actor_manager.get_space_actor_from_space.return_value
+    assert actor is policy.actor_manager.get_space_actor.return_value
     with pytest.raises(NotFoundException):
         await policy.load_space_access(flow_id=retired.flow_id)
     with pytest.raises(NotFoundException):
@@ -1166,9 +1167,9 @@ async def test_service_key_raw_export_fails_closed_in_classification_three(
     )
     assert exc_info.value.code == "flow_run_evidence_raw_export_forbidden"
     assert exc_info.value.context == {"auth_layer": "flow_run_principal"}
-    cast(AsyncMock, policy.space_service).get_space.assert_awaited_once_with(
-        flow.space_id
-    )
+    cast(
+        AsyncMock, policy.space_service
+    ).get_space_access_facts.assert_awaited_once_with(flow.space_id)
 
 
 def test_evidence_policy_reads_only_the_tenant_flow_settings(user) -> None:

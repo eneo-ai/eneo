@@ -1017,7 +1017,7 @@ async def test_tenant_scoped_user_api_key_loads_space_membership_check(monkeypat
 
     assert result["count"] == 1
     assert result["has_more"] is False
-    container.space_service.return_value.get_space.assert_awaited_once_with(
+    container.space_service.return_value.get_space_access_facts.assert_awaited_once_with(
         flow.space_id
     )
 
@@ -1105,7 +1105,7 @@ async def test_space_scoped_api_key_matching_space_succeeds(monkeypatch):
 
     assert result["count"] == 1
     assert result["has_more"] is False
-    container.space_service.return_value.get_space.assert_awaited_once_with(
+    container.space_service.return_value.get_space_access_facts.assert_awaited_once_with(
         flow.space_id
     )
 
