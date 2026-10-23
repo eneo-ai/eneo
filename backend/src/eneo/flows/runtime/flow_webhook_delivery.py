@@ -322,6 +322,8 @@ class FlowRunWebhookDeliveryService:
                 FlowWebhookDeliveryResult(dead_lettered_count=int(did_dead_letter))
             )
         except WebhookDeliveryError as exc:
+            # Only 4xx (bar 408/429) is terminal. A 3xx is not followed and
+            # retries within the bounded attempts: a redirect can be temporary.
             terminal_http_failure = (
                 exc.status_code is not None
                 and 400 <= exc.status_code < 500

@@ -254,7 +254,7 @@ async def resolve_http_input_source_text(
             ) from None
         response_ms = (time.monotonic() - start_time) * 1000
         status_code = response.status_code
-        if response.status_code >= 400:
+        if not response.is_success:
             raise TypedIOValidationException(
                 f"Step {step.step_order}: HTTP {method} input returned status {response.status_code}.",
                 code=FlowApiErrorCode.TYPED_IO_HTTP_NON_SUCCESS.value,
@@ -425,7 +425,7 @@ async def deliver_webhook(
         raise
 
     duration_ms = (time.monotonic() - start_time) * 1000
-    if response.status_code >= 400:
+    if not response.is_success:
         err_msg = f"Webhook delivery returned status {response.status_code}."
         await deps.audit_http_outbound(
             run=run,

@@ -13,6 +13,7 @@ import httpx
 import pytest
 from cryptography.fernet import Fernet
 
+from eneo.audit.domain.outcome import Outcome
 from eneo.flows.runtime.http_orchestration import (
     WebhookDeliveryError,
     deliver_webhook,
@@ -265,8 +266,11 @@ async def test_resolve_http_input_source_text_timeout_maps_to_typed_code() -> No
     deps.audit_http_outbound.assert_awaited()
 
 
+@pytest.mark.parametrize("status_code", [302, 503])
 @pytest.mark.asyncio
-async def test_resolve_http_input_source_text_non_success_maps_to_typed_code() -> None:
+async def test_resolve_http_input_source_text_non_success_maps_to_typed_code(
+    status_code: int,
+) -> None:
     step = _Step(
         step_order=3,
         step_id="s3",
@@ -277,7 +281,7 @@ async def test_resolve_http_input_source_text_non_success_maps_to_typed_code() -
     run = _Run(id="run-3", flow_id="flow-1", tenant_id="tenant-1")
     request = httpx.Request("GET", "https://example.org/data")
     send_http_request = AsyncMock(
-        return_value=httpx.Response(503, request=request, text="unavailable")
+        return_value=httpx.Response(status_code, request=request, text="unavailable")
     )
     deps = _make_deps(send_http_request=send_http_request)
 
@@ -631,7 +635,7 @@ async def test_http_transport_failures_do_not_disclose_credentials_to_run_audit_
         assert exc.value.status_code is None
 
 
-@pytest.mark.parametrize("status_code", [408, 429, 400, 422, 503])
+@pytest.mark.parametrize("status_code", [301, 302, 408, 429, 400, 422, 503])
 @pytest.mark.asyncio
 async def test_deliver_webhook_exposes_typed_http_status(status_code: int) -> None:
     step = _Step(
@@ -665,7 +669,9 @@ async def test_deliver_webhook_exposes_typed_http_status(status_code: int) -> No
 
     assert exc.value.status_code == status_code
     assert f"status {status_code}" in str(exc.value)
-    assert deps.audit_http_outbound.await_args.kwargs["status_code"] == status_code
+    audit = deps.audit_http_outbound.await_args.kwargs
+    assert audit["status_code"] == status_code
+    assert audit["outcome"] == Outcome.FAILURE
 
 
 @pytest.mark.asyncio
