@@ -4273,3 +4273,108 @@ def test_publish_accepts_reads_the_source_step_produces(steps: list[FlowStep]) -
         metadata_json=_audio_metadata(),
         require_complete_template_fill_config=True,
     )
+
+
+_TEXT = {"output_type": "text"}
+
+
+@pytest.mark.parametrize(
+    ("steps", "source_step_orders"),
+    [
+        pytest.param(
+            [
+                _step(1, **_TEXT),
+                _step(2, **_TEXT),
+                _sectioned(
+                    3, **_question("{{ step_1.output.text }} {{ step_2.output.text }}")
+                ),
+            ],
+            [1, 2],
+            id="question-reads-two-steps",
+        ),
+        pytest.param(
+            [
+                _step(1, **_TEXT),
+                _step(2, **_TEXT),
+                _sectioned(3, input_source="all_previous_steps"),
+            ],
+            [1, 2],
+            id="all-previous-steps",
+        ),
+        pytest.param(
+            [
+                _step(1, **_TEXT),
+                _step(2, **_TEXT),
+                _sectioned(
+                    3,
+                    input_bindings={
+                        "source_refs": [
+                            {"step_ref": "step_1", "output": "text"},
+                            {"step_ref": "step_2", "output": "text"},
+                        ]
+                    },
+                ),
+            ],
+            [1, 2],
+            id="two-source-refs",
+        ),
+        pytest.param([_sectioned(1)], [], id="first-step-without-uploads"),
+    ],
+)
+def test_publish_refuses_section_step_without_exactly_one_material(
+    steps: list[FlowStep], source_step_orders: list[int]
+) -> None:
+    # The run refuses these: section processing splits exactly one material.
+    exc = _assert_validate_steps_rejects(
+        steps,
+        expected_type=FlowStepValidationError,
+        match="exactly one material",
+        code=FlowGraphIssueCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+        step_order=steps[-1].step_order,
+        require_complete_template_fill_config=True,
+    )
+    assert exc.context is not None
+    assert exc.context["source_step_orders"] == source_step_orders
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        pytest.param([_step(1, **_TEXT), _sectioned(2)], id="one-step"),
+        pytest.param(
+            [
+                _step(1, **_TEXT),
+                _sectioned(
+                    2, **_question("{{ step_1.output.text }} {{ föregående_steg }}")
+                ),
+            ],
+            id="two-reads-of-one-step",
+        ),
+        pytest.param(
+            [_transcript(1), _sectioned(2, **_question("{{ transkribering }}"))],
+            id="transcript-counted-at-run",
+        ),
+        pytest.param(
+            [
+                _step(
+                    1,
+                    input_type="document",
+                    output_contract=_SECTION_RECORDS,
+                    input_config={
+                        "text_processing": {"mode": "process_each_section"},
+                        "runtime_input": {"enabled": True, "max_files": 3},
+                    },
+                )
+            ],
+            id="uploads-counted-at-run",
+        ),
+    ],
+)
+def test_publish_accepts_section_step_reading_one_material(
+    steps: list[FlowStep],
+) -> None:
+    validate_steps(
+        steps,
+        metadata_json=_audio_metadata(),
+        require_complete_template_fill_config=True,
+    )

@@ -476,8 +476,12 @@ async def test_publish_flow_snapshots_the_assistants_it_validated(user):
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
     section_step = _step(step_order=2).model_copy(
         update={
-            "input_bindings": {"question": "{{ flow_input.text }}"},
-            "input_config": {"text_processing": {"mode": "process_each_section"}},
+            "input_bindings": {"question": "{{ step_input.text }}"},
+            # Uploads give the sections their one material.
+            "input_config": {
+                "text_processing": {"mode": "process_each_section"},
+                "runtime_input": {"enabled": True},
+            },
             "output_contract": {
                 "type": "object",
                 "properties": {

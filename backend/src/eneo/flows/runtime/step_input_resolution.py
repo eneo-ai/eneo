@@ -99,12 +99,14 @@ from eneo.flows.runtime.transcription_runtime import (
 )
 from eneo.flows.source_identity import RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD
 from eneo.flows.step_chain_rules import OUTSIDE_INPUT_SOURCES
-from eneo.flows.step_lineage import selected_source_step_order
+from eneo.flows.step_lineage import (
+    selected_source_step_order,
+    selects_run_transcript,
+)
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
     analyze_template,
     consumes_runtime_input,
-    referenced_form_fields,
 )
 from eneo.main.exceptions import (
     BadRequestException,
@@ -1395,13 +1397,8 @@ async def _resolve_step_materials(
             step_refs=state.step_ref_mapping if state else {},
             form_field_names={FLOW_INPUT_TRANSCRIPTION_KEY},
         )
-        if FLOW_INPUT_TRANSCRIPTION_KEY in referenced_form_fields(
-            references, form_field_names={FLOW_INPUT_TRANSCRIPTION_KEY}
-        ):
-            selected_transcript = True
+        selected_transcript |= selects_run_transcript(references)
         for reference in references:
-            if reference.head == FLOW_INPUT_TRANSCRIPTION_KEY and not reference.tail:
-                selected_transcript = True
             order = selected_source_step_order(
                 reference, step_order=step.step_order, section_processing=processing
             )

@@ -67,6 +67,7 @@ from eneo.flows.flow_metadata import (
     parse_flow_form_schema,
 )
 from eneo.flows.flow_review_policy import parse_flow_step_review_policy
+from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
 from eneo.flows.flow_validators_form import (
     validate_form_schema,
     validate_variable_alias_collisions,
@@ -132,6 +133,7 @@ from eneo.flows.step_lineage import (
     referenced_step_order,
     resolve_upstream_step_orders,
     selected_source_step_order,
+    selects_run_transcript,
 )
 from eneo.flows.template_reference_analyzer import (
     TemplateReference,
@@ -2834,10 +2836,14 @@ def _validate_section_source_reads(
         ("prompt", step.prompt_template, None),
     ]
     reads: list[tuple[str, str, int]] = []
+    transcript = {FLOW_INPUT_TRANSCRIPTION_KEY}
+    reads_transcript = False
     for field, template, authored_reference in authored:
-        for reference in analyze_template(
-            template or "", step_refs=step_ref_mapping, form_field_names=set()
-        ):
+        references = analyze_template(
+            template or "", step_refs=step_ref_mapping, form_field_names=transcript
+        )
+        reads_transcript |= selects_run_transcript(references)
+        for reference in references:
             order = selected_source_step_order(
                 reference, step_order=step.step_order, section_processing=True
             )
@@ -2868,6 +2874,32 @@ def _validate_section_source_reads(
             },
             step_order=step.step_order,
         )
+    # The run splits exactly one material, counting the material identities
+    # (file ids, attempt-scoped inline text) it only has once steps ran, so it
+    # cannot call this. Publish knows the step orders: each step writes its own
+    # output, so distinct steps are distinct materials and repeat reads of one
+    # step are one. Uploads and the transcript are counted only at run.
+    source_step_orders = sorted(
+        {order for _, _, order in reads if order in steps_by_order}
+    )
+    if len(source_step_orders) == 1 or (
+        not source_step_orders
+        and (reads_transcript or takes_runtime_files(step.input_config))
+    ):
+        return
+    read = (
+        "steps " + " and ".join(map(str, source_step_orders))
+        if source_step_orders
+        else "no earlier step and takes no upload"
+    )
+    raise FlowStepValidationError(
+        f"Step {step.step_order}: section processing splits exactly one material, "
+        f"but the step reads {read}. Read one step's text, or let people upload "
+        "the file (input_config.runtime_input).",
+        code=FlowGraphIssueCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+        context={"source_step_orders": source_step_orders},
+        step_order=step.step_order,
+    )
 
 
 def _yields_structured_output(step: FlowStepValidationView) -> bool:
