@@ -447,11 +447,11 @@ async def test_two_fixes_of_one_prompt_both_land(
     assert (await _suggestions(client, flow))["items"] == []
 
 
-async def test_a_suggestion_an_earlier_fix_changed_is_skipped_and_reported(
+async def test_fixing_all_removes_a_chain_of_relays(
     client: AsyncClient, db_container, admin_user, patch_auth_service_jwt
 ):
-    # Steps 2 and 3 each only pass on the step before. Removing step 2 makes
-    # step 3 the relay of step 1, a suggestion of its own.
+    # Steps 2 and 3 each only pass on the step before. Removing step 2
+    # renumbers step 3, which stays the same relay and is removed too.
     flow = await _seeded(
         client,
         db_container,
@@ -469,26 +469,20 @@ async def test_a_suggestion_an_earlier_fix_changed_is_skipped_and_reported(
         str(flow.step_ids[1]),
         str(flow.step_ids[2]),
     ]
-    first, second = (item["fingerprint"] for item in relays)
+    fingerprints = [item["fingerprint"] for item in relays]
 
-    response = await _apply(client, flow, [first, second], listed["draft_revision"])
+    response = await _apply(client, flow, fingerprints, listed["draft_revision"])
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["applied"] == [first]
-    assert body["skipped"] == [second]
+    assert body["applied"] == fingerprints
+    assert body["skipped"] == []
     assert [step["id"] for step in body["flow"]["steps"]] == [
         str(flow.step_ids[0]),
-        str(flow.step_ids[2]),
         str(flow.step_ids[3]),
     ]
-    remaining = [
-        item
-        for item in (await _suggestions(client, flow))["items"]
-        if item["code"] == "relay_step"
-    ]
-    assert [item["steps"][0] for item in remaining] == [str(flow.step_ids[2])]
-    assert [item["fingerprint"] for item in remaining] != [second]
+    after = await _suggestions(client, flow)
+    assert [item for item in after["items"] if item["code"] == "relay_step"] == []
 
 
 async def test_a_viewer_may_not_apply_a_suggestion(

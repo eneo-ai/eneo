@@ -363,6 +363,37 @@ def test_no_relay_for_an_unread_relay_a_review_or_more_than_one_read() -> None:
     assert _of(_RELAY, [_step(1), _step(2), two_reads, _step(4)]) == []
 
 
+def test_a_relay_keeps_its_fingerprint_when_the_relay_before_it_goes() -> None:
+    # Steps 2 and 3 each pass on the step before. Removing step 2 renumbers
+    # step 3 and makes it pass on step 1: still the same relay.
+    first, second = _of(
+        _RELAY, [_step(1), _relay(2), _relay(3, id=_IDS[30]), _step(4, id=_IDS[31])]
+    )
+    (after,) = _of(_RELAY, [_step(1), _relay(2, id=_IDS[30]), _step(3, id=_IDS[31])])
+
+    assert after.fingerprint == second.fingerprint
+    assert after.fingerprint != first.fingerprint
+    assert after.steps == (_IDS[30], _IDS[1])
+    assert after.params["source_step_order"] == 1
+
+
+def test_a_relay_read_another_way_is_another_relay() -> None:
+    (by_input,) = _of(_RELAY, [_step(1), _relay(), _step(3)])
+    (by_question,) = _of(
+        _RELAY,
+        [
+            _step(1),
+            _relay(
+                input_source="flow_input",
+                input_bindings={"question": "{{ step_1.output.text }}"},
+            ),
+            _step(3),
+        ],
+    )
+
+    assert by_question.fingerprint != by_input.fingerprint
+
+
 # --------------------------------------------------------------------------- #
 # unused_form_field
 # --------------------------------------------------------------------------- #
