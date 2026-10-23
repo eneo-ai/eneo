@@ -28,4 +28,4 @@ def test_the_instructions_resolve_introduced_suggestions_in_the_same_turn() -> N
     assert "introduced_suggestions" in instructions
     assert "Resolve each in the same turn" in instructions
     assert "unless the user explicitly asked for that shape" in instructions
-    assert "—" not in AUTHORING_INSTRUCTIONS
+    assert chr(0x2014) not in AUTHORING_INSTRUCTIONS

@@ -545,4 +545,4 @@ def test_every_suggestion_code_has_one_plain_authoring_rule() -> None:
     for rule in FLOW_SUGGESTION_AUTHORING_RULES.values():
         assert rule.endswith(".")
         assert "\n" not in rule
-        assert "—" not in rule
+        assert chr(0x2014) not in rule
