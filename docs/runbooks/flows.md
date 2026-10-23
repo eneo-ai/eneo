@@ -46,6 +46,12 @@ Preserve completed step results and treat an unfinished provider call as outcome
 unknown. Do not automatically replay it: remote work and spend may already have
 occurred.
 
+## Worker shutdown
+
+ARQ workers drain for up to 60 seconds on SIGTERM, and the compose file gives
+each worker `init: true` and `stop_grace_period: 70s`. A flow run longer than
+the drain is cancelled and recovered by the heartbeat reaper.
+
 ## Runtime health
 
 `GET /api/healthz/flows` is an operator diagnostic endpoint. It requires the
