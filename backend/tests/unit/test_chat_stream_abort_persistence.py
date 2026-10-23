@@ -447,6 +447,59 @@ async def test_streaming_handle_response_schedules_partial_save_on_abort():
 
 
 @pytest.mark.asyncio
+async def test_streaming_abort_closes_the_completion_stream_on_the_same_task():
+    """The completion stream holds the turn's MCP connections, which only the
+    task that opened them can close; an abort must not leave that to the GC."""
+
+    completion_closed_on: list[asyncio.Task[object] | None] = []
+
+    async def fake_completion_stream():
+        try:
+            for text in ["hello ", "world"]:
+                yield Completion(
+                    reasoning_token_count=0,
+                    response_type=ResponseType.TEXT,
+                    text=text,
+                )
+        finally:
+            completion_closed_on.append(asyncio.current_task())
+
+    response = SimpleNamespace(
+        completion=fake_completion_stream(),
+        total_token_count=5,
+        usage=None,
+        extended_logging=None,
+    )
+    svc = _make_assistant_service_for_streaming(AsyncMock())
+
+    with patch.object(
+        session_service_module,
+        "persist_partial_question_answer",
+        AsyncMock(),
+    ):
+        from eneo.assistants.assistant_service import AssistantService
+
+        gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+            svc,  # pyright: ignore[reportArgumentType]
+            response=response,
+            datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+            question="hello?",
+            files=[],
+            completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+            session=_make_session_in_db(),
+            stream=True,
+            assistant_id=uuid4(),
+            question_id=uuid4(),
+            **_skill_runtime_args(),
+        )
+
+        await _drain_until(gen, 1)
+        await gen.aclose()
+
+    assert completion_closed_on == [asyncio.current_task()]
+
+
+@pytest.mark.asyncio
 async def test_streaming_abort_persists_changed_skill_evidence_without_text():
     async def fake_completion_stream():
         yield Completion(

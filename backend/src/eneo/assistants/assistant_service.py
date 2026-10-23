@@ -2889,6 +2889,12 @@ class AssistantService:
                             f"answer_chars={len(response_string)}"
                         )
 
+                    # An abort leaves the completion stream suspended. Closing it
+                    # on this task lets it release the MCP connections it opened.
+                    aclose_completion = getattr(response.completion, "aclose", None)
+                    if aclose_completion is not None:
+                        await aclose_completion()
+
             return response_stream()
         else:
             reasoning_token_count = 0

@@ -30,6 +30,7 @@ lives in step 020.
 
 from __future__ import annotations
 
+from contextlib import aclosing
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, AsyncGenerator, cast
 from uuid import UUID
@@ -562,14 +563,15 @@ class HelperRunService:
         stream_usage: TokenUsage | None = None
         stream_input_token_estimate: int | None = None
 
-        async for chunk in completion:
-            if chunk.usage is not None:
-                stream_usage = chunk.usage
-            if chunk.input_token_estimate is not None:
-                stream_input_token_estimate = chunk.input_token_estimate
-            if chunk.response_type == ResponseType.TEXT and chunk.text is not None:
-                response_string = f"{response_string}{chunk.text}"
-            yield chunk
+        async with aclosing(completion):
+            async for chunk in completion:
+                if chunk.usage is not None:
+                    stream_usage = chunk.usage
+                if chunk.input_token_estimate is not None:
+                    stream_input_token_estimate = chunk.input_token_estimate
+                if chunk.response_type == ResponseType.TEXT and chunk.text is not None:
+                    response_string = f"{response_string}{chunk.text}"
+                yield chunk
 
         if stream_usage is not None and stream_usage.prompt_tokens is not None:
             num_tokens_question = stream_usage.prompt_tokens
