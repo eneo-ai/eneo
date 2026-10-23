@@ -205,7 +205,7 @@ async def _save(
         id=uuid4(),
         tenant_id=flow.tenant_id,
         permissions=[],
-        tenant=SimpleNamespace(security_enabled=False),
+        tenant=SimpleNamespace(security_enabled=False, flow_settings={}),
     )
     flow_repo = AsyncMock()
     flow_repo.get.return_value = flow

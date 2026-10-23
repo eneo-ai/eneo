@@ -525,6 +525,7 @@ class FlowRunExecutorConfig:
     def step_deadline_seconds(self, step: RuntimeStep) -> float:
         return float(
             resolve_step_timeout_seconds(
+                step_order=step.step_order,
                 step_timeout_seconds=step.timeout_seconds,
                 policy=self.runtime_policy,
             )

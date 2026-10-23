@@ -71,6 +71,10 @@ from eneo.flows.flow_resource_bindings import (
     LocalResourceBinding,
 )
 from eneo.flows.flow_review_policy import dump_flow_step_review_policy
+from eneo.flows.flow_runtime_policy import (
+    resolve_flow_runtime_policy,
+    resolve_step_timeout_seconds,
+)
 from eneo.flows.flow_security_classification import (
     FlowStepClassificationExplanation,
     explain_flow_security_classification,
@@ -244,6 +248,7 @@ class FlowService:
             metadata_json=normalize_flow_metadata_for_write(metadata_json),
         )
         self._validate_steps(steps, metadata_json=normalized_metadata)
+        self._refuse_step_timeouts_above_the_maximum(steps)
         self._validate_variable_alias_collisions(
             steps=steps,
             metadata_json=normalized_metadata,
@@ -388,6 +393,7 @@ class FlowService:
         )
         if refusals:
             raise refusals[0]
+        self._refuse_step_timeouts_above_the_maximum(next_steps)
         # An edit that leaves the metadata alone states no new choice.
         if metadata_json is not NOT_PROVIDED:
             space = await self._check_speaker_service(
@@ -808,6 +814,21 @@ class FlowService:
                 "Flow must contain at least one step before publish.",
                 code=code,
                 context={"issue_code": code},
+            )
+        # The maximum may have been lowered since the draft was saved.
+        self._refuse_step_timeouts_above_the_maximum(flow.steps)
+
+    def _refuse_step_timeouts_above_the_maximum(
+        self, steps: Sequence[FlowStep]
+    ) -> None:
+        """A step may not ask for more time than the organisation allows: the
+        run refuses it the same way (resolve_step_timeout_seconds)."""
+        policy = resolve_flow_runtime_policy(self.user.tenant.flow_settings)
+        for step in steps:
+            resolve_step_timeout_seconds(
+                step_order=step.step_order,
+                step_timeout_seconds=step.timeout_seconds,
+                policy=policy,
             )
 
     def _validate_steps(

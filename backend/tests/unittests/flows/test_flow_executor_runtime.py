@@ -5662,6 +5662,61 @@ async def test_execute_step_shares_one_deadline_with_every_dependency(user):
 
 
 @pytest.mark.asyncio
+async def test_step_timeout_above_the_organisation_maximum_fails_with_its_own_code(
+    user,
+):
+    """A step budget above the organisation's maximum fails the step and the
+    run with the catalogued code and the numbers, not the generic typed code."""
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor._step_deadline_seconds = FlowRunExecutorConfig(
+        max_inline_text_bytes=1024,
+        runtime_policy=FlowRuntimePolicy(
+            default_step_timeout_seconds=70,
+            max_step_timeout_seconds=100,
+            hard_ceiling_seconds=100,
+            max_concurrent_runs=4,
+            max_concurrent_runs_capacity=4,
+        ),
+    ).step_deadline_seconds
+    flow_run_repo.finish_attempt = AsyncMock()
+    executor._terminalize_run = AsyncMock()
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = replace(_step_for_execute_step(step_order=2), timeout_seconds=150)
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(
+            step=step, run=run, state=_empty_execution_state(), attempt_no=1
+        )
+
+    claimed = _claimed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=step.step_id,
+        assistant_id=step.assistant_id,
+    )
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=exc_info.value,
+        failed_input_payload=None,
+        state=_empty_execution_state(),
+    )
+
+    code = "flow_step_timeout_exceeds_tenant_max"
+    assert flow_run_repo.finish_attempt.await_args.kwargs["error_code"] == code
+    assert executor._terminalize_run.await_args.kwargs["error"].code == code
+    assert exc_info.value.context == {
+        "step_order": 2,
+        "timeout_seconds": 150,
+        "max_step_timeout_seconds": 100,
+    }
+
+
+@pytest.mark.asyncio
 async def test_execute_step_backstop_fails_typed_with_completed_call_evidence(
     user, monkeypatch
 ):

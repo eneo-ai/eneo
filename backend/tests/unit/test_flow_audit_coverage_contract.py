@@ -141,6 +141,9 @@ FLOW_ROUTE_AUDIT_CONTRACTS: dict[str, FlowAuditContract] = {
             ),
             "inspect_flow_template": "flow_template_router.inspect_flow_template",
             "get_flow_step_kinds": "flow_step_kinds_router.get_flow_step_kinds",
+            "get_flow_execution_limits": (
+                "flow_execution_limits_router.get_flow_execution_limits"
+            ),
         }.items()
     },
     **{

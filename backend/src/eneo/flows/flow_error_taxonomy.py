@@ -1068,6 +1068,23 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
             "step's time budget or reduce the input."
         ),
     ),
+    FlowApiErrorCode.STEP_TIMEOUT_EXCEEDS_TENANT_MAX: _entry(
+        category="Typed input/output",
+        surfaced_through="API response and run error payload",
+        cause=(
+            "The step's timeout_seconds is above the organisation's maximum step "
+            "timeout, so the save or publish is refused or the run does not start "
+            "the step."
+        ),
+        consumer_action=(
+            "Lower the step's timeout_seconds to the maximum the message names and "
+            "save again; after a failed run, publish again and start a new run."
+        ),
+        user_action=(
+            "Ask a flow editor to lower the step's time limit, or an administrator "
+            "to raise the maximum."
+        ),
+    ),
     FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",

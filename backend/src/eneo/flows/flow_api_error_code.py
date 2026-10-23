@@ -136,6 +136,7 @@ class FlowApiErrorCode(StrEnum):
     LLM_OUTPUT_WHITESPACE_ABORT = "flow_llm_output_whitespace_abort"
     LLM_REQUEST_TIMEOUT = "flow_llm_request_timeout"
     STEP_TIMEOUT = "flow_step_timeout"
+    STEP_TIMEOUT_EXCEEDS_TENANT_MAX = "flow_step_timeout_exceeds_tenant_max"
     RUNTIME_INPUT_NOT_CONSUMED = "flow_runtime_input_not_consumed"
     MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED = "flow_mapped_provider_call_limit_exceeded"
     SUMMARIZATION_NON_CONVERGENT = "flow_summarization_non_convergent"
@@ -300,6 +301,7 @@ FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
         FlowApiErrorCode.LLM_OUTPUT_WHITESPACE_ABORT,
         FlowApiErrorCode.LLM_REQUEST_TIMEOUT,
         FlowApiErrorCode.STEP_TIMEOUT,
+        FlowApiErrorCode.STEP_TIMEOUT_EXCEEDS_TENANT_MAX,
         FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED,
         FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED,
         FlowApiErrorCode.SUMMARIZATION_NON_CONVERGENT,

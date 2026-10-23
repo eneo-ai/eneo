@@ -68,8 +68,24 @@ export const flowEditorKeys = {
     ["flows", flowId, "classification-preview", request] as const,
   insertionKinds: (flowId: string, revision: number, position: number) =>
     ["flows", flowId, "step-kinds", revision, "insertion", position] as const,
-  securityClassifications: () => ["security-classifications"] as const
+  securityClassifications: () => ["security-classifications"] as const,
+  executionLimits: () => ["flows", "execution-limits"] as const
 };
+
+/**
+ * The organisation's step time limit (default and ceiling), as a run applies
+ * it. Anyone who may edit flows may read it; if the request fails the editor
+ * shows the control without them.
+ */
+export function executionLimitsQueryOptions() {
+  return queryOptions({
+    queryKey: flowEditorKeys.executionLimits(),
+    queryFn: (): Promise<components["schemas"]["FlowExecutionLimitsPublic"]> =>
+      unwrap(browserApi.GET("/api/v1/flows/execution-limits/")),
+    retry: false,
+    staleTime: 5 * 60_000
+  });
+}
 
 export function flowAssistantQueryOptions(flowId: string, assistantId: string) {
   return queryOptions({

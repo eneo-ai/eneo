@@ -2072,6 +2072,8 @@ Structured output uses the same 8 MiB ceiling, measured as serialized JSON inclu
 
 The 8-hour invocation default must land after heartbeat-based recovery (`eneo-dgh9`); release orchestration enforces this dependency. For longer recordings, operators change **`FLOW_AUDIO_MAX_DURATION_SECONDS` and `TASK_EXECUTION_TIMEOUT_SECONDS` together**. The invocation budget still reserves 60 seconds for finalization, giving steps a maximum of 28,740 seconds within the remaining shared budget; the minimum invocation budget remains 65 seconds. Upload bytes, decoded bytes, and model/provider capacity must also admit the recording. These provisional duration and execution defaults may be revised by the measurement receipt tracked as `eneo-hy7c`.
 
+Within that budget, a step's `timeout_seconds` is bounded by the organisation's step timeout limits. `GET /api/v1/flows/execution-limits/` (`get_flow_execution_limits`) returns `default_step_timeout_seconds`, used when a step sets none, and `max_step_timeout_seconds`, above which a save or run is refused with `flow_step_timeout_exceeds_tenant_max`. Anyone who may manage flows can read it; administrators change it with `PATCH /api/v1/settings/flow-runtime-policy`.
+
 ### Workload receipt
 
 This table checks workloads against the default limits. It does not establish provider throughput or extraction time for every document.

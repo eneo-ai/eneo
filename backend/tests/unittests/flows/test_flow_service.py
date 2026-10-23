@@ -4836,3 +4836,113 @@ async def test_update_flow_drops_inactive_stored_credentials(user, supply_steps)
         steps=[incoming, new_step] if supply_steps else None,
     )
     assert all(step.input_config is None for step in updated.steps)
+
+
+def _with_max_step_timeout(user, seconds: int):
+    tenant = user.tenant.model_copy(
+        update={
+            "flow_settings": {
+                "runtime_policy": {"version": 1, "max_step_timeout_seconds": seconds}
+            }
+        }
+    )
+    return user.model_copy(update={"tenant": tenant})
+
+
+def _flow_with_steps(user, steps: list[FlowStep]) -> Flow:
+    return Flow(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        draft_revision=1,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=steps,
+    )
+
+
+# The run refuses a step that asks for more time than the organisation allows
+# (resolve_step_timeout_seconds), so a save and a publish refuse it with the
+# same code, also a value no database integer column can hold.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout_seconds", [301, 10**12])
+async def test_create_flow_refuses_a_step_timeout_above_the_maximum(
+    user, timeout_seconds: int
+):
+    flow_repo = AsyncMock()
+    service = _service(
+        user=_with_max_step_timeout(user, 300),
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+    )
+    step = _step(step_order=1).model_copy(update={"timeout_seconds": timeout_seconds})
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.create_flow(
+            space_id=uuid4(), name="Flow", steps=[step], metadata_json=None
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.STEP_TIMEOUT_EXCEEDS_TENANT_MAX
+    flow_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_flow_refuses_a_step_timeout_above_the_maximum(user):
+    flow_repo = AsyncMock()
+    service = _service(
+        user=_with_max_step_timeout(user, 300),
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+    )
+    existing = _flow_with_steps(user, [_step(step_order=1)])
+    flow_repo.get.return_value = existing
+    incoming = existing.steps[0].model_copy(update={"timeout_seconds": 301})
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow(flow_id=existing.id, steps=[incoming])
+
+    assert exc_info.value.code == FlowApiErrorCode.STEP_TIMEOUT_EXCEEDS_TENANT_MAX
+    flow_repo.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_publish_refuses_a_saved_step_timeout_above_a_lowered_maximum(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(
+        user=_with_max_step_timeout(user, 300),
+        flow_repo=flow_repo,
+        version_repo=version_repo,
+    )
+    step = _step(step_order=1).model_copy(update={"timeout_seconds": 600})
+    flow_repo.get.return_value = _flow_with_steps(user, [step])
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.publish_flow(flow_id=flow_repo.get.return_value.id)
+
+    assert exc_info.value.code == FlowApiErrorCode.STEP_TIMEOUT_EXCEEDS_TENANT_MAX
+    version_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_step_timeout_within_the_maximum_saves(user):
+    flow_repo = AsyncMock()
+    service = _service(
+        user=_with_max_step_timeout(user, 300),
+        flow_repo=flow_repo,
+        version_repo=AsyncMock(),
+    )
+    step = _step(step_order=1).model_copy(update={"timeout_seconds": 300})
+
+    await service.create_flow(
+        space_id=uuid4(), name="Flow", steps=[step], metadata_json=None
+    )
+
+    flow_repo.create.assert_awaited_once()
