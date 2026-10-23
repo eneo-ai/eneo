@@ -211,3 +211,39 @@ def test_custom_secret_headers_use_the_core_credential_policy():
             },
             {},
         )
+
+
+async def test_read_flow_suggestions_reports_the_drafts_suggestions_in_view_mode(
+    monkeypatch,
+):
+    from eneo.flows.api import flow_suggestions_router
+    from eneo.flows.api.flow_suggestions_models import (
+        FLOW_SUGGESTIONS_EXAMPLE,
+        FlowSuggestionsPublic,
+    )
+
+    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=False)
+    monkeypatch.setattr(
+        flows, "internal_tool_context", _tool_context(_transaction_container([]))
+    )
+    monkeypatch.setattr(
+        flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
+    )
+    edit = AsyncMock()
+    monkeypatch.setattr(flow_authoring_chat, "require_authoring_edit", edit)
+    answer = FlowSuggestionsPublic.model_validate(
+        {**FLOW_SUGGESTIONS_EXAMPLE, "flow_id": str(chat.flow_id)}
+    )
+    read = AsyncMock(return_value=answer)
+    monkeypatch.setattr(flow_suggestions_router, "get_flow_suggestions", read)
+
+    result = await flows.read_flow_suggestions(MagicMock(), offset=0)
+
+    assert result.isError is not True
+    page = json.loads(result.content[0].text)
+    assert page["flow_id"] == str(chat.flow_id)
+    assert page["draft_revision"] == answer.draft_revision
+    assert '"code":"duplicate_read"' in page["content"]
+    # A read: the tool asks the router for this chat's flow and needs no edit mode.
+    assert read.await_args.kwargs["id"] == chat.flow_id
+    edit.assert_not_awaited()

@@ -98,6 +98,13 @@ depend on read_tool_options. When a tool refuses a change, the refusal names
 what to fix: correct it and try again rather than concluding that the change
 is impossible, and do not rely on an earlier refusal in this conversation
 without calling the tool again.
+When the user asks to optimize or simplify the flow or make it cheaper, call
+read_flow_suggestions first. Explain each finding in plain words with its
+impact: which step receives which earlier result twice and through which
+reads. Never claim a duplication the tool did not report, and never say the
+flow is free of them beyond what it reported. Suggestions never block
+publishing. A change the user agrees to is made with update_step in edit
+mode: remove the redundant read the suggestion names and keep the other.
 """
 
 

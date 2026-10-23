@@ -651,6 +651,34 @@ async def read_tool_options(ctx: Context, offset: int = 0) -> CallToolResult:
 
 
 @mcp.tool()
+async def read_flow_suggestions(ctx: Context, offset: int = 0) -> CallToolResult:
+    """Read what the saved draft could do cheaper or simpler, with pagination:
+    where a step's model receives the same earlier result twice
+    (duplicate_read), through its input and a read of the same step in its
+    prompt, or twice in one of them. Each item names its steps, the reads,
+    an impact level and how it is acted on (fix.kind). It reports only what
+    the definition proves: the reads publish and the runtime resolve, no
+    judgement of prompt text, no run content. Suggestions never block
+    publishing and the tool changes nothing; a change the user agrees to is
+    made with update_step in edit mode. Works in view mode."""
+
+    async def operation(container, chat, request):
+        from eneo.flows.api.flow_suggestions_router import get_flow_suggestions
+
+        suggestions = await get_flow_suggestions(
+            id=chat.flow_id, request=request, container=container
+        )
+        return page_result(
+            suggestions.model_dump(mode="json"),
+            flow_id=chat.flow_id,
+            offset=offset,
+            revision=suggestions.draft_revision,
+        )
+
+    return await _call(ctx, operation)
+
+
+@mcp.tool()
 async def run_flow(
     ctx: Context,
     expected_flow_version: int,
