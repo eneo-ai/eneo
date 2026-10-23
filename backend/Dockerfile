@@ -66,7 +66,9 @@ WORKDIR /app
 # Run as unprivileged user
 USER 1000
 
-CMD ["sh", "-c", "./run.sh"]
+# Exec form: init's SIGTERM reaches run.sh, which execs arq or gunicorn, so
+# they drain. Under `sh -c` the shell forks run.sh and the signal stops there.
+CMD ["./run.sh"]
 ARG APP_VERSION=0.0.0-dev
 ARG APP_REVISION=unknown
 ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}
