@@ -13,9 +13,11 @@ from eneo.flows.enums import FlowInputSource, FlowOutputMode
 from eneo.flows.step_lineage import (
     INPUT_SOURCE_READ_SITE,
     PROMPT_READ_SITE_PREFIX,
+    FormFieldRead,
     StepRead,
     resolve_step_input_orders,
     resolve_step_upstream_orders,
+    step_form_field_reads,
     step_reads_by_channel,
 )
 
@@ -494,3 +496,58 @@ def test_reads_fail_closed_on_an_unknown_input_source(unknown: object) -> None:
 def test_reads_fail_closed_on_an_unknown_output_mode() -> None:
     with pytest.raises(ValueError):
         step_reads_by_channel(**_shape(output_mode="sideways"))
+
+
+_FIELDS = ("kommun", "arende")
+
+
+def _field_reads(**shape: Any) -> tuple[FormFieldRead, ...]:
+    values = _shape(**shape)
+    values.pop("max_prior_step_order")
+    return step_form_field_reads(**values, form_field_names=_FIELDS)
+
+
+def test_form_fields_are_read_per_channel_by_path_and_bare_name() -> None:
+    reads = _field_reads(
+        input_bindings={"question": "{{ flow_input.kommun }}"},
+        prompt_template="Ärende: {{ arende }}",
+        output_mode=FlowOutputMode.TEMPLATE_FILL,
+        output_config={"bindings": {"ort": "{{ flow.input.kommun }}"}},
+    )
+
+    assert reads == (
+        FormFieldRead("input", "kommun", "input_bindings.question"),
+        FormFieldRead("prompt", "arende", f"{PROMPT_READ_SITE_PREFIX}arende"),
+        FormFieldRead("config", "kommun", "output_config.bindings.ort"),
+    )
+
+
+@pytest.mark.parametrize(
+    "shape",
+    [
+        pytest.param({}, id="flow-input-without-underlag"),
+        pytest.param(
+            {"input_bindings": {"question": "{{ flow_input }}"}}, id="whole-template"
+        ),
+        pytest.param(
+            {
+                "input_source": FlowInputSource.PREVIOUS_STEP,
+                "output_mode": FlowOutputMode.TEMPLATE_FILL,
+                "output_config": {"bindings": "not an object"},
+            },
+            id="unreadable-config",
+        ),
+    ],
+)
+def test_the_whole_run_input_reads_every_form_field(shape: dict[str, Any]) -> None:
+    assert {read.field for read in _field_reads(**shape)} == set(_FIELDS)
+
+
+def test_no_form_field_is_read_by_a_step_reading_only_steps() -> None:
+    assert (
+        _field_reads(
+            input_source=FlowInputSource.PREVIOUS_STEP,
+            prompt_template=_STEP_1,
+        )
+        == ()
+    )
