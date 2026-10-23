@@ -115,6 +115,40 @@ async def list_flow_suggestions(
     return flow_suggestions(flow, prompts=stored)
 
 
+# At most this many introduced suggestions are reported after one change.
+MAX_REPORTED_INTRODUCED = 10
+
+
+def introduced_suggestions(
+    before: Sequence[FlowSuggestion], after: Sequence[FlowSuggestion]
+) -> tuple[FlowSuggestion, ...]:
+    """The suggestions of ``after`` that ``before`` did not have: what a
+    change introduced, in the order ``after`` lists them."""
+    known = {suggestion.fingerprint for suggestion in before}
+    return tuple(
+        suggestion for suggestion in after if suggestion.fingerprint not in known
+    )
+
+
+def suggestion_summary(
+    suggestion: FlowSuggestion, steps: Sequence[FlowStep]
+) -> dict[str, Any]:
+    """A suggestion in short, for a tool result: no patch body, its steps by
+    order and name."""
+    by_id = {step.id: step for step in steps if step.id is not None}
+    return {
+        "fingerprint": suggestion.fingerprint,
+        "code": suggestion.code.value,
+        "message": suggestion.message,
+        "fix_kind": suggestion.fix.kind,
+        "steps": [
+            {"step_order": step.step_order, "name": step.user_description}
+            for step_id in suggestion.steps
+            if (step := by_id.get(step_id)) is not None
+        ],
+    }
+
+
 def checked_suggestions(
     flow: Flow,
     suggestions: Sequence[FlowSuggestion],
