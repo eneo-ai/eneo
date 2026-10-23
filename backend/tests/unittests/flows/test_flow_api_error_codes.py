@@ -15,6 +15,7 @@ from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
     FLOW_TYPED_IO_ERROR_CODES,
     FlowApiErrorCode,
+    is_flow_api_error_code,
 )
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
@@ -577,3 +578,20 @@ def test_pdf_upload_refusal_is_request_path_only() -> None:
     assert code in FLOW_API_ERROR_CODES
     assert code not in FLOW_RUN_TERMINAL_ERROR_CODES
     assert code not in FLOW_TYPED_IO_ERROR_CODES
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("flow_deleted", True),
+        (FlowApiErrorCode.FLOW_DELETED, True),
+        ("not_a_flow_code", False),
+        ("", False),
+        (None, False),
+        (7, False),
+    ],
+)
+def test_is_flow_api_error_code_matches_catalog_values_only(
+    raw: object, expected: bool
+) -> None:
+    assert is_flow_api_error_code(raw) is expected

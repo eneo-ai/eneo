@@ -35,6 +35,7 @@ class FlowPackageErrorCode(StrEnum):
         "flow_package_import_template_assets_unsupported"
     )
     IMPORT_NAME_COLLISION = "flow_package_import_name_collision"
+    FILE_TOO_LARGE = "flow_package_file_too_large"
 
 
 class FlowPackageExportErrorCode(StrEnum):

@@ -98,14 +98,13 @@ from eneo.flows.input_binding_contract_rules import (
     duplicate_source_ref_expressions,
     effective_question_binding,
     has_explicit_underlag,
+    input_binding_key_refusal,
     input_contract_binding_conflict,
     is_structured_projection_binding,
     item_template_field_names,
     question_binding,
     source_ref_bindings,
     source_ref_step_order,
-    unsupported_input_binding_key,
-    validate_source_refs_binding,
 )
 from eneo.flows.output_modes import (
     ALLOWED_OUTPUT_MODES,
@@ -1165,24 +1164,14 @@ def _validate_input_contract_binding_compatibility(
 
 
 def _validate_supported_input_binding_keys(*, step: FlowStepValidationView) -> None:
-    unsupported_key = unsupported_input_binding_key(step.input_bindings)
-    if unsupported_key is not None:
+    refusal = input_binding_key_refusal(step.input_bindings)
+    if refusal is not None:
         raise FlowStepValidationError(
-            f"Step {step.step_order}: unsupported input_bindings key '{unsupported_key}'. "
-            "Only input_bindings.question and input_bindings.source_refs are supported.",
+            f"Step {step.step_order}: {refusal}",
             code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
-            context={"field": "input_bindings", "key": unsupported_key},
+            context={"field": "input_bindings", "key": refusal.key},
             step_order=step.step_order,
-        )
-    try:
-        validate_source_refs_binding(step.input_bindings)
-    except InputBindingContractError as exc:
-        raise FlowStepValidationError(
-            f"Step {step.step_order}: {exc}",
-            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
-            context={"field": "input_bindings", "key": exc.key},
-            step_order=step.step_order,
-        ) from exc
+        ) from refusal
 
 
 _SCALAR_FORM_FIELD_TYPES = frozenset(

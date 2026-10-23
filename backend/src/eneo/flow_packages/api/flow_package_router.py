@@ -726,7 +726,7 @@ def _read_flow_package_base64(package_base64: str) -> FlowPackageEnvelope:
     if len(normalized) > MAX_PACKAGE_BASE64_CHARS:
         raise FileTooLargeException(
             "Flow package upload exceeds the allowed size.",
-            code="flow_package_file_too_large",
+            code=FlowPackageErrorCode.FILE_TOO_LARGE.value,
             context={"max_package_upload_bytes": MAX_PACKAGE_UPLOAD_BYTES},
             file_size=(len(normalized) * 3) // 4,
             max_size=MAX_PACKAGE_UPLOAD_BYTES,
@@ -744,7 +744,7 @@ def _read_flow_package_base64(package_base64: str) -> FlowPackageEnvelope:
     if len(package_bytes) > MAX_PACKAGE_UPLOAD_BYTES:
         raise FileTooLargeException(
             "Flow package upload exceeds the allowed size.",
-            code="flow_package_file_too_large",
+            code=FlowPackageErrorCode.FILE_TOO_LARGE.value,
             context={"max_package_upload_bytes": MAX_PACKAGE_UPLOAD_BYTES},
             file_size=len(package_bytes),
             max_size=MAX_PACKAGE_UPLOAD_BYTES,
@@ -931,7 +931,7 @@ async def _read_package_upload_bytes(package_file: UploadFile) -> bytes:
         return package_bytes
     raise FileTooLargeException(
         "Flow package upload exceeds the allowed size.",
-        code="flow_package_file_too_large",
+        code=FlowPackageErrorCode.FILE_TOO_LARGE.value,
         context={"max_package_upload_bytes": MAX_PACKAGE_UPLOAD_BYTES},
         file_size=len(package_bytes),
         max_size=MAX_PACKAGE_UPLOAD_BYTES,

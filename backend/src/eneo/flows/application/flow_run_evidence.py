@@ -4,6 +4,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from datetime import datetime
+from enum import Enum
 from typing import Annotated, Any, Literal, TypeAlias, cast
 from uuid import UUID
 
@@ -35,7 +36,7 @@ from eneo.flows.enums import (
     FlowOutputType,
     is_terminal_flow_run_status,
 )
-from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_error_code import is_flow_api_error_code
 from eneo.flows.flow_run_provenance import normalize_rag_payload
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.json_types import JsonObject
@@ -340,6 +341,16 @@ def parse_step_order(value: Any, *, default: int | None = None) -> int | None:
     return default
 
 
+def _enum_value(enum_type: type[Enum], raw: object) -> str | None:
+    """``raw`` when it is a string value of ``enum_type``, else ``None``."""
+    if not isinstance(raw, str):
+        return None
+    try:
+        return str(enum_type(raw).value)
+    except ValueError:
+        return None
+
+
 def normalize_debug_step(
     step: dict[str, Any],
     *,
@@ -348,24 +359,10 @@ def normalize_debug_step(
     status: str | None = None,
     models_used: Sequence[str] = (),
 ) -> dict[str, Any]:
-    input_type = step.get("input_type")
-    if (
-        not isinstance(input_type, str)
-        or input_type not in FlowInputType._value2member_map_
-    ):
-        input_type = None
-    output_type = step.get("output_type")
-    if (
-        not isinstance(output_type, str)
-        or output_type not in FlowOutputType._value2member_map_
-    ):
-        output_type = None
-    source = step.get("input_source")
-    if not isinstance(source, str) or source not in FlowInputSource._value2member_map_:
-        source = None
-    mode = step.get("output_mode")
-    if not isinstance(mode, str) or mode not in FlowOutputMode._value2member_map_:
-        mode = None
+    input_type = _enum_value(FlowInputType, step.get("input_type"))
+    output_type = _enum_value(FlowOutputType, step.get("output_type"))
+    source = _enum_value(FlowInputSource, step.get("input_source"))
+    mode = _enum_value(FlowOutputMode, step.get("output_mode"))
     return DebugStepProjection(
         status=status,
         step_id=_diagnostic_uuid(step.get("step_id")),
@@ -404,9 +401,7 @@ def normalize_debug_attempt(attempt: FlowStepAttempt) -> DebugAttemptProjection:
         status=_normalize_status(attempt.status),
         duration_ms=duration_ms,
         error_code=(
-            attempt.error_code
-            if attempt.error_code in FlowApiErrorCode._value2member_map_
-            else None
+            attempt.error_code if is_flow_api_error_code(attempt.error_code) else None
         ),
         requested_model=attempt.requested_model,
         response_model=attempt.response_model,

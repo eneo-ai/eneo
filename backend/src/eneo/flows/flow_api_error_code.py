@@ -293,6 +293,16 @@ class FlowApiErrorCode(StrEnum):
 
 
 FLOW_API_ERROR_CODES: tuple[FlowApiErrorCode, ...] = tuple(FlowApiErrorCode)
+_FLOW_API_ERROR_CODE_VALUES: frozenset[str] = frozenset(
+    code.value for code in FlowApiErrorCode
+)
+
+
+def is_flow_api_error_code(raw: object) -> bool:
+    """Whether ``raw`` is the value of a cataloged Flow error code."""
+    return isinstance(raw, str) and raw in _FLOW_API_ERROR_CODE_VALUES
+
+
 FLOW_TYPED_IO_ERROR_CODES: frozenset[FlowApiErrorCode] = frozenset(
     {
         FlowApiErrorCode.RUN_INPUT_EXCEEDS_LIMIT,

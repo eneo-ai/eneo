@@ -483,6 +483,28 @@ def unsupported_input_binding_key(input_bindings: object) -> str | None:
     return None
 
 
+def input_binding_key_refusal(
+    input_bindings: object,
+) -> InputBindingContractError | None:
+    """The one refusal of `input_bindings` the step contract rejects: a key
+    other than the supported ones, or a malformed `source_refs`. Publish
+    validation and the runtime parser both raise it under their own exception
+    type, so neither can accept bindings the other refuses."""
+
+    unsupported_key = unsupported_input_binding_key(input_bindings)
+    if unsupported_key is not None:
+        return InputBindingContractError(
+            f"Unsupported input_bindings key '{unsupported_key}'. "
+            "Only input_bindings.question and input_bindings.source_refs are supported.",
+            key=unsupported_key,
+        )
+    try:
+        validate_source_refs_binding(input_bindings)
+    except InputBindingContractError as exc:
+        return exc
+    return None
+
+
 def _parse_source_ref(raw_ref: object, *, index: int) -> SourceRefBinding:
     if not isinstance(raw_ref, Mapping):
         raise InputBindingContractError(
