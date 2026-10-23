@@ -926,6 +926,57 @@ def test_validate_steps_publish_rejects_unknown_input_names_with_precise_context
     assert exc.context == _expected_boundary_context(exc, _expected_context)
 
 
+def test_validate_steps_publish_refuses_previous_step_alias_in_first_step_question() -> (
+    None
+):
+    # eneo-epim.50: the run binds föregående_steg only from step 2 on, so the
+    # first step's question fails every run on it; refused as the prompt is.
+    exc = _assert_validate_steps_rejects(
+        [_step(input_bindings={"question": "Svar: {{ föregående_steg }}"})],
+        expected_type=FlowStepValidationError,
+        match="previous step",
+        code="flow_input_binding_unknown_step_order",
+        step_order=1,
+        require_complete_template_fill_config=True,
+    )
+
+    assert exc.context == _expected_boundary_context(
+        exc,
+        {"field": "input_bindings.question", "reference": "föregående_steg"},
+    )
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        pytest.param(
+            [_step(input_bindings={"question": "{{ case_id }} {{ datum }}"})],
+            id="first-step-form-field-and-runtime-variable",
+        ),
+        pytest.param(
+            [
+                _step(1, output_type="text"),
+                _step(
+                    2,
+                    input_bindings={
+                        "question": "{{ föregående_steg }} {{ step_1.output.text }}"
+                    },
+                ),
+            ],
+            id="later-step-previous-alias-and-earlier-step",
+        ),
+    ],
+)
+def test_validate_steps_publish_accepts_question_reads_the_run_binds(
+    steps: list[FlowStep],
+) -> None:
+    validate_steps(
+        steps,
+        metadata_json=_form_metadata("case_id"),
+        require_complete_template_fill_config=True,
+    )
+
+
 def test_validate_steps_projects_publish_binding_error_to_exact_issue() -> None:
     steps = [_step(input_bindings={"question": "{{ undeclared }}"})]
 
