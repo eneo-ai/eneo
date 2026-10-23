@@ -7812,10 +7812,6 @@
   "flows_evidence_export_hint": "Whoever may see a run can then download its evidence.",
   "flows_chat_heading": "Chat about the flow",
   "flows_chat_intro": "Ask about the flow or ask the chat to change it. Its changes show in the flow at once.",
-  "flows_chat_editing": "Edit mode",
-  "flows_chat_editing_hint": "While it is on, the chat may change the flow.",
-  "flows_chat_can_edit": "The chat can change the flow",
-  "flows_chat_reads_only": "The chat only reads",
   "flows_chat_editing_on": "Edit mode is on. The chat can now change the flow.",
   "flows_chat_editing_off": "Edit mode is off. The chat can only read the flow.",
   "flows_chat_changed_flow": "The flow was updated from the chat",
@@ -9062,5 +9058,13 @@
   "flows_chat_reference_copied": "The reference is copied.",
   "flows_chat_reference_step_missing": "The step is no longer in the flow.",
   "flows_chat_reference_group_run": "The run",
-  "flows_chat_reference_item_run": "A value of the run"
+  "flows_chat_reference_item_run": "A value of the run",
+  "flows_chat_mode": "Mode",
+  "flows_chat_mode_current": "Mode: {mode}",
+  "flows_chat_mode_ask": "Ask",
+  "flows_chat_mode_edit": "Edit",
+  "flows_chat_mode_ask_description": "The chat reads the flow and changes nothing.",
+  "flows_chat_mode_edit_description": "The chat changes the draft right away.",
+  "flows_chat_placeholder_ask": "Ask about the flow…",
+  "flows_chat_placeholder_edit": "Describe the change…"
 }

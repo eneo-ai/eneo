@@ -7812,10 +7812,6 @@
   "flows_evidence_export_hint": "Den som får se en körning kan då ladda ner dess bevisunderlag.",
   "flows_chat_heading": "Chatt om flödet",
   "flows_chat_intro": "Fråga om flödet eller be chatten ändra det. Ändringarna syns i flödet direkt.",
-  "flows_chat_editing": "Redigeringsläge",
-  "flows_chat_editing_hint": "När det är på får chatten ändra flödet.",
-  "flows_chat_can_edit": "Chatten kan ändra flödet",
-  "flows_chat_reads_only": "Chatten läser bara",
   "flows_chat_editing_on": "Redigeringsläget är på. Chatten kan nu ändra flödet.",
   "flows_chat_editing_off": "Redigeringsläget är av. Chatten kan bara läsa flödet.",
   "flows_chat_changed_flow": "Flödet uppdaterades från chatten",
@@ -9062,5 +9058,13 @@
   "flows_chat_reference_copied": "Referensen är kopierad.",
   "flows_chat_reference_step_missing": "Steget finns inte längre i flödet.",
   "flows_chat_reference_group_run": "Körningen",
-  "flows_chat_reference_item_run": "Ett värde från körningen"
+  "flows_chat_reference_item_run": "Ett värde från körningen",
+  "flows_chat_mode": "Läge",
+  "flows_chat_mode_current": "Läge: {mode}",
+  "flows_chat_mode_ask": "Fråga",
+  "flows_chat_mode_edit": "Redigera",
+  "flows_chat_mode_ask_description": "Chatten läser flödet men ändrar inget.",
+  "flows_chat_mode_edit_description": "Chatten ändrar utkastet direkt.",
+  "flows_chat_placeholder_ask": "Fråga om flödet…",
+  "flows_chat_placeholder_edit": "Beskriv ändringen…"
 }

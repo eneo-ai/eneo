@@ -71,12 +71,18 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
 }));
 // The conversation itself is the chat feature's; the page only follows what it reports.
 vi.mock("@/features/chat/chat-view", () => ({
+  // The stub shows what the flow page puts in the composer's footer (the
+  // Fråga/Redigera picker) and its placeholder, and offers the callbacks.
   ChatView: ({
     onToolCallFinished,
-    onAnswerFinished
+    onAnswerFinished,
+    footerActions,
+    placeholder
   }: {
     onToolCallFinished: (call: { serverName: string; isInternal: boolean }) => void;
     onAnswerFinished: () => void;
+    footerActions?: React.ReactNode;
+    placeholder?: string;
   }) => (
     <div>
       <button
@@ -88,6 +94,8 @@ vi.mock("@/features/chat/chat-view", () => ({
       <button type="button" onClick={onAnswerFinished}>
         Svar klart
       </button>
+      {footerActions}
+      <p>{placeholder}</p>
     </div>
   )
 }));
@@ -472,10 +480,12 @@ describe("FlowPage", () => {
     state.mode = ok({ ...chat, editing: true });
     renderPage();
 
-    expect(await screen.findByText("Chatten läser bara")).toBeTruthy();
-    fireEvent.click(screen.getByRole("switch", { name: /Redigeringsläge/ }));
+    // The mode is picked beside the send button, in the composer's footer.
+    fireEvent.click(await screen.findByRole("button", { name: "Läge: Fråga" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Redigera/ }));
 
-    expect(await screen.findByText("Chatten kan ändra flödet")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Läge: Redigera" })).toBeTruthy();
+    expect(screen.getByText("Beskriv ändringen…")).toBeTruthy();
     await waitFor(() =>
       expect(state.announce).toHaveBeenCalledWith(
         "Redigeringsläget är på. Chatten kan nu ändra flödet."
@@ -493,7 +503,8 @@ describe("FlowPage", () => {
     state.mode = ok({ ...chat, session_id: "session-2", editing: true });
     renderPage();
 
-    fireEvent.click(await screen.findByRole("switch", { name: /Redigeringsläge/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Läge: Fråga" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Redigera/ }));
 
     await waitFor(() =>
       expect(state.announce).toHaveBeenCalledWith(
