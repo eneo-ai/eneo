@@ -165,6 +165,7 @@ __all__ = [
     "collect_step_graph_issues",
     "draft_step_refusals",
     "flow_run_input",
+    "publish_step_refusals",
     "retained_contracts",
     "run_input_alias_refusal",
     "step_limit_issue",
@@ -273,6 +274,46 @@ def draft_step_refusals(
             retained=retained,
         )
     ]
+    try:
+        validate_variable_alias_collisions(steps=steps, metadata_json=metadata_json)
+    except BadRequestException as exc:
+        refusals.append(exc)
+    return refusals
+
+
+def publish_step_refusals(
+    steps: Sequence[FlowStep],
+    *,
+    metadata_json: FlowPersistedJsonObject | None,
+    prompt_templates: Mapping[int, str],
+) -> list[BadRequestException]:
+    """Every refusal the step rules give a publish of ``steps``, in the order
+    publish meets them; publish refuses with the first. The step graph's
+    issues, read with each step's prompt (``prompt_templates`` by step order)
+    and a complete template fill required, come first; then a flow without
+    steps; then a step name the run reserves or a form field takes.
+    ``metadata_json`` is the metadata as publish normalizes it. Only these
+    rules: the checks publish makes against the space, the organisation and
+    stored credentials need more than the definition."""
+    refusals = [
+        _to_exception(issue)
+        for issue in collect_step_graph_issues(
+            flow_step_validation_views_from_flow_steps(
+                steps, prompt_templates=prompt_templates
+            ),
+            metadata_json=metadata_json,
+            require_complete_template_fill_config=True,
+        )
+    ]
+    if not steps:
+        code = FlowGraphIssueCode.FLOW_HAS_NO_STEPS.value
+        refusals.append(
+            BadRequestException(
+                "Flow must contain at least one step before publish.",
+                code=code,
+                context={"issue_code": code},
+            )
+        )
     try:
         validate_variable_alias_collisions(steps=steps, metadata_json=metadata_json)
     except BadRequestException as exc:
