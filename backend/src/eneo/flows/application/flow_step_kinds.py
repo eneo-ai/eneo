@@ -1,11 +1,11 @@
 """Which kinds of step may stand at each place of a draft, and why the others
 may not, judged by the draft save's own rules.
 
-For every place a step can be added (before each step and after the last) and
-for every saved step, each kind's change is built as an editor update makes
-it: the new step with the kind's configuration at that place (step 1 also
-hands the run's input over to it), or the saved step turned to the kind's
-configuration. The change then goes through what the save does with it: the
+For a place a step can be added (before a step or after the last) or a saved
+step, each kind's change is built as an editor update makes it: the new step
+with the kind's configuration at that place (step 1 also hands the run's input
+over to it), or the saved step turned to the kind's configuration. The change
+then goes through what the save does with it: the
 editor update's placement, the reads that follow moved steps, the settings of
 modes a step does not use dropped, and the step rules. A kind is allowed
 exactly when those accept the change, and its refusals are theirs.
@@ -133,22 +133,20 @@ def step_kind_answer(
     flow: Flow,
     *,
     prompts: Mapping[UUID, str],
-    positions: Sequence[int] | None = None,
-    step_ids: Sequence[UUID] | None = None,
+    positions: Sequence[int],
+    step_ids: Sequence[UUID],
 ) -> StepKindAnswer:
-    """Every kind at every place of ``flow``'s draft, or at the insertion
-    ``positions`` and saved ``step_ids`` named. ``prompts`` are the saved
-    prompts of the steps' assistants, which follow moved steps too."""
+    """Every kind at the insertion ``positions`` and saved ``step_ids`` of
+    ``flow``'s draft. Each place judges the whole draft once per kind, so a
+    caller names the places it needs. ``prompts`` are the saved prompts of
+    the steps' assistants, which follow moved steps too."""
 
-    steps = _ordered(flow.steps)
-    insertion_positions = (
-        range(1, len(steps) + 2) if positions is None else sorted(set(positions))
-    )
-    changed_steps = (
-        steps
-        if step_ids is None
-        else [step for step in steps if step.id is not None and step.id in step_ids]
-    )
+    insertion_positions = sorted(set(positions))
+    changed_steps = [
+        step
+        for step in _ordered(flow.steps)
+        if step.id is not None and step.id in step_ids
+    ]
     return StepKindAnswer(
         insertions=tuple(
             StepKindPlace(

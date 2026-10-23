@@ -288,12 +288,19 @@ def _assert_save_agrees(
         ), where
 
 
+def _every_place(flow: Flow) -> dict[str, Any]:
+    return {
+        "positions": range(1, len(flow.steps) + 2),
+        "step_ids": [step.id for step in flow.steps],
+    }
+
+
 @pytest.mark.parametrize("draft", DRAFTS)
 async def test_every_answer_is_what_the_editor_save_does(
     draft: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     flow, prompts = DRAFTS[draft]()
-    answer = step_kind_answer(flow, prompts=prompts)
+    answer = step_kind_answer(flow, prompts=prompts, **_every_place(flow))
 
     assert [place.position for place in answer.insertions] == list(
         range(1, len(flow.steps) + 2)
@@ -353,7 +360,7 @@ async def test_a_full_flow_takes_no_new_step_but_its_steps_may_change_kind(
 
 def test_a_published_flow_refuses_every_change_as_the_save_does() -> None:
     flow, prompts = DRAFTS["published"]()
-    answer = step_kind_answer(flow, prompts=prompts)
+    answer = step_kind_answer(flow, prompts=prompts, **_every_place(flow))
 
     codes = {
         refusal.code

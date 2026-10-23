@@ -64,15 +64,27 @@ def read(monkeypatch: pytest.MonkeyPatch):
     return flow, call
 
 
-async def test_without_a_place_every_place_is_answered(read):
+async def test_a_read_that_names_no_place_is_refused(read, monkeypatch):
+    # Every place at once judges the whole draft per kind and place: work that
+    # grows with the square of the step count, in one request.
+    _, call = read
+    answer = MagicMock()
+    monkeypatch.setattr(flow_step_kinds_router, "step_kind_answer", answer)
+
+    with pytest.raises(BadRequestException, match="position or step_id"):
+        await call()
+    answer.assert_not_called()
+
+
+async def test_a_place_and_a_step_named_together_are_both_answered(read):
     flow, call = read
 
-    answer = await call()
+    answer = await call(position=1, step_id=flow.steps[0].id)
 
     assert answer.flow_id == flow.id
     assert answer.draft_revision == 7
-    assert [place.position for place in answer.insertions] == [1, 2, 3]
-    assert [place.step_id for place in answer.steps] == [s.id for s in flow.steps]
+    assert [place.position for place in answer.insertions] == [1]
+    assert [place.step_id for place in answer.steps] == [flow.steps[0].id]
     assert [option.kind for option in answer.steps[0].options] == list(FlowStepKind)
 
 

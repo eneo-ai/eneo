@@ -6109,7 +6109,7 @@ export interface paths {
     };
     /**
      * Get Allowed Step Kinds
-     * @description Which kinds of step the draft allows at each place, and why it refuses the others: for each place a step can be added (before every step and after the last) and for each saved step turned to another kind. Each answer is the draft save's own: the kind's change is built as `PATCH /flows/{id}/editor/` makes it and judged by that save's placement, read following and step rules, so a kind is `allowed` exactly when the save accepts it and `refusals` are the errors the save gives. The change is in the answer: the kind's starting `configuration`, the saved steps it edits too (a step added first takes the run's input over from the step that was first) and whether it turns transcription on. Not judged: the new step's name; the URL of `fetch_http` and `send_http` and the tool of `tool`, judged as entered and valid; and the checks a save makes against the space (assistants, security classification, the transcription service). Every change to a published flow is refused with `flow_unpublish_required`. The answer grows with the square of the step count, so a client that needs one place names it with `position` or `step_id`. It needs read access to the draft.
+     * @description Which kinds of step the draft allows at each place, and why it refuses the others: for each place a step can be added (before every step and after the last) and for each saved step turned to another kind. Each answer is the draft save's own: the kind's change is built as `PATCH /flows/{id}/editor/` makes it and judged by that save's placement, read following and step rules, so a kind is `allowed` exactly when the save accepts it and `refusals` are the errors the save gives. The change is in the answer: the kind's starting `configuration`, the saved steps it edits too (a step added first takes the run's input over from the step that was first) and whether it turns transcription on. Not judged: the new step's name; the URL of `fetch_http` and `send_http` and the tool of `tool`, judged as entered and valid; and the checks a save makes against the space (assistants, security classification, the transcription service). Every change to a published flow is refused with `flow_unpublish_required`. A read names the places it asks about, `position`, `step_id` or both: each place judges the whole draft once per kind, so every place at once would grow with the square of the step count. It needs read access to the draft.
      */
     get: operations["get_flow_step_kinds"];
     put?: never;
@@ -27599,12 +27599,12 @@ export interface components {
       flow_id: string;
       /**
        * Insertions
-       * @description Each place a step can be added, first to after the last step, or the ones `position` names.
+       * @description The place a step can be added that `position` names; empty when it names none.
        */
       insertions: components["schemas"]["FlowStepKindPlacePublic"][];
       /**
        * Steps
-       * @description Each saved step in order, turned to each kind where it stands, or the one `step_id` names.
+       * @description The saved step `step_id` names, turned to each kind where it stands; empty when it names none.
        */
       steps: components["schemas"]["FlowStepKindPlacePublic"][];
     };
@@ -63804,9 +63804,9 @@ export interface operations {
   get_flow_step_kinds: {
     parameters: {
       query?: {
-        /** @description Answer only this insertion place (1 is first, one past the last step is last), and no saved step unless `step_id` names one. */
+        /** @description The insertion place to answer (1 is first, one past the last step is last). A read names this, `step_id` or both. */
         position?: number | null;
-        /** @description Answer only this saved step, and no insertion place unless `position` names one. */
+        /** @description The saved step to answer, turned to each kind. A read names this, `position` or both. */
         step_id?: string | null;
       };
       header?: never;
@@ -63943,7 +63943,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowStepKindsPublic"];
         };
       };
-      /** @description `position` is past the place after the last step. */
+      /** @description Neither `position` nor `step_id` names a place, or `position` is past the place after the last step. */
       400: {
         headers: {
           [name: string]: unknown;
