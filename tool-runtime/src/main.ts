@@ -27,6 +27,7 @@ import { chartTools } from "./tools/charts/tool";
 import { chartView } from "./tools/charts/view";
 import type { ForecastResult } from "./tools/forecast/ports";
 import { forecastTools } from "./tools/forecast/tool";
+import { forecastView } from "./tools/forecast/view";
 
 const config = loadConfig(process.env);
 const isolate = (job: SandboxJob, timeoutMs: number) =>
@@ -137,6 +138,8 @@ const inspector = fileInspector((job) =>
 const builtinTemplate = builtinTemplateProvider((job) =>
   slot(async () => (await isolate({ job }, renderTimeoutMs)) as RenderResult),
 );
+// Charts and a forecast's picture are drawn alike: one size, image limit and number format.
+const charts = chartConfigSchema.parse({});
 // One endpoint creates every kind of file, so one Eneo provider serves the capability.
 endpoints.push(
   {
@@ -151,7 +154,7 @@ endpoints.push(
     slug: "charts",
     toolTimeoutMs: renderTimeoutMs + 5_000,
     tools: chartTools(
-      chartConfigSchema.parse({}),
+      charts,
       (job) => slot(async () => (await isolate({ job }, renderTimeoutMs)) as ChartResult),
       {
         allowedFileOrigins: config.tabular.allowedFileOrigins,
@@ -166,20 +169,23 @@ endpoints.push(
 // Forecasts run a Python sidecar with torch each, so they queue on their own, one at a time by
 // default. A waiting forecast holds one of the server's slots, so the queue is short: more
 // callers are told the runtime is busy instead of crowding out every other tool.
-// The whole-job deadline covers the sidecar's start-up (torch import, model load).
+// The whole-job deadline covers reading the file, the sidecar (at most 25 s with its torch
+// import and model load) and drawing the picture.
 const forecastQueue = Math.min(config.maxConcurrency, 2 * config.forecastConcurrency);
 const forecastScheduler = new Scheduler(config.forecastConcurrency, forecastQueue, forecastQueue);
-const forecastJobTimeoutMs = 30_000;
+const forecastJobTimeoutMs = 40_000;
 endpoints.push({
   slug: "forecast",
   toolTimeoutMs: forecastJobTimeoutMs + 5_000,
   tools: forecastTools(
     config.forecast,
+    charts,
     (job) =>
       forecastScheduler.run(
         async () => (await isolate({ job }, forecastJobTimeoutMs)) as ForecastResult,
       ),
     fileAccess,
+    await forecastView(),
   ),
 });
 

@@ -9,6 +9,7 @@ import type {
   ForecastResult,
   Interval,
 } from "./ports";
+import { PLOT_TEXTS, focused, forecastPlot } from "./plot";
 import { DAY_MS, dailySeries, isoDay } from "./series";
 
 export async function executeForecast(
@@ -60,7 +61,7 @@ export async function executeForecast(
   const start = Date.parse(`${series.from}T00:00:00Z`);
   const capped = values.length < days;
   const day = (index: number) => isoDay(start + index * DAY_MS);
-  return {
+  const result: ForecastResult = {
     history: {
       from: series.from,
       to: isoDay(start + (days - 1) * DAY_MS),
@@ -86,6 +87,20 @@ export async function executeForecast(
         : plan,
     parameters: prediction.parameters,
   };
+  if (!job.image) return result;
+  // The chart the view opens on, from the unrounded figures; the renderer loads only here.
+  const [{ renderChart }, { chartFailure }] = await Promise.all([
+    import("../charts/engine/render"),
+    import("../charts/execute"),
+  ]);
+  const { image } = job;
+  let drawn;
+  try {
+    drawn = renderChart(forecastPlot(focused(result), PLOT_TEXTS[image.language], image.title), image.chart);
+  } catch (error) {
+    throw chartFailure(error);
+  }
+  return { ...result, image: { png_base64: drawn.png_base64, width: drawn.width, height: drawn.height } };
 }
 
 function holdoutOf(prediction: EngineResult): Interval {

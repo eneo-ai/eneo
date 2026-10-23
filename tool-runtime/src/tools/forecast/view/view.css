@@ -1,0 +1,106 @@
+/* The legend, its dots and the plot are Charts' own (charts/view/view.css). This adds what a
+   forecast has beyond a chart: the interval's swatch, the method under the footer, and how the
+   chart arrives. Motion uses the theme's tokens and stays out of the reader's way. */
+@import "../../charts/view/view.css";
+
+/* Fullscreen gives the table the room the plot leaves, as it does a chart's. */
+:root[data-mode="fullscreen"] [data-view="forecast"] .eneo-rows {
+  max-height: none;
+}
+
+/* An interval is an area, so its swatch is a filled square in the area's colour. */
+.eneo-dot[data-band] {
+  border-radius: 2px;
+  border-color: color-mix(in srgb, var(--series) 45%, transparent);
+}
+.eneo-dot[data-band][data-showing] {
+  background: color-mix(in srgb, var(--series) 30%, transparent);
+}
+
+/* The chart arrives once per answer, after the text: a short fade and a slight focus pull, so
+   it settles in instead of popping into a frame that has just grown. */
+[data-view="forecast"] .eneo-plot {
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard);
+}
+@starting-style {
+  [data-view="forecast"] .eneo-plot {
+    opacity: 0;
+    filter: blur(2px);
+  }
+}
+
+/* The method grows open from the footer (grid rows 0fr to 1fr, no measuring), and its chevron
+   turns over. The inner element clips and carries the padding, so a closed panel has no height. */
+.eneo-method-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--duration-fast) var(--ease-standard);
+}
+.eneo-method[data-open="true"] .eneo-method-panel {
+  grid-template-rows: 1fr;
+  transition: grid-template-rows var(--duration-fast) var(--ease-standard);
+}
+.eneo-method-inner {
+  overflow: hidden;
+  min-height: 0;
+  opacity: 0;
+  filter: blur(2px);
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard);
+}
+.eneo-method[data-open="true"] .eneo-method-inner {
+  opacity: 1;
+  filter: blur(0);
+  transition:
+    opacity var(--duration-fast) var(--ease-standard),
+    filter var(--duration-fast) var(--ease-standard);
+}
+.eneo-method-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-3);
+  padding: var(--spacing-3) var(--spacing-4);
+  background: var(--color-background-muted);
+}
+.eneo-chevron {
+  display: inline-flex;
+  transform: scaleY(1);
+  transform-origin: center;
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+.eneo-chevron path {
+  vector-effect: non-scaling-stroke;
+}
+.eneo-method[data-open="true"] .eneo-chevron {
+  transform: scaleY(-1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .eneo-method-panel,
+  .eneo-method-inner,
+  .eneo-chevron {
+    transition: none !important;
+  }
+  /* Arrival keeps its fade, which explains the change, and drops the blur. */
+  [data-view="forecast"] .eneo-plot {
+    transition: opacity var(--duration-fast) linear;
+  }
+  @starting-style {
+    [data-view="forecast"] .eneo-plot {
+      filter: none;
+    }
+  }
+}
+
+/* The one thing the forecast cannot know, under the chart in the supporting voice. */
+.eneo-note {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-2);
+  margin: 0;
+  padding: 0 var(--spacing-4) var(--spacing-3);
+  color: var(--color-text-secondary);
+}

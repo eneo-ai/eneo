@@ -30,6 +30,14 @@ export const codeIcon = lucide(
   </>,
 );
 export const chevronDownIcon = lucide(<path d="m6 9 6 6 6-6" />);
+/** An i in a circle: a note beside what it explains. */
+export const infoIcon = lucide(
+  <>
+    <circle cx="12" cy="12" r="10" />
+    <path d="M12 16v-4" />
+    <path d="M12 8h.01" />
+  </>,
+);
 export const chevronUpIcon = lucide(<path d="m18 15-6-6-6 6" />);
 /** A triangle pointing right: run. */
 export const playIcon = lucide(<polygon points="6 3 20 12 6 21 6 3" />);
