@@ -79,6 +79,7 @@ from eneo.flows.flow_security_classification import (
 from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
 from eneo.flows.flow_validators import (
     draft_step_refusals,
+    publish_step_refusals,
     retained_contracts,
     validate_step_count,
     validate_steps,
@@ -714,10 +715,6 @@ class FlowService:
                 for step in flow.steps
             },
         )
-        self._validate_variable_alias_collisions(
-            steps=flow.steps,
-            metadata_json=normalized_metadata,
-        )
         space = await self._check_speaker_service(
             space_id=flow.space_id,
             metadata_json=normalized_metadata,
@@ -796,19 +793,15 @@ class FlowService:
         metadata_json: FlowPersistedJsonObject | None,
         prompt_templates: Mapping[int, str],
     ) -> None:
-        self._validate_steps(
+        # The rules a suggestion's patch is checked against before it is
+        # offered (flow_suggestion_service), so the two cannot drift.
+        refusals = publish_step_refusals(
             flow.steps,
             metadata_json=metadata_json,
-            require_complete_template_fill_config=True,
             prompt_templates=prompt_templates,
         )
-        if not flow.steps:
-            code = FlowGraphIssueCode.FLOW_HAS_NO_STEPS.value
-            raise BadRequestException(
-                "Flow must contain at least one step before publish.",
-                code=code,
-                context={"issue_code": code},
-            )
+        if refusals:
+            raise refusals[0]
 
     def _validate_steps(
         self,
