@@ -140,6 +140,12 @@ function ComposerInput({
       insertToken: (token) => {
         handle.current?.focus();
         handle.current?.insertToken(token);
+        // Astryx's menu emits the change after its own insert; the public
+        // insert does not, so the field would keep its placeholder and the
+        // page its old value.
+        root.current
+          ?.querySelector("[contenteditable]")
+          ?.dispatchEvent(new Event("input", { bubbles: true }));
       },
       insertText: (text) => {
         const editable = root.current?.querySelector<HTMLElement>("[contenteditable]");
