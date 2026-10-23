@@ -15,6 +15,7 @@ from eneo.flows.http_transport import (
     secret_fields_holding_templates,
     validate_authored_config,
 )
+from eneo.flows.output_modes import outside_input_mode_violation
 from eneo.main.config import get_settings
 from eneo.main.exceptions import TypedIOValidationException
 
@@ -24,6 +25,16 @@ def validate_http_input_config(*, step: FlowStepValidationView) -> None:
         raise FlowStepValidationError(
             f"Step {step.step_order}: input_type '{step.input_type}' is not supported with input_source '{step.input_source}'.",
             step_order=step.step_order,
+        )
+    mode_violation = outside_input_mode_violation(
+        input_source=step.input_source, output_mode=step.output_mode
+    )
+    if mode_violation is not None:
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: {mode_violation}.",
+            step_order=step.step_order,
+            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+            context={"field": "output_mode"},
         )
     validate_http_config(
         step_order=step.step_order,

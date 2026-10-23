@@ -594,6 +594,28 @@ def test_validate_steps_rejects_file_like_input_types_for_http_sources():
         )
 
 
+def test_validate_steps_refuses_an_http_get_step_that_fills_a_template() -> None:
+    # eneo-be0p.18: a template fill never resolves the step's input, so the
+    # fetch would never be made. Refused on every save, as for a tool step.
+    exc = _assert_validate_steps_rejects(
+        [
+            _step(
+                input_source="http_get",
+                input_config={"url": "https://example.com", "auth": {"mode": "none"}},
+                output_mode="template_fill",
+                output_type="docx",
+            )
+        ],
+        expected_type=FlowStepValidationError,
+        match="output_mode 'template_fill' does not read the step's input, so it "
+        "cannot be used with input_source 'http_get'",
+        code="typed_io_http_invalid_config",
+        step_order=1,
+    )
+
+    assert (exc.context or {})["field"] == "output_mode"
+
+
 def test_validate_form_schema_options_error_mentions_select_and_multiselect():
     with pytest.raises(
         BadRequestException, match="only valid for select or multiselect"

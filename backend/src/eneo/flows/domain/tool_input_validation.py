@@ -13,9 +13,9 @@ from eneo.flows.domain.tool_input import (
     ToolInputConfig,
     read_tool_input_config,
 )
-from eneo.flows.enums import FlowInputType, FlowOutputMode
+from eneo.flows.enums import FlowInputType
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.output_modes import OUTPUT_MODES_WITHOUT_STEP_INPUT
+from eneo.flows.output_modes import outside_input_mode_violation
 
 _FIELD = f"input_config.{TOOL_INPUT_CONFIG_KEY}"
 
@@ -32,11 +32,12 @@ def validate_tool_input_config(*, step: FlowStepValidationView) -> ToolInputConf
             step_order=step.step_order,
             context={"field": "input_type"},
         )
-    output_mode = FlowOutputMode(step.output_mode)
-    if output_mode in OUTPUT_MODES_WITHOUT_STEP_INPUT:
+    mode_violation = outside_input_mode_violation(
+        input_source=step.input_source, output_mode=step.output_mode
+    )
+    if mode_violation is not None:
         raise invalid_tool_config(
-            f"Step {step.step_order}: output_mode '{output_mode.value}' does not "
-            "read the step's input, so it cannot be used with input_source 'tool'.",
+            f"Step {step.step_order}: {mode_violation}.",
             step_order=step.step_order,
             context={"field": "output_mode"},
         )

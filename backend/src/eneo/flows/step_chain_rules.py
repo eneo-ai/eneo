@@ -2,17 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Final, Protocol, Sequence
+from typing import Protocol, Sequence
 
 from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.enums import FlowInputSource, FlowInputType, FlowOutputType
 from eneo.flows.flow_capability_manifest import is_chain_compatible
 from eneo.flows.input_binding_contract_rules import has_explicit_underlag
-
-# The sources whose input is read from outside the run: nothing of the run
-# stands in for it, so it is fetched before any other part of the step's input
-# and cannot be replaced by underlag.
-OUTSIDE_INPUT_SOURCES: Final = frozenset({"http_get", "tool"})
+from eneo.flows.output_modes import OUTSIDE_INPUT_SOURCES
 
 
 class StepChainShape(Protocol):
