@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { composerValue, typeIntoComposer } from "@/test/composer";
 import { renderInApp } from "@/test/render";
 import { ChatPage } from "./chat-page";
 
@@ -172,14 +173,14 @@ function renderPage(sessionId: string | null, pagePartner: ChatPartner = partner
 }
 
 function composer() {
-  return screen.getByRole("textbox", { name: /Meddelande till/ }) as HTMLTextAreaElement;
+  return screen.getByRole("textbox", { name: /Meddelande till/ });
 }
 
 /** Types a question and presses Enter in the composer, as a keyboard user does. */
 function askWithKeyboard(question: string) {
   const textarea = composer();
   textarea.focus();
-  fireEvent.change(textarea, { target: { value: question } });
+  typeIntoComposer(textarea, question);
   fireEvent.keyDown(textarea, { key: "Enter" });
 }
 
@@ -384,7 +385,7 @@ describe("ChatPage while an answer streams", () => {
     expect(await screen.findByText("Något gick fel. Försök igen.")).toBeTruthy();
     // One h1 (the start state's), the question back in the composer, focus with it.
     expect(h1Texts()).toEqual(["Upphandlingsassistenten"]);
-    expect(composer().value).toBe("Vilken gräns gäller?");
+    expect(composerValue(composer())).toBe("Vilken gräns gäller?");
     await waitFor(() => expect(document.activeElement).toBe(composer()));
   });
 });

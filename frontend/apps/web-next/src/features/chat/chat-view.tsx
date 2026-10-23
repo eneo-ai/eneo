@@ -56,7 +56,7 @@ import { useAnswerFeedback } from "./answer-feedback";
 import { disabledCapabilitiesForRequest } from "./chat-capabilities";
 import { matchesUpload } from "./chat-attachment-plan";
 import { ChatMessage, PendingAnswer, PendingQuestion, type ActivityRequest } from "./chat-message";
-import { Composer } from "./composer";
+import { Composer, type ComposerHandle } from "./composer";
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatTools, mcpConversationOptions } from "./mcp-controls";
 import type { PendingUpload } from "./message-files";
@@ -293,12 +293,12 @@ function ConversationView({
   // back); keep keyboard focus in the composer (WCAG 2.4.3).
   const startComposerRef = useRef<HTMLDivElement>(null);
   const dockElement = useRef<HTMLDivElement | null>(null);
-  const dockTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const startTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const dockInputRef = useRef<ComposerHandle>(null);
+  const startInputRef = useRef<ComposerHandle>(null);
   const refocusComposer = useRef(false);
   const rescue = useFocusRescue();
   useEffect(() => {
-    if (focusComposerIfLost) rescue(startTextareaRef.current);
+    if (focusComposerIfLost) rescue(() => startInputRef.current?.element ?? null);
   }, [focusComposerIfLost, rescue]);
 
   const transport = useMemo(() => createChatTransport(), []);
@@ -535,7 +535,7 @@ function ConversationView({
         const text = panel.takeSuggestion();
         if (text === null) return;
         setInput((current) => (current.trim() ? `${current}\n${text}` : text));
-        dockTextareaRef.current?.focus();
+        dockInputRef.current?.focus();
       }),
     [panel]
   );
@@ -579,7 +579,7 @@ function ConversationView({
     reportStarted(started);
     if (refocusComposer.current) {
       refocusComposer.current = false;
-      (started ? dockTextareaRef : startTextareaRef).current?.focus();
+      (started ? dockInputRef : startInputRef).current?.focus();
     }
   }, [started]);
 
@@ -926,7 +926,7 @@ function ConversationView({
             headingLevel={startHeadingLevel}
             onPickStarter={(prompt) => {
               setInput(prompt);
-              startTextareaRef.current?.focus();
+              startInputRef.current?.focus();
             }}
             composer={
               <div ref={startComposerRef} className="flex w-full flex-col gap-3">
@@ -935,7 +935,7 @@ function ConversationView({
                   {...composerProps}
                   variant="start"
                   partnerToken={partnerToken}
-                  textareaRef={startTextareaRef}
+                  inputRef={startInputRef}
                 />
               </div>
             }
@@ -1007,7 +1007,7 @@ function ConversationView({
           style={{ scrollPaddingBottom: dockHeight + 28 }}
           composer={
             <div ref={dockRef} className="mx-auto w-full max-w-[680px]">
-              <Composer {...composerProps} textareaRef={dockTextareaRef} />
+              <Composer {...composerProps} inputRef={dockInputRef} />
             </div>
           }
         >

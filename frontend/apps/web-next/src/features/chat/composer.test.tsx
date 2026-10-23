@@ -4,6 +4,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { typeIntoComposer } from "@/test/composer";
 import { renderInApp } from "@/test/render";
 import { Composer } from "./composer";
 import { useAttachments } from "./use-attachments";
@@ -52,12 +53,12 @@ function renderComposer(props: Parameters<typeof Harness>[0] = {}) {
 }
 
 describe("Composer", () => {
-  it("is a named textarea with the keyboard hint as its description", () => {
+  it("is a named multi-line text field with the keyboard hint as its description", () => {
     renderComposer();
     const textarea = screen.getByRole("textbox", {
       name: "Meddelande till Upphandlingsassistenten"
     });
-    expect(textarea.tagName).toBe("TEXTAREA");
+    expect(textarea.getAttribute("aria-multiline")).toBe("true");
     const hint = document.getElementById(textarea.getAttribute("aria-describedby") ?? "");
     expect(hint?.textContent).toBe("Enter skickar, Skift+Enter ger en ny rad.");
   });
@@ -72,7 +73,7 @@ describe("Composer", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(onSubmit).not.toHaveBeenCalled();
 
-    fireEvent.change(textarea, { target: { value: "Hej" } });
+    typeIntoComposer(textarea, "Hej");
     expect(send.hasAttribute("disabled")).toBe(false);
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
     expect(onSubmit).not.toHaveBeenCalled();

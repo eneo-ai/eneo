@@ -4,6 +4,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { composerValue } from "@/test/composer";
 import { renderInApp, testAppContext } from "@/test/render";
 import { ChatView, type ActivityState } from "./chat-view";
 
@@ -120,7 +121,7 @@ describe("ChatView start state", () => {
 
     const textarea = screen.getByRole("textbox", { name: "Meddelande till Personlig assistent" });
     fireEvent.click(screen.getByRole("button", { name: /Gör en plan/ }));
-    expect((textarea as HTMLTextAreaElement).value).toBe("Gör en konkret plan för: ");
+    expect(composerValue(textarea)).toBe("Gör en konkret plan för: ");
     expect(document.activeElement).toBe(textarea);
 
     const quickLinks = await screen.findByRole("region", { name: "Dina assistenter" });

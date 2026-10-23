@@ -1,7 +1,12 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import { ChatComposer, ChatComposerDrawer, useChatComposerContext } from "@astryxdesign/core/Chat";
+import {
+  ChatComposer,
+  ChatComposerDrawer,
+  type ChatComposerInputHandle,
+  type ChatComposerTrigger
+} from "@astryxdesign/core/Chat";
 import { Popover } from "@astryxdesign/core/Popover";
 import {
   ArrowUp,
@@ -18,14 +23,15 @@ import {
 import { useTranslations } from "next-intl";
 import {
   useId,
+  useImperativeHandle,
   useRef,
   useState,
-  type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
   type ReactNode,
   type Ref
 } from "react";
+import { ChatComposerInput } from "@/components/astryx/chat-composer-input";
 import type { KnowledgeOrigin } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { ComposerAttachments } from "./attachments";
@@ -40,20 +46,33 @@ const PILL_CLASS =
 const PILL_ACTIVE_CLASS = "bg-ax-accent-muted text-ax-text-accent";
 
 /**
- * The composer's text field. A real <textarea> (e2e and assistive tech rely
- * on it) wired to Astryx ChatComposer's context: Enter sends, Shift+Enter adds
- * a line (the hint is in its description), IME composition is respected,
- * pasted files become attachments and Backspace in an empty field removes the
- * last attachment.
+ * What a page holds of the composer's text field: a way to focus it, and the
+ * element itself for focus rescue. The field is an Astryx ChatComposerInput
+ * (a contenteditable element), so there is no textarea to hold.
  */
-function ComposerTextarea({
+export type ComposerHandle = {
+  focus: () => void;
+  element: HTMLElement | null;
+};
+
+/**
+ * The composer's text field: Astryx ChatComposerInput on ChatComposer's
+ * context. Enter sends and Shift+Enter adds a line (the hint is in its
+ * description); an IME's Enter commits its candidate instead. Pasted or
+ * dropped files become attachments and Backspace in an empty field removes
+ * the last attachment. Message history and paste-as-token are off: a chat
+ * draft is the person's own text. With `triggers`, typing their character
+ * opens a menu whose picks become inline tokens (the flow chat's references).
+ */
+function ComposerInput({
   label,
   hintId,
   placeholder,
   onEnter,
   onPasteFiles,
   onBackspaceEmpty,
-  rows,
+  minRows,
+  triggers,
   ref
 }: {
   label: string;
@@ -62,56 +81,52 @@ function ComposerTextarea({
   onEnter: () => void;
   onPasteFiles: (files: File[]) => void;
   onBackspaceEmpty: () => void;
-  rows: number;
-  ref?: Ref<HTMLTextAreaElement>;
+  minRows: 1 | 2;
+  triggers?: ChatComposerTrigger[];
+  ref?: Ref<ComposerHandle>;
 }) {
-  const composer = useChatComposerContext();
-  const [composing, setComposing] = useState(false);
+  const handle = useRef<ChatComposerInputHandle>(null);
+  const root = useRef<HTMLDivElement>(null);
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus: () => handle.current?.focus(),
+      get element() {
+        return root.current?.querySelector<HTMLElement>("[contenteditable]") ?? null;
+      }
+    }),
+    []
+  );
 
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // An open trigger menu has taken its keys before this runs.
     if (event.key === "Enter" && !event.shiftKey) {
-      if (composing || event.nativeEvent.isComposing) return;
+      // Astryx leaves an IME's Enter alone; so does this.
+      if (event.nativeEvent.isComposing) return;
+      // Sending is the page's: a blocked send keeps the text (Astryx's own
+      // Enter would clear the field first).
       event.preventDefault();
       onEnter();
       return;
     }
-    if (event.key === "Backspace" && event.currentTarget.value === "") {
+    if (event.key === "Backspace" && (handle.current?.getValue() ?? "") === "") {
       onBackspaceEmpty();
     }
   };
 
-  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
-    const files: File[] = [];
-    for (const item of event.clipboardData?.items ?? []) {
-      if (item.kind === "file") {
-        const file = item.getAsFile();
-        if (file) files.push(file);
-      }
-    }
-    if (files.length > 0) {
-      event.preventDefault();
-      onPasteFiles(files);
-    }
-  };
-
   return (
-    <textarea
-      ref={ref}
-      name="message"
-      rows={rows}
-      value={composer?.value ?? ""}
-      onChange={(event) => composer?.onChange(event.currentTarget.value)}
-      onKeyDown={onKeyDown}
-      onPaste={onPaste}
-      onCompositionStart={() => setComposing(true)}
-      onCompositionEnd={() => setComposing(false)}
-      aria-label={label}
+    <ChatComposerInput
+      ref={root}
+      handleRef={handle}
+      label={label}
       aria-describedby={hintId}
       placeholder={placeholder}
-      // The Astryx ChatComposer around this textarea draws the 3:1 focus ring
-      // (focus-within), so the field itself has none.
-      // eslint-disable-next-line eneo/no-weak-focus-indicator -- ring drawn by ChatComposer
-      className="text-ax-text placeholder:text-ax-text-secondary block [field-sizing:content] max-h-48 min-h-[46px] w-full resize-none bg-transparent px-1.5 py-0.5 text-[15px] leading-normal focus:outline-none"
+      hasHistory={false}
+      pasteAsToken={false}
+      onFiles={onPasteFiles}
+      onKeyDown={onKeyDown}
+      triggers={triggers}
+      className={cn("py-0.5", minRows === 2 && "[&_[contenteditable]]:min-h-[2.75rem]")}
     />
   );
 }
@@ -142,9 +157,11 @@ function useFileDrop(onFiles: (files: File[]) => void, enabled: boolean) {
           },
           onDrop: (event: DragEvent) => {
             if (!hasFiles(event)) return;
-            event.preventDefault();
             depth.current = 0;
             setDragging(false);
+            // A drop on the text field itself is the field's (`onFiles`).
+            if (event.defaultPrevented) return;
+            event.preventDefault();
             const files = Array.from(event.dataTransfer.files ?? []);
             if (files.length > 0) onFiles(files);
           }
@@ -233,8 +250,14 @@ export type ComposerProps = {
   contextBar?: ReactNode;
   /** A passage quoted from a file or a view, sent as the opening lines of the question. */
   quote?: ComposerQuote | null;
+  /** Menus the text field opens as their character is typed (the flow chat's references). */
+  triggers?: ChatComposerTrigger[];
+  /** Small icon-only buttons above the text field (a "Referera" button, say). */
+  headerActions?: ReactNode;
+  /** Controls after the pills in the footer (the flow chat's Fråga/Redigera picker). */
+  footerActions?: ReactNode;
   variant?: "docked" | "start";
-  textareaRef?: Ref<HTMLTextAreaElement>;
+  inputRef?: Ref<ComposerHandle>;
 };
 
 export type ComposerQuote = {
@@ -287,8 +310,8 @@ function ComposerQuoteCard({ quote }: { quote: ComposerQuote }) {
 
 /**
  * The chat composer (Astryx ChatComposer): drawer with attachment cards,
- * a textarea, and a row with attach, the knowledge pill (accent tint, clearly
- * lighter than Send), tools, the model picker and send/stop. Files
+ * the text field, and a row with attach, the knowledge pill (accent tint,
+ * clearly lighter than Send), tools, the model picker and send/stop. Files
  * can be dropped anywhere on it; the attach button is the non-drag
  * alternative (WCAG 2.5.7). Footer: data-sovereignty note.
  */
@@ -310,8 +333,11 @@ export function Composer({
   partnerToken,
   contextBar,
   quote = null,
+  triggers,
+  headerActions,
+  footerActions,
   variant = "docked",
-  textareaRef
+  inputRef
 }: ComposerProps) {
   const t = useTranslations();
   const hintId = useId();
@@ -335,15 +361,15 @@ export function Composer({
         <ChatComposer
           value={value}
           onChange={onChange}
-          // Submission runs through `send` (the textarea's Enter and the send
+          // Submission runs through `send` (the field's Enter and the send
           // button) so a blocked send never clears the field.
           onSubmit={send}
           onStop={onStop}
           isStopShown={busy}
           elevation="none"
           className={cn(
-            "rounded-ax-chat [&>div:has(textarea)]:shadow-ax-med",
-            variant === "start" && "[&>div:has(textarea)]:rounded-[1.375rem]"
+            "rounded-ax-chat [&>div:has([contenteditable])]:shadow-ax-med",
+            variant === "start" && "[&>div:has([contenteditable])]:rounded-[1.375rem]"
           )}
           drawer={
             hasAttachments || quote ? (
@@ -355,13 +381,15 @@ export function Composer({
               </ChatComposerDrawer>
             ) : undefined
           }
+          headerActions={headerActions}
           input={
-            <ComposerTextarea
-              ref={textareaRef}
+            <ComposerInput
+              ref={inputRef}
               label={label}
               hintId={hintId}
               placeholder={placeholder}
-              rows={variant === "start" ? 2 : 1}
+              minRows={variant === "start" ? 2 : 1}
+              triggers={triggers}
               onEnter={send}
               onPasteFiles={(files) => void attachments.addFiles(files)}
               onBackspaceEmpty={() => {
@@ -390,6 +418,7 @@ export function Composer({
               <KnowledgePill knowledge={knowledge} />
               {tools}
               {mention}
+              {footerActions}
             </div>
           }
           sendActions={modelSelector}
