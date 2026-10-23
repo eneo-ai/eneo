@@ -1007,8 +1007,16 @@ class FlowRunRepository:
         return [(run_id, tenant_id) for run_id, tenant_id in rows]
 
     async def acquire_tenant_run_creation_lock(self, *, tenant_id: UUID) -> None:
+        """Serialize this tenant's run creations until the transaction ends.
+
+        FOR NO KEY UPDATE: it excludes the next creation's lock, but not the
+        FOR KEY SHARE every foreign-key check on the tenant takes, so the
+        tenant's other writes (step results, outbox rows, uploads, audit
+        entries) do not wait for a run to be created."""
         await self.session.execute(
-            sa.select(Tenants.id).where(Tenants.id == tenant_id).with_for_update()
+            sa.select(Tenants.id)
+            .where(Tenants.id == tenant_id)
+            .with_for_update(key_share=True)
         )
 
     async def list_statuses(

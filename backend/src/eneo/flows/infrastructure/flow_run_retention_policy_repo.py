@@ -479,9 +479,13 @@ class FlowRunRetentionPolicyRepository:
             next_cursor=next_cursor,
         )
 
+    # Both locks are FOR NO KEY UPDATE: they serialize policy changes without
+    # making the foreign-key checks of other writes to the tenant or space wait.
     async def _lock_organization(self, *, tenant_id: UUID) -> None:
         found = await self.session.scalar(
-            sa.select(Tenants.id).where(Tenants.id == tenant_id).with_for_update()
+            sa.select(Tenants.id)
+            .where(Tenants.id == tenant_id)
+            .with_for_update(key_share=True)
         )
         if found is None:
             raise NotFoundException("Organization not found.")
@@ -491,7 +495,7 @@ class FlowRunRetentionPolicyRepository:
             sa.select(Spaces.id)
             .where(Spaces.id == space_id)
             .where(Spaces.tenant_id == tenant_id)
-            .with_for_update()
+            .with_for_update(key_share=True)
         )
         if found is None:
             raise NotFoundException("Space not found.")
