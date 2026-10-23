@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, TypeVar, cast
 from uuid import UUID
@@ -998,10 +998,40 @@ class FlowRunEvidenceService:
             tenant_id=self.user.tenant_id,
         )
         run_usage = usage_by_run_id.get(resolved_run.id)
+        models_ceiling = (
+            RUN_VIEW_MAX_LOADED_SECTION_ROWS
+            if is_view
+            else EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING
+        )
         models_used_by_step_id = await self.provider_call_repo.list_models_used_by_step(
             run_id=resolved_run.id,
             tenant_id=self.user.tenant_id,
+            limit=models_ceiling + 1,
         )
+        models_used_by_step_id, models_omitted = self._bound_models_used(
+            models_used_by_step_id, ceiling=models_ceiling
+        )
+        if models_omitted:
+            if not is_view:
+                raise self._section_rows_refusal(
+                    section="provider_calls",
+                    limit_kind="section_rows",
+                    row_count=models_ceiling + models_omitted,
+                    ceiling=models_ceiling,
+                    detail=(
+                        "raw" if access_kind == "evidence_export_raw" else "redacted"
+                    ),
+                )
+            # The models derive from provider-call receipts, so their overflow
+            # is recorded against that section. The repository stops reading
+            # at ceiling + 1, so the true count is a lower bound.
+            view_omissions.append(
+                RunViewEvidenceRowOmission(
+                    section="provider_calls",
+                    rows_omitted=models_omitted,
+                    count_truncated=True,
+                )
+            )
         if is_view:
             step_result_usage = self._section_usage(section_usages, "step_results")
             self._record_view_omission(
@@ -1128,18 +1158,51 @@ class FlowRunEvidenceService:
                 if section == "provider_calls"
                 else "section_rows"
             )
-            raise FileTooLargeException(
-                "Flow evidence export contains too many rows in one section.",
-                code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value,
-                context={
-                    "section": section,
-                    "limit": limit_kind,
-                    "section_row_count": row_count,
-                    "max_section_rows": section_ceiling,
-                    "detail": detail,
-                    "hint": _EVIDENCE_EXPORT_TOO_LARGE_HINT,
-                },
+            raise self._section_rows_refusal(
+                section=section,
+                limit_kind=limit_kind,
+                row_count=row_count,
+                ceiling=section_ceiling,
+                detail=detail,
             )
+
+    @staticmethod
+    def _section_rows_refusal(
+        *,
+        section: EvidenceSectionIdentifier,
+        limit_kind: EvidenceLimitIdentifier,
+        row_count: int,
+        ceiling: int,
+        detail: EvidenceExportDetail,
+    ) -> FileTooLargeException:
+        return FileTooLargeException(
+            "Flow evidence export contains too many rows in one section.",
+            code=FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value,
+            context={
+                "section": section,
+                "limit": limit_kind,
+                "section_row_count": row_count,
+                "max_section_rows": ceiling,
+                "detail": detail,
+                "hint": _EVIDENCE_EXPORT_TOO_LARGE_HINT,
+            },
+        )
+
+    @staticmethod
+    def _bound_models_used(
+        models_by_step_id: Mapping[UUID, Sequence[str]], *, ceiling: int
+    ) -> tuple[dict[UUID, Sequence[str]], int]:
+        """The first ``ceiling`` (step, model) pairs and how many were beyond."""
+        bounded: dict[UUID, Sequence[str]] = {}
+        remaining = ceiling
+        omitted = 0
+        for step_id, models in models_by_step_id.items():
+            kept = models[:remaining]
+            omitted += len(models) - len(kept)
+            remaining -= len(kept)
+            if kept:
+                bounded[step_id] = kept
+        return bounded, omitted
 
     @staticmethod
     def _section_usage(

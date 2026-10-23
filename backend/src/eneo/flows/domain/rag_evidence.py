@@ -27,6 +27,7 @@ from typing import Any, Final, Literal, TypeAlias, TypedDict, cast, get_args
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from eneo.flows.domain.runtime_invariant_exceptions import MappedEvidenceNestingError
+from eneo.flows.flow_run_error import TOOL_ERROR_TEXT_MAX_LENGTH
 
 RETRIEVED_KNOWLEDGE_EVIDENCE_VERSION: Final[Literal[2]] = 2
 
@@ -80,6 +81,7 @@ RagRetrievalStatus: TypeAlias = Literal[
     "skipped_no_knowledge",
     "skipped_no_input",
     "skipped_transcribe_only",
+    "skipped_speaker_mapping",
     "success",
     "no_chunks",
     "timeout",
@@ -91,8 +93,10 @@ RAG_RETRIEVAL_STATUSES: frozenset[RagRetrievalStatus] = frozenset(
 RAG_RETRIEVAL_FAIL_CLOSED_STATUSES: frozenset[RagRetrievalStatus] = frozenset(
     status
     for status in RAG_RETRIEVAL_STATUSES
-    if status not in {"success", "skipped_transcribe_only"}
+    if status not in {"success", "skipped_transcribe_only", "skipped_speaker_mapping"}
 )
+# Bound on the sanitised provider reason kept when retrieval fails.
+RAG_RETRIEVAL_ERROR_REASON_MAX_LENGTH: Final[int] = TOOL_ERROR_TEXT_MAX_LENGTH
 RagEmbeddingModelStatus: TypeAlias = Literal["recorded", "not_reported"]
 
 
@@ -458,10 +462,9 @@ class RetrievedKnowledgeEvidence(BaseModel):
 class RagRetrievalRecord:
     """Producer metadata before the runtime adds query and prompt provenance."""
 
-    status: RagRetrievalStatus | Literal["skipped"] = "skipped_no_service"
+    status: RagRetrievalStatus = "skipped_no_service"
     attempted: bool = False
     timeout_seconds: int = 0
-    reason: Literal["speaker_mapping"] | None = None
     chunks_retrieved: int = 0
     raw_chunks_count: int = 0
     deduped_chunks_count: int = 0
@@ -471,6 +474,7 @@ class RagRetrievalRecord:
     error_code: Literal["rag_retrieval_timeout", "rag_retrieval_failed"] | None = None
     retrieval_duration_ms: int | None = None
     retrieval_error_type: str | None = None
+    retrieval_error_reason: str | None = None
     embedding_model: RagEmbeddingModel | None = None
     embedding_model_status: RagEmbeddingModelStatus = "not_reported"
     reference_metadata_status: (
@@ -487,11 +491,10 @@ class RagRetrievalRecord:
             "attempted": self.attempted,
             "status": self.status,
         }
-        if self.reason is not None:
-            payload["reason"] = self.reason
         # Speaker mapping's bare skipped record is a distinct existing shape;
         # adding retrieval fields would change its persisted reader semantics.
-        if self.status == "skipped":
+        # Rows stored before it was declared read `skipped` with a `reason`.
+        if self.status == "skipped_speaker_mapping":
             return payload
         payload.update(
             {
@@ -511,6 +514,10 @@ class RagRetrievalRecord:
                 "embedding_model_status": self.embedding_model_status,
             }
         )
+        # Only a failed retrieval carries a reason; every other stored payload
+        # keeps the shape it always had.
+        if self.retrieval_error_reason is not None:
+            payload["retrieval_error_reason"] = self.retrieval_error_reason
         if self.reference_metadata_status is not None:
             payload["reference_metadata_status"] = self.reference_metadata_status
             payload["reference_metadata_error_type"] = (

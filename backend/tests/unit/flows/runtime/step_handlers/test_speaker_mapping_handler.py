@@ -215,7 +215,7 @@ async def test_proposal_renames_transcript_and_records_provenance(harness) -> No
     assert calls["deps"].retrieve_rag_chunks is handler_module._no_rag
     assert await calls["deps"].retrieve_rag_chunks() == (
         [],
-        {"attempted": False, "status": "skipped", "reason": "speaker_mapping"},
+        {"attempted": False, "status": "skipped_speaker_mapping"},
         [],
     )
     assert any(d.code == "speaker_mapping_unmapped_labels" for d in output.diagnostics)

@@ -1289,6 +1289,54 @@ async def test_view_bounds_other_fan_out_sections_and_records_omissions(user) ->
     ]
 
 
+def _models_used_beyond(ceiling: int) -> dict:
+    """One step that answered through ceiling + 1 distinct models."""
+    return {uuid4(): tuple(f"model-{index:05d}" for index in range(ceiling + 1))}
+
+
+@pytest.mark.asyncio
+async def test_view_bounds_models_used_and_records_the_overflow(user) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    ceiling = flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS
+    models = _models_used_beyond(ceiling)
+    service.provider_call_repo.list_models_used_by_step.return_value = models
+
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    # The repository is asked for one more than the view may carry.
+    assert (
+        service.provider_call_repo.list_models_used_by_step.await_args.kwargs["limit"]
+        == ceiling + 1
+    )
+    carried = bundle.debug_export["run"]["summary"]["models_used"]
+    assert len(carried) <= ceiling
+    assert {
+        "reason": "row_limit",
+        "section": "provider_calls",
+        "rows_omitted": 1,
+        "count_truncated": True,
+    } in bundle.debug_export["run"]["summary"]["omissions"]
+
+
+@pytest.mark.asyncio
+async def test_export_refuses_instead_of_truncating_models_used(user) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    ceiling = flow_run_evidence_service.EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING
+    service.provider_call_repo.list_models_used_by_step.return_value = (
+        _models_used_beyond(ceiling)
+    )
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        await service.export_evidence_json(run_id=run.id)
+
+    assert exc_info.value.code == FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value
+    assert exc_info.value.context["section"] == "provider_calls"
+    assert exc_info.value.context["limit"] == "section_rows"
+    assert exc_info.value.context["max_section_rows"] == ceiling
+
+
 @pytest.mark.asyncio
 async def test_view_refuses_to_materialize_a_section_over_its_logical_budget(
     user,

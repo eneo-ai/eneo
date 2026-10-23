@@ -122,7 +122,8 @@ const NO_KNOWLEDGE_SEARCH = new Set([
   "",
   "skipped",
   "skipped_no_knowledge",
-  "skipped_transcribe_only"
+  "skipped_transcribe_only",
+  "skipped_speaker_mapping"
 ]);
 
 /**
@@ -146,6 +147,8 @@ const STATUS_VIEWS: Record<string, { key: string; tone: StatusTone }> = {
     key: "flow_run_knowledge_status_skipped_transcribe_only",
     tone: "neutral"
   },
+  skipped_speaker_mapping: { key: "flow_run_knowledge_status_skipped", tone: "neutral" },
+  // Rows stored before speaker mapping declared its own status.
   skipped: { key: "flow_run_knowledge_status_skipped", tone: "neutral" }
 };
 

@@ -14,6 +14,7 @@ from typing import (
 from uuid import UUID
 
 from eneo.flows.domain.rag_evidence import (
+    RAG_RETRIEVAL_ERROR_REASON_MAX_LENGTH,
     RagEmbeddingModel,
     RagEmbeddingModelStatus,
     RagRetrievalRecord,
@@ -21,6 +22,7 @@ from eneo.flows.domain.rag_evidence import (
 from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
 from eneo.flows.domain.runtime import StepDiagnostic
 from eneo.flows.flow_run_provenance import default_rag_tracking
+from eneo.flows.flow_run_redaction import redact_string
 from eneo.flows.runtime.protocols import RuntimeAssistantProtocol
 from eneo.flows.runtime.rag_metadata import build_retrieved_knowledge_evidence
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
@@ -53,6 +55,19 @@ def _embedding_model_evidence(
         "id": str(model_id) if model_id is not None else None,
         "name": name.strip(),
     }, "recorded"
+
+
+def _retrieval_error_reason(exc: Exception) -> str | None:
+    """Why retrieval failed: the typed code and message, redacted and bounded.
+
+    The class name is recorded separately. Provider messages are redacted for
+    credentials and URLs before they are stored, so a rejection explains itself
+    in the evidence without carrying request content.
+    """
+    code = getattr(exc, "code", None)
+    parts = [code if isinstance(code, str) else "", " ".join(str(exc).split())]
+    reason = redact_string(": ".join(part for part in parts if part), key=None)
+    return reason[:RAG_RETRIEVAL_ERROR_REASON_MAX_LENGTH] or None
 
 
 async def retrieve_rag_chunks(
@@ -197,6 +212,7 @@ async def retrieve_rag_chunks(
         rag_record.status = "error"
         rag_record.error_code = "rag_retrieval_failed"
         rag_record.retrieval_error_type = exc.__class__.__name__
+        rag_record.retrieval_error_reason = _retrieval_error_reason(exc)
         rag_record.retrieval_duration_ms = int(
             (time.monotonic() - retrieval_started) * 1000
         )

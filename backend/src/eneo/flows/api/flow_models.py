@@ -2493,6 +2493,13 @@ class FlowRunDebugRag(BaseModel):
     error_code: str | None = None
     retrieval_duration_ms: int | None = None
     retrieval_error_type: str | None = None
+    retrieval_error_reason: str | None = Field(
+        default=None,
+        description=(
+            "Why retrieval failed: the error code and message, with credentials "
+            "and URLs redacted and the text bounded. Set only when it failed."
+        ),
+    )
     references: list[FlowRunDebugRagReference] | None = None
     knowledge_evidence_version: int | None = None
     sources_with_recorded_passages: int | None = Field(

@@ -21454,6 +21454,11 @@ export interface components {
       references?: components["schemas"]["FlowRunDebugRagReference"][] | null;
       /** Retrieval Duration Ms */
       retrieval_duration_ms?: number | null;
+      /**
+       * Retrieval Error Reason
+       * @description Why retrieval failed: the error code and message, with credentials and URLs redacted and the text bounded. Set only when it failed.
+       */
+      retrieval_error_reason?: string | null;
       /** Retrieval Error Type */
       retrieval_error_type?: string | null;
       /** Source Display Names */

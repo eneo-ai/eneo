@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -10,16 +11,24 @@ import pytest
 
 from eneo.assistants.references import ReferencesService
 from eneo.collections.domain.collection import Collection
+from eneo.flows.api.flow_models import FlowRunStepKnowledgeTrace
 from eneo.flows.domain.rag_evidence import (
+    RAG_RETRIEVAL_ERROR_REASON_MAX_LENGTH,
     RAG_RETRIEVAL_FAIL_CLOSED_STATUSES,
     RAG_RETRIEVAL_STATUSES,
 )
 from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
+from eneo.flows.flow_run_provenance import normalize_rag_payload
 from eneo.flows.runtime.rag_retrieval import (
     RagRetrievalDeps,
     retrieve_rag_chunks,
 )
+from eneo.flows.runtime.step_handlers.speaker_mapping import (
+    _no_rag,  # type: ignore[attr-defined]
+)
+from eneo.flows.runtime.step_result_builder import build_transcribe_only_rag_metadata
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+from eneo.main.exceptions import ProviderRejectedRequestException
 from eneo.services.service import DatastoreResult
 from tests.fixtures import (
     TEST_COLLECTION,
@@ -262,6 +271,7 @@ def test_rag_retrieval_status_family_is_closed_and_complete() -> None:
             "skipped_no_knowledge",
             "skipped_no_input",
             "skipped_transcribe_only",
+            "skipped_speaker_mapping",
             "success",
             "no_chunks",
             "timeout",
@@ -271,6 +281,7 @@ def test_rag_retrieval_status_family_is_closed_and_complete() -> None:
     assert RAG_RETRIEVAL_FAIL_CLOSED_STATUSES == RAG_RETRIEVAL_STATUSES - {
         "success",
         "skipped_transcribe_only",
+        "skipped_speaker_mapping",
     }
 
 
@@ -334,3 +345,152 @@ async def test_recorded_passages_never_reach_the_logger() -> None:
     logged = "".join(str(call) for call in logger.mock_calls)
     assert passage not in logged
     assert "Anna Andersson" not in logged
+
+
+_RETRIEVAL_SCENARIOS = {
+    "skipped_no_service": ("service_missing", "hello", True),
+    "skipped_no_knowledge": ("service", "hello", False),
+    "skipped_no_input": ("service", "  ", True),
+    "success": ("chunks", "hello", True),
+    "no_chunks": ("no_chunks", "hello", True),
+    "error": ("error", "hello", True),
+}
+
+
+@pytest.mark.asyncio
+async def test_every_rag_status_emitter_uses_the_declared_vocabulary() -> None:
+    """Each producer of a RagRetrievalRecord writes a declared status."""
+    emitted: dict[str, str] = {}
+    for label, (mode, question, has_knowledge) in _RETRIEVAL_SCENARIOS.items():
+        references_service = MagicMock()
+        if mode == "service_missing":
+            references_service = None
+        elif mode == "chunks":
+            references_service.get_references = AsyncMock(
+                return_value=_datastore_result(
+                    [
+                        retrieved_info_blob_chunk(
+                            info_blob_id=uuid4(), chunk_no=1, text="stycke", score=0.9
+                        )
+                    ]
+                )
+            )
+        elif mode == "no_chunks":
+            references_service.get_references = AsyncMock(
+                return_value=_datastore_result([])
+            )
+        elif mode == "error":
+            references_service.get_references = AsyncMock(
+                side_effect=RuntimeError("boom")
+            )
+        _, payload, _ = await retrieve_rag_chunks(
+            assistant=_assistant(has_knowledge=has_knowledge),
+            question=question,
+            run_id=uuid4(),
+            step_order=1,
+            deps=_deps(references_service, logger=MagicMock()),
+        )
+        emitted[f"retrieve:{label}"] = payload["status"]
+
+    slow_service = MagicMock()
+    slow_service.get_references = AsyncMock(side_effect=asyncio.TimeoutError)
+    _, payload, _ = await retrieve_rag_chunks(
+        assistant=_assistant(has_knowledge=True),
+        question="hello",
+        run_id=uuid4(),
+        step_order=1,
+        deps=_deps(slow_service, logger=MagicMock()),
+    )
+    emitted["retrieve:timeout"] = payload["status"]
+    emitted["transcribe_only"] = build_transcribe_only_rag_metadata(timeout_seconds=30)[
+        "status"
+    ]
+    _, speaker_payload, _ = await _no_rag()
+    emitted["speaker_mapping"] = speaker_payload["status"]
+
+    undeclared = {
+        emitter: status
+        for emitter, status in emitted.items()
+        if status not in RAG_RETRIEVAL_STATUSES
+    }
+    assert undeclared == {}
+    # Every declared status has an emitter here, so a new one needs a case.
+    assert set(emitted.values()) == RAG_RETRIEVAL_STATUSES
+
+
+def test_only_the_known_modules_construct_a_rag_retrieval_record() -> None:
+    """A new RagRetrievalRecord producer must be added to the emitter test."""
+    src = Path(__file__).resolve().parents[3] / "src" / "eneo"
+    producers = {
+        path.relative_to(src).as_posix()
+        for path in src.rglob("*.py")
+        if "RagRetrievalRecord(" in path.read_text(encoding="utf-8")
+    }
+    assert producers == {
+        "flows/runtime/rag_retrieval.py",
+        "flows/runtime/step_result_builder.py",
+        "flows/runtime/step_handlers/speaker_mapping.py",
+    }
+
+
+@pytest.mark.asyncio
+async def test_retrieval_failure_records_a_bounded_reason() -> None:
+    references_service = MagicMock()
+    references_service.get_references = AsyncMock(
+        side_effect=ProviderRejectedRequestException("bad input")
+    )
+
+    _, payload, _ = await retrieve_rag_chunks(
+        assistant=_assistant(has_knowledge=True),
+        question="hello",
+        run_id=uuid4(),
+        step_order=1,
+        deps=_deps(references_service, logger=MagicMock()),
+    )
+
+    assert payload["status"] == "error"
+    assert payload["retrieval_error_type"] == "ProviderRejectedRequestException"
+    assert payload["retrieval_error_reason"] == "bad input"
+    # The run's knowledge trace shows it, as stored.
+    trace = FlowRunStepKnowledgeTrace.model_validate(
+        {"step_order": 1, "rag": normalize_rag_payload(payload)}
+    )
+    assert trace.rag.retrieval_error_reason == "bad input"
+
+
+@pytest.mark.asyncio
+async def test_retrieval_failure_reason_is_redacted_and_bounded() -> None:
+    references_service = MagicMock()
+    references_service.get_references = AsyncMock(
+        side_effect=ProviderRejectedRequestException(
+            "api_key=sk-secret-value " + "x" * 5000, code="bad_request"
+        )
+    )
+
+    _, payload, _ = await retrieve_rag_chunks(
+        assistant=_assistant(has_knowledge=True),
+        question="hello",
+        run_id=uuid4(),
+        step_order=1,
+        deps=_deps(references_service, logger=MagicMock()),
+    )
+
+    reason = payload["retrieval_error_reason"]
+    assert isinstance(reason, str)
+    assert reason.startswith("bad_request: ")
+    assert "sk-secret-value" not in reason
+    assert len(reason) <= RAG_RETRIEVAL_ERROR_REASON_MAX_LENGTH
+
+
+@pytest.mark.asyncio
+async def test_a_retrieval_that_did_not_fail_carries_no_failure_reason() -> None:
+    references_service = MagicMock()
+    references_service.get_references = AsyncMock(return_value=_datastore_result([]))
+    _, payload, _ = await retrieve_rag_chunks(
+        assistant=_assistant(has_knowledge=True),
+        question="hello",
+        run_id=uuid4(),
+        step_order=1,
+        deps=_deps(references_service, logger=MagicMock()),
+    )
+    assert "retrieval_error_reason" not in payload

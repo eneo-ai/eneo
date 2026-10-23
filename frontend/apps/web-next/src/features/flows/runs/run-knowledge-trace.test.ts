@@ -107,7 +107,12 @@ describe("showsKnowledgeTrace", () => {
   });
 
   it("leaves out a step that never searches knowledge, unless it found sources", () => {
-    for (const status of ["skipped", "skipped_no_knowledge", "skipped_transcribe_only"]) {
+    for (const status of [
+      "skipped",
+      "skipped_no_knowledge",
+      "skipped_transcribe_only",
+      "skipped_speaker_mapping"
+    ]) {
       expect(showsKnowledgeTrace(traceSummary({ status }), 0)).toBe(false);
     }
     expect(showsKnowledgeTrace(traceSummary({}), 0)).toBe(false);
