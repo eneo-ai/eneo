@@ -283,6 +283,11 @@ The knowledge tools are deliberately paged and capped:
 - each MCP result is also subject to the proxy's character limit;
 - across a turn, tool results share an aggregate admission budget based on the
   same context-window share reserved for injected knowledge.
+- a turn may make at most `MAX_TOOL_ROUNDS` model responses with tool calls
+  (40 by default); parallel calls in one response count as one round. In the
+  last two rounds the model is told how many remain, and a further request for
+  tools is refused so the model answers from what it gathered instead of the
+  turn failing.
 
 When the aggregate budget is exhausted, later results are replaced with an
 explicit instruction to stop calling tools and answer from the information
@@ -618,6 +623,8 @@ Eneo contains failures at the smallest useful boundary where possible.
 | A loopback connection fails | That completion loses the affected built-in tool. Because its server entity is ephemeral, failure state does not accumulate across requests. |
 | A tool result is too large | The proxy keeps bounded text and adds a truncation notice; built-in readers offer offset-based continuation. |
 | The turn-wide tool-result budget is exhausted | Later results are withheld with an instruction to answer from material already gathered. |
+| The turn reaches `MAX_TOOL_ROUNDS` | Pending calls are refused and one final request without tools asks the model to answer and name anything left unfinished. |
+| A provider stops responding | The request fails after `COMPLETION_REQUEST_TIMEOUT_SECONDS` without a response or, while streaming, without a new chunk, and the turn reports the provider as unavailable. |
 | An external live definition is unknown or changed | It is staged for admin approval and omitted or kept at its prior approved version. |
 | A knowledge document ID is missing or outside scope | The same not-found response is returned in both cases. |
 | A signed attachment reference is invalid, expired, or inaccessible | The files tool returns a non-revealing error and asks for a fresh attachment when appropriate. |
@@ -636,6 +643,8 @@ The most relevant backend settings are:
 | `MCP_CLIENT_CONNECT_TIMEOUT_SECONDS` | Connection deadline for an MCP endpoint. |
 | `MCP_CLIENT_LIST_TOOLS_TIMEOUT_SECONDS` | Deadline for external tool discovery. |
 | `MCP_CLIENT_CALL_TIMEOUT_SECONDS` | Deadline for an MCP tool call. |
+| `MAX_TOOL_ROUNDS` | Model responses with tool calls that one turn may make (default 40). Parallel calls in one response count once. |
+| `COMPLETION_REQUEST_TIMEOUT_SECONDS` | Longest wait for a completion provider: for the connection, the response, and while streaming each next chunk (default 600). A slow model that keeps streaming is not cut off. |
 | `MCP_CIRCUIT_BREAKER_FAILURE_THRESHOLD` | Failures before a persistent external server's circuit opens. |
 | `MCP_CIRCUIT_BREAKER_COOLDOWN_SECONDS` | How long that circuit remains open before retry. |
 
