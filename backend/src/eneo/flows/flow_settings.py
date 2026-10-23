@@ -3,6 +3,10 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any, Final, cast
 
+from eneo.flows.domain.flow_authoring_chat_policy import (
+    FLOW_AUTHORING_CHAT_SETTINGS_KEY,
+    validate_flow_authoring_chat_policy_object,
+)
 from eneo.flows.domain.mapped_execution_policy import (
     validate_flow_mapped_execution_policy_object,
 )
@@ -11,10 +15,6 @@ from eneo.flows.domain.rag_evidence_policy import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
-from eneo.flows.flow_authoring_chat_policy import (
-    FLOW_AUTHORING_CHAT_SETTINGS_KEY,
-    validate_flow_authoring_chat_policy_object,
-)
 from eneo.flows.flow_document_limits import (
     validate_flow_document_render_limits_object,
 )

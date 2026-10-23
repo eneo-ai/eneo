@@ -14,6 +14,10 @@ from eneo.data_retention.infrastructure.data_retention_service import (
 )
 from eneo.files.file_reference import file_reference_base_url
 from eneo.flows.application.feature_gate import FLOW_FEATURE
+from eneo.flows.domain.flow_authoring_chat_policy import (
+    apply_flow_authoring_chat_policy_patch,
+    resolve_flow_authoring_chat_model_id,
+)
 from eneo.flows.domain.mapped_execution_policy import (
     FlowMappedExecutionPolicy,
     apply_flow_mapped_execution_policy_patch,
@@ -26,10 +30,6 @@ from eneo.flows.domain.rag_evidence_policy import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
-from eneo.flows.flow_authoring_chat_policy import (
-    apply_flow_authoring_chat_policy_patch,
-    resolve_flow_authoring_chat_model_id,
-)
 from eneo.flows.flow_document_limits import (
     apply_flow_document_render_limits_patch,
     resolve_flow_document_render_limits,

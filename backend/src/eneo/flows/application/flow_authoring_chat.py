@@ -34,9 +34,11 @@ from eneo.flows.api.flow_definition_access import (
     require_flow_edit_access,
 )
 from eneo.flows.application.feature_gate import require_flows_enabled
+from eneo.flows.domain.flow_authoring_chat_policy import (
+    resolve_flow_authoring_chat_model_id,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
-from eneo.flows.flow_authoring_chat_policy import resolve_flow_authoring_chat_model_id
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, NotFoundException

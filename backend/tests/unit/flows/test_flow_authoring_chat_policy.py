@@ -2,13 +2,13 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_api_exceptions import FlowBadRequestException
-from eneo.flows.flow_authoring_chat_policy import (
+from eneo.flows.domain.flow_authoring_chat_policy import (
     apply_flow_authoring_chat_policy_patch,
     resolve_flow_authoring_chat_model_id,
     validate_flow_authoring_chat_policy_object,
 )
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.flows.flow_settings import (
     normalize_flow_settings_object,
     validate_flow_settings_write,
