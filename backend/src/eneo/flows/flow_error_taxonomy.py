@@ -628,6 +628,17 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         ),
         user_action="Check the run history or contact support before starting another run.",
     ),
+    FlowApiErrorCode.RUN_WORKER_SHUTDOWN: _entry(
+        category="Run lifecycle",
+        surfaced_through="Run error payload",
+        cause="The worker shut down while the run was executing, so the run failed at once.",
+        # Not requeued: a step that was executing may already have had effects.
+        consumer_action=(
+            "Inspect earlier external effects, then retry the failed run from its "
+            "failed step where eligible or start a new run; nothing is requeued."
+        ),
+        user_action="Check the run's steps before you retry it or start a new run.",
+    ),
     FlowApiErrorCode.RUN_ABANDONED: _entry(
         category="Run lifecycle",
         surfaced_through="API response and run error payload",

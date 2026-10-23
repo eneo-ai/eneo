@@ -132,7 +132,7 @@ async def deliver_webhook_outbox(*, container: Container) -> dict[str, int | str
 
 async def execution_startup(ctx: ARQContext) -> None:
     await execution_worker.on_startup(ctx)
-    execution_heartbeats().start()
+    execution_heartbeats().attach_to_worker()
 
 
 async def execution_shutdown(ctx: ARQContext) -> None:

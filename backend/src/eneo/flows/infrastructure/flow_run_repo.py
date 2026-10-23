@@ -132,6 +132,7 @@ from eneo.flows.infrastructure.flow_run_list_query import (
     run_search_clause,
 )
 from eneo.flows.infrastructure.flow_run_staleness import (
+    flow_run_awaits_webhook_delivery,
     stale_running_flow_run_predicate,
 )
 from eneo.flows.infrastructure.flow_run_step_input_file_rows import (
@@ -1263,8 +1264,9 @@ class FlowRunRepository:
         run_id: UUID,
         tenant_id: UUID,
         session: AsyncSession | None = None,
+        owner: FlowRunExecutionOwner | None = None,
     ) -> None:
-        owner = flow_run_execution_owner.get()
+        owner = owner or flow_run_execution_owner.get()
         if owner is None:
             return
         db_session = session or self.session
@@ -1596,8 +1598,13 @@ class FlowRunRepository:
         output_payload_json: FlowPersistedJsonObject | None = None,
         cancelled_at: datetime | None = None,
         stale_running_revision: int | None = None,
+        interrupted_owner: FlowRunExecutionOwner | None = None,
     ) -> FlowRun | None:
-        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
+        """``interrupted_owner`` ends a run its worker stopped executing: only
+        while that owner still holds it and it waits on no outbound delivery."""
+        await self.lock_execution_ownership(
+            run_id=run_id, tenant_id=tenant_id, owner=interrupted_owner
+        )
         if target_status not in TERMINAL_FLOW_RUN_STATUSES:
             raise ValueError("target_status must be terminal")
 
@@ -1635,6 +1642,8 @@ class FlowRunRepository:
                 stale_running_flow_run_predicate(),
                 FlowRuns.revision == stale_running_revision,
             )
+        if interrupted_owner is not None:
+            stmt = stmt.where(~flow_run_awaits_webhook_delivery())
         run_row = await self.session.scalar(stmt.values(**values).returning(FlowRuns))
         if run_row is None:
             return None

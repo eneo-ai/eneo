@@ -33,8 +33,12 @@ def test_flow_run_error_from_source_requires_public_error_code() -> None:
 
 
 def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
-    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 106
+    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 108
     assert FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[FlowApiErrorCode.RUN_ABANDONED] is False
+    # A step the stopped worker was executing may have had effects.
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.RUN_WORKER_SHUTDOWN
+    ]
     assert set(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == FLOW_RUN_TERMINAL_ERROR_CODES
     assert {
         code
@@ -57,6 +61,10 @@ def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
     # A spent step budget may leave a provider request in flight, so a new
     # run can duplicate work and spend.
     assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[FlowApiErrorCode.STEP_TIMEOUT]
+    # The same definition refuses again until the step's timeout is lowered.
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.STEP_TIMEOUT_EXCEEDS_TENANT_MAX
+    ]
     assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
         FlowApiErrorCode.PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED
     ]
@@ -124,6 +132,7 @@ def test_flow_run_error_exposes_retryability_without_changing_persisted_dump() -
     [
         FlowApiErrorCode.RUN_DISPATCH_FAILED,
         FlowApiErrorCode.RUN_WORKER_STALLED,
+        FlowApiErrorCode.RUN_WORKER_SHUTDOWN,
     ],
 )
 def test_flow_run_error_accepts_only_matching_public_retryability(

@@ -21,6 +21,11 @@ FLOW_EXECUTION_HEARTBEAT_INTERVAL_SECONDS = 30
 FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS = 180
 FLOW_EXECUTION_HEARTBEAT_MAX_FAILURES = 3
 FLOW_EXECUTION_HEARTBEAT_TRANSACTION_TIMEOUT_SECONDS = 10
+# A run whose worker shuts down mid-execution is failed with one fenced write.
+# ARQ cancels the run's task when its job_completion_wait (60 s) is over, and
+# the deployment's stop_grace_period (70 s) kills the worker 10 s later; half
+# that margin leaves the worker time to close its pools before the kill.
+FLOW_WORKER_SHUTDOWN_WRITE_TIMEOUT_SECONDS = 5
 FLOW_RUNNING_RECONCILE_INTERVAL_SECONDS = 60
 FLOW_RUN_ABANDONMENT_AFTER = timedelta(days=30)
 

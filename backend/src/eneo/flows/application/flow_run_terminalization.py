@@ -26,7 +26,10 @@ from eneo.flows.flow_run_error import (
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
-from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunExecutionOwner,
+    FlowRunRepository,
+)
 from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
     FlowRunReviewCheckpointRepository,
 )
@@ -108,6 +111,27 @@ class FlowRunTerminalizer:
             stale_running_revision=expected_revision,
         )
 
+    async def terminalize_interrupted_running_run(
+        self,
+        *,
+        owner: FlowRunExecutionOwner,
+        error: FlowRunError,
+    ) -> FlowRunTerminalizationResult:
+        """Fail a run its worker stopped executing, behind that worker's
+        execution-owner fence: a run another worker, a user or a review now
+        holds, or one waiting on an outbound delivery, is left as it is.
+
+        Raises FlowExecutionOwnershipLost when the owner no longer holds it.
+        The run's own task writes this, so its source is the task's failure."""
+        return await self._terminalize_run(
+            run_id=owner.run_id,
+            tenant_id=owner.tenant_id,
+            target_status=FlowRunStatus.FAILED,
+            source=FlowRunLifecycleSource.TASK_FAILURE,
+            error=error,
+            interrupted_owner=owner,
+        )
+
     async def terminalize_abandoned_run(
         self,
         *,
@@ -143,6 +167,7 @@ class FlowRunTerminalizer:
         principal: FlowPrincipal | None = None,
         stale_running_revision: int | None = None,
         abandonment: tuple[int, FlowRunAbandonmentFacts] | None = None,
+        interrupted_owner: FlowRunExecutionOwner | None = None,
     ) -> FlowRunTerminalizationResult:
         if not is_terminal_flow_run_status(target_status):
             raise ValueError("target_status must be a terminal FlowRunStatus")
@@ -207,6 +232,7 @@ class FlowRunTerminalizer:
                 output_payload_json=output_payload_json,
                 cancelled_at=cancelled_at,
                 stale_running_revision=stale_running_revision,
+                interrupted_owner=interrupted_owner,
             )
         if terminal_run is None:
             existing_run = await self.flow_run_repo.get(

@@ -3187,6 +3187,7 @@
   "flow_error_flow_task_timeout": "Körningen tog för lång tid och avbröts. Kontrollera körningens steg innan du startar en ny: AI-tjänsten kan redan ha gjort en del av arbetet. Försök sedan med ett mindre underlag, eller kontakta support om felet återkommer.",
   "flow_error_flow_webhook_delivery_failed": "Alla steg blev klara, men resultatet kunde inte skickas vidare till den mottagande tjänsten, så körningen räknas som misslyckad. Resultatet finns kvar i Eneo. Be en flödesredigerare kontrollera mottagarens adress under Resultat före nästa körning.",
   "flow_error_flow_worker_stalled": "Körningen slutade svara. Kontrollera körningens steg innan du startar en ny: AI-tjänsten kan redan ha gjort en del av arbetet. Kontakta support och uppge körningens referens om det händer igen.",
+  "flow_error_flow_worker_shutdown": "Körningen avbröts eftersom servern som körde den stoppades. Kontrollera körningens steg innan du försöker igen eller startar en ny: AI-tjänsten kan redan ha gjort en del av arbetet.",
   "flow_error_flow_run_abandoned": "Körningen har väntat i 30 dagar på att fortsätta, efter en godkänd granskning eller efter misslyckade startförsök, och har avslutats. Historiken finns kvar. Se där vad som redan hann göras, och starta en ny körning om du behöver resultatet.",
   "flow_error_flow_review_already_resumed": "Körningen har redan fortsatt efter den här granskningen. Läs in körningen igen för att se aktuell status.",
   "flow_error_flow_review_cancelled": "Granskningen har avbrutits. Läs in körningen igen innan du fortsätter.",

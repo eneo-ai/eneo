@@ -31,6 +31,7 @@ from eneo.flows.application.flow_webhook_delivery_policy import (
 from eneo.flows.domain.flow import FlowRunStatus
 from eneo.flows.domain.flow_run_recovery_policy import (
     FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS,
+    FLOW_WORKER_SHUTDOWN_WRITE_TIMEOUT_SECONDS,
     FlowRunRecoveryKind,
 )
 from eneo.flows.domain.mapped_execution_policy import (
@@ -494,6 +495,80 @@ async def _terminalize_flow_run_failure_from_task(
         )
 
 
+async def _terminalize_run_stopped_by_worker_shutdown(
+    owner: FlowRunExecutionOwner,
+) -> None:
+    # Ownership loss is a CancelledError: caught here, inside the shield, it
+    # cannot read as the shielded write itself being cancelled.
+    with suppress(FlowExecutionOwnershipLost):
+        async with (
+            asyncio.timeout(FLOW_WORKER_SHUTDOWN_WRITE_TIMEOUT_SECONDS),
+            sessionmanager.session() as session,
+            session.begin(),
+        ):
+            container = Container(session=providers.Object(session))
+            terminalizer = container.flow_run_terminalizer()
+            result = await terminalizer.terminalize_interrupted_running_run(
+                owner=owner,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.TASK_FAILURE,
+                    code=FlowApiErrorCode.RUN_WORKER_SHUTDOWN,
+                    message=(
+                        "flow_worker_shutdown: The worker shut down before run "
+                        "completion."
+                    ),
+                ),
+            )
+            if result.did_transition:
+                # As the heartbeat reaper does: a call the worker started has
+                # no known outcome, so none is presented as finished.
+                provider_calls = container.flow_provider_call_repo()
+                await provider_calls.mark_started_calls_outcome_unknown_for_run(
+                    run_id=owner.run_id,
+                    tenant_id=owner.tenant_id,
+                    reason=ProviderCallUnknownReason.WORKER_INTERRUPTED,
+                )
+
+
+async def _fail_run_stopped_by_worker_shutdown(
+    *, owner: FlowRunExecutionOwner, task_id: str | None
+) -> None:
+    """End at once a run whose task the worker shutdown cancelled, instead of
+    leaving it running until the heartbeat reaper calls it stalled.
+
+    The owner is passed in because the heartbeat context reset it on the way
+    out. The write is bounded so a slow database cannot hold the shutdown,
+    and it is the execution heartbeats' task, so a second cancellation cannot
+    cut it short and the worker waits for it before closing its database; a
+    job that only gets here after the worker stopped waiting starts none, and
+    the heartbeat reaper ends the run. The run is not requeued: a step that
+    was executing may have had effects, and repeating it needs idempotency the
+    steps do not promise; the user retries or reruns.
+    """
+    write = execution_heartbeats().run_shutdown_write(
+        _end_run_stopped_by_worker_shutdown(owner=owner, task_id=task_id)
+    )
+    if write is not None:
+        await asyncio.shield(write)
+
+
+async def _end_run_stopped_by_worker_shutdown(
+    *, owner: FlowRunExecutionOwner, task_id: str | None
+) -> None:
+    try:
+        # A run a user, another worker or a review holds now is left as it is.
+        await _terminalize_run_stopped_by_worker_shutdown(owner)
+    except Exception:
+        logger.exception(
+            "Flow run could not be ended after a worker shutdown",
+            extra={
+                "run_id": str(owner.run_id),
+                "tenant_id": str(owner.tenant_id),
+                "task_id": task_id,
+            },
+        )
+
+
 async def execute_flow_run_task(
     *,
     run_id: str,
@@ -506,6 +581,9 @@ async def execute_flow_run_task(
     task_id: str | None,
     retry_count: int,
 ) -> dict[str, str]:
+    # Before anything can be cancelled: the worker's shutdown waits for this
+    # job, wherever a cancellation finds it, before closing its database.
+    execution_heartbeats().hold_job()
     logger.info(
         "Received flow execution task",
         extra={
@@ -583,6 +661,15 @@ async def execute_flow_run_task(
             )
     except FlowExecutionOwnershipLost:
         return {"status": "skipped", "reason": "execution_ownership_lost"}
+    except asyncio.CancelledError:
+        if execution_heartbeats().worker_is_shutting_down():
+            await _fail_run_stopped_by_worker_shutdown(
+                owner=FlowRunExecutionOwner(
+                    run_id_uuid, tenant_id_uuid, expected_run_revision
+                ),
+                task_id=task_id,
+            )
+        raise
     except TimeoutError:
         error_message = (
             "flow_task_timeout: Flow execution timed out before task completion."
