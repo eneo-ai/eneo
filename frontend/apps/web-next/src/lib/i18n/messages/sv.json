@@ -9054,8 +9054,6 @@
   "flows_chat_reference_value_structured": "fast format",
   "flows_chat_reference_card": "Referens",
   "flows_chat_reference_show_step": "Visa steget",
-  "flows_chat_reference_copy": "Kopiera referens",
-  "flows_chat_reference_copied": "Referensen är kopierad.",
   "flows_chat_reference_step_missing": "Steget finns inte längre i flödet.",
   "flows_chat_reference_group_run": "Körningen",
   "flows_chat_reference_item_run": "Ett värde från körningen",

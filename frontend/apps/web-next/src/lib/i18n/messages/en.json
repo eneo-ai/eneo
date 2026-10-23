@@ -9054,8 +9054,6 @@
   "flows_chat_reference_value_structured": "structured",
   "flows_chat_reference_card": "Reference",
   "flows_chat_reference_show_step": "Show the step",
-  "flows_chat_reference_copy": "Copy reference",
-  "flows_chat_reference_copied": "The reference is copied.",
   "flows_chat_reference_step_missing": "The step is no longer in the flow.",
   "flows_chat_reference_group_run": "The run",
   "flows_chat_reference_item_run": "A value of the run",

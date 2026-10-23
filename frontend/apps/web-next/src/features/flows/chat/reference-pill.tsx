@@ -1,7 +1,6 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import { useClipboard } from "@astryxdesign/core/hooks";
 import { Popover } from "@astryxdesign/core/Popover";
 import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
@@ -18,6 +17,7 @@ import {
 import { cn } from "@/lib/utils";
 import { meaningLabel, readWarning } from "../editor/step-labels";
 import type { FlowPublic } from "../editor/step-types";
+import { stepLabel } from "../flow-labels";
 import { referenceStep, referenceTone, valueWhat, type Reference } from "./references";
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -58,6 +58,24 @@ export function referenceLabel(reference: Reference, flow: Flow, t: Translate): 
           : t("flows_chat_reference_value_structured");
   if (stepText && whatText) return `${stepText} › ${whatText}`;
   return meaningLabel(reference.meaning, reference.token, flow, t);
+}
+
+/** What the reference is: the step, or what a value is of which step ("Fältet fastighet · Steg 1: Extrahera"). */
+export function referenceDescription(reference: Reference, flow: Flow, t: Translate): string {
+  const step = referenceStep(reference, flow);
+  const stepText = step ? stepLabel(step, t) : null;
+  // A removed step: the note below says so.
+  if (reference.kind === "step") return stepText ?? t("flows_chat_reference_item_step");
+  const what = valueWhat(reference.meaning);
+  const whatText =
+    what === null
+      ? meaningLabel(reference.meaning, reference.token, flow, t)
+      : what.type === "field"
+        ? t("flow_step_editor_variable_step_field", { field: what.field })
+        : what.type === "text"
+          ? t("flows_chat_reference_item_text")
+          : t("flows_chat_reference_item_structured");
+  return stepText && what !== null ? `${whatText} · ${stepText}` : whatText;
 }
 
 /** What is wrong with a reference, or null: its step is gone, or it reads nothing useful. */
@@ -141,7 +159,6 @@ export function ReferencePillButton({ reference }: { reference: Reference }) {
 function ReferenceCard({ card, onClose }: { card: Card | null; onClose: () => void }) {
   const t = useTranslations();
   const refs = useFlowReferences()!;
-  const { copy } = useClipboard({ announce: t("flows_chat_reference_copied") });
   // The anchor as a ref object the popover can read; a pill is never a React ref.
   const anchorRef = useMemo(() => ({ current: card?.anchor }) as RefObject<HTMLElement>, [card]);
   const reference = card?.reference;
@@ -162,7 +179,22 @@ function ReferenceCard({ card, onClose }: { card: Card | null; onClose: () => vo
       content={
         reference ? (
           <div className="flex flex-col gap-2">
-            <Text type="code" size="xsm" as="p" display="block" className="m-0 break-all">
+            <div className="flex flex-col gap-0.5">
+              <Text type="label" weight="semibold" as="p" display="block" className="m-0">
+                {referenceLabel(reference, refs.flow, t)}
+              </Text>
+              <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+                {referenceDescription(reference, refs.flow, t)}
+              </Text>
+            </div>
+            {/* As it is written in a message, for anyone who types references. */}
+            <Text
+              type="code"
+              size="xsm"
+              as="p"
+              display="block"
+              className="text-ax-text-secondary m-0 break-all"
+            >
               {reference.raw}
             </Text>
             {note ? (
@@ -180,8 +212,8 @@ function ReferenceCard({ card, onClose }: { card: Card | null; onClose: () => vo
                 <span>{note}</span>
               </p>
             ) : null}
-            <div className="flex flex-wrap gap-2">
-              {step?.id ? (
+            {step?.id ? (
+              <div>
                 <Button
                   size="sm"
                   label={t("flows_chat_reference_show_step")}
@@ -190,14 +222,8 @@ function ReferenceCard({ card, onClose }: { card: Card | null; onClose: () => vo
                     onClose();
                   }}
                 />
-              ) : null}
-              <Button
-                size="sm"
-                variant="ghost"
-                label={t("flows_chat_reference_copy")}
-                onClick={() => void copy(reference.raw)}
-              />
-            </div>
+              </div>
+            ) : null}
           </div>
         ) : null
       }
