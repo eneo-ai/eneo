@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { DuckDBInstance } from "@duckdb/node-api";
 import { ToolError } from "../../errors";
 import { spillDirectory } from "../tabular/engine/duckdb";
-import { convertXlsxToCsvSheets } from "../tabular/engine/xlsx-to-csv";
+import { convertXlsxToCsvSheets, dateText } from "../tabular/engine/xlsx-to-csv";
 import { assertZipWithinBounds } from "../tabular/zip-guard";
 import type {
   Cell,
@@ -34,10 +34,15 @@ async function resolveSheet(sheet: SheetRequest): Promise<SheetSpec> {
   return { name: sheet.name, columns, rows };
 }
 
-/** Reads a downloaded CSV or XLSX source (one sheet) as typed columns and rows. */
+/**
+ * Reads a downloaded CSV or XLSX source (one sheet) as typed columns and rows. With `asText`,
+ * every cell keeps the text the file holds (empty cells are null): for a caller that must
+ * validate dates and numbers itself rather than accept the reader's guess at their format.
+ */
 export async function readSource(
   source: SheetSource,
-): Promise<{ columns: string[]; rows: Cell[][] }> {
+  options: { asText?: boolean } = {},
+): Promise<{ columns: string[]; rows: Cell[][]; uncalculated?: string[] }> {
   const { path, isXlsx } = source;
   if (!path) throw new ToolError("RENDER_FAILED", "A source file was not downloaded.");
   const bytes = await readFile(path);
@@ -57,6 +62,8 @@ export async function readSource(
     if (!picked) throw new ToolError("UNKNOWN_SHEET", "Unknown sheet in the source workbook.");
     csvPath = join(dirname(path), `${source.index}.csv`);
     await writeFile(csvPath, picked.csv, { mode: 0o600 });
+    const table = await readTypedCsv(csvPath, options.asText === true);
+    return picked.uncalculated ? { ...table, uncalculated: picked.uncalculated } : table;
   } else {
     if (bytes.includes(0))
       throw new ToolError("INVALID_FILE", "The source is not a text CSV file.");
@@ -66,10 +73,13 @@ export async function readSource(
       throw new ToolError("INVALID_FILE", "CSV sources must use UTF-8 encoding.");
     }
   }
-  return readTypedCsv(csvPath);
+  return readTypedCsv(csvPath, options.asText === true);
 }
 
-async function readTypedCsv(csvPath: string): Promise<{ columns: string[]; rows: Cell[][] }> {
+async function readTypedCsv(
+  csvPath: string,
+  asText: boolean,
+): Promise<{ columns: string[]; rows: Cell[][] }> {
   // Server-built SQL over a file this child was given; no model SQL runs here.
   const instance = await DuckDBInstance.create(":memory:", {
     memory_limit: "256MB",
@@ -84,7 +94,7 @@ async function readTypedCsv(csvPath: string): Promise<{ columns: string[]; rows:
     try {
       const literal = "'" + csvPath.replaceAll("'", "''") + "'";
       const reader = await conn.runAndReadAll(
-        `SELECT * FROM read_csv_auto(${literal}) LIMIT ${SOURCE_ROW_LIMIT + 1}`,
+        `SELECT * FROM read_csv_auto(${literal}${asText ? ", all_varchar = true" : ""}) LIMIT ${SOURCE_ROW_LIMIT + 1}`,
       );
       const rows = reader.getRowsJS();
       if (rows.length > SOURCE_ROW_LIMIT)
@@ -112,6 +122,9 @@ function toCell(value: unknown): Cell {
       : value.toString();
   if (typeof value === "number" || typeof value === "boolean" || typeof value === "string")
     return value;
-  // Dates, timestamps and decimals keep DuckDB's own text form.
+  // DuckDB hands dates and timestamps over as UTC instants: written as XLSX conversion writes
+  // them, never in the host's locale or time zone.
+  if (value instanceof Date) return dateText(value);
+  // Decimals and other values keep DuckDB's own text form.
   return String(value);
 }

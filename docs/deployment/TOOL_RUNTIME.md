@@ -157,9 +157,64 @@ Variables without a `.env` mapping in the reference stack
 `tool-runtime/README.md`; set them on the service in a Compose override if you
 need to.
 
+The forecast engine reads `FORECAST_MODEL_PATH`, `FORECAST_MODEL_NAME`,
+`FORECAST_CONCURRENCY` and `FORECAST_THREADS`; see
+[The forecast model](#the-forecast-model).
+
 `BUNDLED_CATALOG_TTL_SECONDS` on the backend (default 300) controls how long a
 backend process caches the runtime's tool catalog; see
 [Upgrading the runtime](#upgrading-the-runtime).
+
+## The forecast model
+
+The `/mcp/forecast` endpoint runs Timestral, a time-series model from Mistral AI,
+on the runtime's CPU. The image holds the engine (CPU-only torch and the Apache-2.0
+`timestral` library, pinned in `tool-runtime/scripts/requirements-forecast.txt`)
+but no model weights. You provide a checkpoint, and the runtime never downloads one.
+
+The weights are published under Mistral's "Modified MIT" licence, which does not
+grant any rights to an organisation whose global consolidated monthly revenue,
+or its employer's, exceeds USD 20 million. Check that your organisation, and
+whoever operates Eneo for it, may use the checkpoint, or obtain a commercial
+licence from Mistral. Keep the licence file with the weights.
+
+1. Download one checkpoint at a pinned revision to the host, for example
+   Timestral 28M:
+
+   ```bash
+   hf download mistralai/Timestral-28M config.json model.safetensors LICENSE \
+     --revision 49b26409ac87b5935539a5d8ffe7f397b720db47 \
+     --local-dir /srv/eneo/models/timestral-28m
+   ```
+
+   `hf` comes with `pip install huggingface_hub`. The directory must hold
+   `config.json` and `model.safetensors`.
+
+2. Mount it read-only into the runtime in a Compose override, and name it for
+   users:
+
+   ```yaml
+   services:
+     tool-runtime:
+       environment:
+         FORECAST_MODEL_NAME: "Timestral 28M"
+       volumes:
+         - /srv/eneo/models/timestral-28m:/models/forecast:ro
+   ```
+
+3. Recreate `tool-runtime`.
+
+| Runtime variable | Default | Meaning |
+| --- | --- | --- |
+| `FORECAST_MODEL_PATH` | `/models/forecast` | Checkpoint directory inside the container |
+| `FORECAST_MODEL_NAME` | `Timestral` | How users see the model named |
+| `FORECAST_CONCURRENCY` | 1 | Forecasts at a time; each runs its own Python sidecar |
+| `FORECAST_THREADS` | 2 | CPU threads one forecast may use |
+
+Without a checkpoint, or with a directory that is not a Timestral checkpoint, a
+forecast fails with `MODEL_UNAVAILABLE` and every other tool keeps working.
+A larger checkpoint (Timestral 123M or 209M) fits the same steps; give the
+runtime more memory and threads before you raise `FORECAST_CONCURRENCY`.
 
 ## Isolation checklist
 
@@ -272,7 +327,11 @@ Each concurrent compute call costs about 32 MiB for its child process. A
 tabular query child can use up to 256 MB for DuckDB plus 256 MB of spill
 space. Such children and the Office renderers share
 `TOOL_RUNTIME_TABULAR_CONCURRENCY` slots; PDF renders have their own pool of
-two Python sidecars. The standard stack caps the container at 2 GiB, 2 CPUs
+two Python sidecars, and forecasts one sidecar at a time (`FORECAST_CONCURRENCY`).
+A Timestral 28M forecast takes about a second and the container peaked at
+850 MiB while the longest one (4,096 days of history, 180 days ahead) ran
+next to a compute call, measured on linux/arm64 with the standard limits and
+Landlock. The standard stack caps the container at 2 GiB, 2 CPUs
 and 256 processes. `/tmp` is a 512 MiB tmpfs that holds job scratch space and
 the 256 MiB cache, and it counts towards memory. If you raise a concurrency
 setting, raise `mem_limit` with it.
