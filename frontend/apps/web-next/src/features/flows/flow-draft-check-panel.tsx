@@ -46,6 +46,7 @@ import {
   type FlowProblem,
   type StepProblem
 } from "./flow-draft-check";
+import { FlowSuggestionsSection } from "./flow-suggestions-section";
 import type { SpeakerServiceLink } from "./flow-transcription";
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -362,6 +363,7 @@ export function FlowDraftCheck({
           </ul>
         </QuietBanner>
       )}
+      <FlowSuggestionsSection flow={flow} onOpenStep={onOpenStep} />
     </section>
   );
 }
