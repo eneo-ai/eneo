@@ -229,9 +229,10 @@ def _is_active_flow_name_violation(exc: IntegrityError) -> bool:
     return getattr(driver_error, "constraint_name", None) == _ACTIVE_FLOW_NAME_INDEX
 
 
-def _stale_revision_error(
+def stale_revision_error(
     *, flow_id: UUID, expected_revision: int
 ) -> FlowBadRequestException:
+    """The refusal of a draft change fenced on a revision the draft has left."""
     return FlowBadRequestException(
         "Flödet har ändrats sedan det lästes in, till exempel i en "
         "annan flik eller av en kollega. Ladda om sidan och gör om "
@@ -972,7 +973,7 @@ class FlowRepository:
             await self._lock_flow_row(flow_id=flow_id, tenant_id=tenant_id)
         ).draft_revision
         if revision != expected_revision:
-            raise _stale_revision_error(
+            raise stale_revision_error(
                 flow_id=flow_id, expected_revision=expected_revision
             )
         return DraftRevisionReservation(
@@ -1024,7 +1025,7 @@ class FlowRepository:
         )
         if existing_id is None:
             raise NotFoundException("Flow not found.")
-        raise _stale_revision_error(flow_id=flow_id, expected_revision=revision)
+        raise stale_revision_error(flow_id=flow_id, expected_revision=revision)
 
     async def update(
         self,
