@@ -4,7 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testQueryClient } from "@/test/render";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
-import { FlowChatModelPickers, NewConversationButton, flowChatModelId } from "./flow-chat-controls";
+import {
+  FlowChatModelPickers,
+  NewConversationButton,
+  OptimizeFlowButton,
+  flowChatModelId
+} from "./flow-chat-controls";
 import { flowKeys, type FlowAuthoringChat } from "./flows-api";
 
 type Reply = { data?: unknown; error?: unknown; response: Response };
@@ -245,5 +250,20 @@ describe("NewConversationButton", () => {
 
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(api.POST).not.toHaveBeenCalled();
+  });
+});
+
+describe("OptimizeFlowButton", () => {
+  it("hands the prepared review request to the composer and sends nothing", async () => {
+    const onAskChat = vi.fn();
+    const { container } = renderInApp(<OptimizeFlowButton onAskChat={onAskChat} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Optimera flödet" }));
+    expect(onAskChat).toHaveBeenCalledWith(
+      expect.stringMatching(/^Granska flödet med read_flow_suggestions och föreslå förbättringar/)
+    );
+    expect(api.POST).not.toHaveBeenCalled();
+    expect(api.PATCH).not.toHaveBeenCalled();
+    await expectNoAxeViolations(container);
   });
 });
