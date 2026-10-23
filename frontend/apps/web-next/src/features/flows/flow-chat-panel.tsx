@@ -168,7 +168,7 @@ function AuthoringConversation({
   onRefused: ChatPanelProps["onRefused"];
 }) {
   const t = useTranslations();
-  const references = useFlowChatReferences(flow);
+  const { references, composer } = useFlowChatReferences(flow);
   const { space } = useSpace();
   const spaceName = useSpaceDisplayName();
   const [activity, setActivity] = useState<ActivityState | null>(null);
@@ -239,7 +239,7 @@ function AuthoringConversation({
   };
 
   return (
-    <FlowReferences flow={flow} onShowStep={showStepCard}>
+    <FlowReferences flow={flow} onShowStep={showStepCard} composer={composer}>
       <ChatView
         key={chat.session_id}
         partner={partner}

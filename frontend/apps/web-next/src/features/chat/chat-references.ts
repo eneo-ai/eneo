@@ -2,8 +2,11 @@ import type { ChatComposerToken, ChatComposerTrigger } from "@astryxdesign/core/
 import type { ReactNode } from "react";
 import type { MessageResponseProps } from "@/components/ai-elements/message";
 
-/** A way to put text into the composer's field, for a control beside it. */
-export type ComposerInsert = { insertText: (text: string) => void };
+/** A way to put text or a token (a pill) into the composer's field, at the caret. */
+export type ComposerInsert = {
+  insertText: (text: string) => void;
+  insertToken: (token: ChatComposerToken) => void;
+};
 
 /**
  * What a page lets a conversation refer to (the flow chat's steps and
@@ -20,4 +23,6 @@ export type ChatReferences = {
   components: NonNullable<MessageResponseProps["components"]>;
   /** A control above the text field that puts text in it (a "Referera" button). */
   headerActions?: (input: ComposerInsert) => ReactNode;
+  /** The composer on screen, as something to insert into; null while there is none. */
+  onComposer?: (input: ComposerInsert | null) => void;
 };

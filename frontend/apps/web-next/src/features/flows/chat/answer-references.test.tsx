@@ -23,14 +23,15 @@ const flow = makeFlow({
 });
 
 function renderAnswer(text: string, onShowStep = vi.fn(() => true)) {
+  const composer = { insertText: vi.fn(), insertToken: vi.fn() };
   const view = renderInApp(
-    <FlowReferences flow={flow} onShowStep={onShowStep}>
+    <FlowReferences flow={flow} onShowStep={onShowStep} composer={composer}>
       <MessageResponse remarkPlugins={referenceRemarkPlugins} components={referenceComponents}>
         {text}
       </MessageResponse>
     </FlowReferences>
   );
-  return { ...view, onShowStep };
+  return { ...view, onShowStep, composer };
 }
 
 describe("references in an answer", () => {
@@ -50,6 +51,17 @@ describe("references in an answer", () => {
     expect(within(card).getByText("@[Bedömning](step:step-3)")).toBeTruthy();
     fireEvent.click(within(card).getByRole("button", { name: "Visa steget" }));
     expect(onShowStep).toHaveBeenCalledWith("step-3");
+  });
+
+  it("puts the reference into the composer as a pill from its card", async () => {
+    const { composer } = renderAnswer("Se {{step_2.output.text}}.");
+    fireEvent.click(screen.getByRole("button", { name: "2 Hämta register › text" }));
+    const card = await screen.findByRole("dialog", { name: "Referens" });
+    fireEvent.click(within(card).getByRole("button", { name: "Infoga i meddelandet" }));
+    expect(composer.insertToken).toHaveBeenCalledWith(
+      expect.objectContaining({ value: "{{step_2.output.text}}" })
+    );
+    expect(screen.queryByRole("dialog", { name: "Referens" })).toBeNull();
   });
 
   it("says when a step is gone and when a field is read from a step that answers in text", async () => {

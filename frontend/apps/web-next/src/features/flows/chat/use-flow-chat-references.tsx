@@ -6,7 +6,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { createStaticSource, type SearchableItem } from "@astryxdesign/core/Typeahead";
 import { AtSign } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { ChatReferences, ComposerInsert } from "@/features/chat/chat-references";
 import type { FlowPublic } from "../editor/step-types";
 import { meaningLabel } from "../editor/step-labels";
@@ -82,7 +82,12 @@ function ReferenceRow({ choice, flow }: { choice: ReferenceChoice; flow: Flow })
  * same references are pills in sent questions and in answers. Render inside
  * a FlowReferencesProvider, which the pills read the flow from.
  */
-export function useFlowChatReferences(flow: Flow): ChatReferences {
+export function useFlowChatReferences(flow: Flow): {
+  /** For the ChatView. */
+  references: ChatReferences;
+  /** For FlowReferences around it: the composer on screen, or null. */
+  composer: ComposerInsert | null;
+} {
   const t = useTranslations();
 
   const items = useMemo<ChoiceItem[]>(
@@ -159,14 +164,18 @@ export function useFlowChatReferences(flow: Flow): ChatReferences {
     [t]
   );
 
-  return useMemo(
+  // The chat's composer, for the reference card's "Infoga i meddelandet".
+  const [composer, setComposer] = useState<ComposerInsert | null>(null);
+  const references = useMemo<ChatReferences>(
     () => ({
       triggers,
       tokens,
       remarkPlugins: referenceRemarkPlugins,
       components: referenceComponents,
-      headerActions
+      headerActions,
+      onComposer: setComposer
     }),
     [triggers, tokens, headerActions]
   );
+  return { references, composer };
 }

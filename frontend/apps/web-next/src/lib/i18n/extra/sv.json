@@ -3675,6 +3675,7 @@
   "flows_chat_reference_card": "Referens",
   "flows_chat_reference_show_step": "Visa steget",
   "flows_chat_reference_step_missing": "Steget finns inte längre i flödet.",
+  "flows_chat_reference_insert": "Infoga i meddelandet",
   "flows_chat_reference_group_run": "Körningen",
   "flows_chat_reference_item_run": "Ett värde från körningen",
   "flows_chat_mode": "Läge",

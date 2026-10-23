@@ -857,6 +857,7 @@ function ConversationView({
     triggers: references?.triggers,
     headerActions: references?.headerActions,
     footerActions,
+    onInput: references?.onComposer,
     contextBar: (
       <ContextUsageBar
         usage={usage}

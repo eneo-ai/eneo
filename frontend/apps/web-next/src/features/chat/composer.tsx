@@ -5,6 +5,7 @@ import {
   ChatComposer,
   ChatComposerDrawer,
   type ChatComposerInputHandle,
+  type ChatComposerToken,
   type ChatComposerTrigger
 } from "@astryxdesign/core/Chat";
 import { useMergedRefs } from "@astryxdesign/core/hooks";
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
+  useEffect,
   useId,
   useImperativeHandle,
   useRef,
@@ -57,6 +59,8 @@ export type ComposerHandle = {
   element: HTMLElement | null;
   /** Puts text at the caret, as typed: a trigger character opens its menu. */
   insertText: (text: string) => void;
+  /** Puts a token (a pill) at the caret, as a menu pick does. */
+  insertToken: (token: ChatComposerToken) => void;
 };
 
 const isToken = (node: Node | null): node is HTMLElement =>
@@ -132,6 +136,10 @@ function ComposerInput({
       focus: () => handle.current?.focus(),
       get element() {
         return root.current?.querySelector<HTMLElement>("[contenteditable]") ?? null;
+      },
+      insertToken: (token) => {
+        handle.current?.focus();
+        handle.current?.insertToken(token);
       },
       insertText: (text) => {
         const editable = root.current?.querySelector<HTMLElement>("[contenteditable]");
@@ -330,6 +338,8 @@ export type ComposerProps = {
   footerActions?: ReactNode;
   variant?: "docked" | "start";
   inputRef?: Ref<ComposerHandle>;
+  /** The field as something to insert into, while it is on screen. */
+  onInput?: (input: ComposerInsert | null) => void;
 };
 
 export type ComposerQuote = {
@@ -409,7 +419,8 @@ export function Composer({
   headerActions,
   footerActions,
   variant = "docked",
-  inputRef
+  inputRef,
+  onInput
 }: ComposerProps) {
   const t = useTranslations();
   const hintId = useId();
@@ -417,6 +428,9 @@ export function Composer({
   // while rendering (a ref must not be read then).
   const [input, setInput] = useState<ComposerHandle | null>(null);
   const inputRefs = useMergedRefs(inputRef, setInput);
+  useEffect(() => {
+    onInput?.(input);
+  }, [input, onInput]);
   const canAttach = attachments.maxFiles !== 0;
   const { dragging, handlers } = useFileDrop(
     (files) => void attachments.addFiles(files),

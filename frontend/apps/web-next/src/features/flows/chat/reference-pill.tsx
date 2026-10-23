@@ -14,6 +14,7 @@ import {
   type ReactNode,
   type RefObject
 } from "react";
+import type { ComposerInsert } from "@/features/chat/chat-references";
 import { cn } from "@/lib/utils";
 import { meaningLabel, readWarning } from "../editor/step-labels";
 import type { FlowPublic } from "../editor/step-types";
@@ -30,6 +31,8 @@ type FlowReferencesValue = {
   flow: Flow;
   /** Brings the step's card into view; false when the card is not on the page. */
   onShowStep: (stepId: string) => boolean;
+  /** The chat's composer, to put a reference into; null while there is none. */
+  composer: ComposerInsert | null;
   card: Card | null;
   openCard: (reference: Reference, anchor: HTMLElement) => void;
 };
@@ -156,7 +159,14 @@ export function ReferencePillButton({ reference }: { reference: Reference }) {
 }
 
 /** The card a pill opens: the reference as written, what is wrong with it, and its actions. */
-function ReferenceCard({ card, onClose }: { card: Card | null; onClose: () => void }) {
+function ReferenceCard({
+  card,
+  onClose
+}: {
+  card: Card | null;
+  /** Closes the card; focus returns to the pill unless `refocus` is false. */
+  onClose: (options?: { refocus: boolean }) => void;
+}) {
   const t = useTranslations();
   const refs = useFlowReferences()!;
   // The anchor as a ref object the popover can read; a pill is never a React ref.
@@ -212,18 +222,33 @@ function ReferenceCard({ card, onClose }: { card: Card | null; onClose: () => vo
                 <span>{note}</span>
               </p>
             ) : null}
-            {step?.id ? (
-              <div>
+            <div className="flex flex-wrap gap-2">
+              {refs.composer ? (
                 <Button
                   size="sm"
+                  label={t("flows_chat_reference_insert")}
+                  onClick={() => {
+                    // The pill goes to the caret and focus with it.
+                    refs.composer?.insertToken({
+                      value: reference.raw,
+                      render: () => <ReferencePill reference={reference} />
+                    });
+                    onClose({ refocus: false });
+                  }}
+                />
+              ) : null}
+              {step?.id ? (
+                <Button
+                  size="sm"
+                  variant={refs.composer ? "ghost" : undefined}
                   label={t("flows_chat_reference_show_step")}
                   onClick={() => {
                     refs.onShowStep(step.id!);
                     onClose();
                   }}
                 />
-              </div>
-            ) : null}
+              ) : null}
+            </div>
           </div>
         ) : null
       }
@@ -239,10 +264,13 @@ function ReferenceCard({ card, onClose }: { card: Card | null; onClose: () => vo
 export function FlowReferences({
   flow,
   onShowStep,
+  composer = null,
   children
 }: {
   flow: Flow;
   onShowStep: (stepId: string) => boolean;
+  /** The chat's composer, for "Infoga i meddelandet"; null while there is none. */
+  composer?: ComposerInsert | null;
   children: ReactNode;
 }) {
   const [card, setCard] = useState<Card | null>(null);
@@ -250,15 +278,16 @@ export function FlowReferences({
     () => ({
       flow,
       onShowStep,
+      composer,
       card,
       openCard: (reference, anchor) =>
         setCard((current) => (current?.anchor === anchor ? null : { reference, anchor }))
     }),
-    [flow, onShowStep, card]
+    [flow, onShowStep, composer, card]
   );
-  const close = () => {
-    // Focus goes back to the pill the card came from.
-    card?.anchor.focus();
+  const close = ({ refocus = true } = {}) => {
+    // Focus goes back to the pill the card came from, unless it went elsewhere.
+    if (refocus) card?.anchor.focus();
     setCard(null);
   };
   return (
