@@ -29,6 +29,7 @@ from eneo.flow_packages.domain.flow_package_errors import (
     FlowPackageErrorCode,
     FlowPackageValidationError,
 )
+from eneo.flow_packages.domain.flow_package_limits import MAX_FLOW_PACKAGE_BYTES
 from eneo.flow_packages.domain.flow_package_requirements import (
     FlowPackageTemplateAssetRequirement,
 )
@@ -334,6 +335,46 @@ async def test_replacement_uploads_over_the_aggregate_encoded_limit_are_refused_
 
     assert error.value.code is FlowPackageErrorCode.TEMPLATE_FILE_INVALID
     assert decoded == []
+
+
+async def test_an_included_template_plus_replacements_over_the_budget_is_refused_before_inspection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _spy_inspection(monkeypatch)
+    content = _docx()
+    checksum = hashlib.sha256(content).hexdigest()
+    requirements = [
+        FlowPackageTemplateAssetRequirement.model_validate(
+            {
+                "slot_ref": _slot(index),
+                "used_by_steps": [f"s{index}"],
+                "template": {
+                    "filename": "T.docx",
+                    "checksum": checksum,
+                    "size_bytes": len(content),
+                    "fields": [{"name": "dokument", "kind": "rich"}],
+                    "asset_path": f"templates/{checksum}.docx" if index == 0 else None,
+                },
+            }
+        )
+        for index in range(2)
+    ]
+    envelope = cast(
+        FlowPackageEnvelope,
+        _FakeEnvelope(
+            requirements=SimpleNamespace(requirements=requirements),
+            template_payloads={f"templates/{checksum}.docx": content},
+        ),
+    )
+    # Alone the replacement fits the budget; with the included file it does not.
+    replacement = _upload(1, b"\0" * (MAX_FLOW_PACKAGE_BYTES - len(content) // 2))
+
+    with pytest.raises(FlowPackageValidationError) as error:
+        await resolve_flow_package_template_files(envelope, [replacement])
+
+    assert error.value.code is FlowPackageErrorCode.TEMPLATE_FILE_INVALID
+    assert "exceed the package size limit" in str(error.value)
+    assert calls == []
 
 
 def _changeset(count: int) -> FlowDraftChangeSet:

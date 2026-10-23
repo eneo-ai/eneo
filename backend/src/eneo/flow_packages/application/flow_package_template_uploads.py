@@ -98,8 +98,9 @@ async def resolve_flow_package_template_files(
 ) -> dict[str, FlowPackageTemplateFile]:
     """The Word file of every template slot, each slot keeping its own filename.
 
-    The cheap bounds run first and refuse before any archive is expanded: the
-    upload count, the encoded size of all uploads together, and the unpacked
+    The cheap bounds run first and refuse before any archive is expanded or
+    inspected: the upload count, the encoded size of all uploads together, the
+    bytes of the included files plus the replacement uploads, and the unpacked
     size summed over every slot (a file reused by many slots counts once per
     slot, since each becomes its own asset). Each payload is hashed once, its
     checksum carried from there on, and a file is inspected once however many
@@ -119,20 +120,26 @@ async def resolve_flow_package_template_files(
     ):
         raise _invalid_upload("The Word template uploads exceed the size limit.")
 
-    packaged = await _packaged_templates(envelope, requirements)
-    files = {ref: resolved.file for ref, resolved in packaged.items()}
-    if not uploads:
-        return files
-
+    # The slots the package fills itself, with the file each one includes.
+    packaged_paths = {
+        ref: requirement.template.asset_path
+        for ref, requirement in requirements.items()
+        if requirement.template is not None
+        and requirement.template.asset_path is not None
+    }
     candidates: list[_TemplateCandidate] = []
     seen: set[str] = set()
-    total_bytes = 0
+    # Each included file once (a file reused by many slots is one payload),
+    # then every replacement: all counted before anything is inspected.
+    total_bytes = sum(
+        len(envelope.template_payloads[path]) for path in set(packaged_paths.values())
+    )
     for upload in uploads:
         requirement = requirements.get(upload.template_ref)
         if (
             requirement is None
             or requirement.template is None
-            or upload.template_ref in packaged
+            or upload.template_ref in packaged_paths
             or upload.template_ref in seen
         ):
             raise _invalid_upload(
@@ -162,6 +169,10 @@ async def resolve_flow_package_template_files(
                 included=False,
             )
         )
+    packaged = await _packaged_templates(envelope, requirements)
+    files = {ref: resolved.file for ref, resolved in packaged.items()}
+    if not candidates:
+        return files
     uploaded = await _resolve_candidates(
         candidates,
         known=packaged.values(),

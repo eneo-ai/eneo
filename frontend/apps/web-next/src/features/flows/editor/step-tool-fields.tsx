@@ -16,6 +16,7 @@ import {
   argumentValue,
   toolArguments,
   withArgument,
+  type ToolArgumentSpec,
   type ToolConfig
 } from "./step-configs";
 import type { ToolOption } from "./step-types";
@@ -34,10 +35,35 @@ export function toolRefusalText(
   return t.has(key) ? t(key) : t("flow_step_editor_tool_refusal_other");
 }
 
+/** What the schema says about an argument beyond its description, in a few words. */
+function argumentHints(
+  argument: ToolArgumentSpec,
+  t: ReturnType<typeof useTranslations>
+): string[] {
+  const { type, items, format, minimum, maximum } = argument;
+  const shown = type && items ? `${type}<${items}>` : type;
+  return [
+    shown
+      ? t("flow_step_editor_tool_argument_type", { type: format ? `${shown} (${format})` : shown })
+      : null,
+    minimum !== null && maximum !== null
+      ? t("flow_step_editor_tool_argument_range", { minimum, maximum })
+      : minimum !== null
+        ? t("flow_step_editor_tool_argument_minimum", { minimum })
+        : maximum !== null
+          ? t("flow_step_editor_tool_argument_maximum", { maximum })
+          : null,
+    argument.default !== undefined
+      ? t("flow_step_editor_tool_argument_default", { value: argumentText(argument.default) })
+      : null
+  ].filter((hint): hint is string => hint !== null);
+}
+
 function ArgumentField({
   name,
   type,
   description,
+  hints,
   required,
   value,
   onChange,
@@ -46,6 +72,7 @@ function ArgumentField({
   name: string;
   type: string | null;
   description: string | null;
+  hints: string[];
   required: boolean;
   value: unknown;
   onChange: (value: unknown) => void;
@@ -59,9 +86,7 @@ function ArgumentField({
     <div className="flex flex-col gap-2">
       <TextInput
         label={name}
-        description={[description, type ? t("flow_step_editor_tool_argument_type", { type }) : null]
-          .filter(Boolean)
-          .join(" ")}
+        description={[description, ...hints].filter(Boolean).join(" ")}
         value={text}
         onChange={(next) => {
           const result = argumentValue(next, type);
@@ -193,6 +218,7 @@ export function ToolFields({
               name={argument.name}
               type={argument.type}
               description={argument.description}
+              hints={argumentHints(argument, t)}
               required={argument.required}
               value={tool.arguments[argument.name]}
               onChange={(value) =>

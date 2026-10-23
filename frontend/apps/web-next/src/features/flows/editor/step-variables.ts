@@ -62,10 +62,11 @@ export function contractFields(contract: unknown): { name: string; type: string 
   const properties = objectOf(objectOf(contract).properties);
   return Object.entries(properties)
     .filter(([name]) => isVariablePathSegment(name))
-    .map(([name, schema]) => ({
-      name,
-      type: typeof objectOf(schema).type === "string" ? (objectOf(schema).type as string) : null
-    }));
+    .map(([name, schema]) => {
+      const { type } = objectOf(schema);
+      const first = Array.isArray(type) ? type.find((item) => item !== "null") : type;
+      return { name, type: typeof first === "string" ? first : null };
+    });
 }
 
 export type VariableEntry = {
