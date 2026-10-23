@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowStepResult, FlowStepRetrievalPolicy
@@ -118,11 +118,14 @@ class RuntimeStep:
         return flow_output_mode_uses_completion_model(self.output_mode)
 
 
+StepDiagnosticSeverity: TypeAlias = Literal["info", "warning", "error"]
+
+
 @dataclass(frozen=True)
 class StepDiagnostic:
     code: str
     message: str
-    severity: str = "warning"
+    severity: StepDiagnosticSeverity = "warning"
 
 
 @dataclass
