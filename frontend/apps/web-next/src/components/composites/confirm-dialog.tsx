@@ -20,7 +20,7 @@ import {
   type RefObject
 } from "react";
 import { createPortal, flushSync } from "react-dom";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 // Not shadcn: the focus return every Astryx Dialog in the app shares (menu
 // openers, Safari's unfocused clicks, an opener that is gone).
 import { useReturnFocus } from "@/components/ui/dialog-focus";

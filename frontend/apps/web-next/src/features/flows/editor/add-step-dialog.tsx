@@ -12,7 +12,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { QueryStateBoundary, type QueryLike } from "@/components/composites/query-state";
 import {
   getFlow,
@@ -295,6 +295,7 @@ function AddStepForm({
       >
         {formProblem && (
           <Banner
+            role="alert"
             status="error"
             title={t("flow_step_editor_add_refused")}
             description={formProblem.message}

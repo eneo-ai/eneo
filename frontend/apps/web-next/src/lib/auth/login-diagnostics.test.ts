@@ -29,6 +29,19 @@ describe("login diagnostics", () => {
     });
   });
 
+  it("does not read the login page's own notices as failures", () => {
+    // After a sign-out or an expired session nothing went wrong; the page
+    // shows that notice itself and must not add an authentication failure.
+    expect(loginDiagnosticsFromSearchParams(new URLSearchParams("message=logout"))).toBeNull();
+    expect(loginDiagnosticsFromSearchParams(new URLSearchParams("message=expired"))).toBeNull();
+    expect(
+      loginDiagnosticsFromSearchParams(new URLSearchParams("message=password_changed"))
+    ).toBeNull();
+    expect(
+      loginDiagnosticsFromSearchParams(new URLSearchParams("message=logout&correlation=c1"))
+    ).toMatchObject({ message: undefined, correlation: "c1" });
+  });
+
   it("maps diagnostics to user-facing message keys", () => {
     expect(loginDiagnosticMessageKey({ detailCode: "access_denied" })).toBe("oidc_error_forbidden");
     expect(loginDiagnosticMessageKey({ detailCode: "unauthorized" })).toBe(

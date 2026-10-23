@@ -127,21 +127,32 @@ export function initWebsites(client) {
 
       /**
        * List one bounded page of indexed crawl results for a website.
-       * @param {{id: string, limit?: number, cursor?: string | null}} website Website and page options
+       * @param {{id: string, limit?: number, cursor?: string | null, q?: string, prefix?: string}} website Website and page options
        * @returns {Promise<WebsiteInfoBlobPage>}
        * @throws {EneoError}
        * */
       listPage: async (website) => {
-        const { id, limit = 100, cursor } = website;
+        const { id, limit = 100, cursor, q, prefix } = website;
         const res = await client.fetch("/api/v1/websites/{id}/info-blobs/page/", {
           method: "get",
           params: {
             path: { id },
-            query: { limit, cursor }
+            query: { limit, cursor, ...(q ? { q } : {}), ...(prefix ? { prefix } : {}) }
           }
         });
         return res;
-      }
+      },
+
+      /**
+       * List a bounded level of URL directories across the entire active index.
+       * @param {{id: string, prefix?: string, cursor?: string | null, limit?: number}} options
+       * @returns {Promise<import('../types/resources').WebsiteContentFolders>}
+       */
+      folders: async ({ id, prefix = "", cursor, limit = 100 }) =>
+        client.fetch("/api/v1/websites/{id}/content-folders/", {
+          method: "get",
+          params: { path: { id }, query: { prefix, cursor, limit } }
+        })
     },
 
     crawlRuns: {

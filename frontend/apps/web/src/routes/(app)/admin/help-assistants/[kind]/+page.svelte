@@ -1,8 +1,6 @@
 <!--
     Copyright (c) 2024 Sundsvalls Kommun
 
-    Licensed under the MIT License.
-
     Settings page for a single Help Assistant, hosted inside the admin UI
     (not under /spaces/). Visually distinct from a normal assistant editor so
     it is clear you are editing a behind-the-scenes helper. Reuses the shared

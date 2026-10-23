@@ -61,18 +61,19 @@ Run this when the release branch is cut or the tag is about to be pushed.
 2. Write one entry per change (merge PRs that describe the same feature) into
    a new release object at the **top** of `releases` in `releases.json`:
 
-   | Field      | Rule                                                                                                                                       |
-   | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-   | `version`  | Semver without `v`, matching the tag (`v2.3.0` → `2.3.0`).                                                                                 |
-   | `date`     | Leave out in the draft; set `YYYY-MM-DD` when the tag is pushed.                                                                           |
-   | `id`       | Stable kebab-case, unique within the release. Never rename after publishing — it is the deep-link target on docs.                          |
-   | `aliases`  | When merging published entries, keep their former ids here so existing links still work. Unique across all ids and aliases in the release. |
-   | `type`     | `new` (could not do before), `improved` (could, now better), `fixed` (was broken for users).                                               |
-   | `area`     | Where the user meets it: `chat`, `assistants`, `knowledge`, `spaces`, `skills`, `account`, `admin`, `platform`.                            |
-   | `audience` | `admin` when only administrators can see the screen. Omit otherwise. Hidden from non-admins in the app.                                    |
-   | `title`    | ≤ 60 characters, verb first ("Change your own password"). Both `en` and `sv`.                                                              |
-   | `body`     | 1–3 sentences. What the user can do now and where. Both `en` and `sv`.                                                                     |
-   | `showMe`   | Optional. `href` is the app path without locale prefix; `anchor` must exist as `data-tour="…"` in `frontend/apps/web/src`.                 |
+   | Field         | Rule                                                                                                                                                     |
+   | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `version`     | Semver without `v`, matching the tag (`v2.3.0` → `2.3.0`).                                                                                               |
+   | `date`        | Leave out in the draft; set `YYYY-MM-DD` when the tag is pushed.                                                                                         |
+   | `id`          | Stable kebab-case, unique within the release. Never rename after publishing — it is the deep-link target on docs.                                        |
+   | `aliases`     | When merging published entries, keep their former ids here so existing links still work. Unique across all ids and aliases in the release.               |
+   | `type`        | `new` (could not do before), `improved` (could, now better), `fixed` (was broken for users).                                                             |
+   | `area`        | Where the user meets it: `chat`, `assistants`, `knowledge`, `spaces`, `skills`, `account`, `admin`, `platform`.                                          |
+   | `audience`    | `admin` when only administrators can see the screen. Omit otherwise. Hidden from non-admins in the app.                                                  |
+   | `permissions` | Optional `{ "allOf": [...], "anyOf": [...] }` using actual Eneo permission names. Both groups must pass when present. See Permission requirements below. |
+   | `title`       | ≤ 60 characters, verb first ("Change your own password"). Both `en` and `sv`.                                                                            |
+   | `body`        | 1–3 sentences. What the user can do now and where. Both `en` and `sv`.                                                                                   |
+   | `showMe`      | Optional. `href` is the app path without locale prefix; `anchor` must exist as `data-tour="…"` in `frontend/apps/web/src`.                               |
 
 3. Editorial rules — the check script enforces the mechanical ones:
 
@@ -140,6 +141,52 @@ to an older RC. The store and Chromium tests cover these boundaries. A newer
 RC backend ignores future markers sent by stale clients, so an old tab cannot
 pre-record the final release. The 2.3 migration corrects RC0's already stored
 `2.3.0` markers to `2.3.0-rc.0` and must ship before the first 2.3 final.
+
+### Permission requirements
+
+`visibleEntries(release, can)` is the canonical app visibility rule. Pass the
+app's existing permission checker, never a role name or an admin boolean.
+`audience: "admin"` requires `admin`; `permissions` adds requirements that even
+administrators must meet. Omit requirements for general news. An omitted group
+places no constraint; a present group must be non-empty. The schema and the CI
+validator reject unknown permissions, empty groups and misspelled keys. Types
+reuse the SDK's `Permission` contract.
+
+When adding or renaming a backend permission, update the permission enum in
+`releases.schema.json` too. The contract test compares it with
+`backend/src/eneo/roles/permissions.py`; CI runs that test when either file
+changes. Assign requirements to relevant news entries explicitly: a new
+permission does not classify news automatically.
+
+Check the actual feature owner before assigning requirements, not the entry's
+area. Current examples:
+
+- Assistant editing needs `assistants`; personal chat has its separate
+  `personal_chat` permission. General chat entries also apply to assistant and
+  group chats (`anyOf: personal_chat, assistants, group_chats`).
+- Capability use additionally needs its capability permission (`file_creation`,
+  `file_analysis`, `image_generation`, `compute`, `charts`). The combined
+  calculation-and-chart workflow needs both `compute` and `charts`.
+- Creating/editing Skills needs both `skills` and `skills_management`.
+- Website crawling needs `websites`; SharePoint import needs `integrations`.
+  Reading websites and integration knowledge has no tenant permission gate
+  (`SpaceActor.tenant_permits`), so read-only status/sync news stays general.
+- Module administration needs both the admin audience and `modules`. Storage,
+  model and organisation Skill administration use their actual `admin` gate;
+  do not infer extra permissions from a feature's name.
+
+Requirements filter relevance to tenant permissions. Resource membership,
+provider availability and tenant feature settings still belong to their feature
+owners; news is not an authorization boundary. Tour preloading continues to
+skip inaccessible resources. The public docs render all entries.
+
+The app hides releases with no visible entries from its picker and computes
+unread state from visible news. The latest bundled release is announced only
+when it has visible entries; an empty latest release does not announce an older
+release instead. Reading visible history still advances the installed release
+marker. Empty news does not write progress or consume reminders, so a later
+permission grant can make that release available. Version/RC ordering and
+per-account reminder keys are unchanged.
 
 ## Maintenance
 

@@ -165,8 +165,9 @@ naming a `text` or `multiselect` form field with the participants. A completion
 model proposes which participant each label is; the step output is the mapping
 (`structured`, fixed contract) plus the transcript with names applied (`text`),
 and the run pauses at the review checkpoint where the reviewer confirms or
-corrects the names. Editing re-derives the text from the mapping and updates
-`{{transkribering}}` on the run input.
+corrects the names. Editing re-derives the text from the mapping. The step and
+the edit also update `{{transkribering}}` on the run input, but only while it
+still holds the inline transcript the step read; otherwise it keeps its text.
 `output_config.speaker_mapping.speaker_count_field` may name a `number` form field. A run's
 upper bound on speakers is its own `max_speakers`, else that field's value, else the flow's
 default (`wizard.transcription_max_speakers`, shown as `transcription.max_speakers.default` in

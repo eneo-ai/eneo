@@ -2,13 +2,13 @@
 
 import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
 import { Activity, PanelRightOpen } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useEffectEvent, useId, useRef, type ReactNode } from "react";
 import { findAppCall } from "@/features/mcp-apps/mcp-apps";
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import type { EneoUIMessage } from "@/lib/chat/types";
-import { useResizableSplit } from "@/lib/hooks/use-resizable-split";
 import { cn } from "@/lib/utils";
 import type { DocumentExport } from "./document-export";
 import type { DocumentSaver } from "./document-saver";
@@ -80,12 +80,16 @@ export function SidePanel({
   const hasContents = panelContentsCount(contents) > 0;
   const shown = kind !== "closed" && !(kind === "overview" && !hasContents);
   const maximised = panel.maximised && (kind === "file" || kind === "view");
-  const { width, containerRef, separatorProps } = useResizableSplit({
-    storageKey: WIDTH_STORAGE_KEY,
-    defaultWidth: 520,
-    minWidth: 360,
-    maxFraction: 0.65,
-    enabled: shown && beside
+  // The panel's width, a share of the row both halves share. The row is the
+  // basis only while the panel can be beside the conversation: below that it
+  // is phone-wide, and clamping the remembered width against it would lose it.
+  const containerRef = useRef<HTMLDivElement>(null);
+  const resizable = useResizable({
+    containerRef,
+    defaultSize: 520,
+    minSize: 360,
+    maxSize: "65%",
+    autoSaveId: WIDTH_STORAGE_KEY
   });
 
   // A view whose call is gone (another conversation was opened, or it was
@@ -261,7 +265,7 @@ export function SidePanel({
   );
 
   return (
-    <div ref={containerRef} className="relative flex min-h-0 min-w-0 flex-1">
+    <div ref={beside ? containerRef : null} className="relative flex min-h-0 min-w-0 flex-1">
       {/* No stacking context of its own: a view's frame lives in a message here
           and is laid out over the panel, so it must be able to paint above it. */}
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
@@ -270,17 +274,19 @@ export function SidePanel({
       </div>
       {shown && beside && (
         <>
-          <div
-            {...separatorProps}
-            aria-label={t("file_preview_resize_handle")}
-            className="hover:bg-ax-border-strong focus-visible:outline-ring bg-ax-border w-1 shrink-0 cursor-col-resize touch-none focus-visible:outline-2"
+          {/* The panel sits at the end of the row: dragging the handle left widens it. */}
+          <ResizeHandle
+            isReversed
+            hasDivider
+            label={t("file_preview_resize_handle")}
+            resizable={resizable.props}
           />
           <aside
             ref={aside}
             id={panelId}
             aria-label={label}
             tabIndex={-1}
-            style={maximised ? undefined : { width }}
+            style={maximised ? undefined : { width: resizable.size }}
             className={cn(
               "bg-ax-surface flex min-h-0 shrink-0 flex-col focus-visible:outline-none",
               maximised ? "absolute inset-0 z-20" : "relative h-full"
@@ -311,6 +317,7 @@ export function SidePanel({
           }}
           label={label}
           height="tall"
+          padding={0}
         >
           <div id={panelId} className="flex h-full min-h-0 flex-col">
             {body(true)}

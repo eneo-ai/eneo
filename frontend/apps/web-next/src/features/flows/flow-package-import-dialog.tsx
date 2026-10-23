@@ -15,7 +15,6 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { QuietBanner } from "@/components/astryx/banner";
 import { FieldMessage } from "./editor/editor-fields";
 import { toast } from "@/lib/toast";
 import { useSpace } from "@/features/spaces/use-space";
@@ -478,7 +477,7 @@ export function FlowPackageImportDialog({
                     </MetadataList>
 
                     {omittedMcp > 0 ? (
-                      <QuietBanner
+                      <Banner
                         status="warning"
                         title={t("flow_editor_tools_package_import_mcp_title")}
                         description={t("flow_editor_tools_package_import_mcp_description", {
@@ -491,7 +490,7 @@ export function FlowPackageImportDialog({
                     {readiness &&
                     (readiness.requiresTranscriptionModel ||
                       readiness.blockingReasons.length > 0) ? (
-                      <QuietBanner
+                      <Banner
                         status="error"
                         title={t("flow_editor_tools_package_blocks_import")}
                         description={
@@ -511,7 +510,7 @@ export function FlowPackageImportDialog({
                         collapsible={false}
                       />
                     ) : readiness ? (
-                      <QuietBanner
+                      <Banner
                         status="success"
                         title={
                           readiness.canPublishAfterImport
@@ -575,6 +574,7 @@ export function FlowPackageImportDialog({
                 <div ref={errorRef} tabIndex={-1} className="outline-none">
                   {failure ? (
                     <Banner
+                      role="alert"
                       status="error"
                       title={t("flow_editor_tools_package_import_failed_title")}
                       description={failure}

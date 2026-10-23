@@ -1,5 +1,3 @@
-# MIT License
-
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Json

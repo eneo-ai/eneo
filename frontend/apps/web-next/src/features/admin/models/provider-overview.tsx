@@ -6,8 +6,8 @@ import { Link } from "@astryxdesign/core/Link";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
-import { QuietBanner } from "@/components/astryx/banner";
-import { TextInput } from "@/components/astryx/text-input";
+import { Banner } from "@astryxdesign/core/Banner";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
 import { useFormatter, useTranslations } from "next-intl";
@@ -95,7 +95,7 @@ function AttentionBanner({
   }
 
   return (
-    <QuietBanner
+    <Banner
       status={
         rows.some((row) => row.notices.some((notice) => notice.tone === "error"))
           ? "error"
@@ -132,7 +132,7 @@ function AttentionBanner({
           <Text type="supporting">{t("provider_status_attention_hint")}</Text>
         </div>
       ) : null}
-    </QuietBanner>
+    </Banner>
   );
 }
 
@@ -288,7 +288,7 @@ export function ProviderOverview({
             announceResults({ search: value });
           }}
           hasClear
-          className="w-full sm:w-72"
+          containerClassName="w-full sm:w-72"
         />
         {/* Segments wrap instead of overflowing on narrow screens (1.4.10). */}
         <SegmentedControl

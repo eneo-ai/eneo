@@ -1,7 +1,5 @@
 /*
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 */
 
 import { json } from "@sveltejs/kit";

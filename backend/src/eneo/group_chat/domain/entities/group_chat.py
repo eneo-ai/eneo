@@ -1,6 +1,4 @@
 # Copyright (c) 2025 Sundsvalls Kommun
-#
-# Licensed under the MIT License.
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Union, cast, overload

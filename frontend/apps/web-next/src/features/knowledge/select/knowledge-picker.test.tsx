@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -100,9 +100,9 @@ describe("KnowledgePicker", () => {
     const add = screen.getByRole("button", { name: "Lägg till kunskap (den här ytan)" });
     add.focus();
     fireEvent.keyDown(add, { key: "Enter" });
-    // Focus moves to the list's search field (its name is Astryx's own).
+    // Focus moves to the list's search field (its name is Astryx's own) once it is open.
     const search = await screen.findByRole("combobox", { name: "Sökalternativ" });
-    expect(document.activeElement).toBe(search);
+    await waitFor(() => expect(document.activeElement).toBe(search));
     await expectNoAxeViolations(document.body);
     fireEvent.change(search, { target: { value: "avtal" } });
     expect(screen.queryByRole("option", { name: /Upphandlingspolicy/ })).toBeNull();

@@ -32,6 +32,8 @@
   import { useSyncProgress } from "$lib/features/integrations/useSyncProgress.svelte";
   import { jobCompletionEvents } from "$lib/features/jobs/JobManager";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import SourceStat from "$lib/features/knowledge/components/SourceStat.svelte";
+  import SourceStats from "$lib/features/knowledge/components/SourceStats.svelte";
   import { m } from "$lib/paraglide/messages";
   import IntegrationActions from "../IntegrationActions.svelte";
   import SharePointWrapperActions from "../SharePointWrapperActions.svelte";
@@ -361,49 +363,39 @@
           {nowReading}
         />
       {:else}
-        <dl class="border-default grid grid-cols-2 rounded-lg border lg:grid-cols-4">
-          <div class="flex flex-col gap-1 px-4 py-3">
-            <dt class="text-secondary text-xs">{m.integration_source_stat_searchable()}</dt>
-            <dd class="text-xl font-semibold tabular-nums">{summary.documentCount}</dd>
-          </div>
-          <div class="border-default flex flex-col gap-1 border-l px-4 py-3">
-            <dt class="text-secondary text-xs">{m.integration_source_stat_skipped()}</dt>
-            <dd class="text-xl font-semibold tabular-nums">
-              {skippedTotal ?? "–"}
-            </dd>
-          </div>
-          <div class="border-default flex flex-col gap-1 px-4 py-3 max-lg:border-t lg:border-l">
-            <dt class="text-secondary text-xs">{m.integration_source_last_up_to_date()}</dt>
-            <dd class="pt-1 text-sm font-semibold">
-              {summary.lastSyncedAt ? formatDateTime(summary.lastSyncedAt) : "–"}
-            </dd>
-          </div>
-          <div class="border-default flex flex-col gap-1 border-l px-4 py-3 max-lg:border-t">
-            <dt class="text-secondary text-xs">{m.integration_source_stat_watch()}</dt>
-            <dd class="flex flex-col gap-0.5 pt-1 text-sm font-semibold">
-              {source.integrationType === "sharepoint" ? watchLabel : "–"}
-              {#if source.integrationType === "sharepoint"}
-                {#if expiredWatchCount > 0}
-                  <span class="text-warning-stronger text-xs font-normal">
-                    {expiredWatchCount === 1
-                      ? m.integration_source_watch_expired_one()
-                      : m.integration_source_watch_expired_other({ count: expiredWatchCount })}
-                  </span>
-                {:else if expiringWatchCount > 0}
-                  <span class="text-secondary text-xs font-normal">
-                    {expiringWatchCount === 1
-                      ? m.integration_source_watch_expiring_one()
-                      : m.integration_source_watch_expiring_other({ count: expiringWatchCount })}
-                  </span>
-                {:else if watchedCount === 0}
-                  <span class="text-secondary text-xs font-normal">
-                    {m.integration_source_watch_off_hint()}
-                  </span>
-                {/if}
+        <SourceStats>
+          <SourceStat label={m.integration_source_stat_searchable()}>
+            {summary.documentCount}
+          </SourceStat>
+          <SourceStat label={m.integration_source_stat_skipped()}>
+            {skippedTotal ?? "–"}
+          </SourceStat>
+          <SourceStat label={m.integration_source_last_up_to_date()} tone="text">
+            {summary.lastSyncedAt ? formatDateTime(summary.lastSyncedAt) : "–"}
+          </SourceStat>
+          <SourceStat label={m.integration_source_stat_watch()} tone="text">
+            {source.integrationType === "sharepoint" ? watchLabel : "–"}
+            {#if source.integrationType === "sharepoint"}
+              {#if expiredWatchCount > 0}
+                <span class="text-warning-stronger text-xs font-normal">
+                  {expiredWatchCount === 1
+                    ? m.integration_source_watch_expired_one()
+                    : m.integration_source_watch_expired_other({ count: expiredWatchCount })}
+                </span>
+              {:else if expiringWatchCount > 0}
+                <span class="text-secondary text-xs font-normal">
+                  {expiringWatchCount === 1
+                    ? m.integration_source_watch_expiring_one()
+                    : m.integration_source_watch_expiring_other({ count: expiringWatchCount })}
+                </span>
+              {:else if watchedCount === 0}
+                <span class="text-secondary text-xs font-normal">
+                  {m.integration_source_watch_off_hint()}
+                </span>
               {/if}
-            </dd>
-          </div>
-        </dl>
+            {/if}
+          </SourceStat>
+        </SourceStats>
       {/if}
 
       <Page.Tab id="content">

@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import type { ResumeRefusal, SavedRecording } from "./recording-keeper";
 
 type Translator = ReturnType<typeof useTranslations>;
@@ -65,7 +65,7 @@ export function ResumePrompt({
           saved.interruptedAt
         );
   return (
-    <QuietBanner
+    <Banner
       status="info"
       title={t("flow_transcript_resume_title")}
       description={[
@@ -111,6 +111,6 @@ export function ResumePrompt({
           }}
         />
       </div>
-    </QuietBanner>
+    </Banner>
   );
 }

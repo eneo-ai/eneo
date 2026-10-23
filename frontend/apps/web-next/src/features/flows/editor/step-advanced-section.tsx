@@ -66,7 +66,7 @@ export function StepAdvancedSection({
           rows={6}
           hasSpellCheck={false}
           isOptional
-          className="font-mono"
+          controlClassName="font-mono"
           status={problemStatus(
             problems[field] ??
               (parsed === undefined ? t("flow_step_editor_contract_invalid") : null)

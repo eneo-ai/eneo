@@ -11,18 +11,38 @@ import { ArrowDown, ArrowUp, Ellipsis, Plus, Workflow } from "lucide-react";
 import { useQueries } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { flowAssistantQueryOptions } from "./editor/editor-api";
 import { stepUsesModel } from "./editor/step-rules";
 import type { FlowStep } from "./flows-api";
+import type { StepChange } from "./flow-changes";
 import { inputTypeLabel, producesLabel, readLabel, stepLabel } from "./flow-labels";
 import { stepName, stepReaders, stepReads, type StepPrompts } from "./flow-steps";
 
 /** The id of a step's control, so focus can be put back on it after the list re-renders. */
 export function stepControlId(stepId: string, control: "open" | "up" | "down"): string {
   return `flow-step-${stepId}-${control}`;
+}
+
+export function stepCardId(stepId: string): string {
+  return `flow-step-${stepId}`;
+}
+
+/**
+ * Brings a step's card into view and marks it for a moment, for a pill in
+ * the chat that names the step. Focus stays where it is. False when the
+ * card is not on the page (the step list is on another tab on a phone).
+ */
+export function showStepCard(stepId: string): boolean {
+  const card = document.getElementById(stepCardId(stepId));
+  if (!card) return false;
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  card.scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
+  card.setAttribute("data-highlight", "");
+  window.setTimeout(() => card.removeAttribute("data-highlight"), 1800);
+  return true;
 }
 
 type StepActions = {
@@ -44,6 +64,7 @@ function StepCard({
   index,
   canEdit,
   speakerOffer,
+  change,
   actions
 }: {
   step: FlowStep;
@@ -52,6 +73,8 @@ function StepCard({
   index: number;
   canEdit: boolean;
   speakerOffer: SpeakerStepOffer | null;
+  /** What the chat just did to this step, while the mark lasts. */
+  change: StepChange | null;
   actions: StepActions & { onAskRemove: (step: FlowStep) => void };
 }) {
   const t = useTranslations();
@@ -63,8 +86,13 @@ function StepCard({
 
   return (
     <article
+      id={stepCardId(id)}
       aria-labelledby={titleId}
-      className="border-ax-border bg-ax-card rounded-ax-container flex flex-col gap-3 border p-4"
+      data-highlight={change ? "" : undefined}
+      // Named for the view transition that moves, shows and hides the cards
+      // when the chat's tools change the flow.
+      style={id ? { viewTransitionName: `flow-step-${id}` } : undefined}
+      className="border-ax-border bg-ax-card rounded-ax-container data-[highlight]:border-ax-accent flex flex-col gap-3 border p-4 transition-colors"
     >
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <div className="flex min-w-0 flex-[1_1_14rem] flex-col gap-1">
@@ -74,12 +102,22 @@ function StepCard({
             </span>
             <span className="text-base">{stepName(step) ?? t("flows_step_unnamed")}</span>
           </Heading>
-          {review ? (
-            <span>
-              <Badge
-                variant="warning"
-                label={review === "edit" ? t("flows_review_edit") : t("flows_review_view")}
-              />
+          {review || change ? (
+            <span className="flex flex-wrap gap-1.5">
+              {review ? (
+                <Badge
+                  variant="warning"
+                  label={review === "edit" ? t("flows_review_edit") : t("flows_review_view")}
+                />
+              ) : null}
+              {change ? (
+                <Token
+                  size="sm"
+                  color="blue"
+                  label={t(`flows_step_change_${change}`)}
+                  className="motion-safe:animate-in motion-safe:fade-in"
+                />
+              ) : null}
             </span>
           ) : null}
         </div>
@@ -171,7 +209,7 @@ function StepCard({
         </MetadataListItem>
       </MetadataList>
       {speakerOffer && speakerOffer.stepId === step.id ? (
-        <QuietBanner
+        <Banner
           status="info"
           title={t("flows_speaker_offer_title")}
           description={t("flows_speaker_offer_description")}
@@ -221,6 +259,7 @@ export function FlowStepList({
   canEdit,
   headingRef,
   speakerOffer = null,
+  changes = null,
   ...actions
 }: StepActions & {
   flowId: string;
@@ -228,6 +267,8 @@ export function FlowStepList({
   canEdit: boolean;
   headingRef: React.Ref<HTMLHeadingElement>;
   speakerOffer?: SpeakerStepOffer | null;
+  /** The steps the chat just added, changed or moved, by id, while the mark lasts. */
+  changes?: ReadonlyMap<string, StepChange> | null;
 }) {
   const t = useTranslations();
   const headingId = useId();
@@ -283,6 +324,7 @@ export function FlowStepList({
                 index={index}
                 canEdit={canEdit}
                 speakerOffer={speakerOffer}
+                change={(step.id && changes?.get(step.id)) || null}
                 actions={{ ...actions, onAskRemove: setRemoving }}
               />
             </li>

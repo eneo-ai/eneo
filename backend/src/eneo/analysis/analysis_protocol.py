@@ -1,5 +1,3 @@
-# MIT License
-
 from eneo.analysis.analysis import (
     AssistantMetadata,
     MetadataCount,

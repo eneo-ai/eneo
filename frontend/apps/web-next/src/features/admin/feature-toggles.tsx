@@ -1,7 +1,7 @@
 "use client";
 
 import { Heading } from "@astryxdesign/core/Heading";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import {
   LayoutTemplate,
   PartyPopper,

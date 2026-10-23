@@ -134,7 +134,7 @@ describe("Math in answers", () => {
     expect(container.querySelector("img")).toBeNull();
     expect(container.querySelector(".x")).toBeNull();
     // jsdom has no layout: the rule's size is in its inline style, capped at maxSize.
-    const rule = container.querySelector(".katex-display .rule") as HTMLElement;
+    const rule = container.querySelector(".katex-display .katex-rule") as HTMLElement;
     expect(rule.getAttribute("style")).not.toContain("100000");
   });
 

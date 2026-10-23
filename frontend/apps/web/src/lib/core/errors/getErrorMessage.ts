@@ -39,6 +39,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9061: () => m.eneo_error_9061(), // PASSWORD_REUSE
   9062: () => m.eneo_error_9062(), // PASSWORD_POLICY_VIOLATION
   9063: () => m.eneo_error_9063(), // LOCAL_PASSWORD_CHANGE_UNAVAILABLE
+  9070: () => m.eneo_error_9070(), // PASSWORD_CHANGE_REQUIRED
 
   // --- Model & provider issues ---
   9002: () => m.eneo_error_9002(), // UNSUPPORTED_MODEL

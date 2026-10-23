@@ -55,8 +55,17 @@ def _session(container: Container) -> AsyncSession:
 
 AUTHORING_INSTRUCTIONS = """Help the user configure this flow through the flow tools.
 Read the saved definition and revision before changing it. Preserve settings the
-user has not asked to change. The tools use the existing flow core: input_source,
+user has not asked to change. The tools take the flow's own fields: input_source,
 input_type, output_mode and output_type describe a step. Never invent step kinds.
+
+Speak to the person in plain language, as the flow editor does: name steps and
+their values with the reference forms, and describe what a step reads and gives.
+Never mention revisions, tool names, internal field keys (input_source,
+output_mode, metadata_json, output_contract and the like), the "core", the
+"kärnan" or other machinery in an answer. When a change is refused, say in plain
+words what stands in the way and offer the next step, for example: "Fältet
+diarienummer används fortfarande av steg 2, så det kan inte tas bort än. Ska jag
+ändra steg 2 först?" Quote a refusal's text only when it helps the person.
 Published flows must be unpublished before editing. A refused edit means the
 user must enter edit mode or reload the current revision. Do not try to bypass it.
 Never ask for credentials or include credentials in tool arguments. Credentials
@@ -81,8 +90,8 @@ its output_contract. Give every step a short, unique name. Publishing checks the
 whole flow and names what to fix.
 Moving, removing or renaming a step, or renaming a run form field (send
 form_field_renames with the new metadata_json), keeps every read pointing where
-it pointed: the core rewrites the reads, and refuses a change that would leave a
-read without its step or field. Change that read first when it is refused.
+it pointed: the reads are rewritten, and a change that would leave a read without
+its step or field is refused. Change that read first when it is refused.
 When two steps share an assistant, update_step with assistant_changes gives the
 edited step its own copy and leaves the other step's assistant as it was.
 An http_get step (input_source http_get) keeps its request in input_config and

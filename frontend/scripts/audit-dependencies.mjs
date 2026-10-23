@@ -44,23 +44,6 @@ for (const [name, advisories] of Object.entries(report)) {
       );
       continue;
     }
-    if (
-      name === "katex" &&
-      advisory.url === "https://github.com/advisories/GHSA-238p-pmpm-9mq7"
-    ) {
-      // Low (CVSS 2.1): only exploitable once the page already has prototype
-      // pollution. Every dependent (rehype-katex, @streamdown/math, mermaid,
-      // nextra, micromark-extension-math) still pins ^0.16; move to 0.18.2
-      // when they do.
-      assert.ok(
-        new Date() < new Date("2026-12-01T00:00:00Z"),
-        "Bump katex to 0.18.2 (dependents permitting) or renew the GHSA-238p-pmpm-9mq7 exception before 2026-12-01.",
-      );
-      console.log(
-        "katex: GHSA-238p-pmpm-9mq7 accepted (low, needs pre-existing prototype pollution); review expires 2026-12-01.",
-      );
-      continue;
-    }
     console.error(`${name}: ${advisory.severity} ${advisory.url}`);
     blocking++;
   }

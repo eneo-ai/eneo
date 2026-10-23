@@ -56,7 +56,8 @@ import { useAnswerFeedback } from "./answer-feedback";
 import { disabledCapabilitiesForRequest } from "./chat-capabilities";
 import { matchesUpload } from "./chat-attachment-plan";
 import { ChatMessage, PendingAnswer, PendingQuestion, type ActivityRequest } from "./chat-message";
-import { Composer } from "./composer";
+import type { ChatReferences } from "./chat-references";
+import { Composer, type ComposerHandle } from "./composer";
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatTools, mcpConversationOptions } from "./mcp-controls";
 import type { PendingUpload } from "./message-files";
@@ -183,6 +184,12 @@ type ChatViewProps = {
    * lower where the chat sits inside a page with its own h1.
    */
   startHeadingLevel?: StartHeadingLevel;
+  /** What the conversation can refer to (the flow chat's steps and values). */
+  references?: ChatReferences;
+  /** Controls after the composer's pills (the flow chat's Fråga/Redigera picker). */
+  footerActions?: ReactNode;
+  /** The text field's placeholder, when the page has a better one than "Fråga …". */
+  placeholder?: string;
 };
 
 /**
@@ -215,7 +222,10 @@ function ConversationView({
   onActivityChange,
   onToolCallFinished,
   onAnswerFinished,
-  startHeadingLevel
+  startHeadingLevel,
+  references,
+  footerActions,
+  placeholder
 }: ChatViewProps) {
   const t = useTranslations();
   const { featureFlags, can } = useAppContext();
@@ -293,12 +303,12 @@ function ConversationView({
   // back); keep keyboard focus in the composer (WCAG 2.4.3).
   const startComposerRef = useRef<HTMLDivElement>(null);
   const dockElement = useRef<HTMLDivElement | null>(null);
-  const dockTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const startTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const dockInputRef = useRef<ComposerHandle>(null);
+  const startInputRef = useRef<ComposerHandle>(null);
   const refocusComposer = useRef(false);
   const rescue = useFocusRescue();
   useEffect(() => {
-    if (focusComposerIfLost) rescue(startTextareaRef.current);
+    if (focusComposerIfLost) rescue(() => startInputRef.current?.element ?? null);
   }, [focusComposerIfLost, rescue]);
 
   const transport = useMemo(() => createChatTransport(), []);
@@ -535,7 +545,7 @@ function ConversationView({
         const text = panel.takeSuggestion();
         if (text === null) return;
         setInput((current) => (current.trim() ? `${current}\n${text}` : text));
-        dockTextareaRef.current?.focus();
+        dockInputRef.current?.focus();
       }),
     [panel]
   );
@@ -579,7 +589,7 @@ function ConversationView({
     reportStarted(started);
     if (refocusComposer.current) {
       refocusComposer.current = false;
-      (started ? dockTextareaRef : startTextareaRef).current?.focus();
+      (started ? dockInputRef : startInputRef).current?.focus();
     }
   }, [started]);
 
@@ -836,7 +846,7 @@ function ConversationView({
     // A stop while the question still waits for its uploads takes it back.
     onStop: () => (pendingAbort.current ? pendingAbort.current.abort() : void stop()),
     label: composerLabel,
-    placeholder: t("chat_composer_placeholder"),
+    placeholder: placeholder ?? t("chat_composer_placeholder"),
     attachments: composerAttachments,
     onOpenFileDialog: openAttachmentDialog,
     knowledge: partner.knowledge,
@@ -844,6 +854,10 @@ function ConversationView({
     mention,
     modelSelector,
     quote: composerQuote,
+    triggers: references?.triggers,
+    headerActions: references?.headerActions,
+    footerActions,
+    onInput: references?.onComposer,
     contextBar: (
       <ContextUsageBar
         usage={usage}
@@ -926,7 +940,7 @@ function ConversationView({
             headingLevel={startHeadingLevel}
             onPickStarter={(prompt) => {
               setInput(prompt);
-              startTextareaRef.current?.focus();
+              startInputRef.current?.focus();
             }}
             composer={
               <div ref={startComposerRef} className="flex w-full flex-col gap-3">
@@ -935,7 +949,7 @@ function ConversationView({
                   {...composerProps}
                   variant="start"
                   partnerToken={partnerToken}
-                  textareaRef={startTextareaRef}
+                  inputRef={startInputRef}
                 />
               </div>
             }
@@ -1007,7 +1021,7 @@ function ConversationView({
           style={{ scrollPaddingBottom: dockHeight + 28 }}
           composer={
             <div ref={dockRef} className="mx-auto w-full max-w-[680px]">
-              <Composer {...composerProps} textareaRef={dockTextareaRef} />
+              <Composer {...composerProps} inputRef={dockInputRef} />
             </div>
           }
         >
@@ -1039,6 +1053,7 @@ function ConversationView({
                   conversationFiles={allFiles}
                   documents={documents.documents}
                   draft={streaming ? liveDraft : null}
+                  references={references}
                 />
               );
             })}
@@ -1047,6 +1062,7 @@ function ConversationView({
                 text={pendingQuestion.text}
                 uploads={pendingUploads}
                 conversationFiles={allFiles}
+                references={references}
               />
             )}
             {(status === "submitted" || pendingQuestion) && (

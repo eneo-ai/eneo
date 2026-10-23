@@ -1,5 +1,3 @@
-# MIT License
-
 """Shared display-name uniqueness guard for the model tables.
 
 A model's display name (`nickname`) is what users pick from in the chat model

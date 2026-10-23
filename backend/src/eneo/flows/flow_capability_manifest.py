@@ -40,12 +40,12 @@ from eneo.flows.enums import (
     flow_output_mode_uses_completion_model,
 )
 from eneo.flows.output_modes import (
-    OUTPUT_MODES_WITHOUT_STEP_INPUT,
+    outside_input_mode_violation,
     speaker_mapping_violation,
 )
 from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
 
-FCM_VERSION: int = 13
+FCM_VERSION: int = 14
 
 CapabilityId = str
 TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
@@ -911,14 +911,12 @@ def _cell_illegality(cell: TupleSpec) -> tuple[str, str | None] | None:
     source_type_issue = _source_type_illegality(source, input_type)
     if source_type_issue is not None:
         return "illegal_source_type_pair", source_type_issue
-    if (
-        source is FlowInputSource.TOOL
-        and output_mode in OUTPUT_MODES_WITHOUT_STEP_INPUT
-    ):
+    mode_violation = outside_input_mode_violation(
+        input_source=source, output_mode=output_mode
+    )
+    if mode_violation is not None:
         return "illegal_source_type_pair", (
-            f"output_mode {output_mode.value!r} does not read the step's input, "
-            "so it cannot be used with input_source 'tool' "
-            "(domain.tool_input_validation.validate_tool_input_config)."
+            f"{mode_violation} (output_modes.outside_input_mode_violation)."
         )
     if (
         speaker_mapping_violation(

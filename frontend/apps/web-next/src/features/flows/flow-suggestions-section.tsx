@@ -1,12 +1,12 @@
 "use client";
 
+import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import type { FlowPublic, FlowStep } from "./flows-api";
@@ -67,7 +67,7 @@ export function FlowSuggestionsSection({
       <Heading level={3} id={headingId} weight="semibold" className="text-base">
         {t("flow_suggestions_heading", { count: shown.length })}
       </Heading>
-      <QuietBanner
+      <Banner
         status="info"
         title={t("flow_suggestions_banner_title")}
         description={t("flow_suggestions_banner_description")}
@@ -114,7 +114,7 @@ export function FlowSuggestionsSection({
             );
           })}
         </ul>
-      </QuietBanner>
+      </Banner>
     </section>
   );
 }

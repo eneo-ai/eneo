@@ -1,8 +1,6 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
 
-    Licensed under the MIT License.
-
     AI Elements-style model selector for the chat input toolbar: a command
     palette grouped by model vendor with provider logos and text search.
     Policy-filtered models, a locked label when the policy pins a single model,

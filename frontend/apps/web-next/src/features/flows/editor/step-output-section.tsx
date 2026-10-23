@@ -3,7 +3,7 @@
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "next-intl";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import { ContractFromExampleDialog } from "./contract-from-example-dialog";
 import { Anchor, EditorSection, problemStatus } from "./editor-fields";
 import type { FieldProblems } from "./field-problems";

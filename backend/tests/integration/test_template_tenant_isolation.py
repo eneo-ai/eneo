@@ -51,6 +51,8 @@ async def _create_user(
         "username": email.split("@")[0],
         "tenant_id": tenant_id,
         "password": password,
+        # These sessions exercise ordinary endpoints, not the first-login flow.
+        "password_change_required": False,
     }
     response = await client.post(
         "/api/v1/sysadmin/users/",

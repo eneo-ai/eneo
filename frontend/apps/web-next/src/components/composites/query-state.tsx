@@ -58,6 +58,7 @@ export function ListError({
 
   return (
     <Banner
+      role="alert"
       status="error"
       title={title ?? t("query_error_title")}
       description={getErrorMessage(error, t)}

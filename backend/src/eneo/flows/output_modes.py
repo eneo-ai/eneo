@@ -1,16 +1,41 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Final
 
 from eneo.flows.enums import FLOW_OUTPUT_MODE_VALUES, FlowOutputMode
 
 ALLOWED_OUTPUT_MODES = set(FLOW_OUTPUT_MODE_VALUES)
 # The modes whose handler builds its result without resolving the step's
-# input. A source that exists only as the step's input (an MCP tool's answer)
-# would never be read under one of them.
+# input. A source that exists only as the step's input would never be read
+# under one of them.
 OUTPUT_MODES_WITHOUT_STEP_INPUT: frozenset[FlowOutputMode] = frozenset(
     {FlowOutputMode.TEMPLATE_FILL}
 )
+# The sources whose input is read from outside the run: nothing of the run
+# stands in for it, so it is fetched (the MCP tool called, the URL read) when
+# the step's input is resolved, before any other part of it, and cannot be
+# replaced by underlag.
+OUTSIDE_INPUT_SOURCES: Final = frozenset({"http_get", "tool"})
+
+
+def outside_input_mode_violation(
+    *, input_source: str | Enum, output_mode: str | Enum
+) -> str | None:
+    """Why a step cannot fetch its input from outside the run under this
+    output mode (the mode never resolves the step's input, so the fetch would
+    never be made); None when it can or the source is not fetched."""
+    source = _enum_value(input_source)
+    mode = _enum_value(output_mode)
+    if (
+        source not in OUTSIDE_INPUT_SOURCES
+        or mode not in OUTPUT_MODES_WITHOUT_STEP_INPUT
+    ):
+        return None
+    return (
+        f"output_mode '{mode}' does not read the step's input, so it cannot be "
+        f"used with input_source '{source}'"
+    )
 
 
 def transcribe_only_violation(

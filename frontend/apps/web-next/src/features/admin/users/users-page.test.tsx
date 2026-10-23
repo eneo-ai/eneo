@@ -60,6 +60,9 @@ function serve(pages: (query: Record<string, unknown>) => Page) {
           predefined_roles: { items: [] }
         });
       }
+      if (path === "/api/v1/admin/password-policy") {
+        return ok({ max_age_days: null });
+      }
       const query = init?.params?.query ?? {};
       const { items, totalPages = 1, page = Number(query.page) } = pages(query);
       return ok({

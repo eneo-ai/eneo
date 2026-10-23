@@ -269,8 +269,10 @@ a tool changes something: a run that is started again calls the tool again, and
 Eneo does not prevent the repeated change.
 
 A step's model gets no MCP tools: Eneo rejects MCP-bearing current assistants,
-packages, and historical published definitions before it mutates Flow state or
-performs external work. Package export refuses a flow that has a tool step.
+package imports, and historical published definitions before it mutates Flow
+state or performs external work. Package export leaves step assistants' MCP
+servers and tools out (it reports how many it left out) and refuses a flow that
+has a tool step.
 
 Standalone assistants and conversations retain their separately owned MCP
 behavior. Flow accepts HTTP GET as an input source and sends terminal HTTP POST
