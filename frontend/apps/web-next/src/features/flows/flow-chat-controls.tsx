@@ -3,7 +3,7 @@
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQueryClient } from "@tanstack/react-query";
-import { MessageSquarePlus } from "lucide-react";
+import { MessageSquarePlus, Sparkles } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
@@ -213,5 +213,24 @@ export function NewConversationButton({
         onConfirm={() => void start()}
       />
     </>
+  );
+}
+
+/**
+ * "Optimera flödet": puts a prepared request in the composer that asks the
+ * chat to review the flow with its suggestions tool and propose
+ * improvements. The person reads it, edits it if they like, and sends it;
+ * nothing is sent from here.
+ */
+export function OptimizeFlowButton({ onAskChat }: { onAskChat: (text: string) => void }) {
+  const t = useTranslations();
+  return (
+    <Button
+      label={t("flow_suggestions_optimize")}
+      variant="ghost"
+      size="sm"
+      icon={<Sparkles aria-hidden className="size-4" />}
+      onClick={() => onAskChat(t("flow_suggestions_optimize_request"))}
+    />
   );
 }

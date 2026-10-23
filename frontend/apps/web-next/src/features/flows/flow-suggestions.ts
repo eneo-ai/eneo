@@ -3,6 +3,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import type { FlowStep } from "./flows-api";
+import { stepName } from "./flow-steps";
 
 /**
  * The core's suggestions for a draft (`GET /flows/{id}/suggestions/`): where
@@ -86,7 +87,7 @@ export function readText(
 }
 
 /** "a och b", "a, b och c". */
-function joinReads(parts: string[], t: Translate): string {
+function joinParts(parts: string[], t: Translate): string {
   if (parts.length <= 1) return parts[0] ?? "";
   const head = parts.slice(0, -1).join(", ");
   return t("flow_suggestion_reads_pair", { first: head, second: parts[parts.length - 1]! });
@@ -108,7 +109,7 @@ export function suggestionText(
       const producer =
         typeof params.producer_step_order === "number" ? params.producer_step_order : 0;
       const contained = params.contained === true;
-      const reads = joinReads(
+      const reads = joinParts(
         duplicateReads(params).map((read) => readText(read, t, step)),
         t
       );
@@ -128,4 +129,58 @@ export function suggestionText(
         explanation: t("flow_suggestion_unknown_explanation")
       };
   }
+}
+
+/** A suggestion shown on the step it is about: the first of its steps. */
+export type ShownSuggestion = { suggestion: FlowSuggestion; step: FlowStep };
+
+/**
+ * The suggestions the draft can show, each with the step it is about. One
+ * whose step the draft no longer has (the answer is from a revision before a
+ * removal) cannot be shown on it and is left out.
+ */
+export function shownSuggestions(
+  items: readonly FlowSuggestion[] | undefined,
+  steps: readonly FlowStep[]
+): ShownSuggestion[] {
+  return (items ?? []).flatMap((suggestion): ShownSuggestion[] => {
+    const step = steps.find((candidate) => candidate.id === suggestion.steps[0]);
+    return step ? [{ suggestion, step }] : [];
+  });
+}
+
+/** How many suggestions are about each step, by step id. */
+export function suggestionCounts(shown: readonly ShownSuggestion[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const { step } of shown) {
+    if (step.id) counts.set(step.id, (counts.get(step.id) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/**
+ * The request "Fråga assistenten" puts in the flow chat's composer: the
+ * suggestion's code and title and its steps by order and name, asking for an
+ * explanation and a proposed change. It carries nothing from a run.
+ */
+export function suggestionRequest(
+  suggestion: FlowSuggestion,
+  steps: readonly FlowStep[],
+  t: Translate
+): string {
+  const named = suggestion.steps.flatMap((id): FlowStep[] => {
+    const step = steps.find((candidate) => candidate.id === id);
+    return step ? [step] : [];
+  });
+  const stepTexts = named.map((step) => {
+    const name = stepName(step);
+    return name
+      ? t("flow_suggestion_ask_step", { order: step.step_order, name })
+      : t("flow_suggestion_ask_step_unnamed", { order: step.step_order });
+  });
+  return t("flow_suggestion_ask_request", {
+    title: suggestionText(suggestion, t, named[0]).title,
+    code: suggestion.code,
+    steps: joinParts(stepTexts, t)
+  });
 }

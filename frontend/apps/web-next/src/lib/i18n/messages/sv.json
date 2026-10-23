@@ -9052,7 +9052,6 @@
   "flow_suggestions_loading": "Letar efter förslag…",
   "flow_suggestions_error_title": "Förslagen kunde inte hämtas",
   "flow_suggestion_why": "Varför?",
-  "flow_suggestion_why_about": ": {title}",
   "flow_suggestion_duplicate_read_title": "Svaret från steg {producer} skickas två gånger",
   "flow_suggestion_duplicate_read_title_contained": "Svaret från steg {producer} skickas både helt och som ett fält",
   "flow_suggestion_duplicate_read_explanation": "Steget får samma text {reads}. Modellen läser den två gånger varje körning, vilket kostar tokens och tar plats i modellens fönster.",
@@ -9066,5 +9065,16 @@
   "flow_suggestion_read_other": "i {site}",
   "flow_suggestion_reads_pair": "{first} och {second}",
   "flow_suggestion_unknown_title": "Förslag",
-  "flow_suggestion_unknown_explanation": "Den här versionen känner inte till förslagets typ. Flödeschatten kan förklara det."
+  "flow_suggestion_unknown_explanation": "Den här versionen känner inte till förslagets typ. Flödeschatten kan förklara det.",
+  "flow_suggestion_why_named": "Varför? {title}",
+  "flow_suggestion_ask": "Fråga assistenten",
+  "flow_suggestion_ask_named": "Fråga assistenten om ”{title}” ({step})",
+  "flow_suggestion_ask_request": "Förklara förslaget ”{title}” ({code}) som gäller {steps}, och föreslå hur flödet kan ändras.",
+  "flow_suggestion_ask_step": "steg {order} ({name})",
+  "flow_suggestion_ask_step_unnamed": "steg {order}",
+  "flow_suggestion_marker": "{count, plural, one {# förslag} other {# förslag}}",
+  "flow_suggestion_marker_named": "{count, plural, one {# förslag} other {# förslag}} för {step}",
+  "flow_suggestions_step_heading": "Förslag för steget ({count})",
+  "flow_suggestions_optimize": "Optimera flödet",
+  "flow_suggestions_optimize_request": "Granska flödet med read_flow_suggestions och föreslå förbättringar som gör det billigare eller enklare. Förklara varje förslag och vad det sparar, och ändra inget förrän jag har sagt ja."
 }

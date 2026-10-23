@@ -65,7 +65,11 @@ function patchBodies() {
 
 function renderEditor(
   flow: FlowPublic,
-  overrides: { readOnly?: boolean; space?: ReturnType<typeof makeSpace> } = {}
+  overrides: {
+    readOnly?: boolean;
+    space?: ReturnType<typeof makeSpace>;
+    onAskChat?: (text: string) => void;
+  } = {}
 ) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(["spaces", "space-1"], overrides.space ?? makeSpace());
@@ -78,6 +82,7 @@ function renderEditor(
       readOnly={overrides.readOnly ?? false}
       onSaved={onSaved}
       onCancel={onCancel}
+      onAskChat={overrides.onAskChat}
     />,
     { queryClient }
   );
@@ -150,6 +155,62 @@ describe("FlowStepEditor", () => {
         step_edits: [{ step_id: "step-1", changes: { user_description: "Sammanfatta ärendet" } }]
       }
     ]);
+  });
+
+  it("shows the open step's suggestions at the top, and asks for them again after a save", async () => {
+    const SUGGESTIONS = "GET /api/v1/flows/{id}/suggestions/";
+    const about = (stepId: string, code: string, fingerprint: string) => ({
+      code,
+      fingerprint,
+      steps: [stepId, "step-1"],
+      params: { producer_step_order: 1, reads: [] },
+      message: "A suggestion.",
+      impact: { basis: "definition", level: "high" },
+      fix: { kind: "assisted" }
+    });
+    api.routes[SUGGESTIONS] = () => ({
+      body: {
+        flow_id: "flow-1",
+        draft_revision: 4,
+        items: [
+          about("step-2", "duplicate_read", "a".repeat(64)),
+          about("step-1", "some_later_code", "b".repeat(64))
+        ]
+      }
+    });
+    const second = makeStep({
+      id: "step-2",
+      assistant_id: "assistant-2",
+      step_order: 2,
+      user_description: "Skriv svar",
+      input_source: "previous_step"
+    });
+    const flow = makeFlow({ steps: [makeStep(), second] });
+    api.routes[EDITOR] = () => ({
+      body: makeFlow({ draft_revision: 5, steps: [makeStep(), second] })
+    });
+    const onAskChat = vi.fn();
+    const { container } = renderEditor(flow, { onAskChat });
+
+    const section = await screen.findByRole("region", { name: "Förslag för steget (1)" });
+    expect(screen.queryByText("Svaret från steg 1 skickas två gånger")).toBeNull();
+    await expectNoAxeViolations(container);
+    fireEvent.click(
+      within(section).getByRole("button", {
+        name: "Fråga assistenten om ”Förslag” (Steg 1: Sammanfatta)"
+      })
+    );
+    expect(onAskChat).toHaveBeenCalledWith(expect.stringContaining("(some_later_code)"));
+    // Only the open step is open: no way to open it again from here.
+    expect(within(section).queryByRole("button", { name: /^Öppna/ })).toBeNull();
+
+    const fetched = () =>
+      api.stub.calls.filter((call) => `${call.method} ${call.path}` === SUGGESTIONS).length;
+    expect(fetched()).toBe(1);
+    fireEvent.change(await nameField(), { target: { value: "Sammanfatta ärendet" } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    // The saved revision keys the suggestions anew.
+    await waitFor(() => expect(fetched()).toBe(2));
   });
 
   it("reads long material in parts as one step setting, and explains what it costs", async () => {

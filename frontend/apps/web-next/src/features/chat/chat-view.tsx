@@ -183,7 +183,19 @@ type ChatViewProps = {
    * lower where the chat sits inside a page with its own h1.
    */
   startHeadingLevel?: StartHeadingLevel;
+  /**
+   * A message the page around the chat prepared (a flow's "Fråga
+   * assistenten"). The composer takes it as its text, as it takes one an
+   * interactive view offers, and is focused; nothing is sent by itself.
+   * `onOfferTaken` follows once it is in the composer, so the page can let
+   * go of it; an offer is taken once, however often the view renders.
+   */
+  offer?: ComposerOffer | null;
+  onOfferTaken?: () => void;
 };
+
+/** A message offered to the composer from outside the conversation; a new object is a new offer. */
+export type ComposerOffer = { text: string };
 
 /**
  * One conversation: the start state, then the message list with the docked
@@ -215,7 +227,9 @@ function ConversationView({
   onActivityChange,
   onToolCallFinished,
   onAnswerFinished,
-  startHeadingLevel
+  startHeadingLevel,
+  offer = null,
+  onOfferTaken
 }: ChatViewProps) {
   const t = useTranslations();
   const { featureFlags, can } = useAppContext();
@@ -528,17 +542,27 @@ function ConversationView({
     }
   }, [liveFiles, liveCalls, panel]);
 
-  // A message an interactive view offered lands in the composer.
+  // A message an interactive view (or the page, below) offered lands in the composer.
   useEffect(
     () =>
       panel.subscribe(() => {
         const text = panel.takeSuggestion();
         if (text === null) return;
         setInput((current) => (current.trim() ? `${current}\n${text}` : text));
-        dockTextareaRef.current?.focus();
+        // Before the first question the start state's composer is the one on show.
+        (dockTextareaRef.current ?? startTextareaRef.current)?.focus();
       }),
     [panel]
   );
+  // The page's offer goes the same way. After the subscription above, so a
+  // view mounted with an offer already waiting takes it too.
+  const takenOffer = useRef<ComposerOffer | null>(null);
+  useEffect(() => {
+    if (offer === null || takenOffer.current === offer) return;
+    takenOffer.current = offer;
+    panel.suggestMessage(offer.text);
+    onOfferTaken?.();
+  }, [offer, onOfferTaken, panel]);
 
   const preflight = usePreflight({
     question: input,

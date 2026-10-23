@@ -149,7 +149,12 @@ describe("FlowDraftCheck", () => {
     const onOpenStep = vi.fn();
     const flow = makeFlow();
     const { container } = renderInApp(
-      <FlowDraftCheck flow={flow} speakerServices={[]} onOpenStep={onOpenStep} />
+      <FlowDraftCheck
+        flow={flow}
+        speakerServices={[]}
+        onOpenStep={onOpenStep}
+        onAskChat={vi.fn()}
+      />
     );
 
     expect(await screen.findByRole("heading", { level: 3, name: "Förslag (1)" })).toBeTruthy();
@@ -160,17 +165,92 @@ describe("FlowDraftCheck", () => {
       expect.objectContaining({ params: { path: { id: "flow-1" } } })
     );
 
-    const why = screen.getByRole("button", { name: /^Varför\?/ });
+    // A native disclosure: a button that says whether the region it controls is open.
+    const why = screen.getByRole("button", {
+      name: "Varför? Svaret från steg 1 skickas två gånger"
+    });
+    expect(why.tagName).toBe("BUTTON");
     expect(why.getAttribute("aria-expanded")).toBe("false");
+    const region = document.getElementById(why.getAttribute("aria-controls") ?? "")!;
+    expect(region.hidden).toBe(true);
+    await expectNoAxeViolations(container);
     fireEvent.click(why);
     expect(why.getAttribute("aria-expanded")).toBe("true");
-    expect(
-      screen.getByText(/Steget får samma text som indata \(föregående steg\) och i prompten/)
-    ).toBeTruthy();
+    expect(region.hidden).toBe(false);
+    expect(region.textContent).toMatch(
+      /Steget får samma text som indata \(föregående steg\) och i prompten/
+    );
     await expectNoAxeViolations(container);
 
     fireEvent.click(screen.getByRole("button", { name: "Öppna Steg 2: Skriv svar" }));
     expect(onOpenStep).toHaveBeenCalledWith(flow.steps[1]);
+  });
+
+  it("hands a prepared request about a suggestion to the flow chat", async () => {
+    route(
+      {
+        "assistant-1": makeAssistant({ id: "assistant-1" }),
+        "assistant-2": makeAssistant({ id: "assistant-2" })
+      },
+      [DUPLICATE_READ]
+    );
+    const onAskChat = vi.fn();
+    const { container } = renderInApp(
+      <FlowDraftCheck
+        flow={makeFlow()}
+        speakerServices={[]}
+        onOpenStep={vi.fn()}
+        onAskChat={onAskChat}
+      />
+    );
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Fråga assistenten om ”Svaret från steg 1 skickas två gånger” (Steg 2: Skriv svar)"
+      })
+    );
+    expect(onAskChat).toHaveBeenCalledWith(
+      "Förklara förslaget ”Svaret från steg 1 skickas två gånger” (duplicate_read) som gäller " +
+        "steg 2 (Skriv svar) och steg 1 (Sammanfatta), och föreslå hur flödet kan ändras."
+    );
+    await expectNoAxeViolations(container);
+  });
+
+  it("shows a kind of suggestion it does not know with the generic text, still to ask about", async () => {
+    route(
+      {
+        "assistant-1": makeAssistant({ id: "assistant-1" }),
+        "assistant-2": makeAssistant({ id: "assistant-2" })
+      },
+      [{ ...DUPLICATE_READ, code: "some_later_code", params: {}, fix: { kind: "advice" } }]
+    );
+    const onAskChat = vi.fn();
+    renderInApp(
+      <FlowDraftCheck
+        flow={makeFlow()}
+        speakerServices={[]}
+        onOpenStep={vi.fn()}
+        onAskChat={onAskChat}
+      />
+    );
+
+    expect(await screen.findByText("Förslag", { selector: "p" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^Fråga assistenten/ }));
+    expect(onAskChat).toHaveBeenCalledWith(expect.stringContaining("(some_later_code)"));
+  });
+
+  it("offers no request to the chat while the chat is not available", async () => {
+    route(
+      {
+        "assistant-1": makeAssistant({ id: "assistant-1" }),
+        "assistant-2": makeAssistant({ id: "assistant-2" })
+      },
+      [DUPLICATE_READ]
+    );
+    renderInApp(<FlowDraftCheck flow={makeFlow()} speakerServices={[]} onOpenStep={vi.fn()} />);
+
+    expect(await screen.findByText("Svaret från steg 1 skickas två gånger")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Fråga assistenten/ })).toBeNull();
   });
 
   it("renders no suggestions section while the draft gives none", async () => {

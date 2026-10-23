@@ -16,12 +16,16 @@ import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { ChatPartner } from "@/lib/chat/types";
 import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { retryPartnerQuery } from "@/features/chat/chat-partner-state";
-import { ChatView, type ActivityState } from "@/features/chat/chat-view";
+import { ChatView, type ActivityState, type ComposerOffer } from "@/features/chat/chat-view";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
 import { useSpace } from "@/features/spaces/use-space";
 import { useSpaceDisplayName } from "@/features/spaces/frame/space-header";
-import { FlowChatModelPickers, NewConversationButton } from "./flow-chat-controls";
+import {
+  FlowChatModelPickers,
+  NewConversationButton,
+  OptimizeFlowButton
+} from "./flow-chat-controls";
 import {
   authoringChatQueryOptions,
   flowKeys,
@@ -44,6 +48,12 @@ type ChatPanelProps = {
   onFlowMayHaveChanged: () => void;
   /** A refused mode change, shown with the page's other refusals. */
   onRefused: (error: unknown, title: string) => void;
+  /** A message the page prepared for the composer ("Fråga assistenten"); never sent by itself. */
+  offer: ComposerOffer | null;
+  /** The composer took `offer`. */
+  onOfferTaken: () => void;
+  /** Prepares a message for the composer (the page shows the chat first, on a phone). */
+  onAskChat: (text: string) => void;
 };
 
 /**
@@ -115,10 +125,11 @@ function EditModeSwitch({
 /** The conversation itself, once the chat, its assistant and its history are loaded. */
 function AuthoringConversation({
   chat,
-  onFlowMayHaveChanged
-}: {
+  onFlowMayHaveChanged,
+  offer,
+  onOfferTaken
+}: Pick<ChatPanelProps, "onFlowMayHaveChanged" | "offer" | "onOfferTaken"> & {
   chat: FlowAuthoringChat;
-  onFlowMayHaveChanged: () => void;
 }) {
   const t = useTranslations();
   const { space } = useSpace();
@@ -203,6 +214,8 @@ function AuthoringConversation({
         if (isFlowsToolCall(call)) onFlowMayHaveChanged();
       }}
       onAnswerFinished={onFlowMayHaveChanged}
+      offer={offer}
+      onOfferTaken={onOfferTaken}
     />
   );
 }
@@ -221,7 +234,14 @@ function unavailableMessage(error: unknown, t: ReturnType<typeof useTranslations
  * chat change the draft, and the page shows each change as the chat's tools
  * make it.
  */
-export function FlowChatPanel({ flow, onFlowMayHaveChanged, onRefused }: ChatPanelProps) {
+export function FlowChatPanel({
+  flow,
+  onFlowMayHaveChanged,
+  onRefused,
+  offer,
+  onOfferTaken,
+  onAskChat
+}: ChatPanelProps) {
   const t = useTranslations();
   // The chat needs edit access; without it the core would refuse it (a 403
   // still says so, should the flag be out of date).
@@ -249,13 +269,21 @@ export function FlowChatPanel({ flow, onFlowMayHaveChanged, onRefused }: ChatPan
             <EditModeSwitch chat={chat.data} onRefused={onRefused} />
             <div className="flex flex-wrap items-center justify-between gap-2">
               <FlowChatModelPickers chat={chat.data} onRefused={onRefused} />
-              <NewConversationButton chat={chat.data} onRefused={onRefused} />
+              <span className="flex flex-wrap items-center gap-1">
+                <OptimizeFlowButton onAskChat={onAskChat} />
+                <NewConversationButton chat={chat.data} onRefused={onRefused} />
+              </span>
             </div>
           </>
         ) : null}
       </div>
       {chat.data ? (
-        <AuthoringConversation chat={chat.data} onFlowMayHaveChanged={onFlowMayHaveChanged} />
+        <AuthoringConversation
+          chat={chat.data}
+          onFlowMayHaveChanged={onFlowMayHaveChanged}
+          offer={offer}
+          onOfferTaken={onOfferTaken}
+        />
       ) : mayEdit && !chat.isError ? (
         <LoadingState label={t("flows_chat_loading")} rows={3} className="p-4" />
       ) : (

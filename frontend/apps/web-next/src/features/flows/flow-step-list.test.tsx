@@ -6,9 +6,18 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { makeStep } from "./flow-fixtures";
 
-const prompts = vi.hoisted(() => ({ byAssistant: {} as Record<string, string> }));
+const prompts = vi.hoisted(() => ({
+  byAssistant: {} as Record<string, string>,
+  suggestions: [] as unknown[]
+}));
 const api = vi.hoisted(() => ({
-  GET: vi.fn(async (_path: string, init: { params: { path: { assistant_id: string } } }) => {
+  GET: vi.fn(async (path: string, init: { params: { path: { assistant_id: string } } }) => {
+    if (path === "/api/v1/flows/{id}/suggestions/") {
+      return {
+        data: { flow_id: "flow-1", draft_revision: 4, items: prompts.suggestions },
+        response: new Response(null, { status: 200 })
+      };
+    }
     const id = init.params.path.assistant_id;
     return {
       data: { id, prompt: { text: prompts.byAssistant[id] ?? "" } },
@@ -22,8 +31,23 @@ import { FlowStepList, type SpeakerStepOffer } from "./flow-step-list";
 
 afterEach(() => {
   cleanup();
+  vi.clearAllMocks();
   prompts.byAssistant = {};
+  prompts.suggestions = [];
 });
+
+/** A suggestion about `stepId` (its first step), reading step 1. */
+function suggestionAbout(stepId: string, fingerprint: string) {
+  return {
+    code: "duplicate_read",
+    fingerprint,
+    steps: [stepId, "step-1"],
+    params: { producer_step_order: 1, producer_step_id: "step-1", reads: [] },
+    message: "Reads step 1 twice.",
+    impact: { basis: "definition", level: "high" },
+    fix: { kind: "assisted" }
+  };
+}
 
 const steps = [
   makeStep(1, { user_description: "Sammanfatta", input_type: "document" }),
@@ -46,6 +70,7 @@ function renderList(canEdit = true, speakerOffer: SpeakerStepOffer | null = null
   const view = renderInApp(
     <FlowStepList
       flowId="flow-1"
+      draftRevision={4}
       steps={steps}
       canEdit={canEdit}
       headingRef={createRef()}
@@ -138,11 +163,37 @@ describe("FlowStepList", () => {
     await waitFor(() => expect(actions.onRemove).toHaveBeenCalledWith(steps[0]));
   });
 
+  it("marks each step the core has suggestions about with their count", async () => {
+    prompts.suggestions = [
+      suggestionAbout("step-2", "a".repeat(64)),
+      suggestionAbout("step-2", "b".repeat(64)),
+      suggestionAbout("step-3", "c".repeat(64)),
+      // A step the draft no longer has gets no marker anywhere.
+      suggestionAbout("step-9", "d".repeat(64))
+    ];
+    const { container } = renderList();
+
+    const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+    expect(await within(second).findByText("2 förslag för Steg 2: Skriv svar")).toBeTruthy();
+    const third = screen.getByRole("article", { name: "Steg 3 Granska" });
+    expect(within(third).getByText("1 förslag för Steg 3: Granska")).toBeTruthy();
+    expect(within(third).getByText("1 förslag").getAttribute("aria-hidden")).toBe("true");
+    const first = screen.getByRole("article", { name: "Steg 1 Sammanfatta" });
+    expect(within(first).queryByText(/förslag/)).toBeNull();
+    // One request, keyed like the draft check's.
+    expect(
+      api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/suggestions/")
+    ).toHaveLength(1);
+    await expectNoAxeViolations(container);
+  });
+
   it("only shows the steps to someone who cannot change them", () => {
     renderList(false);
     expect(screen.getByRole("button", { name: "Visa Steg 1: Sammanfatta" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Flytta/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Fler åtgärder/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Lägg till steg" })).toBeNull();
+    // Suggestions are for editors: they are not asked for.
+    expect(api.GET).not.toHaveBeenCalledWith("/api/v1/flows/{id}/suggestions/", expect.anything());
   });
 });

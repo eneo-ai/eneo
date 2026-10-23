@@ -17,6 +17,7 @@ import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { SpaceProvider, useSpace } from "@/features/spaces/use-space";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
+import { StepSuggestions } from "../flow-suggestions-section";
 import {
   classificationPreviewQueryOptions,
   flowAssistantQueryOptions,
@@ -82,6 +83,11 @@ type EditorProps = {
   readOnly: boolean;
   onSaved: (flow: FlowPublic) => void;
   onCancel: () => void;
+  /**
+   * Puts a prepared request about one of the step's suggestions in the flow
+   * chat's composer; absent while the chat is not available.
+   */
+  onAskChat?: (text: string) => void;
 };
 
 /**
@@ -89,8 +95,9 @@ type EditorProps = {
  * what it does, what it hands on, who reviews it and the classification its
  * result carries. Save sends one revision-fenced editor PATCH with only the
  * fields that changed; a draft that moved on elsewhere (`stale_revision`)
- * keeps the edits and offers to put them on the latest version. Read-only
- * shows the same settings as text.
+ * keeps the edits and offers to put them on the latest version. The core's
+ * suggestions about the step show at the top. Read-only shows the same
+ * settings as text.
  */
 export function FlowStepEditor(props: EditorProps): React.JSX.Element {
   const t = useTranslations();
@@ -128,7 +135,14 @@ type Session = {
   dirty: boolean;
 };
 
-function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel }: EditorProps) {
+function StepEditorSession({
+  flow: propFlow,
+  stepId,
+  readOnly,
+  onSaved,
+  onCancel,
+  onAskChat
+}: EditorProps) {
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
@@ -513,6 +527,9 @@ function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel
         className="flex flex-col gap-6 pb-4 [&_:is(input,textarea,button,[tabindex])]:scroll-mb-28"
       >
         {header}
+
+        {/* The saved draft's suggestions, as the draft check shows them. */}
+        <StepSuggestions flow={latest} stepId={stepId} onAskChat={onAskChat} />
 
         <div
           ref={summaryRef}

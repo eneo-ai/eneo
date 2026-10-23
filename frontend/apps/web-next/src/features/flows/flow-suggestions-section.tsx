@@ -1,8 +1,6 @@
 "use client";
 
-import { Button } from "@astryxdesign/core/Button";
-import { Collapsible } from "@astryxdesign/core/Collapsible";
-import { Heading, Text } from "@astryxdesign/core/Text";
+import { Heading } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId } from "react";
@@ -10,33 +8,26 @@ import { QuietBanner } from "@/components/astryx/banner";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import type { FlowPublic, FlowStep } from "./flows-api";
-import { stepLabel } from "./flow-labels";
-import {
-  flowSuggestionsQueryOptions,
-  suggestionText,
-  type FlowSuggestion
-} from "./flow-suggestions";
-
-// A compact Astryx Collapsible for the "why" of one suggestion.
-const WHY_COLLAPSIBLE_CLASS =
-  "[&_.astryx-collapsible-trigger]:text-ax-text-secondary [&_.astryx-collapsible-trigger]:min-h-8 [&_.astryx-collapsible-trigger]:text-sm [&_.astryx-collapsible-trigger]:font-medium";
-
-type Shown = { suggestion: FlowSuggestion; step: FlowStep };
+import { FlowSuggestionItem, type SuggestionActions } from "./flow-suggestion-item";
+import { flowSuggestionsQueryOptions, shownSuggestions } from "./flow-suggestions";
 
 /**
  * "Förslag": what the core says the draft could do cheaper or simpler, below
  * the publish blockers and apart from them (a neutral banner, never a
- * warning). Display only: each suggestion shows the step it is about, a
- * title, its explanation behind a disclosure and a button that opens the
- * step. Nothing is rendered while the draft gives no suggestion. The query
- * is keyed by the draft revision, so a save or a chat tool call refetches.
+ * warning). Each suggestion shows the step it is about, a title, its
+ * explanation behind a disclosure, a button that opens the step and, while
+ * the flow chat is available, "Fråga assistenten". Nothing is rendered while
+ * the draft gives no suggestion. The query is keyed by the draft revision,
+ * so a save or a chat tool call refetches.
  */
 export function FlowSuggestionsSection({
   flow,
-  onOpenStep
+  onOpenStep,
+  onAskChat
 }: {
   flow: FlowPublic;
   onOpenStep: (step: FlowStep) => void;
+  onAskChat?: SuggestionActions["onAskChat"];
 }) {
   const t = useTranslations();
   const headingId = useId();
@@ -55,11 +46,7 @@ export function FlowSuggestionsSection({
       />
     );
   }
-  // A suggestion whose step the draft no longer has cannot be shown on it.
-  const shown = (query.data?.items ?? []).flatMap((suggestion): Shown[] => {
-    const step = flow.steps.find((candidate) => candidate.id === suggestion.steps[0]);
-    return step ? [{ suggestion, step }] : [];
-  });
+  const shown = shownSuggestions(query.data.items, flow.steps);
   if (shown.length === 0) return null;
 
   return (
@@ -74,45 +61,69 @@ export function FlowSuggestionsSection({
         collapsible={false}
       >
         <ul className="m-0 flex list-none flex-col gap-3 p-0">
-          {shown.map(({ suggestion, step }) => {
-            const label = stepLabel(step, t);
-            const text = suggestionText(suggestion, t, step);
-            return (
-              <li key={suggestion.fingerprint} className="flex flex-col gap-1">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-ax-text text-sm font-semibold break-words">{label}</span>
-                  <Button
-                    label={t("flow_editor_tools_check_open_step")}
-                    aria-label={t("flow_editor_tools_check_open_step_named", { step: label })}
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => onOpenStep(step)}
-                  />
-                </div>
-                <Text size="sm" as="p" display="block" className="m-0">
-                  {text.title}
-                </Text>
-                <div className={WHY_COLLAPSIBLE_CLASS}>
-                  <Collapsible
-                    trigger={
-                      <>
-                        {t("flow_suggestion_why")}
-                        <span className="sr-only">
-                          {t("flow_suggestion_why_about", { title: text.title })}
-                        </span>
-                      </>
-                    }
-                    chevronPosition="start"
-                    defaultIsOpen={false}
-                  >
-                    <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-                      {text.explanation}
-                    </Text>
-                  </Collapsible>
-                </div>
-              </li>
-            );
-          })}
+          {shown.map(({ suggestion, step }) => (
+            <FlowSuggestionItem
+              key={suggestion.fingerprint}
+              suggestion={suggestion}
+              step={step}
+              steps={flow.steps}
+              showStep
+              onOpenStep={onOpenStep}
+              onAskChat={onAskChat}
+            />
+          ))}
+        </ul>
+      </QuietBanner>
+    </section>
+  );
+}
+
+/**
+ * The open step's suggestions at the top of the step editor, compact and
+ * with the same actions as the draft check (the step is open already, so
+ * no "Öppna steget"). It reads the same query as the draft check and the
+ * step list's marker. Nothing is rendered while the step has none, or while
+ * they load or fail (the draft check says so).
+ */
+export function StepSuggestions({
+  flow,
+  stepId,
+  onAskChat
+}: {
+  flow: FlowPublic;
+  stepId: string;
+  onAskChat?: SuggestionActions["onAskChat"];
+}) {
+  const t = useTranslations();
+  const headingId = useId();
+  const query = useQuery(flowSuggestionsQueryOptions(flow.id, flow.draft_revision));
+  const shown = shownSuggestions(query.data?.items, flow.steps).filter(
+    ({ step }) => step.id === stepId
+  );
+  if (shown.length === 0) return null;
+
+  return (
+    <section aria-labelledby={headingId} className="flex flex-col gap-2">
+      <QuietBanner
+        status="info"
+        title={
+          <Heading level={3} id={headingId} weight="semibold" className="text-sm">
+            {t("flow_suggestions_step_heading", { count: shown.length })}
+          </Heading>
+        }
+        collapsible={false}
+      >
+        <ul className="m-0 flex list-none flex-col gap-3 p-0">
+          {shown.map(({ suggestion, step }) => (
+            <FlowSuggestionItem
+              key={suggestion.fingerprint}
+              suggestion={suggestion}
+              step={step}
+              steps={flow.steps}
+              showStep={false}
+              onAskChat={onAskChat}
+            />
+          ))}
         </ul>
       </QuietBanner>
     </section>

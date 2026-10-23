@@ -7,8 +7,8 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Token } from "@astryxdesign/core/Token";
-import { ArrowDown, ArrowUp, Ellipsis, Plus, Workflow } from "lucide-react";
-import { useQueries } from "@tanstack/react-query";
+import { ArrowDown, ArrowUp, Ellipsis, Lightbulb, Plus, Workflow } from "lucide-react";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
@@ -19,6 +19,11 @@ import { stepUsesModel } from "./editor/step-rules";
 import type { FlowStep } from "./flows-api";
 import { inputTypeLabel, producesLabel, readLabel, stepLabel } from "./flow-labels";
 import { stepName, stepReaders, stepReads, type StepPrompts } from "./flow-steps";
+import {
+  flowSuggestionsQueryOptions,
+  shownSuggestions,
+  suggestionCounts
+} from "./flow-suggestions";
 
 /** The id of a step's control, so focus can be put back on it after the list re-renders. */
 export function stepControlId(stepId: string, control: "open" | "up" | "down"): string {
@@ -43,6 +48,7 @@ function StepCard({
   prompts,
   index,
   canEdit,
+  suggestionCount,
   speakerOffer,
   actions
 }: {
@@ -51,6 +57,8 @@ function StepCard({
   prompts: StepPrompts;
   index: number;
   canEdit: boolean;
+  /** How many of the core's suggestions are about this step. */
+  suggestionCount: number;
   speakerOffer: SpeakerStepOffer | null;
   actions: StepActions & { onAskRemove: (step: FlowStep) => void };
 }) {
@@ -74,12 +82,30 @@ function StepCard({
             </span>
             <span className="text-base">{stepName(step) ?? t("flows_step_unnamed")}</span>
           </Heading>
-          {review ? (
-            <span>
-              <Badge
-                variant="warning"
-                label={review === "edit" ? t("flows_review_edit") : t("flows_review_view")}
-              />
+          {review || suggestionCount > 0 ? (
+            <span className="flex flex-wrap gap-1">
+              {review ? (
+                <Badge
+                  variant="warning"
+                  label={review === "edit" ? t("flows_review_edit") : t("flows_review_view")}
+                />
+              ) : null}
+              {suggestionCount > 0 ? (
+                <Badge
+                  variant="neutral"
+                  icon={<Lightbulb aria-hidden="true" className="size-3" />}
+                  label={
+                    <>
+                      <span aria-hidden="true">
+                        {t("flow_suggestion_marker", { count: suggestionCount })}
+                      </span>
+                      <span className="sr-only">
+                        {t("flow_suggestion_marker_named", { count: suggestionCount, step: label })}
+                      </span>
+                    </>
+                  }
+                />
+              ) : null}
             </span>
           ) : null}
         </div>
@@ -213,10 +239,13 @@ function useStepPrompts(flowId: string, steps: readonly FlowStep[]): StepPrompts
  * its prompt), what it takes and what it produces. Editors open a step, move it up or down with buttons
  * (there is no drag), add a step before or after it and remove it after a
  * confirmation that names the steps that read it. After the step that
- * transcribes, `speakerOffer` offers the step that names the speakers.
+ * transcribes, `speakerOffer` offers the step that names the speakers. For
+ * editors, a step the core has suggestions about carries a quiet marker with
+ * their count; it reads the draft check's query (same key, one request).
  */
 export function FlowStepList({
   flowId,
+  draftRevision,
   steps,
   canEdit,
   headingRef,
@@ -224,6 +253,8 @@ export function FlowStepList({
   ...actions
 }: StepActions & {
   flowId: string;
+  /** The draft revision on screen, which keys the suggestions. */
+  draftRevision: number;
   steps: readonly FlowStep[];
   canEdit: boolean;
   headingRef: React.Ref<HTMLHeadingElement>;
@@ -234,6 +265,13 @@ export function FlowStepList({
   const [removing, setRemoving] = useState<FlowStep | null>(null);
   const [removePending, setRemovePending] = useState(false);
   const prompts = useStepPrompts(flowId, steps);
+  const suggestions = useQuery({
+    ...flowSuggestionsQueryOptions(flowId, draftRevision),
+    enabled: canEdit
+  });
+  const counts = canEdit
+    ? suggestionCounts(shownSuggestions(suggestions.data?.items, steps))
+    : new Map<string, number>();
   const readers = removing ? stepReaders(removing, steps, prompts) : [];
 
   const addButton = (
@@ -282,6 +320,7 @@ export function FlowStepList({
                 prompts={prompts}
                 index={index}
                 canEdit={canEdit}
+                suggestionCount={step.id ? (counts.get(step.id) ?? 0) : 0}
                 speakerOffer={speakerOffer}
                 actions={{ ...actions, onAskRemove: setRemoving }}
               />

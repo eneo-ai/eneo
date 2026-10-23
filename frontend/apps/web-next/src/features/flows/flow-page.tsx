@@ -17,6 +17,7 @@ import { browserApi } from "@/lib/api/browser";
 import { focusAfterRemoval } from "@/lib/focus-after-removal";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
+import type { ComposerOffer } from "@/features/chat/chat-view";
 import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
 import { useSpace } from "@/features/spaces/use-space";
@@ -25,6 +26,7 @@ import { insertionKindsQueryOptions } from "./editor/editor-api";
 import { FlowStepEditor } from "./editor/flow-step-editor";
 import type { StepKindOption } from "./editor/step-kinds";
 import {
+  authoringChatQueryOptions,
   flowKeys,
   flowQueryOptions,
   publishFlow,
@@ -75,7 +77,9 @@ function focusMoveControl(stepId: string, delta: -1 | 1) {
  * revision-fenced edit each; a refusal is shown above both columns with how
  * to fix it, and a stale draft is reloaded. Publishing freezes the
  * definition until it is unpublished. On a phone the two columns are one
- * view at a time.
+ * view at a time. A suggestion's "Fråga assistenten" and the chat's
+ * "Optimera flödet" put a prepared request in the chat's composer (showing
+ * the chat first, on a phone); the person sends it.
  */
 export function FlowPage({ flowId }: { flowId: string }) {
   const t = useTranslations();
@@ -109,6 +113,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
   const [starting, setStarting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [chatOffer, setChatOffer] = useState<ComposerOffer | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
   const [chosenTab, setTab] = useState<PageTab>(
@@ -143,6 +148,18 @@ export function FlowPage({ flowId }: { flowId: string }) {
     },
     [flowId, queryClient, t]
   );
+
+  // The chat is there for someone who may edit, once the core has opened it
+  // (the panel reads the same query); only then is a request handed to it.
+  const chat = useQuery({ ...authoringChatQueryOptions(flow.id), enabled: mayEdit });
+  const chatAvailable = chat.data !== undefined;
+
+  /** Puts `text` in the chat's composer, never sending it; on a phone the chat comes into view first. */
+  const askChat = useCallback((text: string) => {
+    setView("chat");
+    setChatOffer({ text });
+  }, []);
+  const offerTaken = useCallback(() => setChatOffer(null), []);
 
   const saved = (updated: FlowPublic) => {
     storeFlow(queryClient, updated);
@@ -459,6 +476,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                   flow={flow}
                   stepId={openedStep.id}
                   readOnly={!canEdit}
+                  onAskChat={chatAvailable ? askChat : undefined}
                   onSaved={(updated) => {
                     saved(updated);
                     announce(t("flows_step_saved", { step: stepLabel(openedStep, t) }));
@@ -495,10 +513,12 @@ export function FlowPage({ flowId }: { flowId: string }) {
                     speakerServices={space.transcription_services ?? []}
                     onOpenStep={openStep}
                     onRepair={repairReference}
+                    onAskChat={chatAvailable ? askChat : undefined}
                   />
                 ) : null}
                 <FlowStepList
                   flowId={flow.id}
+                  draftRevision={flow.draft_revision}
                   steps={steps}
                   canEdit={canEdit}
                   headingRef={stepsHeadingRef}
@@ -541,6 +561,9 @@ export function FlowPage({ flowId }: { flowId: string }) {
             flow={flow}
             onFlowMayHaveChanged={() => void refreshFromChat()}
             onRefused={(error, title) => refused(error, title, steps)}
+            offer={chatOffer}
+            onOfferTaken={offerTaken}
+            onAskChat={askChat}
           />
         </section>
       </div>

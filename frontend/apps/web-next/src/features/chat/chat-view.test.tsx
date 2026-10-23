@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
-import { ChatView, type ActivityState } from "./chat-view";
+import { ChatView, type ActivityState, type ComposerOffer } from "./chat-view";
 
 const spies = vi.hoisted(() => ({ announce: vi.fn(), toastError: vi.fn() }));
 
@@ -165,6 +165,76 @@ describe("ChatView conversation", () => {
     );
     await waitFor(() => expect(screen.getByRole("log")).toBeTruthy());
     await expectNoAxeViolations(container);
+  });
+});
+
+/**
+ * A page around the chat that prepares messages for its composer, as a
+ * flow's "Fråga assistenten" does, and lets go of each once it is taken.
+ */
+function OfferHarness({
+  messages = [],
+  onOfferTaken
+}: {
+  messages?: EneoUIMessage[];
+  onOfferTaken: () => void;
+}) {
+  const [activity, setActivity] = useState<ActivityState | null>(null);
+  const [offer, setOffer] = useState<ComposerOffer | null>(null);
+  return (
+    <div className="flex h-[600px] flex-col">
+      <button type="button" onClick={() => setOffer({ text: "Förklara steg 2." })}>
+        Erbjud
+      </button>
+      <ChatView
+        partner={assistant}
+        initialMessages={messages}
+        initialSessionId={messages.length > 0 ? "session-1" : null}
+        activity={activity}
+        onActivityChange={setActivity}
+        offer={offer}
+        onOfferTaken={() => {
+          onOfferTaken();
+          setOffer(null);
+        }}
+      />
+    </div>
+  );
+}
+
+describe("ChatView offered message", () => {
+  it("puts the page's message in the start composer and focuses it, sending nothing", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const onOfferTaken = vi.fn();
+    const { container } = renderInApp(<OfferHarness onOfferTaken={onOfferTaken} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Erbjud" }));
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox", {
+      name: "Meddelande till Upphandlingsassistenten"
+    });
+    await waitFor(() => expect(textarea.value).toBe("Förklara steg 2."));
+    expect(document.activeElement).toBe(textarea);
+    expect(onOfferTaken).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(api.POST).not.toHaveBeenCalled();
+    await expectNoAxeViolations(container);
+    vi.unstubAllGlobals();
+  });
+
+  it("adds the message after what the person has typed in a docked composer", async () => {
+    const onOfferTaken = vi.fn();
+    renderInApp(<OfferHarness messages={history} onOfferTaken={onOfferTaken} />);
+    const textarea = screen.getByRole<HTMLTextAreaElement>("textbox", {
+      name: "Meddelande till Upphandlingsassistenten"
+    });
+    fireEvent.change(textarea, { target: { value: "Hej" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Erbjud" }));
+    await waitFor(() => expect(textarea.value).toBe("Hej\nFörklara steg 2."));
+    expect(document.activeElement).toBe(textarea);
+    expect(onOfferTaken).toHaveBeenCalledTimes(1);
+    expect(api.POST).not.toHaveBeenCalled();
   });
 });
 

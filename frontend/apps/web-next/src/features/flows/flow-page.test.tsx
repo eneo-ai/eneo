@@ -29,7 +29,8 @@ const state = vi.hoisted(() => ({
   runs: null as unknown,
   unpublish: null as unknown,
   mode: null as unknown,
-  kinds: null as unknown
+  kinds: null as unknown,
+  suggestions: null as unknown
 }));
 
 const api = vi.hoisted(() => ({
@@ -37,6 +38,7 @@ const api = vi.hoisted(() => ({
     if (path === "/api/v1/flows/{id}/") return state.flow;
     if (path === "/api/v1/flows/{id}/runs/") return state.runs;
     if (path === "/api/v1/flows/{id}/step-kinds/") return state.kinds;
+    if (path === "/api/v1/flows/{id}/suggestions/") return state.suggestions;
     if (path === "/api/v1/assistants/{id}/") {
       return {
         data: { id: "assistant-chat", name: "Medborgarbrev", mcp_servers: [] },
@@ -70,15 +72,20 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   useAnnounce: () => state.announce
 }));
 // The conversation itself is the chat feature's; the page only follows what it reports.
+// It shows what the page offered its composer (the chat view's own tests put
+// an offer in the composer and check that nothing is sent).
 vi.mock("@/features/chat/chat-view", () => ({
   ChatView: ({
     onToolCallFinished,
-    onAnswerFinished
+    onAnswerFinished,
+    offer
   }: {
     onToolCallFinished: (call: { serverName: string; isInternal: boolean }) => void;
     onAnswerFinished: () => void;
+    offer: { text: string } | null;
   }) => (
     <div>
+      {offer ? <p>Erbjudet: {offer.text}</p> : null}
       <button
         type="button"
         onClick={() => onToolCallFinished({ serverName: "flows", isInternal: true })}
@@ -102,8 +109,43 @@ const steps = [
   makeStep(2, { user_description: "Skriv svar" })
 ];
 
+/** One `duplicate_read` on step 2, reading step 1 as its input and in its prompt. */
+const DUPLICATE_READ = {
+  code: "duplicate_read",
+  fingerprint: "f".repeat(64),
+  steps: ["step-2", "step-1"],
+  params: {
+    producer_step_order: 1,
+    producer_step_id: "step-1",
+    contained: false,
+    reads: [
+      { channel: "input", site: "input_source", selector: [] },
+      { channel: "prompt", site: "assistant_prompt:step_1.output.text", selector: [] }
+    ]
+  },
+  message: "Step 2 reads step 1 twice.",
+  impact: { basis: "definition", level: "high" },
+  fix: { kind: "patch" }
+};
+
+const suggestions = (revision: number, items: unknown[]) =>
+  ok({ flow_id: "flow-1", draft_revision: revision, items });
+
+/** The flow's chat, opened for someone who may edit. */
+const CHAT = { flow_id: "flow-1", assistant_id: "assistant-chat", session_id: "session-1" };
+
+/** Posts that open the chat and check the draft; anything else would be news. */
+const OPENING_POSTS = [
+  "/api/v1/flows/{id}/authoring-chat/",
+  "/api/v1/flows/{id}/security-classification/preview"
+];
+
+/** What the page posted, by path. */
+const posted = () => api.POST.mock.calls.map(([path]) => path);
+
 beforeEach(() => {
   state.flow = ok(makeFlow({ steps }));
+  state.suggestions = suggestions(4, []);
   // Without edit access the chat is not offered; most tests are about the definition.
   state.chat = refused(403, { code: "insufficient_space_permission", message: "No." });
 });
@@ -507,5 +549,72 @@ describe("FlowPage", () => {
       })
     );
     expect(await screen.findByRole("button", { name: "Ny konversation" })).toBeTruthy();
+  });
+
+  it("hands a suggestion to the chat, bringing the chat into view on a phone, unsent", async () => {
+    state.chat = ok({ ...CHAT, editing: false });
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    const { container } = renderPage();
+    const definition = screen.getByRole("region", { name: "Flödet" });
+    const chat = screen.getByRole("region", { name: "Chatt om flödet" });
+    expect(chat.className).toContain("max-lg:hidden");
+
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Fråga assistenten om ”Svaret från steg 1 skickas två gånger” (Steg 2: Skriv svar)"
+      })
+    );
+    expect(
+      await screen.findByText(
+        "Erbjudet: Förklara förslaget ”Svaret från steg 1 skickas två gånger” (duplicate_read) " +
+          "som gäller steg 2 (Skriv svar) och steg 1 (Sammanfatta), och föreslå hur flödet kan ändras."
+      )
+    ).toBeTruthy();
+    expect(definition.className).toContain("max-lg:hidden");
+    expect(chat.className).not.toContain("max-lg:hidden");
+    // The chat was opened and the draft checked; nothing was sent.
+    expect(posted().every((path) => OPENING_POSTS.includes(path))).toBe(true);
+    await expectNoAxeViolations(container);
+  });
+
+  it("offers no request to a chat that is not available", async () => {
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    renderPage();
+    expect(await screen.findByText("Svaret från steg 1 skickas två gånger")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Fråga assistenten/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Optimera flödet" })).toBeNull();
+  });
+
+  it("puts the review request in the chat from Optimera flödet, sending nothing", async () => {
+    state.chat = ok({ ...CHAT, editing: false });
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Optimera flödet" }));
+    expect(
+      await screen.findByText(/^Erbjudet: Granska flödet med read_flow_suggestions/)
+    ).toBeTruthy();
+    expect(posted().every((path) => OPENING_POSTS.includes(path))).toBe(true);
+  });
+
+  it("asks for the suggestions again when the chat's tools change the draft", async () => {
+    state.chat = ok({ ...CHAT, editing: true });
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    renderPage();
+    const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+    expect(await within(second).findByText("1 förslag för Steg 2: Skriv svar")).toBeTruthy();
+    expect(await screen.findByRole("heading", { level: 3, name: "Förslag (1)" })).toBeTruthy();
+
+    // The chat removed the duplicate: a new revision, and no suggestion on it.
+    state.flow = ok(makeFlow({ draft_revision: 5, steps }));
+    state.suggestions = suggestions(5, []);
+    fireEvent.click(screen.getByRole("button", { name: "Verktyg klart" }));
+
+    await waitFor(() =>
+      expect(within(second).queryByText("1 förslag för Steg 2: Skriv svar")).toBeNull()
+    );
+    expect(screen.queryByRole("heading", { level: 3, name: "Förslag (1)" })).toBeNull();
+    // The panel and the marker share one request per revision.
+    expect(
+      api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/suggestions/")
+    ).toHaveLength(2);
   });
 });
