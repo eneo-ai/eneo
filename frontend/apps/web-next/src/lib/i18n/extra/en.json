@@ -3287,7 +3287,7 @@
   "flow_error_flow_template_read_only": "You can use this flow but cannot replace its template. Ask a flow editor to replace it.",
   "flow_error_flow_template_unsupported_extension": "Only .docx files can be used as templates. Choose a .docx file and try again.",
   "flow_error_typed_io_contract_violation": "The step's result does not have the required format. Check the result and the step's instructions in the step details.",
-  "flow_error_typed_io_contract_not_checked": "The step's JSON could not be checked against the required format within the time limit, or the check failed. A large value or a complex format takes longer to check; the value was not found invalid.",
+  "flow_error_typed_io_contract_not_checked": "The step's JSON, or the arguments of its tool call, could not be checked against the required format within the time limit, or the check failed. A large value or a complex format takes longer to check; the value was not found invalid.",
   "flow_error_flow_model_capacity_undeclared": "The selected model has no limit set for how much text it can take in or write. Ask an administrator to set both limits before starting a new run.",
   "flow_error_flow_llm_output_truncated": "The model reached its answer length limit before finishing. Reduce the material or how much the answer should contain, or ask an administrator to review the model's limits before starting a new run.",
   "flow_error_flow_llm_output_whitespace_abort": "The model got stuck and stopped writing anything meaningful, so the call was stopped. What the model managed to do is unknown. Ask an administrator to look at the model before you start a new run.",
@@ -3344,7 +3344,7 @@
   "flow_error_typed_io_invalid_output_mode_combination": "The selected processing does not work with the step's material or result settings. A flow editor needs to adjust the step and publish the flow again. Then start a new run.",
   "flow_error_typed_io_invalid_schema": "The step's fixed answer format is invalid. Ask a flow editor to fix the format and publish the flow again.",
   "flow_error_typed_io_missing_required_files": "Required files are missing. Add them and start the run again.",
-  "flow_error_typed_io_output_parse_failed": "The model's answer could not be read in the expected fixed format. Adjust the instruction or the format and start a new run.",
+  "flow_error_typed_io_output_parse_failed": "The model's answer, or a step's output value, could not be read as JSON in the expected fixed format: it is malformed or nested too deep. Adjust the instruction or the format and start a new run.",
   "flow_error_typed_io_render_failed": "The document could not be created. Check the step's answer and the document format before running again.",
   "flow_error_typed_io_template_checksum_mismatch": "The Word template changed after publishing. A flow editor needs to publish the flow again with the current template. Then start a new run.",
   "flow_error_typed_io_template_render_failed": "The Word template could not be filled in. Check the template fields and the step results they draw from.",
@@ -3686,5 +3686,13 @@
   "flows_chat_mode_edit_description": "The chat changes the draft right away.",
   "flows_chat_placeholder_ask": "Ask about the flow…",
   "flows_chat_placeholder_edit": "Describe the change…",
-  "flows_chat_resize_handle": "Resize the chat"
+  "flows_chat_resize_handle": "Resize the chat",
+  "integration_source_collapse_folder": "Collapse {name}",
+  "integration_source_expand_folder": "Expand {name}",
+  "duration": "Duration",
+  "pages_succeeded": "{count} pages succeeded",
+  "files_succeeded": "{count} files succeeded",
+  "pages_and_files_succeeded": "{pages} pages and {files} files succeeded",
+  "pages_unchanged_count": "{count} pages unchanged",
+  "admin_issued_password_copy_failed": "Couldn't copy. Select the password and copy it yourself."
 }

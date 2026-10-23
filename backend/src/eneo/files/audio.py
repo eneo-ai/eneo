@@ -1,5 +1,3 @@
-# MIT License
-
 import asyncio
 import math
 import os

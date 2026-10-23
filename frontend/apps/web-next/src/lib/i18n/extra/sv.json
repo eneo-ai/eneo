@@ -3287,7 +3287,7 @@
   "flow_error_flow_template_read_only": "Du kan använda flödet men inte byta dess mall. Be en flödesredigerare byta mallen.",
   "flow_error_flow_template_unsupported_extension": "Endast .docx-filer kan användas som mall. Välj en .docx-fil och försök igen.",
   "flow_error_typed_io_contract_violation": "Stegets resultat har inte det format som krävs. Kontrollera resultatet och stegets instruktioner i stegdetaljerna.",
-  "flow_error_typed_io_contract_not_checked": "Stegets JSON kunde inte kontrolleras mot det krävda formatet inom tidsgränsen, eller så misslyckades kontrollen. Ett stort värde eller ett komplext format tar längre tid att kontrollera; värdet befanns inte ogiltigt.",
+  "flow_error_typed_io_contract_not_checked": "Stegets JSON, eller argumenten till dess verktygsanrop, kunde inte kontrolleras mot det krävda formatet inom tidsgränsen, eller så misslyckades kontrollen. Ett stort värde eller ett komplext format tar längre tid att kontrollera; värdet befanns inte ogiltigt.",
   "flow_error_flow_model_capacity_undeclared": "Det är inte angivet hur mycket text den valda modellen kan ta emot eller skriva. Be en administratör ange båda gränserna innan du startar en ny körning.",
   "flow_error_flow_llm_output_truncated": "Modellen nådde sin gräns för svarslängd innan svaret var färdigt. Minska underlaget eller hur mycket svaret ska innehålla, eller be en administratör se över modellens gränser innan du startar en ny körning.",
   "flow_error_flow_llm_output_whitespace_abort": "Modellen fastnade och slutade skriva något meningsfullt, så anropet avbröts. Det är okänt vad modellen hann göra. Be en administratör se över modellen innan du startar en ny körning.",
@@ -3344,7 +3344,7 @@
   "flow_error_typed_io_invalid_output_mode_combination": "Den valda bearbetningen fungerar inte med stegets inställningar för underlag eller resultat. En flödesredigerare behöver justera steget och publicera flödet igen. Starta sedan en ny körning.",
   "flow_error_typed_io_invalid_schema": "Stegets fasta svarsformat är felaktigt. Be en flödesredigerare rätta formatet och publicera flödet igen.",
   "flow_error_typed_io_missing_required_files": "Filer som krävs saknas. Lägg till filerna och starta körningen igen.",
-  "flow_error_typed_io_output_parse_failed": "Modellens svar kunde inte läsas i det förväntade fasta formatet. Justera instruktionen eller formatet och starta en ny körning.",
+  "flow_error_typed_io_output_parse_failed": "Modellens svar, eller stegets utdatavärde, kunde inte läsas som JSON i det förväntade fasta formatet: det är felformat eller för djupt nästlat. Justera instruktionen eller formatet och starta en ny körning.",
   "flow_error_typed_io_render_failed": "Dokumentet kunde inte skapas. Kontrollera stegets svar och dokumentformatet innan du kör igen.",
   "flow_error_typed_io_template_checksum_mismatch": "Word-mallen ändrades efter publiceringen. En flödesredigerare behöver publicera flödet igen med den aktuella mallen. Starta sedan en ny körning.",
   "flow_error_typed_io_template_render_failed": "Word-mallen kunde inte fyllas i. Kontrollera mallens fält och de stegresultat de hämtar från.",
@@ -3686,5 +3686,13 @@
   "flows_chat_mode_edit_description": "Chatten ändrar utkastet direkt.",
   "flows_chat_placeholder_ask": "Fråga om flödet…",
   "flows_chat_placeholder_edit": "Beskriv ändringen…",
-  "flows_chat_resize_handle": "Ändra storlek på chatten"
+  "flows_chat_resize_handle": "Ändra storlek på chatten",
+  "integration_source_collapse_folder": "Fäll ihop {name}",
+  "integration_source_expand_folder": "Fäll ut {name}",
+  "duration": "Varaktighet",
+  "pages_succeeded": "{count} sidor lyckades",
+  "files_succeeded": "{count} filer lyckades",
+  "pages_and_files_succeeded": "{pages} sidor och {files} filer lyckades",
+  "pages_unchanged_count": "{count} sidor oförändrade",
+  "admin_issued_password_copy_failed": "Det gick inte att kopiera. Markera lösenordet och kopiera det själv."
 }

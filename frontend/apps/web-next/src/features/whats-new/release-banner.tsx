@@ -44,12 +44,11 @@ function ReleaseBanner({
   const t = useTranslations();
   const router = useRouter();
   const { user, can } = useAppContext();
-  const isAdmin = can("admin");
   // Captured once: recording the release as announced clears pendingRelease,
   // and the banner must stay until the user leaves or dismisses it.
   const [release] = useState<Release | null>(() =>
     pendingRelease &&
-    visibleEntries(pendingRelease, isAdmin).length > 0 &&
+    visibleEntries(pendingRelease, can).length > 0 &&
     shouldShowAnnouncement(pendingRelease, user.created_at)
       ? pendingRelease
       : null
@@ -64,8 +63,8 @@ function ReleaseBanner({
   }, [release, markLatestAnnounced]);
 
   if (!release || !open) return null;
-  const entries = visibleEntries(release, isAdmin);
-  const steps = tourEntries(release, isAdmin);
+  const entries = visibleEntries(release, can);
+  const steps = tourEntries(release, can);
 
   async function startTour() {
     if (tour.running) return;

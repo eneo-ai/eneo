@@ -252,3 +252,13 @@ export function crawlFailureReasonHelp(reason: string): string | undefined {
       return undefined;
   }
 }
+
+/** The failed address as a link target, when it is a plain HTTP(S) URL. */
+export function crawlFailureHref(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : undefined;
+  } catch {
+    return undefined;
+  }
+}

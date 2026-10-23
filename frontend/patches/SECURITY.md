@@ -28,14 +28,16 @@ The resolutions for xmldom, PostCSS, Mermaid and sharp select published fixes
 where upstream parents still pin vulnerable versions. Revisit those overrides
 when the parents accept the fixed releases; do not widen them across API majors.
 
-## katex 0.16.x — GHSA-238p-pmpm-9mq7
+## KaTeX resolution — GHSA-238p-pmpm-9mq7
 
-Reviewed 2026-10-13. Exception expires 2026-12-01 (CI fails after that date).
-Low severity (CVSS 2.1): KaTeX reads inherited `Object.prototype` properties as
-settings, so it only matters on a page that already has prototype pollution.
-The fixed release is 0.18.2, but every dependent (rehype-katex, @streamdown/math,
-mermaid, nextra, micromark-extension-math) still pins `^0.16`, so a root
-resolution would run them against a version they have not released for.
-No patch is installed; `scripts/audit-dependencies.mjs` accepts exactly this
-advisory until the dependents move or the date passes. All other advisories
-still fail.
+Reviewed 2026-10-22. The root resolution selects KaTeX 0.18.11 for both apps
+and the transitive renderers (rehype-katex, Mermaid, Nextra and
+micromark-extension-math). This includes the upstream 0.18.2 fix for inherited
+settings, setting metadata and namespace entries. There is no audit exception.
+
+The resolution overrides the parents' older `^0.16` ranges; remove it once
+those parents require a fixed version. The beta's math and clipboard tests
+cover rendering, size limits and untrusted formulas, including inherited
+`trust` and `processor` properties. Both apps retain the shared
+`@eneo/markdown-math` options. KaTeX 0.18 prefixes internal CSS classes;
+application styles use the stable outer `.katex` and `.katex-display` classes.

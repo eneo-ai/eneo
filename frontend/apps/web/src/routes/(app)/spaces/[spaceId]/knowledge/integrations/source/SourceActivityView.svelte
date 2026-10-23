@@ -8,7 +8,7 @@
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getEneo } from "$lib/core/Eneo";
   import { getErrorMessage } from "$lib/core/errors";
-  import { formatDateMedium, formatDuration, formatTime } from "$lib/core/formatting/dateTime";
+  import { formatDuration, formatTime } from "$lib/core/formatting/dateTime";
   import { describeSkipReason } from "$lib/features/integrations/skipReasons";
   import { isCredentialsError } from "$lib/features/integrations/sourceProblems";
   import {
@@ -25,6 +25,7 @@
     type SyncLog
   } from "$lib/features/integrations/syncActivity";
   import { m } from "$lib/paraglide/messages";
+  import SourceActivityDay from "$lib/features/knowledge/components/SourceActivityDay.svelte";
 
   interface Props {
     items: IntegrationKnowledge[];
@@ -290,110 +291,102 @@
     {/if}
 
     {#each days as day (day.day)}
-      <section aria-labelledby="activity-day-{day.day}" class="flex flex-col">
-        <h2
-          id="activity-day-{day.day}"
-          class="text-secondary pb-2 text-xs font-semibold tracking-wide uppercase"
-        >
-          {formatDateMedium(day.entries[0].log.started_at)}
-        </h2>
-        <ol class="flex flex-col">
-          {#each day.entries as { log, item } (log.id)}
-            {@const kind = activityKind(log)}
-            {@const extras = readSyncLogExtras(log)}
-            {@const failure = failureText(log)}
-            {@const took = duration(log)}
-            <li class="border-dimmer flex gap-3 border-t py-3">
-              <time
-                class="text-secondary w-11 shrink-0 pt-1.5 text-xs tabular-nums"
-                datetime={log.started_at}
-              >
-                {formatTime(log.started_at)}
-              </time>
-              <span
-                class="flex size-7 shrink-0 items-center justify-center rounded-full {iconStyles[
-                  kind
-                ]}"
-                aria-hidden="true"
-              >
-                {#if kind === "failed"}
-                  <X class="size-3.5" />
-                {:else if kind === "running"}
-                  <IconLoadingSpinner size="sm" class="motion-safe:animate-spin" />
-                {:else}
-                  <Check class="size-3.5" />
-                {/if}
-              </span>
-              <div class="flex min-w-0 flex-1 flex-col gap-1">
-                <p class="font-medium">{title(log, kind)}</p>
-                {#if failure}
-                  <p class="text-negative-stronger text-sm break-words">{failure}</p>
-                {/if}
-                {#if extras.reconcileWarning}
-                  <p class="text-warning-stronger text-sm">
-                    <span class="font-medium">{m.sync_reconcile_warning()}:</span>
-                    {extras.reconcileWarning}
-                  </p>
-                {/if}
-                <p class="text-secondary text-xs">
-                  {[
-                    multiple && !selectedId ? item.name : null,
-                    log.sync_type === "full" ? m.full_sync() : m.delta_sync(),
-                    took
-                  ]
-                    .filter((part) => part !== null)
-                    .join(" · ")}
+      <SourceActivityDay date={day.entries[0].log.started_at}>
+        {#each day.entries as { log, item } (log.id)}
+          {@const kind = activityKind(log)}
+          {@const extras = readSyncLogExtras(log)}
+          {@const failure = failureText(log)}
+          {@const took = duration(log)}
+          <li class="border-dimmer flex gap-3 border-t py-3">
+            <time
+              class="text-secondary w-11 shrink-0 pt-1.5 text-xs tabular-nums"
+              datetime={log.started_at}
+            >
+              {formatTime(log.started_at)}
+            </time>
+            <span
+              class="flex size-7 shrink-0 items-center justify-center rounded-full {iconStyles[
+                kind
+              ]}"
+              aria-hidden="true"
+            >
+              {#if kind === "failed"}
+                <X class="size-3.5" />
+              {:else if kind === "running"}
+                <IconLoadingSpinner size="sm" class="motion-safe:animate-spin" />
+              {:else}
+                <Check class="size-3.5" />
+              {/if}
+            </span>
+            <div class="flex min-w-0 flex-1 flex-col gap-1">
+              <p class="font-medium">{title(log, kind)}</p>
+              {#if failure}
+                <p class="text-negative-stronger text-sm break-words">{failure}</p>
+              {/if}
+              {#if extras.reconcileWarning}
+                <p class="text-warning-stronger text-sm">
+                  <span class="font-medium">{m.sync_reconcile_warning()}:</span>
+                  {extras.reconcileWarning}
                 </p>
-                {#if extras.changedFiles.length > 0 || log.skipped_details?.length > 0}
-                  {@const notListed =
-                    skippedNotListed(log) +
-                    Math.max(0, extras.changedTotal - extras.changedFiles.length)}
-                  <details class="text-sm">
-                    <summary
-                      class="text-secondary focus-visible:ring-stronger w-fit cursor-pointer rounded text-xs hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                    >
-                      {extras.changedTotal + log.skipped_items === 1
-                        ? m.integration_activity_show_files_one()
-                        : m.integration_activity_show_files_other({
-                            count: extras.changedTotal + log.skipped_items
-                          })}
-                    </summary>
-                    <ul class="mt-1 flex flex-col gap-0.5 pl-1 text-xs">
-                      <!-- The same file name recurs across folders, so the key needs the position. -->
-                      {#each extras.changedFiles as change, index (`c${index}:${change.file}`)}
-                        <li class="flex gap-2">
-                          <span class="w-20 shrink-0 font-medium {changeStyle[change.change]}"
-                            >{changeLabel(change.change)}</span
-                          >
-                          <span class="text-primary min-w-0 break-all">{change.file}</span>
-                        </li>
-                      {/each}
-                      {#each log.skipped_details ?? [] as detail, index (`s${index}:${detail.file}`)}
-                        <li class="flex gap-2">
-                          <span class="text-warning-stronger w-20 shrink-0 font-medium"
-                            >{m.integration_activity_change_skipped()}</span
-                          >
-                          <span class="min-w-0 break-all">
-                            <span class="text-primary">{detail.file}</span>
-                            <span class="text-secondary">– {describeSkipReason(detail)}</span>
-                          </span>
-                        </li>
-                      {/each}
-                      {#if notListed > 0}
-                        <li class="text-secondary italic">
-                          {m.skipped_and_n_more({ count: notListed })}
-                        </li>
-                      {:else if extras.skippedTruncated}
-                        <li class="text-secondary italic">{m.skipped_list_truncated()}</li>
-                      {/if}
-                    </ul>
-                  </details>
-                {/if}
-              </div>
-            </li>
-          {/each}
-        </ol>
-      </section>
+              {/if}
+              <p class="text-secondary text-xs">
+                {[
+                  multiple && !selectedId ? item.name : null,
+                  log.sync_type === "full" ? m.full_sync() : m.delta_sync(),
+                  took
+                ]
+                  .filter((part) => part !== null)
+                  .join(" · ")}
+              </p>
+              {#if extras.changedFiles.length > 0 || log.skipped_details?.length > 0}
+                {@const notListed =
+                  skippedNotListed(log) +
+                  Math.max(0, extras.changedTotal - extras.changedFiles.length)}
+                <details class="text-sm">
+                  <summary
+                    class="text-secondary focus-visible:ring-stronger w-fit cursor-pointer rounded text-xs hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                  >
+                    {extras.changedTotal + log.skipped_items === 1
+                      ? m.integration_activity_show_files_one()
+                      : m.integration_activity_show_files_other({
+                          count: extras.changedTotal + log.skipped_items
+                        })}
+                  </summary>
+                  <ul class="mt-1 flex flex-col gap-0.5 pl-1 text-xs">
+                    <!-- The same file name recurs across folders, so the key needs the position. -->
+                    {#each extras.changedFiles as change, index (`c${index}:${change.file}`)}
+                      <li class="flex gap-2">
+                        <span class="w-20 shrink-0 font-medium {changeStyle[change.change]}"
+                          >{changeLabel(change.change)}</span
+                        >
+                        <span class="text-primary min-w-0 break-all">{change.file}</span>
+                      </li>
+                    {/each}
+                    {#each log.skipped_details ?? [] as detail, index (`s${index}:${detail.file}`)}
+                      <li class="flex gap-2">
+                        <span class="text-warning-stronger w-20 shrink-0 font-medium"
+                          >{m.integration_activity_change_skipped()}</span
+                        >
+                        <span class="min-w-0 break-all">
+                          <span class="text-primary">{detail.file}</span>
+                          <span class="text-secondary">– {describeSkipReason(detail)}</span>
+                        </span>
+                      </li>
+                    {/each}
+                    {#if notListed > 0}
+                      <li class="text-secondary italic">
+                        {m.skipped_and_n_more({ count: notListed })}
+                      </li>
+                    {:else if extras.skippedTruncated}
+                      <li class="text-secondary italic">{m.skipped_list_truncated()}</li>
+                    {/if}
+                  </ul>
+                </details>
+              {/if}
+            </div>
+          </li>
+        {/each}
+      </SourceActivityDay>
     {/each}
 
     {#if hasMore}

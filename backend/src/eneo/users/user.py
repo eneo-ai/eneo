@@ -22,6 +22,7 @@ from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB, RolePublic
 from eneo.tenants.tenant import TenantInDB, TenantPublic
 from eneo.users.password import LOCAL_PASSWORD_POLICY, LocalPasswordPolicy
+from eneo.users.password_lifecycle import PasswordStatusPublic
 
 
 class UserState(str, Enum):
@@ -231,6 +232,8 @@ class UserAdd(UserBase):
     tenant_id: UUID
     quota_limit: Optional[int] = None
     credential_version: int = 0
+    password_changed_at: Optional[datetime] = None
+    password_change_required: bool = False
 
     roles: list[ModelId] = []
 
@@ -248,6 +251,8 @@ class UserUpdate(BaseModel):
     quota_limit: Optional[int] = None
     salt: Optional[str] = None
     credential_version: Optional[int] = Field(default=None, ge=0)
+    password_changed_at: Optional[datetime] = None
+    password_change_required: Optional[bool] = None
 
     roles: Optional[list[ModelId]] = None
 
@@ -287,10 +292,15 @@ class UserInDB(UserInDBBase):
     state: UserState
     quota_limit: Optional[int] = None
     credential_version: int = Field(default=0, ge=0)
+    password_changed_at: Optional[datetime] = None
+    password_change_required: bool = False
 
     user_groups: list[UserGroupInDBRead] = []
     tenant: TenantInDB
     active_api_key: Optional[ApiKeyV2InDB] = None
+    # The session's ``auth_method`` claim (eneo.users.password_lifecycle).
+    # Request-scoped like active_api_key; never persisted or returned.
+    session_auth_method: Optional[str] = Field(default=None, exclude=True, repr=False)
     roles: list[RoleInDB] = []
     quota_used: int = 0
     deleted_at: Optional[datetime] = Field(
@@ -356,6 +366,13 @@ class UserPublic(UserPublicBase):
     roles: list[RolePublic]
     user_groups: list[UserGroupRead]
     password_change: PasswordChangeCapabilityPublic
+    password_status: Optional[PasswordStatusPublic] = Field(
+        default=None,
+        description=(
+            "Lifecycle of the local Eneo password against the tenant policy. "
+            "Absent for accounts without a local password."
+        ),
+    )
 
 
 class UserPublicWithAccessToken(UserPublic):
@@ -392,6 +409,14 @@ class UserAddAdmin(UserBase):
 
 class UserAddSuperAdmin(UserAddAdmin):
     tenant_id: UUID
+    password_change_required: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Whether the account must replace the given password at its first "
+            "password login. Unset follows the tenant password policy; false "
+            "skips this initial change. The tenant's max_age_days still applies."
+        ),
+    )
 
 
 class UserAdminView(UserPublicBase):
@@ -400,6 +425,8 @@ class UserAdminView(UserPublicBase):
     quota_limit: Optional[int]
     is_active: bool
     state: UserState
+    password_changed_at: Optional[datetime] = None
+    password_change_required: bool = False
 
     roles: list[RolePublic]
     user_groups: list[UserGroupRead]

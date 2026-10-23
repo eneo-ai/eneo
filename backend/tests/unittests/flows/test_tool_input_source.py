@@ -404,6 +404,10 @@ def test_a_tool_step_cannot_use_a_mode_that_never_reads_its_input() -> None:
 
     assert (refused.code, refused.step_order) == (_INVALID_CONFIG, 2)
     assert (refused.context or {})["field"] == "output_mode"
+    assert str(refused) == (
+        "Step 2: output_mode 'template_fill' does not read the step's input, so "
+        "it cannot be used with input_source 'tool'."
+    )
 
 
 def test_a_tool_step_cannot_also_take_uploaded_files() -> None:

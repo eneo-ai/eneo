@@ -15,6 +15,7 @@ them. A tenant row with `enabled = false` turns flows off for that tenant.
 | --- | --- |
 | Reference core, `origin/feature/flows-and-builder` | `044ec559c1bb1865149325b0f5c6d7f425f95e2a` |
 | Develop merged in, `origin/develop` on 2026-10-21 | `e6c635414b0ee20b622ca32a64d744302f39db26` |
+| Develop merged in again, `origin/develop` on 2026-10-23 | `6d7bf6753ffa49e0946bc9828490a6f627f6f4af` |
 | Merge base of the two | `ff30fadee32c81ac668ce1e770a7484cf161d835` |
 | Earlier develop-based adoption checkpoint, `codex/flows-core-adoption` | `97aafa6d0050df94b73c4c6b27b71bdd0c8c05a4` (parent `e81b3e9d4`) |
 | Earlier simplified core with its local HTTP, MCP and webhook work, `feat/flows-core-mcp-wip` | built from stash `cf5f1fb1c136bbcb6f8477185b221340a94a25d5` on `f0dc5236f` |
@@ -41,6 +42,13 @@ diff.
   that a navigation or an applied update made stale (develop).
 - Release notes are develop's: entries for 2.3 are curated on develop, so the
   reference's flow upload-limit note is not carried into 2.3.0.
+- Password lifecycle (2026-10-23 merge): the branch keeps its own error codes
+  for the password errors (9061-9064, where develop uses 9058-9061), and
+  develop's `PASSWORD_CHANGE_REQUIRED` keeps 9070. The e2e stacks set
+  develop's `DEFAULT_USER_PASSWORD_CHANGE_REQUIRED: "false"` in their shared
+  backend environment. eneo-js keeps running its tests with `bun test`, so
+  develop's two new tests count calls with plain spies instead of
+  `node:test`'s `mock`, which bun does not provide.
 
 ### Migrations
 
@@ -56,6 +64,12 @@ alembic stamp --purge 202610141000 202610142100 && \
 alembic upgrade 202610191600 && \
 alembic stamp --purge 202610191005
 ```
+
+The 2026-10-23 merge brought develop's `202610211200` (website path index) and
+`202610161000` (password lifecycle), both after `202610191600`. The new merge
+`202610231000` joins `202610161000` with the flow head `202610221100`, so a
+flow database runs both develop migrations on its next upgrade. Re-pointing
+`202610151000` again would have marked them applied without running them.
 
 ## Transfer from the adoption checkpoint
 

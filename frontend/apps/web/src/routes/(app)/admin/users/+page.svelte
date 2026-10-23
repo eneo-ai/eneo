@@ -4,6 +4,7 @@
   import UserEditor from "./editor/UserEditor.svelte";
   import UserTable from "./UserTable.svelte";
   import UserFilters from "./UserFilters.svelte";
+  import PasswordPolicyPanel from "./PasswordPolicyPanel.svelte";
   import { m } from "$lib/paraglide/messages";
   import { resolve } from "$app/paths";
   import { navigating, page } from "$app/state";
@@ -102,6 +103,9 @@
           </nav>
         {/if}
       </div>
+      {#if data.passwordLifecyclePolicy}
+        <PasswordPolicyPanel policy={data.passwordLifecyclePolicy} />
+      {/if}
     </div>
   </Page.Main>
 </Page.Root>

@@ -1,7 +1,5 @@
 #!/bin/bash
 # Copyright (c) 2024 Sundsvalls Kommun
-#
-# Licensed under the MIT License.
 
 set -euf -o pipefail
 

@@ -27,7 +27,7 @@ const release: Release = {
   version: "2.2.0",
   entries: [entry("a"), { ...entry("b"), showMe: undefined }, entry("c", "admin"), entry("d")]
 };
-const steps = tourSteps(release, true, "en");
+const steps = tourSteps(release, () => true, "en");
 const labels = { done: "Done", progress: "Step {{current}} of {{total}}" };
 let tour: ReturnType<typeof createWhatsNewTour>;
 
@@ -54,7 +54,7 @@ afterEach(() => {
 
 describe("what's new walkthrough", () => {
   it("derives localized steps from visible entries only", () => {
-    expect(tourSteps(release, false, "sv").map((step) => [step.anchor, step.title])).toEqual([
+    expect(tourSteps(release, () => false, "sv").map((step) => [step.anchor, step.title])).toEqual([
       ["a", "a sv"],
       ["d", "d sv"]
     ]);

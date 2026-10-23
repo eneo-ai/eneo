@@ -85,10 +85,12 @@ function matchInlineMath(src: string, prev: string | undefined): InlineMath | un
 
 // marked asks where math starts again after each text token, with the rest
 // of the paragraph. Its text ends before each of these characters anyway, and
-// at each line end when line breaks are kept, so a `$` after the first one is
-// not a cut and the search stops there.
-const textEnd = /[$\\<![`*~_]/;
-const textOrLineEnd = /[$\\<![`*~_\n]/;
+// at each line end when line breaks are kept, so the search stops at the first
+// one that is not a `$`. A single `$` that opens no formula (`5 $ eller`,
+// `$5 eller $6`) is no cut either: the text runs on past it, as marked's
+// does, instead of ending at every price in the answer.
+const textEnd = /[$\\<![`*~_]/g;
+const textOrLineEnd = /[$\\<![`*~_\n]/g;
 
 // marked builds a text token by appending, so reading its last character
 // copies all of it, once per `$` in a paragraph. marked lexes a paragraph's
@@ -108,8 +110,15 @@ const inlineMath: TokenizerAndRendererExtension = {
   name: "eneoMath",
   level: "inline",
   start(this: TokenizerThis, src: string) {
-    const at = src.search(this.lexer.options.breaks ? textOrLineEnd : textEnd);
-    return src[at] === "$" ? at : -1;
+    const end = this.lexer.options.breaks ? textOrLineEnd : textEnd;
+    end.lastIndex = 0;
+    for (let hit = end.exec(src); hit; hit = end.exec(src)) {
+      const at = hit.index;
+      if (src[at] !== "$") return -1;
+      // The character before the first one is out of sight here.
+      if (at === 0 || src[at + 1] === "$" || matchDollar(src.slice(at), src[at - 1])) return at;
+    }
+    return -1;
   },
   tokenizer(src: string, tokens: Token[]): EneoMathToken | Tokens.Text | undefined {
     // Only a `$` needs the character before it.

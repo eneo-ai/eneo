@@ -70,6 +70,10 @@ from eneo.roles.role import RolePublic
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.tenants.tenant import ModelPricingVisibility, TenantPublic
+from eneo.users.password_lifecycle import (
+    PasswordLifecyclePolicy,
+    PasswordLifecyclePolicyUpdate,
+)
 from eneo.users.user import (
     UserAddAdmin,
     UserAdminView,
@@ -548,6 +552,7 @@ async def update_user(
     # Password change tracking (just flag, never log the actual password)
     if user.password:
         changes["password_changed"] = True
+        changes["password_change_required"] = user_updated.password_change_required
 
     # Track role changes (UserUpdatePublic supports full role management)
     if user.roles is not None:
@@ -1146,6 +1151,81 @@ async def _enrich_api_keys_with_user_snapshots(
         enriched.append(updated)
 
     return enriched
+
+
+@router.get(
+    "/password-policy",
+    response_model=PasswordLifecyclePolicy,
+    summary="Get tenant password lifecycle policy",
+    description=(
+        "Get when local Eneo passwords in the current tenant must be replaced: "
+        "after an administrator sets one, and after a maximum age."
+    ),
+    responses=responses.get_responses([401, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
+async def get_password_policy(container: AdminContainer) -> PasswordLifecyclePolicy:
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+    return PasswordLifecyclePolicy.from_tenant(container.user().tenant.password_policy)
+
+
+@router.patch(
+    "/password-policy",
+    response_model=PasswordLifecyclePolicy,
+    summary="Update tenant password lifecycle policy",
+    description=(
+        "Update when local Eneo passwords in the current tenant must be replaced. "
+        "Only the given fields change; a null max_age_days disables rotation."
+    ),
+    responses=responses.get_responses([400, 401, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_ORGANIZATION_ADMIN_ACCESS_REASON,
+)
+async def update_password_policy(
+    request: PasswordLifecyclePolicyUpdate,
+    container: AdminContainer,
+) -> PasswordLifecyclePolicy:
+    admin_service = container.admin_service()
+    await admin_service.validate_admin_permission()
+    user = container.user()
+
+    updates = request.model_dump(exclude_unset=True)
+    if not updates:
+        return PasswordLifecyclePolicy.from_tenant(user.tenant.password_policy)
+
+    before = PasswordLifecyclePolicy.from_tenant(user.tenant.password_policy)
+    updated_tenant = await container.tenant_service().update_password_policy(
+        user.tenant_id, updates
+    )
+    after = PasswordLifecyclePolicy.from_tenant(updated_tenant.password_policy)
+
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.TENANT_POLICY_UPDATED,
+        entity_type=EntityType.TENANT_SETTINGS,
+        entity_id=user.tenant_id,
+        description="Updated tenant password lifecycle policy",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=updated_tenant,
+            changes={
+                "password_policy": {
+                    "old": before.model_dump(),
+                    "new": after.model_dump(),
+                }
+            },
+        ),
+    )
+    return after
 
 
 @router.get(
