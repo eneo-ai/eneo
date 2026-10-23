@@ -5,7 +5,7 @@ became an assistant with the same id, so a client holding a group chat id can
 use it as an assistant id against the assistant endpoints.
 """
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -37,7 +37,9 @@ def _gone() -> None:
     raise HTTPException(status_code=410, detail=RETIRED_DETAIL)
 
 
-_RESPONSES = {410: {"description": "Group chats are retired."}}
+_RESPONSES: dict[int | str, dict[str, Any]] = {
+    410: {"description": "Group chats are retired."}
+}
 _DESCRIPTION = "Retired: group chats became assistants with specialists. Always 410."
 
 

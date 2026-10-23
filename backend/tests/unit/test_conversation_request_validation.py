@@ -36,7 +36,7 @@ def test_conversation_request_accepts_single_target_id():
 
     assert request.assistant_id == assistant_id
     assert request.session_id is None
-    assert request.group_chat_id is None
+    assert request.retired_group_chat_id is None
 
 
 def test_conversation_request_keeps_a_retired_group_chat_target_for_the_router():
@@ -45,7 +45,7 @@ def test_conversation_request_keeps_a_retired_group_chat_target_for_the_router()
 
     request = ConversationRequest(question="hello", group_chat_id=group_chat_id)
 
-    assert request.group_chat_id == group_chat_id
+    assert request.retired_group_chat_id == group_chat_id
     assert request.assistant_id is None
 
 

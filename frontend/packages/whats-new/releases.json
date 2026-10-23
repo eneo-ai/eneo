@@ -39,14 +39,11 @@
           "id": "file-creation-progress",
           "permissions": {
             "allOf": ["file_creation"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
-          "aliases": [
-            "charts-in-documents",
-            "file-download-links"
-          ],
+          "aliases": ["charts-in-documents", "file-download-links"],
           "title": {
             "en": "Create, edit and restore documents",
             "sv": "Skapa, redigera och återställ dokument"
@@ -60,13 +57,11 @@
           "id": "file-analysis-trace",
           "permissions": {
             "allOf": ["file_analysis"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
-          "aliases": [
-            "spreadsheet-selection-quotes"
-          ],
+          "aliases": ["spreadsheet-selection-quotes"],
           "title": {
             "en": "Explore CSV and Excel files in chat",
             "sv": "Utforska CSV- och Excel-filer i chatten"
@@ -80,14 +75,11 @@
           "id": "compute-and-charts",
           "permissions": {
             "allOf": ["compute", "charts"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
-          "aliases": [
-            "intermediate-query-tables",
-            "chat-widget-scroll"
-          ],
+          "aliases": ["intermediate-query-tables", "chat-widget-scroll"],
           "title": {
             "en": "Calculate and explore interactive charts",
             "sv": "Beräkna och utforska interaktiva diagram"
@@ -100,7 +92,7 @@
         {
           "id": "conversation-uploads",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -265,9 +257,7 @@
           "id": "clearer-errors",
           "type": "fixed",
           "area": "platform",
-          "aliases": [
-            "sign-in-behind-reverse-proxy"
-          ],
+          "aliases": ["sign-in-behind-reverse-proxy"],
           "title": {
             "en": "Understand why a request failed",
             "sv": "Förstå varför en förfrågan misslyckades"
@@ -455,7 +445,7 @@
         {
           "id": "knowledge-on-demand",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -472,7 +462,7 @@
           "id": "image-variations",
           "permissions": {
             "allOf": ["image_generation"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -488,7 +478,7 @@
         {
           "id": "copy-rich-text",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -544,7 +534,7 @@
         {
           "id": "model-details",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -560,7 +550,7 @@
         {
           "id": "chat-polish",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -576,7 +566,7 @@
         {
           "id": "attachments",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -608,7 +598,7 @@
         {
           "id": "open-shared-sources",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "fixed",
           "area": "knowledge",
@@ -854,7 +844,7 @@
         {
           "id": "rename-conversations",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -870,7 +860,7 @@
         {
           "id": "aborted-answers-saved",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -886,7 +876,7 @@
         {
           "id": "provider-outage-message",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -902,7 +892,7 @@
         {
           "id": "webp-avif-uploads",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "fixed",
           "area": "chat",

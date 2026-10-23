@@ -162,8 +162,8 @@ Check the actual feature owner before assigning requirements, not the entry's
 area. Current examples:
 
 - Assistant editing needs `assistants`; personal chat has its separate
-  `personal_chat` permission. General chat entries also apply to assistant and
-  group chats (`anyOf: personal_chat, assistants, group_chats`).
+  `personal_chat` permission. General chat entries also apply to assistant
+  chats (`anyOf: personal_chat, assistants`).
 - Capability use additionally needs its capability permission (`file_creation`,
   `file_analysis`, `image_generation`, `compute`, `charts`). The combined
   calculation-and-chart workflow needs both `compute` and `charts`.
