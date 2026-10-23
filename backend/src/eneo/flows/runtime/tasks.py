@@ -1025,9 +1025,11 @@ async def _deliver_flow_webhook_outbox(
     *,
     budget: FlowWebhookDeliveryBudget,
     limit: int = FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
+    clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
 ) -> dict[str, int | str]:
     """Claim and deliver due webhooks in waves of the concurrency until a wave
     claims nothing or the job deadline no longer covers a whole delivery.
+    ``clock`` is what the claims call "now"; only tests replace it.
 
     Claims, deliveries and their recording are all cut at the budget's hard
     stop. A delivery cut there keeps its claim; the job then returns its counts
@@ -1049,7 +1051,7 @@ async def _deliver_flow_webhook_outbox(
                         container = Container(session=providers.Object(session))
                         service = container.flow_run_webhook_delivery_service()
                         batch = await service.claim_due_batch(
-                            now=datetime.now(timezone.utc),
+                            now=clock(),
                             limit=min(FLOW_WEBHOOK_DELIVERY_CONCURRENCY, remaining),
                             deadline=deadline,
                         )

@@ -12,10 +12,8 @@ from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.principal_types import PrincipalType
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.application.flow_webhook_delivery_policy import (
-    FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
     FLOW_WEBHOOK_MAX_ATTEMPTS,
     FlowWebhookDeliveryDeadline,
-    flow_webhook_delivery_budget,
     flow_webhook_retry_delay_seconds,
     sanitize_webhook_delivery_error,
 )
@@ -172,26 +170,6 @@ class FlowRunWebhookDeliveryService:
         self.tenant_repo = tenant_repo
         self.http_runtime = http_runtime
         self.variable_resolver = FlowVariableResolver()
-
-    async def deliver_due(
-        self,
-        *,
-        now: datetime,
-        limit: int = FLOW_WEBHOOK_DELIVERY_BATCH_SIZE,
-    ) -> FlowWebhookDeliveryResult:
-        """Claim one batch at ``now`` and deliver it row by row, under a job
-        deadline from the configured budget."""
-        deadline = flow_webhook_delivery_budget().deadline(
-            started_at=asyncio.get_running_loop().time()
-        )
-        batch = await self.claim_due_batch(now=now, limit=limit, deadline=deadline)
-        await self.webhook_delivery_repo.session.commit()
-        result = batch.result
-        for row in batch.claimed_rows:
-            result = result.combine(
-                await self.deliver_claimed(row=row, deadline=deadline)
-            )
-        return result
 
     async def claim_due_batch(
         self,
