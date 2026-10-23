@@ -46,6 +46,10 @@ RUN npm run build
 
 # ---- runner -----------------------------------------------------------------
 FROM node:22.23.4-bookworm-slim AS runner
+# The runtime only executes node. Drop the bundled package managers: their vendored
+# dependencies lag behind advisories and would fail the release image vulnerability gate.
+RUN rm -rf /usr/local/lib/node_modules /usr/local/bin/npm /usr/local/bin/npx \
+    /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg /opt/yarn-v*
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000 \
