@@ -7,7 +7,7 @@ from contextlib import aclosing, nullcontext
 from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional, TypeVar, Union, cast
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
@@ -369,6 +369,13 @@ REFERENCE_PATTERN = r'<inref id="([0-9a-f]{8})"/>'  # noqa
 
 def clean_eneo_tag(input_string: str) -> str:
     return re.sub(AT_TAG_PATTERN, "", input_string)
+
+
+def _injected_blob_reference_id(blob_id: UUID) -> UUID:
+    # The reference row needs its own primary key because the same blob can be
+    # cited by many questions, but the specialist cites the blob's own 8-char
+    # prefix, so the reference keeps it.
+    return UUID(hex=blob_id.hex[:8] + uuid4().hex[8:])
 
 
 TReference = TypeVar("TReference")
@@ -4086,7 +4093,7 @@ class AssistantService:
                     ],
                     mcp_tool_references=[
                         McpToolReference(
-                            id=blob.id,
+                            id=_injected_blob_reference_id(blob.id),
                             tool_call_id=None,
                             mcp_tool_name=None,
                             uri=f"eneo://info-blob/{blob.id}",

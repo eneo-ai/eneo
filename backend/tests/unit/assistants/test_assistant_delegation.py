@@ -1016,6 +1016,11 @@ async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
     assert any(step.server_name == "knowledge" for step in saved.tool_calls)
     assert len(saved.references) == 1
     assert saved.references[0].content == evidence
+    if knowledge_mode == "inject":
+        # Reference rows are keyed by their own id: reusing the blob id made
+        # the second question citing the same blob violate the primary key.
+        assert saved.references[0].id != source_id
+        assert str(saved.references[0].id)[:8] == str(source_id)[:8]
     assert called == (["search_knowledge"] if knowledge_mode == "tool" else [])
     if knowledge_mode == "tool":
         turn.service.references_service.get_references.assert_not_awaited()
