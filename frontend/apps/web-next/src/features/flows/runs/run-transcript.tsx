@@ -7,8 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
-import { QuietBanner } from "@/components/astryx/banner";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { useAppContext } from "@/components/providers/app-context";
@@ -109,6 +108,7 @@ function SpeakerNames({
       >
         {problem ? (
           <Banner
+            role="alert"
             status="error"
             title={t("flow_runs_transcript_names_not_saved")}
             description={problem}
@@ -258,7 +258,7 @@ function StepTranscript({
       }
     >
       {corrections?.stale ? (
-        <QuietBanner
+        <Banner
           status="warning"
           title={t("flow_runs_transcript_stale_title")}
           description={t("flow_runs_transcript_stale")}

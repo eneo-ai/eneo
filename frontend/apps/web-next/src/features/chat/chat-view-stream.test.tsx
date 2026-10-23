@@ -6,6 +6,7 @@ import { browserApi } from "@/lib/api/browser";
 import { recentConversationsQueryOptions } from "@/lib/api/conversations";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { composerValue, typeIntoComposer } from "@/test/composer";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { observedElements, reportResize } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
@@ -177,7 +178,7 @@ function Harness({
 
 function ask(question: string) {
   const textarea = screen.getByRole("textbox", { name: /Meddelande till/ });
-  fireEvent.change(textarea, { target: { value: question } });
+  typeIntoComposer(textarea, question);
   fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
 }
 
@@ -320,7 +321,12 @@ describe("ChatView docked composer", () => {
     expect(scroller?.style.scrollPaddingBottom).toBe("28px");
 
     const textarea = screen.getByRole("textbox", { name: /Meddelande till/ });
-    const dock = observedElements().find((element) => element.contains(textarea));
+    // The innermost observed element around the field: the dock, not a
+    // resizable row the page observes around the whole conversation.
+    const around = observedElements().filter((element) => element.contains(textarea));
+    const dock = around.find(
+      (element) => !around.some((other) => other !== element && element.contains(other))
+    );
     expect(dock).toBeDefined();
     act(() => reportResize(dock!, { height: 150 }));
     expect(scroller?.style.scrollPaddingBottom).toBe("178px");
@@ -375,9 +381,9 @@ describe("ChatView when generation fails", () => {
     expect(within(list).getByText("Tjänsten svarar inte")).toBeTruthy();
     // The failed first question returns to the composer instead of vanishing.
     await waitFor(() =>
-      expect(
-        (screen.getByRole("textbox", { name: /Meddelande till/ }) as HTMLTextAreaElement).value
-      ).toBe("Vilken gräns gäller?")
+      expect(composerValue(screen.getByRole("textbox", { name: /Meddelande till/ }))).toBe(
+        "Vilken gräns gäller?"
+      )
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
@@ -502,9 +508,9 @@ describe("ChatView when generation fails", () => {
 
     // Back to the start state with the draft and its attachment in the composer.
     await waitFor(() =>
-      expect(
-        (screen.getByRole("textbox", { name: /Meddelande till/ }) as HTMLTextAreaElement).value
-      ).toBe("Sammanfatta policyn")
+      expect(composerValue(screen.getByRole("textbox", { name: /Meddelande till/ }))).toBe(
+        "Sammanfatta policyn"
+      )
     );
     expect(screen.getByRole("button", { name: "Ta bort Policy.pdf" })).toBeTruthy();
     expect(screen.queryByText(/Laddar upp bilagor/)).toBeNull();

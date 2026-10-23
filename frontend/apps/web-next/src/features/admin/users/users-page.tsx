@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { Pagination } from "@astryxdesign/core/Pagination";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Search, UserPlus } from "lucide-react";
 import { useSearchParams } from "next/navigation";
@@ -215,7 +215,7 @@ export function AdminUsersPage() {
             onChange={setSearchInput}
             hasClear
             autoComplete="off"
-            className="w-full sm:w-80"
+            containerClassName="w-full sm:w-80"
           />
           {roleId && (
             <div className="bg-ax-muted rounded-ax-element flex items-center gap-2 py-1 ps-3 pe-1 text-sm">

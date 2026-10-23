@@ -1,10 +1,10 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { Switch } from "@astryxdesign/core/Switch";
 import { Text } from "@astryxdesign/core/Text";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { generatePassword } from "@eneo/eneo-js/auth/password-generator";
-import { Switch } from "@/components/astryx/switch";
-import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";

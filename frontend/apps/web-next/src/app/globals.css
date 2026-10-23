@@ -307,6 +307,13 @@
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
+    /* A view transition (the flow's step cards moving as the chat edits them)
+       is only started with motion allowed; this covers one already running. */
+    ::view-transition-group(*),
+    ::view-transition-old(*),
+    ::view-transition-new(*) {
+      animation: none !important;
+    }
   }
 }
 

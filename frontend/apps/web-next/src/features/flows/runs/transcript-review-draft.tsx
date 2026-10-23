@@ -14,7 +14,7 @@ import {
   useSyncExternalStore,
   type Ref
 } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { isStaleRefusal, refusalText } from "./run-messages";
 import {
@@ -96,7 +96,7 @@ function DraftStatusNote({
   if (state.status !== "failed") return null;
   const stale = isStaleRefusal(state.problem);
   return (
-    <QuietBanner
+    <Banner
       status="error"
       title={t("flow_transcript_draft_failed_title")}
       description={`${refusalText(state.problem, t)} ${t("flow_transcript_draft_kept")}`}
@@ -124,7 +124,7 @@ function DraftStatusNote({
           />
         ) : null}
       </div>
-    </QuietBanner>
+    </Banner>
   );
 }
 

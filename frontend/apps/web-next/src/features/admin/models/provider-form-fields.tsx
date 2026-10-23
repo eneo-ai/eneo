@@ -1,6 +1,6 @@
 "use client";
 
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { useTranslations } from "next-intl";
 import { useMemo, useRef } from "react";
 import {

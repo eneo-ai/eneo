@@ -6,7 +6,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { useQuery } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { FieldMessage, problemStatus, VariablePicker } from "./editor-fields";

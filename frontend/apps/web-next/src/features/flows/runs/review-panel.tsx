@@ -11,8 +11,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { QuietBanner } from "@/components/astryx/banner";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { ClientTime } from "@/components/composites/client-time";
 import { EneoApiError } from "@/lib/api/errors";
 import { CitationSummary } from "./run-citations";
@@ -407,14 +406,14 @@ export function ReviewPanel({
         className="focus-visible:outline-ring rounded-ax-inner outline-none focus-visible:outline-2 focus-visible:outline-offset-2"
       >
         {options.expired && !options.canResume ? (
-          <QuietBanner
+          <Banner
             status="warning"
             title={t("flow_runs_review_expired_title")}
             description={t("flow_runs_review_expired")}
             collapsible={false}
           />
         ) : !mayReview ? (
-          <QuietBanner
+          <Banner
             status="info"
             title={t("flow_runs_review_waiting_title")}
             description={t("flow_runs_review_not_allowed")}
@@ -423,6 +422,7 @@ export function ReviewPanel({
         ) : null}
         {problem && (draft.kind === "file" || !options.canEdit) ? (
           <Banner
+            role="alert"
             status="error"
             title={t("flow_runs_review_not_done")}
             description={problem.message}

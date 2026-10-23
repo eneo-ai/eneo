@@ -127,6 +127,7 @@ function SettingsLoadFailure({
   const t = useTranslations();
   return (
     <Banner
+      role="alert"
       status="error"
       title={title}
       endContent={
@@ -617,7 +618,7 @@ function ModelsSection() {
             onChange={(change) => changeModels("completion", change)}
           />
           {failedKind === "completion" && (
-            <Banner status="error" title={t("space_models_save_failed")} />
+            <Banner role="alert" status="error" title={t("space_models_save_failed")} />
           )}
           <SpaceModelSelect
             kind="embedding"
@@ -628,7 +629,7 @@ function ModelsSection() {
             onChange={(change) => changeModels("embedding", change)}
           />
           {failedKind === "embedding" && (
-            <Banner status="error" title={t("space_models_save_failed")} />
+            <Banner role="alert" status="error" title={t("space_models_save_failed")} />
           )}
           <SpaceModelSelect
             kind="transcription"
@@ -639,7 +640,7 @@ function ModelsSection() {
             onChange={(change) => changeModels("transcription", change)}
           />
           {failedKind === "transcription" && (
-            <Banner status="error" title={t("space_models_save_failed")} />
+            <Banner role="alert" status="error" title={t("space_models_save_failed")} />
           )}
         </>
       ) : null}

@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import type { Permission } from "@/lib/auth/permissions";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { makeKindOption, makeKindPlace } from "./editor/testing/fixtures";
 import { flowPermissions, makeFlow, makeStep } from "./flow-fixtures";
@@ -71,12 +72,18 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
 }));
 // The conversation itself is the chat feature's; the page only follows what it reports.
 vi.mock("@/features/chat/chat-view", () => ({
+  // The stub shows what the flow page puts in the composer's footer (the
+  // Fråga/Redigera picker) and its placeholder, and offers the callbacks.
   ChatView: ({
     onToolCallFinished,
-    onAnswerFinished
+    onAnswerFinished,
+    footerActions,
+    placeholder
   }: {
     onToolCallFinished: (call: { serverName: string; isInternal: boolean }) => void;
     onAnswerFinished: () => void;
+    footerActions?: React.ReactNode;
+    placeholder?: string;
   }) => (
     <div>
       <button
@@ -88,6 +95,8 @@ vi.mock("@/features/chat/chat-view", () => ({
       <button type="button" onClick={onAnswerFinished}>
         Svar klart
       </button>
+      {footerActions}
+      <p>{placeholder}</p>
     </div>
   )
 }));
@@ -147,6 +156,19 @@ describe("FlowPage", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Steg" })).toBeTruthy();
     expect(await screen.findByText("Chatten är inte tillgänglig")).toBeTruthy();
     await expectNoAxeViolations(container);
+  });
+
+  it("offers a handle to resize the chat beside the definition, not on a phone", async () => {
+    renderPage();
+    const handle = screen.getByRole("separator", { name: "Ändra storlek på chatten" });
+    expect(handle.getAttribute("aria-orientation")).toBe("vertical");
+    expect(handle.getAttribute("aria-valuemin")).toBe("352");
+    expect(handle.tabIndex).toBe(0);
+
+    act(() => setViewport("phone"));
+    expect(screen.queryByRole("separator", { name: "Ändra storlek på chatten" })).toBeNull();
+    // The chat is one of the tabbed views there, laid out by the stylesheet alone.
+    expect(screen.getByRole("region", { name: "Chatt om flödet" }).style.width).toBe("");
   });
 
   it("moves a step through the editor, fenced on the revision on screen", async () => {
@@ -455,7 +477,9 @@ describe("FlowPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
 
     expect(await screen.findByText("Granska svaret")).toBeTruthy();
-    expect(state.announce).toHaveBeenCalledWith("Flödet uppdaterades från chatten");
+    expect(state.announce).toHaveBeenCalledWith("Chatten lade till Steg 3: Granska svaret.");
+    // The new card is marked, for a while.
+    expect(screen.getByText("Tillagt av chatten")).toBeTruthy();
 
     // An answer that changed nothing is not news.
     state.announce.mockClear();
@@ -472,10 +496,12 @@ describe("FlowPage", () => {
     state.mode = ok({ ...chat, editing: true });
     renderPage();
 
-    expect(await screen.findByText("Chatten läser bara")).toBeTruthy();
-    fireEvent.click(screen.getByRole("switch", { name: /Redigeringsläge/ }));
+    // The mode is picked beside the send button, in the composer's footer.
+    fireEvent.click(await screen.findByRole("button", { name: "Läge: Fråga" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Redigera/ }));
 
-    expect(await screen.findByText("Chatten kan ändra flödet")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Läge: Redigera" })).toBeTruthy();
+    expect(screen.getByText("Beskriv ändringen…")).toBeTruthy();
     await waitFor(() =>
       expect(state.announce).toHaveBeenCalledWith(
         "Redigeringsläget är på. Chatten kan nu ändra flödet."
@@ -493,7 +519,8 @@ describe("FlowPage", () => {
     state.mode = ok({ ...chat, session_id: "session-2", editing: true });
     renderPage();
 
-    fireEvent.click(await screen.findByRole("switch", { name: /Redigeringsläge/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Läge: Fråga" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Redigera/ }));
 
     await waitFor(() =>
       expect(state.announce).toHaveBeenCalledWith(

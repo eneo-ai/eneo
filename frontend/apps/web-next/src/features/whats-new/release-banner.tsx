@@ -83,6 +83,7 @@ function ReleaseBanner({
   return (
     <div className="w-full">
       <Banner
+        role="status"
         status="info"
         title={t("whats_new_announcement_heading")}
         description={t("whats_new_banner_description", { count: entries.length })}

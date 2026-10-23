@@ -118,7 +118,8 @@ export function DocumentLinksProvider({
 
 const CitationLink = citationComponents.a;
 
-function AnswerLink(props: ComponentProps<"a"> & { node?: unknown }) {
+/** An answer's link: a document name opens the document, anything else is a citation or a plain link. */
+export function AnswerLink(props: ComponentProps<"a"> & { node?: unknown }) {
   const t = useTranslations();
   const links = useContext(DocumentLinksContext);
   const match = typeof props.href === "string" ? DOC_LINK.exec(props.href) : null;

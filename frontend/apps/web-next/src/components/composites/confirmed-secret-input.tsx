@@ -1,6 +1,6 @@
 "use client";
 
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { useState } from "react";
 
 /** What is wrong with a secret and its confirmation, if anything. */

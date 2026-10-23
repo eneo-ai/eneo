@@ -97,7 +97,7 @@ export function ReasoningEffortSelector({
           .catch(() => {})
           .finally(() => setPending((current) => (current === next ? null : current)));
       }}
-      className={className}
+      controlClassName={className}
     />
   );
 }
