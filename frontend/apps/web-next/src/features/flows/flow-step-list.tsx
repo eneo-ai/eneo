@@ -11,7 +11,7 @@ import { ArrowDown, ArrowUp, Ellipsis, Plus, Workflow } from "lucide-react";
 import { useQueries } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useState } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { flowAssistantQueryOptions } from "./editor/editor-api";
@@ -171,7 +171,7 @@ function StepCard({
         </MetadataListItem>
       </MetadataList>
       {speakerOffer && speakerOffer.stepId === step.id ? (
-        <QuietBanner
+        <Banner
           status="info"
           title={t("flows_speaker_offer_title")}
           description={t("flows_speaker_offer_description")}

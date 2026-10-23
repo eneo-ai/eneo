@@ -7,7 +7,7 @@ import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { clockTime, type ShownSegment } from "./transcript";
 import { withCasingOf, type Candidate, type Suggestions } from "./transcript-suggestions";
 
@@ -78,7 +78,7 @@ export function SuggestionsDialog({
           <LayoutContent>
             <div className="flex flex-col gap-3">
               {problem ? (
-                <QuietBanner
+                <Banner
                   status="error"
                   title={t("flow_transcript_line_not_saved")}
                   description={problem}

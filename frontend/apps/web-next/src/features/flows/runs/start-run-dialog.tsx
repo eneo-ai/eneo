@@ -13,7 +13,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
-import { QuietBanner } from "@/components/astryx/banner";
 import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { toast } from "@/lib/toast";
@@ -99,7 +98,7 @@ function ContractNotices({ flow, contract }: { flow: FlowPublic; contract: RunCo
   return (
     <>
       {classification ? (
-        <QuietBanner
+        <Banner
           status="info"
           title={t("flow_runs_classification_title", { name: classification.name })}
           description={classification.description?.trim() || undefined}
@@ -107,7 +106,7 @@ function ContractNotices({ flow, contract }: { flow: FlowPublic; contract: RunCo
         />
       ) : null}
       {restrictedBeforeApproval(flow.metadata_json) ? (
-        <QuietBanner
+        <Banner
           status="warning"
           title={t("flow_runs_sensitive_title")}
           description={t("flow_runs_sensitive_body")}
@@ -115,7 +114,7 @@ function ContractNotices({ flow, contract }: { flow: FlowPublic; contract: RunCo
         />
       ) : null}
       {templates.length > 0 ? (
-        <QuietBanner
+        <Banner
           status="error"
           title={t("flow_runs_template_blocked_title")}
           description={templates
@@ -131,7 +130,7 @@ function ContractNotices({ flow, contract }: { flow: FlowPublic; contract: RunCo
         />
       ) : null}
       {labels?.unavailable_reason ? (
-        <QuietBanner
+        <Banner
           status={labels.required ? "error" : "warning"}
           title={
             labels.required
@@ -424,6 +423,7 @@ function StartRunForm({
       >
         {formProblem || tooManyInAll ? (
           <Banner
+            role="alert"
             status="error"
             title={t("flow_runs_not_started")}
             description={

@@ -8,8 +8,8 @@ import { useQuery } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "next-intl";
 import { useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
-import { QuietBanner } from "@/components/astryx/banner";
-import { Switch } from "@/components/astryx/switch";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Switch } from "@astryxdesign/core/Switch";
 import { useAppContext } from "@/components/providers/app-context";
 import { adminModelsQueryOptions } from "@/features/admin/models/models";
 import { browserApi } from "@/lib/api/browser";
@@ -268,7 +268,7 @@ export function MappedSection({
       description={t("flow_admin_mapped_group_description")}
     >
       {mapped.max_provider_calls_source === "invalid" ? (
-        <QuietBanner
+        <Banner
           status="error"
           title={t("flow_admin_mapped_invalid_title")}
           description={t("flow_admin_mapped_invalid")}

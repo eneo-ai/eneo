@@ -11,7 +11,7 @@ import {
   TableRow
 } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { Token } from "@astryxdesign/core/Token";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
@@ -135,7 +135,7 @@ export function MigrationHistoryPanel() {
             announceResults({ search: value });
           }}
           hasClear
-          className="w-full sm:w-72"
+          containerClassName="w-full sm:w-72"
         />
         <Selector
           label={t("model_type")}

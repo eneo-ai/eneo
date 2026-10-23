@@ -5,7 +5,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import type { ShownSegment } from "./transcript";
 import { withoutLineText, type CorrectionSet } from "./transcript-corrections";
 import type { LineEditing } from "./transcript-lines";
@@ -76,7 +76,7 @@ export function TurnEditor({
   return (
     <div className="border-ax-border rounded-ax-inner mx-1 mb-2 flex flex-col gap-3 border p-3">
       {problem ? (
-        <QuietBanner
+        <Banner
           status="error"
           title={t("flow_transcript_line_not_saved")}
           description={problem}

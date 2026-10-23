@@ -142,6 +142,13 @@ function installBrowser({ recorder = true, live = false } = {}) {
   Object.defineProperty(navigator, "locks", { configurable: true, value: fakeLocks().locks });
 }
 
+/** When a kept part was captured: two hours ago (inside the keeper's 24 h window), a minute per part. */
+const KEPT_BASE = Math.floor(Date.now() / 60_000) * 60_000 - 2 * 60 * 60 * 1000;
+const keptAt = (index: number) => KEPT_BASE + index * 60_000;
+/** The part's file name as the run gets it: its capture time, with no characters a file system refuses. */
+const keptName = (index: number) =>
+  `recording-0a1b2c3d-0000-4000-8000-000000000001-seg0${index}-${new Date(keptAt(index)).toISOString().replace(/[:.]/g, "-")}.webm`;
+
 /** A part of a recording kept on the device from an earlier visit. */
 function keptPart(index: number, overrides: Partial<StoredPart> = {}): StoredPart {
   return {
@@ -152,7 +159,7 @@ function keptPart(index: number, overrides: Partial<StoredPart> = {}): StoredPar
     blob: new Blob([`part ${index}`], { type: "audio/webm" }),
     mimeType: "audio/webm",
     durationMs: 30_000,
-    capturedAt: Date.UTC(2026, 9, 22, 8, index, 0),
+    capturedAt: keptAt(index),
     interrupted: false,
     contract: {
       publishedFlowVersion: 4,
@@ -591,10 +598,7 @@ describe("Keeping a recording on the device", () => {
     expect(await within(dialog).findByText("Inspelning, del 2 (00:30)")).toBeTruthy();
     expect(within(dialog).queryByText(messages.flow_transcript_resume_title)).toBeNull();
     await waitFor(() => expect(FakeUpload.sent).toHaveLength(2));
-    expect(FakeUpload.sent.map((file) => file.name)).toEqual([
-      "recording-0a1b2c3d-0000-4000-8000-000000000001-seg00-2026-10-22T08-00-00-000Z.webm",
-      "recording-0a1b2c3d-0000-4000-8000-000000000001-seg01-2026-10-22T08-01-00-000Z.webm"
-    ]);
+    expect(FakeUpload.sent.map((file) => file.name)).toEqual([keptName(0), keptName(1)]);
 
     // Recording again goes on with the kept recording.
     fireEvent.click(button(dialog, messages.flow_transcript_rec_continue));

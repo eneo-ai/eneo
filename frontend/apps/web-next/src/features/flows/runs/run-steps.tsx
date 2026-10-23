@@ -3,7 +3,7 @@
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Token } from "@astryxdesign/core/Token";
 import { useLocale, useTranslations } from "next-intl";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { StatusLabel } from "@/components/composites/status-label";
 import { LongMaterialCoverage } from "../long-material-coverage";
 import { CitationSummary } from "./run-citations";
@@ -173,7 +173,7 @@ function StepCard({
         </p>
       ) : null}
       {result?.status === "failed" && !notRun ? (
-        <QuietBanner
+        <Banner
           status="error"
           title={t("flow_runs_step_failed_title")}
           description={

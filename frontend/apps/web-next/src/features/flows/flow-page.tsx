@@ -10,7 +10,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useCallback, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { QuietBanner } from "@/components/astryx/banner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
@@ -384,6 +383,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
         />
         {notice ? (
           <Banner
+            role={notice.status === "error" || notice.status === "warning" ? "alert" : "status"}
             key={notice.key}
             status={notice.status}
             title={notice.title}
@@ -469,7 +469,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
             ) : (
               <>
                 {isPublished ? (
-                  <QuietBanner
+                  <Banner
                     status="info"
                     title={t("flows_published_title", { version: flow.published_version ?? "" })}
                     description={

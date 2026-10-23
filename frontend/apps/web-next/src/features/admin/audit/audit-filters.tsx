@@ -16,7 +16,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListFilter, User, X } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useMemo, useState } from "react";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { browserApi } from "@/lib/api/browser";
 import { adminUsersQueryOptions, MIN_SEARCH_LENGTH } from "@/features/admin/users/users";
 import {
@@ -125,7 +125,7 @@ function UserField({
         )
       }
       minQueryLength={MIN_SEARCH_LENGTH}
-      emptySearchResultsText={t("audit_user_search_empty")}
+      emptySearchText={t("audit_user_search_empty")}
       width="100%"
     />
   );
@@ -269,6 +269,7 @@ function FilterButton({ filters, onChange }: { filters: AuditFilters; onChange: 
         onOpenChange={setOpen}
         label={t("audit_filters_button")}
         height="tall"
+        padding={0}
       >
         <div className="p-4">{fields}</div>
       </BottomSheet>

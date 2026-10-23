@@ -433,7 +433,8 @@ describe("the add-model wizard's catalog", () => {
 
     for (const name of [/gpt-5/, /kommun-llama/]) {
       const checkbox = within(dialog).getByRole("checkbox", { name }) as HTMLInputElement;
-      expect(checkbox.disabled).toBe(true);
+      // Astryx keeps a disabled checkbox focusable, so its reason stays reachable.
+      expect(checkbox.getAttribute("aria-disabled")).toBe("true");
       // Said in words, not only by the dimmed box.
       expect(description(checkbox)).toContain("Tillagd");
     }

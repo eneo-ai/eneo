@@ -198,6 +198,7 @@ function ContentIssuesBanner({
   const missingOnly = isCompletedWithMissingResources(run);
   return (
     <Banner
+      role={missingOnly ? "status" : "alert"}
       status={missingOnly ? "info" : "warning"}
       title={missingOnly ? t("crawl_content_has_missing") : t("crawl_content_has_failures")}
       description={t("crawl_content_failure_description", { date: date ?? "" })}

@@ -20,7 +20,7 @@ import {
   type Ref
 } from "react";
 import { flushSync } from "react-dom";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { EneoApiError } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
@@ -211,7 +211,7 @@ function LiveText({ snapshot }: { snapshot: LiveSnapshot }) {
         {state ? <Text type="supporting">{state}</Text> : null}
       </div>
       {ended ? (
-        <QuietBanner
+        <Banner
           status="warning"
           title={
             status === "interrupted"
@@ -678,7 +678,7 @@ export function RunRecorder({
 
   if (!recordsInto(input, options.mimeType)) {
     return (
-      <QuietBanner
+      <Banner
         status="info"
         title={t("flow_transcript_rec_heading")}
         description={t("flow_transcript_rec_wrong_type")}
@@ -689,7 +689,7 @@ export function RunRecorder({
 
   if (support !== "supported") {
     return (
-      <QuietBanner
+      <Banner
         status="info"
         title={t("flow_transcript_rec_heading")}
         description={problemText(support, t)}
@@ -757,7 +757,7 @@ export function RunRecorder({
             }}
           />
           {resumeProblem ? (
-            <QuietBanner
+            <Banner
               status="error"
               title={t("flow_transcript_resume_problem_title")}
               description={resumeProblem}
@@ -767,7 +767,7 @@ export function RunRecorder({
         </div>
       ) : null}
       {scan.data?.incomplete || scan.isError ? (
-        <QuietBanner
+        <Banner
           status="warning"
           title={t("flow_transcript_resume_scan_failed_title")}
           description={t("flow_transcript_resume_scan_failed")}
@@ -787,7 +787,7 @@ export function RunRecorder({
       ) : null}
 
       {problem ? (
-        <QuietBanner
+        <Banner
           status="error"
           title={t("flow_transcript_rec_problem_title")}
           description={problemText(problem, t)}
@@ -795,14 +795,14 @@ export function RunRecorder({
         />
       ) : null}
       {degradation === "failed" && (phase !== "idle" || recorded.length > 0) ? (
-        <QuietBanner
+        <Banner
           status="warning"
           title={t("flow_transcript_storage_degraded_title")}
           description={t("flow_transcript_storage_degraded")}
           collapsible={false}
         />
       ) : degradation === "unavailable" && phase !== "idle" ? (
-        <QuietBanner
+        <Banner
           status="info"
           title={t("flow_transcript_storage_on_part_end_title")}
           description={t("flow_transcript_storage_on_part_end")}
@@ -810,7 +810,7 @@ export function RunRecorder({
         />
       ) : null}
       {discardProblem ? (
-        <QuietBanner
+        <Banner
           status="warning"
           title={t("flow_transcript_discard_partly_title")}
           description={t("flow_transcript_discard_partly")}
@@ -818,7 +818,7 @@ export function RunRecorder({
         />
       ) : null}
       {filesFull ? (
-        <QuietBanner
+        <Banner
           status="warning"
           title={t("flow_transcript_rec_problem_title")}
           description={t("flow_transcript_rec_files_full", { count: input.max_files ?? 0 })}
@@ -826,7 +826,7 @@ export function RunRecorder({
         />
       ) : null}
       {backlogFull ? (
-        <QuietBanner
+        <Banner
           status="warning"
           title={t("flow_transcript_rec_problem_title")}
           description={t("flow_transcript_rec_backlog_full")}
@@ -834,21 +834,21 @@ export function RunRecorder({
         />
       ) : null}
       {restartState.phase === "waiting" ? (
-        <QuietBanner
+        <Banner
           status="warning"
           title={t("flow_transcript_rec_restarting_title")}
           description={restartingText(ended, t)}
           collapsible={false}
         />
       ) : restartState.phase === "failed" ? (
-        <QuietBanner
+        <Banner
           status="error"
           title={t("flow_transcript_rec_restart_failed_title")}
           description={t("flow_transcript_rec_restart_failed")}
           collapsible={false}
         />
       ) : ended && ended !== "manual" && phase === "idle" ? (
-        <QuietBanner
+        <Banner
           status="warning"
           title={t("flow_transcript_rec_ended_title")}
           description={endedText(ended, t)}

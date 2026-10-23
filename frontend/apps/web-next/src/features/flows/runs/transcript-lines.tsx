@@ -15,7 +15,7 @@ import { Download, Pencil, Undo2, Volume2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { clockTime, type ShownPart, type ShownSegment, type TranscriptTarget } from "./transcript";
 import {
@@ -256,7 +256,7 @@ function LineEditor({
   return (
     <div className="border-ax-border rounded-ax-inner mt-1 mb-2 flex flex-col gap-3 border p-3">
       {problem ? (
-        <QuietBanner
+        <Banner
           status="error"
           title={t("flow_transcript_line_not_saved")}
           description={problem}
@@ -687,7 +687,7 @@ function OverlapReview({
   }
   const open = found.filter((overlap) => overlap.open > 0).length;
   return (
-    <QuietBanner
+    <Banner
       status={open > 0 ? "warning" : "success"}
       title={
         open > 0
@@ -750,7 +750,7 @@ function OverlapReview({
           />
         </div>
       ) : null}
-    </QuietBanner>
+    </Banner>
   );
 }
 
@@ -1279,7 +1279,7 @@ export function TranscriptLines({
         </Text>
       ) : null}
       {menuProblem ? (
-        <QuietBanner
+        <Banner
           status="error"
           title={t("flow_transcript_speaker_not_saved")}
           description={menuProblem}

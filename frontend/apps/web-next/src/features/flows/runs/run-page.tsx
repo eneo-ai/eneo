@@ -13,7 +13,7 @@ import {
 import { RefreshCw } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
@@ -226,7 +226,7 @@ function RunProblem({
   }
   if (run.status === "cancelled" && run.error) {
     return (
-      <QuietBanner
+      <Banner
         status="info"
         title={t("flow_runs_cancelled_title")}
         description={runErrorText(run.error, t)}
@@ -236,7 +236,7 @@ function RunProblem({
   }
   if (run.status === "queued" && run.dispatch_last_error) {
     return (
-      <QuietBanner
+      <Banner
         status="warning"
         title={t("flow_runs_dispatch_problem_title")}
         description={
@@ -481,7 +481,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
           </p>
         ) : null}
         {notice ? (
-          <QuietBanner
+          <Banner
             status={notice.status}
             title={notice.title}
             description={notice.description}

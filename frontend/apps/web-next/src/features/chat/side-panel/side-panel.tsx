@@ -311,6 +311,7 @@ export function SidePanel({
           }}
           label={label}
           height="tall"
+          padding={0}
         >
           <div id={panelId} className="flex h-full min-h-0 flex-col">
             {body(true)}

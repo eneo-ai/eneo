@@ -7,7 +7,7 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowRight, Globe, RefreshCw } from "lucide-react";

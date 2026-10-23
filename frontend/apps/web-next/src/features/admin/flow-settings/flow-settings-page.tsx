@@ -284,6 +284,7 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
       <div className="bg-ax-card border-ax-border rounded-ax-container shadow-ax-high sticky bottom-4 z-20 flex flex-col gap-3 border p-4">
         {refusal ? (
           <Banner
+            role="alert"
             status="error"
             title={t("flow_admin_save_failed")}
             description={

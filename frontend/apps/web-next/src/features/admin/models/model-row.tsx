@@ -9,7 +9,7 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSubMenu
 } from "@astryxdesign/core/DropdownMenu";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import { TableCell, TableRow } from "@astryxdesign/core/Table";
 import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";

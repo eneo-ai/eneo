@@ -113,7 +113,7 @@ export function ContractFromExampleDialog({
                     onChange={setExample}
                     rows={6}
                     hasSpellCheck={false}
-                    className="font-mono"
+                    controlClassName="font-mono"
                     status={
                       reading?.ok === false
                         ? { type: "error", message: problemText(reading.problem, t) }

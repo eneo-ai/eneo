@@ -8,7 +8,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { Token } from "@astryxdesign/core/Token";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw, Search } from "lucide-react";
@@ -500,7 +500,7 @@ export function ModelCatalogStep({
                   hasDividers
                   // The options scroll in their own box (focus scrolls them from
                   // the keyboard); the error below stays in view.
-                  className="[&_[role=group]]:border-ax-border [&_[role=group]]:rounded-ax-element [&_[role=group]]:max-h-72 [&_[role=group]]:overflow-y-auto [&_[role=group]]:border [&_[role=group]]:px-3 [&_[role=group]]:py-1"
+                  containerClassName="[&_[role=group]]:border-ax-border [&_[role=group]]:rounded-ax-element [&_[role=group]]:max-h-72 [&_[role=group]]:overflow-y-auto [&_[role=group]]:border [&_[role=group]]:px-3 [&_[role=group]]:py-1"
                   status={
                     noSelection
                       ? { type: "error", message: t("provider_form_select_model_required") }
@@ -621,7 +621,12 @@ export function ModelCatalogStep({
       {validationFailures.length > 0 && (
         <div className="flex flex-col gap-3">
           {/* Mounted by the press on the create button: announced as an alert. */}
-          <Banner status="warning" title={t("model_validation_warning_title")} collapsible={false}>
+          <Banner
+            role="alert"
+            status="warning"
+            title={t("model_validation_warning_title")}
+            collapsible={false}
+          >
             <ul className="flex flex-col gap-1.5">
               {validationFailures.map((failure) => (
                 <li key={failure.model} className="flex flex-wrap items-center gap-2 text-sm">

@@ -209,20 +209,10 @@ const eslintConfig = defineConfig([
         {
           paths: [
             {
-              name: "@astryxdesign/core/Switch",
-              message:
-                'Use `Switch` from "@/components/astryx/switch": Astryx\'s busy state announces an English "Loading".'
-            },
-            {
               name: "@astryxdesign/core/Table",
               importNames: ["Table"],
               message:
                 'Use `Table` from "@/components/astryx/table": it must be named, and names its scroll region.'
-            },
-            {
-              name: "@astryxdesign/core/TextInput",
-              message:
-                'Use `TextInput` from "@/components/astryx/text-input": Astryx drops a caller\'s aria-describedby.'
             }
           ]
         }

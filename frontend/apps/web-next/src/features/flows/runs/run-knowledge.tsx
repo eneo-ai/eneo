@@ -8,8 +8,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useId, useState } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
-import { TextInput } from "@/components/astryx/text-input";
+import { Banner } from "@astryxdesign/core/Banner";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
@@ -276,7 +276,7 @@ function StepKnowledgeTrace({
         <p className="text-ax-text m-0 text-sm">{t("flow_runs_knowledge_search_failed")}</p>
       ) : null}
       {mappedCallsIncomplete(rag) ? (
-        <QuietBanner
+        <Banner
           status="warning"
           title={t("flow_run_knowledge_mapped_fan_out_incomplete")}
           collapsible={false}

@@ -6,8 +6,8 @@ import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useMemo, useRef, useState } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
-import { Switch } from "@/components/astryx/switch";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Switch } from "@astryxdesign/core/Switch";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
@@ -261,7 +261,7 @@ export function FlowChatPanel({ flow, onFlowMayHaveChanged, onRefused }: ChatPan
       ) : (
         <div className="p-4">
           {unavailable ? (
-            <QuietBanner
+            <Banner
               status="info"
               title={t("flows_chat_unavailable")}
               description={unavailable}
