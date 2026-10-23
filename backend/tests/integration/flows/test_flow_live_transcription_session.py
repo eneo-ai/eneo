@@ -159,7 +159,7 @@ async def _draft_flow(
 
     created = await client.post(
         "/api/v1/flows/",
-        json={"space_id": space_id, "name": f"Live {uuid4().hex[:8]}", "steps": []},
+        json={"space_id": space_id, "name": f"Live {uuid4().hex[:8]}"},
         headers=headers,
     )
     assert created.status_code == 201, created.text

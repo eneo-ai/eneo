@@ -307,7 +307,7 @@ async def test_executor_output_contract_never_opens_sockets_or_urls(
     assert requests == []
 
 
-@pytest.mark.parametrize("operation", ["create", "update", "publish"])
+@pytest.mark.parametrize("operation", ["update", "publish"])
 @pytest.mark.parametrize("field", ["input_contract", "output_contract"])
 @pytest.mark.asyncio
 async def test_authoring_services_reject_remote_contracts(
@@ -339,11 +339,7 @@ async def test_authoring_services_reject_remote_contracts(
     )
     flow_repo.get.return_value = stored if operation == "update" else flow
     with pytest.raises(FlowStepValidationError) as exc_info:
-        if operation == "create":
-            await service.create_flow(
-                space_id=flow.space_id, name=flow.name, steps=steps
-            )
-        elif operation == "update":
+        if operation == "update":
             await service.update_flow(flow_id=flow.id, steps=steps)
         else:
             await service.publish_flow(flow_id=flow.id)
@@ -351,7 +347,6 @@ async def test_authoring_services_reject_remote_contracts(
     assert exc_info.value.step_order == 2
     assert "/properties/value/$ref" in str(exc_info.value)
     assert exc_info.value.context["json_pointer"] == "/properties/value/$ref"
-    flow_repo.create.assert_not_awaited()
     flow_repo.update.assert_not_awaited()
     version_repo.create.assert_not_awaited()
     assert requests == []

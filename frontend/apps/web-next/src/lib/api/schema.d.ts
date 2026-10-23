@@ -4734,7 +4734,7 @@ export interface paths {
     put?: never;
     /**
      * Create Flow
-     * @description Create a new draft flow definition, including its initial ordered steps, inside a space. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
+     * @description Create a new, empty draft flow inside a space. Each step runs an assistant the flow owns, so steps follow once the flow exists: create each step's assistant with `POST /api/v1/flows/{id}/assistants/`, then send the steps with `PATCH /api/v1/flows/{id}/`. Draft ownership stays with the draft owner in the current backend policy. Space admins can manage shared space resources, but overriding another member's draft still requires the draft owner, a space owner, or a tenant admin.
      */
     post: operations["create_flow"];
     delete?: never;
@@ -4887,7 +4887,7 @@ export interface paths {
     put?: never;
     /**
      * Create Flow Assistant
-     * @description Create a flow-managed assistant owned by the specified draft flow. Use this authoring endpoint when a flow editor needs a dedicated assistant for one or more steps instead of reusing an existing assistant. The created assistant is returned with the caller's effective permissions and can then be referenced by step `assistant_id` values in flow create/update payloads. The caller must own the draft; tenant admins and space owners may override draft ownership. Existing action, space permission and API-key scope checks apply.
+     * @description Create a flow-managed assistant owned by the specified draft flow. Each flow step runs an assistant its flow owns, so create one here for a step before adding the step. The created assistant is returned with the caller's effective permissions and is referenced by step `assistant_id` values in a flow update (`PATCH /api/v1/flows/{id}/`). The caller must own the draft; tenant admins and space owners may override draft ownership. Existing action, space permission and API-key scope checks apply.
      */
     post: operations["create_flow_assistant"];
     delete?: never;
@@ -18695,20 +18695,12 @@ export interface components {
     };
     /**
      * FlowCreateRequest
+     * @description A new flow starts with no steps: each step runs an assistant the flow
+     *     owns, and those exist only once the flow does.
      * @example {
      *       "description": "Transcribe and summarize citizen audio",
      *       "name": "Municipality Intake Transcription",
-     *       "space_id": "00000000-0000-0000-0000-000000000001",
-     *       "steps": [
-     *         {
-     *           "assistant_id": "00000000-0000-0000-0000-000000000002",
-     *           "input_source": "flow_input",
-     *           "input_type": "audio",
-     *           "output_mode": "transcribe_only",
-     *           "output_type": "text",
-     *           "step_order": 1
-     *         }
-     *       ]
+     *       "space_id": "00000000-0000-0000-0000-000000000001"
      *     }
      */
     FlowCreateRequest: {
@@ -18725,8 +18717,6 @@ export interface components {
        * Format: uuid
        */
       space_id: string;
-      /** Steps */
-      steps: components["schemas"]["FlowStepCreateRequest"][];
     };
     /**
      * FlowDocumentRenderLimitsPublic
@@ -27169,80 +27159,6 @@ export interface components {
        * @description The tool name the call used, pinned at publish.
        */
       tool_name: string;
-    };
-    /**
-     * FlowStepCreateRequest
-     * @example {
-     *       "assistant_id": "00000000-0000-0000-0000-000000000001",
-     *       "input_source": "flow_input",
-     *       "input_type": "audio",
-     *       "output_mode": "transcribe_only",
-     *       "output_type": "text",
-     *       "step_order": 1,
-     *       "user_description": "Transcribe incoming audio"
-     *     }
-     */
-    FlowStepCreateRequest: {
-      /**
-       * Assistant Id
-       * Format: uuid
-       */
-      assistant_id: string;
-      /** Input Bindings */
-      input_bindings?: {
-        [key: string]: unknown;
-      } | null;
-      /** Input Config */
-      input_config?: components["schemas"]["FlowStepInputConfig"] | null;
-      /** Input Contract */
-      input_contract?: {
-        [key: string]: unknown;
-      } | null;
-      /** @description Where the step's input comes from. `tool` names one MCP tool in `input_config.tool` (`mcp_server_id`, `tool_id`, `arguments`). Each argument is a fixed JSON value or one whole reference such as `{{flow_input.field}}`. A fixed string cannot contain `{{...}}`: it is read as a reference, and there is no escape syntax. Argument values are stored and returned as written and are not treated as secrets, so a credential does not belong in one; the MCP server's credential is stored with the server. A tool step reads text or JSON, takes no uploaded files and cannot use the output mode `template_fill`. Publish also requires each reference to name one of these: an earlier step's text (`step_N.output.text`, or the step's name alone), its status, its error message or a field of its declared contract, a declared run-form field, or a runtime variable. Publish does not judge whether a runtime variable that depends on the run's data (a transcript, an upload) has a value in a run. Any other configuration is refused with `typed_io_tool_invalid_config`. A run calls the tool once per step attempt and takes its answer as the step's input: for `input_type` `json` the structured content, or text that is a JSON object or array; for `text` the text. */
-      input_source: components["schemas"]["FlowInputSource"];
-      input_type: components["schemas"]["FlowInputType"];
-      /** Output Classification Override */
-      output_classification_override?: number | null;
-      /** Output Config */
-      output_config?:
-        | ({
-            /**
-             * FlowStepRetrievalPolicy
-             * @description Versioned policy embedded in the existing per-step output config JSON.
-             */
-            retrieval_policy?: {
-              /**
-               * Mode
-               * @enum {string}
-               */
-              mode: "best_effort" | "fail_closed";
-              /**
-               * Version
-               * @constant
-               */
-              version: 1;
-            };
-          } & {
-            [key: string]: unknown;
-          })
-        | null;
-      /** Output Contract */
-      output_contract?: {
-        [key: string]: unknown;
-      } | null;
-      output_mode: components["schemas"]["FlowOutputMode"];
-      output_type: components["schemas"]["FlowOutputType"];
-      /** @description Optional human-in-the-loop checkpoint for this step. Set mode to `view` to pause after the step until a reviewer approves it, or `edit` to let the reviewer edit the step output before downstream steps continue. Use `null` or omit the field for no pause. Review policy cannot be combined with outbound delivery output modes. */
-      review_policy?: components["schemas"]["FlowStepReviewPolicy"] | null;
-      /** Step Order */
-      step_order: number;
-      /**
-       * Timeout Seconds
-       * @description Optional per-step execution budget in seconds: one wall-clock deadline for the whole step execution, covering input resolution (including transcription), retrieval, every provider request of the step and finalization. Unset, the effective runtime policy's default applies (the organisation's flow runtime settings, else the deployment default). A value above that policy's maximum is refused with `flow_step_timeout_exceeds_tenant_max` when the flow is saved or published, and fails a run that still meets it. Exhaustion fails the run with `flow_step_timeout`.
-       */
-      timeout_seconds?: number | null;
-      /** User Description */
-      user_description?: string | null;
     };
     /**
      * FlowStepDiagnosticPublic

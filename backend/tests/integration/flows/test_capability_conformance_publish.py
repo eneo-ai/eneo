@@ -130,7 +130,6 @@ async def _publish_conformance_flow(
         json={
             "space_id": space_id,
             "name": f"{spec.flow_name} {uuid4().hex[:6]}",
-            "steps": [],
         },
         headers=headers,
     )

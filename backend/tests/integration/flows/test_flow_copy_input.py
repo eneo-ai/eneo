@@ -32,7 +32,9 @@ async def test_migrated_postgres_saves_and_publishes_copy_input_and_guards_rollb
     async with db_container() as container:
         service = container.flow_service()
         flow = await service.create_flow(
-            space_id=space_id, name="Copy JSON", description=None, steps=[]
+            space_id=space_id,
+            name="Copy JSON",
+            description=None,
         )
         assistant, _ = await service.create_flow_assistant(flow_id=flow.id, name="copy")
         step = FlowStep(

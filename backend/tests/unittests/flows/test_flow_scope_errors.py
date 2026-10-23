@@ -43,7 +43,6 @@ from eneo.flows.api.flow_authoring_router import (
 from eneo.flows.api.flow_models import (
     FlowCreateRequest,
     FlowRunCreateRequest,
-    FlowStepCreateRequest,
     FlowUpdateRequest,
 )
 from eneo.flows.api.flow_run_evidence_router import get_flow_run_evidence
@@ -224,17 +223,6 @@ async def test_create_flow_rejects_space_scope_mismatch(monkeypatch):
             flow_in=FlowCreateRequest(
                 space_id=target_space_id,
                 name="Flow",
-                steps=[
-                    FlowStepCreateRequest(
-                        assistant_id=uuid4(),
-                        step_order=1,
-                        user_description="Step",
-                        input_source="flow_input",
-                        input_type="text",
-                        output_mode="pass_through",
-                        output_type="json",
-                    )
-                ],
             ),
             container=container,
         )
@@ -873,16 +861,6 @@ async def test_create_flow_rejects_non_member(monkeypatch):
     flow_in = FlowCreateRequest(
         space_id=space_id,
         name="Test Flow",
-        steps=[
-            FlowStepCreateRequest(
-                assistant_id=uuid4(),
-                step_order=1,
-                input_source="flow_input",
-                input_type="text",
-                output_mode="pass_through",
-                output_type="json",
-            )
-        ],
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:
@@ -915,16 +893,6 @@ async def test_create_flow_rejects_without_tenant_manage_permission(monkeypatch)
     flow_in = FlowCreateRequest(
         space_id=space_id,
         name="Test Flow",
-        steps=[
-            FlowStepCreateRequest(
-                assistant_id=uuid4(),
-                step_order=1,
-                input_source="flow_input",
-                input_type="text",
-                output_mode="pass_through",
-                output_type="json",
-            )
-        ],
     )
 
     with pytest.raises(UnauthorizedException) as exc_info:

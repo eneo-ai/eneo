@@ -96,7 +96,6 @@ async def saved_three_step_flow(db_container, space_id: UUID) -> Saved:
             space_id=space_id,
             name="Tre steg",
             description="Läser, bedömer, skriver.",
-            steps=[],
         )
         steps: list[FlowStep] = []
         for order in (1, 2, 3):
@@ -272,7 +271,6 @@ async def seed_flow_with_assistants(
             space_id=space_id,
             name="Tre steg",
             description="Läser, analyserar och sammanfattar.",
-            steps=[],
         )
         steps: list[FlowStep] = []
         assistant_ids: list[UUID] = []

@@ -226,8 +226,11 @@ _FLOW_NAME_TAKEN_RESPONSE = error_response(
     operation_id="create_flow",
     summary="Create Flow",
     description=(
-        "Create a new draft flow definition, including its initial ordered steps, "
-        f"inside a space. {_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
+        "Create a new, empty draft flow inside a space. Each step runs an "
+        "assistant the flow owns, so steps follow once the flow exists: create "
+        "each step's assistant with `POST /api/v1/flows/{id}/assistants/`, then "
+        "send the steps with `PATCH /api/v1/flows/{id}/`. "
+        f"{_FLOW_DRAFT_OWNERSHIP_DESCRIPTION}"
     ),
     responses={
         400: error_response(

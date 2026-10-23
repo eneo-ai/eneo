@@ -237,38 +237,23 @@ class FlowService:
         *,
         space_id: UUID,
         name: str,
-        steps: list[FlowStep],
         description: str | None = None,
         metadata_json: FlowPersistedJsonObject | None = None,
         owner_user_id: UUID | None = None,
     ) -> Flow:
-        steps = [clean_inactive_step_config(step) for step in steps]
+        """A new flow, with no steps: each step runs an assistant the flow
+        owns (``create_flow_assistant``), so its steps are set by an update."""
         normalized_metadata, space = await self._fill_default_speaker_service(
             space_id=space_id,
             metadata_json=normalize_flow_metadata_for_write(metadata_json),
         )
-        self._validate_steps(steps, metadata_json=normalized_metadata)
-        self._refuse_step_timeouts_above_the_maximum(steps)
+        # A form field alone can take a name the run reserves.
         self._validate_variable_alias_collisions(
-            steps=steps,
-            metadata_json=normalized_metadata,
+            steps=[], metadata_json=normalized_metadata
         )
-        space = await self._check_speaker_service(
+        await self._check_speaker_service(
             space_id=space_id, metadata_json=normalized_metadata, space=space
         )
-        await self._validate_assistant_scope_for_steps(
-            space_id=space_id,
-            steps=steps,
-        )
-        await self._validate_step_security_classification_for_steps(
-            space_id=space_id,
-            steps=steps,
-            space=space,
-        )
-
-        normalized_steps = self._normalize_steps_for_tenant(steps)
-        persisted_steps = self._protect_authored_step_secrets(normalized_steps)
-        self._reject_unresolved_secret_sentinels(persisted_steps)
         flow = Flow(
             id=None,
             tenant_id=self.user.tenant_id,
@@ -281,7 +266,7 @@ class FlowService:
             metadata_json=normalized_metadata,
             created_at=None,
             updated_at=None,
-            steps=persisted_steps,
+            steps=[],
         )
         return await self.flow_repo.create(flow=flow, tenant_id=self.user.tenant_id)
 
@@ -372,7 +357,7 @@ class FlowService:
         await self._validate_assistant_scope_for_steps(
             space_id=existing.space_id,
             steps=next_steps,
-            owning_flow_id=existing.id,
+            owning_flow_id=existing.require_persisted_id(),
         )
 
         next_metadata = draft_write_metadata(existing.metadata_json, metadata_json)
@@ -709,7 +694,7 @@ class FlowService:
         await self._validate_assistant_scope_for_steps(
             space_id=flow.space_id,
             steps=flow.steps,
-            owning_flow_id=flow.id,
+            owning_flow_id=flow.require_persisted_id(),
         )
         assistants_by_id = await self._load_step_assistants(flow.steps)
         self._validate_publishable(
@@ -864,8 +849,7 @@ class FlowService:
         *,
         space_id: UUID,
         steps: list[FlowStep],
-        owning_flow_id: UUID | None = None,
-        require_owned_by_flow: bool = False,
+        owning_flow_id: UUID,
     ) -> None:
         assistant_ids = {step.assistant_id for step in steps}
         if not assistant_ids:
@@ -881,13 +865,6 @@ class FlowService:
         if missing:
             raise BadRequestException(
                 "One or more steps reference assistants outside the selected space or tenant."
-            )
-
-        if owning_flow_id is None:
-            if not require_owned_by_flow:
-                return
-            raise BadRequestException(
-                "Flow steps must reference flow-managed assistants owned by the flow."
             )
 
         non_owned = [
@@ -1013,7 +990,7 @@ class FlowService:
         await self._validate_assistant_scope_for_steps(
             space_id=flow.space_id,
             steps=candidate_steps,
-            owning_flow_id=flow.id,
+            owning_flow_id=flow.require_persisted_id(),
         )
         space = await self.space_service.get_space(flow.space_id)
         assistants_by_id: dict[UUID, Any] = dict(

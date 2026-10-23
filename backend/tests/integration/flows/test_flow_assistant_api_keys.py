@@ -67,7 +67,9 @@ async def _flow_assistant(db_container, *, space_id: UUID) -> tuple[UUID, UUID]:
     async with db_container() as container:
         flow_service = container.flow_service()
         flow = await flow_service.create_flow(
-            space_id=space_id, name="Nycklar", description="", steps=[]
+            space_id=space_id,
+            name="Nycklar",
+            description="",
         )
         assistant, _ = await flow_service.create_flow_assistant(
             flow_id=flow.id, name="steg"

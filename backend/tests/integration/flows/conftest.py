@@ -409,7 +409,6 @@ def create_published_compose_text_flow() -> Callable[
                 "space_id": space_id,
                 "name": name,
                 "description": "Deterministic broker and worker process proof.",
-                "steps": [],
                 **({} if metadata_json is None else {"metadata_json": metadata_json}),
             },
             headers=headers,

@@ -77,9 +77,7 @@ def _flow_name_taken_conflict() -> ConflictException:
     )
 
 
-def _classification_override_step_orders(
-    flow_data: FlowCreateRequest | FlowUpdateRequest,
-) -> list[int]:
+def _classification_override_step_orders(flow_data: FlowUpdateRequest) -> list[int]:
     steps = flow_data.steps
     if not steps:
         return []
@@ -134,7 +132,6 @@ async def create_flow(
             space_id=flow_in.space_id,
             name=flow_in.name,
             description=flow_in.description,
-            steps=[assembler.to_domain_step(step) for step in flow_in.steps],
             metadata_json=flow_in.metadata_json,
         )
     except FlowNameTakenError as exc:
@@ -155,21 +152,6 @@ async def create_flow(
             changes=_evidence_export_change(before=None, after=created.metadata_json),
         ),
     )
-    overrides = _classification_override_step_orders(flow_in)
-    if overrides:
-        audit.add(
-            tenant_id=user.tenant_id,
-            actor_id=user.id,
-            action=ActionType.FLOW_CLASSIFICATION_OVERRIDE,
-            entity_type=EntityType.FLOW,
-            entity_id=created_flow_id,
-            description="Configured output classification overrides for flow steps.",
-            metadata=AuditMetadata.standard(
-                actor=user,
-                target=created,
-                changes={"step_orders": overrides},
-            ),
-        )
     if owns_audit:
         await audit.log()
 

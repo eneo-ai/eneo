@@ -100,7 +100,6 @@ async def _create_flow_and_file(
         space_id=space.id,
         name=f"Template flow {uuid4().hex}",
         description="",
-        steps=[],
     )
     content = content if content is not None else _template_bytes(placeholder)
     file = await _save_template_file(

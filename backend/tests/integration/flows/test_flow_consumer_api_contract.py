@@ -163,7 +163,6 @@ async def _create_published_flow(
             "space_id": space_id,
             "name": f"consumer-flow-{uuid4().hex[:8]}",
             "description": "Runtime API consumer contract flow",
-            "steps": [],
         },
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -415,7 +414,6 @@ async def _create_published_required_runtime_input_flow(
             "space_id": space_id,
             "name": f"required-runtime-input-flow-{uuid4().hex[:8]}",
             "description": "Runtime input required API contract flow",
-            "steps": [],
         },
         headers={"Authorization": f"Bearer {token}"},
     )

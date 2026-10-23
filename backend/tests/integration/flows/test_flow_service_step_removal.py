@@ -103,7 +103,6 @@ async def _two_step_flow(db_container, *, space_id: UUID, name: str = "Två steg
             space_id=space_id,
             name=name,
             description="Sammanfattar och granskar.",
-            steps=[],
         )
         kept, _ = await flow_service.create_flow_assistant(flow_id=flow.id, name="kept")
         removed, _ = await flow_service.create_flow_assistant(

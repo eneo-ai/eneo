@@ -98,7 +98,6 @@ async def _create(client: AsyncClient, headers, space_id: str, metadata):
         json={
             "space_id": space_id,
             "name": f"Protokoll {uuid4().hex[:6]}",
-            "steps": [],
             "metadata_json": metadata,
         },
         headers=headers,

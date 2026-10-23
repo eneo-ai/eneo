@@ -297,12 +297,14 @@ export function initFlows(client) {
       }
     },
     /**
-     * Create a new Flow
-     * @param {{spaceId: string, name: string, description?: string, steps?: any[], metadata_json?: any}} flow
+     * Create a new, empty Flow. Its steps run assistants the flow owns: create
+     * them with `flows.assistants.create` once the flow exists, then set the
+     * steps with `flows.update`.
+     * @param {{spaceId: string, name: string, description?: string, metadata_json?: any}} flow
      * @throws {EneoError}
      */
     create: async (flow) => {
-      const { spaceId, name, description, steps = [], metadata_json } = flow;
+      const { spaceId, name, description, metadata_json } = flow;
       return _fetch("/api/v1/flows/", {
         method: "post",
         requestBody: {
@@ -310,7 +312,6 @@ export function initFlows(client) {
             space_id: spaceId,
             name,
             description,
-            steps,
             metadata_json
           }
         }

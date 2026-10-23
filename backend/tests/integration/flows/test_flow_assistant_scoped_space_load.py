@@ -60,7 +60,9 @@ async def _flow_assistants(db_container, *, space_id: UUID, count: int) -> list[
     async with db_container() as container:
         flow_service = container.flow_service()
         flow = await flow_service.create_flow(
-            space_id=space_id, name="Skrivning", description="", steps=[]
+            space_id=space_id,
+            name="Skrivning",
+            description="",
         )
         ids = []
         for index in range(count):

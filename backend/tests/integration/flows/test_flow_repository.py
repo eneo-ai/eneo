@@ -1459,7 +1459,7 @@ async def test_flow_repository_sparse_list_derives_step_projection_in_one_batche
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-@pytest.mark.parametrize("operation", ["create", "update", "metadata", "switch"])
+@pytest.mark.parametrize("operation", ["update", "metadata", "switch"])
 async def test_flow_save_removes_inactive_step_config(
     db_container,
     completion_model_factory,
@@ -1507,53 +1507,44 @@ async def test_flow_save_removes_inactive_step_config(
                 },
             }
         )
-        if operation == "create":
-            saved = await service.create_flow(
-                space_id=space.id, name="Cleanup", steps=[step]
-            )
-        else:
-            from cryptography.fernet import Fernet
+        from cryptography.fernet import Fernet
 
-            from eneo.settings.encryption_service import EncryptionService
+        from eneo.settings.encryption_service import EncryptionService
 
-            encryption = EncryptionService(Fernet.generate_key().decode())
-            stored_step = step.model_copy(deep=True)
-            stored_step.input_config = {
-                "url": "https://example.test/private",
-                "auth": {
-                    "mode": "bearer_token",
-                    "token": encryption.encrypt("stored-credential"),
-                },
+        encryption = EncryptionService(Fernet.generate_key().decode())
+        stored_step = step.model_copy(deep=True)
+        stored_step.input_config = {
+            "url": "https://example.test/private",
+            "auth": {
+                "mode": "bearer_token",
+                "token": encryption.encrypt("stored-credential"),
+            },
+        }
+        if operation == "switch":
+            stored_step.input_source = "http_get"
+        flow = _build_flow(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            user_id=admin_user.id,
+            assistant_id=assistant.id,
+        ).model_copy(
+            update={
+                "steps": [stored_step] if operation in {"metadata", "switch"} else []
             }
-            if operation == "switch":
-                stored_step.input_source = "http_get"
-            flow = _build_flow(
-                tenant_id=admin_user.tenant_id,
-                space_id=space.id,
-                user_id=admin_user.id,
-                assistant_id=assistant.id,
-            ).model_copy(
-                update={
-                    "steps": [stored_step]
-                    if operation in {"metadata", "switch"}
-                    else []
-                }
-            )
-            existing = await repo.create(flow=flow, tenant_id=admin_user.tenant_id)
-            await session.execute(
-                sa.update(Assistants)
-                .where(Assistants.id == assistant.id)
-                .values(
-                    origin="flow_managed", managing_flow_id=existing.id, hidden=True
-                )
-            )
-            if operation == "switch":
-                step.id = existing.steps[0].id
-            saved = await service.update_flow(
-                flow_id=existing.require_persisted_id(),
-                name="Cleanup",
-                steps=[step] if operation in {"update", "switch"} else None,
-            )
+        )
+        existing = await repo.create(flow=flow, tenant_id=admin_user.tenant_id)
+        await session.execute(
+            sa.update(Assistants)
+            .where(Assistants.id == assistant.id)
+            .values(origin="flow_managed", managing_flow_id=existing.id, hidden=True)
+        )
+        if operation == "switch":
+            step.id = existing.steps[0].id
+        saved = await service.update_flow(
+            flow_id=existing.require_persisted_id(),
+            name="Cleanup",
+            steps=[step] if operation in {"update", "switch"} else None,
+        )
         reloaded = await repo.get(saved.require_persisted_id(), admin_user.tenant_id)
         assert reloaded.steps[0].input_config == (
             None if operation == "metadata" else {"extension": {"keep": True}}

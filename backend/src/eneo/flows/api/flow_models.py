@@ -795,6 +795,9 @@ FlowName: TypeAlias = Annotated[
 
 
 class FlowCreateRequest(BaseModel):
+    """A new flow starts with no steps: each step runs an assistant the flow
+    owns, and those exist only once the flow does."""
+
     model_config = ConfigDict(
         extra="forbid",
         json_schema_extra={
@@ -802,16 +805,6 @@ class FlowCreateRequest(BaseModel):
                 "space_id": "00000000-0000-0000-0000-000000000001",
                 "name": "Municipality Intake Transcription",
                 "description": "Transcribe and summarize citizen audio",
-                "steps": [
-                    {
-                        "assistant_id": "00000000-0000-0000-0000-000000000002",
-                        "step_order": 1,
-                        "input_source": "flow_input",
-                        "input_type": "audio",
-                        "output_mode": "transcribe_only",
-                        "output_type": "text",
-                    }
-                ],
             }
         },
     )
@@ -819,7 +812,6 @@ class FlowCreateRequest(BaseModel):
     space_id: UUID
     name: FlowName
     description: str | None = None
-    steps: list[FlowStepCreateRequest]
     metadata_json: dict[str, Any] | None = None
 
 

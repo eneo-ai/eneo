@@ -53,7 +53,6 @@ from eneo.flows.api.flow_models import (
     FlowAssistantCreateRequest,
     FlowAssistantPatchRequest,
     FlowCreateRequest,
-    FlowStepCreateRequest,
     FlowStepUpdateRequest,
     FlowUpdateRequest,
 )
@@ -451,34 +450,17 @@ async def test_create_flow_pins_audit_entity_ids(monkeypatch):
 
     response = await create_flow(
         request=_request(),
-        flow_in=FlowCreateRequest(
-            space_id=space_id,
-            name="Flow",
-            steps=[
-                FlowStepCreateRequest(
-                    assistant_id=uuid4(),
-                    step_order=1,
-                    input_source="flow_input",
-                    input_type="text",
-                    output_mode="pass_through",
-                    output_type="json",
-                    output_classification_override=2,
-                )
-            ],
-        ),
+        flow_in=FlowCreateRequest(space_id=space_id, name="Flow"),
         container=container,
     )
 
     assert response.id == flow_id
     assert [
         call.kwargs["action"] for call in audit_service.log_async.await_args_list
-    ] == [
-        ActionType.FLOW_CREATED,
-        ActionType.FLOW_CLASSIFICATION_OVERRIDE,
-    ]
+    ] == [ActionType.FLOW_CREATED]
     assert [
         call.kwargs["entity_id"] for call in audit_service.log_async.await_args_list
-    ] == [flow_id, flow_id]
+    ] == [flow_id]
 
 
 @pytest.mark.asyncio
@@ -950,7 +932,6 @@ async def test_create_flow_audits_evidence_export_allowed_from_the_start(
         flow_in=FlowCreateRequest(
             space_id=flow.space_id,
             name="Flow",
-            steps=[],
             metadata_json={"evidence_policy": {"allow_export": allowed}},
         ),
         container=container,
@@ -1431,9 +1412,7 @@ def _refused_fields(response: httpx.Response) -> list[list[object]]:
 def test_flow_name_materialization_refuses_is_refused_at_the_boundary(name: str):
     client = _authoring_client()
 
-    created = client.post(
-        "/", json={"space_id": str(uuid4()), "name": name, "steps": []}
-    )
+    created = client.post("/", json={"space_id": str(uuid4()), "name": name})
     updated = client.patch(f"/{uuid4()}/", json={"name": name})
     edited = client.patch(
         f"/{uuid4()}/editor/",
@@ -1443,4 +1422,4 @@ def test_flow_name_materialization_refuses_is_refused_at_the_boundary(name: str)
     assert ["body", "name"] in _refused_fields(created)
     assert ["body", "name"] in _refused_fields(updated)
     assert ["body", "definition", "name"] in _refused_fields(edited)
-    FlowCreateRequest(space_id=uuid4(), name="x" * MAX_FLOW_NAME_LENGTH, steps=[])
+    FlowCreateRequest(space_id=uuid4(), name="x" * MAX_FLOW_NAME_LENGTH)

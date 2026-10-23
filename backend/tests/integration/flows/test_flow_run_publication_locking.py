@@ -312,7 +312,6 @@ async def _create_unpublished_flow(
         space_id=space.id,
         name="Flow edit publish race flow",
         description="Proves a draft edit cannot revert a concurrent publish.",
-        steps=[],
     )
     assert flow.id is not None
     assistant, _ = await flow_service.create_flow_assistant(

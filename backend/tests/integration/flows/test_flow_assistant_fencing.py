@@ -80,7 +80,9 @@ async def editable(
     async with db_container() as container:
         service = container.flow_service()
         flow = await service.create_flow(
-            space_id=space_id, name="Ett steg", description=None, steps=[]
+            space_id=space_id,
+            name="Ett steg",
+            description=None,
         )
         assistant, _ = await service.create_flow_assistant(
             flow_id=flow.id, name="steg1"

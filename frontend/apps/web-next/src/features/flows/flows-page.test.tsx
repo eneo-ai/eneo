@@ -103,8 +103,7 @@ describe("FlowsPage", () => {
       body: {
         space_id: "space-1",
         name: "Bygglov",
-        description: "Granskar ansökningar.",
-        steps: []
+        description: "Granskar ansökningar."
       }
     });
   });
