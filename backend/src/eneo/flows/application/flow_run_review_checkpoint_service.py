@@ -89,11 +89,9 @@ from eneo.flows.infrastructure.flow_transcript_corrections_repo import (
 from eneo.flows.infrastructure.flow_transcript_words_repo import (
     FlowTranscriptWordsRepository,
 )
-from eneo.flows.output_processing import (
-    StructuredOutputValue,
-    validate_against_contract,
-)
+from eneo.flows.output_processing import StructuredOutputValue
 from eneo.flows.principal import FlowPrincipal
+from eneo.flows.runtime.contract_check import check_contract_in_child
 from eneo.flows.runtime.speaker_mapping_runtime import (
     SpeakerMappingValidationError,
     mapping_to_names,
@@ -346,10 +344,20 @@ def _rendered_json_text(
         ) from exc
 
 
-def _validate_against_output_contract(
-    *, checkpoint: FlowRunReviewCheckpoint, structured: StructuredOutputValue
+async def check_review_payload_contract(
+    *, checkpoint: FlowRunReviewCheckpoint, payload: FlowPersistedJsonObject
 ) -> None:
-    if checkpoint.output_contract_json is None:
+    """Check a rebuilt JSON payload's structured value against the step's
+    output contract.
+
+    The flow author owns the contract, so the check runs in the killable
+    contract checker: a pattern that backtracks ends at the check's time limit
+    (typed_io_contract_not_checked) instead of holding the API event loop.
+    """
+    if (
+        checkpoint.output_contract_json is None
+        or checkpoint.output_type is not FlowOutputType.JSON
+    ):
         return
     context: dict[str, object] = {
         "checkpoint_id": str(checkpoint.id),
@@ -358,10 +366,11 @@ def _validate_against_output_contract(
         "payload_field": "structured",
     }
     try:
-        validate_against_contract(
-            structured,
+        await check_contract_in_child(
+            cast(StructuredOutputValue, payload.get("structured")),
             checkpoint.output_contract_json,
             label=f"Review checkpoint step {checkpoint.step_order} output",
+            side="output",
         )
     except TypedIOValidationException as exc:
         exc.context = context
@@ -472,7 +481,26 @@ def _speaker_mapping_text(
     return apply_speaker_names(source_text, mapping_to_names(mapping)), mapping
 
 
-def build_edited_review_payload(
+async def build_edited_review_payload(
+    *,
+    checkpoint: FlowRunReviewCheckpoint,
+    edited_value: FlowReviewEditedValue,
+    source_text: str | None = None,
+    split_labels: Sequence[str] = (),
+) -> FlowPersistedJsonObject:
+    """The reviewed step's payload rebuilt from the edit
+    (``rebuild_review_payload``) and checked against its output contract."""
+    payload = rebuild_review_payload(
+        checkpoint=checkpoint,
+        edited_value=edited_value,
+        source_text=source_text,
+        split_labels=split_labels,
+    )
+    await check_review_payload_contract(checkpoint=checkpoint, payload=payload)
+    return payload
+
+
+def rebuild_review_payload(
     *,
     checkpoint: FlowRunReviewCheckpoint,
     edited_value: FlowReviewEditedValue,
@@ -480,6 +508,9 @@ def build_edited_review_payload(
     split_labels: Sequence[str] = (),
 ) -> FlowPersistedJsonObject:
     """Rebuild the reviewed step's payload from the one value the reviewer owns.
+
+    The output contract is not checked here; ``check_review_payload_contract``
+    owns that check and every caller awaits it before persisting.
 
     Both persisted encodings of a JSON step output — the structured value and its
     text rendering — are derived here, so an edit cannot leave them disagreeing.
@@ -553,8 +584,8 @@ def build_edited_review_payload(
         case _:
             assert_never(checkpoint.output_type)
 
-    # Size is settled before schema validation so an oversized value cannot buy
-    # unbounded validation work.
+    # Size is settled here, before the caller's contract check, so an oversized
+    # value cannot buy unbounded validation work.
     max_inline_text_bytes = get_settings().flow_max_inline_text_bytes
     try:
         text_bytes = len(text.encode("utf-8"))
@@ -581,8 +612,6 @@ def build_edited_review_payload(
                 "text_bytes": text_bytes,
             },
         )
-    if structured is not None:
-        _validate_against_output_contract(checkpoint=checkpoint, structured=structured)
 
     payload: FlowPersistedJsonObject = {"text": text}
     if structured is not None:
@@ -713,7 +742,7 @@ class FlowRunReviewCheckpointService:
             if extension is not None and self.transcript_corrections_repo is not None
             else []
         )
-        current_payload_json = build_edited_review_payload(
+        current_payload_json = await build_edited_review_payload(
             checkpoint=checkpoint,
             edited_value=edited_value,
             source_text=source_text,
@@ -1156,7 +1185,7 @@ class FlowRunReviewCheckpointService:
                 if entry["samples"]
             }
             surviving = [label for label in split_labels if label in with_text]
-            return build_edited_review_payload(
+            return rebuild_review_payload(
                 checkpoint=checkpoint,
                 edited_value=cast(
                     StructuredOutputValue,
@@ -1168,7 +1197,7 @@ class FlowRunReviewCheckpointService:
                 split_labels=surviving,
             )
 
-        return build_folded_transcript(
+        fold = build_folded_transcript(
             checkpoint=checkpoint,
             step_result=step_result,
             correction_set=correction_set,
@@ -1180,6 +1209,16 @@ class FlowRunReviewCheckpointService:
             rebuild_payload=rebuild,
             words_by_segment=words_by_segment,
         )
+        if fold.folded_payload is not None:
+            try:
+                await check_review_payload_contract(
+                    checkpoint=checkpoint, payload=fold.folded_payload
+                )
+            except TypedIOValidationException:
+                return skip_folded_transcript(
+                    correction_set, "payload_rebuild_failed", fold.previous_text
+                )
+        return fold
 
     async def _fold_words(
         self,

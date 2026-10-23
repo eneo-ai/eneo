@@ -291,8 +291,9 @@ and an edited value whose text rendering exceeds the inline output limit returns
 
 When the checkpoint has an `output_contract`, the edited JSON value is validated before any
 checkpoint, step-result projection, or audit state is persisted. Contract failures return `400`
-with code `typed_io_contract_violation` and context fields `checkpoint_id`, `step_id`,
-`step_order`, and `payload_field`.
+with code `typed_io_contract_violation`, and a check that does not finish within its time limit
+returns `400` with code `typed_io_contract_not_checked`; both carry context fields
+`checkpoint_id`, `step_id`, `step_order`, and `payload_field`.
 
 The edit must be submitted before the checkpoint `expires_at` deadline. Late edits return
 `400` with code `flow_review_expired`.
@@ -769,6 +770,7 @@ async def get_active_flow_run_review_checkpoint(
             description=(
                 "Review edit failed. Representative machine-readable codes include "
                 "`typed_io_validation_failed`, `typed_io_contract_violation`, "
+                "`typed_io_contract_not_checked`, "
                 "`flow_review_stale_revision`, `flow_review_expired`, "
                 "`flow_review_not_active`, `flow_review_edit_not_allowed`, "
                 "`flow_review_edit_file_backed_unsupported`, "
