@@ -25,6 +25,8 @@ from eneo.websites.presentation.website_models import (
     BulkWebsiteDeleteResponse,
     CrawlRunPublic,
     WebsiteBulkActionError,
+    WebsiteContentFolderPublic,
+    WebsiteContentFoldersPublic,
     WebsiteCreateRequestDeprecated,
     WebsiteExistsResponse,
     WebsitePublic,
@@ -443,8 +445,6 @@ async def run_crawl(
     id: Annotated[UUID, Path(description="Unique identifier of the website to crawl")],
     container: ContainerDep,
 ):
-    # MIT License
-
     service = container.website_crud_service()
     crawl_run = await service.crawl_website(id)
 
@@ -535,6 +535,10 @@ async def get_info_blob_page(
     container: ContainerDep,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     cursor: Annotated[UUID | None, Query()] = None,
+    q: Annotated[str, Query(max_length=200)] = "",
+    prefix: Annotated[
+        str, Query(max_length=2048, pattern=r"^(https?://[^?#]+/)?$")
+    ] = "",
 ) -> CursorPaginatedResponse[InfoBlobPublicNoText]:
     service = container.info_blob_service()
 
@@ -542,6 +546,8 @@ async def get_info_blob_page(
         id,
         limit=limit,
         cursor=cursor,
+        q=q,
+        prefix=prefix,
     )
 
     info_blobs_public = [
@@ -553,4 +559,37 @@ async def get_info_blob_page(
         limit=limit,
         next_cursor=str(page.next_cursor) if page.next_cursor is not None else None,
         total_count=page.total_count,
+    )
+
+
+@router.get(
+    "/{id}/content-folders/",
+    response_model=WebsiteContentFoldersPublic,
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_BLOB_ACCESS_REASON,
+)
+async def get_content_folders(
+    id: Annotated[UUID, Path(description="Unique identifier of the website")],
+    container: ContainerDep,
+    prefix: Annotated[
+        str, Query(max_length=2048, pattern=r"^(https?://[^?#]+/)?$")
+    ] = "",
+    cursor: Annotated[str | None, Query(max_length=2048)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+) -> WebsiteContentFoldersPublic:
+    page = await container.info_blob_service().get_website_folders(
+        id, prefix=prefix, cursor=cursor, limit=limit
+    )
+    return WebsiteContentFoldersPublic(
+        items=[
+            WebsiteContentFolderPublic(
+                path=folder.path, count=folder.count, has_children=folder.has_children
+            )
+            for folder in page.items
+        ],
+        next_cursor=page.next_cursor,
     )

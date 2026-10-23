@@ -3,7 +3,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import type { FlowStep } from "./flows-api";
-import { stepName } from "./flow-steps";
+import { stepMention } from "./chat/references";
 
 /**
  * The core's suggestions for a draft (`GET /flows/{id}/suggestions/`): where
@@ -87,7 +87,7 @@ export function readText(
 }
 
 /** "a och b", "a, b och c". */
-function joinParts(parts: string[], t: Translate): string {
+function joinReads(parts: string[], t: Translate): string {
   if (parts.length <= 1) return parts[0] ?? "";
   const head = parts.slice(0, -1).join(", ");
   return t("flow_suggestion_reads_pair", { first: head, second: parts[parts.length - 1]! });
@@ -109,7 +109,7 @@ export function suggestionText(
       const producer =
         typeof params.producer_step_order === "number" ? params.producer_step_order : 0;
       const contained = params.contained === true;
-      const reads = joinParts(
+      const reads = joinReads(
         duplicateReads(params).map((read) => readText(read, t, step)),
         t
       );
@@ -160,8 +160,9 @@ export function suggestionCounts(shown: readonly ShownSuggestion[]): Map<string,
 
 /**
  * The request "Fråga assistenten" puts in the flow chat's composer: the
- * suggestion's code and title and its steps by order and name, asking for an
- * explanation and a proposed change. It carries nothing from a run.
+ * suggestion's code and title and its steps as mentions (pills in the
+ * composer, ids for the chat's tools), asking for an explanation and a
+ * proposed change. It carries nothing from a run.
  */
 export function suggestionRequest(
   suggestion: FlowSuggestion,
@@ -172,15 +173,13 @@ export function suggestionRequest(
     const step = steps.find((candidate) => candidate.id === id);
     return step ? [step] : [];
   });
-  const stepTexts = named.map((step) => {
-    const name = stepName(step);
-    return name
-      ? t("flow_suggestion_ask_step", { order: step.step_order, name })
-      : t("flow_suggestion_ask_step_unnamed", { order: step.step_order });
-  });
+  const mentions = named.flatMap((step) =>
+    step.id ? [stepMention({ id: step.id, user_description: step.user_description })] : []
+  );
   return t("flow_suggestion_ask_request", {
     title: suggestionText(suggestion, t, named[0]).title,
     code: suggestion.code,
-    steps: joinParts(stepTexts, t)
+    // Pills in the composer, side by side; a pill brings its own space.
+    steps: mentions.join(" ")
   });
 }

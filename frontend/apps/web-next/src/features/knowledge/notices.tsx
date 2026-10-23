@@ -14,6 +14,7 @@ export function CrawlLimitationsBanner({
 
   return (
     <Banner
+      role="status"
       status="info"
       title={t("limitations")}
       description={
@@ -38,6 +39,7 @@ export function IntegrationsBetaNotice({
 
   return (
     <Banner
+      role="status"
       status="info"
       title={t("beta_version")}
       isDismissable

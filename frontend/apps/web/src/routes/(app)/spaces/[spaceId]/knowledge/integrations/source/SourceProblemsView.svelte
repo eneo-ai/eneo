@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { Component } from "svelte";
   import { SvelteSet } from "svelte/reactivity";
-  import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
   import FileBox from "@lucide/svelte/icons/file-box";
   import FileLock from "@lucide/svelte/icons/file-lock";
@@ -16,7 +15,7 @@
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
   import CopyButton from "$lib/components/CopyButton.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
-  import * as Collapsible from "$lib/components/ui/collapsible/index.js";
+  import SourceProblemGroup from "$lib/features/knowledge/components/SourceProblemGroup.svelte";
   import { formatDateTime } from "$lib/core/formatting/dateTime";
   import type {
     FileProblemCategory,
@@ -116,73 +115,55 @@
 
 {#snippet fileGroup(group: FileProblemGroup, open: boolean)}
   {@const meta = categories[group.category]}
-  <Collapsible.Root {open} class="border-default border-b last:border-b-0">
-    <Collapsible.Trigger
-      class="hover:bg-hover-dimmer focus-visible:ring-stronger group flex w-full items-center gap-3 px-4 py-3 text-left focus-visible:ring-2 focus-visible:outline-none"
-    >
-      <span
-        class="flex size-8 shrink-0 items-center justify-center rounded-md {group.severity ===
-        'fixable'
-          ? 'bg-warning-dimmer text-warning-stronger'
-          : 'bg-secondary text-secondary'}"
-      >
-        <meta.icon class="size-4" aria-hidden="true" />
-      </span>
-      <span class="flex min-w-0 flex-1 flex-col">
-        <span class="font-medium">{meta.title()}</span>
-        <span class="text-secondary text-sm">{meta.advice()}</span>
-      </span>
-      <span class="shrink-0 text-sm font-medium tabular-nums">
-        {group.files.length === 1
-          ? m.integration_problem_files_one()
-          : m.integration_problem_files_other({ count: group.files.length })}
-      </span>
-      <ChevronDown
-        class="text-secondary size-4 shrink-0 motion-safe:transition-transform group-data-[state=open]:rotate-180"
-        aria-hidden="true"
-      />
-    </Collapsible.Trigger>
-    <Collapsible.Content>
-      {@const expanded = expandedGroups.has(group.category)}
-      <ul class="flex flex-col px-4 pb-3 pl-15 text-sm">
-        <!-- The same file name recurs across folders, so the key needs the position. -->
-        {#each expanded ? group.files : group.files.slice(0, FILES_SHOWN) as file, index (`${index}:${file.item.id}:${file.file}`)}
-          <li
-            class="border-dimmer grid items-baseline gap-x-6 gap-y-0.5 border-t py-2 {showFolders
-              ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_minmax(0,3fr)]'
-              : 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]'}"
-          >
-            <span class="min-w-0 font-medium break-all">{file.file}</span>
-            {#if showFolders}
-              <!-- eslint-disable svelte/no-navigation-without-resolve -- href comes from the caller -->
-              <a
-                href={folderHref(file.item.id)}
-                class="text-secondary focus-visible:ring-stronger min-w-0 justify-self-start rounded break-all hover:underline focus-visible:ring-2 focus-visible:outline-none"
-                >{folderLabel(file.item)}</a
-              >
-              <!-- eslint-enable svelte/no-navigation-without-resolve -->
-            {/if}
-            <span class="text-secondary min-w-0">{file.detail}</span>
-          </li>
-        {/each}
-      </ul>
-      {#if group.files.length > FILES_SHOWN}
-        <div class="px-4 pb-3 pl-15">
-          <Button
-            variant="link"
-            size="sm"
-            class="h-auto p-0"
-            onclick={() =>
-              expanded ? expandedGroups.delete(group.category) : expandedGroups.add(group.category)}
-          >
-            {expanded
-              ? m.integration_problem_show_fewer()
-              : m.integration_problem_show_all({ count: group.files.length })}
-          </Button>
-        </div>
-      {/if}
-    </Collapsible.Content>
-  </Collapsible.Root>
+  <SourceProblemGroup
+    {open}
+    title={meta.title()}
+    advice={meta.advice()}
+    icon={meta.icon}
+    tone={group.severity === "fixable" ? "warning" : "neutral"}
+    countLabel={group.files.length === 1
+      ? m.integration_problem_files_one()
+      : m.integration_problem_files_other({ count: group.files.length })}
+  >
+    {@const expanded = expandedGroups.has(group.category)}
+    <ul class="flex flex-col px-4 pb-3 pl-15 text-sm">
+      <!-- The same file name recurs across folders, so the key needs the position. -->
+      {#each expanded ? group.files : group.files.slice(0, FILES_SHOWN) as file, index (`${index}:${file.item.id}:${file.file}`)}
+        <li
+          class="border-dimmer grid items-baseline gap-x-6 gap-y-0.5 border-t py-2 {showFolders
+            ? 'lg:grid-cols-[minmax(0,2fr)_minmax(0,2fr)_minmax(0,3fr)]'
+            : 'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]'}"
+        >
+          <span class="min-w-0 font-medium break-all">{file.file}</span>
+          {#if showFolders}
+            <!-- eslint-disable svelte/no-navigation-without-resolve -- href comes from the caller -->
+            <a
+              href={folderHref(file.item.id)}
+              class="text-secondary focus-visible:ring-stronger min-w-0 justify-self-start rounded break-all hover:underline focus-visible:ring-2 focus-visible:outline-none"
+              >{folderLabel(file.item)}</a
+            >
+            <!-- eslint-enable svelte/no-navigation-without-resolve -->
+          {/if}
+          <span class="text-secondary min-w-0">{file.detail}</span>
+        </li>
+      {/each}
+    </ul>
+    {#if group.files.length > FILES_SHOWN}
+      <div class="px-4 pb-3 pl-15">
+        <Button
+          variant="link"
+          size="sm"
+          class="h-auto p-0"
+          onclick={() =>
+            expanded ? expandedGroups.delete(group.category) : expandedGroups.add(group.category)}
+        >
+          {expanded
+            ? m.integration_problem_show_fewer()
+            : m.integration_problem_show_all({ count: group.files.length })}
+        </Button>
+      </div>
+    {/if}
+  </SourceProblemGroup>
 {/snippet}
 
 <div class="flex flex-col gap-6">

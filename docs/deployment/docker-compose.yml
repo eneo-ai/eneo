@@ -176,6 +176,7 @@ services:
     container_name: eneo_worker
     init: true
     restart: unless-stopped
+    stop_grace_period: 70s  # arq drain (60 s) + margin
     environment:
       - TOOL_RUNTIME_URL=${TOOL_RUNTIME_URL:-http://tool-runtime:3010}
       - TOOL_RUNTIME_TOKEN=${TOOL_RUNTIME_TOKEN:-}
@@ -206,7 +207,9 @@ services:
     # Platform execution-capacity worker.
     image: ${ENEO_BACKEND_IMAGE:-ghcr.io/eneo-ai/eneo-backend:${ENEO_VERSION:?Select one Eneo release or use release.env}}
     container_name: eneo_task_execution_worker
+    init: true
     restart: unless-stopped
+    stop_grace_period: 70s  # arq drain (60 s) + margin
     command: ["task-execution-worker"]
     env_file:
       - env_backend.env
@@ -230,7 +233,9 @@ services:
     # Platform maintenance-capacity worker and scheduler.
     image: ${ENEO_BACKEND_IMAGE:-ghcr.io/eneo-ai/eneo-backend:${ENEO_VERSION:?Select one Eneo release or use release.env}}
     container_name: eneo_task_maintenance_worker
+    init: true
     restart: unless-stopped
+    stop_grace_period: 70s  # arq drain (60 s) + margin
     command: ["task-maintenance-worker"]
     env_file:
       - env_backend.env

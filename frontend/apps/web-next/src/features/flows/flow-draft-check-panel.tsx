@@ -7,7 +7,7 @@ import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQueries, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
 import { useId, useRef } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import {
   classificationPreviewQueryOptions,
@@ -306,7 +306,7 @@ export function FlowDraftCheck({
           {t("flow_editor_tools_check_running")}
         </Text>
       ) : count === 0 ? (
-        <QuietBanner
+        <Banner
           status={unchecked ? "warning" : "success"}
           title={
             unchecked ? t("flow_editor_tools_check_incomplete") : t("flow_editor_tools_check_clean")
@@ -315,7 +315,7 @@ export function FlowDraftCheck({
           collapsible={false}
         />
       ) : (
-        <QuietBanner
+        <Banner
           status="warning"
           title={t("flow_editor_tools_check_problems", { count })}
           description={unchecked ? t("flow_editor_tools_check_incomplete") : undefined}
@@ -365,7 +365,7 @@ export function FlowDraftCheck({
               );
             })}
           </ul>
-        </QuietBanner>
+        </Banner>
       )}
       <FlowSuggestionsSection flow={flow} onOpenStep={onOpenStep} onAskChat={onAskChat} />
     </section>

@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import type { Permission } from "@/lib/auth/permissions";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { makeKindOption, makeKindPlace } from "./editor/testing/fixtures";
 import { flowPermissions, makeFlow, makeStep } from "./flow-fixtures";
@@ -30,7 +31,13 @@ const state = vi.hoisted(() => ({
   unpublish: null as unknown,
   mode: null as unknown,
   kinds: null as unknown,
-  suggestions: null as unknown
+  suggestions: null as unknown,
+  // What went into the chat's composer, text and pills (by the value they send) in order.
+  inserted: [] as string[],
+  composer: {
+    insertText: (text: string) => state.inserted.push(text),
+    insertToken: (token: { value: string }) => state.inserted.push(token.value)
+  }
 }));
 
 const api = vi.hoisted(() => ({
@@ -72,32 +79,48 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   useAnnounce: () => state.announce
 }));
 // The conversation itself is the chat feature's; the page only follows what it reports.
-// It shows what the page offered its composer (the chat view's own tests put
-// an offer in the composer and check that nothing is sent).
-vi.mock("@/features/chat/chat-view", () => ({
-  ChatView: ({
-    onToolCallFinished,
-    onAnswerFinished,
-    offer
-  }: {
-    onToolCallFinished: (call: { serverName: string; isInternal: boolean }) => void;
-    onAnswerFinished: () => void;
-    offer: { text: string } | null;
-  }) => (
-    <div>
-      {offer ? <p>Erbjudet: {offer.text}</p> : null}
-      <button
-        type="button"
-        onClick={() => onToolCallFinished({ serverName: "flows", isInternal: true })}
-      >
-        Verktyg klart
-      </button>
-      <button type="button" onClick={onAnswerFinished}>
-        Svar klart
-      </button>
-    </div>
-  )
-}));
+vi.mock("@/features/chat/chat-view", async () => {
+  const { useEffect } = await import("react");
+  return {
+    // The stub shows what the flow page puts in the composer's footer (the
+    // Fråga/Redigera picker) and its placeholder, and offers the callbacks.
+    // It reports a composer that records what is put into it, as the real
+    // one does through `references.onComposer`.
+    ChatView: function ChatView({
+      onToolCallFinished,
+      onAnswerFinished,
+      footerActions,
+      placeholder,
+      references
+    }: {
+      onToolCallFinished: (call: { serverName: string; isInternal: boolean }) => void;
+      onAnswerFinished: () => void;
+      footerActions?: React.ReactNode;
+      placeholder?: string;
+      references?: { onComposer?: (input: unknown) => void };
+    }) {
+      useEffect(() => {
+        references?.onComposer?.(state.composer);
+        return () => references?.onComposer?.(null);
+      }, [references]);
+      return (
+        <div>
+          <button
+            type="button"
+            onClick={() => onToolCallFinished({ serverName: "flows", isInternal: true })}
+          >
+            Verktyg klart
+          </button>
+          <button type="button" onClick={onAnswerFinished}>
+            Svar klart
+          </button>
+          {footerActions}
+          <p>{placeholder}</p>
+        </div>
+      );
+    }
+  };
+});
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   const { makeSpace: space } = await import("@/features/spaces/testing/space-fixture");
@@ -146,6 +169,7 @@ const posted = () => api.POST.mock.calls.map(([path]) => path);
 beforeEach(() => {
   state.flow = ok(makeFlow({ steps }));
   state.suggestions = suggestions(4, []);
+  state.inserted = [];
   // Without edit access the chat is not offered; most tests are about the definition.
   state.chat = refused(403, { code: "insufficient_space_permission", message: "No." });
 });
@@ -189,6 +213,19 @@ describe("FlowPage", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Steg" })).toBeTruthy();
     expect(await screen.findByText("Chatten är inte tillgänglig")).toBeTruthy();
     await expectNoAxeViolations(container);
+  });
+
+  it("offers a handle to resize the chat beside the definition, not on a phone", async () => {
+    renderPage();
+    const handle = screen.getByRole("separator", { name: "Ändra storlek på chatten" });
+    expect(handle.getAttribute("aria-orientation")).toBe("vertical");
+    expect(handle.getAttribute("aria-valuemin")).toBe("352");
+    expect(handle.tabIndex).toBe(0);
+
+    act(() => setViewport("phone"));
+    expect(screen.queryByRole("separator", { name: "Ändra storlek på chatten" })).toBeNull();
+    // The chat is one of the tabbed views there, laid out by the stylesheet alone.
+    expect(screen.getByRole("region", { name: "Chatt om flödet" }).style.width).toBe("");
   });
 
   it("moves a step through the editor, fenced on the revision on screen", async () => {
@@ -497,7 +534,9 @@ describe("FlowPage", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
 
     expect(await screen.findByText("Granska svaret")).toBeTruthy();
-    expect(state.announce).toHaveBeenCalledWith("Flödet uppdaterades från chatten");
+    expect(state.announce).toHaveBeenCalledWith("Chatten lade till Steg 3: Granska svaret.");
+    // The new card is marked, for a while.
+    expect(screen.getByText("Tillagt av chatten")).toBeTruthy();
 
     // An answer that changed nothing is not news.
     state.announce.mockClear();
@@ -514,10 +553,12 @@ describe("FlowPage", () => {
     state.mode = ok({ ...chat, editing: true });
     renderPage();
 
-    expect(await screen.findByText("Chatten läser bara")).toBeTruthy();
-    fireEvent.click(screen.getByRole("switch", { name: /Redigeringsläge/ }));
+    // The mode is picked beside the send button, in the composer's footer.
+    fireEvent.click(await screen.findByRole("button", { name: "Läge: Fråga" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Redigera/ }));
 
-    expect(await screen.findByText("Chatten kan ändra flödet")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Läge: Redigera" })).toBeTruthy();
+    expect(screen.getByText("Beskriv ändringen…")).toBeTruthy();
     await waitFor(() =>
       expect(state.announce).toHaveBeenCalledWith(
         "Redigeringsläget är på. Chatten kan nu ändra flödet."
@@ -535,7 +576,8 @@ describe("FlowPage", () => {
     state.mode = ok({ ...chat, session_id: "session-2", editing: true });
     renderPage();
 
-    fireEvent.click(await screen.findByRole("switch", { name: /Redigeringsläge/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Läge: Fråga" }));
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: /Redigera/ }));
 
     await waitFor(() =>
       expect(state.announce).toHaveBeenCalledWith(
@@ -564,16 +606,21 @@ describe("FlowPage", () => {
         name: "Fråga assistenten om ”Svaret från steg 1 skickas två gånger” (Steg 2: Skriv svar)"
       })
     );
-    expect(
-      await screen.findByText(
-        "Erbjudet: Förklara förslaget ”Svaret från steg 1 skickas två gånger” (duplicate_read) " +
-          "som gäller steg 2 (Skriv svar) och steg 1 (Sammanfatta), och föreslå hur flödet kan ändras."
-      )
-    ).toBeTruthy();
+    // Text as typed, each step a pill that carries its id.
+    await waitFor(() =>
+      expect(state.inserted).toEqual([
+        "Förklara förslaget ”Svaret från steg 1 skickas två gånger” (duplicate_read) och " +
+          "föreslå hur flödet kan ändras. Steg: ",
+        "@[Skriv svar](step:step-2)",
+        "@[Sammanfatta](step:step-1)"
+      ])
+    );
     expect(definition.className).toContain("max-lg:hidden");
     expect(chat.className).not.toContain("max-lg:hidden");
-    // The chat was opened and the draft checked; nothing was sent.
+    // The chat was opened and the draft checked; nothing was sent, and the mode stayed.
     expect(posted().every((path) => OPENING_POSTS.includes(path))).toBe(true);
+    expect(api.PATCH).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Läge: Fråga" })).toBeTruthy();
     await expectNoAxeViolations(container);
   });
 
@@ -589,10 +636,13 @@ describe("FlowPage", () => {
     state.chat = ok({ ...CHAT, editing: false });
     renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "Optimera flödet" }));
-    expect(
-      await screen.findByText(/^Erbjudet: Granska flödet med read_flow_suggestions/)
-    ).toBeTruthy();
+    await waitFor(() =>
+      expect(state.inserted.join("")).toMatch(/^Granska flödet med read_flow_suggestions/)
+    );
+    // Once, however often the page renders afterwards.
+    expect(state.inserted).toHaveLength(1);
     expect(posted().every((path) => OPENING_POSTS.includes(path))).toBe(true);
+    expect(api.PATCH).not.toHaveBeenCalled();
   });
 
   it("asks for the suggestions again when the chat's tools change the draft", async () => {

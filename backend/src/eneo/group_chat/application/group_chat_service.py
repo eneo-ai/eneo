@@ -1,6 +1,4 @@
 # Copyright (c) 2025 Sundsvalls Kommun
-#
-# Licensed under the MIT License.
 import asyncio
 import re
 from dataclasses import dataclass

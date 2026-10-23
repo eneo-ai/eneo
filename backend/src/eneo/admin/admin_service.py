@@ -220,7 +220,9 @@ class AdminService:
                 )
                 raise UniqueUserException(f"Email '{user.email}' is already registered")
 
-        result = await self.user_service.update_user(user_in_db.id, user)
+        result = await self.user_service.update_user(
+            user_in_db.id, user, actor_id=self.user.id
+        )
         logger.info(
             f"Successfully updated user {username} in tenant {self.user.tenant_id}"
         )

@@ -17,6 +17,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { eneoTheme } from "./eneo";
+import { ENEO_THEME_NAME } from "./theme-name";
 
 const TEXT = 4.5;
 const NON_TEXT = 3;
@@ -309,5 +310,11 @@ describe("contrast helpers", () => {
   it("reads both colour modes from light-dark()", () => {
     expect(modeValue("light-dark(#fff, rgba(1, 2, 3, 0.5))", MODES[0])).toBe("#fff");
     expect(modeValue("light-dark(#fff, rgba(1, 2, 3, 0.5))", MODES[1])).toBe("rgba(1, 2, 3, 0.5)");
+  });
+});
+
+describe("theme name", () => {
+  it("is the name the server puts on <html> as the Astryx theme scope", () => {
+    expect(eneoTheme.name).toBe(ENEO_THEME_NAME);
   });
 });

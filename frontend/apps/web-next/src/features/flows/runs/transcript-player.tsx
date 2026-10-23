@@ -11,7 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight, Play, RotateCcw, RotateCw } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useEffect, useId, useRef, useState } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { refusalText } from "./run-messages";
 import { inputFilePlayback, transcriptWordsQueryOptions } from "./runs-api";
 import type { ShownSegment, TranscriptTarget } from "./transcript";
@@ -241,7 +241,7 @@ export function useTranscriptPlayback({
   const player = (
     <div ref={box} className="flex flex-col gap-2">
       {problem ? (
-        <QuietBanner
+        <Banner
           status="error"
           title={t("flow_transcript_audio_failed")}
           description={problem}

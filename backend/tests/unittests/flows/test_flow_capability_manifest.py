@@ -56,8 +56,8 @@ def _flow_capability_manifest_source() -> Path:
     )
 
 
-def test_fcm_version_is_thirteen() -> None:
-    assert FCM_VERSION == 13
+def test_fcm_version_is_fourteen() -> None:
+    assert FCM_VERSION == 14
 
 
 def test_flow_capability_is_frozen_with_engine_truth_fields() -> None:
@@ -923,6 +923,20 @@ def test_every_enum_tuple_is_classified() -> None:
     assert classified["not_exposed"] > 0
 
 
+@pytest.mark.parametrize("source", [FlowInputSource.TOOL, FlowInputSource.HTTP_GET])
+def test_outside_input_cells_refuse_a_mode_that_never_reads_the_step_input(
+    source: FlowInputSource,
+) -> None:
+    # eneo-be0p.18: a template fill never resolves the step's input, so the
+    # tool call or HTTP fetch would never be made.
+    outcome, reason = _classify_cell(
+        source, FlowInputType.TEXT, FlowOutputType.DOCX, FlowOutputMode.TEMPLATE_FILL
+    )
+
+    assert outcome == "illegal_source_type_pair"
+    assert f"input_source '{source.value}'" in (reason or "")
+
+
 # ---------------------------------------------------------------------
 # FCM_VERSION bump-discipline.
 #
@@ -991,7 +1005,7 @@ def _compute_fcm_surface_fingerprint() -> tuple[object, ...]:
     )
 
 
-_FCM_SURFACE_FINGERPRINT_V12: tuple[object, ...] = (
+_FCM_SURFACE_FINGERPRINT_V14: tuple[object, ...] = (
     (
         "applies_to_tuples",
         "channel",
@@ -1057,7 +1071,7 @@ _FCM_SURFACE_FINGERPRINT_V12: tuple[object, ...] = (
             "builder",
             "text_only",
             None,
-            "fbc541a7a61149f5918bed7567c49ca9e7c681fa1a2d159d0e6abac695fd831a",
+            "560c69cc3d8bab98d4c112c82645c4882aad3bcd8b1c79af8c3d46ed341f5f4d",
             (
                 (
                     "input_contract_forbidden",
@@ -1151,7 +1165,7 @@ _FCM_SURFACE_FINGERPRINT_V12: tuple[object, ...] = (
             "builder",
             "text_only",
             "text",
-            "5df8f8ff9253b6b9c2f8a55810a9ed2091730ca64e366418f463c513465f92fe",
+            "71abbd67950f5ba2feb70849066cea1d8c84c30132b1634bdd3a45d50dd82b75",
             (),
             (),
         ),
@@ -1159,7 +1173,7 @@ _FCM_SURFACE_FINGERPRINT_V12: tuple[object, ...] = (
             "builder",
             "text_only",
             "text",
-            "0463d088c7e2f08ebfbf60de2e31291827580a91bd68d9dc548943edb603c298",
+            "499393224715ba0b0eaa76c951b12e0839e47d8cb44f0b88fd3fde345928f76e",
             (),
             (),
         ),
@@ -1273,7 +1287,7 @@ _FCM_SURFACE_FINGERPRINT_V12: tuple[object, ...] = (
             "builder",
             None,
             None,
-            "cb5675b8560d84ada2404bcb871b2b033c2d4698417958d628c6804b05449d24",
+            "28ca61018f6454a8c0ee875e54e7453d92f80f50635023350e688386164af8e4",
             (
                 (
                     "forbids_output_contract",
@@ -1384,11 +1398,11 @@ def test_fcm_surface_fingerprint_is_stable() -> None:
     reads cleanly.
     """
     actual = _compute_fcm_surface_fingerprint()
-    assert actual == _FCM_SURFACE_FINGERPRINT_V12, (
+    assert actual == _FCM_SURFACE_FINGERPRINT_V14, (
         "FCM surface fingerprint drifted. Bump `FCM_VERSION` to "
         f"{FCM_VERSION + 1} and update the expected fingerprint constant "
         "in this test.\n\n"
-        f"Expected: {_FCM_SURFACE_FINGERPRINT_V12}\n\n"
+        f"Expected: {_FCM_SURFACE_FINGERPRINT_V14}\n\n"
         f"Actual:   {actual}"
     )
 

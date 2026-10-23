@@ -210,8 +210,8 @@ describe("FlowDraftCheck", () => {
       })
     );
     expect(onAskChat).toHaveBeenCalledWith(
-      "Förklara förslaget ”Svaret från steg 1 skickas två gånger” (duplicate_read) som gäller " +
-        "steg 2 (Skriv svar) och steg 1 (Sammanfatta), och föreslå hur flödet kan ändras."
+      "Förklara förslaget ”Svaret från steg 1 skickas två gånger” (duplicate_read) och föreslå " +
+        "hur flödet kan ändras. Steg: @[Skriv svar](step:step-2) @[Sammanfatta](step:step-1)"
     );
     await expectNoAxeViolations(container);
   });

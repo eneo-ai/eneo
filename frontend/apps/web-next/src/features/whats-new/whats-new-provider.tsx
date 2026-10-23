@@ -1,7 +1,8 @@
 "use client";
 
-import { hasUnseenRelease, latestRelease } from "@eneo/whats-new";
+import { hasUnseenRelease, latestRelease, releases, visibleEntries } from "@eneo/whats-new";
 import { createContext, useCallback, useContext, useRef, useState } from "react";
+import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { pendingAnnouncement, type Marker } from "./release-model";
@@ -29,13 +30,22 @@ export function WhatsNewProvider({
   initialAnnounced: Marker;
   children: React.ReactNode;
 }) {
+  const { can } = useAppContext();
+  const latest = latestRelease();
+  const latestVisible = latest && visibleEntries(latest, can).length > 0;
   const [seenVersion, setSeenVersion] = useState<Marker>(initialSeen);
   const [announcedVersion, setAnnouncedVersion] = useState<Marker>(initialAnnounced);
   const seenInFlight = useRef<Promise<void> | null>(null);
 
+  const hasUnseen =
+    enabled &&
+    seenVersion !== undefined &&
+    releases.some(
+      (release) => visibleEntries(release, can).length > 0 && hasUnseenRelease(seenVersion, release)
+    );
+
   const markLatestSeen = useCallback((): Promise<void> => {
-    if (!enabled || seenVersion === undefined || !hasUnseenRelease(seenVersion))
-      return Promise.resolve();
+    if (!hasUnseen) return Promise.resolve();
     if (seenInFlight.current) return seenInFlight.current;
     const latest = latestRelease();
     if (!latest) return Promise.resolve();
@@ -54,10 +64,14 @@ export function WhatsNewProvider({
       });
     seenInFlight.current = request;
     return request;
-  }, [enabled, seenVersion]);
+  }, [hasUnseen, seenVersion]);
 
   const markLatestAnnounced = useCallback((): Promise<void> => {
-    const latest = pendingAnnouncement(enabled, latestRelease(), announcedVersion);
+    const latest = pendingAnnouncement(
+      enabled && !!latestVisible,
+      latestRelease(),
+      announcedVersion
+    );
     if (!latest) return Promise.resolve();
     setAnnouncedVersion(latest.version);
     return unwrap(
@@ -67,7 +81,7 @@ export function WhatsNewProvider({
       .catch((error: unknown) => {
         console.error("Could not record the What's new announcement", error);
       });
-  }, [announcedVersion, enabled]);
+  }, [announcedVersion, enabled, latestVisible]);
 
   const resetState = useCallback(async () => {
     await unwrap(browserApi.DELETE("/api/v1/whats-new/state/"));
@@ -80,8 +94,8 @@ export function WhatsNewProvider({
       value={{
         enabled,
         seenVersion,
-        hasUnseen: enabled && seenVersion !== undefined && hasUnseenRelease(seenVersion),
-        pendingRelease: pendingAnnouncement(enabled, latestRelease(), announcedVersion),
+        hasUnseen,
+        pendingRelease: pendingAnnouncement(enabled && !!latestVisible, latest, announcedVersion),
         markLatestSeen,
         markLatestAnnounced,
         resetState

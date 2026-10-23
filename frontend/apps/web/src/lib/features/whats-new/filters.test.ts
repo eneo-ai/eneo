@@ -34,21 +34,21 @@ describe("what's new filters", () => {
   });
 
   it("narrows one release by area and Show me, respecting the audience", () => {
-    expect(filterEntries(releases[0], all, true).map((e) => e.id)).toEqual(["a", "b"]);
-    expect(filterEntries(releases[0], all, false).map((e) => e.id)).toEqual(["a"]);
-    expect(filterEntries(releases[0], { ...all, area: "admin" }, true).map((e) => e.id)).toEqual([
-      "b"
-    ]);
-    expect(filterEntries(releases[0], { ...all, showMeOnly: true }, true).map((e) => e.id)).toEqual(
-      ["a"]
-    );
-    expect(filterEntries(releases[1], { ...all, showMeOnly: true }, true)).toEqual([]);
+    expect(filterEntries(releases[0], all, () => true).map((e) => e.id)).toEqual(["a", "b"]);
+    expect(filterEntries(releases[0], all, () => false).map((e) => e.id)).toEqual(["a"]);
+    expect(
+      filterEntries(releases[0], { ...all, area: "admin" }, () => true).map((e) => e.id)
+    ).toEqual(["b"]);
+    expect(
+      filterEntries(releases[0], { ...all, showMeOnly: true }, () => true).map((e) => e.id)
+    ).toEqual(["a"]);
+    expect(filterEntries(releases[1], { ...all, showMeOnly: true }, () => true)).toEqual([]);
   });
 
   it("lists areas and counts for the audience", () => {
-    expect(areasPresent(releases, true)).toEqual(["chat", "admin", "knowledge"]);
-    expect(areasPresent([releases[1]], true)).toEqual(["knowledge"]);
-    expect(countEntries(releases, true)).toBe(4);
-    expect(countEntries(releases, false)).toBe(3);
+    expect(areasPresent(releases, () => true)).toEqual(["chat", "admin", "knowledge"]);
+    expect(areasPresent([releases[1]], () => true)).toEqual(["knowledge"]);
+    expect(countEntries(releases, () => true)).toBe(4);
+    expect(countEntries(releases, () => false)).toBe(3);
   });
 });

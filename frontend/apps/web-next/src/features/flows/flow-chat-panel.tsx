@@ -1,31 +1,40 @@
 "use client";
 
-import { Badge } from "@astryxdesign/core/Badge";
+import { Button } from "@astryxdesign/core/Button";
+import {
+  DropdownMenu,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem
+} from "@astryxdesign/core/DropdownMenu";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { MessageSquare, Pencil } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { useMemo, useRef, useState } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
-import { Switch } from "@/components/astryx/switch";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Banner } from "@astryxdesign/core/Banner";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { ChatPartner } from "@/lib/chat/types";
+import { cn } from "@/lib/utils";
 import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { retryPartnerQuery } from "@/features/chat/chat-partner-state";
-import { ChatView, type ActivityState, type ComposerOffer } from "@/features/chat/chat-view";
+import { ChatView, type ActivityState } from "@/features/chat/chat-view";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
 import { useSpace } from "@/features/spaces/use-space";
 import { useSpaceDisplayName } from "@/features/spaces/frame/space-header";
+import { FlowReferences, insertMessage } from "./chat/reference-pill";
+import { useFlowChatReferences } from "./chat/use-flow-chat-references";
 import {
   FlowChatModelPickers,
   NewConversationButton,
   OptimizeFlowButton
 } from "./flow-chat-controls";
+import { showStepCard } from "./flow-step-list";
 import {
   authoringChatQueryOptions,
   flowKeys,
@@ -48,22 +57,31 @@ type ChatPanelProps = {
   onFlowMayHaveChanged: () => void;
   /** A refused mode change, shown with the page's other refusals. */
   onRefused: (error: unknown, title: string) => void;
-  /** A message the page prepared for the composer ("Fråga assistenten"); never sent by itself. */
-  offer: ComposerOffer | null;
-  /** The composer took `offer`. */
-  onOfferTaken: () => void;
-  /** Prepares a message for the composer (the page shows the chat first, on a phone). */
+  /**
+   * A request the page prepared ("Fråga assistenten", "Optimera flödet"):
+   * it goes into the composer at the caret, mentions as pills, and is never
+   * sent by itself. The mode stays as the person set it.
+   */
+  request: ChatRequest | null;
+  /** The composer took `request`. */
+  onRequestTaken: () => void;
+  /** Prepares a request for the composer (the page shows the chat first, on a phone). */
   onAskChat: (text: string) => void;
 };
 
+/** A request prepared for the flow chat's composer; a new object is a new request. */
+export type ChatRequest = { text: string };
+
 /**
- * The switch between reading and editing. In edit mode the chat's tools may
- * change the draft; it is fenced on the revision on screen, so a switch made
- * while the flow had changed is refused and the page reloads the flow.
- * Turning it on after a pause may start a new conversation: the panel then
- * switches to it and says so.
+ * The mode a message is sent in, picked beside the send button: Fråga
+ * (the chat reads the flow) or Redigera (its tools may change the draft).
+ * A change is fenced on the revision on screen, so one made while the flow
+ * had changed is refused and the page reloads the flow. Redigera after a
+ * pause may start a new conversation: the panel then switches to it and
+ * says so. In Redigera the button is in the warning colour and says so in
+ * words.
  */
-function EditModeSwitch({
+function ModePicker({
   chat,
   onRefused
 }: {
@@ -106,32 +124,79 @@ function EditModeSwitch({
     }
   );
 
+  const label = editing ? t("flows_chat_mode_edit") : t("flows_chat_mode_ask");
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      <Switch
-        label={t("flows_chat_editing")}
-        description={t("flows_chat_editing_hint")}
-        value={editing}
-        onChange={setEditing}
-      />
-      <Badge
-        variant={editing ? "warning" : "neutral"}
-        label={editing ? t("flows_chat_can_edit") : t("flows_chat_reads_only")}
-      />
-    </div>
+    <DropdownMenu
+      placement="above"
+      renderTrigger={(props) => (
+        <Button
+          {...props}
+          variant="ghost"
+          size="sm"
+          label={label}
+          // "Läge: Redigera": a state, not an action, to a screen reader.
+          aria-label={t("flows_chat_mode_current", { mode: label })}
+          icon={
+            editing ? (
+              <Pencil aria-hidden="true" className="size-4" />
+            ) : (
+              <MessageSquare aria-hidden="true" className="size-4" />
+            )
+          }
+          className={cn(
+            "rounded-ax-element h-8 px-2 text-[13px] font-semibold pointer-coarse:h-11",
+            editing ? "text-ax-warning" : "text-ax-text-secondary hover:text-ax-text"
+          )}
+        />
+      )}
+    >
+      <DropdownMenuRadioGroup
+        label={t("flows_chat_mode")}
+        value={editing ? "edit" : "ask"}
+        onChange={(value) => setEditing(value === "edit")}
+      >
+        <DropdownMenuRadioItem
+          value="ask"
+          label={t("flows_chat_mode_ask")}
+          description={t("flows_chat_mode_ask_description")}
+          icon={<MessageSquare aria-hidden="true" />}
+        />
+        <DropdownMenuRadioItem
+          value="edit"
+          label={t("flows_chat_mode_edit")}
+          description={t("flows_chat_mode_edit_description")}
+          icon={<Pencil aria-hidden="true" />}
+        />
+      </DropdownMenuRadioGroup>
+    </DropdownMenu>
   );
 }
 
 /** The conversation itself, once the chat, its assistant and its history are loaded. */
 function AuthoringConversation({
+  flow,
   chat,
   onFlowMayHaveChanged,
-  offer,
-  onOfferTaken
-}: Pick<ChatPanelProps, "onFlowMayHaveChanged" | "offer" | "onOfferTaken"> & {
+  onRefused,
+  request,
+  onRequestTaken
+}: Pick<ChatPanelProps, "request" | "onRequestTaken"> & {
+  flow: FlowPublic;
   chat: FlowAuthoringChat;
+  onFlowMayHaveChanged: () => void;
+  onRefused: ChatPanelProps["onRefused"];
 }) {
   const t = useTranslations();
+  const { references, composer } = useFlowChatReferences(flow);
+  // A prepared request goes in once the composer is on screen, the same way
+  // the reference card's "Infoga i meddelandet" puts a pill there.
+  const takenRequest = useRef<ChatRequest | null>(null);
+  useEffect(() => {
+    if (!request || !composer || takenRequest.current === request) return;
+    takenRequest.current = request;
+    insertMessage(composer, request.text, flow);
+    onRequestTaken();
+  }, [request, composer, flow, onRequestTaken]);
   const { space } = useSpace();
   const spaceName = useSpaceDisplayName();
   const [activity, setActivity] = useState<ActivityState | null>(null);
@@ -202,21 +267,26 @@ function AuthoringConversation({
   };
 
   return (
-    <ChatView
-      key={chat.session_id}
-      partner={partner}
-      initialSessionId={chat.session_id}
-      initialMessages={initialMessages}
-      activity={activity}
-      onActivityChange={setActivity}
-      startHeadingLevel={3}
-      onToolCallFinished={(call) => {
-        if (isFlowsToolCall(call)) onFlowMayHaveChanged();
-      }}
-      onAnswerFinished={onFlowMayHaveChanged}
-      offer={offer}
-      onOfferTaken={onOfferTaken}
-    />
+    <FlowReferences flow={flow} onShowStep={showStepCard} composer={composer}>
+      <ChatView
+        key={chat.session_id}
+        partner={partner}
+        initialSessionId={chat.session_id}
+        initialMessages={initialMessages}
+        activity={activity}
+        onActivityChange={setActivity}
+        startHeadingLevel={3}
+        references={references}
+        footerActions={<ModePicker chat={chat} onRefused={onRefused} />}
+        placeholder={
+          chat.editing ? t("flows_chat_placeholder_edit") : t("flows_chat_placeholder_ask")
+        }
+        onToolCallFinished={(call) => {
+          if (isFlowsToolCall(call)) onFlowMayHaveChanged();
+        }}
+        onAnswerFinished={onFlowMayHaveChanged}
+      />
+    </FlowReferences>
   );
 }
 
@@ -238,8 +308,8 @@ export function FlowChatPanel({
   flow,
   onFlowMayHaveChanged,
   onRefused,
-  offer,
-  onOfferTaken,
+  request,
+  onRequestTaken,
   onAskChat
 }: ChatPanelProps) {
   const t = useTranslations();
@@ -265,31 +335,30 @@ export function FlowChatPanel({
           </Text>
         </div>
         {chat.data ? (
-          <>
-            <EditModeSwitch chat={chat.data} onRefused={onRefused} />
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <FlowChatModelPickers chat={chat.data} onRefused={onRefused} />
-              <span className="flex flex-wrap items-center gap-1">
-                <OptimizeFlowButton onAskChat={onAskChat} />
-                <NewConversationButton chat={chat.data} onRefused={onRefused} />
-              </span>
-            </div>
-          </>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <FlowChatModelPickers chat={chat.data} onRefused={onRefused} />
+            <span className="flex flex-wrap items-center gap-1">
+              <OptimizeFlowButton onAskChat={onAskChat} />
+              <NewConversationButton chat={chat.data} onRefused={onRefused} />
+            </span>
+          </div>
         ) : null}
       </div>
       {chat.data ? (
         <AuthoringConversation
+          flow={flow}
           chat={chat.data}
           onFlowMayHaveChanged={onFlowMayHaveChanged}
-          offer={offer}
-          onOfferTaken={onOfferTaken}
+          onRefused={onRefused}
+          request={request}
+          onRequestTaken={onRequestTaken}
         />
       ) : mayEdit && !chat.isError ? (
         <LoadingState label={t("flows_chat_loading")} rows={3} className="p-4" />
       ) : (
         <div className="p-4">
           {unavailable ? (
-            <QuietBanner
+            <Banner
               status="info"
               title={t("flows_chat_unavailable")}
               description={unavailable}

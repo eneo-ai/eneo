@@ -5,7 +5,7 @@ import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "next-intl";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import { modelDisplayName } from "@/features/spaces/space-models";
 import {
   speakerServiceState,

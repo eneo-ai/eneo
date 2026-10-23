@@ -132,21 +132,15 @@ export function policyRuleText(t: Translate, rule: PolicyRule, policy: PasswordP
   }
 }
 
-/**
- * What is wrong with a new password and its confirmation, in words for each
- * field. `required`: a password must be set (a new account, one's own change);
- * otherwise both may stay empty (an admin keeping a user's password).
- */
+/** What is wrong with a new password and its confirmation, in words for each field. */
 export function newPasswordErrors(
   t: Translate,
   {
     password,
     confirmation,
-    policy,
-    required
-  }: { password: string; confirmation: string; policy: PasswordPolicy; required: boolean }
+    policy
+  }: { password: string; confirmation: string; policy: PasswordPolicy }
 ): { password?: string; confirmation?: string } {
-  if (!required && !password && !confirmation) return {};
   const rule = password ? brokenRule(password, policy) : undefined;
   return {
     password: !password

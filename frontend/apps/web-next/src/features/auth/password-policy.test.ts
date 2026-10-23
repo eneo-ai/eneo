@@ -1,3 +1,4 @@
+import { generatePassword } from "@eneo/eneo-js/auth/password-generator";
 import { createTranslator } from "next-intl";
 import { describe, expect, it } from "vitest";
 import sv from "@/lib/i18n/messages/sv.json";
@@ -92,8 +93,8 @@ const t = createTranslator({ locale: "sv", messages: sv as Record<string, string
 
 describe("the words the forms use", () => {
   it("says what is wrong with a new password and its confirmation", () => {
-    const errors = (password: string, confirmation: string, required = true) =>
-      newPasswordErrors(t, { password, confirmation, policy, required });
+    const errors = (password: string, confirmation: string) =>
+      newPasswordErrors(t, { password, confirmation, policy });
 
     expect(errors("", "")).toEqual({
       password: "Ange ett nytt lösenord.",
@@ -111,8 +112,36 @@ describe("the words the forms use", () => {
       password: undefined,
       confirmation: undefined
     });
-    // An admin may leave a user's password as it is.
-    expect(errors("", "", false)).toEqual({});
-    expect(errors("", "Langt-losenord-1", false).password).toBe("Ange ett nytt lösenord.");
+  });
+});
+
+describe("generated administrator passwords", () => {
+  const flags = ["requiresUppercase", "requiresLowercase", "requiresNumber", "requiresSymbol"];
+
+  // The shared generator and this app's checks must agree on every policy the
+  // backend can send, or an administrator could issue a refused password.
+  it.each(
+    Array.from({ length: 2 ** flags.length }, (_, mask) =>
+      Object.fromEntries(flags.map((flag, bit) => [flag, (mask & (1 << bit)) !== 0]))
+    )
+  )("meet the policy %j", (classes) => {
+    for (const { minLength, maxBytes } of [
+      { minLength: 12, maxBytes: 72 },
+      { minLength: 40, maxBytes: 72 },
+      { minLength: 12, maxBytes: 16 }
+    ]) {
+      const generated: PasswordPolicy = {
+        requiresUppercase: false,
+        requiresLowercase: false,
+        requiresNumber: false,
+        requiresSymbol: false,
+        ...classes,
+        minLength,
+        maxBytes
+      };
+      for (let i = 0; i < 25; i++) {
+        expect(brokenRule(generatePassword(generated), generated)).toBeUndefined();
+      }
+    }
   });
 });

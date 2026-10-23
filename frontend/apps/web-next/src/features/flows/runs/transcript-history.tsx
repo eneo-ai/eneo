@@ -8,7 +8,7 @@ import { useInfiniteQuery, useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { useRef, useState } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { ClientTime } from "@/components/composites/client-time";
 import { StatusLabel } from "@/components/composites/status-label";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -166,7 +166,7 @@ function StartedRun({
   });
   const view = runStatusView(status.data?.status ?? started.run.status);
   return (
-    <QuietBanner
+    <Banner
       status="success"
       title={
         started.created
@@ -185,7 +185,7 @@ function StartedRun({
         {t("flow_transcript_regenerate_status")}{" "}
         <StatusLabel status={view.tone} label={t(view.labelKey)} isPulsing={view.isPulsing} />
       </span>
-    </QuietBanner>
+    </Banner>
   );
 }
 
@@ -240,7 +240,7 @@ export function RegenerateFromTranscript({
         {t("flow_transcript_regenerate_hint")}
       </Text>
       {problem ? (
-        <QuietBanner
+        <Banner
           status="error"
           title={t("flow_transcript_regenerate_failed")}
           description={problem}

@@ -90,3 +90,71 @@ describe("client error privacy", () => {
     assert.equal(JSON.stringify(error).includes(password), false);
   });
 });
+
+describe("client-wide error notification", () => {
+  const body = { message: "Choose a new password", eneo_error_code: 9070 };
+  const endpoint = "/api/v1/users/tenant/";
+
+  /** Records reported errors; node:test's `mock` is missing under bun test. */
+  function recordErrors() {
+    const reported = [];
+    return { reported, onError: (error) => reported.push(error) };
+  }
+
+  for (const transport of ["fetch", "stream", "download", "xhr"]) {
+    it(`reports ${transport} refusals and preserves the error for the caller`, async (t) => {
+      const { reported, onError } = recordErrors();
+      if (transport === "xhr") {
+        const original = Object.getOwnPropertyDescriptor(globalThis, "XMLHttpRequest");
+        t.after(() => {
+          if (original) Object.defineProperty(globalThis, "XMLHttpRequest", original);
+          else delete globalThis.XMLHttpRequest;
+        });
+        globalThis.XMLHttpRequest = class {
+          upload = {};
+          DONE = 4;
+          readyState = 4;
+          status = 403;
+          statusText = "Forbidden";
+          responseText = JSON.stringify(body);
+          open() {}
+          setRequestHeader() {}
+          getAllResponseHeaders() {
+            return "content-type: application/json";
+          }
+          send() {
+            this.onload();
+          }
+        };
+      }
+      const client = createClient({
+        baseUrl: "https://eneo.example",
+        fetch: async () => Response.json(body, { status: 403 }),
+        onError
+      });
+      await assert.rejects(client[transport](endpoint, { method: "get" }, {}), (error) => {
+        assert.ok(error instanceof EneoError);
+        assert.equal(error.status, 403);
+        assert.equal(error.code, 9070);
+        assert.equal(reported.length, 1);
+        assert.equal(reported[0], error);
+        return true;
+      });
+    });
+  }
+
+  it("leaves successful API-key requests untouched", async () => {
+    const { reported, onError } = recordErrors();
+    const client = createClient({
+      baseUrl: "https://eneo.example",
+      apiKey: "sk_test",
+      fetch: async (_url, init) => {
+        assert.equal(init.headers["X-API-Key"], "sk_test");
+        return Response.json({ name: "Tenant" });
+      },
+      onError
+    });
+    assert.deepEqual(await client.fetch(endpoint, { method: "get" }), { name: "Tenant" });
+    assert.equal(reported.length, 0);
+  });
+});
