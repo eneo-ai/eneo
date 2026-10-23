@@ -69,6 +69,7 @@ def test_previous_step_and_a_prompt_read_of_that_step_is_a_duplicate() -> None:
         "producer_step_order": 1,
         "producer_step_id": str(_IDS[1]),
         "contained": False,
+        "redundant_reads": [1],
         "reads": [
             {"channel": "input", "site": "input_source", "selector": []},
             {
@@ -224,6 +225,59 @@ def test_a_field_read_next_to_the_whole_text_is_contained() -> None:
         "({{ step_1.output.structured.title }}), where the narrower read is part "
         "of what the whole read already carries."
     )
+
+
+def test_a_field_in_the_input_next_to_the_whole_text_in_the_prompt_is_the_redundant_read() -> (
+    None
+):
+    suggestion = _only(
+        analyze_flow(
+            [
+                _step(1),
+                _step(
+                    2,
+                    input_bindings={"question": "{{ step_1.output.structured.title }}"},
+                    prompt_text="{{ step_1.output.text }}",
+                ),
+            ]
+        )
+    )
+
+    assert suggestion.params["contained"] is True
+    # The prompt carries the whole text; removing it would drop data.
+    assert suggestion.params["redundant_reads"] == [0]
+    assert suggestion.params["reads"][0]["site"] == "input_bindings.question"
+
+
+def test_the_whole_input_next_to_a_field_in_the_prompt_keeps_the_input() -> None:
+    suggestion = _only(
+        analyze_flow(
+            [_step(1), _step(2, prompt_text="{{ step_1.output.structured.title }}")]
+        )
+    )
+
+    assert suggestion.params["contained"] is True
+    assert suggestion.params["redundant_reads"] == [1]
+    assert suggestion.params["reads"][1]["channel"] == "prompt"
+
+
+def test_every_narrower_read_a_wider_read_contains_is_redundant() -> None:
+    suggestion = _only(
+        analyze_flow(
+            [
+                _step(1),
+                _step(
+                    2,
+                    prompt_text=(
+                        "{{ step_1.output.structured.a }}\n"
+                        "{{ step_1.output.structured.b }}"
+                    ),
+                ),
+            ]
+        )
+    )
+
+    assert suggestion.params["redundant_reads"] == [1, 2]
 
 
 def test_a_path_under_a_structured_source_ref_is_contained() -> None:

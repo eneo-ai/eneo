@@ -26,6 +26,7 @@ _DUPLICATE_READ_EXAMPLE: JsonDict = {
         "producer_step_order": 1,
         "producer_step_id": _FIRST_STEP_ID,
         "contained": False,
+        "redundant_reads": [1],
         "reads": [
             {"channel": "input", "site": "input_source", "selector": []},
             {
@@ -110,7 +111,9 @@ class FlowSuggestionPublic(BaseModel):
             "Typed per code, for a client to render its own text from. For "
             "`duplicate_read`: `producer_step_order`, `producer_step_id`, "
             "`contained` (one read is a field of what the other already "
-            "carries) and `reads`, each with `channel` (`input` or `prompt`), "
+            "carries), `redundant_reads` (the indexes in `reads` of the reads "
+            "the others already carry, never a whole read next to a narrower "
+            "one) and `reads`, each with `channel` (`input` or `prompt`), "
             "`site` (`input_source`, `input_bindings.question`, "
             "`input_bindings.source_refs[N]`, `assistant_prompt:<expression>`) "
             'and `selector` (empty for the whole text, `["structured", ...]` '

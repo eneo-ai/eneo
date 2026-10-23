@@ -163,7 +163,10 @@ def _duplicate_reads(
     are a duplicate. A whole read next to a narrower read of the same result
     (the text and a field of it, the structured value and a path in it) is
     reported as contained: the narrower read adds nothing the whole does not
-    carry. Steps without a completion model read nothing into a model.
+    carry. ``params["redundant_reads"]`` names, by index into ``reads``, the
+    reads a fix removes: a repeated read, and every read a wider one
+    contains, never the whole read. Steps without a completion model read
+    nothing into a model.
     """
     if not flow_output_mode_uses_completion_model(step.output_mode):
         return []
@@ -188,17 +191,11 @@ def _duplicate_reads(
     suggestions: list[FlowSuggestion] = []
     for producer_order in sorted(by_producer):
         group = by_producer[producer_order]
-        if len(group) < 2:
+        redundant = _redundant_reads(group)
+        if not redundant:
             continue
-        exact = len({read.selector for read in group}) < len(group)
-        contained = not exact and any(
-            _contains(whole.selector, part.selector)
-            for whole in group
-            for part in group
-            if whole is not part
-        )
-        if not exact and not contained:
-            continue
+        exact = any(_repeats_earlier(group, index) for index in redundant)
+        contained = not exact
         if contained:
             level: FlowSuggestionLevel = "low"
         elif any(
@@ -209,11 +206,10 @@ def _duplicate_reads(
             level = "medium"
         else:
             level = "high"
-        # The redundant read is the last one written: a prompt read when the
-        # prompt takes part, else the later of two input reads.
-        redundant = group[-1]
         fix_kind: FlowSuggestionFixKind = (
-            "patch" if _is_standalone_read(step, redundant) else "assisted"
+            "patch"
+            if all(_is_standalone_read(step, group[index]) for index in redundant)
+            else "assisted"
         )
         producer_id = ids_by_order.get(producer_order)
         step_ids = (step.id, *((producer_id,) if producer_id is not None else ()))
@@ -234,6 +230,7 @@ def _duplicate_reads(
                         str(producer_id) if producer_id is not None else None
                     ),
                     "contained": contained,
+                    "redundant_reads": redundant,
                     "reads": [
                         {
                             "channel": read.channel,
@@ -251,6 +248,23 @@ def _duplicate_reads(
             )
         )
     return suggestions
+
+
+def _redundant_reads(group: Sequence[StepRead]) -> list[int]:
+    """The reads of one producer that the others already carry, by index: a
+    read whose selector an earlier read repeats, and a read a wider read
+    contains. Removing them drops no data: the first of the widest reads is
+    never among them, so a whole read is kept and its narrower reads go."""
+    return [
+        index
+        for index, read in enumerate(group)
+        if _repeats_earlier(group, index)
+        or any(_contains(other.selector, read.selector) for other in group)
+    ]
+
+
+def _repeats_earlier(group: Sequence[StepRead], index: int) -> bool:
+    return any(other.selector == group[index].selector for other in group[:index])
 
 
 def _contains(whole: tuple[str, ...], part: tuple[str, ...]) -> bool:

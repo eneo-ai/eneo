@@ -108,11 +108,20 @@ def resolve_upstream_step_orders(
             step_order=step_order,
             max_prior_step_order=max_prior_step_order,
         )
-    if source is FlowInputSource.PREVIOUS_STEP and step_order > 1:
-        return [step_order - 1]
-    if source is FlowInputSource.ALL_PREVIOUS_STEPS and step_order > 1:
-        return list(range(1, step_order))
-    return []
+    return list(_implicit_input_orders(source, step_order))
+
+
+def _implicit_input_orders(source: FlowInputSource, step_order: int) -> range:
+    """The earlier steps a step without underlag reads through its
+    ``input_source``: the step before it for ``previous_step``, every earlier
+    step for ``all_previous_steps``, none for any other source."""
+    if step_order <= 1:
+        return range(0)
+    if source is FlowInputSource.PREVIOUS_STEP:
+        return range(step_order - 1, step_order)
+    if source is FlowInputSource.ALL_PREVIOUS_STEPS:
+        return range(1, step_order)
+    return range(0)
 
 
 ReadChannel = Literal["input", "prompt", "config"]
@@ -249,12 +258,10 @@ def _model_channel_reads(
                     max_prior_step_order=max_prior_step_order,
                 )
             )
-    elif source is FlowInputSource.PREVIOUS_STEP and step_order > 1:
-        reads.append(StepRead("input", step_order - 1, (), INPUT_SOURCE_READ_SITE))
-    elif source is FlowInputSource.ALL_PREVIOUS_STEPS and step_order > 1:
+    else:
         reads.extend(
             StepRead("input", order, (), INPUT_SOURCE_READ_SITE)
-            for order in range(1, step_order)
+            for order in _implicit_input_orders(source, step_order)
         )
     if prompt_template:
         for reference in analyze_template(
