@@ -1,10 +1,11 @@
 import { browser } from "$app/environment";
 import { splitPendingInref } from "./inrefBuffer";
 import { PAGINATION } from "$lib/core/constants";
-import { toastError } from "$lib/core/errors";
+import { getAnswerFailureMessage, toastError } from "$lib/core/errors";
 import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
 import { createClassContext } from "$lib/core/helpers/createClassContext";
 import { waitFor } from "$lib/core/waitFor";
+import { m } from "$lib/paraglide/messages";
 import { selectEffectiveChatModel } from "$lib/features/chat/selectEffectiveChatModel";
 import {
   type ConversationSparse,
@@ -21,6 +22,8 @@ import {
   type SSE
 } from "@eneo/eneo-js";
 import { SvelteMap } from "svelte/reactivity";
+import type { Readable } from "svelte/store";
+import type { Attachment } from "$lib/features/attachments/AttachmentManager";
 import type { CapabilityPurpose } from "$lib/features/mcp/capabilities";
 import { documentDraft, type DocumentDraft } from "./documentDraft";
 import { conversationDocuments } from "./documentVersions";
@@ -30,6 +33,43 @@ export type PendingToolApproval = {
   approvalId: string;
   tools: SSE.ToolApprovalRequired["tools"];
 };
+
+/** An attachment of a sent message that is still on its way to the server. */
+export type PendingUpload = {
+  id: string;
+  name: string;
+  size: number;
+  mimetype: string;
+  status: Attachment["status"];
+  progress: number;
+};
+
+/**
+ * Attachments a message was sent with before all of them had finished
+ * uploading. The message waits in the conversation, mirroring their progress,
+ * and the request is issued once `ready` resolves.
+ */
+export type PendingAttachments = {
+  ids: string[];
+  subscribe: Readable<Attachment[]>["subscribe"];
+  ready: () => Promise<UploadedFile[]>;
+};
+
+/** A conversation message, plus the uploads it may still be waiting for. */
+export type PendingMessage = ConversationMessage & { pending_uploads?: PendingUpload[] };
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.message.includes("aborted"))
+  );
+}
+
+/** A send that ended because its attachments never became ready; the
+ * attachment manager has already told the user why. */
+function isUploadsNotReady(error: unknown): boolean {
+  return error instanceof Error && error.name === "UploadsNotReadyError";
+}
 
 /** A tool call as the document features read it, streamed or from history. */
 type DocumentToolCall = {
@@ -171,6 +211,21 @@ export class ChatService {
       this.generatedFileIdsOf(call)
     )
   );
+
+  /**
+   * A version a reader saved of a document joins the answer that holds the
+   * version it was edited from, as the backend has stored it, so the
+   * documents and their versions update without reloading the conversation.
+   */
+  addGeneratedFile(file: ConversationMessage["generated_files"][number]) {
+    const messages = this.currentConversation.messages ?? [];
+    const holder =
+      messages.find((message) =>
+        message.generated_files?.some((other) => other.id === file.revises_file_id)
+      ) ?? messages.at(-1);
+    if (!holder || holder.generated_files?.some((other) => other.id === file.id)) return;
+    holder.generated_files = [...(holder.generated_files ?? []), file];
+  }
 
   /** Actual text/sheets as they arrive, with a visible preparation state from call start. */
   get writingDocument(): DocumentDraft | null {
@@ -704,12 +759,16 @@ export class ChatService {
   askQuestion = createAsyncState(
     async (
       question: string,
-      attachments?: UploadedFile[],
+      attachments?: UploadedFile[] | PendingAttachments,
       tools?: ConversationTools,
       requireToolApproval?: boolean,
       abortController?: AbortController,
       disabledMcpServerIds?: string[]
     ) => {
+      // Stop pressed while the send was still waiting its turn.
+      if (abortController?.signal.aborted) {
+        throw new DOMException("Send cancelled", "AbortError");
+      }
       // Clear preflight estimate — the message is leaving the input
       this.#clearPreflight(false);
       // End any previous stream loop/buffer
@@ -721,8 +780,30 @@ export class ChatService {
       const streamGen = ++this.#streamGen;
       this.#activeDiagnosticsStreamGeneration = streamGen;
       let inrefBuffer = "";
-      let ref: ReturnType<typeof emptyMessage> | undefined;
       const isStale = () => this.#streamGen !== streamGen;
+
+      // The question joins the conversation at once, before any upload or
+      // backend work, so sending never feels stalled. Until the backend has
+      // accepted the request (`requestOpened`) the message is only a pending
+      // echo and is taken back out should the send fail.
+      const pending = attachments && !Array.isArray(attachments) ? attachments : undefined;
+      this.currentConversation.messages?.push(
+        emptyMessage({ question, files: Array.isArray(attachments) ? attachments : [] })
+      );
+      const ref: PendingMessage =
+        this.currentConversation.messages[this.currentConversation.messages?.length - 1];
+      let requestOpened = false;
+      let stopMirroringUploads: (() => void) | undefined;
+
+      const flushReceivedContent = () => {
+        // Drain both buffers before deciding whether an answer is empty or
+        // replacing it with an error. Repeated calls have nothing left to append.
+        this.#finalizeStream();
+        if (inrefBuffer) {
+          ref.answer += inrefBuffer;
+          inrefBuffer = "";
+        }
+      };
 
       const ensureCurrentSession = (event: { session_id: string }) => {
         if (event.session_id !== this.currentConversation.id) {
@@ -733,12 +814,53 @@ export class ChatService {
         return true;
       };
 
+      const mergeToolReferences = (newRefs: Array<{ id: string }> | undefined) => {
+        if (!ref || !newRefs?.length) return;
+        if (!ref.mcp_tool_references) {
+          ref.mcp_tool_references = [];
+        }
+        // eslint-disable-next-line svelte/prefer-svelte-reactivity
+        const seen = new Set(ref.mcp_tool_references.map((r) => r.id));
+        for (const newRef of newRefs) {
+          if (!seen.has(newRef.id)) {
+            seen.add(newRef.id);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            ref.mcp_tool_references.push(newRef as any);
+          }
+        }
+      };
+
       try {
+        let files: UploadedFile[] = Array.isArray(attachments) ? attachments : [];
+        if (pending) {
+          // eslint-disable-next-line svelte/prefer-svelte-reactivity
+          const sent = new Set(pending.ids);
+          stopMirroringUploads = pending.subscribe((list) => {
+            if (!ref) return;
+            ref.pending_uploads = list
+              .filter((attachment) => sent.has(attachment.id))
+              .map((attachment) => ({
+                id: attachment.id,
+                name: attachment.file.name,
+                size: attachment.file.size,
+                mimetype: attachment.file.type,
+                status: attachment.status,
+                progress: attachment.progress
+              }));
+          });
+          files = await pending.ready();
+          stopMirroringUploads();
+          stopMirroringUploads = undefined;
+          if (isStale()) throw new DOMException("Send cancelled", "AbortError");
+          delete ref.pending_uploads;
+          ref.files = files;
+        }
+
         await this.#eneo.conversations.ask({
           question,
           chatPartner: this.#chatPartner,
           conversation: { id: this.currentConversation.id },
-          files: (attachments ?? []).map((fileRef) => ({ id: fileRef.id })),
+          files: files.map((fileRef) => ({ id: fileRef.id })),
           tools,
           abortController,
           requireToolApproval,
@@ -747,13 +869,19 @@ export class ChatService {
             ?.filter((id) => id.startsWith("capability:"))
             .map((id) => id.slice("capability:".length)) as CapabilityPurpose[] | undefined,
           callbacks: {
+            onOpen: async () => {
+              // The backend has taken the question (and persists it before
+              // streaming), so from here on the message stays in the list.
+              requestOpened = true;
+            },
             onFirstChunk: (chunk) => {
-              if (isStale()) return;
-              // Add the message to the conversation only after backend confirms
-              this.currentConversation.messages?.push(emptyMessage({ question }));
-              ref =
-                this.currentConversation.messages[this.currentConversation.messages?.length - 1];
-              Object.assign(ref, chunk);
+              if (!ref || isStale()) return;
+              // The first chunk carries the stored message. Tool references
+              // may already have arrived through an earlier tool event, so
+              // they are merged rather than replaced by the chunk's default.
+              const { mcp_tool_references, ...stored } = chunk;
+              Object.assign(ref, stored);
+              mergeToolReferences(mcp_tool_references);
               this.#markDiagnosticsPending(ref.id);
               this.currentConversation.id = chunk.session_id;
               this.currentConversation.name = question;
@@ -838,14 +966,10 @@ export class ChatService {
               if (isStale()) return;
               if (!ensureCurrentSession(event)) return;
 
-              if (event.eneo_event_type === "generating_image") {
-                if (!ref) return;
-                ref.generated_files.push({ id: "", name: "", mimetype: "", size: 0 });
-              } else if (event.eneo_event_type === "token_usage" && "usage" in event) {
-                // The backend routes token_usage events through the same SSE
-                // channel as eneo events. Reflect them on the live message
-                // so reload-from-history matches the in-memory state, then
-                // expose the running context fill for the UI bar.
+              if (event.eneo_event_type === "token_usage" && "usage" in event) {
+                // Reflect token usage on the live message so reload-from-history
+                // matches the in-memory state, then expose the running context
+                // fill for the UI bar.
                 const usage = event.usage;
                 if (ref) {
                   ref.num_tokens_question = usage.prompt_tokens;
@@ -911,37 +1035,19 @@ export class ChatService {
                   ref.mcp_tool_calls.push(tool);
                 }
               }
-              const newRefs = (event as unknown as { mcp_tool_references?: Array<{ id: string }> })
-                .mcp_tool_references;
-              if (newRefs && newRefs.length) {
-                if (!ref.mcp_tool_references) {
-                  ref.mcp_tool_references = [];
-                }
-                // eslint-disable-next-line svelte/prefer-svelte-reactivity
-                const seen = new Set(ref.mcp_tool_references.map((r) => r.id));
-                for (const newRef of newRefs) {
-                  if (!seen.has(newRef.id)) {
-                    seen.add(newRef.id);
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    ref.mcp_tool_references.push(newRef as any);
-                  }
-                }
-              }
+              mergeToolReferences(
+                (event as unknown as { mcp_tool_references?: Array<{ id: string }> })
+                  .mcp_tool_references
+              );
             },
             onToolApprovalRequired: (event) => {
-              if (isStale()) return;
+              if (!ref || isStale()) return;
               if (!ensureCurrentSession(event)) return;
               // tool_approval_required can race ahead of onFirstChunk when the
-              // model returns a tool call before any text. Dropping the event
-              // would leave pendingToolApproval unset, hiding the approve/deny
-              // buttons forever while the backend keeps waiting. Materialise
-              // the message here so the approval UI has something to attach to.
-              if (!ref) {
-                this.currentConversation.messages?.push(emptyMessage({ question }));
-                ref =
-                  this.currentConversation.messages[this.currentConversation.messages.length - 1];
-                this.currentConversation.id = event.session_id;
-              }
+              // model returns a tool call before any text; the message is
+              // already in the list, so the approval UI has something to
+              // attach to either way.
+              this.currentConversation.id = event.session_id;
               this.#noteViewCalls(event.tools);
               // Add tools to the message so they display in the UI
               // @ts-expect-error - mcp_tool_calls is a runtime property for streaming
@@ -1020,34 +1126,49 @@ export class ChatService {
           }
         });
       } catch (error) {
+        if (!requestOpened && ref) {
+          // The backend never took the question, so the pending echo comes
+          // back out. Found by identity: a newer request may have pushed its
+          // own message after this one, and a replaced conversation no longer
+          // holds it at all.
+          const index = this.currentConversation.messages.indexOf(ref);
+          if (index !== -1) this.currentConversation.messages.splice(index, 1);
+        }
         if (isStale()) return;
+        flushReceivedContent();
 
-        const streamAborted = error instanceof Error && error.message.includes("aborted");
+        if (!requestOpened) {
+          // Nothing was sent: propagate so ConversationInput can restore the
+          // user's input (silently for a cancel).
+          if (!isAbortError(error) && !isUploadsNotReady(error)) console.error(error);
+          throw error;
+        }
+
+        const streamAborted = abortController?.signal.aborted === true || isAbortError(error);
         if (streamAborted) {
           // Backend persists the user's message before stream start and best-effort
           // saves a partial assistant reply on abort, so the conversation survives a
           // refresh. Falling through to reloadHistory() (below) syncs the sidebar with
           // the now-persisted state instead of leaving the new session invisible until
           // a manual reload.
-        } else if (!ref) {
-          // If the error happened before streaming started (ref is undefined),
-          // no message was added to the conversation — just propagate the error
-          // so ConversationInput can restore the user's input.
-          console.error(error);
-          throw error;
-        } else if (error instanceof EneoError && !ref.answer) {
+        } else if (ref && error instanceof EneoError && !ref.answer) {
           // If streaming started but no content arrived yet, remove the empty message
           this.currentConversation.messages.pop();
           this.#clearDiagnosticsPending(ref.id);
           console.error(error);
           throw error;
         } else {
-          // Error during streaming — show inline in the conversation
-          let message = "We encountered an error processing your request.";
-          if (error instanceof EneoError) {
-            message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
-          } else if (error instanceof Object && "message" in error && "name" in error) {
-            message += `\n\`\`\`\n${error.name}: "${error.message}"\n\`\`\``;
+          // Error during streaming — show inline in the conversation. A known
+          // reason says whose side failed; anything else keeps its details
+          // for a support report.
+          let message = getAnswerFailureMessage(error);
+          if (message === undefined) {
+            message = m.chat_answer_failed();
+            if (error instanceof EneoError) {
+              message += `\n\`\`\`\n${error.code}: "${error.getReadableMessage()}"\n\`\`\``;
+            } else if (error instanceof Object && "message" in error && "name" in error) {
+              message += `\n\`\`\`\n${error.name}: "${error.message}"\n\`\`\``;
+            }
           }
 
           this.currentConversation.messages[this.currentConversation.messages?.length - 1].answer =
@@ -1055,14 +1176,9 @@ export class ChatService {
           console.error(error);
         }
       } finally {
+        stopMirroringUploads?.();
         if (this.#streamGen === streamGen) {
-          // Flush the frame-buffered text first, then anything still held back
-          // as a possible <inref>, so the answer keeps its arrival order.
-          this.#finalizeStream();
-          if (ref && inrefBuffer) {
-            ref.answer += inrefBuffer;
-            inrefBuffer = "";
-          }
+          flushReceivedContent();
           this.#activeDiagnosticsStreamGeneration = null;
           if (this.debugPanelOpen) {
             void this.#confirmPendingDiagnosticsMessages();

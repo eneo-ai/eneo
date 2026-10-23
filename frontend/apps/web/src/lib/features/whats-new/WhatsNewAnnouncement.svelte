@@ -17,25 +17,25 @@
   import { getWhatsNewStore } from "./whatsNewStore";
 
   const { user } = getAppContext();
-  const { enabled, pendingAnnouncement, markLatestAnnounced } = getWhatsNewStore();
+  const { enabled, pendingAnnouncement, markLatestAnnounced, snoozeLatest } = getWhatsNewStore();
   const { start, running } = getWhatsNewTour();
   const locale = getLocale();
-  const isAdmin = user.hasPermission("admin");
+  const can = user.hasPermission;
 
   let release = $state<Release | null>(null);
   let open = $state(false);
+  let postponing = $state(false);
 
-  const summary = $derived(release ? announcementSummary(release, isAdmin) : null);
-  const steps = $derived(release ? tourSteps(release, isAdmin, locale) : []);
+  const summary = $derived(release ? announcementSummary(release, can) : null);
+  const steps = $derived(release ? tourSteps(release, can, locale) : []);
 
   function text(value: Localized): string {
     return value[locale] ?? value.en;
   }
 
-  // Shown once per user and release, on the first app load after the
-  // release reaches them. Recorded as announced when opened, so a reload
-  // without dismissing does not repeat it; closing is not "seen" — the
-  // menu dot stays until they open the page.
+  // App loads show a new release or an unread reminder that is due.
+  // Recording it as announced consumes the reminder. Dismissing is not
+  // "seen": the menu dot stays until the user opens the news page.
   $effect(() => {
     if (!$enabled) {
       open = false;
@@ -43,7 +43,7 @@
     }
     const pending = pendingAnnouncement();
     if (!pending) return;
-    if (announcementSummary(pending, isAdmin).entries.length === 0) return;
+    if (announcementSummary(pending, can).entries.length === 0) return;
     // An account created after the release shipped was never "here" before
     // it: record the release as announced without showing "since you were
     // last here". Undated (upcoming) releases announce to everyone.
@@ -64,7 +64,19 @@
   function openWhatsNew() {
     open = false;
     // eslint-disable-next-line svelte/no-navigation-without-resolve -- localizeHref handles routing
-    void goto(localizeHref("/whats-new"));
+    void goto(localizeHref("/news"));
+  }
+
+  async function remindTomorrow() {
+    postponing = true;
+    try {
+      await snoozeLatest();
+      open = false;
+    } catch (error) {
+      toastError(error, m.whats_new_reminder_failed());
+    } finally {
+      postponing = false;
+    }
   }
 
   // The primary action walks through the release's Show me stops; a release
@@ -94,7 +106,11 @@
     <Dialog.Content
       class="max-h-[calc(100dvh-2rem)] gap-0 overflow-y-auto p-0 sm:max-w-3xl"
       overlayClass="supports-backdrop-filter:backdrop-blur-md"
-      closeLabel={m.close()}
+      showCloseButton={false}
+      onInteractOutside={(event) => event.preventDefault()}
+      onEscapeKeydown={(event) => {
+        if (postponing) event.preventDefault();
+      }}
     >
       <div class="grid md:min-h-[520px] md:grid-cols-[280px_minmax(0,1fr)]">
         <!-- Brand panel: bg-foreground/text-background invert with the theme, so
@@ -117,7 +133,7 @@
               size="lg"
               class="bg-background text-foreground hover:bg-background/90 focus-visible:ring-background/60 h-11 w-full justify-center"
               onclick={primary}
-              disabled={$running}
+              disabled={$running || postponing}
             >
               {steps.length > 0
                 ? m.whats_new_announcement_tour()
@@ -128,15 +144,28 @@
               variant="ghost"
               size="lg"
               class="text-background hover:bg-background/10 hover:text-background focus-visible:ring-background/60 h-11 w-full justify-center"
-              onclick={() => (open = false)}
+              onclick={remindTomorrow}
+              disabled={postponing}
             >
               {m.whats_new_announcement_later()}
             </Button>
+            <Button
+              variant="ghost"
+              size="lg"
+              class="text-background/75 hover:bg-background/10 hover:text-background focus-visible:ring-background/60 h-11 w-full justify-center"
+              onclick={() => (open = false)}
+              disabled={postponing}
+              aria-describedby="whats-new-dismiss-hint"
+            >
+              {m.whats_new_announcement_dismiss()}
+            </Button>
+            <p id="whats-new-dismiss-hint" class="text-background/75 text-center text-xs">
+              {m.whats_new_announcement_dismiss_hint()}
+            </p>
           </div>
         </div>
 
-        <!-- pt-12 keeps the close button's row clear of the first cards. -->
-        <div class="flex flex-col gap-4 px-6 pt-12 pb-6">
+        <div class="flex flex-col gap-4 p-6">
           <ul class="grid gap-3 sm:grid-cols-2" aria-label={m.whats_new_announcement_list_label()}>
             {#each summary.entries as entry (entry.id)}
               {@const Icon = areaIcon[entry.area]}

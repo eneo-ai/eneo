@@ -36,6 +36,10 @@ from eneo.completion_models.presentation.tenant_completion_models_router import 
 from eneo.conversations.conversations_router import router as conversations_router
 from eneo.crawler.crawl_run_router import router as crawl_run_router
 from eneo.dashboard.api.dashboard_router import router as dashboard_router
+from eneo.document_templates.router import (
+    download_router as document_template_download_router,
+)
+from eneo.document_templates.router import router as document_template_router
 from eneo.embedding_models.presentation.embedding_model_router import (
     router as embedding_models_router,
 )
@@ -100,6 +104,12 @@ from eneo.prompt_library.presentation.prompt_library_router import (
     router as prompt_library_router,
 )
 from eneo.prompts.api.prompt_router import router as prompt_router
+from eneo.rerank_models.presentation.rerank_models_router import (
+    router as rerank_models_router,
+)
+from eneo.rerank_models.presentation.tenant_rerank_models_router import (
+    router as tenant_rerank_models_router,
+)
 from eneo.security_classifications.presentation.security_classification_router import (
     router as security_classifications_router,
 )
@@ -400,6 +410,12 @@ router.include_router(
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
 router.include_router(
+    rerank_models_router,
+    prefix="/rerank-models",
+    tags=["rerank-models"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
     model_providers_router,
     prefix="/admin/model-providers",
     tags=["admin", "model-providers"],
@@ -426,6 +442,12 @@ router.include_router(
 router.include_router(
     tenant_image_models_router,
     prefix="/admin/tenant-models/image",
+    tags=["admin", "tenant-models"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    tenant_rerank_models_router,
+    prefix="/admin/tenant-models/rerank",
     tags=["admin", "tenant-models"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
@@ -536,6 +558,18 @@ router.include_router(
     prefix="/mcp-servers",
     tags=["mcp-servers"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+router.include_router(
+    document_template_router,
+    prefix="/document-templates",
+    tags=["document-templates"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+# The tool runtime fetches a template through a signed link, with no user.
+router.include_router(
+    document_template_download_router,
+    prefix="/document-templates",
+    tags=["document-templates"],
 )
 # A view belongs to what a conversation shows, so an API key reaches the token
 # endpoint as it reaches conversations: with read access to assistants, and

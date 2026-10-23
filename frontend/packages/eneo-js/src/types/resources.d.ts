@@ -71,6 +71,7 @@ export type CompletionModel = components["schemas"]["CompletionModelPublic"];
 export type EmbeddingModel = components["schemas"]["EmbeddingModelPublic"];
 export type TranscriptionModel = components["schemas"]["TranscriptionModelPublic"];
 export type ImageModel = components["schemas"]["ImageModelPublic"];
+export type RerankModel = components["schemas"]["RerankModelPublic"];
 export type MCPServerBackingModel = components["schemas"]["MCPServerBackingModelPublic"];
 export type SecurityClassification = components["schemas"]["SecurityClassificationPublic"];
 export type Job = components["schemas"]["JobPublic"];
@@ -99,6 +100,8 @@ export type UserGroup = components["schemas"]["UserGroupPublic"];
 export type User = components["schemas"]["UserAdminView"];
 export type UserSparse = components["schemas"]["UserSparse"];
 export type CurrentUser = components["schemas"]["UserPublic"];
+export type PasswordStatus = components["schemas"]["PasswordStatusPublic"];
+export type PasswordLifecyclePolicy = components["schemas"]["PasswordLifecyclePolicy"];
 export type StorageKind = components["schemas"]["StorageKind"];
 export type ObjectContentReadinessCode = components["schemas"]["ObjectContentReadinessCode"];
 export type UploadLimitUseCase = components["schemas"]["UploadLimitUseCase"];
@@ -145,6 +148,8 @@ export type UploadedFile = components["schemas"]["FilePublic"];
 export type Website = components["schemas"]["WebsitePublic"];
 export type WebsiteInfoBlobPage =
   components["schemas"]["CursorPaginatedResponse_InfoBlobPublicNoText_"];
+export type WebsiteContentFolder = components["schemas"]["WebsiteContentFolderPublic"];
+export type WebsiteContentFolders = components["schemas"]["WebsiteContentFoldersPublic"];
 export type WebsiteBulkActionError = components["schemas"]["WebsiteBulkActionError"];
 export type Settings = components["schemas"]["SettingsPublic"];
 export type WhatsNewState = components["schemas"]["WhatsNewStatePublic"];
@@ -235,7 +240,6 @@ export namespace SSE {
   export type Reasoning = Omit<components["schemas"]["SSEReasoning"], "$defs">;
   export type FirstChunk = Omit<components["schemas"]["SSEFirstChunk"], "$defs">;
   export type Files = Omit<components["schemas"]["SSEFiles"], "$defs">;
-  export type Eneo = Omit<components["schemas"]["SSEEneoEvent"], "$defs">;
   export type ToolCall = Omit<components["schemas"]["SSEToolCall"], "$defs">;
   export type ToolCallDelta = Omit<components["schemas"]["SSEToolCallDelta"], "$defs">;
   export type ToolApprovalRequired = {
@@ -269,7 +273,6 @@ export namespace SSE {
     | Reasoning
     | FirstChunk
     | Files
-    | Eneo
     | ToolCall
     | ToolApprovalRequired
     | ToolApprovalTimeout
@@ -292,6 +295,8 @@ export type TenantTranscriptionModelUpdate =
   components["schemas"]["TenantTranscriptionModelUpdate"];
 export type TenantImageModelCreate = components["schemas"]["TenantImageModelCreate"];
 export type TenantImageModelUpdate = components["schemas"]["TenantImageModelUpdate"];
+export type TenantRerankModelCreate = components["schemas"]["TenantRerankModelCreate"];
+export type TenantRerankModelUpdate = components["schemas"]["TenantRerankModelUpdate"];
 
 // Federation types
 export type TenantInfo = {

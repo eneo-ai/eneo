@@ -39,6 +39,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9058: () => m.eneo_error_9058(), // PASSWORD_REUSE
   9059: () => m.eneo_error_9059(), // PASSWORD_POLICY_VIOLATION
   9060: () => m.eneo_error_9060(), // LOCAL_PASSWORD_CHANGE_UNAVAILABLE
+  9070: () => m.eneo_error_9070(), // PASSWORD_CHANGE_REQUIRED
 
   // --- Model & provider issues ---
   9002: () => m.eneo_error_9002(), // UNSUPPORTED_MODEL
@@ -50,7 +51,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9035: () => m.eneo_error_9035(), // SECURITY_CLASSIFICATION_MISMATCH
   9036: () => m.eneo_error_9036(), // MCP_UPSTREAM_ERROR
   9037: () => m.eneo_error_9037(), // MCP_UPSTREAM_AUTH_ERROR
-  9017: () => m.eneo_error_9017(), // NAME_COLLISION (duplicate display name)
+  9017: () => m.eneo_error_9017(), // NAME_COLLISION (a taken name, for any resource)
   9042: () => m.eneo_error_9042(), // ENCRYPTION_NOT_CONFIGURED
 
   // --- AI service errors ---
@@ -73,6 +74,9 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   // --- Model lifecycle ---
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE
 
+  // --- Governance ---
+  9069: () => m.eneo_error_9069(), // PROMPT_IN_USE_BY_GOVERNANCE
+
   // --- Concurrent changes ---
   9043: () => m.eneo_error_9043(), // SKILL_REVISION_CONFLICT
   9052: () => m.eneo_error_9052(), // SKILL_EXECUTION_BLOCK_CONFLICT
@@ -87,6 +91,71 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9054: () => m.eneo_error_9054(), // SKILL_BLOCKED_FOR_BINDING
   9062: () => m.eneo_error_9062() // SKILL_REMOVAL_BUSY
 };
+
+/**
+ * A storage quota refusal names which limit was hit in the payload's `code`.
+ * The organisation variant tells the user nothing they delete will help; the
+ * generic 9008 copy stays as the fallback for rate limits and older payloads.
+ */
+const QUOTA_REASON_MESSAGES: Record<string, () => string> = {
+  tenant_quota_exceeded: () => m.job_failure_tenant_quota_exceeded(),
+  user_quota_exceeded: () => m.job_failure_user_quota_exceeded()
+};
+
+function getQuotaReasonMessage(error: EneoError): string | undefined {
+  const reason = error.response?.code;
+  return typeof reason === "string" ? QUOTA_REASON_MESSAGES[reason]?.() : undefined;
+}
+
+/**
+ * A failed answer names what went wrong in the payload's `code`, both in an
+ * HTTP error (9010/9041) and in the stream's `error` event. Each message says
+ * on whose side the problem is, so users can tell a provider outage from a
+ * fault in Eneo and know whether trying again can help.
+ */
+const ANSWER_FAILURE_MESSAGES: Record<string, () => string> = {
+  provider_unavailable: () => m.provider_failure_unavailable(),
+  provider_timeout: () => m.provider_failure_timeout(),
+  provider_unreachable: () => m.provider_failure_unreachable(),
+  provider_connection_lost: () => m.provider_failure_connection_lost(),
+  provider_rate_limited: () => m.provider_failure_rate_limited(),
+  provider_model_not_found: () => m.provider_failure_model_not_found(),
+  provider_rejected_request: () => m.provider_failure_rejected_request(),
+  provider_error: () => m.eneo_error_9010(),
+  stream_error: () => m.chat_answer_failed_internal()
+};
+
+/**
+ * Localized message for a failed answer, or undefined when the error does not
+ * say why the answer failed.
+ */
+export function getAnswerFailureMessage(error: unknown): string | undefined {
+  if (!(error instanceof EneoError)) return undefined;
+  const reason = error.response?.code;
+  return typeof reason === "string" ? ANSWER_FAILURE_MESSAGES[reason]?.() : undefined;
+}
+
+/**
+ * An integration refusal names its cause in the payload's `code`. A Microsoft
+ * error code (AADSTS…) in the backend's message is kept: an administrator looks
+ * it up.
+ */
+const INTEGRATION_FAILURE_MESSAGES: Record<string, () => string> = {
+  sharepoint_credentials_invalid: () => m.integration_error_credentials_invalid(),
+  oauth_code_rejected: () => m.integration_error_oauth_code_rejected(),
+  oauth_client_rejected: () => m.integration_error_oauth_client_rejected(),
+  integration_knowledge_syncing: () => m.integration_error_syncing()
+};
+const AADSTS_CODE = /\bAADSTS\d+\b/;
+
+function getIntegrationFailureMessage(error: EneoError): string | undefined {
+  const reason = error.response?.code;
+  if (typeof reason !== "string") return undefined;
+  const message = INTEGRATION_FAILURE_MESSAGES[reason]?.();
+  if (!message) return undefined;
+  const microsoft = AADSTS_CODE.exec(error.getReadableMessage() ?? "")?.[0];
+  return microsoft ? `${message} (${microsoft})` : message;
+}
 
 /**
  * Get a localized, user-facing error message from any error.
@@ -105,7 +174,11 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
  */
 export function getErrorMessage(error: unknown, fallback?: string): string {
   if (error instanceof EneoError) {
-    const mapped = getErrorCodeMessage(error.code);
+    const mapped =
+      getQuotaReasonMessage(error) ??
+      getAnswerFailureMessage(error) ??
+      getIntegrationFailureMessage(error) ??
+      getErrorCodeMessage(error.code);
     if (mapped) {
       return mapped;
     }

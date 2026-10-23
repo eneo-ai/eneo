@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { Markdown } from "$lib/components/markdown/index.js";
-
   import type { PreviewDraft } from "../FilePreview.svelte";
   import { m } from "$lib/paraglide/messages";
+  import DocumentEditor from "./DocumentEditor.svelte";
 
   /** The document so far; it grows while the assistant writes. */
   let { draft }: { draft: PreviewDraft } = $props();
@@ -11,9 +10,14 @@
   // The view keeps to the newest text until the reader scrolls up to read.
   let following = true;
 
+  function follow() {
+    if (following && scroller) scroller.scrollTop = scroller.scrollHeight;
+  }
+
+  // Sheets are laid out with the draft; the editor says when its text is.
   $effect(() => {
     void draft;
-    if (following && scroller) scroller.scrollTop = scroller.scrollHeight;
+    follow();
   });
 
   function onscroll() {
@@ -62,7 +66,7 @@
       {/each}
     </div>
   {:else if draft.text}
-    <Markdown source={draft.text} breaks={false} class="mx-auto max-w-[72ch] p-6 text-base" />
+    <DocumentEditor markdown={draft.text} onrender={follow} />
   {:else}
     <p class="text-muted-foreground p-6 text-sm" role="status">{m.file_preview_preparing()}</p>
   {/if}

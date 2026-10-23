@@ -28,6 +28,29 @@ export function initUser(client) {
     },
 
     /**
+     * Get the tenant policy for when local passwords must be replaced. Requires admin privileges.
+     * @returns {Promise<import('../types/resources').PasswordLifecyclePolicy>}
+     * @throws {EneoError}
+     */
+    getPasswordLifecyclePolicy: async () => {
+      return await client.fetch("/api/v1/admin/password-policy", { method: "get" });
+    },
+
+    /**
+     * Update the tenant policy for when local passwords must be replaced. Requires admin privileges.
+     * Only the given fields change; `max_age_days: null` disables rotation.
+     * @param {import('../types/schema').components["schemas"]["PasswordLifecyclePolicyUpdate"]} updates
+     * @returns {Promise<import('../types/resources').PasswordLifecyclePolicy>}
+     * @throws {EneoError}
+     */
+    updatePasswordLifecyclePolicy: async (updates) => {
+      return await client.fetch("/api/v1/admin/password-policy", {
+        method: "patch",
+        requestBody: { "application/json": updates }
+      });
+    },
+
+    /**
      * Get info about the currently logged in user's tenant.
      * @returns {Promise<Tenant>}
      * @throws {EneoError}

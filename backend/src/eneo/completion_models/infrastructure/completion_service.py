@@ -49,6 +49,7 @@ if TYPE_CHECKING:
         CompletionModelAdapter,
     )
     from eneo.database.database import AsyncSession
+    from eneo.document_templates.domain import DocumentTemplateReference
     from eneo.main.container.container import Container
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
@@ -401,42 +402,18 @@ class CompletionService:
             unavailable_model_ids=frozenset(unavailable_model_ids),
         )
 
-    async def _handle_tool_call(self, completion: AsyncGenerator[Completion]):
+    async def _typed_chunks(self, completion: AsyncGenerator[Completion]):
         async for chunk in completion:
-            # Pass through stop chunk (carries usage data)
-            if chunk.stop:
-                yield chunk
-                continue
-
-            # Pass through reasoning/thinking events directly (text=None, so the
-            # branches below would otherwise drop them before they reach SSE).
-            if chunk.response_type == ResponseType.REASONING:
-                yield chunk
-                continue
-
-            # Pass through MCP tool call events directly, and the argument
-            # text of a call still being written
-            if chunk.response_type in (
-                ResponseType.TOOL_CALL,
-                ResponseType.TOOL_CALL_DELTA,
-            ):
-                yield chunk
-                continue
-
-            # Pass through tool approval required events directly
-            if chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
-                yield chunk
-                continue
-
-            # Pass through generated images (MCP image content blocks) directly
-            if chunk.response_type == ResponseType.FILES:
-                yield chunk
-                continue
-
-            if chunk.text:
-                chunk.response_type = ResponseType.TEXT
-
-                yield chunk
+            # Adapter events name their own type (tool calls and their argument
+            # deltas, approvals and their timeouts, reasoning, images, errors)
+            # and pass through whether or not they carry text. An untyped chunk
+            # is answer text, or the closing stop chunk that carries usage.
+            if chunk.response_type is None:
+                if chunk.text:
+                    chunk.response_type = ResponseType.TEXT
+                elif not chunk.stop:
+                    continue
+            yield chunk
 
     async def get_response(
         self,
@@ -458,6 +435,7 @@ class CompletionService:
         inline_file_text: bool = True,
         knowledge_catalog: str = "",
         url_only_prompt_file_ids: Collection[UUID] = (),
+        document_template: "DocumentTemplateReference | None" = None,
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -554,6 +532,8 @@ class CompletionService:
             )
             # Tools may only be handed links to the files minted above.
             mcp_proxy.allow_file_references(file_reference_urls)
+            if document_template is not None:
+                mcp_proxy.set_document_template(document_template)
             if model.supports_tool_calling:
                 await mcp_proxy.prepare_tools_for_context()
             logger.debug(
@@ -718,7 +698,7 @@ class CompletionService:
                     if mcp_proxy:
                         await mcp_proxy.close()
 
-            completion = self._handle_tool_call(streaming_wrapper())
+            completion = self._typed_chunks(streaming_wrapper())
             adapter_input_estimate = None
             usage = None
 

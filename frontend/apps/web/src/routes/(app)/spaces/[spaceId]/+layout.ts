@@ -1,7 +1,5 @@
 /*
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 */
 
 import type { LayoutLoad } from "./$types";
@@ -41,6 +39,6 @@ export const load: LayoutLoad = async (event) => {
 
   return {
     currentSpace,
-    organizationSpaceId: organizationSpace?.id ?? null
+    organizationSpaceId: currentSpace.organization_space_id
   };
 };

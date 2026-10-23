@@ -33,6 +33,7 @@ from eneo.ai_models.completion_models.completion_model import (
     TokenUsage,
     ToolCallMetadata,
 )
+from eneo.assistants.assistant_service import NonStreamingAnswer
 from eneo.sessions import session_service as session_service_module
 from eneo.sessions.session_service import (
     SessionService,
@@ -450,7 +451,8 @@ async def test_streaming_abort_persists_changed_skill_evidence_without_text():
     async def fake_completion_stream():
         yield Completion(
             reasoning_token_count=0,
-            response_type=ResponseType.ENEO_EVENT,
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[],
         )
 
     response = SimpleNamespace(
@@ -575,6 +577,57 @@ async def test_streaming_handle_response_no_partial_save_on_normal_completion():
 
     # Crucially: no partial-save task was scheduled on a clean finish.
     assert persist_calls == []
+
+
+@pytest.mark.asyncio
+async def test_streaming_handle_response_passes_a_failed_answer_on_to_the_client():
+    """The adapter ends a failed answer with an ERROR chunk instead of raising;
+    dropping it here let a cut-off answer reach the client as a finished one."""
+
+    async def fake_completion_stream():
+        yield Completion(response_type=ResponseType.TEXT, text="Half an ")
+        yield Completion(
+            response_type=ResponseType.ERROR,
+            error="The connection to the AI provider was interrupted.",
+            error_code=503,
+            error_reason="provider_connection_lost",
+            stop=True,
+        )
+
+    response = SimpleNamespace(
+        completion=fake_completion_stream(),
+        total_token_count=3,
+        usage=None,
+        extended_logging=None,
+    )
+    session_service_mock = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+
+    from eneo.assistants.assistant_service import AssistantService
+
+    gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+        svc,  # pyright: ignore[reportArgumentType]
+        response=response,
+        datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+        question="hello?",
+        files=[],
+        completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+        session=_make_session_in_db(),
+        stream=True,
+        assistant_id=uuid4(),
+        question_id=uuid4(),
+        **_skill_runtime_args(
+            initial_skill_context_tokens=2,
+            final_skill_context_tokens=2,
+        ),
+    )
+    collected: list[Completion] = [c async for c in gen]
+
+    errors = [c for c in collected if c.response_type == ResponseType.ERROR]
+    assert [e.error_reason for e in errors] == ["provider_connection_lost"]
+    # What did arrive is still saved, so the conversation keeps the partial text.
+    update_kwargs = session_service_mock.complete_question_with_answer.call_args.kwargs
+    assert update_kwargs["answer"] == "Half an "
 
 
 @pytest.mark.asyncio
@@ -763,7 +816,7 @@ async def test_non_streaming_handle_response_persists_context_without_changing_c
             **_skill_runtime_args(final_skill_context_tokens=37),
         )
 
-    assert answer == "ok"
+    assert answer == NonStreamingAnswer(text="ok")
     persisted = session_service_mock.complete_question_with_answer.await_args.kwargs
     assert persisted["num_tokens_question"] == 1020
     assert persisted["num_tokens_answer"] == 60
@@ -819,7 +872,7 @@ async def test_non_streaming_handle_response_persists_tool_calls_for_replay():
             **_skill_runtime_args(),
         )
 
-    assert answer == "ok"
+    assert answer == NonStreamingAnswer(text="ok")
     persisted = session_service_mock.complete_question_with_answer.await_args.kwargs
     tool_calls = persisted["tool_calls"]
     assert tool_calls is not None and len(tool_calls) == 1
@@ -1267,6 +1320,86 @@ async def test_streaming_handle_response_count_tokens_failure_still_persists_par
     )
     assert persist_calls[0]["answer"] == "partial"
     assert persist_calls[0]["num_tokens_answer"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("aborted", "expected_answer"),
+    [
+        (False, "Jag hämtar tiden.\n\n**Aktuell tid:** 10:00"),
+        (True, "Jag hämtar tiden.\n\n**Aktuell tid:**"),
+    ],
+)
+async def test_streaming_handle_response_persists_round_break_verbatim(
+    aborted: bool, expected_answer: str
+):
+    """The adapter opens a later model round's text with a paragraph break; the
+    persisted answer keeps it as streamed and adds no break of its own around
+    tool calls, whether the stream completes or is aborted."""
+
+    async def fake_completion_stream():
+        yield Completion(response_type=ResponseType.TEXT, text="Jag hämtar tiden.")
+        yield Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[
+                ToolCallMetadata(
+                    server_name="time",
+                    tool_name="now",
+                    tool_call_id="call-1",
+                    result_status="succeeded",
+                )
+            ],
+        )
+        yield Completion(response_type=ResponseType.TEXT, text="\n\n**Aktuell tid:**")
+        yield Completion(response_type=ResponseType.TEXT, text=" 10:00")
+
+    response = SimpleNamespace(
+        completion=fake_completion_stream(),
+        total_token_count=3,
+        usage=None,
+        extended_logging=None,
+    )
+    session_service_mock = AsyncMock()
+    session_service_mock.complete_question_with_answer = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+    persist_calls: list[dict[str, object]] = []
+
+    async def tracking_persist(**kwargs: object) -> None:
+        persist_calls.append(kwargs)
+
+    with patch.object(
+        session_service_module,
+        "persist_partial_question_answer",
+        tracking_persist,
+    ):
+        from eneo.assistants.assistant_service import AssistantService
+
+        gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+            svc,  # pyright: ignore[reportArgumentType]
+            response=response,
+            datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+            question="Vad är klockan?",
+            files=[],
+            completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+            session=_make_session_in_db(),
+            stream=True,
+            assistant_id=uuid4(),
+            question_id=uuid4(),
+            **_skill_runtime_args(),
+        )
+        if aborted:
+            await _drain_until(gen, 3)
+            await gen.aclose()
+            await asyncio.sleep(0)
+        else:
+            async for _ in gen:
+                pass
+
+    if aborted:
+        assert [call["answer"] for call in persist_calls] == [expected_answer]
+    else:
+        persisted = session_service_mock.complete_question_with_answer.call_args
+        assert persisted.kwargs["answer"] == expected_answer
 
 
 # ----- _schedule_background_save strong-ref invariant -----------------------

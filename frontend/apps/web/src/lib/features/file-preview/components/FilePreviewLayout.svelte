@@ -8,8 +8,8 @@
   import * as Sheet from "$lib/components/ui/sheet/index.js";
   import { m } from "$lib/paraglide/messages";
   import type { Snippet } from "svelte";
-  import type { DocumentExport, FilePreview } from "../FilePreview.svelte";
-  import type { PanelContents } from "../panelContents";
+  import type { DocumentExport, DocumentSaver, FilePreview } from "../FilePreview.svelte";
+  import { panelContentsCount, type PanelContents } from "../panelContents";
   import type { PreviewFile } from "../previewKind";
   import FilePreviewPanel from "./FilePreviewPanel.svelte";
 
@@ -19,6 +19,8 @@
     versionsOf?: (file: PreviewFile) => PreviewFile[];
     /** How a file is exported, for a document that can be; null for any other file. */
     exportOf?: (file: PreviewFile) => DocumentExport | null;
+    /** How a document is saved as a new version, for a document that can be; null for any other file. */
+    saverOf?: (file: PreviewFile) => DocumentSaver | null;
     /**
      * Something other than a file that takes the panel (an interactive tool
      * view). The panel shows one thing at a time; while this is shown it
@@ -35,20 +37,20 @@
     children: Snippet;
   };
 
-  let { preview, versionsOf, exportOf, occupant, contents, children }: Props = $props();
+  let { preview, versionsOf, exportOf, saverOf, occupant, contents, children }: Props = $props();
 
   const panelId = $props.id();
-  let overview = $state(false);
+  // The overview is the preview's state, so a file bundle in a message can
+  // open it as the panel's own controls do.
+  const overview = $derived(preview.overview !== null);
   let trigger = $state<HTMLButtonElement | null>(null);
-  const hasContents = $derived(
-    !!contents && contents.views.length + contents.documents.length + contents.uploads.length > 0
-  );
+  const hasContents = $derived(panelContentsCount(contents) > 0);
 
   const occupied = $derived(occupant?.shown ?? false);
   const shown = $derived(preview.shown || occupied || (overview && hasContents));
-  // A file may take the whole width; the conversation stays mounted behind it
-  // and the split it returns to keeps its sizes.
-  const maximised = $derived(preview.maximised && preview.shown && !occupied);
+  // A file or view may take the whole width; the conversation stays mounted
+  // behind it and the split it returns to keeps its sizes.
+  const maximised = $derived(preview.maximised && (preview.shown || occupied));
   const label = $derived(
     occupied && occupant
       ? occupant.label
@@ -59,7 +61,7 @@
 
   $effect(() => {
     // A file or view takes over the overview. Closing it then closes the panel.
-    if (preview.shown || occupied || !hasContents) overview = false;
+    if (preview.shown || occupied || !hasContents) preview.closeOverview(false);
   });
 
   // A selected item can replace its own opener. Restore focus to the panel
@@ -76,16 +78,18 @@
   });
 
   async function choose(show: () => void) {
-    overview = false;
+    preview.closeOverview(false);
     show();
     await tick();
     document.getElementById(panelId)?.focus();
   }
 
-  async function showOverview() {
+  // The panel's own way into the overview (its launcher and back buttons);
+  // a bundle in a message opens it through the preview directly and lands
+  // on its section instead of the panel.
+  async function openOverview() {
     occupant?.close();
-    preview.close();
-    overview = true;
+    preview.showOverview(null, trigger);
     await tick();
     document.getElementById(panelId)?.focus();
   }
@@ -93,7 +97,7 @@
   function close() {
     if (occupied) occupant?.close();
     else if (preview.shown) preview.close();
-    else overview = false;
+    else preview.closeOverview();
   }
 
   // Below this width a split leaves neither side usable, so the preview opens
@@ -122,7 +126,8 @@
     if (event.key !== "Escape" || event.defaultPrevented) return;
     if (!panel?.contains(document.activeElement)) return;
     event.preventDefault();
-    // Escape steps back: out of the maximised panel first, then out of the panel.
+    // Escape steps back: out of the maximised panel first, then out of the
+    // panel, which asks first when edits would be lost.
     if (maximised) preview.maximised = false;
     else close();
   }
@@ -149,13 +154,15 @@
         {preview}
         {...contents}
         fullHeight
+        focusSection={preview.overview?.section ?? null}
+        focusGroup={preview.overview?.group ?? null}
         onfile={(file) => choose(() => preview.open(file, trigger))}
         onview={(view) => choose(view.open)}
       />
     </div>
   {/if}
   {#if occupied && occupant}
-    {@render occupant.panel(hasContents ? showOverview : undefined)}
+    {@render occupant.panel(hasContents ? openOverview : undefined)}
   {/if}
   {#if preview.shown}
     <!-- A covered file stays mounted, so it is as the reader left it (the
@@ -169,8 +176,9 @@
         {preview}
         {versionsOf}
         {exportOf}
+        {saverOf}
         {contents}
-        onoverview={hasContents ? showOverview : undefined}
+        onoverview={hasContents ? openOverview : undefined}
         sheet={!split}
       />
     </div>
@@ -198,7 +206,7 @@
                 bind:ref={trigger}
                 onopen={() => {
                   preview.openedByItself = false;
-                  overview = true;
+                  void openOverview();
                 }}
               />
             </div>

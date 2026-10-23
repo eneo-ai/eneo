@@ -8,6 +8,7 @@
   import bash from "highlight.js/lib/languages/bash";
   import yaml from "highlight.js/lib/languages/yaml";
   import sql from "highlight.js/lib/languages/sql";
+  import markdown from "highlight.js/lib/languages/markdown";
   import plaintext from "highlight.js/lib/languages/plaintext";
   import { IconCopy } from "@eneo/icons/copy";
   import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
@@ -21,6 +22,9 @@
   hljs.registerLanguage("bash", bash);
   hljs.registerLanguage("yaml", yaml);
   hljs.registerLanguage("sql", sql);
+  // A Markdown example (tagged md or markdown) reads as Markdown, fences
+  // inside it included, rather than as whatever the detector guesses.
+  hljs.registerLanguage("markdown", markdown);
   hljs.registerLanguage("plaintext", plaintext);
 
   export let source: string;

@@ -1,9 +1,7 @@
-# MIT License
-
 """Tenant-model orchestration service.
 
-Pulls the create/update/delete business logic out of the four tenant
-routers (`/api/v1/admin/tenant-models/{completion,embedding,transcription,image}/`)
+Pulls the create/update/delete business logic out of the five tenant
+routers (`/api/v1/admin/tenant-models/{completion,embedding,transcription,image,rerank}/`)
 so the routers stay thin and the rules are tested in one place.
 
 The classes share helpers via composition rather than inheritance
@@ -39,6 +37,7 @@ from eneo.database.tables.ai_models_table import (
     CompletionModels,
     EmbeddingModels,
     ImageModels,
+    RerankModels,
     TranscriptionModels,
 )
 from eneo.embedding_models.domain.embedding_model_repo import EmbeddingModelRepository
@@ -57,6 +56,7 @@ from eneo.model_providers.infrastructure.litellm_transport import (
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
+from eneo.rerank_models.domain.rerank_model_repo import RerankModelRepository
 from eneo.security_classifications.tenant_validation import (
     resolve_tenant_security_classification,
 )
@@ -81,6 +81,11 @@ if TYPE_CHECKING:
     from eneo.image_models.presentation.tenant_image_models_router import (
         TenantImageModelCreate,
         TenantImageModelUpdate,
+    )
+    from eneo.rerank_models.domain.rerank_model import RerankModel
+    from eneo.rerank_models.presentation.tenant_rerank_models_router import (
+        TenantRerankModelCreate,
+        TenantRerankModelUpdate,
     )
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
@@ -188,12 +193,16 @@ async def _audit(
     changes: dict[str, Any] | None = None,
 ) -> None:
     """Log a tenant-model write to the audit log. No-op when no audit
-    service is wired (e.g. unit tests using a stub container)."""
+    service is wired (e.g. unit tests using a stub container).
+
+    The actor is derived from ``user`` by the audit service: a service key
+    carries a synthetic user whose id is no ``users`` row, and passing it as
+    ``actor_id`` would violate the audit log's foreign key."""
     if audit_service is None:
         return
     await audit_service.log_async(
         tenant_id=user.tenant_id,
-        actor_id=user.id,
+        user=user,
         action=action,
         entity_type=entity_type,
         entity_id=target.id,
@@ -1077,4 +1086,171 @@ class TenantImageModelService:
             entity_type=EntityType.IMAGE_MODEL,
             target=snapshot,
             description=f"Deleted tenant image model {snapshot.name}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Rerank
+# ---------------------------------------------------------------------------
+
+
+class TenantRerankModelService:
+    def __init__(
+        self,
+        session: "AsyncSession",
+        user: "UserInDB",
+        audit_service: "AuditService | None" = None,
+    ) -> None:
+        self.session = session
+        self.user = user
+        self.audit_service = audit_service
+
+    async def create(self, payload: "TenantRerankModelCreate") -> "RerankModel":
+        provider = await _validate_active_provider(
+            self.session, payload.provider_id, self.user.tenant_id
+        )
+        await _validate_unique_display_name(
+            self.session,
+            RerankModels,
+            tenant_id=self.user.tenant_id,
+            provider_id=payload.provider_id,
+            nickname=payload.display_name,
+        )
+
+        if payload.is_default:
+            await _unset_other_defaults(self.session, RerankModels, self.user.tenant_id)
+
+        classification_id = await resolve_tenant_security_classification(
+            self.session, payload.security_classification, self.user.tenant_id
+        )
+
+        new_model = RerankModels(
+            **dict(  # type: ignore[call-arg]
+                tenant_id=self.user.tenant_id,
+                provider_id=payload.provider_id,
+                name=payload.name,
+                nickname=payload.display_name,
+                family=payload.family or provider.provider_type,
+                hosting=payload.hosting,
+                org=None,
+                stability="stable",
+                open_source=False,
+                description=payload.description,
+                hf_link=None,
+                is_deprecated=False,
+                is_enabled=payload.is_active,
+                is_default=payload.is_default,
+                security_classification_id=classification_id,
+            )
+        )
+        self.session.add(new_model)
+        await self.session.flush()
+
+        repo = RerankModelRepository(self.session, self.user)
+        loaded = await repo.one(new_model.id)
+
+        await _audit(
+            self.audit_service,
+            user=self.user,
+            action=ActionType.RERANK_MODEL_CREATED,
+            entity_type=EntityType.RERANK_MODEL,
+            target=loaded,
+            description=f"Created tenant rerank model {loaded.name}",
+            extra={"provider_id": str(payload.provider_id)},
+        )
+        return loaded
+
+    async def update(
+        self, model_id: UUID, payload: "TenantRerankModelUpdate"
+    ) -> "RerankModel":
+        stmt = sa.select(RerankModels).where(
+            RerankModels.id == model_id,
+            RerankModels.tenant_id == self.user.tenant_id,
+            RerankModels.deleted_at.is_(None),
+        )
+        result = await self.session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if not model:
+            raise NotFoundException(
+                "Model not found or does not belong to your organization"
+            )
+        _ensure_tenant_owned(model)
+
+        provided = payload.model_fields_set
+        if payload.display_name is not None:
+            await _validate_unique_display_name(
+                self.session,
+                RerankModels,
+                tenant_id=self.user.tenant_id,
+                provider_id=model.provider_id,
+                nickname=payload.display_name,
+                exclude_id=model.id,
+            )
+            model.nickname = payload.display_name
+        if "description" in provided:
+            model.description = payload.description
+        if payload.hosting is not None:
+            model.hosting = payload.hosting
+        if payload.open_source is not None:
+            model.open_source = payload.open_source
+        if payload.stability is not None:
+            model.stability = payload.stability
+        if "is_default" in provided and payload.is_default is not None:
+            if payload.is_default:
+                await _unset_other_defaults(
+                    self.session, RerankModels, self.user.tenant_id
+                )
+            model.is_default = payload.is_default
+        if "security_classification" in provided:
+            model.security_classification_id = (
+                await resolve_tenant_security_classification(
+                    self.session,
+                    payload.security_classification,
+                    self.user.tenant_id,
+                )
+            )
+
+        await self.session.flush()
+
+        repo = RerankModelRepository(self.session, self.user)
+        loaded = await repo.one(model.id)
+
+        await _audit(
+            self.audit_service,
+            user=self.user,
+            action=ActionType.RERANK_MODEL_UPDATED,
+            entity_type=EntityType.RERANK_MODEL,
+            target=loaded,
+            description=f"Updated tenant rerank model {loaded.name}",
+            extra={"fields": sorted(provided)},
+        )
+        return loaded
+
+    async def delete(self, model_id: UUID) -> None:
+        stmt = sa.select(RerankModels).where(
+            RerankModels.id == model_id,
+            RerankModels.tenant_id == self.user.tenant_id,
+            RerankModels.deleted_at.is_(None),
+        )
+        result = await self.session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if not model:
+            raise NotFoundException(
+                "Model not found or does not belong to your organization"
+            )
+        _ensure_tenant_owned(model)
+
+        # Soft delete: read paths filter deleted_at; the cleanup worker
+        # hard-deletes the tombstone on its next run.
+        snapshot = _DeletedSnapshot(id=model.id, name=model.nickname)
+        model.deleted_at = sa.func.now()
+        await self.session.flush()
+
+        await _audit(
+            self.audit_service,
+            user=self.user,
+            action=ActionType.RERANK_MODEL_DELETED,
+            entity_type=EntityType.RERANK_MODEL,
+            target=snapshot,
+            description=f"Deleted tenant rerank model {snapshot.name}",
         )

@@ -1,5 +1,10 @@
 import { createZitadelClient } from "$lib/core/Zitadel";
 import { createEneo, createEneoSocket } from "@eneo/eneo-js";
+import { redirect } from "@sveltejs/kit";
+import {
+  handlePasswordChangeRequired,
+  passwordChangeUrl
+} from "$lib/features/auth/passwordChangeRequired";
 
 export const load = async (event) => {
   event.depends("global:state");
@@ -9,7 +14,8 @@ export const load = async (event) => {
   const eneo = createEneo({
     token: tokens.id_token,
     baseUrl: environment.baseUrl ?? "",
-    fetch: event.fetch
+    fetch: event.fetch,
+    onError: (error) => handlePasswordChangeRequired(error, event.url)
   });
 
   let zitadelClient: ReturnType<typeof createZitadelClient> | null = null;
@@ -46,17 +52,23 @@ export const load = async (event) => {
     return null;
   };
 
-  const [userInfo, user, tenant, backendVersion, limits, settings, whatsNewState] =
-    await Promise.all([
-      getUserInfo(),
-      eneo.users.me(),
-      eneo.users.tenant(),
-      eneo.version.get(),
-      eneo.limits.list(),
-      eneo.settings.get(),
-      // Non-essential: an older backend during a rolling deploy must not block the app.
-      eneo.whatsNew.getState().catch(() => null)
-    ]);
+  // A session that must replace its local password is refused by every
+  // endpoint here except /users/me/. The client's error handler also covers
+  // later calls from the loaded app, when a policy changes or a password expires.
+  const loaded = await Promise.all([
+    getUserInfo(),
+    eneo.users.me(),
+    eneo.users.tenant(),
+    eneo.version.get(),
+    eneo.limits.list(),
+    eneo.settings.get(),
+    // Non-essential: an older backend during a rolling deploy must not block the app.
+    eneo.whatsNew.getState().catch(() => null)
+  ]);
+  const [userInfo, user, tenant, backendVersion, limits, settings, whatsNewState] = loaded;
+  if (user.password_status?.change_required) {
+    redirect(302, passwordChangeUrl(event.url));
+  }
 
   const versions = {
     frontend: environment.frontendVersion,
@@ -83,6 +95,7 @@ export const load = async (event) => {
     // undefined = could not be read (older backend, transient error): show
     // neither the dot nor the announcement rather than treating it as "never".
     whatsNewEnabled: settings.whats_new_enabled !== false,
+    whatsNewVersion: versions.frontend,
     whatsNewSeenVersion: whatsNewState ? whatsNewState.seen_version : undefined,
     whatsNewAnnouncedVersion: whatsNewState ? whatsNewState.announced_version : undefined,
     featureFlags,

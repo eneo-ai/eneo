@@ -8,6 +8,7 @@ from eneo.assistants.api.assistant_models import AssistantType, KnowledgeMode
 from eneo.base.base_entity import Entity
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.document_templates.domain import DocumentTemplateChoice
 from eneo.files.file_models import File, FileType
 from eneo.files.file_reference import url_only_attachment_ids
 from eneo.files.text import TextMimeTypes
@@ -38,10 +39,12 @@ if TYPE_CHECKING:
     from eneo.assistants.references import ReferencesService
     from eneo.collections.domain.collection import Collection
     from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
+    from eneo.document_templates.domain import DocumentTemplateReference
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.rerank_models.domain.rerank_spec import RerankSpec
     from eneo.templates.assistant_template.assistant_template import AssistantTemplate
     from eneo.websites.domain.website import Website
 
@@ -69,6 +72,7 @@ class Assistant(Entity):
         published: bool,
         integration_knowledge_list: list["IntegrationKnowledge"] | None = None,
         mcp_servers: list["MCPServer"] | None = None,
+        mcp_tools: list[tuple[UUID, bool]] | None = None,
         created_at: datetime | None = None,
         updated_at: datetime | None = None,
         source_template: Optional["AssistantTemplate"] = None,
@@ -83,6 +87,8 @@ class Assistant(Entity):
         icon_id: Optional[UUID] = None,
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         attachment_inline_text: Mapping[UUID, bool] | None = None,
+        document_template: DocumentTemplateChoice | None = None,
+        rerank_model_id: Optional[UUID] = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
 
@@ -97,6 +103,7 @@ class Assistant(Entity):
         self._collections = collections
         self._integration_knowledge_list = integration_knowledge_list or []
         self.mcp_servers = mcp_servers or []
+        self.mcp_tools = mcp_tools or []
         self.created_at = created_at
         self.updated_at = updated_at
         self._attachments = attachments
@@ -112,6 +119,7 @@ class Assistant(Entity):
         self.insight_enabled = insight_enabled
         self.inline_file_text = inline_file_text
         self.knowledge_mode = knowledge_mode
+        self.rerank_model_id = rerank_model_id
         self.data_retention_days = data_retention_days
         self.type = (
             AssistantType.DEFAULT_ASSISTANT if is_default else AssistantType.ASSISTANT
@@ -121,11 +129,11 @@ class Assistant(Entity):
             enabled_capabilities or []
         )
         self.available_capabilities: list[CapabilityAvailability] = []
+        # Which document template the file-creation capability renders with.
+        self.document_template: DocumentTemplateChoice = (
+            document_template or DocumentTemplateChoice()
+        )
         self.icon_id = icon_id
-
-        # Temporary attributes for update flow - not persisted directly
-        self._mcp_server_ids: list[UUID] | None = None
-        self._mcp_tool_settings: list[tuple[UUID, bool]] | None = None
 
     def _validate_embedding_model(self, items: _KnowledgeItemList):
         embedding_model_id_set = set([item.embedding_model.id for item in items])
@@ -407,6 +415,7 @@ class Assistant(Entity):
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        rerank_model_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ):
         if name is not None:
             self.name = name
@@ -451,6 +460,9 @@ class Assistant(Entity):
 
         if knowledge_mode is not None:
             self.knowledge_mode = knowledge_mode
+
+        if is_provided(rerank_model_id):
+            self.rerank_model_id = rerank_model_id
 
         if is_provided(data_retention_days):
             self.data_retention_days = data_retention_days
@@ -516,6 +528,8 @@ class Assistant(Entity):
         knowledge_mcp_server: Optional["MCPServer"] = None,
         internal_mcp_servers: Sequence["MCPServer"] = (),
         skill_runtime: "SkillActivationRuntime | None" = None,
+        document_template: "DocumentTemplateReference | None" = None,
+        rerank: "RerankSpec | None" = None,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         # Overrides come from the orchestrating service (personal assistant
         # governance). When set, they take precedence over the values stored on
@@ -560,6 +574,7 @@ class Assistant(Entity):
                 integration_knowledge_list=self.integration_knowledge_list,
                 context_window_tokens=effective_model.max_input_tokens,
                 version=version,
+                rerank=rerank,
             )
         else:
             datastore_result = DatastoreResult(
@@ -619,6 +634,7 @@ class Assistant(Entity):
             inline_file_text=self.inline_file_text,
             knowledge_catalog=knowledge_catalog,
             url_only_prompt_file_ids=url_only_prompt_file_ids,
+            document_template=document_template,
         )
 
         return response, datastore_result

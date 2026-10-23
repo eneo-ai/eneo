@@ -1,7 +1,5 @@
 <!--
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <script lang="ts" generics="Resource">
@@ -137,10 +135,14 @@
                       onToggle={() => viewModel.toggleSort(header.column.id)}
                       actionPadding={isAction ? actionPadding : undefined}
                     >
-                      <FlexRender
-                        content={header.column.columnDef.header}
-                        context={header.getContext()}
-                      />
+                      {#if isAction && !header.column.columnDef.header}
+                        <span class="sr-only">{m.actions()}</span>
+                      {:else}
+                        <FlexRender
+                          content={header.column.columnDef.header}
+                          context={header.getContext()}
+                        />
+                      {/if}
                     </SortButton>
                   </th>
                 {/if}

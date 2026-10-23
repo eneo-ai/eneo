@@ -96,3 +96,34 @@ describe("image model drafts", () => {
     expect(isDraftComplete({ ...draft, displayName: "" }, "image")).toBe(false);
   });
 });
+
+describe("rerank model drafts", () => {
+  it("only needs a name and display name to be complete", () => {
+    const draft = {
+      ...createEmptyDraft("rerank", "hosted_vllm"),
+      name: "Qwen/Qwen3-Reranker-4B",
+      displayName: "Qwen3 Reranker 4B"
+    };
+
+    expect(isDraftComplete(draft, "rerank")).toBe(true);
+    expect(isDraftComplete({ ...draft, name: "" }, "rerank")).toBe(false);
+  });
+
+  it("takes the name from a catalog entry and leaves every cost empty", () => {
+    const draft = applyCatalogModelToDraft(
+      createEmptyDraft("rerank", "cohere"),
+      { name: "rerank-v3.5", display_name: "Rerank 3.5", input_cost_per_token: 0.000002 },
+      "rerank"
+    );
+
+    expect(draft.name).toBe("rerank-v3.5");
+    expect(draft.displayName).toBe("Rerank 3.5");
+    expect(draft.inputCostPerTokenStr).toBe("");
+    expect(draftToWizardModel(draft)).toMatchObject({
+      name: "rerank-v3.5",
+      displayName: "Rerank 3.5",
+      inputCostPerToken: null,
+      outputCostPerToken: null
+    });
+  });
+});

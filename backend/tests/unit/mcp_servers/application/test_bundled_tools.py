@@ -143,6 +143,21 @@ async def test_catalog_is_listed_once_per_endpoint_until_it_expires(monkeypatch)
     assert len(calls) == 2
 
 
+async def test_catalog_is_listed_again_once_its_ttl_has_passed(monkeypatch):
+    calls = _runtime(monkeypatch, [LIVE, LIVE])
+    monkeypatch.setattr(
+        bundled_tools,
+        "get_settings",
+        lambda: SimpleNamespace(mcp_apps_enabled=False, bundled_catalog_ttl_seconds=0),
+    )
+    server = _server()
+
+    await with_live_bundled_tools(server)
+    await with_live_bundled_tools(server)
+
+    assert len(calls) == 2
+
+
 async def test_unreachable_runtime_keeps_the_persisted_snapshot(monkeypatch):
     _runtime(monkeypatch, [MCPClientError("connection refused")])
     server = _server()
@@ -199,7 +214,7 @@ async def test_a_view_stored_now_is_shown_with_this_answer(monkeypatch, stored):
     monkeypatch.setattr(
         bundled_tools,
         "get_settings",
-        lambda: SimpleNamespace(mcp_apps_enabled=True),
+        lambda: SimpleNamespace(mcp_apps_enabled=True, bundled_catalog_ttl_seconds=300),
     )
 
     class _Session:
@@ -239,6 +254,29 @@ async def test_a_catalog_that_cannot_be_stored_does_not_fail_the_answer(monkeypa
     live = await with_live_bundled_tools(_server())
 
     assert [tool.name for tool in live.tools] == ["query_table", "export_table"]
+
+
+async def test_a_catalog_that_could_not_be_stored_is_tried_again(monkeypatch, stored):
+    _runtime(monkeypatch, [LIVE])
+    server = _server()
+    attempts = 0
+    store = bundled_tools.store_own_catalog
+
+    async def flaky(mcp_server_id, tenant_id, tool_defs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise RuntimeError("runtime restarting")
+        await store(mcp_server_id, tenant_id, tool_defs)
+
+    monkeypatch.setattr(bundled_tools, "store_own_catalog", flaky)
+
+    await with_live_bundled_tools(server)
+    await with_live_bundled_tools(server)
+    await with_live_bundled_tools(server)
+
+    assert attempts == 2
+    assert [server_id for server_id, _ in stored] == [server.id]
 
 
 async def test_a_stored_catalog_is_audited_as_the_systems_own_change(monkeypatch):

@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, Dict, Optional
+from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
@@ -13,6 +13,18 @@ if TYPE_CHECKING:
 
 
 _DEFAULT_SIZE = 0
+_MAX_SYNC_ERROR_LENGTH = 1000
+
+# A display name a person types or a SharePoint item name, as long as the
+# names of assistant templates and uploaded files.
+KNOWLEDGE_NAME_MAX_LENGTH = 255
+KNOWLEDGE_NAME_LENGTH_REASON = (
+    f"The name must be 1 to {KNOWLEDGE_NAME_MAX_LENGTH} characters long"
+)
+
+SYNC_STATUS_NEVER = "never"
+SYNC_STATUS_SUCCESS = "success"
+SYNC_STATUS_ERROR = "error"
 
 
 class IntegrationKnowledge(Entity):
@@ -31,7 +43,7 @@ class IntegrationKnowledge(Entity):
         original_name: str | None = None,
         site_id: str | None = None,
         last_synced_at: datetime | None = None,
-        last_sync_summary: Dict[str, int] | None = None,
+        last_sync_summary: dict[str, Any] | None = None,
         sharepoint_subscription_id: UUID | None = None,
         sharepoint_subscription: Optional["SharePointSubscription"] = None,
         delta_token: str | None = None,
@@ -42,6 +54,10 @@ class IntegrationKnowledge(Entity):
         drive_id: str | None = None,
         wrapper_id: UUID | None = None,
         wrapper_name: str | None = None,
+        last_sync_status: str | None = None,
+        last_sync_error: str | None = None,
+        last_sync_attempted_at: datetime | None = None,
+        document_count: int | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.name = name
@@ -65,6 +81,26 @@ class IntegrationKnowledge(Entity):
         self.drive_id = drive_id
         self.wrapper_id = wrapper_id
         self.wrapper_name = wrapper_name
+        self.last_sync_status = last_sync_status or SYNC_STATUS_NEVER
+        self.last_sync_error = last_sync_error
+        self.last_sync_attempted_at = last_sync_attempted_at
+        # Active documents indexed for this knowledge. Read-only projection
+        # loaded by the repositories; never persisted.
+        self.document_count = document_count or 0
+
+    def mark_sync_started(self, at: datetime) -> None:
+        self.last_sync_attempted_at = at
+
+    def mark_sync_succeeded(self, at: datetime) -> None:
+        self.last_sync_status = SYNC_STATUS_SUCCESS
+        self.last_sync_error = None
+        self.last_synced_at = at
+
+    def mark_sync_failed(self, error: str) -> None:
+        # last_sync_attempted_at is the start of the attempt (mark_sync_started);
+        # a failure does not move it.
+        self.last_sync_status = SYNC_STATUS_ERROR
+        self.last_sync_error = error[:_MAX_SYNC_ERROR_LENGTH]
 
     @property
     def integration_type(self) -> str:

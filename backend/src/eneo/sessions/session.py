@@ -110,7 +110,6 @@ class SessionResponse(BaseModel):
 
 
 class EneoEventType(str, Enum):
-    GENERATING_IMAGE = "generating_image"
     TOOL_CALL = "tool_call"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
     TOOL_APPROVAL_TIMEOUT = "tool_approval_timeout"
@@ -137,10 +136,6 @@ class SSEFiles(SSEBase):
     # The tool call that produced the file, when one did; history carries the
     # same link as `generated_file_ids` on the tool call.
     tool_call_id: Optional[str] = None
-
-
-class SSEEneoEvent(SSEBase):
-    eneo_event_type: EneoEventType
 
 
 class SSEToolCall(SSEBase):
@@ -183,6 +178,21 @@ class DocumentExportRequest(BaseModel):
     """A Markdown document of the conversation, asked for in another format."""
 
     format: Literal["docx", "pdf"] = Field(description="The format to export to.")
+
+
+# The most a document tool can be configured to accept (its max_content_chars
+# ceiling), so a saved version is never longer than the tool could write.
+MAX_DOCUMENT_VERSION_CHARS = 1_000_000
+
+
+class DocumentVersionCreate(BaseModel):
+    """A reader's edited Markdown of a conversation document, saved as its next version."""
+
+    content: str = Field(
+        min_length=1,
+        max_length=MAX_DOCUMENT_VERSION_CHARS,
+        description="The whole document as Markdown, as the reader left it.",
+    )
 
 
 class ViewToolCallRequest(BaseModel):
@@ -268,6 +278,9 @@ class SSEFirstChunk(AskChatResponse):
 class SSEError(SSEBase):
     error: str
     error_code: Optional[int] = None
+    # Why the answer failed, e.g. ``provider_unreachable``; the same reason
+    # codes an HTTP error carries in ``code``.
+    code: Optional[str] = None
 
 
 class ToolApprovalResponse(BaseModel):
@@ -282,7 +295,6 @@ class ToolApprovalResponse(BaseModel):
 SSE_MODELS = [
     SSEText,
     SSEReasoning,
-    SSEEneoEvent,
     SSEToolCall,
     SSEToolCallDelta,
     SSEToolApprovalRequired,

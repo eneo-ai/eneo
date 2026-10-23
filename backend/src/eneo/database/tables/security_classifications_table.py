@@ -1,6 +1,4 @@
 # Copyright (c) 2025 Sundsvalls Kommun
-#
-# Licensed under the MIT License.
 
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
@@ -16,6 +14,7 @@ if TYPE_CHECKING:
         CompletionModels,
         EmbeddingModels,
         ImageModels,
+        RerankModels,
         TranscriptionModels,
     )
     from eneo.database.tables.mcp_server_table import MCPServers
@@ -55,6 +54,10 @@ class SecurityClassification(BasePublic):
     image_models: Mapped[list["ImageModels"]] = relationship(
         back_populates="security_classification",
         order_by="ImageModels.created_at",
+    )
+    rerank_models: Mapped[list["RerankModels"]] = relationship(
+        back_populates="security_classification",
+        order_by="RerankModels.created_at",
     )
     spaces: Mapped[list["Spaces"]] = relationship(
         back_populates="security_classification", order_by="Spaces.created_at"

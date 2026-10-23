@@ -196,9 +196,7 @@ class ServiceService:
         runs = await self.question_repo.get_by_service(service.id)  # pyright: ignore[reportArgumentType]  # questions_repo.get_by_service has wrong int annotation; actual column is UUID
         return service, runs
 
-    async def move_service_to_space(
-        self, service_id: UUID, space_id: UUID, move_resources: bool
-    ):
+    async def move_service_to_space(self, service_id: UUID, space_id: UUID):
         source_space = await self.space_repo.get_space_by_service(service_id=service_id)
         service = source_space.get_service(service_id)
 
@@ -223,10 +221,3 @@ class ServiceService:
             )
 
         await self.repo.add_service_to_space(service_id=service_id, space_id=space_id)
-
-        if move_resources:
-            for group in service.groups:
-                await self.group_service.import_group_to_space(
-                    group_id=group.id,
-                    space_id=space_id,
-                )

@@ -81,6 +81,10 @@ CATEGORY_MAPPINGS = {
     ActionType.TEMPLATE_CREATED.value: "user_actions",
     ActionType.TEMPLATE_UPDATED.value: "user_actions",
     ActionType.TEMPLATE_DELETED.value: "user_actions",
+    ActionType.DOCUMENT_TEMPLATE_CREATED.value: "admin_actions",
+    ActionType.DOCUMENT_TEMPLATE_UPDATED.value: "admin_actions",
+    ActionType.DOCUMENT_TEMPLATE_DELETED.value: "admin_actions",
+    ActionType.DOCUMENT_TEMPLATE_DEFAULT_SET.value: "admin_actions",
     ActionType.GROUP_CHAT_CREATED.value: "user_actions",
     ActionType.SESSION_STARTED.value: "user_actions",
     ActionType.SESSION_ENDED.value: "user_actions",
@@ -99,6 +103,9 @@ CATEGORY_MAPPINGS = {
     ActionType.IMAGE_MODEL_CREATED.value: "user_actions",
     ActionType.IMAGE_MODEL_UPDATED.value: "user_actions",
     ActionType.IMAGE_MODEL_DELETED.value: "user_actions",
+    ActionType.RERANK_MODEL_CREATED.value: "user_actions",
+    ActionType.RERANK_MODEL_UPDATED.value: "user_actions",
+    ActionType.RERANK_MODEL_DELETED.value: "user_actions",
     # Security Events
     ActionType.SECURITY_CLASSIFICATION_CREATED.value: "security_events",
     ActionType.SECURITY_CLASSIFICATION_UPDATED.value: "security_events",
@@ -119,6 +126,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FILE_ORIGINAL_DOWNLOADED.value: "file_operations",
     ActionType.FILE_SIGNED_URL_MINTED.value: "file_operations",
     ActionType.DOCUMENT_EXPORTED.value: "file_operations",
+    ActionType.DOCUMENT_VERSION_SAVED.value: "file_operations",
     ActionType.INFO_BLOB_ORIGINAL_DOWNLOAD_LINK_CREATED.value: "file_operations",
     # Integration Events (20 actions)
     ActionType.INTEGRATION_ADDED.value: "integration_events",

@@ -1,3 +1,13 @@
+# Frontend development
+
+SvelteKit in `frontend/apps/web` is the primary frontend and the default for
+frontend development. Implement ordinary frontend fixes and new features there.
+React/Next.js with Astryx in `frontend/apps/web-next` is an optional beta;
+work there must be explicitly intended for the beta.
+
+The web-next UI and component rules apply within that app. Follow the existing
+Svelte components and patterns when working in `frontend/apps/web`.
+
 # Documentation and release changes
 
 Before changing documented behaviour or documentation, read
@@ -10,6 +20,10 @@ Do not put unreleased behaviour on a release branch, edit generated version
 folders, or duplicate What's new entries in MDX. Keep the documentation change
 with its behaviour change. In the PR, state the intended release line and the
 page changed, or explain why documentation is unaffected.
+
+# Frontend accessibility
+
+UI work in `frontend/apps/web-next` must meet WCAG 2.2 AA; follow [its accessibility standard](frontend/apps/web-next/ACCESSIBILITY.md).
 
 # GitHub labels
 

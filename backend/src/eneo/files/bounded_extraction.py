@@ -14,6 +14,7 @@ from eneo.files.text import (
     EncryptedFileError,
     ExtractionError,
     ExtractionLimitError,
+    PdfPageLimitError,
     UnsupportedFormatError,
 )
 
@@ -85,6 +86,8 @@ async def extract_in_process(
                         raise ExtractionLimitError(filename, "text output limit")
                     output.extend(block)
                 status = await process.wait()
+                if status == ExtractionExit.PDF_PAGE_LIMIT:
+                    raise PdfPageLimitError(filename, limits.max_pdf_pages)
                 if status in (ExtractionExit.LIMIT, -signal.SIGKILL, -signal.SIGXCPU):
                     raise ExtractionLimitError(filename, "document resource limit")
                 if status == ExtractionExit.ENCRYPTED:

@@ -4,12 +4,30 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
 import { ToolError } from "../../errors";
-import { RichResult, type CallContext, type ToolDefinition, type ToolView } from "../types";
+import { exportFilename, MAX_EXPORT_BYTES } from "../files/csv";
+import {
+  RichResult,
+  type CallContext,
+  type ToolDefinition,
+  type ToolView,
+} from "../types";
 import { SheetCache } from "./cache";
-import { fetchReference, fileReference, type FileReference } from "../files/reference";
+import {
+  fetchReference,
+  requireExtension,
+  TABULAR_EXTENSIONS,
+  tabularReference,
+  type FileReference,
+} from "../files/reference";
 import type { TabularConfig } from "./config";
 import type { downloadFile } from "./download";
-import type { IngestJob, QueryJob, QueryJobResult, QueryOutcome, SheetMetadata } from "./ports";
+import type {
+  IngestJob,
+  QueryJob,
+  QueryJobResult,
+  QueryOutcome,
+  SheetMetadata,
+} from "./ports";
 import { sourceRows } from "./selection";
 import { showsTable } from "./view/paging";
 
@@ -37,29 +55,19 @@ export type TabularDeps = {
 const ROWS_SHOWN =
   "The user sees these rows as a table directly under your answer, which they can sort, filter, copy, expand and page through. Do not write the rows out again or list the columns. For a browsing request, briefly introduce the table; no extra analysis or export is needed. For an analytical question, explain the relevant findings. If truncated, these rows are only the first page: never infer full-dataset totals or rankings from it; run an aggregate or ordered query when needed.";
 
-// An exported result travels as a file; Eneo admits generated files up to 20 MiB by default.
-const MAX_EXPORT_BYTES = 20 * 1024 * 1024;
+const NO_ROWS_MATCHED =
+  "No rows matched. Compare the filter values with the value lists and examples from inspect_table: string comparison is exact and case-sensitive, so use the listed spelling or ILIKE. Say which filter found nothing instead of reporting that the data is missing.";
 
-/** A download name for an exported result; never a path, always .csv. */
-export function exportFilename(input: string | undefined): string {
-  const base = (input ?? "")
-    .normalize("NFC")
-    .replace(/\.csv$/i, "")
-    .replace(/[\u0000-\u001f\u007f-\u009f"\\/:;*?<>|]/g, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^\.+/, "")
-    .slice(0, 100)
-    .trim();
-  return `${base || "resultat"}.csv`;
-}
+export { exportFilename };
 
-const fileRef = fileReference;
+const fileRef = tabularReference;
 const sheetName = z
   .string()
   .max(200)
   .optional()
-  .describe("Exact sheet name from inspect_table. Required when the workbook has several sheets.");
+  .describe(
+    "Exact sheet name from inspect_table. Required when the workbook has several sheets.",
+  );
 const extraFiles = z
   .array(
     fileRef
@@ -70,7 +78,9 @@ const extraFiles = z
           .string()
           .regex(/^[a-z][a-z0-9_]{0,30}$/)
           .refine((a) => a !== "t", "t is the main table")
-          .describe("SQL table name for this file, for example budget or last_year."),
+          .describe(
+            "SQL table name for this file, for example budget or last_year.",
+          ),
       })
       .strict(),
   )
@@ -84,7 +94,7 @@ const selectSql = z
   .min(1)
   .max(10_000)
   .describe(
-    "One read-only DuckDB SELECT over table t (and any aliases), using column names from inspect_table. Example: SELECT region, SUM(amount) AS total FROM t GROUP BY region. For browsing, select the requested rows without adding LIMIT: the host pages the result. Use LIMIT only for an explicitly requested sample or top-N result, with ORDER BY for rankings. No file paths, URLs, extensions or multiple statements.",
+    'One read-only DuckDB SELECT over table t (and any aliases), using column names from inspect_table. Example: SELECT region, SUM(amount) AS total FROM t GROUP BY region. For browsing, select the requested rows without adding LIMIT: the host pages the result. Use LIMIT only for an explicitly requested sample or top-N result, with ORDER BY for rankings. No file paths, URLs, extensions or multiple statements. Dialect: double-quote column names that contain spaces or letters outside a-z ("Belopp 2024", "Län"); single-quote strings. Comparison is exact and case-sensitive: filter with the values listed in the column profile, or use ILIKE. Follow a column\'s hint to cast text that holds numbers or dates; TRY_CAST turns other text into NULL. / divides as a decimal. Excel dates with a time of day are TIMESTAMP; cast to DATE or use date_trunc before grouping. GROUP BY ALL and QUALIFY are available.',
   );
 
 export function tabularTools(deps: TabularDeps): ToolDefinition[] {
@@ -96,6 +106,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     ref: FileReference & { sheet?: string; source_rows?: number[] },
     ctx: CallContext,
   ) {
+    requireExtension(ref, TABULAR_EXTENSIONS, "inspect_table and query_table");
     const { bytes, contentType, isXlsx } = await fetchReference(ref, ctx, {
       allowedFileOrigins: deps.allowedFileOrigins,
       maxBytes: deps.config.max_upload_bytes,
@@ -134,13 +145,19 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     });
   }
 
-  function pickSheet(sheets: SheetMetadata[], requested: string | undefined, label: string) {
+  function pickSheet(
+    sheets: SheetMetadata[],
+    requested: string | undefined,
+    label: string,
+  ) {
     if (!requested && sheets.length > 1)
       throw new ToolError(
         "SHEET_REQUIRED",
         `${label} has several sheets. Pass sheet with a name from inspect_table.`,
       );
-    const sheet = requested ? sheets.find((s) => s.name === requested) : sheets[0];
+    const sheet = requested
+      ? sheets.find((s) => s.name === requested)
+      : sheets[0];
     if (!sheet)
       throw new ToolError(
         "UNKNOWN_SHEET",
@@ -159,10 +176,20 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     extras: z.infer<typeof extraFiles>,
     ctx: CallContext,
   ) {
+    // Every file is checked before any is downloaded, so one call reports the wrong one.
+    for (const ref of [main, ...(extras ?? [])])
+      requireExtension(
+        ref,
+        TABULAR_EXTENSIONS,
+        "inspect_table and query_table",
+      );
     const aliases = new Set<string>();
     for (const extra of extras ?? []) {
       if (aliases.has(extra.alias))
-        throw new ToolError("INVALID_ALIAS", `Duplicate table alias: ${extra.alias}`);
+        throw new ToolError(
+          "INVALID_ALIAS",
+          `Duplicate table alias: ${extra.alias}`,
+        );
       aliases.add(extra.alias);
     }
     const loaded = await load(main, ctx);
@@ -184,12 +211,14 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
         alias: extra.alias,
         csvPath: join(other.directory, otherSheet.csv),
         explicitHeader: otherSheet.explicitHeader,
+        skipRows: otherSheet.skipRows,
       });
     }
     return {
       csvPath: join(loaded.directory, sheet.csv),
       sheet,
       explicitHeader: sheet.explicitHeader,
+      skipRows: sheet.skipRows,
       tables: joined,
       calculation: calculationWarnings.length
         ? {
@@ -204,14 +233,20 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
   const inspectInput = z
     .object({
       files: z
-        .array(fileRef.extend({ sheet: sheetName, source_rows: sourceRows }).strict())
+        .array(
+          fileRef
+            .extend({ sheet: sheetName, source_rows: sourceRows })
+            .strict(),
+        )
         .min(1)
         .max(5),
     })
     .strict();
   const queryInput = z
     .object({
-      file: fileRef.extend({ sheet: sheetName, source_rows: sourceRows }).strict(),
+      file: fileRef
+        .extend({ sheet: sheetName, source_rows: sourceRows })
+        .strict(),
       files: extraFiles,
       sql: selectSql,
       title: z
@@ -237,7 +272,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
         .boolean()
         .default(false)
         .describe(
-          `Leave false for showing, browsing, filtering or sorting rows in the conversation, even for large results. Set true when the user asks for a downloadable file or when the result must become a source file for create_spreadsheet or create_chart. Attaches the complete result (up to ${deps.config.export_row_limit} rows) as CSV; pass its reference url to the next tool instead of copying rows.`,
+          `Leave false for showing, browsing, filtering or sorting rows in the conversation, even for large results, and for a small aggregate (up to about 50 rows, such as totals per month or per category) that a chart will draw: pass those rows to create_chart as labels and series instead, since an export is shown to the user as a downloadable file. Set true when the user asks for a downloadable file, when create_spreadsheet needs the result as a file, or when a chart needs more rows than that. Attaches the complete result (up to ${deps.config.export_row_limit} rows) as CSV; pass its reference url to the next tool instead of copying rows.`,
         ),
       export_filename: z
         .string()
@@ -248,13 +283,19 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
     .strict();
   const assertInput = z
     .object({
-      file: fileRef.extend({ sheet: sheetName, source_rows: sourceRows }).strict(),
+      file: fileRef
+        .extend({ sheet: sheetName, source_rows: sourceRows })
+        .strict(),
       files: extraFiles,
       checks: z
         .array(
           z
             .object({
-              name: z.string().min(1).max(200).describe("Readable name for the data-quality rule."),
+              name: z
+                .string()
+                .min(1)
+                .max(200)
+                .describe("Readable name for the data-quality rule."),
               sql: selectSql.describe(
                 "One SELECT whose first cell is boolean true when the rule passes. Example: SELECT COUNT(*) = 0 FROM t WHERE id IS NULL.",
               ),
@@ -276,11 +317,17 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
       name: "inspect_table",
       title: "Inspect table",
       description:
-        "Start here when the user wants to view, browse, filter, sort or analyse an attached CSV, TSV or Excel (.xlsx) file. For a native row selection, pass source_rows and sheet unchanged to inspect_table and query_table; the source is filtered before SQL. Pass each file's signed url and filename from the attachment reference, unchanged. Returns sheet names, column names and types, column value profiles, parsed and rejected row counts and up to five sample rows per sheet. These samples describe the file, not the requested result: follow with query_table to show the requested rows or calculate an answer over the full dataset. Do not ask the user to name tools or choose an interactive display. Report rejected rows and missing saved formula results as coverage limitations. Formulas are not recalculated; saved results may be outdated.",
+        "Start here for any question about an attached CSV, TSV or Excel (.xlsx) file, including what it contains, and when the user wants to view, browse, filter, sort or analyse it. For a native row selection, pass source_rows and sheet unchanged to inspect_table and query_table; the source is filtered before SQL. Pass each file's signed url and filename from the attachment reference, unchanged. Returns sheet names, column names and types, column value profiles, parsed and rejected row counts and up to five sample rows per sheet. These samples describe the file, not the requested result: follow with query_table to show the requested rows or calculate an answer over the full dataset. Do not ask the user to name tools or choose an interactive display. Report rejected rows and missing saved formula results as coverage limitations. Formulas are not recalculated; saved results may be outdated.",
       inputSchema: inspectInput.shape,
       readOnly: true,
       async execute(raw, ctx) {
         const args = inspectInput.parse(raw);
+        for (const ref of args.files)
+          requireExtension(
+            ref,
+            TABULAR_EXTENSIONS,
+            "inspect_table and query_table",
+          );
         const files = [];
         for (const ref of args.files) {
           const loaded = await load(ref, ctx);
@@ -290,6 +337,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
               name: s.name,
               columns: s.columns,
               parsed_rows: s.rowCount,
+              ...(s.skipRows ? { header_row: s.skipRows + 1 } : {}),
               ...(s.sourceRows ? { source_rows: s.sourceRows } : {}),
               rejected_rows: s.rejectedRows,
               sample_rows: s.sampleRows,
@@ -300,7 +348,9 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
         }
         return {
           files,
-          ...(files.some((file) => file.sheets.some((sheet) => sheet.calculation))
+          ...(files.some((file) =>
+            file.sheets.some((sheet) => sheet.calculation),
+          )
             ? {
                 calculation_notice:
                   "Formulas were not recalculated. Values are saved Excel results and freshness is unknown. Disclose missing saved results and qualify conclusions; recalculate and save in Excel to obtain missing results.",
@@ -314,7 +364,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
       title: "Query table",
       ...(deps.resultView ? { view: deps.resultView } : {}),
       description:
-        'Use for ordinary requests such as "show me this file", "show the rows for this region", "sort by amount" or "summarise sales by region", as well as totals, counts, averages, rankings and comparisons over the full CSV/Excel dataset. Call inspect_table first for the actual sheet and column names. Choose display=none for intermediate queries used to calculate an answer or prepare a chart or another tool; do not show a table merely because you queried data. Choose display=table when the table itself is part of the requested answer, and give it a title that tells it apart from the other tables in the conversation. For viewing or browsing, leave export=false: hosts supporting tool views show multi-row results as an interactive table when display=table. The user does not need to ask for a table, name a tool or choose a display mode. Do not add LIMIT merely to keep the answer short; the host pages the result. Export only for a requested downloadable file or a source file needed by create_spreadsheet or create_chart. For a native row selection, pass its source_rows filter unchanged in file; t contains only those source records before your SQL runs. Runs one read-only DuckDB SELECT over table t; pass sheet for multi-sheet workbooks. To combine attachments, list them under files with an alias and JOIN them. Pass signed urls and filenames unchanged. Results report truncation, parsed/rejected coverage and formula limitations for all source files. Disclose missing saved formula results and qualify conclusions based on them; formulas are not recalculated. When the result includes shown, follow that presentation guidance and do not repeat the rows in your answer. Otherwise answer from the returned data, acknowledge truncation and do not claim an interactive table is visible.',
+        'Use for ordinary requests such as "show me this file", "show the rows for this region", "sort by amount" or "summarise sales by region", as well as totals, counts, averages, rankings and comparisons over the full CSV/Excel dataset. Call inspect_table first for the actual sheet and column names. Choose display=none for intermediate queries used to calculate an answer or prepare a chart or another tool; do not show a table merely because you queried data. Choose display=table when the table itself is part of the requested answer, and give it a title that tells it apart from the other tables in the conversation. For viewing or browsing, leave export=false: hosts supporting tool views show multi-row results as an interactive table when display=table. The user does not need to ask for a table, name a tool or choose a display mode. Do not add LIMIT merely to keep the answer short; the host pages the result. Export only for a requested downloadable file, a source file for create_spreadsheet, or a chart over more than about 50 rows; a smaller aggregate goes to create_chart as labels and series without export, since an export is shown to the user as a downloadable file. For a native row selection, pass its source_rows filter unchanged in file; t contains only those source records before your SQL runs. Runs one read-only DuckDB SELECT over table t; pass sheet for multi-sheet workbooks. To combine attachments, list them under files with an alias and JOIN them. Pass signed urls and filenames unchanged. Results report truncation, parsed/rejected coverage and formula limitations for all source files. Disclose missing saved formula results and qualify conclusions based on them; formulas are not recalculated. When the result includes shown, follow that presentation guidance and do not repeat the rows in your answer. Otherwise answer from the returned data, acknowledge truncation and do not claim an interactive table is visible.',
       inputSchema: queryInput.shape,
       readOnly: true,
       async execute(raw, ctx) {
@@ -326,11 +376,14 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
           ? await mkdtemp(join(tmpdir(), "eneo-tool-runtime-export-"))
           : undefined;
         try {
-          const outputPath = directory ? join(directory, "result.csv") : undefined;
+          const outputPath = directory
+            ? join(directory, "result.csv")
+            : undefined;
           const { results } = await deps.executor.query({
             kind: "tabular_query",
             csvPath: input.csvPath,
             explicitHeader: input.explicitHeader,
+            skipRows: input.skipRows,
             tables: input.tables,
             statements: [args.sql],
             explain: args.explain,
@@ -361,7 +414,9 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
           const structured = {
             display: args.display,
             sheet: input.sheet.name,
-            ...(input.sheet.sourceRows ? { source_rows: input.sheet.sourceRows } : {}),
+            ...(input.sheet.sourceRows
+              ? { source_rows: input.sheet.sourceRows }
+              : {}),
             columns: outcome.columns,
             rows: outcome.rows,
             returned_rows: outcome.returnedRows,
@@ -369,6 +424,11 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
             ...coverage(outcome),
             ...input.calculation,
             ...(shown ? { shown: ROWS_SHOWN } : {}),
+            ...(outcome.returnedRows === 0 &&
+            !args.explain &&
+            /\bwhere\b/i.test(args.sql)
+              ? { hint: NO_ROWS_MATCHED }
+              : {}),
           };
           if (!outputPath) return structured;
           const csv = await readFile(outputPath);
@@ -416,6 +476,7 @@ export function tabularTools(deps: TabularDeps): ToolDefinition[] {
           kind: "tabular_query",
           csvPath: input.csvPath,
           explicitHeader: input.explicitHeader,
+          skipRows: input.skipRows,
           tables: input.tables,
           statements: args.checks.map((c) => c.sql),
           explain: false,

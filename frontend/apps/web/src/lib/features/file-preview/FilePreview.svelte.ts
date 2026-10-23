@@ -32,6 +32,11 @@ export type DocumentExport = {
 /** Whatever is shown in the panel over the file; `leave` takes it out of the panel. */
 export type PreviewCover = { leave: () => void };
 
+/** How a reader's edit of a document is kept: as the document's next version. */
+export type DocumentSaver = {
+  save: (markdown: string) => Promise<PreviewFile>;
+};
+
 /** Actual document input shown while the assistant is still writing it. */
 export type { DocumentDraft as PreviewDraft } from "../chat/documentDraft";
 import type { DocumentDraft as PreviewDraft } from "../chat/documentDraft";
@@ -71,10 +76,11 @@ export class FilePreview {
   #opensByItself = true;
   // The draft the reader left for another file; it does not take the panel back.
   #leftDraft: string | null = null;
-  // A file has arrived for these calls. Late draft effects cannot take over
-  // either its download or its completed preview.
+  // The file that has arrived for each of these calls. Late draft effects
+  // cannot take over either its download or its completed preview, and a
+  // draft the reader asked for after its file came shows that file instead.
   // eslint-disable-next-line svelte/prefer-svelte-reactivity -- transition guard, never rendered
-  #finishedDrafts = new Set<string>();
+  #finishedDrafts = new Map<string, PreviewFile>();
 
   file = $state.raw<PreviewFile | null>(null);
   /**
@@ -96,17 +102,25 @@ export class FilePreview {
   replacementContent = $state.raw<PreviewContent | null>(null);
   replacementError = $state<"failed" | "too_large" | null>(null);
   #replacementHighlight: PreviewPassage | null = null;
+  #replacementReady = false;
 
   #clearReplacement() {
     this.replacementFile = null;
     this.replacementContent = null;
     this.replacementError = null;
     this.#replacementHighlight = null;
+    this.#replacementReady = false;
   }
 
-  /** The new renderer is ready: swap content and metadata together. */
+  /**
+   * The new renderer is ready: swap content and metadata together. A reader
+   * who is editing keeps the text in front of them; the replacement waits.
+   */
   finishReplacement(id: string) {
     if (this.replacementFile?.id !== id || !this.replacementContent) return;
+    this.#replacementReady = true;
+    if (this.dirty) return;
+    this.#releaseSave();
     this.file = this.replacementFile;
     this.content = this.replacementContent;
     this.highlight = this.#replacementHighlight;
@@ -128,6 +142,29 @@ export class FilePreview {
   quote = $state.raw<PreviewQuote | null>(null);
   /** A passage to point out in the open file: a quote the user asked to see in place. */
   highlight = $state.raw<PreviewPassage | null>(null);
+  /**
+   * The reader has changed the open document's text. Edits live in the editor
+   * until the reader saves them as a new version, so nothing is written on a
+   * keystroke; what would lose them asks first.
+   */
+  dirty = $state(false);
+  /** Shared across panel remounts so a pending save keeps its document read-only. */
+  saving = $state(false);
+  #saveRequest: symbol | null = null;
+  // The edited text itself, so an editor torn down and mounted again (the
+  // layout crosses its breakpoint) shows the document as the reader left it.
+  #edits: { fileId: string; text: string } | null = null;
+  /**
+   * Whether the document on show marks what it changed against the version
+   * before it. Off until the reader asks: a version that rewrites the
+   * document would otherwise open as a strike-through of all its old text.
+   */
+  showChanges = $state(false);
+  /**
+   * Something would take the editor away (another file, the panel closing)
+   * while edits are unsaved; it waits for the reader to decide.
+   */
+  pendingDiscard = $state.raw<{ proceed: () => void } | null>(null);
   /** Whether the panel covers the conversation instead of sharing the width with it. */
   maximised = $state(false);
   /**
@@ -136,9 +173,186 @@ export class FilePreview {
    * cover goes; a file that takes the panel asks the cover to leave.
    */
   cover = $state.raw<PreviewCover | null>(null);
+  /**
+   * The panel's overview of everything the conversation has to show, with the
+   * section it opened on, the upload group it points at and the element to
+   * hand the focus back to. It lives here so a file bundle in a message can
+   * open it as the panel's own controls do; the layout decides how it is shown.
+   */
+  overview = $state.raw<{
+    section: "uploads" | null;
+    /** The question whose uploads the overview marks; see `uploadGroupKey`. */
+    group: string | null;
+    opener: string | null;
+  } | null>(null);
 
   constructor(urls: AttachmentUrls) {
     this.#urls = urls;
+  }
+
+  /** Whether the panel shows the overview. */
+  get overviewShown() {
+    return this.overview !== null;
+  }
+
+  /** Whether the reader has edits that are not saved. */
+  get unsaved() {
+    return this.dirty;
+  }
+
+  /**
+   * The text of the document `fileId` as the reader has it now, or null once
+   * it is the file's text again.
+   */
+  setEdits(fileId: string, text: string | null) {
+    this.#edits = text === null ? null : { fileId, text };
+    this.dirty = text !== null;
+    if (text === null) this.#showReplacement();
+  }
+
+  /** The reader's unsaved text of `file`, for an editor that shows it afresh. */
+  editsOf(file: { id: string }): string | null {
+    return this.#edits?.fileId === file.id ? this.#edits.text : null;
+  }
+
+  #clearEdits() {
+    this.#edits = null;
+    this.dirty = false;
+    this.#releaseSave();
+  }
+
+  #releaseSave() {
+    this.#saveRequest = null;
+    this.saving = false;
+  }
+
+  /**
+   * A save belongs to the current editing session, even if its panel remounts.
+   * Leaving or discarding that session detaches its response from the preview.
+   */
+  beginSave() {
+    const request = Symbol("document-save");
+    this.#saveRequest = request;
+    this.saving = true;
+    return {
+      apply: (file: PreviewFile, markdown: string) => {
+        if (this.#saveRequest !== request) return false;
+        this.saved(file, markdown);
+        return true;
+      },
+      finish: () => {
+        if (this.#saveRequest === request) this.#releaseSave();
+      }
+    };
+  }
+
+  /** The reader let their edits go; a replacement that waited then shows. */
+  dropEdits() {
+    this.#clearEdits();
+    this.#showReplacement();
+  }
+
+  /** The text of a Markdown document, for comparing versions; null when it cannot be read. */
+  async loadText(file: PreviewFile): Promise<string | null> {
+    let content = this.#cache.get(file.id);
+    if (!content) {
+      try {
+        const url = await this.#urls.resolveOriginalUrl(file);
+        content = await loadPreview(file, "markdown", url, new AbortController().signal);
+        this.#remember(file.id, content);
+      } catch {
+        return null;
+      }
+    }
+    return content.kind === "markdown" ? content.text : null;
+  }
+
+  /** The reader keeps editing after all. */
+  keepEditing() {
+    this.pendingDiscard = null;
+  }
+
+  /**
+   * The reader's edit was saved as `file`, whose text is `markdown`. It is
+   * the document on show now; a replacement staged meanwhile is dropped,
+   * since the reader's version is the one they asked for.
+   */
+  saved(file: PreviewFile, markdown: string) {
+    const content: PreviewContent = { kind: "markdown", text: markdown, truncated: false };
+    this.#remember(file.id, content);
+    this.#abort?.abort();
+    this.#clearReplacement();
+    this.file = file;
+    this.content = content;
+    this.status = "ready";
+    this.highlight = null;
+    this.draft = null;
+    this.#clearEdits();
+    this.pendingDiscard = null;
+  }
+
+  // Runs `action` at once, or once the reader has agreed to lose their edits.
+  #guarded(action: () => void) {
+    if (!this.unsaved) {
+      action();
+      return;
+    }
+    this.pendingDiscard = {
+      proceed: () => {
+        this.pendingDiscard = null;
+        this.#clearEdits();
+        action();
+      }
+    };
+  }
+
+  #showReplacement() {
+    if (this.#replacementReady && this.replacementFile && this.replacementContent) {
+      this.finishReplacement(this.replacementFile.id);
+    }
+  }
+
+  #remember(id: string, content: PreviewContent) {
+    this.#cache.set(id, content);
+    if (this.#cache.size > CACHED_PREVIEWS) {
+      this.#cache.delete(this.#cache.keys().next().value!);
+    }
+  }
+
+  /**
+   * Shows the overview, open at `section` and marking the upload `group`;
+   * `opener` gets the focus back when it closes. A file or view on show
+   * leaves the panel first.
+   */
+  showOverview(
+    section: "uploads" | null = null,
+    opener?: HTMLElement | null,
+    group: string | null = null
+  ) {
+    this.#guarded(() => {
+      this.cover?.leave();
+      if (this.shown) this.#close();
+      if (opener && !opener.id) opener.id = `preview-opener-${crypto.randomUUID()}`;
+      this.overview = { section, group, opener: opener?.id ?? null };
+    });
+  }
+
+  /** Closes the overview; the focus returns to its opener unless told otherwise. */
+  closeOverview(restoreFocus = true) {
+    const opener = this.overview?.opener;
+    if (this.overview === null) return;
+    this.overview = null;
+    if (restoreFocus && opener && typeof document !== "undefined") {
+      document.getElementById(opener)?.focus();
+    }
+  }
+
+  /** Whether `element` is what opened the overview on show. */
+  isOverviewOpener(element: HTMLElement | null) {
+    // The overview is read first: an element without an id yet must still
+    // leave a dependency on it, or the answer never updates once it opens.
+    const opener = this.overview?.opener;
+    return !!opener && !!element && element.id === opener;
   }
 
   /** Whether a file has a renderer; without one it can only be downloaded. */
@@ -162,6 +376,10 @@ export class FilePreview {
 
   /** Shows `file` in the panel; `opener` gets the focus back when it closes. */
   open(file: PreviewFile, opener?: HTMLElement | null) {
+    this.#guarded(() => this.#open(file, opener));
+  }
+
+  #open(file: PreviewFile, opener?: HTMLElement | null) {
     this.#opener = opener ?? null;
     this.openedByItself = false;
     this.highlight = null;
@@ -173,6 +391,7 @@ export class FilePreview {
     this.#abort?.abort();
     this.#clearReplacement();
     if (this.#holds(file)) return;
+    this.#releaseSave();
     this.file = file;
     void this.#load(file);
   }
@@ -195,10 +414,44 @@ export class FilePreview {
       this.openedByItself = true;
       this.cover?.leave();
     }
+    this.#takeDraft(draft);
+  }
+
+  /**
+   * Shows the document being written because the reader asked for it: after
+   * closing the panel on it, or on a narrow screen, where it does not open
+   * by itself. A loaded document gives way; unsaved edits ask first.
+   */
+  showDraft(draft: PreviewDraft) {
+    if (this.#finishedDrafts.has(draft.callId)) return;
+    this.#guarded(() => {
+      // The reader may have been asked about their edits first, and the
+      // assistant written on meanwhile: the document, once it has come, is
+      // what they get to see, else the draft as it stands now.
+      const finished = this.#finishedDrafts.get(draft.callId);
+      if (finished) {
+        this.#open(finished);
+        return;
+      }
+      if (this.#leftDraft === draft.callId) this.#leftDraft = null;
+      this.openedByItself = false;
+      this.cover?.leave();
+      this.#abort?.abort();
+      // A save still in flight was of the document the draft replaces.
+      this.#releaseSave();
+      this.#clearReplacement();
+      this.file = null;
+      this.content = null;
+      this.#takeDraft(this.draft?.callId === draft.callId ? this.draft : draft);
+    });
+  }
+
+  #takeDraft(draft: PreviewDraft) {
     if (this.draft?.callId !== draft.callId) {
       this.#abort?.abort();
       this.#clearReplacement();
       if (this.status !== "ready" || !this.content) {
+        this.#releaseSave();
         this.file = null;
         this.content = null;
       }
@@ -232,16 +485,25 @@ export class FilePreview {
    * point out in it: what an edit of the earlier version put in.
    */
   arrive(file: PreviewFile, changed: PreviewPassage | null = null, callId?: string | null) {
-    if ((callId && callId === this.#leftDraft) || this.#holds(file)) return;
+    if (this.#holds(file)) return;
+    if (callId && callId === this.#leftDraft) {
+      // Not shown, since the reader left its draft; but asked for, it is this file.
+      this.#finishedDrafts.set(callId, file);
+      return;
+    }
     if (!this.shown || this.cover) {
       const opens = this.besideConversation && this.#opensByItself;
       if (!opens || !this.canPreview(file)) return;
       this.openedByItself = true;
       this.cover?.leave();
     }
-    if (this.draft) this.#finishedDrafts.add(this.draft.callId);
+    // The call that made the file is done, and so is the draft on show, which
+    // the file takes over whichever call it is from.
+    if (callId) this.#finishedDrafts.set(callId, file);
+    if (this.draft) this.#finishedDrafts.set(this.draft.callId, file);
     const keepCurrent = !!this.file && !!this.content && this.status === "ready";
     if (!keepCurrent) {
+      this.#releaseSave();
       this.highlight = changed;
       this.file = file;
     }
@@ -250,8 +512,10 @@ export class FilePreview {
 
   /** Shows `file` with `passage` marked in it, opening the panel if needed. */
   showPassage(file: PreviewFile, passage: PreviewPassage, opener?: HTMLElement | null) {
-    this.open(file, opener);
-    this.highlight = passage;
+    this.#guarded(() => {
+      this.#open(file, opener);
+      this.highlight = passage;
+    });
   }
 
   /** Makes text selected in the open file the quote of the next question. */
@@ -259,7 +523,8 @@ export class FilePreview {
     const text = tidyQuoteText(selected);
     if (this.file && text) {
       this.quote = { fileId: this.file.id, fileName: this.file.name, text, locator };
-      // On narrow screens the preview covers the composer; return to the chat.
+      // On narrow screens the preview covers the composer; return to the
+      // chat. Unsaved edits would go with the panel, so that asks first.
       if (!this.besideConversation) this.close();
     }
   }
@@ -281,11 +546,15 @@ export class FilePreview {
 
   /** Opens `file`, or closes the panel when it already shows that file. */
   toggle(file: PreviewFile, opener?: HTMLElement | null) {
-    if (this.isOpen(file)) this.close();
-    else this.open(file, opener);
+    this.#guarded(() => (this.isOpen(file) ? this.#close() : this.#open(file, opener)));
   }
 
   close() {
+    this.#guarded(() => this.#close());
+  }
+
+  #close() {
+    this.#releaseSave();
     if (this.draft) this.#leftDraft = this.draft.callId;
     this.#abort?.abort();
     this.#abort = null;
@@ -328,10 +597,7 @@ export class FilePreview {
         if (abort.signal.aborted) return;
         content = await loadPreview(file, kind, url, abort.signal);
         if (abort.signal.aborted) return;
-        this.#cache.set(file.id, content);
-        if (this.#cache.size > CACHED_PREVIEWS) {
-          this.#cache.delete(this.#cache.keys().next().value!);
-        }
+        this.#remember(file.id, content);
       }
       if (keepCurrent) {
         // The panel prepares the renderer offscreen and commits only when ready.

@@ -349,6 +349,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_document_exported,
     description: m.audit_action_document_exported_description
   },
+  document_version_saved: {
+    name: m.audit_action_document_version_saved,
+    description: m.audit_action_document_version_saved_description
+  },
   website_created: {
     name: m.audit_action_website_created,
     description: m.audit_action_website_created_description
@@ -481,6 +485,18 @@ const ACTION_MESSAGES = {
     name: m.audit_action_image_model_deleted,
     description: m.audit_action_image_model_deleted_description
   },
+  rerank_model_created: {
+    name: m.audit_action_rerank_model_created,
+    description: m.audit_action_rerank_model_created_description
+  },
+  rerank_model_updated: {
+    name: m.audit_action_rerank_model_updated,
+    description: m.audit_action_rerank_model_updated_description
+  },
+  rerank_model_deleted: {
+    name: m.audit_action_rerank_model_deleted,
+    description: m.audit_action_rerank_model_deleted_description
+  },
   template_created: {
     name: m.audit_action_template_created,
     description: m.audit_action_template_created_description
@@ -520,6 +536,22 @@ const ACTION_MESSAGES = {
   mcp_server_created: {
     name: m.audit_action_mcp_server_created,
     description: m.audit_action_mcp_server_created_description
+  },
+  document_template_created: {
+    name: m.audit_action_document_template_created,
+    description: m.audit_action_document_template_created_description
+  },
+  document_template_updated: {
+    name: m.audit_action_document_template_updated,
+    description: m.audit_action_document_template_updated_description
+  },
+  document_template_deleted: {
+    name: m.audit_action_document_template_deleted,
+    description: m.audit_action_document_template_deleted_description
+  },
+  document_template_default_set: {
+    name: m.audit_action_document_template_default_set,
+    description: m.audit_action_document_template_default_set_description
   },
   mcp_server_updated: {
     name: m.audit_action_mcp_server_updated,

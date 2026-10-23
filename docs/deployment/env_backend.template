@@ -321,16 +321,29 @@ DB_POOL_PRE_PING=true
 # Log connections held >60s - use for debugging pool exhaustion only
 # DB_POOL_DEBUG=false
 
-# Background uploads and website files share bounded extraction. Restart workers
-# after changing these limits. Linux enforces child address-space and CPU limits.
+# Chat uploads, background uploads and website files share bounded extraction:
+# every document is parsed in a short-lived child process under these limits.
+# Restart the backend and the workers after changing them. Linux enforces the
+# child address-space and CPU limits.
+# CONCURRENCY is per backend or worker process, so the worst-case extraction
+# memory of one process is CONCURRENCY x MEMORY_BYTES.
 FILE_EXTRACTION_CONCURRENCY=2
 FILE_EXTRACTION_TIMEOUT_SECONDS=60
 FILE_EXTRACTION_CPU_SECONDS=30
 FILE_EXTRACTION_MEMORY_BYTES=1073741824
+# Extracted text larger than this is rejected. 10 MB is roughly 4,000 dense
+# text pages, or a spreadsheet of about 35,000 rows with ten columns.
 FILE_EXTRACTION_MAX_OUTPUT_BYTES=10000000
 FILE_EXTRACTION_MAX_ARCHIVE_BYTES=134217728
 FILE_EXTRACTION_MAX_ARCHIVE_ENTRIES=10000
+# PDFs with more pages are rejected with a "PDF page limit" error.
 FILE_EXTRACTION_MAX_PDF_PAGES=1000
+# PDFs up to this many pages get table detection (tables become Markdown) and
+# are scanned for pages with visual content. Longer PDFs take their text from
+# the PDF text layer: about fifty times faster, tables come out as plain lines.
+# Table detection costs tens of milliseconds of CPU per page, so keep
+# PDF_LAYOUT_MAX_PAGES low enough to finish well inside CPU_SECONDS.
+FILE_EXTRACTION_PDF_LAYOUT_MAX_PAGES=200
 
 # ----------------------------------------------------------------------------
 # Background Worker Configuration
@@ -452,6 +465,8 @@ EXPORT_MAX_AGE_HOURS=24
 # address users open Eneo on.
 # MCP_APPS_ENABLED=true
 # MCP_APP_CONTENT_BASE_URL=https://views.your-domain.com
+# A second frontend served beside PUBLIC_ORIGIN that may frame views (JSON list).
+# MCP_APP_HOST_ORIGINS=["https://next.your-domain.com"]
 
 # ============================================================================
 # FEATURE FLAGS
@@ -488,6 +503,18 @@ SHAREPOINT_WEBHOOK_CLIENT_STATE=
 # [OPTIONAL] Explicit webhook callback URL. Defaults to
 # {PUBLIC_ORIGIN}/api/v1/integrations/sharepoint/webhook/
 # SHAREPOINT_WEBHOOK_NOTIFICATION_URL=
+
+# [OPTIONAL] Where Graph sends subscription lifecycle events (reauthorization,
+# removal, missed notifications). Defaults to the webhook callback URL itself,
+# which serves both kinds; the lifecycle/ path under it works as well. Graph
+# must reach this URL whenever it creates a subscription.
+# SHAREPOINT_WEBHOOK_LIFECYCLE_NOTIFICATION_URL=
+
+# [OPTIONAL] Hours without any sync after which a SharePoint source gets a
+# delta sync anyway, in case Graph dropped its notifications (0 = off), and the
+# most such syncs queued per run (every 15 minutes).
+# SHAREPOINT_CATCH_UP_AFTER_HOURS=6
+# SHAREPOINT_CATCH_UP_MAX_SYNCS_PER_RUN=25
 
 # ----------------------------------------------------------------------------
 # Default Tenant & User (First-time Bootstrap)
@@ -542,3 +569,8 @@ OTEL_DEPLOYMENT_ENVIRONMENT=production
 # DEPRECATED: MobilityGuard and Zitadel variables are no longer used.
 # Use OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID, and OIDC_CLIENT_SECRET above.
 # ----------------------------------------------------------------------------
+
+# Extra, exact integration callback URLs for parallel frontends (JSON array).
+# Keep OAUTH_CALLBACK_URL pointing at the existing app. Register each URL with
+# SharePoint/Confluence too. The selected URL is bound to the one-use OAuth state.
+OAUTH_CALLBACK_URLS=[]

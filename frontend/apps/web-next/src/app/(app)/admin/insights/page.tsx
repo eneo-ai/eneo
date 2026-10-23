@@ -1,0 +1,19 @@
+import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
+import { getQueryClient } from "@/lib/api/query";
+import { eneoApi } from "@/lib/api/server";
+import { pageTitle } from "@/lib/page-metadata";
+import { insightCountsQueryOptions } from "@/features/admin/insights/insights";
+import { InsightsPage } from "@/features/admin/insights/insights-page";
+
+export const generateMetadata = pageTitle("insights");
+
+export default async function AdminInsightsRoute() {
+  const queryClient = getQueryClient();
+  await queryClient.query(insightCountsQueryOptions(eneoApi()));
+
+  return (
+    <HydrationBoundary state={dehydrate(queryClient)}>
+      <InsightsPage />
+    </HydrationBoundary>
+  );
+}

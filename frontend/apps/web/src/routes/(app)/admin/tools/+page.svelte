@@ -13,11 +13,9 @@
   import { untrack } from "svelte";
   import {
     ChevronDown,
-    Package,
+    Plug,
     Plus,
-    Server,
     ShieldCheck,
-    Wrench,
     CircleCheck,
     CircleDashed,
     TriangleAlert,
@@ -25,12 +23,12 @@
     Pause,
     Pencil,
     Trash2,
-    ChevronRight,
-    Sparkles
+    ChevronRight
   } from "@lucide/svelte";
   import { m } from "$lib/paraglide/messages";
   import { CAPABILITIES } from "$lib/features/mcp/capabilities";
   import { BUNDLED_SERVERS, bundledIdentity, bundledServerLabel } from "$lib/features/mcp/bundled";
+  import { SOURCE_KINDS, sourceKind } from "$lib/features/mcp/sourceKind";
   import { readinessMessage } from "$lib/features/mcp/readiness";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { setSecurityContext } from "$lib/features/security-classifications/SecurityContext";
@@ -41,6 +39,7 @@
   import DeleteMCPDialog from "../mcp-servers/DeleteMCPDialog.svelte";
   import MCPToolsPanel from "../mcp-servers/MCPToolsPanel.svelte";
   import ProviderToolsSummary from "./ProviderToolsSummary.svelte";
+  import DocumentTemplates from "./DocumentTemplates.svelte";
 
   type Provider = components["schemas"]["MCPServerSettingsPublic"];
   let { data }: { data: PageData } = $props();
@@ -81,14 +80,10 @@
     )
   );
 
-  // The three kinds of source, named the same way as on the MCP servers tab: Eneo itself
+  // The three kinds of source share their glyphs with the MCP servers tab: Eneo itself
   // (an image model called directly), Eneo's separately deployed tool service, or an
   // external MCP server.
-  function sourceKind(source: Provider) {
-    if (source.http_auth_type === "internal") return { icon: Sparkles, label: m.mcp_auth_internal };
-    if (source.http_auth_type === "bundled") return { icon: Package, label: m.mcp_auth_bundled };
-    return { icon: Server, label: m.tools_source_external };
-  }
+  const ExternalSourceIcon = SOURCE_KINDS.external.icon;
 
   function configure(selectedPurpose: string, provider: Provider | null = null) {
     purpose = selectedPurpose;
@@ -284,7 +279,10 @@
                           class="items-start py-2 whitespace-normal"
                           onSelect={() => configure(capability.purpose)}
                         >
-                          <Server class="text-accent-default mt-0.5" aria-hidden="true" />
+                          <ExternalSourceIcon
+                            class="text-accent-default mt-0.5"
+                            aria-hidden="true"
+                          />
                           <span class="flex min-w-0 flex-col gap-0.5">
                             <span class="font-medium">{m.tools_source_external()}</span>
                             <span class="text-secondary text-xs leading-relaxed">
@@ -381,7 +379,7 @@
                 {/if}
                 {#each sources as source (source.mcp_server_id)}
                   {@const expanded = reviewing === source.mcp_server_id}
-                  {@const kind = sourceKind(source)}
+                  {@const kind = sourceKind(source.http_auth_type)}
                   <div class="border-dimmer border-b p-5 last:border-b-0">
                     <div
                       class="grid grid-cols-[auto_minmax(0,1fr)] items-start gap-x-3 gap-y-4 sm:grid-cols-[auto_minmax(0,1fr)_auto]"
@@ -517,6 +515,15 @@
                   </div>
                 {/each}
               </Card.Content>
+              {#if capability.purpose === "file_creation" && sources.length > 0}
+                <!-- The templates the files are rendered into live with the capability. -->
+                <DocumentTemplates
+                  templates={data.documentTemplates?.items ?? null}
+                  runtimeConfigured={data.documentTemplates?.runtime_configured ?? false}
+                  eneo={data.eneo}
+                  onchange={refresh}
+                />
+              {/if}
               {#if capability.guide && sources.length > 0}
                 <!-- Usage guidance lives here and in the docs, not in assistant settings. -->
                 <Card.Footer class="border-dimmer text-secondary block p-5 text-sm">
@@ -558,7 +565,7 @@
                 <DropdownMenu.Trigger>
                   {#snippet child({ props })}
                     <Button {...props} size="sm" disabled={addingBundled}>
-                      <Wrench class="size-4" />{m.add_mcp_server()}<ChevronDown class="size-4" />
+                      <Plug class="size-4" />{m.add_mcp_server()}<ChevronDown class="size-4" />
                     </Button>
                   {/snippet}
                 </DropdownMenu.Trigger>
@@ -568,7 +575,7 @@
                   </DropdownMenu.Label>
                   {#each bundledServersToAdd as bundled (bundled.tool)}
                     {@const server = BUNDLED_SERVERS[bundled.tool]}
-                    {@const Icon = server?.icon ?? Package}
+                    {@const Icon = server?.icon ?? SOURCE_KINDS.bundled.icon}
                     <DropdownMenu.Item
                       class="items-start py-2 whitespace-normal"
                       onSelect={() => addBundled(bundled.tool)}
@@ -589,7 +596,7 @@
                     class="items-start py-2 whitespace-normal"
                     onSelect={() => configure("general")}
                   >
-                    <Server class="text-accent-default mt-0.5" aria-hidden="true" />
+                    <ExternalSourceIcon class="text-accent-default mt-0.5" aria-hidden="true" />
                     <span class="flex min-w-0 flex-col gap-0.5">
                       <span class="font-medium">{m.tools_source_external()}</span>
                       <span class="text-secondary text-xs leading-relaxed">
@@ -601,7 +608,7 @@
               </DropdownMenu.Root>
             {:else}
               <Button size="sm" onclick={() => configure("general")}
-                ><Wrench class="size-4" />{m.add_mcp_server()}</Button
+                ><Plug class="size-4" />{m.add_mcp_server()}</Button
               >
             {/if}
           {/snippet}
