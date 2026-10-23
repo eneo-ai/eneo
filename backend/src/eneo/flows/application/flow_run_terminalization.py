@@ -115,19 +115,20 @@ class FlowRunTerminalizer:
         self,
         *,
         owner: FlowRunExecutionOwner,
+        source: FlowRunLifecycleSource,
         error: FlowRunError,
     ) -> FlowRunTerminalizationResult:
-        """Fail a run its worker stopped executing, behind that worker's
-        execution-owner fence: a run another worker, a user or a review now
-        holds, or one waiting on an outbound delivery, is left as it is.
+        """Fail a run its task stopped executing (a worker shutdown, a job
+        timeout, a task failure), behind that task's execution-owner fence: a
+        run another worker, a user or a review now holds, or one waiting on an
+        outbound delivery, is left as it is.
 
-        Raises FlowExecutionOwnershipLost when the owner no longer holds it.
-        The run's own task writes this, so its source is the task's failure."""
+        Raises FlowExecutionOwnershipLost when the owner no longer holds it."""
         return await self._terminalize_run(
             run_id=owner.run_id,
             tenant_id=owner.tenant_id,
             target_status=FlowRunStatus.FAILED,
-            source=FlowRunLifecycleSource.TASK_FAILURE,
+            source=source,
             error=error,
             interrupted_owner=owner,
         )

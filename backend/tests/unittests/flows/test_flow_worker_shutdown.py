@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import UUID, uuid4
 
 import pytest
@@ -326,14 +326,15 @@ async def test_the_worker_shutdown_waits_for_a_job_still_cleaning_up(
 
 
 @pytest.mark.asyncio
-async def test_the_worker_shutdown_waits_for_a_job_cancelled_before_it_tracks_its_run(
+async def test_the_worker_shutdown_waits_for_a_job_cancelled_before_it_tracks_its_run_and_ends_none(
     worker, monkeypatch
 ):
     # A shutdown can cancel the job while it still claims the run (a commit
-    # before tracking starts); the job then cleans up and starts its write.
+    # before tracking starts). The worker waits for its cleanup, but the job
+    # cannot show the run is its own (a duplicate delivery names the same
+    # revision), so it ends none: the claimer or the heartbeat reaper does.
     cleaned_up = asyncio.Event()
     claiming = asyncio.Event()
-    written = asyncio.Event()
 
     async def execute(**_):
         try:
@@ -342,12 +343,7 @@ async def test_the_worker_shutdown_waits_for_a_job_cancelled_before_it_tracks_it
         finally:
             await asyncio.shield(cleaned_up.wait())
 
-    async def write(**_):
-        written.set()
-        return SimpleNamespace(did_transition=True)
-
     monkeypatch.setattr(flow_runtime_tasks, "_execute_flow_run_async", execute)
-    worker.terminalizer.terminalize_interrupted_running_run.side_effect = write
     poll = await _attached_worker_task(worker.manager)
     job = asyncio.create_task(
         flow_runtime_tasks.execute_flow_run_task(
@@ -374,7 +370,7 @@ async def test_the_worker_shutdown_waits_for_a_job_cancelled_before_it_tracks_it
     cleaned_up.set()
     async with asyncio.timeout(2):
         await stopping
-    assert written.is_set()
+    worker.terminalizer.terminalize_interrupted_running_run.assert_not_awaited()
     with pytest.raises(asyncio.CancelledError):
         await job
     with pytest.raises(asyncio.CancelledError):
@@ -415,3 +411,135 @@ async def test_a_job_that_outlasts_the_shutdown_bound_leaves_its_run_to_the_reap
     worker.terminalizer.terminalize_interrupted_running_run.assert_not_awaited()
     with pytest.raises(asyncio.CancelledError):
         await poll
+
+
+# A job timeout or a task failure ends the run through the same owner fence:
+# by then the heartbeat context has reset the owner, so the task passes its own.
+_TASK_STOPS = [
+    pytest.param(
+        "timeout",
+        FlowRunLifecycleSource.TASK_TIMEOUT,
+        FlowApiErrorCode.RUN_TASK_TIMEOUT,
+        "Flow execution task timed out",
+        id="timeout",
+    ),
+    pytest.param(
+        "failure",
+        FlowRunLifecycleSource.TASK_FAILURE,
+        FlowApiErrorCode.RUN_TASK_FAILURE,
+        "Flow execution task failed",
+        id="failure",
+    ),
+]
+
+
+def _stop_the_task(worker, monkeypatch, stop: str) -> None:
+    if stop == "timeout":
+        monkeypatch.setattr(
+            flow_runtime_tasks,
+            "get_settings",
+            lambda: SimpleNamespace(task_execution_timeout_seconds=0.01),
+        )
+        return
+
+    async def execute(*, run_id: UUID, tenant_id: UUID, run_revision: int, **_):
+        async with worker.manager.track(
+            FlowRunExecutionOwner(run_id, tenant_id, run_revision)
+        ):
+            raise RuntimeError("step blew up")
+
+    monkeypatch.setattr(flow_runtime_tasks, "_execute_flow_run_async", execute)
+
+
+async def _stopped_task(worker, owner: FlowRunExecutionOwner) -> dict[str, str]:
+    result = await flow_runtime_tasks.execute_flow_run_task(
+        run_id=str(owner.run_id),
+        flow_id=str(uuid4()),
+        tenant_id=str(owner.tenant_id),
+        run_revision=owner.revision,
+        principal_type="user",
+        principal_user_id=str(uuid4()),
+        task_id="job-1",
+        retry_count=0,
+    )
+    await worker.manager.stop()
+    return result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("stop", "source", "code", "_log"), _TASK_STOPS)
+async def test_a_timed_out_or_failed_task_ends_its_run_behind_its_owner(
+    worker, monkeypatch, stop, source, code, _log
+):
+    owner = FlowRunExecutionOwner(uuid4(), uuid4(), 4)
+    _stop_the_task(worker, monkeypatch, stop)
+
+    result = await _stopped_task(worker, owner)
+
+    assert result == {
+        "status": "failed",
+        "reason": "timeout" if stop == "timeout" else "task_failure",
+    }
+    worker.terminalizer.terminalize_run.assert_not_awaited()
+    worker.terminalizer.terminalize_interrupted_running_run.assert_awaited_once()
+    call = worker.terminalizer.terminalize_interrupted_running_run.await_args.kwargs
+    assert call["owner"] == owner
+    assert call["source"] == source
+    assert call["error"].code == code
+    assert call["error"].source == source
+    # As after a shutdown or the reaper: a call the task started has no known
+    # outcome once the task ended its run.
+    worker.provider_calls.mark_started_calls_outcome_unknown_for_run.assert_awaited_once_with(
+        run_id=owner.run_id,
+        tenant_id=owner.tenant_id,
+        reason=ProviderCallUnknownReason.WORKER_INTERRUPTED,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("stop", "source", "code", "log"), _TASK_STOPS)
+async def test_a_timed_out_or_failed_task_leaves_a_run_it_no_longer_owns(
+    worker, monkeypatch, stop, source, code, log
+):
+    owner = FlowRunExecutionOwner(uuid4(), uuid4(), 4)
+    _stop_the_task(worker, monkeypatch, stop)
+    worker.terminalizer.terminalize_interrupted_running_run.side_effect = (
+        heartbeat.FlowExecutionOwnershipLost()
+    )
+    failures = Mock()
+    monkeypatch.setattr(flow_runtime_tasks.logger, "exception", failures)
+
+    result = await _stopped_task(worker, owner)
+
+    # The fence is the outcome, not a cancellation or a failed write.
+    assert result["status"] == "failed"
+    worker.terminalizer.terminalize_interrupted_running_run.assert_awaited_once()
+    assert [entry.args[0] for entry in failures.call_args_list] == [log]
+    worker.provider_calls.mark_started_calls_outcome_unknown_for_run.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("stop", "source", "code", "log"), _TASK_STOPS)
+async def test_a_timed_out_or_failed_task_that_never_claimed_its_run_ends_none(
+    worker, monkeypatch, stop, source, code, log
+):
+    # A duplicate delivery names the same run revision as the job that claimed
+    # the run, so it would pass the owner fence too: only its own claim lets a
+    # task end a run.
+    _stop_the_task(worker, monkeypatch, stop)
+
+    async def execute(**_):
+        if stop == "failure":
+            raise RuntimeError("the read after a rejected claim failed")
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(flow_runtime_tasks, "_execute_flow_run_async", execute)
+
+    result = await _stopped_task(worker, FlowRunExecutionOwner(uuid4(), uuid4(), 4))
+
+    assert result == {
+        "status": "failed",
+        "reason": "timeout" if stop == "timeout" else "task_failure",
+    }
+    worker.terminalizer.terminalize_interrupted_running_run.assert_not_awaited()
+    worker.provider_calls.mark_started_calls_outcome_unknown_for_run.assert_not_awaited()

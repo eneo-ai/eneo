@@ -79,6 +79,9 @@ class FlowExecutionHeartbeats:
         # itself has ended: a job a shutdown cancels may still be claiming its
         # run or cleaning up, and only then starts its shutdown write.
         self._jobs: set[asyncio.Task[object]] = set()
+        # The run each job tracked, kept until the job's task has ended: the
+        # job's cleanup may end that run and no other (claimed_run).
+        self._claimed_runs: dict[asyncio.Task[object], FlowRunExecutionOwner] = {}
         self._shutdown_writes: set[asyncio.Task[None]] = set()
         # Set once stop() has waited for the jobs: the worker then closes its
         # database, so a write would meet it closed.
@@ -111,6 +114,19 @@ class FlowExecutionHeartbeats:
         if task is not None and task not in self._jobs:
             self._jobs.add(task)
             task.add_done_callback(self._jobs.discard)
+
+    def claimed_run(self) -> FlowRunExecutionOwner | None:
+        """The run the calling job tracked, also after its tracking ended.
+
+        A job tracks a run only once its claim committed, so this is the
+        job's proof that the run is its own. The owner fence cannot give that
+        proof: a duplicate delivery of the same run names the same revision.
+        None for a job that never tracked a run; its cleanup ends none."""
+        task = asyncio.current_task()
+        return None if task is None else self._claimed_runs.get(task)
+
+    def _forget_claimed_run(self, task: asyncio.Task[object]) -> None:
+        self._claimed_runs.pop(task, None)
 
     def run_shutdown_write(
         self, write: Coroutine[object, object, None]
@@ -169,6 +185,9 @@ class FlowExecutionHeartbeats:
             raise RuntimeError("Flow execution ownership capacity exceeded.")
         invocation = _Invocation(owner, task)
         self._active[owner] = invocation
+        if task not in self._claimed_runs:
+            task.add_done_callback(self._forget_claimed_run)
+        self._claimed_runs[task] = owner
         self.start()
         token = _current_invocation.set(invocation)
         owner_token = flow_run_execution_owner.set(owner)

@@ -447,81 +447,33 @@ async def _execute_flow_run_async_traced(
                 return {key: str(value) for key, value in result.items()}
 
 
+# Bounds the terminal write a job timeout or a task failure makes.
+FLOW_TASK_FAILURE_WRITE_TIMEOUT_SECONDS = 10
+
+
 async def terminalize_flow_run_failure(
     *,
-    run_id: UUID,
-    tenant_id: UUID,
-    source: FlowRunLifecycleSource,
-    error: FlowRunError,
-) -> None:
-    async with sessionmanager.session() as session:
-        async with session.begin():
-            container = Container(session=providers.Object(session))
-            terminalizer = container.flow_run_terminalizer()
-            await terminalizer.terminalize_run(
-                run_id=run_id,
-                tenant_id=tenant_id,
-                target_status=FlowRunStatus.FAILED,
-                source=source,
-                error=error,
-            )
-
-
-async def _terminalize_flow_run_failure_from_task(
-    *,
-    run_id: UUID,
-    tenant_id: UUID,
-    task_id: str | None,
-    source: FlowRunLifecycleSource,
-    error: FlowRunError,
-) -> None:
-    try:
-        async with asyncio.timeout(10):
-            await terminalize_flow_run_failure(
-                run_id=run_id,
-                tenant_id=tenant_id,
-                source=source,
-                error=error,
-            )
-    except Exception:
-        logger.exception(
-            "Flow run task terminalization failed",
-            extra={
-                "run_id": str(run_id),
-                "tenant_id": str(tenant_id),
-                "task_id": task_id,
-                "source": source.value,
-            },
-        )
-
-
-async def _terminalize_run_stopped_by_worker_shutdown(
     owner: FlowRunExecutionOwner,
+    source: FlowRunLifecycleSource,
+    error: FlowRunError,
 ) -> None:
-    # Ownership loss is a CancelledError: caught here, inside the shield, it
-    # cannot read as the shielded write itself being cancelled.
+    """Fail the run this task stopped executing, behind its execution-owner
+    fence: a run another worker or a redispatch took over, a user or a review
+    holds, or one waiting on an outbound delivery, is left as it is.
+
+    The owner is the run this task claimed (``claimed_run``): the heartbeat
+    context reset it on the way out. As the heartbeat reaper does, a provider call the task started has no
+    known outcome once the run ends here, so none is presented as finished."""
+    # Ownership loss is a CancelledError: caught here, it cannot read as the
+    # write itself being cancelled.
     with suppress(FlowExecutionOwnershipLost):
-        async with (
-            asyncio.timeout(FLOW_WORKER_SHUTDOWN_WRITE_TIMEOUT_SECONDS),
-            sessionmanager.session() as session,
-            session.begin(),
-        ):
+        async with sessionmanager.session() as session, session.begin():
             container = Container(session=providers.Object(session))
             terminalizer = container.flow_run_terminalizer()
             result = await terminalizer.terminalize_interrupted_running_run(
-                owner=owner,
-                error=FlowRunError.from_source(
-                    FlowRunLifecycleSource.TASK_FAILURE,
-                    code=FlowApiErrorCode.RUN_WORKER_SHUTDOWN,
-                    message=(
-                        "flow_worker_shutdown: The worker shut down before run "
-                        "completion."
-                    ),
-                ),
+                owner=owner, source=source, error=error
             )
             if result.did_transition:
-                # As the heartbeat reaper does: a call the worker started has
-                # no known outcome, so none is presented as finished.
                 provider_calls = container.flow_provider_call_repo()
                 await provider_calls.mark_started_calls_outcome_unknown_for_run(
                     run_id=owner.run_id,
@@ -530,43 +482,61 @@ async def _terminalize_run_stopped_by_worker_shutdown(
                 )
 
 
+async def _terminalize_flow_run_failure_from_task(
+    *,
+    owner: FlowRunExecutionOwner,
+    task_id: str | None,
+    source: FlowRunLifecycleSource,
+    error: FlowRunError,
+    timeout_seconds: float = FLOW_TASK_FAILURE_WRITE_TIMEOUT_SECONDS,
+) -> None:
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            await terminalize_flow_run_failure(owner=owner, source=source, error=error)
+    except Exception:
+        logger.exception(
+            "Flow run task terminalization failed",
+            extra={
+                "run_id": str(owner.run_id),
+                "tenant_id": str(owner.tenant_id),
+                "task_id": task_id,
+                "source": source.value,
+                "error_code": error.code,
+            },
+        )
+
+
 async def _fail_run_stopped_by_worker_shutdown(
     *, owner: FlowRunExecutionOwner, task_id: str | None
 ) -> None:
     """End at once a run whose task the worker shutdown cancelled, instead of
     leaving it running until the heartbeat reaper calls it stalled.
 
-    The owner is passed in because the heartbeat context reset it on the way
-    out. The write is bounded so a slow database cannot hold the shutdown,
-    and it is the execution heartbeats' task, so a second cancellation cannot
-    cut it short and the worker waits for it before closing its database; a
-    job that only gets here after the worker stopped waiting starts none, and
-    the heartbeat reaper ends the run. The run is not requeued: a step that
-    was executing may have had effects, and repeating it needs idempotency the
+    The write is bounded so a slow database cannot hold the shutdown, and it
+    is the execution heartbeats' task, so a second cancellation cannot cut it
+    short and the worker waits for it before closing its database; a job that
+    only gets here after the worker stopped waiting starts none, and the
+    heartbeat reaper ends the run. The run is not requeued: a step that was
+    executing may have had effects, and repeating it needs idempotency the
     steps do not promise; the user retries or reruns.
     """
     write = execution_heartbeats().run_shutdown_write(
-        _end_run_stopped_by_worker_shutdown(owner=owner, task_id=task_id)
+        _terminalize_flow_run_failure_from_task(
+            owner=owner,
+            task_id=task_id,
+            source=FlowRunLifecycleSource.TASK_FAILURE,
+            error=FlowRunError.from_source(
+                FlowRunLifecycleSource.TASK_FAILURE,
+                code=FlowApiErrorCode.RUN_WORKER_SHUTDOWN,
+                message=(
+                    "flow_worker_shutdown: The worker shut down before run completion."
+                ),
+            ),
+            timeout_seconds=FLOW_WORKER_SHUTDOWN_WRITE_TIMEOUT_SECONDS,
+        )
     )
     if write is not None:
         await asyncio.shield(write)
-
-
-async def _end_run_stopped_by_worker_shutdown(
-    *, owner: FlowRunExecutionOwner, task_id: str | None
-) -> None:
-    try:
-        # A run a user, another worker or a review holds now is left as it is.
-        await _terminalize_run_stopped_by_worker_shutdown(owner)
-    except Exception:
-        logger.exception(
-            "Flow run could not be ended after a worker shutdown",
-            extra={
-                "run_id": str(owner.run_id),
-                "tenant_id": str(owner.tenant_id),
-                "task_id": task_id,
-            },
-        )
 
 
 async def execute_flow_run_task(
@@ -662,13 +632,12 @@ async def execute_flow_run_task(
     except FlowExecutionOwnershipLost:
         return {"status": "skipped", "reason": "execution_ownership_lost"}
     except asyncio.CancelledError:
-        if execution_heartbeats().worker_is_shutting_down():
-            await _fail_run_stopped_by_worker_shutdown(
-                owner=FlowRunExecutionOwner(
-                    run_id_uuid, tenant_id_uuid, expected_run_revision
-                ),
-                task_id=task_id,
-            )
+        # Each terminal write below ends only the run this job claimed: a job
+        # that never did (a duplicate delivery, or one still claiming) leaves
+        # it to its claimer, the redispatch or the heartbeat reaper.
+        claimed = execution_heartbeats().claimed_run()
+        if claimed is not None and execution_heartbeats().worker_is_shutting_down():
+            await _fail_run_stopped_by_worker_shutdown(owner=claimed, task_id=task_id)
         raise
     except TimeoutError:
         error_message = (
@@ -678,17 +647,17 @@ async def execute_flow_run_task(
             "Flow execution task timed out",
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
         )
-        await _terminalize_flow_run_failure_from_task(
-            run_id=run_id_uuid,
-            tenant_id=tenant_id_uuid,
-            task_id=task_id,
-            source=FlowRunLifecycleSource.TASK_TIMEOUT,
-            error=FlowRunError.from_source(
-                FlowRunLifecycleSource.TASK_TIMEOUT,
-                code=FlowApiErrorCode.RUN_TASK_TIMEOUT,
-                message=error_message,
-            ),
-        )
+        if (claimed := execution_heartbeats().claimed_run()) is not None:
+            await _terminalize_flow_run_failure_from_task(
+                owner=claimed,
+                task_id=task_id,
+                source=FlowRunLifecycleSource.TASK_TIMEOUT,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.TASK_TIMEOUT,
+                    code=FlowApiErrorCode.RUN_TASK_TIMEOUT,
+                    message=error_message,
+                ),
+            )
         return {"status": "failed", "reason": "timeout"}
     except Exception:
         error_message = (
@@ -698,17 +667,17 @@ async def execute_flow_run_task(
             "Flow execution task failed",
             extra={"run_id": run_id, "tenant_id": tenant_id, "task_id": task_id},
         )
-        await _terminalize_flow_run_failure_from_task(
-            run_id=run_id_uuid,
-            tenant_id=tenant_id_uuid,
-            task_id=task_id,
-            source=FlowRunLifecycleSource.TASK_FAILURE,
-            error=FlowRunError.from_source(
-                FlowRunLifecycleSource.TASK_FAILURE,
-                code=FlowApiErrorCode.RUN_TASK_FAILURE,
-                message=error_message,
-            ),
-        )
+        if (claimed := execution_heartbeats().claimed_run()) is not None:
+            await _terminalize_flow_run_failure_from_task(
+                owner=claimed,
+                task_id=task_id,
+                source=FlowRunLifecycleSource.TASK_FAILURE,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.TASK_FAILURE,
+                    code=FlowApiErrorCode.RUN_TASK_FAILURE,
+                    message=error_message,
+                ),
+            )
         return {"status": "failed", "reason": "task_failure"}
 
 

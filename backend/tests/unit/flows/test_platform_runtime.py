@@ -6,7 +6,7 @@ import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -17,6 +17,8 @@ from eneo.flows.flow_run_dispatch_request import (
     FlowRunUserDispatchRequest,
     flow_run_dispatch_task_kwargs,
 )
+from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+from eneo.flows.runtime.execution_heartbeat import FlowExecutionHeartbeats
 from eneo.flows.runtime.platform_execution_backend import PlatformFlowExecutionBackend
 from eneo.main.config import get_settings
 from eneo.main.exceptions import NotReadyException
@@ -291,18 +293,33 @@ def test_flow_layers_are_transport_neutral_and_celery_is_not_a_dependency() -> N
     assert not any(dependency.startswith("celery") for dependency in dependencies)
 
 
+def _job_heartbeats(monkeypatch, tasks) -> FlowExecutionHeartbeats:
+    """The job's own heartbeats: a job ends only the run it claimed and
+    tracks, so a stand-in for a running job tracks its run here too."""
+    heartbeats = FlowExecutionHeartbeats(max_active=1)
+    monkeypatch.setattr(tasks, "execution_heartbeats", lambda: heartbeats)
+    return heartbeats
+
+
 async def test_execute_task_cancels_before_timeout_terminalization(monkeypatch) -> None:
     from eneo.flows.runtime import tasks
 
     ordering: list[str] = []
     errors = []
+    heartbeats = _job_heartbeats(monkeypatch, tasks)
 
-    async def execute(**_kwargs: object) -> dict[str, str]:
-        try:
-            await asyncio.Event().wait()
-        except asyncio.CancelledError:
-            ordering.append("execution_cancelled")
-            raise
+    async def execute(
+        *, run_id: UUID, tenant_id: UUID, run_revision: int, **_kwargs: object
+    ) -> dict[str, str]:
+        async with heartbeats.track(
+            FlowRunExecutionOwner(run_id, tenant_id, run_revision)
+        ):
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                ordering.append("execution_cancelled")
+                raise
+        return {"status": "completed"}
 
     async def terminalize(**kwargs: object) -> None:
         ordering.append(f"terminalize:{kwargs['source']}")
@@ -335,6 +352,7 @@ async def test_execute_task_cancels_before_timeout_terminalization(monkeypatch) 
     assert errors[0].code.value == "flow_task_timeout"
     assert errors[0].details is None
     assert errors[0].retryable is False
+    await heartbeats.stop()
 
 
 async def test_execute_task_passes_its_existing_invocation_deadline(monkeypatch):
@@ -387,8 +405,15 @@ async def test_registered_worker_leaves_time_to_persist_execution_timeout(
         lambda: SimpleNamespace(task_execution_timeout_seconds=execution_timeout),
     )
 
-    async def execute(**_kwargs: object) -> dict[str, str]:
-        await asyncio.Event().wait()
+    heartbeats = _job_heartbeats(monkeypatch, tasks)
+
+    async def execute(
+        *, run_id: UUID, tenant_id: UUID, run_revision: int, **_kwargs: object
+    ) -> dict[str, str]:
+        async with heartbeats.track(
+            FlowRunExecutionOwner(run_id, tenant_id, run_revision)
+        ):
+            await asyncio.Event().wait()
         return {"status": "completed"}
 
     monkeypatch.setattr(tasks, "_execute_flow_run_async", execute)
@@ -408,6 +433,7 @@ async def test_registered_worker_leaves_time_to_persist_execution_timeout(
     assert (
         terminalize.await_args.kwargs["source"] is FlowRunLifecycleSource.TASK_TIMEOUT
     )
+    await heartbeats.stop()
 
 
 async def test_execute_task_rejects_malformed_payload_without_terminalizing(

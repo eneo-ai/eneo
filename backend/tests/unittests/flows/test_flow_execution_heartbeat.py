@@ -45,6 +45,30 @@ async def test_long_work_renews_without_changing_ownership_and_unregisters(renew
 
 
 @pytest.mark.asyncio
+async def test_a_job_keeps_the_run_it_tracked_until_its_task_ends(renewal):
+    manager = heartbeat.FlowExecutionHeartbeats(max_active=2)
+    owner = FlowRunExecutionOwner(uuid4(), uuid4(), 3)
+    seen: list[FlowRunExecutionOwner | None] = []
+
+    async def job() -> None:
+        seen.append(manager.claimed_run())
+        async with manager.track(owner):
+            seen.append(manager.claimed_run())
+        # Its cleanup runs after the tracking ended and still names the run.
+        seen.append(manager.claimed_run())
+
+    task = asyncio.create_task(job())
+    await task
+    await asyncio.sleep(0)
+
+    assert seen == [None, owner, owner]
+    # Another job never sees it, and the ended job's record is gone.
+    assert manager.claimed_run() is None
+    assert task not in manager._claimed_runs
+    await manager.stop()
+
+
+@pytest.mark.asyncio
 async def test_lost_revision_cancels_work_before_another_provider_request(renewal):
     manager = heartbeat.FlowExecutionHeartbeats(max_active=2)
     owner = FlowRunExecutionOwner(uuid4(), uuid4(), 1)
