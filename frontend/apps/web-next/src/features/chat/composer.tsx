@@ -7,6 +7,7 @@ import {
   type ChatComposerInputHandle,
   type ChatComposerTrigger
 } from "@astryxdesign/core/Chat";
+import { useMergedRefs } from "@astryxdesign/core/hooks";
 import { Popover } from "@astryxdesign/core/Popover";
 import {
   ArrowUp,
@@ -32,6 +33,7 @@ import {
   type Ref
 } from "react";
 import { ChatComposerInput } from "@/components/astryx/chat-composer-input";
+import type { ComposerInsert } from "./chat-references";
 import type { KnowledgeOrigin } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { ComposerAttachments } from "./attachments";
@@ -53,6 +55,8 @@ const PILL_ACTIVE_CLASS = "bg-ax-accent-muted text-ax-text-accent";
 export type ComposerHandle = {
   focus: () => void;
   element: HTMLElement | null;
+  /** Puts text at the caret, as typed: a trigger character opens its menu. */
+  insertText: (text: string) => void;
 };
 
 /**
@@ -93,6 +97,29 @@ function ComposerInput({
       focus: () => handle.current?.focus(),
       get element() {
         return root.current?.querySelector<HTMLElement>("[contenteditable]") ?? null;
+      },
+      insertText: (text) => {
+        const editable = root.current?.querySelector<HTMLElement>("[contenteditable]");
+        handle.current?.focus();
+        handle.current?.insertText(text);
+        if (!editable) return;
+        // Astryx reads the text before the caret from the text node the
+        // caret is in; a programmatic insert can leave the caret between
+        // nodes instead. Put it at the end of the text just written.
+        const selection = window.getSelection();
+        const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+        if (selection && range?.collapsed && range.startContainer === editable) {
+          const node = editable.childNodes[range.startOffset - 1];
+          if (node?.nodeType === Node.TEXT_NODE) {
+            const caret = document.createRange();
+            caret.setStart(node, node.textContent?.length ?? 0);
+            caret.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(caret);
+          }
+        }
+        // Astryx opens a trigger menu from the input event, not from the insert.
+        editable.dispatchEvent(new Event("input", { bubbles: true }));
       }
     }),
     []
@@ -252,8 +279,11 @@ export type ComposerProps = {
   quote?: ComposerQuote | null;
   /** Menus the text field opens as their character is typed (the flow chat's references). */
   triggers?: ChatComposerTrigger[];
-  /** Small icon-only buttons above the text field (a "Referera" button, say). */
-  headerActions?: ReactNode;
+  /**
+   * Small icon-only buttons above the text field. A function gets a way to
+   * put text in the field (a "Referera" button that types "@").
+   */
+  headerActions?: ReactNode | ((input: ComposerInsert) => ReactNode);
   /** Controls after the pills in the footer (the flow chat's Fråga/Redigera picker). */
   footerActions?: ReactNode;
   variant?: "docked" | "start";
@@ -341,6 +371,10 @@ export function Composer({
 }: ComposerProps) {
   const t = useTranslations();
   const hintId = useId();
+  // The field's handle as state, so a control above the field can be given it
+  // while rendering (a ref must not be read then).
+  const [input, setInput] = useState<ComposerHandle | null>(null);
+  const inputRefs = useMergedRefs(inputRef, setInput);
   const canAttach = attachments.maxFiles !== 0;
   const { dragging, handlers } = useFileDrop(
     (files) => void attachments.addFiles(files),
@@ -381,10 +415,16 @@ export function Composer({
               </ChatComposerDrawer>
             ) : undefined
           }
-          headerActions={headerActions}
+          headerActions={
+            typeof headerActions === "function"
+              ? input
+                ? headerActions(input)
+                : null
+              : headerActions
+          }
           input={
             <ComposerInput
-              ref={inputRef}
+              ref={inputRefs}
               label={label}
               hintId={hintId}
               placeholder={placeholder}

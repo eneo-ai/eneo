@@ -3665,5 +3665,22 @@
   "flow_run_more_run_id_hint": "The run's id. It is needed, for example, when a legal hold should cover specific runs.",
   "flow_run_more_trace_id_hint": "A unique reference to the run's logs. Give it to support if you contact them about this run.",
   "chat_debug_value_about": "Explanation: {label}",
-  "flow_runs_usage_tokens_explainer": "Tokens are the small pieces of text the AI model reads and writes. The count covers every call to the model, retries included, and comes from the service or is estimated. Incomplete means the count is missing for at least one call."
+  "flow_runs_usage_tokens_explainer": "Tokens are the small pieces of text the AI model reads and writes. The count covers every call to the model, retries included, and comes from the service or is estimated. Incomplete means the count is missing for at least one call.",
+  "flows_chat_reference_button": "Reference",
+  "flows_chat_reference_menu": "References",
+  "flows_chat_reference_empty": "No step or value matches.",
+  "flows_chat_reference_searching": "Searching…",
+  "flows_chat_reference_item_step": "The step",
+  "flows_chat_reference_item_text": "The answer as text",
+  "flows_chat_reference_item_structured": "The whole structured answer",
+  "flows_chat_reference_item_field": "A field of the answer",
+  "flows_chat_reference_value_text": "text",
+  "flows_chat_reference_value_structured": "structured",
+  "flows_chat_reference_card": "Reference",
+  "flows_chat_reference_show_step": "Show the step",
+  "flows_chat_reference_copy": "Copy reference",
+  "flows_chat_reference_copied": "The reference is copied.",
+  "flows_chat_reference_step_missing": "The step is no longer in the flow.",
+  "flows_chat_reference_group_run": "The run",
+  "flows_chat_reference_item_run": "A value of the run"
 }

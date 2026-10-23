@@ -38,6 +38,11 @@ input_config.long_material = {"mode": "digest"}: such input is read in parts wit
 the step's own model and the answer is written over the notes. The step result
 records the coverage; partial coverage fails the step unless it has a review.
 Changing input_config replaces it whole, so keep its other keys.
+Name a step in an answer as @[<user_description>](step:<id>) with the values
+read_flow gives, and a value a step produces as the reference the flow resolves,
+{{step_<step_order>.output.text}} or {{step_<step_order>.output.structured.<field>}};
+the editor shows both as pills that open the step. The person's messages use the
+same forms.
 """,
 )
 

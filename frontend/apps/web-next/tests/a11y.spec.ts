@@ -470,10 +470,11 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.waitForURL(/\/flows\/[^/?]+$/, { timeout: 15_000 });
       await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
       await expect(page.getByRole("heading", { level: 2, name: /^(Steg|Steps)$/ })).toBeVisible();
-      // The chat panel has settled: its composer, or why the chat is not available.
+      // The chat panel has settled: its composer (a combobox, as it offers
+      // references on "@"), or why the chat is not available.
       await expect(
         page
-          .getByRole("textbox", { name: /^(Meddelande till|Message to)/ })
+          .getByLabel(/^(Meddelande till|Message to)/)
           .or(page.getByText(/^(Chatten är inte tillgänglig|The chat is not available)$/))
           .or(page.getByText(/^(Chatten kunde inte öppnas|The chat could not be opened)$/))
           .first()

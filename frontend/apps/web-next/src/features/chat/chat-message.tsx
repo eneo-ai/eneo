@@ -1,6 +1,10 @@
 "use client";
 
-import { ChatMessage as AxChatMessage, ChatMessageBubble } from "@astryxdesign/core/Chat";
+import {
+  ChatMessage as AxChatMessage,
+  ChatMessageBubble,
+  ChatTokenizedText
+} from "@astryxdesign/core/Chat";
 import { useClipboard } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
@@ -31,6 +35,7 @@ import { cn } from "@/lib/utils";
 
 import { deriveActivity, modelName } from "./activity";
 import type { ActivityTab } from "./activity-panel";
+import type { ChatReferences } from "./chat-references";
 import type { DocumentDraft } from "./side-panel/document-draft";
 import { ActivityPill } from "./activity-pill";
 import type { TurnDurations } from "./activity-timings";
@@ -161,10 +166,12 @@ function QuestionQuote({
 function Question({
   text: sent,
   conversationFiles,
+  references,
   children
 }: {
   text: string;
   conversationFiles: readonly PreviewFile[];
+  references?: ChatReferences;
   children?: ReactNode;
 }) {
   const t = useTranslations();
@@ -179,7 +186,11 @@ function Question({
       {(text || quote) && (
         <ChatMessageBubble className="bg-ax-muted rounded-ax-page flex max-w-[min(100%,32.5rem)] flex-col gap-2 px-[15px] py-2.5 text-[14.5px] leading-normal whitespace-pre-wrap">
           {quote && <QuestionQuote quote={quote} conversationFiles={conversationFiles} />}
-          {text}
+          {references ? (
+            <ChatTokenizedText tokens={references.tokens(text)}>{text}</ChatTokenizedText>
+          ) : (
+            text
+          )}
         </ChatMessageBubble>
       )}
       {children}
@@ -190,14 +201,20 @@ function Question({
 /** The user's question: a filled bubble on the right, attachments as file chips below. */
 function UserMessage({
   message,
-  conversationFiles
+  conversationFiles,
+  references
 }: {
   message: EneoUIMessage;
   conversationFiles: readonly PreviewFile[];
+  references?: ChatReferences;
 }) {
   const files = message.metadata?.files ?? [];
   return (
-    <Question text={messageText(message)} conversationFiles={conversationFiles}>
+    <Question
+      text={messageText(message)}
+      conversationFiles={conversationFiles}
+      references={references}
+    >
       {files.length > 0 && <MessageFiles files={files} />}
     </Question>
   );
@@ -211,14 +228,16 @@ function UserMessage({
 export function PendingQuestion({
   text,
   uploads,
-  conversationFiles = NO_FILES
+  conversationFiles = NO_FILES,
+  references
 }: {
   text: string;
   uploads: readonly PendingUpload[];
   conversationFiles?: readonly PreviewFile[];
+  references?: ChatReferences;
 }) {
   return (
-    <Question text={text} conversationFiles={conversationFiles}>
+    <Question text={text} conversationFiles={conversationFiles} references={references}>
       <PendingMessageFiles uploads={uploads} />
     </Question>
   );
@@ -463,7 +482,8 @@ function AssistantMessage({
   canDebug,
   sessionId,
   documents,
-  draft
+  draft,
+  references
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -479,6 +499,7 @@ function AssistantMessage({
   sessionId: string | null;
   documents: ConversationDocument[];
   draft: DocumentDraft | null;
+  references?: ChatReferences;
 }) {
   const panel = useSidePanel();
   const text = messageText(message);
@@ -524,9 +545,10 @@ function AssistantMessage({
   const sources = activity.sources;
   const sourceIds = sources.map((source) => source.sourceId);
   const citationPlugins = useCitationRemarkPlugins(sources.length, message.id);
+  const referencePlugins = references?.remarkPlugins;
   const remarkPlugins = useMemo(
-    () => [...citationPlugins, ...documentPlugins],
-    [citationPlugins, documentPlugins]
+    () => [...citationPlugins, ...documentPlugins, ...(referencePlugins ?? [])],
+    [citationPlugins, documentPlugins, referencePlugins]
   );
   const openSource = useCallback(
     (index: number, trigger: HTMLElement) =>
@@ -574,7 +596,7 @@ function AssistantMessage({
                   <MessageResponse
                     className={ANSWER_TEXT_CLASS}
                     remarkPlugins={remarkPlugins}
-                    components={answerLinkComponents}
+                    components={references?.components ?? answerLinkComponents}
                     isAnimating={streamingThis}
                   >
                     {resolveInrefs(
@@ -637,7 +659,8 @@ export function ChatMessage({
   sessionId = null,
   conversationFiles = NO_FILES,
   documents = NO_DOCUMENTS,
-  draft = null
+  draft = null,
+  references
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -660,9 +683,17 @@ export function ChatMessage({
   documents?: ConversationDocument[];
   /** The document this answer is writing now, which the answer offers to show. */
   draft?: DocumentDraft | null;
+  /** What the conversation can refer to: pills in questions and answers. */
+  references?: ChatReferences;
 }) {
   if (message.role === "user") {
-    return <UserMessage message={message} conversationFiles={conversationFiles} />;
+    return (
+      <UserMessage
+        message={message}
+        conversationFiles={conversationFiles}
+        references={references}
+      />
+    );
   }
   return (
     <AssistantMessage
@@ -680,6 +711,7 @@ export function ChatMessage({
       sessionId={sessionId}
       documents={documents}
       draft={draft}
+      references={references}
     />
   );
 }

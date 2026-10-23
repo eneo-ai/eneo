@@ -21,7 +21,10 @@ import { partnerCompletionModel } from "@/features/chat/partner-model";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
 import { useSpace } from "@/features/spaces/use-space";
 import { useSpaceDisplayName } from "@/features/spaces/frame/space-header";
+import { FlowReferences } from "./chat/reference-pill";
+import { useFlowChatReferences } from "./chat/use-flow-chat-references";
 import { FlowChatModelPickers, NewConversationButton } from "./flow-chat-controls";
+import { showStepCard } from "./flow-step-list";
 import {
   authoringChatQueryOptions,
   flowKeys,
@@ -114,13 +117,16 @@ function EditModeSwitch({
 
 /** The conversation itself, once the chat, its assistant and its history are loaded. */
 function AuthoringConversation({
+  flow,
   chat,
   onFlowMayHaveChanged
 }: {
+  flow: FlowPublic;
   chat: FlowAuthoringChat;
   onFlowMayHaveChanged: () => void;
 }) {
   const t = useTranslations();
+  const references = useFlowChatReferences(flow);
   const { space } = useSpace();
   const spaceName = useSpaceDisplayName();
   const [activity, setActivity] = useState<ActivityState | null>(null);
@@ -191,19 +197,22 @@ function AuthoringConversation({
   };
 
   return (
-    <ChatView
-      key={chat.session_id}
-      partner={partner}
-      initialSessionId={chat.session_id}
-      initialMessages={initialMessages}
-      activity={activity}
-      onActivityChange={setActivity}
-      startHeadingLevel={3}
-      onToolCallFinished={(call) => {
-        if (isFlowsToolCall(call)) onFlowMayHaveChanged();
-      }}
-      onAnswerFinished={onFlowMayHaveChanged}
-    />
+    <FlowReferences flow={flow} onShowStep={showStepCard}>
+      <ChatView
+        key={chat.session_id}
+        partner={partner}
+        initialSessionId={chat.session_id}
+        initialMessages={initialMessages}
+        activity={activity}
+        onActivityChange={setActivity}
+        startHeadingLevel={3}
+        references={references}
+        onToolCallFinished={(call) => {
+          if (isFlowsToolCall(call)) onFlowMayHaveChanged();
+        }}
+        onAnswerFinished={onFlowMayHaveChanged}
+      />
+    </FlowReferences>
   );
 }
 
@@ -255,7 +264,11 @@ export function FlowChatPanel({ flow, onFlowMayHaveChanged, onRefused }: ChatPan
         ) : null}
       </div>
       {chat.data ? (
-        <AuthoringConversation chat={chat.data} onFlowMayHaveChanged={onFlowMayHaveChanged} />
+        <AuthoringConversation
+          flow={flow}
+          chat={chat.data}
+          onFlowMayHaveChanged={onFlowMayHaveChanged}
+        />
       ) : mayEdit && !chat.isError ? (
         <LoadingState label={t("flows_chat_loading")} rows={3} className="p-4" />
       ) : (

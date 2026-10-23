@@ -25,6 +25,25 @@ export function stepControlId(stepId: string, control: "open" | "up" | "down"): 
   return `flow-step-${stepId}-${control}`;
 }
 
+export function stepCardId(stepId: string): string {
+  return `flow-step-${stepId}`;
+}
+
+/**
+ * Brings a step's card into view and marks it for a moment, for a pill in
+ * the chat that names the step. Focus stays where it is. False when the
+ * card is not on the page (the step list is on another tab on a phone).
+ */
+export function showStepCard(stepId: string): boolean {
+  const card = document.getElementById(stepCardId(stepId));
+  if (!card) return false;
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  card.scrollIntoView({ block: "center", behavior: reduced ? "auto" : "smooth" });
+  card.setAttribute("data-highlight", "");
+  window.setTimeout(() => card.removeAttribute("data-highlight"), 1800);
+  return true;
+}
+
 type StepActions = {
   onOpen: (step: FlowStep) => void;
   onMove: (step: FlowStep, delta: -1 | 1) => void;
@@ -63,8 +82,9 @@ function StepCard({
 
   return (
     <article
+      id={stepCardId(id)}
       aria-labelledby={titleId}
-      className="border-ax-border bg-ax-card rounded-ax-container flex flex-col gap-3 border p-4"
+      className="border-ax-border bg-ax-card rounded-ax-container data-[highlight]:border-ax-accent flex flex-col gap-3 border p-4 transition-colors"
     >
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <div className="flex min-w-0 flex-[1_1_14rem] flex-col gap-1">

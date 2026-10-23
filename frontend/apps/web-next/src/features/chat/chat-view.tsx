@@ -56,6 +56,7 @@ import { useAnswerFeedback } from "./answer-feedback";
 import { disabledCapabilitiesForRequest } from "./chat-capabilities";
 import { matchesUpload } from "./chat-attachment-plan";
 import { ChatMessage, PendingAnswer, PendingQuestion, type ActivityRequest } from "./chat-message";
+import type { ChatReferences } from "./chat-references";
 import { Composer, type ComposerHandle } from "./composer";
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatTools, mcpConversationOptions } from "./mcp-controls";
@@ -183,6 +184,12 @@ type ChatViewProps = {
    * lower where the chat sits inside a page with its own h1.
    */
   startHeadingLevel?: StartHeadingLevel;
+  /** What the conversation can refer to (the flow chat's steps and values). */
+  references?: ChatReferences;
+  /** Controls after the composer's pills (the flow chat's Fråga/Redigera picker). */
+  footerActions?: ReactNode;
+  /** The text field's placeholder, when the page has a better one than "Fråga …". */
+  placeholder?: string;
 };
 
 /**
@@ -215,7 +222,10 @@ function ConversationView({
   onActivityChange,
   onToolCallFinished,
   onAnswerFinished,
-  startHeadingLevel
+  startHeadingLevel,
+  references,
+  footerActions,
+  placeholder
 }: ChatViewProps) {
   const t = useTranslations();
   const { featureFlags, can } = useAppContext();
@@ -836,7 +846,7 @@ function ConversationView({
     // A stop while the question still waits for its uploads takes it back.
     onStop: () => (pendingAbort.current ? pendingAbort.current.abort() : void stop()),
     label: composerLabel,
-    placeholder: t("chat_composer_placeholder"),
+    placeholder: placeholder ?? t("chat_composer_placeholder"),
     attachments: composerAttachments,
     onOpenFileDialog: openAttachmentDialog,
     knowledge: partner.knowledge,
@@ -844,6 +854,9 @@ function ConversationView({
     mention,
     modelSelector,
     quote: composerQuote,
+    triggers: references?.triggers,
+    headerActions: references?.headerActions,
+    footerActions,
     contextBar: (
       <ContextUsageBar
         usage={usage}
@@ -1039,6 +1052,7 @@ function ConversationView({
                   conversationFiles={allFiles}
                   documents={documents.documents}
                   draft={streaming ? liveDraft : null}
+                  references={references}
                 />
               );
             })}
@@ -1047,6 +1061,7 @@ function ConversationView({
                 text={pendingQuestion.text}
                 uploads={pendingUploads}
                 conversationFiles={allFiles}
+                references={references}
               />
             )}
             {(status === "submitted" || pendingQuestion) && (
