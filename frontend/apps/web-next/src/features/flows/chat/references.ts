@@ -135,6 +135,31 @@ export type ReferenceChoice =
   | { kind: "value"; step: FlowStep; token: string; raw: string; what: ValueWhat }
   | { kind: "run"; token: "flow_input" | "datum"; raw: string };
 
+/**
+ * What a reference that reads nothing useful could have meant: the values of
+ * the step it names (`{{step_1...}}`, `{{step_1.output}}`, a field of a step
+ * that answers in text). Null when it names no step the flow has.
+ */
+export function referenceHint(
+  reference: Reference,
+  flow: Pick<FlowPublic, "steps">
+): { step: FlowStep; choices: Extract<ReferenceChoice, { kind: "value" }>[] } | null {
+  if (reference.kind !== "value") return null;
+  const tone = referenceTone(reference);
+  if (tone === "reads") return null;
+  const order =
+    "order" in reference.meaning
+      ? reference.meaning.order
+      : Number(/^step_(\d+)/.exec(reference.token)?.[1] ?? NaN);
+  const step = flow.steps.find((candidate) => candidate.step_order === order);
+  if (!step) return null;
+  const choices = referenceChoices(flow).filter(
+    (choice): choice is Extract<ReferenceChoice, { kind: "value" }> =>
+      choice.kind === "value" && choice.step === step
+  );
+  return choices.length > 0 ? { step, choices } : null;
+}
+
 /** The run's own values, after the steps: what is sent in, and the date. */
 export const RUN_CHOICES: ReferenceChoice[] = [
   { kind: "run", token: "flow_input", raw: valueReference("flow_input") },

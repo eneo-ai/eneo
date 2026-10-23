@@ -19,7 +19,14 @@ import { cn } from "@/lib/utils";
 import { meaningLabel, readWarning } from "../editor/step-labels";
 import type { FlowPublic } from "../editor/step-types";
 import { stepLabel } from "../flow-labels";
-import { referenceStep, referenceTone, valueWhat, type Reference } from "./references";
+import {
+  referenceHint,
+  referenceStep,
+  referenceTone,
+  valueOf,
+  valueWhat,
+  type Reference
+} from "./references";
 
 type Translate = ReturnType<typeof useTranslations>;
 type Flow = Pick<FlowPublic, "steps" | "metadata_json">;
@@ -89,7 +96,33 @@ export function referenceNote(reference: Reference, flow: Flow, t: Translate): s
   if (reference.meaning.kind === "missing") {
     return meaningLabel(reference.meaning, reference.token, flow, t);
   }
+  // Nothing the flow resolves: shorthand such as {{step_1...}}, or a name it has no value for.
+  if (reference.meaning.kind === "other") {
+    return t("flows_chat_reference_unknown", { token: reference.token });
+  }
   return readWarning(reference.meaning, flow, t);
+}
+
+/** A value the step provides, as a pill: pressed, it goes into the message when there is one. */
+function SuggestedPill({ token }: { token: string }) {
+  const refs = useFlowReferences()!;
+  const reference = valueOf(token, refs.flow);
+  if (!refs.composer) return <ReferencePill reference={reference} />;
+  const composer = refs.composer;
+  return (
+    <button
+      type="button"
+      onClick={() =>
+        composer.insertToken({
+          value: reference.raw,
+          render: () => <ReferencePill reference={reference} />
+        })
+      }
+      className="focus-visible:outline-ring rounded-ax-inner inline-block focus-visible:outline-2 focus-visible:outline-offset-2"
+    >
+      <ReferencePill reference={reference} />
+    </button>
+  );
 }
 
 /**
@@ -176,6 +209,7 @@ function ReferenceCard({
   const step = reference ? referenceStep(reference, refs.flow) : null;
   const tone = reference ? referenceTone(reference) : "reads";
   const note = reference ? referenceNote(reference, refs.flow, t) : null;
+  const hint = reference ? referenceHint(reference, refs.flow) : null;
   return (
     <Popover
       anchorRef={anchorRef}
@@ -222,6 +256,20 @@ function ReferenceCard({
                 )}
                 <span>{note}</span>
               </p>
+            ) : null}
+            {hint ? (
+              <div className="flex flex-col gap-1.5">
+                <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+                  {t("flows_chat_reference_step_offers", { step: stepLabel(hint.step, t) })}
+                </Text>
+                <ul className="m-0 flex list-none flex-wrap gap-1.5 p-0">
+                  {hint.choices.map((choice) => (
+                    <li key={choice.token}>
+                      <SuggestedPill token={choice.token} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
             ) : null}
             <div className="flex flex-wrap gap-2">
               {refs.composer ? (

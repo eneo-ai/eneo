@@ -3676,6 +3676,8 @@
   "flows_chat_reference_show_step": "Show the step",
   "flows_chat_reference_step_missing": "The step is no longer in the flow.",
   "flows_chat_reference_insert": "Add to the message",
+  "flows_chat_reference_unknown": "The flow cannot read {token}.",
+  "flows_chat_reference_step_offers": "{step} provides instead:",
   "flows_chat_reference_group_run": "The run",
   "flows_chat_reference_item_run": "A value of the run",
   "flows_chat_mode": "Mode",

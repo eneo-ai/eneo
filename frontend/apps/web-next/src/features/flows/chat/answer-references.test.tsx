@@ -64,6 +64,18 @@ describe("references in an answer", () => {
     expect(screen.queryByRole("dialog", { name: "Referens" })).toBeNull();
   });
 
+  it("explains a reference the flow cannot read and offers what the step provides", async () => {
+    const { composer } = renderAnswer("Utan {{step_1...}} går det inte.");
+    fireEvent.click(screen.getByRole("button", { name: "step_1..." }));
+    const card = await screen.findByRole("dialog", { name: "Referens" });
+    expect(within(card).getByText("Flödet kan inte läsa step_1....")).toBeTruthy();
+    expect(within(card).getByText("Steg 1: Extrahera ger i stället:")).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "1 Extrahera › atgard" }));
+    expect(composer.insertToken).toHaveBeenCalledWith(
+      expect.objectContaining({ value: "{{step_1.output.structured.atgard}}" })
+    );
+  });
+
   it("says when a step is gone and when a field is read from a step that answers in text", async () => {
     renderAnswer("Se @[Borta](step:step-9) och {{step_2.output.structured.x}}.");
     fireEvent.click(screen.getByRole("button", { name: "Borta" }));
