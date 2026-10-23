@@ -9,6 +9,9 @@
       the legacy eneo.models.update fallback for security_classification
       and is_default no longer exists — those fields live on the tenant
       update contract now).
+  A forecast model comes with the installation and has no tenant-model
+  contract: its display name and classification go to the forecast model
+  endpoint, which also switches it on and off.
 -->
 
 <script lang="ts">
@@ -16,6 +19,7 @@
   import type {
     CompletionModel,
     EmbeddingModel,
+    ForecastModel,
     ImageModel,
     RerankModel,
     TranscriptionModel,
@@ -46,12 +50,17 @@
     modelToDraft,
     rawCostToNumber,
     tokenCostFromPerMillion,
-    type ModelDraftState,
-    type ModelType
+    type DraftModelType,
+    type ModelDraftState
   } from "./AddWizard/models/draft";
 
   type ModelTypeKey =
-    "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
+    | "completionModel"
+    | "embeddingModel"
+    | "transcriptionModel"
+    | "imageModel"
+    | "rerankModel"
+    | "forecastModel";
 
   let {
     openController,
@@ -59,7 +68,13 @@
     type
   }: {
     openController: Writable<boolean>;
-    model: CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
+    model:
+      | CompletionModel
+      | EmbeddingModel
+      | TranscriptionModel
+      | ImageModel
+      | RerankModel
+      | ForecastModel;
     type: ModelTypeKey;
   } = $props();
 
@@ -73,7 +88,7 @@
   });
 
   // --- Draft state ------------------------------------------------------
-  const modelType: ModelType = $derived(
+  const modelType: DraftModelType = $derived(
     type === "completionModel"
       ? "completion"
       : type === "embeddingModel"
@@ -82,7 +97,9 @@
           ? "image"
           : type === "rerankModel"
             ? "rerank"
-            : "transcription"
+            : type === "forecastModel"
+              ? "forecast"
+              : "transcription"
   );
 
   let draft = $state<ModelDraftState>(untrack(() => createEmptyDraft(modelType, "openai")));
@@ -95,6 +112,13 @@
   // We seed on the falling edge of dialogOpen too so a closed-then-reopened
   // dialog forgets unsaved edits — matches the wizard's behaviour.
   let lastSeededFor: { id: string; open: boolean } | null = null;
+  // What the dialog opened with. `model` follows refetches while the dialog is
+  // open, so the changed-field checks compare with this, not with `model`:
+  // otherwise a value another admin set meanwhile would count as this edit.
+  let opened: { displayName: string; classificationId: string | null } = {
+    displayName: "",
+    classificationId: null
+  };
   $effect(() => {
     if (!dialogOpen) {
       lastSeededFor = null;
@@ -102,6 +126,10 @@
     }
     if (lastSeededFor?.id === model.id && lastSeededFor.open) return;
     draft = modelToDraft(model, modelType);
+    opened = {
+      displayName: draft.displayName.trim(),
+      classificationId: model.security_classification?.id ?? null
+    };
     isDefault = "is_org_default" in model ? Boolean(model.is_org_default) : false;
     openSource = model.open_source ?? false;
     error = null;
@@ -116,14 +144,14 @@
   // state silently demote a tenant default.
   const hasDefaultToggle = $derived("is_org_default" in model);
 
-  // Send security_classification only when it actually changed — and use
-  // explicit null (rather than omission) when the user cleared it, since
-  // the backend distinguishes "field omitted" from "field set to null".
+  // Send security_classification only when the admin changed it in this
+  // dialog — and use explicit null (rather than omission) when the user
+  // cleared it, since the backend distinguishes "field omitted" from "field
+  // set to null".
   function securityClassificationPatch():
     { security_classification: { id: string } | null } | Record<string, never> {
     const next = draft.securityClassification?.id ?? null;
-    const prev = model.security_classification?.id ?? null;
-    if (next === prev) return {};
+    if (next === opened.classificationId) return {};
     return { security_classification: next ? { id: next } : null };
   }
 
@@ -226,6 +254,17 @@
         await eneo.tenantModels.updateImage({ id: model.id }, buildImageUpdate());
       } else if (type === "rerankModel") {
         await eneo.tenantModels.updateRerank({ id: model.id }, buildRerankUpdate());
+      } else if (type === "forecastModel") {
+        await eneo.models.update({
+          forecastModel: { id: model.id },
+          // Only the fields the admin changed: an omitted field keeps its value.
+          update: {
+            ...(draft.displayName.trim() !== opened.displayName
+              ? { display_name: draft.displayName.trim() }
+              : {}),
+            ...securityClassificationPatch()
+          }
+        });
       } else {
         await eneo.tenantModels.updateTranscription({ id: model.id }, buildTranscriptionUpdate());
       }
@@ -272,21 +311,23 @@
           nameReadOnly={type !== "completionModel"}
         />
 
-        <fieldset class="border-border/40 mt-2 border-t pt-4">
-          <legend class="sr-only">{m.model_details()}</legend>
-          <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
-            <Field.Field orientation="horizontal" class="w-fit">
-              <Checkbox id="open-source" bind:checked={openSource} />
-              <Field.Label for="open-source">{m.model_label_open_source()}</Field.Label>
-            </Field.Field>
-            {#if "is_org_default" in model}
+        {#if modelType !== "forecast"}
+          <fieldset class="border-border/40 mt-2 border-t pt-4">
+            <legend class="sr-only">{m.model_details()}</legend>
+            <div class="flex flex-wrap items-center gap-x-6 gap-y-3">
               <Field.Field orientation="horizontal" class="w-fit">
-                <Checkbox id="is-default" bind:checked={isDefault} />
-                <Field.Label for="is-default">{m.default_model()}</Field.Label>
+                <Checkbox id="open-source" bind:checked={openSource} />
+                <Field.Label for="open-source">{m.model_label_open_source()}</Field.Label>
               </Field.Field>
-            {/if}
-          </div>
-        </fieldset>
+              {#if "is_org_default" in model}
+                <Field.Field orientation="horizontal" class="w-fit">
+                  <Checkbox id="is-default" bind:checked={isDefault} />
+                  <Field.Label for="is-default">{m.default_model()}</Field.Label>
+                </Field.Field>
+              {/if}
+            </div>
+          </fieldset>
+        {/if}
       </div>
     </div>
 

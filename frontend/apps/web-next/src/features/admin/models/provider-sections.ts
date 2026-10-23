@@ -28,6 +28,11 @@ export interface ProviderSection {
   maskedKey?: string | null;
   hasKey: boolean;
   isActive: boolean;
+  /**
+   * Comes with the installation (Eneo's tool service): Eneo created it and
+   * runs it, so there is no key, connection or model to add, edit or delete.
+   */
+  managed: boolean;
   /** A required API key is missing. */
   needsKey: boolean;
   status: ProviderStatus;
@@ -42,16 +47,19 @@ function flatten(presentation: ModelsPresentation): KindedModel[] {
       model,
       kind: "transcription" as const
     })),
-    ...presentation.image_models.map((model) => ({ model, kind: "image" as const }))
+    ...presentation.image_models.map((model) => ({ model, kind: "image" as const })),
+    ...(presentation.forecast_models ?? []).map((model) => ({ model, kind: "forecast" as const }))
   ];
 }
 
 /**
  * A required API key is missing. Whether the key is required comes from the
  * backend's field definitions (the capabilities endpoint): self-hosted vLLM,
- * for one, needs none.
+ * for one, needs none, and the provider that comes with the installation has
+ * no key by design.
  */
 function needsKey(provider: ModelProvider, capabilities: ProviderCapabilities): boolean {
+  if (provider.is_managed) return false;
   return !provider.masked_api_key && isApiKeyRequired(capabilities, provider.provider_type);
 }
 
@@ -67,12 +75,15 @@ export function providerStatus(
  * Group models by the custom provider they belong to. Only provider-backed
  * models are shown (matching the Svelte admin's `provider_id != null` filter) —
  * legacy global/seeded models without a provider are intentionally omitted so a
- * provider isn't duplicated by its orphaned global models.
+ * provider isn't duplicated by its orphaned global models. The provider that
+ * comes with the installation is called `managedName`, its name in the
+ * reader's language (it is stored in English).
  */
 export function buildProviderSections(
   presentation: ModelsPresentation,
   providers: ModelProvider[],
-  capabilities: ProviderCapabilities
+  capabilities: ProviderCapabilities,
+  managedName?: string
 ): ProviderSection[] {
   const byProvider = new Map<string, KindedModel[]>();
   for (const entry of flatten(presentation)) {
@@ -85,15 +96,17 @@ export function buildProviderSections(
 
   const sections: ProviderSection[] = providers.map((provider) => {
     const hasKey = Boolean(provider.masked_api_key);
+    const managed = provider.is_managed === true;
     return {
       key: provider.id,
-      name: provider.name,
+      name: (managed && managedName) || provider.name,
       providerType: provider.provider_type,
       providerId: provider.id,
       provider,
       maskedKey: provider.masked_api_key,
       hasKey,
       isActive: provider.is_active,
+      managed,
       needsKey: needsKey(provider, capabilities),
       status: providerStatus(provider, capabilities),
       models: byProvider.get(provider.id) ?? []
@@ -114,8 +127,19 @@ export const KIND_FILTERS: KindFilter[] = [
   "completion",
   "embedding",
   "transcription",
-  "image"
+  "image",
+  "forecast"
 ];
+
+/** The type a `?type=` value names; anything else shows every type. */
+export function kindFilterOf(value: string | undefined): KindFilter {
+  return KIND_FILTERS.find((filter) => filter === value) ?? "all";
+}
+
+/** Admin > Models showing one type's models, for links from other pages. */
+export function modelsHref(kind: ModelKind): string {
+  return `/admin/models?type=${kind}`;
+}
 
 /** Security filter value for models without a classification. */
 export const UNCLASSIFIED = "__unclassified__";
@@ -189,7 +213,8 @@ export function countByKind(
     completion: 0,
     embedding: 0,
     transcription: 0,
-    image: 0
+    image: 0,
+    forecast: 0
   };
   for (const section of sections) {
     for (const { kind } of sectionModels(section, { ...filters, kind: "all" })) {
@@ -207,7 +232,8 @@ export type ModelLifecycle =
 
 /** Deprecation from the recorded date, or the admin's manual deprecation flag. */
 export function modelLifecycle(model: AdminModel, today?: string): ModelLifecycle {
-  const status = getDeprecationStatus(model, today);
+  // A forecast model has no recorded date, only the flag.
+  const status = getDeprecationStatus(model as { deprecation_date?: string | null }, today);
   if (status.kind === "deprecated") return { kind: "deprecated", date: status.date };
   if (model.is_deprecated) return { kind: "deprecated", date: null };
   if (status.kind === "retiring") return { kind: "retiring", date: status.date };
@@ -266,13 +292,16 @@ export type ModelPrice =
   | { kind: "tokens"; input: string | null; output: string | null }
   | { kind: "minute"; value: string }
   | { kind: "image"; value: string }
-  | { kind: "unknown" };
+  | { kind: "unknown" }
+  | { kind: "none" };
 
 /**
  * Indicative price: per 1M tokens (in / out), per audio minute for
- * transcription, or per generated image for image models.
+ * transcription, or per generated image for image models; "unknown" when
+ * none is set. A forecast model uses no tokens and has none to set.
  */
 export function modelPrice(model: AdminModel, kind: ModelKind): ModelPrice {
+  if (kind === "forecast") return { kind: "none" };
   if (kind === "image") {
     const value = formatCostPerImage((model as { cost_per_image?: string | null }).cost_per_image);
     return value ? { kind: "image", value } : { kind: "unknown" };

@@ -8,6 +8,9 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelSecurityStatus,
 )
+from eneo.forecast_models.presentation.forecast_model_models import (
+    ForecastModelSecurityStatus,
+)
 from eneo.image_models.presentation.image_model_models import (
     ImageModelSecurityStatus,
 )
@@ -27,3 +30,4 @@ class ModelsPresentation(BaseModel):
     transcription_models: List[TranscriptionModelSecurityStatus]
     image_models: List[ImageModelSecurityStatus]
     rerank_models: List[RerankModelSecurityStatus] = []
+    forecast_models: List[ForecastModelSecurityStatus] = []

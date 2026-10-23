@@ -43,9 +43,10 @@ describe.skipIf(!(await forecastAvailable()))("the Timestral engine", () => {
 
   test("refuses a missing checkpoint without looking anywhere else for it", async () => {
     const missing = timestralEngine({ modelPath: join(directory, "mistralai/Timestral-28M"), threads: 1 });
-    await expect(missing({ values: daily(60), horizon: 3, holdout: false })).rejects.toMatchObject({
-      code: "MODEL_UNAVAILABLE",
-    });
+    const refused = await missing({ values: daily(60), horizon: 3, holdout: false }).catch((error) => error);
+    expect(refused).toMatchObject({ code: "MODEL_UNAVAILABLE" });
+    // The message reaches the model and the user: what is missing, never where.
+    expect(refused.message).not.toContain(directory);
   });
 
   test.each([
@@ -60,9 +61,9 @@ describe.skipIf(!(await forecastAvailable()))("the Timestral engine", () => {
     await copyFile(join(modelPath, "model.safetensors"), join(path, "model.safetensors"));
     await spoil(path);
     const spoiled = timestralEngine({ modelPath: path, threads: 1 });
-    await expect(spoiled({ values: daily(60), horizon: 3, holdout: false })).rejects.toMatchObject({
-      code: "MODEL_UNAVAILABLE",
-    });
+    const refused = await spoiled({ values: daily(60), horizon: 3, holdout: false }).catch((error) => error);
+    expect(refused).toMatchObject({ code: "MODEL_UNAVAILABLE" });
+    expect(refused.message).not.toContain(path);
     await chmod(join(path, "model.safetensors"), 0o600);
   });
 

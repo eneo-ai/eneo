@@ -3,7 +3,10 @@
 from uuid import uuid4
 
 from eneo.main.config import get_settings
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    MCPServer,
+    MCPServerBackingModel,
+)
 from eneo.mcp_servers.infrastructure.client import mcp_client as client_module
 from eneo.mcp_servers.infrastructure.client.mcp_client import MCPClient
 
@@ -132,3 +135,45 @@ async def test_existing_bundled_registration_forwards_only_opaque_identity(monke
         server, None, identity_headers=identity
     )._build_auth_headers()
     assert not any(key.lower().startswith("x-eneo-") for key in headers)
+
+
+async def test_a_forecast_source_names_the_model_eneo_selected(monkeypatch):
+    settings = get_settings().model_copy(
+        update={
+            "tool_runtime_url": "http://tool-runtime:3010",
+            "tool_runtime_token": "runtime-secret",
+            "mcp_apps_enabled": False,
+        }
+    )
+    monkeypatch.setattr(client_module, "get_settings", lambda: settings)
+
+    def source(model_key: str | None) -> MCPServer:
+        return MCPServer(
+            id=uuid4(),
+            tenant_id=uuid4(),
+            name="Forecast",
+            http_url="http://tool-runtime:3010/mcp/forecast",
+            http_auth_type="bundled",
+            purpose="forecast",
+            forecast_model=(
+                MCPServerBackingModel(
+                    id=uuid4(),
+                    name=model_key,
+                    nickname="Timestral",
+                    provider_name="Eneo tool service",
+                    is_enabled=True,
+                    is_deleted=False,
+                    security_classification=None,
+                )
+                if model_key is not None
+                else None
+            ),
+        )
+
+    cpu = await MCPClient(source("default"), None)._build_auth_headers()
+    gpu = await MCPClient(source("gpu-large"), None)._build_auth_headers()
+    none = await MCPClient(source(None), None)._build_auth_headers()
+
+    assert cpu["X-Eneo-Model"] == "default"
+    assert gpu["X-Eneo-Model"] == "gpu-large"
+    assert "X-Eneo-Model" not in none

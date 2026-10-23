@@ -1,4 +1,5 @@
 import { queryOptions } from "@tanstack/react-query";
+import { getCapability } from "@/features/capabilities/capabilities";
 import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -8,8 +9,13 @@ export type CompletionModelAdmin = Schema<"CompletionModelSecurityStatus">;
 export type EmbeddingModelAdmin = Schema<"EmbeddingModelSecurityStatus">;
 export type TranscriptionModelAdmin = Schema<"TranscriptionModelSecurityStatus">;
 export type ImageModelAdmin = Schema<"ImageModelSecurityStatus">;
+export type ForecastModelAdmin = Schema<"ForecastModelSecurityStatus">;
 export type AdminModel =
-  CompletionModelAdmin | EmbeddingModelAdmin | TranscriptionModelAdmin | ImageModelAdmin;
+  | CompletionModelAdmin
+  | EmbeddingModelAdmin
+  | TranscriptionModelAdmin
+  | ImageModelAdmin
+  | ForecastModelAdmin;
 export type TenantCompletionModelCreate = Schema<"TenantCompletionModelCreate">;
 export type TenantCompletionModelUpdate = Schema<"TenantCompletionModelUpdate">;
 export type TenantEmbeddingModelCreate = Schema<"TenantEmbeddingModelCreate">;
@@ -18,6 +24,7 @@ export type TenantTranscriptionModelCreate = Schema<"TenantTranscriptionModelCre
 export type TenantTranscriptionModelUpdate = Schema<"TenantTranscriptionModelUpdate">;
 export type TenantImageModelCreate = Schema<"TenantImageModelCreate">;
 export type TenantImageModelUpdate = Schema<"TenantImageModelUpdate">;
+export type ForecastModelUpdate = Schema<"ForecastModelUpdate">;
 export type ModelUsageStatistics = Schema<"ModelUsageStatistics">;
 export type TranscriptionModelUsageStats = Schema<"TranscriptionModelUsageStats">;
 export type ValidationResult = Schema<"ValidationResult">;
@@ -25,7 +32,12 @@ export type ModelMigrationHistory = Schema<"ModelMigrationHistory"> & {
   model_type: "completion" | "transcription";
 };
 
-export type ModelKind = "completion" | "embedding" | "transcription" | "image";
+export type ModelKind = "completion" | "embedding" | "transcription" | "image" | "forecast";
+/**
+ * Kinds an admin adds to a provider, edits in full and deletes (the
+ * tenant-models endpoints). Forecast models come with the installation.
+ */
+export type TenantModelKind = Exclude<ModelKind, "forecast">;
 /** Kinds with usage endpoints (and so a detail dialog's usage tab and a migrate flow). */
 export type MigratableModelKind = "completion" | "transcription";
 
@@ -216,7 +228,7 @@ export function createTenantModel(
 ): Promise<unknown>;
 export function createTenantModel(
   api: EneoClient,
-  kind: ModelKind,
+  kind: TenantModelKind,
   body:
     | TenantCompletionModelCreate
     | TenantEmbeddingModelCreate
@@ -277,7 +289,7 @@ export function updateTenantModel(
 ): Promise<unknown>;
 export function updateTenantModel(
   api: EneoClient,
-  kind: ModelKind,
+  kind: TenantModelKind,
   modelId: string,
   body:
     | TenantCompletionModelUpdate
@@ -312,7 +324,14 @@ export function updateTenantModel(
   return updateCompletionModel(api, modelId, body as TenantCompletionModelUpdate);
 }
 
-export function deleteTenantModel(api: EneoClient, kind: ModelKind, modelId: string) {
+/** One endpoint turns a forecast model on or off, classifies and renames it. */
+export function updateForecastModel(api: EneoClient, modelId: string, body: ForecastModelUpdate) {
+  return unwrap(
+    api.POST("/api/v1/forecast-models/{id}/", { params: { path: { id: modelId } }, body })
+  );
+}
+
+export function deleteTenantModel(api: EneoClient, kind: TenantModelKind, modelId: string) {
   if (kind === "image") {
     return unwrap(
       api.DELETE("/api/v1/admin/tenant-models/image/{model_id}/", {
@@ -344,7 +363,7 @@ export function deleteTenantModel(api: EneoClient, kind: ModelKind, modelId: str
 export function validateProviderModel(
   api: EneoClient,
   providerId: string,
-  body: { model_name: string; model_type: ModelKind }
+  body: { model_name: string; model_type: TenantModelKind }
 ) {
   return unwrap(
     api.POST("/api/v1/admin/model-providers/{provider_id}/validate-model/", {
@@ -354,12 +373,27 @@ export function validateProviderModel(
   );
 }
 
+type UsedBy = { id: string; name: string; purpose: string };
+
 /**
- * Capability sources (the built-in image generation) that run on an image
- * model. While any exists the backend refuses to delete the model (9039).
+ * Function sources that run on an image or forecast model (the built-in image
+ * generation, the bundled Prognos source). While any exists the backend
+ * refuses to delete an image model (9039).
  */
-export function imageModelUsedBy(model: AdminModel): { id: string; name: string }[] {
+export function modelUsedBy(model: AdminModel): UsedBy[] {
   return "used_by_mcp_servers" in model ? (model.used_by_mcp_servers ?? []) : [];
+}
+
+/**
+ * "Används av Prognos": the Functions whose sources run on the model, in the
+ * reader's language (a bundled source's stored name is Eneo's English one);
+ * a source of an unknown purpose by its own name.
+ */
+export function usedByLabel(t: Translate, usedBy: UsedBy[]): string {
+  const functions = new Set(
+    usedBy.map((source) => (getCapability(source.purpose) ? t(source.purpose) : source.name))
+  );
+  return t("model_used_by_function", { function: [...functions].join(", ") });
 }
 
 export function adminModelsQueryOptions(api: EneoClient) {

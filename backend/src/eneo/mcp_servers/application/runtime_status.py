@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import time
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 import httpx
@@ -54,6 +54,11 @@ class RuntimeStatus(BaseModel):
     # The runtime's endpoints that said they cannot run now. Not part of the
     # status shown: the offer of each such tool says why instead.
     _unavailable: frozenset[str] = PrivateAttr(default_factory=frozenset)
+    # The name of each model an endpoint runs, by endpoint and the key Eneo
+    # selects the model with. Not shown either: the catalog row carries it.
+    _model_names: dict[tuple[str, str], str] = PrivateAttr(
+        default_factory=dict[tuple[str, str], str]
+    )
 
     def cannot_run(self, endpoint: str) -> bool:
         """Whether the runtime last said this endpoint cannot run (advisory)."""
@@ -61,6 +66,13 @@ class RuntimeStatus(BaseModel):
 
     def note_unavailable(self, endpoints: list[str]) -> None:
         self._unavailable = frozenset(endpoints)
+
+    def model_name(self, endpoint: str, model_id: str) -> str | None:
+        """The name the runtime last reported for a model of this endpoint."""
+        return self._model_names.get((endpoint, model_id))
+
+    def note_model_names(self, names: dict[tuple[str, str], str]) -> None:
+        self._model_names = dict(names)
 
 
 class _Counts(BaseModel):
@@ -73,6 +85,12 @@ class _Confinement(BaseModel):
     tcp: bool
 
 
+class _Model(BaseModel):
+    # The key Eneo selects the model with (x-eneo-model) and its display name.
+    id: str = Field(max_length=64)
+    name: str = Field(max_length=80)
+
+
 class _Diagnostic(BaseModel):
     version: str = Field(max_length=128)
     revision: str = Field(max_length=64)
@@ -81,6 +99,11 @@ class _Diagnostic(BaseModel):
     file_origin: Literal["reachable", "unreachable", "not_allowed", "unknown"]
     # Endpoints that cannot run now; absent from runtimes before it was reported.
     unavailable: list[str] = Field(default_factory=list[str], max_length=32)
+    # The models each endpoint runs; absent from runtimes before they were reported.
+    models: dict[
+        Annotated[str, Field(max_length=64)],
+        Annotated[list[_Model], Field(max_length=16)],
+    ] = Field(default_factory=dict[str, list[_Model]], max_length=32)
 
 
 _cache: tuple[str, float, RuntimeStatus] | None = None
@@ -185,6 +208,13 @@ async def runtime_status() -> RuntimeStatus:
                                         FILE_ORIGIN_WARNING[data.file_origin]
                                     )
                                 status.note_unavailable(data.unavailable)
+                                status.note_model_names(
+                                    {
+                                        (endpoint, model.id): model.name
+                                        for endpoint, models in data.models.items()
+                                        for model in models
+                                    }
+                                )
             except (httpx.HTTPError, TimeoutError, ValidationError, ValueError):
                 # Exception text can contain origins or credentials. Log only safe state.
                 status.state = "unreachable"

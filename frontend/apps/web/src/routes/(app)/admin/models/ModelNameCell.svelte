@@ -4,6 +4,7 @@
   import type {
     CompletionModel,
     EmbeddingModel,
+    ForecastModel,
     ImageModel,
     RerankModel,
     TranscriptionModel
@@ -16,10 +17,22 @@
   import { m } from "$lib/paraglide/messages";
   import { TriangleAlert, Clock } from "@lucide/svelte";
   import { getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
+  import { getCapability } from "$lib/features/mcp/capabilities";
 
-  type AnyModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
+  type AnyModel =
+    | CompletionModel
+    | EmbeddingModel
+    | TranscriptionModel
+    | ImageModel
+    | RerankModel
+    | ForecastModel;
   type ModelTypeKey =
-    "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
+    | "completionModel"
+    | "embeddingModel"
+    | "transcriptionModel"
+    | "imageModel"
+    | "rerankModel"
+    | "forecastModel";
 
   export let model: AnyModel;
   export let type: ModelTypeKey;
@@ -37,10 +50,20 @@
 
   $: statusKey = isDeprecated ? "deprecated" : isRetiring ? "retiring" : "ok";
 
-  // Capability providers running on the model; while any exists the model
+  // Function sources running on the model; while any exists an image model
   // cannot be deleted, so say so up front instead of after a failed delete.
   $: usedBy = "used_by_mcp_servers" in model ? (model.used_by_mcp_servers ?? []) : [];
-  $: usedByNames = usedBy.map((u) => u.name).join(", ");
+  // "Används av Prognos": the Functions, in the reader's language.
+  $: usedByFunctions = [...new Set(usedBy.map(functionName))].join(", ");
+  // A forecast model runs bundled sources, which are named after their
+  // function (the stored name is Eneo's English one); others by their name.
+  $: usedByNames = usedBy
+    .map((u) => (type === "forecastModel" ? functionName(u) : u.name))
+    .join(", ");
+
+  function functionName(source: { name: string; purpose: string }): string {
+    return getCapability(source.purpose)?.label() ?? source.name;
+  }
 
   $: statusLabel = isDeprecated
     ? m.model_label_deprecated()
@@ -120,10 +143,10 @@
         {#snippet child({ props })}
           <div
             {...props}
-            class="bg-warning-dimmer text-warning-stronger inline-flex cursor-default items-center rounded-full px-2 py-[2px] text-[11px] font-medium tracking-wide"
+            class="text-secondary bg-secondary inline-flex cursor-default items-center rounded px-2 py-0.5 text-xs"
             data-status="in-use"
           >
-            {m.model_used_by_image_generation()}
+            {m.model_used_by_function({ function: usedByFunctions })}
           </div>
         {/snippet}
       </Tooltip.Trigger>

@@ -19,6 +19,15 @@ if TYPE_CHECKING:
 # a write that submits it back is rejected (see ModelProviderService).
 MASKED_HEADER_VALUE = "********"
 
+# Eneo's own tool service (the bundled tool runtime) as a provider of the
+# models it runs. It comes with the deployment: Eneo creates it, and its URL
+# and token stay in the deployment's settings, never on the row, so an admin
+# cannot edit or delete it. It is not offered when adding a provider.
+ENEO_TOOL_SERVICE_PROVIDER_TYPE = "eneo_tool_service"
+MANAGED_PROVIDER_MESSAGE = (
+    "This provider comes with the deployment; Eneo manages it and its models"
+)
+
 
 class ModelProvider:
     """Domain entity for a tenant-specific AI model provider instance."""
@@ -86,6 +95,11 @@ class ModelProvider:
         )
 
     @property
+    def is_managed(self) -> bool:
+        """Whether the provider comes with the deployment (see above)."""
+        return self.provider_type == ENEO_TOOL_SERVICE_PROVIDER_TYPE
+
+    @property
     def connection_check_supported(self) -> bool:
         return connection_check_supported(
             self.provider_type.lower(), configured_endpoint(self.config)
@@ -101,6 +115,7 @@ class ModelProvider:
             "provider_type": self.provider_type,
             "config": self.config,
             "is_active": self.is_active,
+            "is_managed": self.is_managed,
             "key_expires_on": self.key_expires_on,
             "connection_check": (
                 {

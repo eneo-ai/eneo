@@ -42,10 +42,13 @@ import { ModelDetailDialog } from "./model-detail-dialog";
 import {
   type AdminModel,
   deleteTenantModel,
-  imageModelUsedBy,
   type MigratableModelKind,
   MODELS_KEY,
-  type ModelKind
+  type ModelKind,
+  modelUsedBy,
+  type TenantModelKind,
+  updateForecastModel,
+  usedByLabel
 } from "./models";
 import { modelLifecycle, modelPrice } from "./provider-sections";
 
@@ -74,6 +77,8 @@ async function updateModelFlags(kind: ModelKind, id: string, flags: ModelFlags):
     await unwrap(
       browserApi.POST("/api/v1/image-models/{id}/", { params: { path: { id } }, body: flags })
     );
+  } else if (kind === "forecast") {
+    await updateForecastModel(browserApi, id, flags);
   } else {
     await unwrap(
       browserApi.POST("/api/v1/embedding-models/{id}/", {
@@ -132,13 +137,13 @@ function Price({ model, kind }: { model: AdminModel; kind: ModelKind }) {
   const t = useTranslations();
   const price = modelPrice(model, kind);
 
-  if (price.kind === "unknown") {
+  if (price.kind === "unknown" || price.kind === "none") {
     return (
       <>
         <span aria-hidden="true" className="text-ax-text-secondary">
           –
         </span>
-        <span className="sr-only">{t("model_cost_unknown")}</span>
+        <span className="sr-only">{t(price.kind === "none" ? "none" : "model_cost_unknown")}</span>
       </>
     );
   }
@@ -192,9 +197,10 @@ export function ModelRow({
   const [showMigrate, setShowMigrate] = useState(false);
   const [showDetail, setShowDetail] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
-  // Embedding models have no detail view; image models get the properties
+  // Embedding and forecast models have no detail view (a forecast model's one
+  // fact, the source on it, is on the row); image models get the properties
   // without a usage tab (no usage endpoint).
-  const canViewDetail = kind !== "embedding";
+  const canViewDetail = kind !== "embedding" && kind !== "forecast";
 
   const label = modelDisplayName(model);
   // Each returns the refetch, so a mutation stays pending until the list has
@@ -236,24 +242,28 @@ export function ModelRow({
   });
 
   // The technical id under the display name, unless the name already is the id.
-  const technicalId = modelTechnicalId(model);
-  const locked = model.is_locked ?? false;
+  // A forecast model's key ("default") is Eneo's own mapping, not a name an admin uses.
+  const technicalId = kind === "forecast" ? null : modelTechnicalId(model);
+  const locked = (model as { is_locked?: boolean | null }).is_locked ?? false;
   const readonly = "readonly" in model && model.readonly === true;
   const isDefault = hasDefault(model) && model.is_org_default === true;
   const currentClassification =
     (model as { security_classification?: SecurityClassification | null })
       .security_classification ?? null;
-  const supportsDefault = kind !== "embedding";
+  // A forecast model comes with the installation: it is renamed, classified
+  // and switched on or off, never made a default or deleted.
+  const supportsDefault = kind !== "embedding" && kind !== "forecast";
   const supportsClassification = securityEnabled;
   const canEdit = !readonly;
   const canMigrate =
     (kind === "completion" || kind === "transcription") &&
     !("migrated_to_model_id" in model && model.migrated_to_model_id);
-  const canDelete = !readonly;
-  // Capability sources (the built-in image generation) that run on this
-  // image model: the backend refuses to delete it while any exists, so the
-  // menu says so and choosing it explains instead of failing.
-  const usedBy = imageModelUsedBy(model);
+  const canDelete = !readonly && kind !== "forecast";
+  // Function sources (the built-in image generation, the bundled Prognos
+  // source) that run on this model: the backend refuses to delete an image
+  // model while any exists, so the menu says so and choosing it explains
+  // instead of failing.
+  const usedBy = modelUsedBy(model);
   const usedByNames = usedBy.map((source) => source.name).join(", ");
   const deleteBlocked = usedBy.length > 0;
   const lifecycle = modelLifecycle(model);
@@ -269,7 +279,7 @@ export function ModelRow({
   // The row, its menu and the dialog go with the model: focus moves to the
   // page's RemovalFocusScope (the tab panel) once the list has refetched.
   const remove = useRemovalMutation({
-    mutationFn: () => deleteTenantModel(browserApi, kind, model.id),
+    mutationFn: () => deleteTenantModel(browserApi, kind as TenantModelKind, model.id),
     refresh: refetchModels,
     onRemoved: () => {
       setShowDelete(false);
@@ -344,9 +354,8 @@ export function ModelRow({
                 label={t("model_label_retiring", { date: lifecycle.date })}
               />
             )}
-            {deleteBlocked && (
-              <Badge variant="warning" label={t("model_used_by_image_generation")} />
-            )}
+            {/* Information, not a warning: why it cannot be deleted is said at Delete. */}
+            {deleteBlocked && <Badge label={usedByLabel(t, usedBy)} />}
           </div>
           {technicalId && (
             <Text type="code" size="sm" color="secondary" maxLines={1}>
@@ -483,7 +492,7 @@ export function ModelRow({
         {canViewDetail && (
           <ModelDetailDialog
             model={model}
-            kind={kind as Exclude<ModelKind, "embedding">}
+            kind={kind as Exclude<ModelKind, "embedding" | "forecast">}
             open={showDetail}
             onOpenChange={setShowDetail}
           />

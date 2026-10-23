@@ -190,19 +190,72 @@ describe("filters", () => {
       completion: 2,
       embedding: 1,
       transcription: 1,
-      image: 1
+      image: 1,
+      forecast: 0
     });
     expect(countByKind(sections, { search: "whisper", security: "all" })).toEqual({
       all: 1,
       completion: 0,
       embedding: 0,
       transcription: 1,
-      image: 0
+      image: 0,
+      forecast: 0
     });
     // Every kind is counted the same way: the image model matches "gpt" too.
     expect(
       filterSections(sections, { ...all, kind: "image" }).map(({ section }) => section.name)
     ).toEqual(["OpenAI"]);
+  });
+});
+
+describe("the provider that comes with the installation", () => {
+  // Eneo's tool service: no key by design, and a type the capabilities endpoint
+  // does not list (whose defaults would ask for one).
+  const tools = provider({
+    id: "p-tools",
+    name: "Eneo tool service",
+    provider_type: "eneo_tool_service",
+    masked_api_key: null,
+    is_managed: true
+  });
+  const withForecast = {
+    ...presentation,
+    forecast_models: [
+      model({ id: "f1", name: "default", nickname: "Timestral", provider_id: "p-tools" })
+    ]
+  } as unknown as ModelsPresentation;
+  const managed = buildProviderSections(
+    withForecast,
+    [...providers, tools],
+    capabilities,
+    "Eneos verktygstjänst"
+  );
+
+  it("is named in the reader's language and never needs a key", () => {
+    const section = managed.find((entry) => entry.providerId === "p-tools")!;
+    expect(section.name).toBe("Eneos verktygstjänst");
+    expect(section.managed).toBe(true);
+    expect(section.needsKey).toBe(false);
+    expect(section.status).toBe("ready");
+    expect(section.models.map(({ model, kind }) => [model.id, kind])).toEqual([["f1", "forecast"]]);
+    expect(
+      modelsAttention(managed, { today: TODAY, viewerToday: "2026-09-26" }).providers.map(
+        ({ section }) => section.providerId
+      )
+    ).toEqual(["p3"]);
+  });
+
+  it("counts and filters its forecast models as their own type", () => {
+    expect(countByKind(managed, { search: "", security: "all" }).forecast).toBe(1);
+    expect(
+      filterSections(managed, { ...all, kind: "forecast" }).map(({ section }) => section.name)
+    ).toEqual(["Eneos verktygstjänst"]);
+    // Found by the name it is shown with.
+    expect(
+      filterSections(managed, { ...all, search: "verktygstjänst" }).map(
+        ({ section }) => section.providerId
+      )
+    ).toEqual(["p-tools"]);
   });
 });
 
@@ -295,7 +348,7 @@ describe("lifecycle and attention", () => {
 });
 
 describe("prices", () => {
-  it("formats per 1M tokens, per minute, per image or unknown", () => {
+  it("formats per 1M tokens, per minute, per image, unknown or none", () => {
     expect(
       modelPrice(
         model({ input_cost_per_token: "0.000003", output_cost_per_token: "0.000015" }),
@@ -312,5 +365,7 @@ describe("prices", () => {
     });
     expect(modelPrice(model({}), "image")).toEqual({ kind: "unknown" });
     expect(modelPrice(model({}), "embedding")).toEqual({ kind: "unknown" });
+    // A forecast model uses no tokens: it has no price, not an unknown one.
+    expect(modelPrice(model({}), "forecast")).toEqual({ kind: "none" });
   });
 });

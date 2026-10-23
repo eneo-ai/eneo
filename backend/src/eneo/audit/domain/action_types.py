@@ -121,6 +121,7 @@ class ActionType(str, Enum):
     RERANK_MODEL_CREATED = "rerank_model_created"
     RERANK_MODEL_UPDATED = "rerank_model_updated"
     RERANK_MODEL_DELETED = "rerank_model_deleted"
+    FORECAST_MODEL_UPDATED = "forecast_model_updated"
     TEMPLATE_CREATED = "template_created"
     TEMPLATE_UPDATED = "template_updated"
     TEMPLATE_DELETED = "template_deleted"

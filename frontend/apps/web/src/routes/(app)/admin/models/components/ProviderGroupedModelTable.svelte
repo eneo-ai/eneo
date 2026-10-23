@@ -1,25 +1,30 @@
 <!-- Copyright (c) 2026 Sundsvalls Kommun -->
 
 <!--
-  Generic provider-grouped table used by all five model-type tabs
-  (completion / embedding / transcription / image / rerank). Replaces three near-identical
+  Generic provider-grouped table used by all six model-type tabs
+  (completion / embedding / transcription / image / rerank / forecast). Replaces three near-identical
   copies that drifted apart over time. Per-type behaviour is limited to:
 
     - the deprecation banner — only completion models carry deprecation_date
     - passing `completionModels` through to ModelNameCell + ModelActions
       (used by the migrate flow, which is completion-only)
+    - forecast models come with the installation: no add-model wizard, no
+      "Add provider", and their own empty state
 
   All other concerns — grouping, "Add model" CTA, empty state — are
-  identical and live here.
+  identical and live here. A provider that comes with the installation
+  (`is_managed`, Eneo's tool service) is named like the Functions page names
+  it and has no key, edit, delete or "Add model".
 -->
 
 <script
   lang="ts"
-  generics="M extends CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel"
+  generics="M extends CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel | ForecastModel"
 >
   import type {
     CompletionModel,
     EmbeddingModel,
+    ForecastModel,
     ImageModel,
     ModelProviderPublic,
     RerankModel,
@@ -38,6 +43,7 @@
   import { getChartColour } from "$lib/features/ai-models/components/ModelNameAndVendor.svelte";
   import { getDeprecationStatus } from "$lib/features/ai-models/formatModelStats";
   import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext";
+  import { SOURCE_KINDS } from "$lib/features/mcp/sourceKind";
 
   import ModelEnableSwitch from "../ModelEnableSwitch.svelte";
   import ModelActions from "../ModelActions.svelte";
@@ -51,10 +57,15 @@
   import { AddWizard } from "../AddWizard/index.js";
 
   type ModelTypeKey =
-    "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
+    | "completionModel"
+    | "embeddingModel"
+    | "transcriptionModel"
+    | "imageModel"
+    | "rerankModel"
+    | "forecastModel";
   type WizardModelType = "completion" | "embedding" | "transcription" | "image" | "rerank";
 
-  const wizardModelTypeFor: Record<ModelTypeKey, WizardModelType> = {
+  const wizardModelTypeFor: Record<Exclude<ModelTypeKey, "forecastModel">, WizardModelType> = {
     completionModel: "completion",
     embeddingModel: "embedding",
     transcriptionModel: "transcription",
@@ -71,8 +82,14 @@
     return "migrated_to_model_id" in model && !!model.migrated_to_model_id;
   }
 
+  /** A provider that comes with the installation is stored with Eneo's English name. */
+  function providerName(provider: ModelProviderPublic): string {
+    return provider.is_managed ? m.mcp_auth_bundled() : provider.name;
+  }
+
   $: tenantModels = models.filter((model) => model.provider_id != null && !isMigratedModel(model));
-  $: wizardModelType = wizardModelTypeFor[modelType];
+  // Forecast models come with the installation: there is nothing to add.
+  $: wizardModelType = modelType === "forecastModel" ? null : wizardModelTypeFor[modelType];
   $: showDeprecationBanner = modelType === "completionModel";
   // Show the classification column only when the tenant has configured at
   // least one classification — otherwise the column would be all em-dashes.
@@ -151,7 +168,12 @@
     table.column({
       accessor: (model: M) => model,
       header: m.details(),
-      cell: (item) => Table.renderComponent(ModelStatusIcons, { model: item.value }),
+      // A forecast model has no price to set: no chip that calls it unknown.
+      cell: (item) =>
+        Table.renderComponent(ModelStatusIcons, {
+          model: item.value,
+          showCost: modelType !== "forecastModel"
+        }),
       plugins: {
         sort: { disable: true },
         tableFilter: {
@@ -197,7 +219,7 @@
 
   $: groups = visibleProviders.map((provider) => ({
     key: provider.id,
-    name: provider.name,
+    name: providerName(provider),
     modelCount: tenantModels.filter((model) => model.provider_id === provider.id).length
   }));
 
@@ -239,7 +261,13 @@
   $: retiringCount = deprecationCounts.retiring;
 </script>
 
-{#if providers.length === 0}
+{#if !wizardModelType && visibleProviders.length === 0}
+  <PageEmptyState
+    title={m.forecast_models_empty_title()}
+    description={m.forecast_models_empty_description()}
+    helper=""
+  />
+{:else if providers.length === 0}
   <PageEmptyState onAddProvider={openAddProvider} />
 {:else if noModelsForThisType}
   <PageEmptyState
@@ -287,14 +315,24 @@
         <Table.Group
           filterFn={groupFilterFor(group.key)}
           title=" "
-          toggleLabel={provider?.name ?? group.name}
+          toggleLabel={group.name}
           open={groupOpenState[group.key] ?? true}
           onOpenChange={(open) => {
             groupOpenState[group.key] = open;
           }}
         >
           {#snippet titlePrefix()}
-            {#if provider}
+            {#if provider?.is_managed}
+              <!-- Nothing to edit: the glyph the Functions page gives Eneo's tool service. -->
+              <div class="mr-1 flex items-center gap-3">
+                <ProviderGlyph
+                  providerType={provider.provider_type}
+                  icon={SOURCE_KINDS.bundled.icon}
+                  size="md"
+                />
+                <span class="text-primary font-medium">{group.name}</span>
+              </div>
+            {:else if provider}
               <button
                 class="group focus:ring-accent-default mr-1 flex cursor-pointer items-center gap-3 rounded-lg transition-colors duration-150 focus:ring-2 focus:ring-offset-2 focus:outline-none"
                 on:click|stopPropagation={() => handleEditProvider(provider)}
@@ -330,21 +368,28 @@
                     : m.provider_model_count_other({ count: modelCount })}
                 </span>
                 <span class="bg-[var(--border-dimmer)] h-4 w-px"></span>
-                <button
-                  class="text-muted hover:bg-hover-dimmer hover:text-primary focus:ring-accent-default flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors duration-150 focus:ring-1 focus:outline-none"
-                  on:click|stopPropagation={() => handleAddModelToProvider(provider.id)}
-                  title={m.add_model()}
-                >
-                  <Plus class="h-3.5 w-3.5" />
-                  {m.add_model()}
-                </button>
-                <ProviderActions {provider} onEditProvider={handleEditProvider} />
+                {#if provider.is_managed}
+                  <!-- In place of "Add model" and the menu: no key, models or settings to manage. -->
+                  <span class="text-muted px-2 py-1 text-xs">
+                    {m.provider_included_in_installation()}
+                  </span>
+                {:else}
+                  <button
+                    class="text-muted hover:bg-hover-dimmer hover:text-primary focus:ring-accent-default flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors duration-150 focus:ring-1 focus:outline-none"
+                    on:click|stopPropagation={() => handleAddModelToProvider(provider.id)}
+                    title={m.add_model()}
+                  >
+                    <Plus class="h-3.5 w-3.5" />
+                    {m.add_model()}
+                  </button>
+                  <ProviderActions {provider} onEditProvider={handleEditProvider} />
+                {/if}
               {/if}
             </div>
           {/snippet}
 
           {#snippet empty()}
-            {#if provider}
+            {#if provider && !provider.is_managed}
               <ProviderEmptyState providerId={provider.id} onAddModel={handleAddModelToProvider} />
             {:else}
               <div
@@ -358,22 +403,26 @@
       {/each}
     </Table.Root>
 
-    <div class="border-dimmer mt-4 flex justify-center border-t pt-8 pb-6">
-      <Button variant="outline" onclick={openAddProvider}>
-        <Plus />
-        {m.add_provider()}
-      </Button>
-    </div>
+    {#if wizardModelType}
+      <div class="border-dimmer mt-4 flex justify-center border-t pt-8 pb-6">
+        <Button variant="outline" onclick={openAddProvider}>
+          <Plus />
+          {m.add_provider()}
+        </Button>
+      </div>
+    {/if}
   </div>
 {/if}
 
-<AddWizard
-  openController={addWizardOpen}
-  {providers}
-  {favoriteProviders}
-  modelType={wizardModelType}
-  preSelectedProviderId={wizardPreSelectedProviderId}
-/>
+{#if wizardModelType}
+  <AddWizard
+    openController={addWizardOpen}
+    {providers}
+    {favoriteProviders}
+    modelType={wizardModelType}
+    preSelectedProviderId={wizardPreSelectedProviderId}
+  />
+{/if}
 
 <ProviderDialog openController={editProviderDialogOpen} provider={editingProvider} />
 

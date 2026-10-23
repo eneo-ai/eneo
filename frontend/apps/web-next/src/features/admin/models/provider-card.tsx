@@ -18,6 +18,7 @@ import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { StatusLabel } from "@/components/composites/status-label";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
+import { SOURCE_KINDS } from "@/features/admin/tools/bundled";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
@@ -104,6 +105,9 @@ function ModelTable({
  * missing, inactive), "Lägg till modell" and the provider menu (edit,
  * delete); then the connection line (latest check, key expiry, "Testa
  * anslutning") and its models as a table, or a line saying it has none yet.
+ * The provider that comes with the installation has no key, connection or
+ * actions: it shows the glyph the Functions page gives Eneo's tool service
+ * and says it is included, then its models.
  */
 export function ProviderCard({
   section,
@@ -147,12 +151,17 @@ export function ProviderCard({
 
   const summary = [
     t("provider_model_count", { count: section.models.length }),
-    section.maskedKey ? t("admin_models_provider_key", { key: section.maskedKey }) : null
+    section.managed
+      ? t("provider_included_in_installation")
+      : section.maskedKey
+        ? t("admin_models_provider_key", { key: section.maskedKey })
+        : null
   ]
     .filter(Boolean)
     .join(" · ");
   // A configured provider has no setup label: its connection line says more.
   const setup = notices.setup(section.status);
+  const BundledIcon = SOURCE_KINDS.bundled.icon;
 
   return (
     <section
@@ -169,7 +178,11 @@ export function ProviderCard({
     >
       <div className="border-ax-border flex flex-wrap items-center gap-x-3 gap-y-2 border-b py-3 ps-4 pe-2.5">
         <span className="bg-ax-muted rounded-ax-inner flex size-8 shrink-0 items-center justify-center">
-          <ProviderLogo provider={section.providerType} className="size-5" />
+          {section.managed ? (
+            <BundledIcon className="size-5" aria-hidden="true" />
+          ) : (
+            <ProviderLogo provider={section.providerType} className="size-5" />
+          )}
         </span>
         <div className="flex min-w-0 flex-col">
           <Heading level={2} id={headingId} className="text-base break-words">
@@ -178,50 +191,52 @@ export function ProviderCard({
           <Text type="supporting">{summary}</Text>
         </div>
         {setup ? <StatusLabel status={setup.tone} label={setup.label} /> : null}
-        <div className="ms-auto flex items-center gap-1">
-          <Button
-            size="sm"
-            label={t("add_model")}
-            aria-label={t("admin_models_add_model_to", { name: section.name })}
-            icon={<Plus className="size-4" aria-hidden="true" />}
-            onClick={() => onAddModel(section.providerId)}
-          />
-          <DropdownMenu
-            button={{
-              label: t("admin_models_provider_menu", { name: section.name }),
-              tooltip: t("admin_models_provider_menu", { name: section.name }),
-              icon: <MoreHorizontal className="size-4" aria-hidden="true" />,
-              isIconOnly: true,
-              variant: "ghost",
-              size: "sm"
-            }}
-            hasChevron={false}
-            alignment="end"
-          >
-            <DropdownMenuItem
-              icon={Pencil}
-              label={t("edit_provider")}
-              onClick={() => setShowEdit(true)}
+        {!section.managed && (
+          <div className="ms-auto flex items-center gap-1">
+            <Button
+              size="sm"
+              label={t("add_model")}
+              aria-label={t("admin_models_add_model_to", { name: section.name })}
+              icon={<Plus className="size-4" aria-hidden="true" />}
+              onClick={() => onAddModel(section.providerId)}
             />
-            <DropdownMenuDivider />
-            <DropdownMenuItem
-              icon={Trash2}
-              label={t("delete_provider")}
-              // The reason is at the action, and the item stays reachable:
-              // Astryx menus skip disabled items, reason and all.
-              description={
-                modelCount > 0
-                  ? t("provider_delete_models_first", { count: modelCount })
-                  : undefined
-              }
-              variant="destructive"
-              onClick={() => setShowDelete(true)}
-            />
-          </DropdownMenu>
-        </div>
+            <DropdownMenu
+              button={{
+                label: t("admin_models_provider_menu", { name: section.name }),
+                tooltip: t("admin_models_provider_menu", { name: section.name }),
+                icon: <MoreHorizontal className="size-4" aria-hidden="true" />,
+                isIconOnly: true,
+                variant: "ghost",
+                size: "sm"
+              }}
+              hasChevron={false}
+              alignment="end"
+            >
+              <DropdownMenuItem
+                icon={Pencil}
+                label={t("edit_provider")}
+                onClick={() => setShowEdit(true)}
+              />
+              <DropdownMenuDivider />
+              <DropdownMenuItem
+                icon={Trash2}
+                label={t("delete_provider")}
+                // The reason is at the action, and the item stays reachable:
+                // Astryx menus skip disabled items, reason and all.
+                description={
+                  modelCount > 0
+                    ? t("provider_delete_models_first", { count: modelCount })
+                    : undefined
+                }
+                variant="destructive"
+                onClick={() => setShowDelete(true)}
+              />
+            </DropdownMenu>
+          </div>
+        )}
       </div>
 
-      <ProviderConnectionStatus provider={section.provider} />
+      {!section.managed && <ProviderConnectionStatus provider={section.provider} />}
 
       {modelCount === 0 ? (
         <Text type="supporting" className="block px-4 py-3">
@@ -237,24 +252,32 @@ export function ProviderCard({
         />
       )}
 
-      <ProviderEditDialog provider={section.provider} open={showEdit} onOpenChange={setShowEdit} />
-      {modelCount > 0 ? (
-        <DeleteBlockedDialog
-          open={showDelete}
-          onOpenChange={setShowDelete}
-          title={t("provider_delete_blocked_title", { name: section.name })}
-          description={t("provider_delete_blocked_description", { count: modelCount })}
-        />
-      ) : (
-        <ConfirmDialogControlled
-          open={showDelete}
-          onOpenChange={setShowDelete}
-          title={t("delete_provider")}
-          description={`${t("delete_provider_confirm", { name: section.name })} ${t("delete_provider_warning")}`}
-          confirmLabel={t("delete")}
-          pending={remove.isPending}
-          onConfirm={() => remove.mutate()}
-        />
+      {!section.managed && (
+        <>
+          <ProviderEditDialog
+            provider={section.provider}
+            open={showEdit}
+            onOpenChange={setShowEdit}
+          />
+          {modelCount > 0 ? (
+            <DeleteBlockedDialog
+              open={showDelete}
+              onOpenChange={setShowDelete}
+              title={t("provider_delete_blocked_title", { name: section.name })}
+              description={t("provider_delete_blocked_description", { count: modelCount })}
+            />
+          ) : (
+            <ConfirmDialogControlled
+              open={showDelete}
+              onOpenChange={setShowDelete}
+              title={t("delete_provider")}
+              description={`${t("delete_provider_confirm", { name: section.name })} ${t("delete_provider_warning")}`}
+              confirmLabel={t("delete")}
+              pending={remove.isPending}
+              onConfirm={() => remove.mutate()}
+            />
+          )}
+        </>
       )}
     </section>
   );

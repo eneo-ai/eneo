@@ -20,6 +20,9 @@ vi.mock("@/components/providers/app-context", () => ({
 
 import { ModelsPage } from "./models-page";
 
+const EMPTY_FORECAST = (messages as Record<string, string>).forecast_models_empty_title!;
+const NO_PROVIDERS_YET = (messages as Record<string, string>).no_providers_yet!;
+
 const ok = (data: unknown) =>
   Promise.resolve({ data, response: new Response("{}", { status: 200 }) });
 
@@ -88,6 +91,23 @@ const presentation = {
       // The built-in image generation runs on it: it cannot be deleted.
       used_by_mcp_servers: [{ id: "cap-1", name: "Bildgenerering", purpose: "image_generation" }]
     }
+  ],
+  forecast_models: [
+    {
+      id: "f1",
+      name: "default",
+      nickname: "Timestral",
+      org: "Mistral AI",
+      open_source: true,
+      is_deprecated: false,
+      is_org_enabled: true,
+      provider_id: "p-tools",
+      provider_name: "Eneo tool service",
+      provider_type: "eneo_tool_service",
+      security_classification: null,
+      // The bundled Prognos source, stored with Eneo's English name.
+      used_by_mcp_servers: [{ id: "cap-2", name: "Forecast", purpose: "forecast" }]
+    }
   ]
 } as unknown as ModelsPresentation;
 
@@ -112,7 +132,13 @@ const providers = [
   provider("p-vllm", "vLLM", "hosted_vllm", null),
   // Needs a key but has none (and no models yet).
   provider("p-openai", "OpenAI", "openai", null),
-  provider("p-images", "OpenAI Images", "openai", "...9c1e")
+  provider("p-images", "OpenAI Images", "openai", "...9c1e"),
+  // Comes with the installation: no key by design, nothing to edit or test.
+  {
+    ...provider("p-tools", "Eneo tool service", "eneo_tool_service", null),
+    is_managed: true,
+    connection_check_supported: false
+  }
 ];
 
 /** vLLM's key is optional; every other type needs one (the backend's defaults). */
@@ -154,16 +180,17 @@ function choose(menu: HTMLElement, submenu: string, option: string) {
   fireEvent.click(within(items).getByRole("menuitemradio", { name: option }));
 }
 
-function renderPage() {
+function renderPage(data: { models?: unknown; providers?: unknown } = {}) {
+  const models = data.models ?? presentation;
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
   });
-  client.setQueryData(MODELS_KEY, presentation);
-  client.setQueryData(PROVIDERS_KEY, providers);
+  client.setQueryData(MODELS_KEY, models);
+  client.setQueryData(PROVIDERS_KEY, data.providers ?? providers);
   client.setQueryData(CAPABILITIES_KEY, capabilities);
   client.setQueryData(SECURITY_CLASSIFICATIONS_KEY, security);
   api.GET.mockImplementation((path: string) => {
-    if (path === "/api/v1/ai-models/") return ok(presentation);
+    if (path === "/api/v1/ai-models/") return ok(models);
     if (path.endsWith("/migration-history")) return ok([]);
     return ok({});
   });
@@ -235,7 +262,7 @@ describe("ModelsPage", () => {
   it("filters by type with counts and announces the result", async () => {
     renderPage();
     const types = screen.getByRole("radiogroup", { name: "Modelltyp" });
-    expect(within(types).getByRole("radio", { name: "Alla (4)" })).toBeTruthy();
+    expect(within(types).getByRole("radio", { name: "Alla (5)" })).toBeTruthy();
     expect(within(types).getByRole("radio", { name: "Chatt (2)" })).toBeTruthy();
 
     fireEvent.click(within(types).getByRole("radio", { name: "Inbäddning (1)" }));
@@ -269,6 +296,85 @@ describe("ModelsPage", () => {
     expect(screen.queryByRole("region", { name: "Anthropic" })).toBeNull();
     expect(screen.getByRole("region", { name: "OpenAI Images" })).toBeTruthy();
     await expectNoAxeViolations(document.body);
+  });
+
+  it("points the empty Prognos filter to the Function, also before any provider exists", async () => {
+    renderPage({
+      models: {
+        completion_models: [],
+        embedding_models: [],
+        transcription_models: [],
+        image_models: [],
+        forecast_models: []
+      },
+      providers: []
+    });
+    const types = screen.getByRole("radiogroup", { name: "Modelltyp" });
+    fireEvent.click(within(types).getByRole("radio", { name: "Prognos (0)" }));
+    expect(screen.getByText(EMPTY_FORECAST)).toBeTruthy();
+    expect(screen.queryByText(NO_PROVIDERS_YET)).toBeNull();
+  });
+
+  it("lists the forecast model under the provider that comes with the installation", async () => {
+    renderPage();
+    const tools = screen.getByRole("region", { name: "Eneos verktygstjänst" });
+    // Where other providers show their key: it has none by design, so no
+    // missing key, no connection to test and nothing to add, edit or delete.
+    expect(within(tools).getByText("1 modell · Ingår i installationen")).toBeTruthy();
+    expect(within(tools).queryByText("Nyckel saknas")).toBeNull();
+    expect(within(tools).queryByText("Inte testad")).toBeNull();
+    expect(within(tools).queryByRole("button", { name: /^Testa anslutning/ })).toBeNull();
+    expect(within(tools).queryByRole("button", { name: /^Lägg till modell/ })).toBeNull();
+    expect(
+      within(tools).queryByRole("button", { name: "Fler alternativ för Eneos verktygstjänst" })
+    ).toBeNull();
+
+    expect(within(tools).getByText("Timestral")).toBeTruthy();
+    expect(within(tools).getByRole("cell", { name: "Prognos" })).toBeTruthy();
+    // It uses no tokens and has no price: none, not an unknown one.
+    expect(within(tools).queryByText("Pris okänt")).toBeNull();
+    // Named after the Function, not the source's stored English name.
+    expect(within(tools).getByTitle("Används av Prognos")).toBeTruthy();
+
+    // "Prognos" follows "Bildgenerering" in the type filter.
+    const types = screen.getByRole("radiogroup", { name: "Modelltyp" });
+    const radios = within(types).getAllByRole("radio");
+    const forecast = within(types).getByRole("radio", { name: "Prognos (1)" });
+    expect(radios.indexOf(forecast)).toBe(
+      radios.indexOf(within(types).getByRole("radio", { name: "Bildgenerering (1)" })) + 1
+    );
+    fireEvent.click(forecast);
+    expect(screen.queryByRole("region", { name: "Anthropic" })).toBeNull();
+    expect(screen.getByRole("region", { name: "Eneos verktygstjänst" })).toBeTruthy();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("turns the forecast model off and classifies it through its own endpoint", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("switch", { name: "Aktivera Timestral" }));
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/forecast-models/{id}/", {
+        params: { path: { id: "f1" } },
+        body: { is_org_enabled: false }
+      })
+    );
+
+    const menu = openRowMenu("Timestral");
+    // It comes with the installation: nothing to delete, migrate or make the default.
+    expect(within(menu).getByRole("menuitem", { name: "Redigera" })).toBeTruthy();
+    for (const name of [/^Ta bort/, /^Migrera/, /^Ange som standardmodell/, /^Modelldetaljer/]) {
+      expect(within(menu).queryByRole("menuitem", { name })).toBeNull();
+    }
+    choose(menu, "Säkerhetsklassificering", "Klass 3");
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/forecast-models/{id}/", {
+        params: { path: { id: "f1" } },
+        body: { security_classification: { id: "s3" } }
+      })
+    );
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith("Timestral har nu säkerhetsklassen Klass 3.")
+    );
   });
 
   it("enables and disables an image model through its own endpoint", async () => {

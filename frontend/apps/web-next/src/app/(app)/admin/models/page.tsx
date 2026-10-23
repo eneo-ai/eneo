@@ -8,11 +8,17 @@ import {
 } from "@/features/admin/models/model-providers";
 import { adminModelsQueryOptions } from "@/features/admin/models/models";
 import { ModelsPage } from "@/features/admin/models/models-page";
+import { kindFilterOf } from "@/features/admin/models/provider-sections";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 
 export const generateMetadata = pageTitle("models");
 
-export default async function AdminModelsRoute() {
+export default async function AdminModelsRoute({
+  searchParams
+}: {
+  searchParams: Promise<{ type?: string }>;
+}) {
+  const { type } = await searchParams;
   const queryClient = getQueryClient();
   const api = eneoApi();
 
@@ -28,7 +34,7 @@ export default async function AdminModelsRoute() {
 
   return (
     <HydrationBoundary state={dehydrate(queryClient)}>
-      <ModelsPage />
+      <ModelsPage kind={kindFilterOf(type)} />
     </HydrationBoundary>
   );
 }

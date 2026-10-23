@@ -13,6 +13,7 @@ vi.mock("@/lib/toast", () => ({
 import { CAPABILITIES_KEY, type ModelProvider, PROVIDERS_KEY } from "./model-providers";
 import type { ModelsPresentation } from "./models";
 import { ProviderOverview } from "./provider-overview";
+import { kindFilterOf, type KindFilter } from "./provider-sections";
 
 const model = (id: string, nickname: string, providerId: string) => ({
   id,
@@ -85,7 +86,7 @@ const capabilities = {
   default_fields: [{ name: "api_key", required: true, secret: true, in: "credentials" }]
 };
 
-function renderOverview(items: ModelProvider[] = providers) {
+function renderOverview(items: ModelProvider[] = providers, initialKind?: KindFilter) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(PROVIDERS_KEY, items);
   queryClient.setQueryData(CAPABILITIES_KEY, capabilities);
@@ -94,6 +95,7 @@ function renderOverview(items: ModelProvider[] = providers) {
       models={presentation}
       classifications={[]}
       securityEnabled={false}
+      initialKind={initialKind}
       onAddModel={vi.fn()}
       onAddProvider={vi.fn()}
     />,
@@ -214,5 +216,19 @@ describe("the models page's attention banner", () => {
     renderOverview([provider("p-openai", "OpenAI"), provider("p-groq", "Groq")]);
 
     expect(screen.queryByText(/behöver åtgärdas/)).toBeNull();
+  });
+});
+
+describe("the models page's type filter", () => {
+  it("opens on the type the address names, so a link can show one type's models", () => {
+    renderOverview(providers, kindFilterOf("embedding"));
+
+    expect(screen.getByRole("region", { name: "vLLM" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Anthropic" })).toBeNull();
+  });
+
+  it("shows every type for an address without a type it knows", () => {
+    expect(kindFilterOf(undefined)).toBe("all");
+    expect(kindFilterOf("chat")).toBe("all");
   });
 });

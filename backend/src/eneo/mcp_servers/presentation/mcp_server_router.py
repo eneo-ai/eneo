@@ -354,6 +354,10 @@ async def create_bundled_mcp_server(
 
     user = container.user()
     audit_service = container.audit_service()
+    extra: dict[str, object] = {"bundled_tool": tool}
+    if result.server.forecast_model_id is not None:
+        # The forecast model Eneo bound the source to (created the first time).
+        extra["forecast_model_id"] = str(result.server.forecast_model_id)
     await audit_service.log_async(
         tenant_id=user.tenant_id,
         user=user,
@@ -361,9 +365,7 @@ async def create_bundled_mcp_server(
         entity_type=EntityType.MCP_SERVER,
         entity_id=result.server.id,
         description=f"Added bundled MCP server '{result.server.name}'",
-        metadata=AuditMetadata.standard(
-            actor=user, target=result.server, extra={"bundled_tool": tool}
-        ),
+        metadata=AuditMetadata.standard(actor=user, target=result.server, extra=extra),
     )
     if activate:
         await audit_service.log_async(

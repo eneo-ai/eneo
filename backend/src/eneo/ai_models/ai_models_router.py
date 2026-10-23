@@ -15,6 +15,9 @@ from eneo.authentication.endpoint_access import (
 from eneo.embedding_models.presentation.embedding_model_models import (
     EmbeddingModelSecurityStatus,
 )
+from eneo.forecast_models.presentation.forecast_model_models import (
+    ForecastModelSecurityStatus,
+)
 from eneo.image_models.presentation.image_model_models import (
     ImageModelSecurityStatus,
 )
@@ -35,7 +38,10 @@ router = APIRouter()
     "/",
     response_model=ModelsPresentation,
     summary="Get all AI models",
-    description="Get all completion, embedding, transcription and image models.",
+    description=(
+        "Get all completion, embedding, transcription, image, rerank and "
+        "forecast models."
+    ),
     responses=responses.get_responses([404, 500]),
 )
 @endpoint_access(
@@ -58,6 +64,7 @@ async def get_models(
     embedding_model_crud_service = container.embedding_model_crud_service()
     image_model_crud_service = container.image_model_crud_service()
     rerank_model_crud_service = container.rerank_model_crud_service()
+    forecast_model_crud_service = container.forecast_model_crud_service()
     user = container.user()
     space_service = container.space_service()
     space = None
@@ -69,6 +76,7 @@ async def get_models(
     ems = await embedding_model_crud_service.get_embedding_models()
     ims = await image_model_crud_service.get_image_models()
     rms = await rerank_model_crud_service.get_rerank_models()
+    fms = await forecast_model_crud_service.get_forecast_models()
 
     completion_models: list[CompletionModelSecurityStatus] = []
     for cm in cms:
@@ -157,10 +165,28 @@ async def get_models(
                 rerank_model_public.meets_security_classification = None
         rerank_models.append(rerank_model_public)
 
+    forecast_models: list[ForecastModelSecurityStatus] = []
+    for fm in fms:
+        forecast_model_public = ForecastModelSecurityStatus.from_domain(fm)
+        if space:
+            if user.tenant.security_enabled:
+                if space.security_classification is None:
+                    forecast_model_public.meets_security_classification = True
+                else:
+                    forecast_model_public.meets_security_classification = (
+                        not space.security_classification.is_greater_than(
+                            fm.security_classification
+                        )
+                    )
+            else:
+                forecast_model_public.meets_security_classification = None
+        forecast_models.append(forecast_model_public)
+
     return ModelsPresentation(
         completion_models=completion_models,
         embedding_models=embedding_models,
         transcription_models=transcription_models,
         image_models=image_models,
         rerank_models=rerank_models,
+        forecast_models=forecast_models,
     )

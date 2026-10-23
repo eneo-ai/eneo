@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from eneo.database.tables.ai_models_table import (
         CompletionModels,
         EmbeddingModels,
+        ForecastModels,
         ImageModels,
         RerankModels,
         TranscriptionModels,
@@ -58,6 +59,10 @@ class SecurityClassification(BasePublic):
     rerank_models: Mapped[list["RerankModels"]] = relationship(
         back_populates="security_classification",
         order_by="RerankModels.created_at",
+    )
+    forecast_models: Mapped[list["ForecastModels"]] = relationship(
+        back_populates="security_classification",
+        order_by="ForecastModels.created_at",
     )
     spaces: Mapped[list["Spaces"]] = relationship(
         back_populates="security_classification", order_by="Spaces.created_at"

@@ -259,6 +259,82 @@ describe("admin function sources", () => {
     expect(screen.queryByText("tools_builtin_model_missing_hint")).toBeNull();
   });
 
+  it("names the model a forecast source runs and where, and why it is blocked while it is off", async () => {
+    const forecastSource = (readiness: string | null) => ({
+      ...source,
+      id: "forecast",
+      mcp_server_id: "forecast",
+      name: "Forecast",
+      http_url: "http://runtime:8765/forecast",
+      http_auth_type: "bundled",
+      purpose: "forecast",
+      is_enabled: true,
+      readiness_reason: readiness,
+      forecast_model_id: "f1",
+      forecast_model: {
+        id: "f1",
+        name: "default",
+        nickname: "Timestral",
+        // The stored name; the line says where it runs in the reader's language.
+        provider_name: "Eneo tool service",
+        is_enabled: readiness === null
+      }
+    });
+    const serve = (readiness: string | null) =>
+      get.mockImplementation((path?: string) => {
+        if (path === "/api/v1/mcp-servers/settings/")
+          return ok({ items: [forecastSource(readiness)] });
+        if (path === "/api/v1/mcp-servers/bundled/")
+          return ok({
+            ...bundled,
+            items: bundled.items.map((item) =>
+              item.tool === "forecast"
+                ? { ...item, mcp_server_id: "forecast", available: true, unavailable_reason: null }
+                : item
+            )
+          });
+        return ok({ items: [] });
+      });
+
+    serve(null);
+    show();
+    expect(await screen.findByRole("heading", { level: 3, name: "forecast" })).toBeTruthy();
+    expect(screen.getByText("tools_builtin_forecast_summary")).toBeTruthy();
+    // The name opens Admin > Models on the forecast models, where it is governed.
+    const modelLink = screen.getByRole("link", { name: "Timestral" });
+    expect(modelLink.getAttribute("href")).toBe("/admin/models?type=forecast");
+    expect(modelLink.closest("p")?.textContent).toBe("model · Timestral · mcp_auth_bundled");
+    expect(screen.queryByText("tools_readiness_model_disabled")).toBeNull();
+    cleanup();
+
+    // Switched off in Admin > Models: the source says why, like an image source.
+    serve("model_disabled");
+    show();
+    expect(await screen.findByText("tools_readiness_model_disabled")).toBeTruthy();
+    expect(screen.getByText("tools_blocked")).toBeTruthy();
+  });
+
+  it("links an image source's model to the image models under Admin > Models", async () => {
+    const imageSource = {
+      ...source,
+      id: "images",
+      name: "Images",
+      http_auth_type: "internal",
+      purpose: "image_generation",
+      image_model_id: "m1",
+      image_model: { id: "m1", name: "gpt-image", nickname: "Studio", provider_name: "OpenAI" }
+    };
+    get.mockImplementation((path?: string) => {
+      if (path === "/api/v1/mcp-servers/settings/") return ok({ items: [imageSource] });
+      if (path === "/api/v1/mcp-servers/bundled/") return ok(bundled);
+      return ok({ items: [] });
+    });
+    show();
+    const modelLink = await screen.findByRole("link", { name: "Studio" });
+    expect(modelLink.getAttribute("href")).toBe("/admin/models?type=image");
+    expect(modelLink.closest("p")?.textContent).toBe("tools_source_model · Studio · OpenAI");
+  });
+
   it("activates an existing source through the capability endpoint", async () => {
     get.mockImplementation((path?: string) =>
       path === "/api/v1/mcp-servers/settings/" ? ok({ items: [source] }) : ok({ items: [] })

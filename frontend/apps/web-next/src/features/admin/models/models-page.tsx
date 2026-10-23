@@ -15,6 +15,7 @@ import { MigrationHistoryPanel } from "./migration-history-panel";
 import { adminModelsQueryOptions } from "./models";
 import { PricingVisibilityToggle } from "./pricing-visibility-toggle";
 import { ProviderOverview } from "./provider-overview";
+import type { KindFilter } from "./provider-sections";
 
 type ModelsTab = "models" | "history" | "settings";
 const TABS: ModelsTab[] = ["models", "history", "settings"];
@@ -24,9 +25,10 @@ const TABS: ModelsTab[] = ["models", "history", "settings"];
  * status, enable/disable, default, security classification, edit, migrate);
  * "Migreringshistorik" lists past migrations; "Inställningar" holds the
  * org-wide pricing visibility. "Lägg till leverantör" and each provider's
- * "Lägg till modell" open the same add-model wizard.
+ * "Lägg till modell" open the same add-model wizard. `kind` is the type the
+ * address names (`?type=`), which the type filter opens on.
  */
-export function ModelsPage() {
+export function ModelsPage({ kind = "all" }: { kind?: KindFilter } = {}) {
   const t = useTranslations();
   const { data: models } = useSuspenseQuery(adminModelsQueryOptions(browserApi));
   const { data: security } = useSuspenseQuery(securityClassificationsQueryOptions(browserApi));
@@ -120,6 +122,7 @@ export function ModelsPage() {
                 models={models}
                 classifications={security.security_classifications}
                 securityEnabled={security.security_enabled}
+                initialKind={kind}
                 onAddModel={openAddModel}
                 onAddProvider={openAddProvider}
               />

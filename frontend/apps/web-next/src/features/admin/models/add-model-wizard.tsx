@@ -33,7 +33,7 @@ import {
   providerOptions,
   setFavoriteProviders
 } from "./model-providers";
-import type { ModelKind } from "./models";
+import type { TenantModelKind } from "./models";
 import { ProviderField, providerFieldProblem, useFieldFocus } from "./provider-form-fields";
 import { ProviderPicker } from "./provider-picker";
 
@@ -48,13 +48,13 @@ const STEP_FOCUS = [
 
 type Step = "provider" | "credentials" | "models";
 
-function supportedModelKinds(modes: string[] | undefined): ModelKind[] {
-  const ordered: ModelKind[] = ["completion", "embedding", "transcription", "image"];
+function supportedModelKinds(modes: string[] | undefined): TenantModelKind[] {
+  const ordered: TenantModelKind[] = ["completion", "embedding", "transcription", "image"];
   const modeSet = new Set(modes ?? []);
   const supported = ordered.filter((mode) => modeSet.has(mode));
   return supported.length > 0 ? supported : ["completion"];
 }
-function defaultModelKind(modes: string[] | undefined): ModelKind {
+function defaultModelKind(modes: string[] | undefined): TenantModelKind {
   return supportedModelKinds(modes)[0] ?? "completion";
 }
 
@@ -80,7 +80,12 @@ export function AddModelWizard({
   const capsQuery = useQuery({ ...providerCapabilitiesQueryOptions(browserApi), enabled: open });
   const caps: ProviderCapabilities | undefined = capsQuery.data;
 
-  const hasProviders = (providers.data?.length ?? 0) > 0;
+  // The provider that comes with the installation takes no models from an admin.
+  const addableProviders = useMemo(
+    () => (providers.data ?? []).filter((provider) => !provider.is_managed),
+    [providers.data]
+  );
+  const hasProviders = addableProviders.length > 0;
 
   const favoritesQuery = useQuery({
     ...favoriteProvidersQueryOptions(browserApi),
@@ -123,7 +128,7 @@ export function AddModelWizard({
   const [fieldConfirmations, setFieldConfirmations] = useState<Record<string, string>>({});
   const [keyExpiresOn, setKeyExpiresOn] = useState<string | null>(null);
   const [providerId, setProviderId] = useState<string | null>(null);
-  const [modelKind, setModelKind] = useState<ModelKind>("completion");
+  const [modelKind, setModelKind] = useState<TenantModelKind>("completion");
   const [credentialsSubmitted, setCredentialsSubmitted] = useState(false);
   const [existingSubmitted, setExistingSubmitted] = useState(false);
   /** A name the create was refused for: another provider has it. */
@@ -135,7 +140,7 @@ export function AddModelWizard({
   useReturnFocus(open, noTrigger);
 
   function reset() {
-    const preselect = initialProviderId ?? providers.data?.[0]?.id ?? "";
+    const preselect = initialProviderId ?? addableProviders[0]?.id ?? "";
     // Default to the provider gallery ("new"); the existing-provider path is a
     // secondary link. Adding models to a specific provider jumps past this step.
     setStep(initialProviderId ? "models" : "provider");
@@ -332,7 +337,7 @@ export function AddModelWizard({
           )}
           <Selector
             label={t("provider")}
-            options={(providers.data ?? []).map((provider) => ({
+            options={addableProviders.map((provider) => ({
               value: provider.id,
               label: provider.name
             }))}

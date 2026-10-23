@@ -13,7 +13,8 @@
     ctaLabel,
     helper
   }: {
-    onAddProvider: () => void;
+    /** Without it there is no call to action (nothing an admin can add here). */
+    onAddProvider?: () => void;
     title?: string;
     description?: string;
     ctaLabel?: string;
@@ -56,12 +57,14 @@
   </div>
 
   <!-- CTA Button -->
-  <div class="mt-8" in:fly={{ y: 10, duration: 400, delay: 300 }}>
-    <Button onclick={onAddProvider} class="px-6">
-      <Plus />
-      {ctaLabel ?? m.add_first_provider()}
-    </Button>
-  </div>
+  {#if onAddProvider}
+    <div class="mt-8" in:fly={{ y: 10, duration: 400, delay: 300 }}>
+      <Button onclick={onAddProvider} class="px-6">
+        <Plus />
+        {ctaLabel ?? m.add_first_provider()}
+      </Button>
+    </div>
+  {/if}
 
   {#if helper !== ""}
     <p

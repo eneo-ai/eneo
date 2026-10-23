@@ -220,6 +220,14 @@ class ModelProviderPublic(BaseModel):
     provider_type: str
     config: dict[str, Any]
     is_active: bool
+    is_managed: bool = Field(
+        default=False,
+        description=(
+            "The provider comes with the deployment (Eneo's tool service): "
+            "Eneo creates it, its connection stays in the deployment's "
+            "settings, and it cannot be edited or deleted."
+        ),
+    )
     masked_api_key: str | None = None
     key_expires_on: date | None = Field(
         default=None, description=_KEY_EXPIRES_ON_DESCRIPTION

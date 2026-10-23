@@ -51,7 +51,8 @@ MCPServerAuthType = Literal["none", "bearer", "api_key_header", "internal"]
 
 
 class MCPServerBackingModelPublic(BaseModel):
-    """The catalog image model a built-in provider runs on (read-only)."""
+    """The catalog model a server runs on (read-only): a built-in provider's
+    image model, the Forecast source's forecast model."""
 
     id: UUID
     name: str
@@ -80,6 +81,10 @@ class MCPServerPublic(BaseModel):
     # Built-in providers only: the image model the loopback tool calls.
     image_model_id: Optional[UUID] = None
     image_model: Optional[MCPServerBackingModelPublic] = None
+    # The bundled Forecast source only: the forecast model its tool service
+    # runs. Set by Eneo when the source is added; governed in the catalog.
+    forecast_model_id: Optional[UUID] = None
+    forecast_model: Optional[MCPServerBackingModelPublic] = None
     is_enabled: bool = True
     readiness_reason: str | None = None
     # Capability providers: who this provider serves. "everyone" is the
@@ -97,8 +102,9 @@ class MCPServerPublic(BaseModel):
     tags: Optional[list[str]]
     icon_url: Optional[str]
     documentation_url: Optional[str]
-    # Effective classification: the row's own, or for a built-in provider the
-    # one of its image model.
+    # Effective classification: the row's own, else the one of the model it
+    # runs on (a built-in provider's image model, the Forecast source's
+    # forecast model).
     security_classification: Optional[SecurityClassificationPublic] = None
 
 

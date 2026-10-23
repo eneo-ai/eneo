@@ -9,6 +9,7 @@
 import type {
   CompletionModel,
   EmbeddingModel,
+  ForecastModel,
   ImageModel,
   RerankModel,
   SecurityClassification,
@@ -23,9 +24,15 @@ import {
   type ImageSize
 } from "$lib/features/ai-models/imageModelOptions";
 
+/** Kinds the add wizard creates and the edit dialog edits in full. */
 export type ModelType = "completion" | "embedding" | "transcription" | "image" | "rerank";
+/**
+ * What a draft can be edited as: also a forecast model, which comes with the
+ * installation, so only its display name and classification are edited.
+ */
+export type DraftModelType = ModelType | "forecast";
 export type AnyCatalogModel =
-  CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
+  CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel | ForecastModel;
 
 export interface ModelDraftState {
   name: string;
@@ -54,7 +61,7 @@ export interface ModelDraftState {
   securityClassification: SecurityClassification | null;
 }
 
-export function createEmptyDraft(modelType: ModelType, providerType: string): ModelDraftState {
+export function createEmptyDraft(modelType: DraftModelType, providerType: string): ModelDraftState {
   return {
     name: "",
     displayName: "",
@@ -235,7 +242,7 @@ function costToString(value: number | string | null | undefined): string {
  * Build a draft from an existing model record. Used by EditModelDialog so
  * the same form component can power both create and edit flows.
  */
-export function modelToDraft(model: AnyCatalogModel, modelType: ModelType): ModelDraftState {
+export function modelToDraft(model: AnyCatalogModel, modelType: DraftModelType): ModelDraftState {
   const base: ModelDraftState = {
     name: model.name,
     displayName: ("nickname" in model && model.nickname) || model.name,
@@ -247,7 +254,8 @@ export function modelToDraft(model: AnyCatalogModel, modelType: ModelType): Mode
     family: ("family" in model && model.family) || "openai",
     dimensionsStr: "",
     maxInputStr: "",
-    hosting: model.hosting ?? "swe",
+    // A forecast model has none: Eneo's tool service runs it.
+    hosting: ("hosting" in model ? model.hosting : null) ?? "swe",
     description: model.description ?? "",
     inputCostPerTokenStr: "",
     outputCostPerTokenStr: "",
