@@ -59,6 +59,41 @@ export type ComposerHandle = {
   insertText: (text: string) => void;
 };
 
+const isToken = (node: Node | null): node is HTMLElement =>
+  node instanceof HTMLElement && node.hasAttribute("data-astryx-token");
+const isBlank = (node: Node | null): node is Text =>
+  node?.nodeType === Node.TEXT_NODE && /^[  ]?$/.test(node.textContent ?? "");
+
+/**
+ * Removes the token (a pill) just before a collapsed caret, with the blank
+ * Astryx keeps after it. One Backspace takes the pill; Astryx's own handling
+ * only takes the blank first, which looks like nothing happened. False when
+ * the caret is not right after a token.
+ */
+function removeTokenBeforeCaret(editable: HTMLElement): boolean {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount || !selection.isCollapsed) return false;
+  const { startContainer: node, startOffset: offset } = selection.getRangeAt(0);
+  if (!editable.contains(node)) return false;
+  let before: Node | null;
+  if (node.nodeType === Node.TEXT_NODE) {
+    // At the start of a text, or at the end of the blank after a token.
+    if (offset === 0) before = node.previousSibling;
+    else if (isBlank(node) && offset === (node.textContent?.length ?? 0)) before = node;
+    else return false;
+  } else if (node === editable) {
+    before = editable.childNodes[offset - 1] ?? null;
+  } else {
+    return false;
+  }
+  const blank = isBlank(before) ? before : null;
+  const token = blank ? blank.previousSibling : before;
+  if (!isToken(token)) return false;
+  blank?.remove();
+  token.remove();
+  return true;
+}
+
 /**
  * The composer's text field: Astryx ChatComposerInput on ChatComposer's
  * context. Enter sends and Shift+Enter adds a line (the hint is in its
@@ -136,8 +171,15 @@ function ComposerInput({
       onEnter();
       return;
     }
-    if (event.key === "Backspace" && (handle.current?.getValue() ?? "") === "") {
-      onBackspaceEmpty();
+    if (event.key === "Backspace") {
+      const editable = root.current?.querySelector<HTMLElement>("[contenteditable]");
+      if (editable && removeTokenBeforeCaret(editable)) {
+        event.preventDefault();
+        // Astryx emits the change and drops the token's portal on input.
+        editable.dispatchEvent(new Event("input", { bubbles: true }));
+        return;
+      }
+      if ((handle.current?.getValue() ?? "") === "") onBackspaceEmpty();
     }
   };
 

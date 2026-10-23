@@ -321,7 +321,12 @@ describe("ChatView docked composer", () => {
     expect(scroller?.style.scrollPaddingBottom).toBe("28px");
 
     const textarea = screen.getByRole("textbox", { name: /Meddelande till/ });
-    const dock = observedElements().find((element) => element.contains(textarea));
+    // The innermost observed element around the field: the dock, not a
+    // resizable row the page observes around the whole conversation.
+    const around = observedElements().filter((element) => element.contains(textarea));
+    const dock = around.find(
+      (element) => !around.some((other) => other !== element && element.contains(other))
+    );
     expect(dock).toBeDefined();
     act(() => reportResize(dock!, { height: 150 }));
     expect(scroller?.style.scrollPaddingBottom).toBe("178px");
