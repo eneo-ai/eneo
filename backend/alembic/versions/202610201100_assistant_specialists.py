@@ -5,7 +5,7 @@ and answer with one combined reply. The consultations of a question are
 kept on the question. Historical questions have no consultation records.
 
 Revision ID: 202610201100
-Revises: 202610161000
+Revises: 202610071400
 """
 
 import sqlalchemy as sa
@@ -14,7 +14,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision = "202610201100"
-down_revision = "202610161000"
+down_revision = "202610071400"
 branch_labels = None
 depends_on = None
 
