@@ -35,6 +35,12 @@ function splitReferences(value: string): MdNode[] {
   return out;
 }
 
+function isOneReference(value: string): boolean {
+  const trimmed = value.trim();
+  const match = trimmed.match(REFERENCE);
+  return match?.length === 1 && match[0] === trimmed;
+}
+
 function textOf(node: MdNode): string {
   if (node.type === "text") return node.value ?? "";
   return (node.children ?? []).map(textOf).join("");
@@ -67,6 +73,9 @@ function transform(node: MdNode) {
     }
     if (child.type === "text" && child.value) {
       next.push(...splitReferences(child.value));
+    } else if (child.type === "inlineCode" && isOneReference(child.value ?? "")) {
+      // A reference the answer put in backticks is still the reference.
+      next.push(referenceLink(child.value!.trim()));
     } else {
       if (child.type !== "code" && child.type !== "inlineCode" && child.type !== "link") {
         transform(child);

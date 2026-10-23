@@ -61,6 +61,12 @@ describe("references in an answer", () => {
     expect(screen.getByRole("button", { name: "2 Hämta register › fast format" })).toBeTruthy();
   });
 
+  it("draws a reference the answer put in backticks, spaces and all", () => {
+    renderAnswer("Läser `{{ step_1.output.structured.atgard }}` och `step_1`.");
+    expect(screen.getByRole("button", { name: "1 Extrahera › atgard" })).toBeTruthy();
+    expect(screen.getByText("step_1").tagName).toBe("CODE");
+  });
+
   it("keeps the text of a code block as it is", () => {
     const { container } = renderAnswer("```\n{{step_1.output.text}}\n```");
     expect(container.querySelector("code")?.textContent).toContain("{{step_1.output.text}}");
