@@ -7,7 +7,10 @@ does not import what output_processing imports.
 
 from __future__ import annotations
 
+import hashlib
 import re
+import threading
+from collections import OrderedDict
 from collections.abc import Generator, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -111,11 +114,51 @@ def _panic_as_recursion() -> Generator[None]:
         raise RecursionError("recursion limit reached in the reference engine") from exc
 
 
+# How many accepted schemas the metaschema check remembers, least recently
+# used forgotten first. An entry is a digest, about 100 bytes.
+METASCHEMA_VERDICTS_MAX = 1024
+# (dialect, sha256 of the schema's repr) of each schema the check
+# accepted. A refusal is not remembered: its message holds part of the schema.
+_metaschema_verdicts: OrderedDict[tuple[type[Validator], bytes], None] = OrderedDict()
+# Draft saves check on the event loop and step-kind answers in threads.
+_metaschema_verdicts_lock = threading.Lock()
+
+
+def _content_key(
+    schema: Schema, dialect: type[Validator]
+) -> tuple[type[Validator], bytes] | None:
+    """``schema``'s content in its own key order, which the check reads it in.
+    Its repr, unlike its JSON text, tells a list from a tuple and a str key
+    from an int key, as the check does. None when it has none (nested too
+    deep), and the schema is checked as if never seen."""
+    try:
+        text = repr(schema)
+    except Exception:
+        return None
+    return dialect, hashlib.sha256(text.encode()).digest()
+
+
 def check_metaschema(schema: Schema, dialect: type[Validator]) -> None:
     """Raise SchemaError for a schema that is not one of ``dialect``, and
     RecursionError for one nested too deep to check, also when the limit
     trips inside rpds, so that every caller can refuse it as a typed
-    failure."""
+    failure. A schema with the content of one accepted before is accepted
+    without a check."""
+    key = _content_key(schema, dialect)
+    if key is not None:
+        with _metaschema_verdicts_lock:
+            if key in _metaschema_verdicts:
+                _metaschema_verdicts.move_to_end(key)
+                return
+    _check_metaschema(schema, dialect)
+    if key is not None:
+        with _metaschema_verdicts_lock:
+            _metaschema_verdicts[key] = None
+            if len(_metaschema_verdicts) > METASCHEMA_VERDICTS_MAX:
+                _metaschema_verdicts.popitem(last=False)
+
+
+def _check_metaschema(schema: Schema, dialect: type[Validator]) -> None:
     validator = build_schema_validator(
         dialect.META_SCHEMA, format_checker=dialect.FORMAT_CHECKER
     )

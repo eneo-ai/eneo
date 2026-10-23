@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import socket
 import urllib.request
+from collections import OrderedDict
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
@@ -710,6 +711,8 @@ _ReferenceEnginePanic.__module__ = "pyo3_runtime"
 
 
 def _metaschema_check_panics(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Only a schema the check has not accepted before is checked.
+    monkeypatch.setattr(schema_engine, "_metaschema_verdicts", OrderedDict())
     build = schema_engine.build_schema_validator
 
     class Panicking:
