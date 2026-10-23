@@ -1069,7 +1069,18 @@ async def test_death_after_claim_before_first_attempt_is_recovered(
                 - timedelta(seconds=181)
             )
         )
-    monkeypatch.setattr(flow_runtime_tasks, "_stale_running_cursor", None)
+    monkeypatch.setattr(
+        flow_runtime_tasks,
+        "_actionable_recovery",
+        flow_runtime_tasks._RecoveryWindow(
+            flow_runtime_tasks._ACTIONABLE_RECOVERY_KINDS
+        ),
+    )
+    monkeypatch.setattr(
+        flow_runtime_tasks,
+        "_review_recovery",
+        flow_runtime_tasks._RecoveryWindow(flow_runtime_tasks._REVIEW_RECOVERY_KINDS),
+    )
     await flow_runtime_tasks._reconcile_stale_running_runs_all_tenants()
     async with sessionmanager.session() as session, session.begin():
         recovered = await FlowRunRepository(session=session).get(
@@ -1096,6 +1107,152 @@ async def test_death_after_claim_before_first_attempt_is_recovered(
             )
             == 1
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_stale_run_is_recovered_ahead_of_older_healthy_reviews_elsewhere(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+):
+    from eneo.database.tables.tenant_table import Tenants
+
+    limit, reviews = 100, 150
+    async with sessionmanager.session() as session, session.begin():
+        run, flow, _ = await _create_running_run(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run.id)
+            .values(execution_heartbeat_at=sa.func.clock_timestamp() - _stale_run_age())
+        )
+        other_tenant_id = await session.scalar(
+            sa.insert(Tenants)
+            .values(name=f"healthy-reviews-{uuid4().hex}", quota_limit=0)
+            .returning(Tenants.id)
+        )
+        # A flow row of its own lets tenant B's runs satisfy the tenant FKs.
+        other_flow_id = await session.scalar(
+            sa.text("""
+                INSERT INTO flows (
+                    name, tenant_id, space_id, created_by_user_id, owner_user_id
+                )
+                SELECT 'Healthy reviews elsewhere', :tenant_id, space_id,
+                    created_by_user_id, owner_user_id
+                FROM flows WHERE id = :flow_id
+                RETURNING id
+            """),
+            {"tenant_id": other_tenant_id, "flow_id": flow.id},
+        )
+        await session.execute(
+            sa.text("""
+                INSERT INTO flow_versions (
+                    flow_id, version, tenant_id, definition_checksum, definition_json
+                )
+                SELECT :other_flow_id, version, :tenant_id, definition_checksum,
+                    definition_json
+                FROM flow_versions WHERE flow_id = :flow_id AND version = 1
+            """),
+            {
+                "tenant_id": other_tenant_id,
+                "flow_id": flow.id,
+                "other_flow_id": other_flow_id,
+            },
+        )
+        parameters = {
+            "tenant_id": other_tenant_id,
+            "flow_id": other_flow_id,
+            "user_id": admin_user.id,
+            "step_id": flow.steps[0].id,
+            "reviews": reviews,
+        }
+        # Healthy reviews in another tenant, every one older than the stale run.
+        await session.execute(
+            sa.text("""
+                INSERT INTO flow_runs (
+                    tenant_id, flow_id, flow_version, principal_user_id, status,
+                    created_at
+                )
+                SELECT :tenant_id, :flow_id, 1, :user_id, 'awaiting_review',
+                    now() - interval '60 days' + n * interval '1 second'
+                FROM generate_series(1, :reviews) series(n)
+            """),
+            parameters,
+        )
+        await session.execute(
+            sa.text("""
+                INSERT INTO flow_step_attempts (
+                    flow_run_id, flow_id, tenant_id, step_id, step_order,
+                    attempt_no, status, started_at, finished_at
+                )
+                SELECT id, flow_id, tenant_id, :step_id, 1, 1, 'completed', now(), now()
+                FROM flow_runs WHERE tenant_id = :tenant_id
+            """),
+            parameters,
+        )
+        await session.execute(
+            sa.text("""
+                INSERT INTO flow_run_review_checkpoints (
+                    flow_run_id, flow_id, tenant_id, step_id, step_order, attempt_no,
+                    review_mode, output_type, requester_principal_type,
+                    requester_user_id, expires_at
+                )
+                SELECT id, flow_id, tenant_id, :step_id, 1, 1,
+                    'view', 'json', 'user', principal_user_id, now() + interval '14 days'
+                FROM flow_runs WHERE tenant_id = :tenant_id
+            """),
+            parameters,
+        )
+        assert (
+            await FlowRunRepository(session=session).count_active_runs(
+                tenant_id=run.tenant_id
+            )
+            == 1
+        )
+
+    monkeypatch.setattr(
+        flow_runtime_tasks,
+        "_actionable_recovery",
+        flow_runtime_tasks._RecoveryWindow(
+            flow_runtime_tasks._ACTIONABLE_RECOVERY_KINDS
+        ),
+    )
+    monkeypatch.setattr(
+        flow_runtime_tasks,
+        "_review_recovery",
+        flow_runtime_tasks._RecoveryWindow(flow_runtime_tasks._REVIEW_RECOVERY_KINDS),
+    )
+    result = await flow_runtime_tasks._reconcile_stale_running_runs_all_tenants(
+        limit=limit
+    )
+
+    assert result["reconciled"] == 1
+    assert result["review_checkpoint_invariant_violations"] == 0
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowRunRepository(session=session)
+        recovered = await repo.get(run_id=run.id, tenant_id=run.tenant_id)
+        assert recovered.status == FlowRunStatus.FAILED
+        assert recovered.error.code == FlowApiErrorCode.RUN_WORKER_STALLED
+        # The stale run no longer holds the tenant's active-run capacity.
+        assert await repo.count_active_runs(tenant_id=run.tenant_id) == 0
+
+    # Review inspection keeps its own paging and advances across ticks.
+    first_review_cursor = flow_runtime_tasks._review_recovery.cursor
+    assert first_review_cursor is not None
+    second = await flow_runtime_tasks._reconcile_stale_running_runs_all_tenants(
+        limit=limit
+    )
+    assert second["reconciled"] == second["abandoned"] == 0
+    assert flow_runtime_tasks._review_recovery.cursor > first_review_cursor
 
 
 @pytest.mark.asyncio

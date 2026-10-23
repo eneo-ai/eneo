@@ -488,16 +488,23 @@ async def test_reconciler_uses_one_global_budget_and_advances_after_failure(
         "get_settings",
         lambda: SimpleNamespace(task_execution_timeout_seconds=14400),
     )
-    monkeypatch.setattr(tasks, "_stale_running_cursor", None, raising=False)
-    monkeypatch.setattr(tasks, "_stale_running_window_end", None)
+    monkeypatch.setattr(
+        tasks,
+        "_actionable_recovery",
+        tasks._RecoveryWindow(tasks._ACTIONABLE_RECOVERY_KINDS),
+    )
+    monkeypatch.setattr(
+        tasks, "_review_recovery", tasks._RecoveryWindow(tasks._REVIEW_RECOVERY_KINDS)
+    )
     with pytest.raises(tasks.FlowTenantSweepPartialFailure):
         await tasks._reconcile_stale_running_runs_all_tenants(limit=1)
-    assert repo.list_recovery_candidates.await_args.kwargs == {
+    assert repo.list_recovery_candidates.await_args_list[0].kwargs == {
         "limit": 1,
         "after": None,
         "through": (run.anchor_at, run.id),
+        "kinds": tasks._ACTIONABLE_RECOVERY_KINDS,
     }
-    assert tasks._stale_running_cursor == (run.anchor_at, run.id)
+    assert tasks._actionable_recovery.cursor == (run.anchor_at, run.id)
     assert (
         terminalizer.terminalize_stale_running_run.await_args.kwargs[
             "expected_revision"
@@ -549,10 +556,18 @@ async def test_reconciler_wraps_finite_window_despite_newer_arrivals(
     append_run(2)
     discovered = []
 
-    async def discover(*, limit, after=None, through=None):
-        candidates = [
+    def of_kinds(kinds):
+        actionable = kinds == tasks._ACTIONABLE_RECOVERY_KINDS
+        return [
             row
             for row in rows
+            if (row.kind in tasks._ACTIONABLE_RECOVERY_KINDS) == actionable
+        ]
+
+    async def discover(*, limit, after=None, through=None, kinds):
+        candidates = [
+            row
+            for row in of_kinds(kinds)
             if (after is None or key(row) > after)
             and (through is None or key(row) <= through)
         ][:limit]
@@ -561,7 +576,9 @@ async def test_reconciler_wraps_finite_window_despite_newer_arrivals(
 
     repo = AsyncMock()
     repo.list_recovery_candidates.side_effect = discover
-    repo.recovery_sweep_boundary.side_effect = lambda: max(map(key, rows))
+    repo.recovery_sweep_boundary.side_effect = lambda *, kinds: max(
+        map(key, of_kinds(kinds)), default=None
+    )
     attempts = []
 
     async def terminalize(**kwargs):
@@ -588,8 +605,14 @@ async def test_reconciler_wraps_finite_window_despite_newer_arrivals(
     monkeypatch.setattr(tasks.sessionmanager, "session", session_context)
     monkeypatch.setattr(tasks, "enable_autobegin_for_flow_task_session", lambda _: None)
     monkeypatch.setattr(tasks, "Container", lambda **_: container)
-    monkeypatch.setattr(tasks, "_stale_running_cursor", None)
-    monkeypatch.setattr(tasks, "_stale_running_window_end", None, raising=False)
+    monkeypatch.setattr(
+        tasks,
+        "_actionable_recovery",
+        tasks._RecoveryWindow(tasks._ACTIONABLE_RECOVERY_KINDS),
+    )
+    monkeypatch.setattr(
+        tasks, "_review_recovery", tasks._RecoveryWindow(tasks._REVIEW_RECOVERY_KINDS)
+    )
     for number in range(3, 9):
         try:
             await tasks._reconcile_stale_running_runs_all_tenants(limit=1)

@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from typing import Any, Sequence, TypedDict, cast
+from typing import Any, Collection, Sequence, TypedDict, cast
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
@@ -199,6 +199,7 @@ def _run_recovery_candidates_query(
     after: tuple[datetime, UUID] | None = None,
     through: tuple[datetime, UUID] | None = None,
     descending: bool = False,
+    kinds: Collection[FlowRunRecoveryKind] | None = None,
 ) -> sa.Subquery:
     deadline_anchor = sa.func.statement_timestamp() - FLOW_RUN_ABANDONMENT_AFTER
     heartbeat = sa.select(
@@ -234,7 +235,14 @@ def _run_recovery_candidates_query(
     ).where(FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value)
     # PostgreSQL may sort every UNION input before applying an outer LIMIT.
     bounded: list[sa.Select[Any]] = []
-    for branch in (heartbeat, exhausted, reviews):
+    branches = {
+        FlowRunRecoveryKind.EXECUTION_HEARTBEAT_EXPIRED: heartbeat,
+        FlowRunRecoveryKind.EXHAUSTED_DISPATCH: exhausted,
+        FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION: reviews,
+    }
+    for kind, branch in branches.items():
+        if kinds is not None and kind not in kinds:
+            continue
         anchor = branch.selected_columns.anchor_at
         run_id = branch.selected_columns.id
         if tenant_id is not None:
@@ -1087,8 +1095,12 @@ class FlowRunRepository:
         rows = (await self.session.execute(stmt)).scalars().all()
         return [FlowRun.model_validate(row) for row in rows]
 
-    async def recovery_sweep_boundary(self) -> tuple[datetime, UUID] | None:
-        candidates = _run_recovery_candidates_query(limit=1, descending=True)
+    async def recovery_sweep_boundary(
+        self, *, kinds: Collection[FlowRunRecoveryKind] | None = None
+    ) -> tuple[datetime, UUID] | None:
+        candidates = _run_recovery_candidates_query(
+            limit=1, descending=True, kinds=kinds
+        )
         row = (
             await self.session.execute(
                 sa.select(candidates.c.anchor_at, candidates.c.id)
@@ -1105,11 +1117,14 @@ class FlowRunRepository:
         limit: int = 25,
         after: tuple[datetime, UUID] | None = None,
         through: tuple[datetime, UUID] | None = None,
+        kinds: Collection[FlowRunRecoveryKind] | None = None,
     ) -> list[FlowRunRecoveryCandidate]:
+        """`kinds` names discovery branches; the review branch may come back
+        refined to an approved or missing checkpoint."""
         if limit < 1:
             return []
         candidates = _run_recovery_candidates_query(
-            limit=limit, tenant_id=tenant_id, after=after, through=through
+            limit=limit, tenant_id=tenant_id, after=after, through=through, kinds=kinds
         )
         stmt = (
             sa.select(candidates)

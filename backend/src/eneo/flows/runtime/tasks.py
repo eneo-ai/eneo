@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncGenerator, Generator
-from contextlib import asynccontextmanager, contextmanager
+from collections.abc import AsyncGenerator, Callable, Generator
+from contextlib import asynccontextmanager, contextmanager, suppress
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from typing import TYPE_CHECKING, assert_never
@@ -53,7 +54,11 @@ from eneo.flows.flow_run_error import (
     FlowRunRecoveryFacts,
 )
 from eneo.flows.flow_runtime_policy import resolve_flow_runtime_policy
-from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunExecutionOwner,
+    FlowRunRecoveryCandidate,
+    FlowRunRepository,
+)
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRow,
 )
@@ -650,14 +655,53 @@ def _fail_task_if_tenants_were_skipped(
     )
 
 
-_stale_running_cursor: tuple[datetime, UUID] | None = None
-_stale_running_window_end: tuple[datetime, UUID] | None = None
+# Review checkpoint inspection pages every awaiting-review run, healthy ones too.
+_REVIEW_RECOVERY_KINDS = frozenset({FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION})
+# Expired heartbeats and exhausted dispatches page apart, so a backlog of healthy
+# reviews anywhere in the deployment cannot delay their recovery.
+_ACTIONABLE_RECOVERY_KINDS = frozenset(
+    {
+        FlowRunRecoveryKind.EXECUTION_HEARTBEAT_EXPIRED,
+        FlowRunRecoveryKind.EXHAUSTED_DISPATCH,
+    }
+)
+
+
+@dataclass
+class _RecoveryWindow:
+    """A finite window of recovery candidates of some kinds, paged in order and
+    then wrapped, so newer arrivals cannot starve older ones."""
+
+    kinds: frozenset[FlowRunRecoveryKind]
+    cursor: tuple[datetime, UUID] | None = None
+    end: tuple[datetime, UUID] | None = None
+
+    async def next_page(
+        self, run_repo: FlowRunRepository, *, limit: int
+    ) -> list[FlowRunRecoveryCandidate]:
+        if self.cursor is None or (self.end is not None and self.cursor >= self.end):
+            self.cursor = self.end = None
+        if self.end is None:
+            self.end = await run_repo.recovery_sweep_boundary(kinds=self.kinds)
+        page = (
+            await run_repo.list_recovery_candidates(
+                limit=limit, after=self.cursor, through=self.end, kinds=self.kinds
+            )
+            if self.end is not None
+            else []
+        )
+        if not page:
+            self.cursor = self.end = None
+        return page
+
+
+_actionable_recovery = _RecoveryWindow(_ACTIONABLE_RECOVERY_KINDS)
+_review_recovery = _RecoveryWindow(_REVIEW_RECOVERY_KINDS)
 
 
 async def _reconcile_stale_running_runs_all_tenants(
     *, limit: int = 100
 ) -> dict[str, int | str]:
-    global _stale_running_cursor, _stale_running_window_end
     reconciled = 0
     abandoned = 0
     review_checkpoint_invariant_violations = 0
@@ -669,27 +713,12 @@ async def _reconcile_stale_running_runs_all_tenants(
         provider_call_repo = container.flow_provider_call_repo()
         terminalizer = container.flow_run_terminalizer()
         async with session.begin():
-            if _stale_running_cursor is None or (
-                _stale_running_window_end is not None
-                and _stale_running_cursor >= _stale_running_window_end
-            ):
-                _stale_running_cursor = None
-                _stale_running_window_end = None
-            if _stale_running_window_end is None:
-                _stale_running_window_end = await run_repo.recovery_sweep_boundary()
-            stale_runs = (
-                await run_repo.list_recovery_candidates(
-                    limit=limit,
-                    after=_stale_running_cursor,
-                    through=_stale_running_window_end,
-                )
-                if _stale_running_window_end is not None
-                else []
-            )
-            if not stale_runs:
-                _stale_running_cursor = None
-                _stale_running_window_end = None
-        for run in stale_runs:
+            candidates = [
+                (window, run)
+                for window in (_actionable_recovery, _review_recovery)
+                for run in await window.next_page(run_repo, limit=limit)
+            ]
+        for window, run in candidates:
             try:
                 if run.kind == FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION:
                     continue
@@ -749,7 +778,7 @@ async def _reconcile_stale_running_runs_all_tenants(
                 )
             finally:
                 # Advance even after failure so one old run cannot starve other tenants.
-                _stale_running_cursor = run.cursor
+                window.cursor = run.cursor
     _fail_task_if_tenants_were_skipped(
         task_name="flows.reconcile_running", skipped_tenant_ids=skipped_tenant_ids
     )
