@@ -6,6 +6,10 @@
       "entries": [
         {
           "id": "file-creation-progress",
+          "permissions": {
+            "allOf": ["file_creation"],
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "new",
           "area": "chat",
           "aliases": ["charts-in-documents", "file-download-links"],
@@ -20,6 +24,10 @@
         },
         {
           "id": "file-analysis-trace",
+          "permissions": {
+            "allOf": ["file_analysis"],
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "new",
           "area": "chat",
           "aliases": ["spreadsheet-selection-quotes"],
@@ -34,6 +42,10 @@
         },
         {
           "id": "compute-and-charts",
+          "permissions": {
+            "allOf": ["compute", "charts"],
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "new",
           "area": "chat",
           "aliases": ["intermediate-query-tables", "chat-widget-scroll"],
@@ -48,6 +60,9 @@
         },
         {
           "id": "conversation-uploads",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "improved",
           "area": "chat",
           "title": {
@@ -61,6 +76,9 @@
         },
         {
           "id": "assistant-attachment-modes",
+          "permissions": {
+            "allOf": ["assistants"]
+          },
           "type": "new",
           "area": "assistants",
           "title": {
@@ -74,6 +92,9 @@
         },
         {
           "id": "sharepoint-document-properties",
+          "permissions": {
+            "allOf": ["integrations"]
+          },
           "type": "improved",
           "area": "knowledge",
           "title": {
@@ -158,6 +179,9 @@
         },
         {
           "id": "sharepoint-picker-keyboard",
+          "permissions": {
+            "allOf": ["integrations"]
+          },
           "type": "improved",
           "area": "knowledge",
           "title": {
@@ -171,6 +195,9 @@
         },
         {
           "id": "website-indexing",
+          "permissions": {
+            "allOf": ["websites"]
+          },
           "type": "improved",
           "area": "knowledge",
           "title": {
@@ -211,6 +238,7 @@
         },
         {
           "id": "knowledge-moves-removed",
+          "permissions": { "allOf": ["assistants"] },
           "type": "improved",
           "area": "spaces",
           "title": {
@@ -321,8 +349,22 @@
             "sv": "Läs nyheter från kontots sidomeny"
           },
           "body": {
-            "en": "You can switch between My account, Integrations, API keys and What's new in the same sidebar. Release notes use the available width at /news. Choose Later to see unread news again after 24 hours, or Not interested to dismiss this version.",
-            "sv": "Du kan växla mellan Mitt konto, Integrationer, API-nycklar och Nyheter i samma sidomeny. Nyheterna använder hela bredden på /news. Välj Senare för att se olästa nyheter igen efter 24 timmar, eller Inte intresserad för att stänga för den här versionen."
+            "en": "You can switch between My account, Integrations, API keys and What's new in the same sidebar, with release notes using the available width at /news. News and guided tours follow your feature permissions. Choose Later to see unread news again after 24 hours, or Not interested to dismiss this version.",
+            "sv": "Du kan växla mellan Mitt konto, Integrationer, API-nycklar och Nyheter i samma sidomeny, med nyheter över hela bredden på /news. Nyheter och guidade turer anpassas efter dina behörigheter. Välj Senare för att se olästa nyheter igen efter 24 timmar, eller Inte intresserad för att stänga för den här versionen."
+          }
+        },
+        {
+          "id": "retention-runs-in-audit-log",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Follow retention runs in the audit log",
+            "sv": "Följ gallringskörningar i granskningsloggen"
+          },
+          "body": {
+            "en": "Every nightly retention run writes to the audit log: how many questions, app runs, sessions and files were removed, what was kept and why, and whether the run finished or stopped at its limit. The log never contains the content itself. Your operator can pause each retention task and set its limits.",
+            "sv": "Varje nattlig gallringskörning skriver till granskningsloggen: hur många frågor, appkörningar, sessioner och filer som togs bort, vad som behölls och varför, och om körningen blev klar eller stoppade vid sin gräns. Loggen innehåller aldrig själva innehållet. Driftansvarig kan pausa varje gallringsuppgift och ställa in dess gränser."
           }
         }
       ]
@@ -333,6 +375,9 @@
       "entries": [
         {
           "id": "skills",
+          "permissions": {
+            "allOf": ["skills", "skills_management"]
+          },
           "type": "new",
           "area": "skills",
           "title": {
@@ -368,6 +413,9 @@
         },
         {
           "id": "knowledge-on-demand",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "improved",
           "area": "chat",
           "title": {
@@ -381,6 +429,10 @@
         },
         {
           "id": "image-variations",
+          "permissions": {
+            "allOf": ["image_generation"],
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "new",
           "area": "chat",
           "title": {
@@ -394,6 +446,9 @@
         },
         {
           "id": "copy-rich-text",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "new",
           "area": "chat",
           "title": {
@@ -447,6 +502,9 @@
         },
         {
           "id": "model-details",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "improved",
           "area": "chat",
           "title": {
@@ -460,6 +518,9 @@
         },
         {
           "id": "chat-polish",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "improved",
           "area": "chat",
           "title": {
@@ -473,6 +534,9 @@
         },
         {
           "id": "attachments",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "improved",
           "area": "chat",
           "title": {
@@ -486,6 +550,9 @@
         },
         {
           "id": "download-original",
+          "permissions": {
+            "allOf": ["collections"]
+          },
           "type": "new",
           "area": "knowledge",
           "title": {
@@ -499,6 +566,9 @@
         },
         {
           "id": "open-shared-sources",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "fixed",
           "area": "knowledge",
           "title": {
@@ -512,6 +582,9 @@
         },
         {
           "id": "knowledge-reliability",
+          "permissions": {
+            "allOf": ["collections"]
+          },
           "type": "improved",
           "area": "knowledge",
           "title": {
@@ -525,6 +598,9 @@
         },
         {
           "id": "sharepoint-import",
+          "permissions": {
+            "allOf": ["integrations"]
+          },
           "type": "improved",
           "area": "knowledge",
           "title": {
@@ -538,6 +614,9 @@
         },
         {
           "id": "prompt-guide",
+          "permissions": {
+            "allOf": ["assistants"]
+          },
           "type": "improved",
           "area": "assistants",
           "title": {
@@ -568,6 +647,9 @@
         },
         {
           "id": "legacy-api-keys",
+          "permissions": {
+            "allOf": ["api_keys"]
+          },
           "type": "improved",
           "area": "account",
           "title": {
@@ -629,6 +711,9 @@
         },
         {
           "id": "modules-admin",
+          "permissions": {
+            "allOf": ["modules"]
+          },
           "type": "new",
           "area": "admin",
           "audience": "admin",
@@ -689,6 +774,9 @@
       "entries": [
         {
           "id": "crawler-restored",
+          "permissions": {
+            "allOf": ["websites"]
+          },
           "type": "fixed",
           "area": "knowledge",
           "title": {
@@ -708,6 +796,9 @@
       "entries": [
         {
           "id": "prompt-guide",
+          "permissions": {
+            "allOf": ["assistants"]
+          },
           "type": "new",
           "area": "assistants",
           "title": {
@@ -721,6 +812,9 @@
         },
         {
           "id": "rename-conversations",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "new",
           "area": "chat",
           "title": {
@@ -734,6 +828,9 @@
         },
         {
           "id": "aborted-answers-saved",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "improved",
           "area": "chat",
           "title": {
@@ -747,6 +844,9 @@
         },
         {
           "id": "provider-outage-message",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "improved",
           "area": "chat",
           "title": {
@@ -760,6 +860,9 @@
         },
         {
           "id": "webp-avif-uploads",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "fixed",
           "area": "chat",
           "title": {
@@ -799,6 +902,9 @@
         },
         {
           "id": "knowledge-selector",
+          "permissions": {
+            "allOf": ["assistants"]
+          },
           "type": "improved",
           "area": "assistants",
           "title": {
@@ -838,6 +944,9 @@
         },
         {
           "id": "api-key-file-cleanup",
+          "permissions": {
+            "allOf": ["api_keys"]
+          },
           "type": "improved",
           "area": "account",
           "title": {

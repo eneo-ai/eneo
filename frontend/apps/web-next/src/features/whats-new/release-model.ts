@@ -1,5 +1,5 @@
 import { compareVersions, visibleEntries } from "@eneo/whats-new";
-import type { EntryArea, Release, ReleaseEntry } from "@eneo/whats-new";
+import type { PermissionCheck, EntryArea, Release, ReleaseEntry } from "@eneo/whats-new";
 
 export type Marker = string | null | undefined;
 export type ReleaseFilters = { area: EntryArea | null; showMeOnly: boolean };
@@ -24,21 +24,21 @@ export function isReadRelease(release: Release, seenAtOpen: string | null): bool
   return Boolean(seenAtOpen && compareVersions(release.version, seenAtOpen) <= 0);
 }
 
-export function areasPresent(release: Release, isAdmin: boolean): EntryArea[] {
-  return [...new Set(visibleEntries(release, isAdmin).map((entry) => entry.area))];
+export function areasPresent(release: Release, can: PermissionCheck): EntryArea[] {
+  return [...new Set(visibleEntries(release, can).map((entry) => entry.area))];
 }
 
 export function filterEntries(
   release: Release,
   filters: ReleaseFilters,
-  isAdmin: boolean
+  can: PermissionCheck
 ): ReleaseEntry[] {
-  return visibleEntries(release, isAdmin).filter(
+  return visibleEntries(release, can).filter(
     (entry) =>
       (!filters.area || entry.area === filters.area) && (!filters.showMeOnly || entry.showMe)
   );
 }
 
-export function tourEntries(release: Release, isAdmin: boolean): ReleaseEntry[] {
-  return visibleEntries(release, isAdmin).filter((entry) => entry.showMe);
+export function tourEntries(release: Release, can: PermissionCheck): ReleaseEntry[] {
+  return visibleEntries(release, can).filter((entry) => entry.showMe);
 }

@@ -75,9 +75,6 @@ from eneo.conversations.application.recent_conversations_service import (
 )
 from eneo.crawler.destination_policy import DestinationPolicy
 from eneo.crawler.python_engine import PythonCrawlEngine
-from eneo.data_retention.infrastructure.data_retention_service import (
-    DataRetentionService,
-)
 from eneo.database.database import AsyncSession
 from eneo.document_templates.repo import DocumentTemplateRepository
 from eneo.document_templates.service import DocumentTemplateService
@@ -1734,11 +1731,6 @@ class Container(containers.DeclarativeContainer):
         app_service=app_service,
         file_service=file_service,
         job_service=job_service,
-    )
-
-    data_retention_service = providers.Factory(
-        DataRetentionService,
-        session=session,
     )
 
     # ═══════════════════════════════════════════════════════════════════════════

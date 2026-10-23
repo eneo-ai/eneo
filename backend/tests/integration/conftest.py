@@ -847,6 +847,15 @@ async def async_session(setup_database):
             yield session
 
 
+@pytest.fixture
+async def retention_session(setup_database):
+    # Retention commits must release real transactions rather than a fixture savepoint.
+    async with sessionmanager.session() as session:
+        session.sync_session.expire_on_commit = False
+        await session.begin()
+        yield session
+
+
 @pytest.fixture(autouse=True)
 def clear_api_keys_for_all_tests(request, monkeypatch):
     """Auto-use fixture to ensure API keys are cleared for integration tests ONLY.
