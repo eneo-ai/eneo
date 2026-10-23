@@ -1,5 +1,6 @@
 """Password-login responses and structured logs must never echo credentials."""
 
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass
 from unittest.mock import AsyncMock, MagicMock
@@ -16,6 +17,7 @@ from eneo.main.container.container import Container
 from eneo.main.exceptions import (
     AuthenticationException,
     ErrorCodes,
+    QuotaExceededException,
 )
 from eneo.main.logging import OTELJSONFormatter
 from eneo.main.models import GeneralError
@@ -86,13 +88,25 @@ def structured_logs(caplog: pytest.LogCaptureFixture) -> str:
     return "\n".join(formatter.format(record) for record in caplog.records)
 
 
+def login_log(caplog: pytest.LogCaptureFixture, message: str) -> logging.LogRecord:
+    return next(record for record in caplog.records if record.getMessage() == message)
+
+
+def logged_correlation_ids(caplog: pytest.LogCaptureFixture) -> set[str]:
+    return {
+        record.correlation_id  # type: ignore[attr-defined]
+        for record in caplog.records
+        if hasattr(record, "correlation_id")
+    }
+
+
 @pytest.mark.parametrize(
-    ("username", "password", "field", "error_type"),
+    ("username", "password", "form_field", "error_type"),
     [
         (EMAIL, "s3cret", "password", "string_too_short"),
         (EMAIL, "s" * 101, "password", "string_too_long"),
         (EMAIL, "密" * 101, "password", "string_too_long"),
-        ("invalid-email-SENTINEL", PASSWORD, "email", "value_error"),
+        ("invalid-email-SENTINEL", PASSWORD, "username", "value_error"),
     ],
 )
 def test_invalid_login_uses_safe_public_validation_errors(
@@ -100,7 +114,7 @@ def test_invalid_login_uses_safe_public_validation_errors(
     caplog: pytest.LogCaptureFixture,
     username: str,
     password: str,
-    field: str,
+    form_field: str,
     error_type: str,
 ) -> None:
     response = login_endpoint.client.post(
@@ -108,17 +122,65 @@ def test_invalid_login_uses_safe_public_validation_errors(
     )
 
     assert response.status_code == 422
+    # Same location shape as FastAPI's own form errors for this endpoint.
     assert response.json() == {
-        "detail": [{"loc": [field], "type": error_type, "msg": "Invalid value"}]
+        "detail": [
+            {"loc": ["body", form_field], "type": error_type, "msg": "Invalid value"}
+        ]
     }
     assert response.headers["X-Correlation-ID"]
     assert password not in response.text
     assert password not in structured_logs(caplog)
-    if field == "email":
+    if form_field == "username":
         assert username not in response.text
         assert username not in structured_logs(caplog)
     login_endpoint.count.assert_not_awaited()
     login_endpoint.service.login.assert_not_awaited()
+
+
+def test_missing_form_field_and_manual_validation_report_locations_alike(
+    login_endpoint: LoginEndpoint,
+) -> None:
+    missing = login_endpoint.client.post(LOGIN_PATH, data={"username": EMAIL})
+    malformed = login_endpoint.client.post(
+        LOGIN_PATH, data={"username": EMAIL, "password": "short"}
+    )
+
+    assert [error["loc"] for error in missing.json()["detail"]] == [
+        ["body", "password"]
+    ]
+    assert [error["loc"] for error in malformed.json()["detail"]] == [
+        ["body", "password"]
+    ]
+
+
+@pytest.mark.parametrize(
+    ("password", "expected_status"),
+    [("short", 422), (PASSWORD, 401), ("Unexpected-" + PASSWORD, 500)],
+)
+def test_correlation_header_names_the_id_in_the_login_logs(
+    login_endpoint: LoginEndpoint,
+    caplog: pytest.LogCaptureFixture,
+    password: str,
+    expected_status: int,
+) -> None:
+    """Support reads the header and searches the logs for it; the caller's own
+    id is still echoed as ``request_id`` in the body, as documented."""
+    login_endpoint.service.login.side_effect = (
+        RuntimeError("boom") if expected_status == 500 else AuthenticationException()
+    )
+
+    response = login_endpoint.client.post(
+        LOGIN_PATH,
+        data={"username": EMAIL, "password": password},
+        headers={"X-Correlation-ID": "caller-supplied-id"},
+    )
+
+    assert response.status_code == expected_status
+    header = response.headers["X-Correlation-ID"]
+    assert logged_correlation_ids(caplog) == {header}
+    if expected_status != 422:
+        assert response.json()["request_id"] == "caller-supplied-id"
 
 
 @pytest.mark.parametrize(
@@ -226,6 +288,7 @@ def test_invalid_credentials_keep_the_public_contract_without_exception_values(
 @pytest.mark.parametrize("password_matches", [True, False])
 def test_account_state_is_only_disclosed_after_password_verification(
     login_endpoint: LoginEndpoint,
+    caplog: pytest.LogCaptureFixture,
     user_state: UserState,
     tenant_state: TenantState,
     code: ErrorCodes,
@@ -266,6 +329,15 @@ def test_account_state_is_only_disclosed_after_password_verification(
     assert response.headers["X-Correlation-ID"]
     if password_matches:
         assert error.eneo_error_code == code
+        # Valid credentials against a blocked account are worth tracing.
+        refused = login_log(caplog, "Login refused after credential verification")
+        assert refused.levelno == logging.WARNING
+        assert refused.email == EMAIL  # type: ignore[attr-defined]
+        assert refused.source_ip  # type: ignore[attr-defined]
+        assert refused.error_type in {  # type: ignore[attr-defined]
+            "UserInactiveException",
+            "TenantSuspendedException",
+        }
     else:
         assert error.code == "invalid_credentials"
         assert error.message == "Invalid credentials"
@@ -273,7 +345,29 @@ def test_account_state_is_only_disclosed_after_password_verification(
     login_endpoint.clear.assert_not_awaited()
 
 
-def test_unexpected_errors_keep_diagnostics_without_exception_values(
+def test_any_denial_with_a_registered_handler_keeps_its_canonical_response(
+    login_endpoint: LoginEndpoint, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Not only the two account-state denials: whatever the shared handlers
+    answer canonically must not be downgraded to ``login_unavailable``."""
+    login_endpoint.service.login.side_effect = QuotaExceededException(
+        "Seat limit reached"
+    )
+
+    response = login_endpoint.client.post(
+        LOGIN_PATH, data={"username": EMAIL, "password": PASSWORD}
+    )
+
+    assert response.status_code == 403
+    error = GeneralError.model_validate(response.json())
+    assert error.eneo_error_code == ErrorCodes.QUOTA_EXCEEDED
+    assert error.code != "login_unavailable"
+    refused = login_log(caplog, "Login refused after credential verification")
+    assert refused.error_type == "QuotaExceededException"  # type: ignore[attr-defined]
+    login_endpoint.clear.assert_not_awaited()
+
+
+def test_unexpected_errors_keep_diagnostics_with_the_password_redacted(
     login_endpoint: LoginEndpoint, caplog: pytest.LogCaptureFixture
 ) -> None:
     exception = RuntimeError(f"Backend failed with credential {PASSWORD}")
@@ -292,8 +386,13 @@ def test_unexpected_errors_keep_diagnostics_without_exception_values(
     assert PASSWORD not in response.text
     logs = structured_logs(caplog)
     assert PASSWORD not in logs
-    assert "RuntimeError" in logs
-    assert any("stack_frames" in record.__dict__ for record in caplog.records)
+    failure = login_log(caplog, "Login failed: unexpected error")
+    assert failure.error_type == "RuntimeError"  # type: ignore[attr-defined]
+    assert failure.error == "Backend failed with credential [REDACTED]"  # type: ignore[attr-defined]
+    trace = failure.traceback  # type: ignore[attr-defined]
+    assert "ValueError: Inner exception: [REDACTED]" in trace
+    assert "RuntimeError: Backend failed with credential [REDACTED]" in trace
+    assert "user_router.py" in trace
     login_endpoint.clear.assert_not_awaited()
 
 

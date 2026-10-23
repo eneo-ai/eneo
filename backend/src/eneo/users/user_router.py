@@ -50,17 +50,13 @@ from eneo.main import config
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import validate_public_origin
 from eneo.main.container.container import Container
-from eneo.main.exceptions import (
-    AuthenticationException,
-    FederatedLoginDenied,
-    TenantSuspendedException,
-    UserInactiveException,
-)
-from eneo.main.logging import get_logger
+from eneo.main.exceptions import AuthenticationException, FederatedLoginDenied
+from eneo.main.logging import get_logger, redact_values
 from eneo.main.models import CursorPaginatedResponse
-from eneo.main.request_context import set_request_context
+from eneo.main.request_context import get_request_context, set_request_context
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
+from eneo.server.exception_handlers import has_registered_handler
 from eneo.server.protocol import responses
 from eneo.tenants.tenant import TenantPublic
 from eneo.users.password import (
@@ -255,6 +251,18 @@ async def _resolve_single_tenant_redirect_uri(
     return resolved_redirect_uri
 
 
+# ``UserLogin`` validates the OAuth2 form, whose field for the email is
+# ``username``. Report locations the way FastAPI reports the form itself.
+_LOGIN_FORM_FIELDS = {"email": "username"}
+
+
+def _login_form_location(loc: tuple[int | str, ...]) -> tuple[int | str, ...]:
+    if not loc:
+        return ("body",)
+    first, *rest = loc
+    return ("body", _LOGIN_FORM_FIELDS.get(str(first), first), *rest)
+
+
 @router.post(
     "/login/token/",
     response_model=AccessToken,
@@ -274,8 +282,12 @@ async def user_login_with_email_and_password(
 ) -> AccessToken:
     """OAuth2 Login with comprehensive error handling and logging"""
 
-    # Generate correlation ID for request tracking
-    correlation_id = secrets.token_hex(8)
+    # Logs, the correlation header and support lookups share one id: the
+    # request context's (the trace id when a span is active, otherwise the
+    # caller's legacy header). Generate one only when the middleware had none.
+    correlation_id = cast(
+        str | None, get_request_context().get("correlation_id")
+    ) or secrets.token_hex(8)
     set_request_context(correlation_id=correlation_id)
 
     # Capture source IP (proxy-aware)
@@ -301,7 +313,9 @@ async def user_login_with_email_and_password(
                 "validation_types": [error["type"] for error in errors],
             },
         )
-        raise RequestValidationError(errors) from None
+        raise RequestValidationError(
+            [{**error, "loc": _login_form_location(error["loc"])} for error in errors]
+        ) from None
 
     logger.info(
         "Username/password login initiated",
@@ -402,13 +416,25 @@ async def user_login_with_email_and_password(
             headers={"X-Correlation-ID": correlation_id},
         ) from None
 
-    except (UserInactiveException, TenantSuspendedException):
-        # These are verified-account denials, with canonical 403 responses.
-        raise
-
     except Exception as e:
-        # Exception values and chained tracebacks can contain credentials.
-        # Keep the type and frame locations for diagnosis without those values.
+        if has_registered_handler(request.app, e):
+            # A denial with a canonical response (inactive user, suspended
+            # organisation, ...). The password was verified before it was
+            # raised, so keep the origin on record.
+            logger.warning(
+                "Login refused after credential verification",
+                extra={
+                    "correlation_id": correlation_id,
+                    "auth_method": "password",
+                    "email": email,
+                    "source_ip": source_ip,
+                    "error_type": type(e).__name__,
+                },
+            )
+            raise
+
+        # Exception values and chained tracebacks may quote the submitted
+        # password; redact it rather than drop the diagnostics.
         logger.error(
             "Login failed: unexpected error",
             extra={
@@ -417,14 +443,10 @@ async def user_login_with_email_and_password(
                 "email": email,
                 "source_ip": source_ip,
                 "error_type": type(e).__name__,
-                "stack_frames": [
-                    {
-                        "file": frame.filename,
-                        "line": frame.lineno,
-                        "function": frame.name,
-                    }
-                    for frame in traceback.extract_tb(e.__traceback__)
-                ],
+                "error": redact_values(str(e), password),
+                "traceback": redact_values(
+                    "".join(traceback.format_exception(e)), password
+                ),
             },
         )
         raise HTTPException(

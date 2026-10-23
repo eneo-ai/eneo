@@ -7,11 +7,20 @@ import {
   startOidcLoginAttempt,
   resolveSafeLoginDestination
 } from "$lib/features/auth/auth.server";
-import { loginWithEneo } from "$lib/features/auth/eneo.server";
+import { loginWithEneo, type EneoLoginFailureReason } from "$lib/features/auth/eneo.server";
 import { getMobilityguardLink } from "$lib/features/auth/mobilityguard.server";
 import { getZitadelLink } from "$lib/features/auth/zitadel.server";
 import { redirect, fail, type Actions } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
+
+/** The form action's status per failure reason: a backend that could not
+ * answer is a 503, a blocked account a 403, everything else the user's 400. */
+const LOGIN_FAILURE_STATUS: Record<EneoLoginFailureReason, number> = {
+  credentials: 400,
+  rate_limited: 400,
+  deactivated: 403,
+  unavailable: 503
+};
 
 export const actions: Actions = {
   login: async (event) => {
@@ -30,10 +39,11 @@ export const actions: Actions = {
         redirect(302, redirectUrl);
       }
 
-      // The page tells a backend that could not answer apart from rejected
-      // credentials; the correlation ID lets support find the server log.
+      // The page tells a backend that could not answer and a blocked account
+      // apart from rejected credentials; the correlation ID lets support find
+      // the server log.
       const failureReason = reason ?? "credentials";
-      return fail(failureReason === "unavailable" ? 503 : 400, {
+      return fail(LOGIN_FAILURE_STATUS[failureReason], {
         failed: true,
         reason: failureReason,
         correlationId,
