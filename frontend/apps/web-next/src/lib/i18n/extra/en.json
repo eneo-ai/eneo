@@ -3236,7 +3236,7 @@
   "flow_error_flow_run_file_access_audit_unavailable": "The download link could not be created because required audit logging is unavailable right now. Try again later.",
   "flow_error_flow_run_file_not_accessible": "One or more selected files are no longer available to you. Upload the files again.",
   "flow_error_flow_run_file_not_bound_to_flow": "One or more selected files were uploaded for another flow. Upload them through this flow and try again.",
-  "flow_error_flow_run_idempotency_conflict": "This run was already submitted with different details. Start a new run.",
+  "flow_error_flow_run_idempotency_conflict": "This request was already sent with other details. Reload the page and try again.",
   "flow_error_flow_run_input_payload_too_large": "What you are sending in is too large. Reduce the text or fields and try again.",
   "flow_error_flow_run_input_exceeds_limit": "What you are sending in exceeds the limit for text or files. Use less text or fewer or smaller files.",
   "flow_error_flow_run_invalid_idempotency_key": "The run could not be submitted safely. Reload the page and try again. Contact support if it keeps happening.",

@@ -1054,6 +1054,15 @@ async def reject_flow_run_review_checkpoint(
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND,
         ),
+        409: error_response(
+            description=(
+                "The Idempotency-Key already resumed another review checkpoint of "
+                "this run. Send a new key for this checkpoint."
+            ),
+            message="The Idempotency-Key already resumed another review checkpoint of this run.",
+            eneo_error_code=ErrorCodes.CONFLICT,
+            code=FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT,
+        ),
     },
 )
 @endpoint_access(
@@ -1157,6 +1166,15 @@ async def resume_flow_run_review_checkpoint(
             message="Review checkpoint not found.",
             eneo_error_code=ErrorCodes.NOT_FOUND,
             code=FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND,
+        ),
+        409: error_response(
+            description=(
+                "The Idempotency-Key already resumed another review checkpoint of "
+                "this run. Send a new key for this checkpoint."
+            ),
+            message="The Idempotency-Key already resumed another review checkpoint of this run.",
+            eneo_error_code=ErrorCodes.CONFLICT,
+            code=FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT,
         ),
     },
 )

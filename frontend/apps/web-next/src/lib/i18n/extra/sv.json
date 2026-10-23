@@ -3236,7 +3236,7 @@
   "flow_error_flow_run_file_access_audit_unavailable": "Nedladdningslänken kunde inte skapas eftersom den obligatoriska loggningen inte fungerar just nu. Försök igen senare.",
   "flow_error_flow_run_file_not_accessible": "En eller flera valda filer är inte längre tillgängliga för dig. Ladda upp filerna igen.",
   "flow_error_flow_run_file_not_bound_to_flow": "En eller flera valda filer laddades upp för ett annat flöde. Ladda upp dem via det här flödet och försök igen.",
-  "flow_error_flow_run_idempotency_conflict": "Körningen har redan skickats med andra uppgifter. Starta en ny körning.",
+  "flow_error_flow_run_idempotency_conflict": "Begäran har redan skickats med andra uppgifter. Läs in sidan på nytt och försök igen.",
   "flow_error_flow_run_input_payload_too_large": "Det du skickar in är för stort. Minska texten eller fälten och försök igen.",
   "flow_error_flow_run_input_exceeds_limit": "Det du skickar in är större än gränsen för text eller filer. Minska texten eller använd färre eller mindre filer.",
   "flow_error_flow_run_invalid_idempotency_key": "Körningen kunde inte skickas på ett säkert sätt. Ladda om sidan och försök igen. Kontakta support om felet återkommer.",

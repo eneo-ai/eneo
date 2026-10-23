@@ -76,6 +76,7 @@ from eneo.flows.runtime.flow_runtime_health import (
     build_flow_runtime_health_policy,
     load_flow_runtime_health_snapshot,
 )
+from eneo.main.exceptions import ConflictException
 from tests.flow_snapshot_fixtures import assistant_snapshot
 from tests.integration.flows.test_flow_run_listing_and_evidence_measurement import (
     _capture_queries,
@@ -1540,6 +1541,102 @@ async def test_resume_review_checkpoint_requeues_run_and_replays_idempotently(
         "flow_run_review_checkpoint_approved",
         "flow_run_review_checkpoint_resumed",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_resume_key_of_an_earlier_checkpoint_of_the_run_is_a_typed_conflict(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    # The resume key is unique per run: a second checkpoint of the run resumed
+    # with the key of the first is refused as a conflict, not a database error.
+    async with db_container() as container:
+        session = container.session()
+        scenario = await _create_review_checkpoint_scenario(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            admin_user=admin_user,
+        )
+        repo = FlowRunRepository(session=session)
+        checkpoint_repo = _review_checkpoint_repo(session=session, run_repo=repo)
+        principal = FlowPrincipal.from_user(admin_user)
+        await repo.mark_running_if_claimable(
+            run_id=scenario.flow_run_id,
+            tenant_id=scenario.tenant_id,
+            expected_revision=scenario.run.revision,
+        )
+        await _complete_reviewed_step_result(session=session, scenario=scenario)
+        common = {
+            "tenant_id": scenario.tenant_id,
+            "flow_id": scenario.flow_id,
+            "flow_run_id": scenario.flow_run_id,
+        }
+        first = await checkpoint_repo.open_review_checkpoint_for_completed_step(
+            **common,
+            step_id=scenario.step_ids[0],
+            step_order=1,
+            attempt_no=1,
+            requester_principal=principal,
+            next_step_ids=(scenario.step_ids[1],),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
+        )
+        await checkpoint_repo.approve_and_resume_review_checkpoint(
+            **common,
+            checkpoint_id=first.checkpoint.id,
+            expected_revision=first.checkpoint.revision,
+            resume_idempotency_key="same-key",
+            principal=principal,
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == scenario.flow_run_id)
+            .values(status=FlowRunStatus.RUNNING.value)
+        )
+        await _ensure_completed_step_attempt(
+            repo=repo,
+            scenario=scenario,
+            step_id=scenario.step_ids[1],
+            step_order=2,
+            attempt_no=1,
+        )
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == scenario.flow_run_id)
+            .where(FlowStepResults.step_id == scenario.step_ids[1])
+            .values(
+                status=FlowStepResultStatus.COMPLETED.value,
+                current_attempt_no=1,
+                output_payload_json={"answer": "second"},
+            )
+        )
+        second = await checkpoint_repo.open_review_checkpoint_for_completed_step(
+            **common,
+            step_id=scenario.step_ids[1],
+            step_order=2,
+            attempt_no=1,
+            requester_principal=principal,
+            next_step_ids=(),
+            review_mode=FlowStepReviewMode.VIEW,
+            output_type=FlowOutputType.JSON,
+        )
+
+        with pytest.raises(ConflictException) as refused:
+            await checkpoint_repo.approve_and_resume_review_checkpoint(
+                **common,
+                checkpoint_id=second.checkpoint.id,
+                expected_revision=second.checkpoint.revision,
+                resume_idempotency_key="same-key",
+                principal=principal,
+            )
+
+    assert refused.value.code == FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT.value
 
 
 @pytest.mark.asyncio

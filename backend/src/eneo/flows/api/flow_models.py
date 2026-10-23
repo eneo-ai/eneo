@@ -124,6 +124,7 @@ from eneo.flows.enums import (
     FlowOutputDelivery as FlowOutputDelivery,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 from eneo.flows.flow_error_taxonomy import FLOW_ERROR_TAXONOMY
 from eneo.flows.flow_review_policy import (
     FLOW_STEP_REVIEW_POLICY_DESCRIPTION,
@@ -785,6 +786,13 @@ class FlowStepUpdateRequest(FlowStepCreateRequest):
     )
 
 
+# What a flow's name can hold: the length its materialization allows, and no
+# NUL, which the database cannot store.
+FlowName: TypeAlias = Annotated[
+    str, Field(max_length=MAX_FLOW_NAME_LENGTH, pattern=r"^[^\x00]*$")
+]
+
+
 class FlowCreateRequest(BaseModel):
     model_config = ConfigDict(
         extra="forbid",
@@ -808,7 +816,7 @@ class FlowCreateRequest(BaseModel):
     )
 
     space_id: UUID
-    name: str
+    name: FlowName
     description: str | None = None
     steps: list[FlowStepCreateRequest]
     metadata_json: dict[str, Any] | None = None
@@ -840,7 +848,7 @@ class FlowUpdateRequest(BaseModel):
         },
     )
 
-    name: str
+    name: FlowName
     description: str | None
     steps: list[FlowStepUpdateRequest]
     metadata_json: dict[str, Any] | None | NotProvided = Field(default=NOT_PROVIDED)

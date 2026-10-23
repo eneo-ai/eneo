@@ -727,6 +727,10 @@ class FlowRunService:
             live_transcript_ids=live_transcript_ids,
             single_recording_steps=single_recording_steps,
         )
+        ensure_inline_payload_size_allowed(
+            flow_id=flow_id,
+            input_payload_json=prepared_payload,
+        )
         request_fingerprint = self._build_idempotency_fingerprint(
             tenant_id=self.user.tenant_id,
             principal=principal,
@@ -736,11 +740,6 @@ class FlowRunService:
             run_label=run_label,
             step_input_files=step_input_file_projections,
             purpose=purpose,
-        )
-
-        ensure_inline_payload_size_allowed(
-            flow_id=flow_id,
-            input_payload_json=prepared_payload,
         )
         return _PreparedRunCreation(
             input_payload_json=prepared_payload,

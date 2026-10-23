@@ -37,6 +37,9 @@ from eneo.flows.api.flow_authoring_router import (
     list_flows as definition_list_flows,
 )
 from eneo.flows.api.flow_authoring_router import (
+    router as flow_authoring_router,
+)
+from eneo.flows.api.flow_authoring_router import (
     update_flow as definition_update_flow,
 )
 from eneo.flows.api.flow_http_test_models import HttpTestRequest
@@ -55,6 +58,7 @@ from eneo.flows.api.flow_models import (
     FlowUpdateRequest,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_authoring_name import MAX_FLOW_NAME_LENGTH
 from eneo.flows.http_transport import SECRET_SENTINEL, HttpTransportError
 from eneo.flows.http_transport.request_preview import HttpRequestPreview
 from eneo.flows.http_transport.test_action import HttpTestResult
@@ -1388,3 +1392,55 @@ async def test_list_flows_requests_all_flows_for_editors(monkeypatch):
         limit=51,
         offset=0,
     )
+
+
+def _authoring_client() -> TestClient:
+    container = MagicMock()
+    container.user.return_value = _user()
+    app = FastAPI()
+    app.include_router(flow_authoring_router)
+    add_exception_handlers(app)
+    for route in flatten_routes(list(app.routes)):
+        if not isinstance(route.route, APIRoute):
+            continue
+        for dependency in route.dependant.dependencies:
+            app.dependency_overrides[dependency.call] = lambda: container
+    return TestClient(app, raise_server_exceptions=False)
+
+
+def _step_json(**updates: object) -> dict[str, object]:
+    return {
+        "assistant_id": str(uuid4()),
+        "step_order": 1,
+        "input_source": "flow_input",
+        "input_type": "text",
+        "output_mode": "pass_through",
+        "output_type": "text",
+        **updates,
+    }
+
+
+def _refused_fields(response: httpx.Response) -> list[list[object]]:
+    assert response.status_code == 422, response.text
+    return [error["location"] for error in response.json()["details"]["errors"]]
+
+
+@pytest.mark.parametrize(
+    "name", ["x" * (MAX_FLOW_NAME_LENGTH + 1), "Flow\x00name"], ids=["long", "nul"]
+)
+def test_flow_name_materialization_refuses_is_refused_at_the_boundary(name: str):
+    client = _authoring_client()
+
+    created = client.post(
+        "/", json={"space_id": str(uuid4()), "name": name, "steps": []}
+    )
+    updated = client.patch(f"/{uuid4()}/", json={"name": name})
+    edited = client.patch(
+        f"/{uuid4()}/editor/",
+        json={"expected_revision": 1, "definition": {"name": name}},
+    )
+
+    assert ["body", "name"] in _refused_fields(created)
+    assert ["body", "name"] in _refused_fields(updated)
+    assert ["body", "definition", "name"] in _refused_fields(edited)
+    FlowCreateRequest(space_id=uuid4(), name="x" * MAX_FLOW_NAME_LENGTH, steps=[])

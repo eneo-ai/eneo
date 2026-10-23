@@ -14,6 +14,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.domain.action_types import ActionType
@@ -74,16 +75,22 @@ from eneo.flows.enums import (
     FlowRunReviewCheckpointState,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowConflictException
 from eneo.flows.flow_review_expiry_policy import (
     FLOW_REVIEW_EXPIRED_TERMINAL_MESSAGE,
     FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_runtime_file_integrity import constraint_name_from_integrity_error
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
     FlowRunAuditOutboxRepository,
 )
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.principal import FlowPrincipal
+
+# The partial unique index of review checkpoints (database/tables/flow_tables.py):
+# a resume key is unique per run.
+_RESUME_KEY_INDEX = "uq_flow_run_review_checkpoints_resume_key"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1284,13 +1291,24 @@ class FlowRunReviewCheckpointRepository:
     ) -> FlowRunReviewCheckpointResumeResult:
         """The RESUMED write plus the run's requeue on rows the caller locked
         and guarded."""
-        updated_checkpoint = await self._update_review_checkpoint_state(
-            checkpoint_id=checkpoint_id,
-            tenant_id=tenant_id,
-            target_state=FlowRunReviewCheckpointState.RESUMED,
-            principal=principal,
-            values={"resume_idempotency_key": resume_idempotency_key},
-        )
+        try:
+            updated_checkpoint = await self._update_review_checkpoint_state(
+                checkpoint_id=checkpoint_id,
+                tenant_id=tenant_id,
+                target_state=FlowRunReviewCheckpointState.RESUMED,
+                principal=principal,
+                values={"resume_idempotency_key": resume_idempotency_key},
+            )
+        except IntegrityError as exc:
+            # The key is unique per run: another checkpoint of the run was
+            # resumed with it.
+            if constraint_name_from_integrity_error(exc) != _RESUME_KEY_INDEX:
+                raise
+            raise FlowConflictException(
+                "The Idempotency-Key already resumed another review checkpoint "
+                "of this run.",
+                code=FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT,
+            ) from exc
         now_utc = datetime.now(timezone.utc)
         updated_run_row = await self.session.scalar(
             sa.update(FlowRuns)

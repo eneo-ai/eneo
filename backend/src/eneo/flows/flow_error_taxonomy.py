@@ -313,9 +313,15 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT: _entry(
         category="Run input",
         surfaced_through="API error response",
-        cause="The retry key was reused with different run input.",
-        consumer_action="Retry with the original payload or choose a new idempotency key.",
-        user_action="Start a new run or retry the exact original request.",
+        cause=(
+            "The idempotency key was already used for a different request: other "
+            "run input, or another review checkpoint of the run."
+        ),
+        consumer_action=(
+            "Send the new request with a new idempotency key; the original request "
+            "with its own key returns its first result."
+        ),
+        user_action="Reload the page and try again.",
     ),
     FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED: _entry(
         category="Run input",

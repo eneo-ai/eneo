@@ -3571,6 +3571,36 @@ async def test_create_run_rejects_oversized_input_payload(user):
 
 
 @pytest.mark.asyncio
+async def test_create_run_refuses_a_lone_surrogate_before_storing_it(user):
+    # A JSON request can carry an escaped lone surrogate: a Python string that
+    # is not text and cannot be encoded, counted or stored.
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    flow_version_repo = AsyncMock()
+    service = _flow_run_service(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=flow_version_repo,
+        runtime_upload_repo=_runtime_upload_repo(),
+        max_concurrent_runs=5,
+    )
+    flow = _flow(user=user, published_version=1)
+    _seed_flow_repo(flow_repo, flow)
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_run_repo.count_active_runs.return_value = 0
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.create_run(
+            flow_id=flow.id, input_payload_json={"text": "a\ud800b"}
+        )
+
+    assert exc_info.value.code == "typed_io_validation_failed"
+    flow_run_repo.create.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("definition_json", "message_fragment", "error_code", "error_context"),
     [

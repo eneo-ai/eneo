@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -37,6 +38,7 @@ from eneo.flows.api.flow_security_classification_router import (
 )
 from eneo.flows.application.flow_service import CandidateAssistantChange, FlowService
 from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.enums import FlowInputSource
 from eneo.flows.flow_authoring_spec import (
     MAX_FLOW_AUTHORING_REQUEST_BYTES,
     MAX_FLOW_AUTHORING_STEPS,
@@ -160,7 +162,8 @@ class _World:
             else _step(
                 2,
                 self.weak.id,
-                input_source="flow_input",
+                # Its explicit question is its whole input: it reads no step.
+                input_source="previous_step",
                 input_bindings={"question": "Fast text."},
             )
         )
@@ -1113,3 +1116,48 @@ def test_two_candidates_for_one_assistant_and_step_are_refused_at_the_request_bo
     for twice in (candidate, for_a_step):
         with pytest.raises(ValueError):
             FlowSecurityClassificationPreviewRequest(assistants=[twice, twice])
+
+
+def test_preview_refuses_a_candidate_step_the_save_refuses(reading_world, monkeypatch):
+    # The candidate's tool argument composes text around a reference: the
+    # save refuses it before its classification reads the configuration, and
+    # the preview gives the same typed refusal instead of explaining it.
+    world = reading_world
+    _sends_step_1_to_a_tool(world, server_level=3)
+    first, second = world.flow.steps
+    assert second.input_config is not None
+    tool = {
+        **second.input_config["tool"],  # type: ignore[dict-item]
+        "arguments": {"case": "Fall: {{step_1.output.text}}"},
+    }
+    candidate = [first, second.model_copy(update={"input_config": {"tool": tool}})]
+    client = _preview_client(world, monkeypatch)
+
+    response = client.post(
+        f"/{world.flow.id}/security-classification/preview",
+        json={
+            "steps": [
+                {
+                    "id": str(step.id),
+                    "assistant_id": str(step.assistant_id),
+                    "step_order": step.step_order,
+                    "user_description": step.user_description,
+                    "input_source": FlowInputSource(step.input_source).value,
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                    "input_config": step.input_config,
+                    "output_classification_override": (
+                        step.output_classification_override
+                    ),
+                }
+                for step in candidate
+            ]
+        },
+    )
+
+    with pytest.raises(BadRequestException) as saved:
+        asyncio.run(world.service.update_flow(flow_id=world.flow.id, steps=candidate))
+    assert response.status_code == 400, response.text
+    assert saved.value.code == "typed_io_tool_invalid_config"
+    assert response.json()["code"] == saved.value.code

@@ -1031,6 +1031,15 @@ class FlowService:
                 else step
                 for step in candidate_steps
             ]
+        # The save's step refusal comes first, as in the save: the
+        # classification reads the configuration a defective step holds.
+        refusals = draft_step_refusals(
+            candidate_steps,
+            metadata_json=draft_write_metadata(flow.metadata_json),
+            retained=retained_contracts(candidate_steps, flow.steps),
+        )
+        if refusals:
+            raise refusals[0]
         return await explain_flow_security_classification(
             steps=candidate_steps,
             assistants_by_id=assistants_by_id,
