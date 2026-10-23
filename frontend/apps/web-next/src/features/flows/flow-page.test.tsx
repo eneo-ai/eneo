@@ -596,6 +596,7 @@ describe("FlowPage", () => {
   it("hands a suggestion to the chat, bringing the chat into view on a phone, unsent", async () => {
     state.chat = ok({ ...CHAT, editing: false });
     state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    setViewport("phone");
     const { container } = renderPage();
     const definition = screen.getByRole("region", { name: "Flödet" });
     const chat = screen.getByRole("region", { name: "Chatt om flödet" });
@@ -603,14 +604,15 @@ describe("FlowPage", () => {
 
     fireEvent.click(
       await screen.findByRole("button", {
-        name: "Fråga assistenten om ”Svaret från steg 1 skickas två gånger” (Steg 2: Skriv svar)"
+        name: "Fråga assistenten om ”Svaret från 1 Sammanfatta skickas två gånger”"
       })
     );
-    // Text as typed, each step a pill that carries its id.
+    // Text as typed, each step a pill that carries its id (a pill brings its own space).
     await waitFor(() =>
       expect(state.inserted).toEqual([
-        "Förklara förslaget ”Svaret från steg 1 skickas två gånger” (duplicate_read) och " +
-          "föreslå hur flödet kan ändras. Steg: ",
+        "Förklara förslaget ”Svaret från ",
+        "@[Sammanfatta](step:step-1)",
+        "skickas två gånger” (duplicate_read) och föreslå hur flödet kan ändras. Steg: ",
         "@[Skriv svar](step:step-2)",
         "@[Sammanfatta](step:step-1)"
       ])
@@ -627,7 +629,7 @@ describe("FlowPage", () => {
   it("offers no request to a chat that is not available", async () => {
     state.suggestions = suggestions(4, [DUPLICATE_READ]);
     renderPage();
-    expect(await screen.findByText("Svaret från steg 1 skickas två gånger")).toBeTruthy();
+    expect(await screen.findByRole("region", { name: "Förslag (1)" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Fråga assistenten/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Optimera flödet" })).toBeNull();
   });
@@ -650,21 +652,38 @@ describe("FlowPage", () => {
     state.suggestions = suggestions(4, [DUPLICATE_READ]);
     renderPage();
     const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
-    expect(await within(second).findByText("1 förslag för Steg 2: Skriv svar")).toBeTruthy();
-    expect(await screen.findByRole("heading", { level: 3, name: "Förslag (1)" })).toBeTruthy();
+    expect(await within(second).findByRole("region", { name: "Förslag (1)" })).toBeTruthy();
+    expect(screen.getByText("1 förslag kan göra flödet enklare eller billigare")).toBeTruthy();
 
     // The chat removed the duplicate: a new revision, and no suggestion on it.
     state.flow = ok(makeFlow({ draft_revision: 5, steps }));
     state.suggestions = suggestions(5, []);
-    fireEvent.click(screen.getByRole("button", { name: "Verktyg klart" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
 
     await waitFor(() =>
-      expect(within(second).queryByText("1 förslag för Steg 2: Skriv svar")).toBeNull()
+      expect(within(second).queryByRole("region", { name: "Förslag (1)" })).toBeNull()
     );
-    expect(screen.queryByRole("heading", { level: 3, name: "Förslag (1)" })).toBeNull();
-    // The panel and the marker share one request per revision.
+    expect(screen.queryByText(/förslag kan göra flödet/)).toBeNull();
+    // One request per revision.
     expect(
       api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/suggestions/")
     ).toHaveLength(2);
+  });
+
+  it("opens one reference card for both sides, and inserts from the definition into the chat", async () => {
+    state.chat = ok({ ...CHAT, editing: false });
+    state.suggestions = suggestions(4, [DUPLICATE_READ]);
+    setViewport("phone");
+    renderPage();
+    const chat = screen.getByRole("region", { name: "Chatt om flödet" });
+
+    const card = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+    fireEvent.click(await within(card).findByRole("button", { name: "1 Sammanfatta" }));
+    const dialog = await screen.findByRole("dialog", { name: "Referens" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Infoga i meddelandet" }));
+
+    expect(state.inserted).toEqual(["@[Sammanfatta](step:step-1)"]);
+    expect(chat.className).not.toContain("max-lg:hidden");
+    expect(screen.queryByRole("dialog", { name: "Referens" })).toBeNull();
   });
 });

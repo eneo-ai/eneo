@@ -16,6 +16,7 @@ import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { SpaceProvider, useSpace } from "@/features/spaces/use-space";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
+import type { SuggestionFix } from "../flow-suggestion-item";
 import { StepSuggestions } from "../flow-suggestions-section";
 import {
   classificationPreviewQueryOptions,
@@ -87,6 +88,8 @@ type EditorProps = {
    * chat's composer; absent while the chat is not available.
    */
   onAskChat?: (text: string) => void;
+  /** Makes a suggestion's patch; absent, no "Åtgärda" is offered. */
+  suggestionFix?: SuggestionFix;
 };
 
 /**
@@ -140,7 +143,8 @@ function StepEditorSession({
   readOnly,
   onSaved,
   onCancel,
-  onAskChat
+  onAskChat,
+  suggestionFix
 }: EditorProps) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -533,7 +537,14 @@ function StepEditorSession({
         {header}
 
         {/* The saved draft's suggestions, as the draft check shows them. */}
-        <StepSuggestions flow={latest} stepId={stepId} onAskChat={onAskChat} />
+        <StepSuggestions
+          flow={latest}
+          stepId={stepId}
+          onAskChat={onAskChat}
+          fix={suggestionFix}
+          fixBlocked={dirty}
+          rescueTarget={() => summaryRef.current}
+        />
 
         <div
           ref={summaryRef}

@@ -164,6 +164,7 @@ function ConfirmSurface({
  * dropdown menus (the menu closes before the dialog opens; render it outside
  * the menu). While `pending`, neither Cancel nor Escape closes it, and the
  * confirm button stays enabled (so it keeps focus) but ignores a press.
+ * `children` show below the description (what the action will change).
  */
 export function ConfirmDialogControlled({
   open,
@@ -173,7 +174,8 @@ export function ConfirmDialogControlled({
   confirmLabel,
   variant = "destructive",
   pending,
-  onConfirm
+  onConfirm,
+  children
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -183,6 +185,7 @@ export function ConfirmDialogControlled({
   variant?: "default" | "destructive";
   pending?: boolean;
   onConfirm: () => void;
+  children?: ReactNode;
 }) {
   const dialogId = useId();
   const noTrigger = useRef<HTMLElement | null>(null);
@@ -200,7 +203,9 @@ export function ConfirmDialogControlled({
       onConfirm={onConfirm}
       dialogId={dialogId}
       triggerRef={noTrigger}
-    />
+    >
+      {children}
+    </ConfirmSurface>
   );
 }
 

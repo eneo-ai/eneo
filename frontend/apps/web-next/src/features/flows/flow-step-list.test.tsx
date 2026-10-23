@@ -4,7 +4,15 @@ import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
-import { makeStep } from "./flow-fixtures";
+import { FlowReferences } from "./chat/reference-pill";
+import { makeFlow, makeStep } from "./flow-fixtures";
+import type { SuggestionFix } from "./flow-suggestion-item";
+
+const state = vi.hoisted(() => ({ announce: vi.fn() }));
+vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
+  useAnnounce: () => state.announce
+}));
 
 const prompts = vi.hoisted(() => ({
   byAssistant: {} as Record<string, string>,
@@ -36,18 +44,45 @@ afterEach(() => {
   prompts.suggestions = [];
 });
 
-/** A suggestion about `stepId` (its first step), reading step 1. */
-function suggestionAbout(stepId: string, fingerprint: string) {
+/** A `duplicate_read` about `stepId` (its first step): step 1 as its input and in its prompt. */
+function suggestionAbout(stepId: string, fingerprint: string, kind = "assisted") {
   return {
     code: "duplicate_read",
     fingerprint,
     steps: [stepId, "step-1"],
-    params: { producer_step_order: 1, producer_step_id: "step-1", reads: [] },
+    params: {
+      producer_step_order: 1,
+      producer_step_id: "step-1",
+      reads: [
+        { channel: "input", site: "input_source", selector: [] },
+        { channel: "prompt", site: "assistant_prompt:step_1.output.text", selector: [] }
+      ]
+    },
     message: "Reads step 1 twice.",
     impact: { basis: "definition", level: "high" },
-    fix: { kind: "assisted" }
+    fix: { kind }
   };
 }
+
+const UNREAD_RESULT = {
+  code: "unread_result",
+  fingerprint: "e".repeat(64),
+  steps: ["step-3"],
+  params: {},
+  message: "Nothing reads step 3.",
+  impact: { basis: "definition", level: "medium" },
+  fix: { kind: "advice" }
+};
+
+const UNUSED_FIELD = {
+  code: "unused_form_field",
+  fingerprint: "9".repeat(64),
+  steps: [],
+  params: { field: "Diarienummer" },
+  message: "No step reads the field.",
+  impact: { basis: "definition", level: "low" },
+  fix: { kind: "patch" }
+};
 
 const steps = [
   makeStep(1, { user_description: "Sammanfatta", input_type: "document" }),
@@ -60,23 +95,31 @@ const steps = [
   makeStep(3, { user_description: "Granska", input_bindings: { question: "{{step_1}}" } })
 ];
 
-function renderList(canEdit = true, speakerOffer: SpeakerStepOffer | null = null) {
+function renderList(
+  canEdit = true,
+  speakerOffer: SpeakerStepOffer | null = null,
+  suggestionActions: { suggestionFix?: SuggestionFix; onAskChat?: (text: string) => void } = {}
+) {
   const actions = {
     onOpen: vi.fn(),
     onMove: vi.fn(),
     onRemove: vi.fn(async () => {}),
     onAdd: vi.fn()
   };
+  // The page's one FlowReferences, so references show as the chat's pills.
   const view = renderInApp(
-    <FlowStepList
-      flowId="flow-1"
-      draftRevision={4}
-      steps={steps}
-      canEdit={canEdit}
-      headingRef={createRef()}
-      speakerOffer={speakerOffer}
-      {...actions}
-    />
+    <FlowReferences flow={makeFlow({ steps })} onShowStep={() => true}>
+      <FlowStepList
+        flowId="flow-1"
+        draftRevision={4}
+        steps={steps}
+        canEdit={canEdit}
+        headingRef={createRef()}
+        speakerOffer={speakerOffer}
+        {...suggestionActions}
+        {...actions}
+      />
+    </FlowReferences>
   );
   return { ...view, actions };
 }
@@ -163,28 +206,111 @@ describe("FlowStepList", () => {
     await waitFor(() => expect(actions.onRemove).toHaveBeenCalledWith(steps[0]));
   });
 
-  it("marks each step the core has suggestions about with their count", async () => {
+  it("puts each suggestion on the card of its step, with the chat's pills", async () => {
     prompts.suggestions = [
       suggestionAbout("step-2", "a".repeat(64)),
-      suggestionAbout("step-2", "b".repeat(64)),
       suggestionAbout("step-3", "c".repeat(64)),
-      // A step the draft no longer has gets no marker anywhere.
+      // A step the draft no longer has shows nowhere.
       suggestionAbout("step-9", "d".repeat(64))
     ];
-    const { container } = renderList();
+    const onAskChat = vi.fn();
+    const { container } = renderList(true, null, { onAskChat });
 
     const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
-    expect(await within(second).findByText("2 förslag för Steg 2: Skriv svar")).toBeTruthy();
-    const third = screen.getByRole("article", { name: "Steg 3 Granska" });
-    expect(within(third).getByText("1 förslag för Steg 3: Granska")).toBeTruthy();
-    expect(within(third).getByText("1 förslag").getAttribute("aria-hidden")).toBe("true");
+    const own = await within(second).findByRole("region", { name: "Förslag (1)" });
+    // The step it reads is a step pill; the prompt's read a value pill.
+    expect(within(own).getByRole("button", { name: "1 Sammanfatta" })).toBeTruthy();
+    fireEvent.click(within(own).getByRole("button", { name: /^Varför\?/ }));
+    const value = within(own).getByRole("button", { name: "1 Sammanfatta › text" });
+    fireEvent.click(value);
+    expect(await screen.findByRole("dialog", { name: "Referens" })).toBeTruthy();
+    // The disclosure is named in words, not in the references' syntax.
+    expect(
+      within(own).getByRole("button", {
+        name: "Varför? Svaret från 1 Sammanfatta skickas två gånger"
+      })
+    ).toBeTruthy();
+    expect(screen.getAllByRole("region", { name: "Förslag (1)" })).toHaveLength(2);
     const first = screen.getByRole("article", { name: "Steg 1 Sammanfatta" });
-    expect(within(first).queryByText(/förslag/)).toBeNull();
-    // One request, keyed like the draft check's.
+    expect(within(first).queryByRole("region", { name: /^Förslag/ })).toBeNull();
+
+    fireEvent.click(
+      within(own).getByRole("button", {
+        name: "Fråga assistenten om ”Svaret från 1 Sammanfatta skickas två gånger”"
+      })
+    );
+    expect(onAskChat).toHaveBeenCalledWith(
+      expect.stringContaining("Steg: @[Skriv svar](step:step-2) @[Sammanfatta](step:step-1)")
+    );
+    // One request for the whole list.
     expect(
       api.GET.mock.calls.filter(([path]) => path === "/api/v1/flows/{id}/suggestions/")
     ).toHaveLength(1);
     await expectNoAxeViolations(container);
+  });
+
+  it("sums the suggestions up above the list, with the run form's own there", async () => {
+    prompts.suggestions = [suggestionAbout("step-2", "a".repeat(64)), UNUSED_FIELD];
+    renderList();
+
+    expect(
+      await screen.findByText("2 förslag kan göra flödet enklare eller billigare")
+    ).toBeTruthy();
+    expect(screen.getByText("Formulärfältet ”Diarienummer” används inte")).toBeTruthy();
+    // Without a way to fix them, nothing offers to.
+    expect(screen.queryByRole("button", { name: /^Åtgärda/ })).toBeNull();
+  });
+
+  it("shows no summary while the draft gives no suggestion", async () => {
+    renderList();
+    await waitFor(() =>
+      expect(api.GET).toHaveBeenCalledWith("/api/v1/flows/{id}/suggestions/", expect.anything())
+    );
+    expect(screen.queryByText(/förslag kan göra flödet/)).toBeNull();
+    expect(screen.queryByRole("region", { name: /^Förslag/ })).toBeNull();
+  });
+
+  it("fixes all patch suggestions after a confirmation that lists them by step", async () => {
+    prompts.suggestions = [
+      suggestionAbout("step-2", "a".repeat(64), "patch"),
+      suggestionAbout("step-3", "c".repeat(64), "assisted"),
+      UNUSED_FIELD
+    ];
+    const fix = { onFix: vi.fn(async () => true), pending: false };
+    renderList(true, null, { suggestionFix: fix });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Åtgärda alla (2)" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Åtgärda 2 förslag?" });
+    expect(within(dialog).getByText("Steg 2: Skriv svar")).toBeTruthy();
+    expect(within(dialog).getByText("Körningens formulär")).toBeTruthy();
+    expect(within(dialog).getByText("1 Sammanfatta")).toBeTruthy();
+    expect(within(dialog).queryByText("Steg 3: Granska")).toBeNull();
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Åtgärda" }));
+    await waitFor(() => expect(fix.onFix).toHaveBeenCalledWith(["a".repeat(64), "9".repeat(64)]));
+    await waitFor(() => expect(state.announce).toHaveBeenCalledWith("2 förslag är åtgärdade"));
+  });
+
+  it("fixes one suggestion from its card, and offers removal for a step nothing reads", async () => {
+    prompts.suggestions = [suggestionAbout("step-2", "a".repeat(64), "patch"), UNREAD_RESULT];
+    const fix = { onFix: vi.fn(async () => true), pending: false };
+    renderList(true, null, { suggestionFix: fix });
+
+    const second = screen.getByRole("article", { name: "Steg 2 Skriv svar" });
+    fireEvent.click(
+      await within(second).findByRole("button", {
+        name: "Åtgärda ”Svaret från 1 Sammanfatta skickas två gånger”"
+      })
+    );
+    await waitFor(() => expect(fix.onFix).toHaveBeenCalledWith(["a".repeat(64)]));
+    await waitFor(() => expect(state.announce).toHaveBeenCalledWith("Förslaget är åtgärdat"));
+
+    // An advice has no "Åtgärda"; the step list's own removal takes its place.
+    const third = screen.getByRole("article", { name: "Steg 3 Granska" });
+    expect(within(third).queryByRole("button", { name: /^Åtgärda/ })).toBeNull();
+    fireEvent.click(within(third).getByRole("button", { name: "Ta bort Steg 3: Granska" }));
+    expect(await screen.findByRole("alertdialog", { name: "Ta bort steget?" })).toBeTruthy();
   });
 
   it("only shows the steps to someone who cannot change them", () => {

@@ -7,23 +7,28 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Token } from "@astryxdesign/core/Token";
-import { ArrowDown, ArrowUp, Ellipsis, Lightbulb, Plus, Workflow } from "lucide-react";
+import { ArrowDown, ArrowUp, Ellipsis, Plus, Workflow } from "lucide-react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
+import { ListError } from "@/components/composites/query-state";
 import { flowAssistantQueryOptions } from "./editor/editor-api";
 import { stepUsesModel } from "./editor/step-rules";
 import type { FlowStep } from "./flows-api";
 import type { StepChange } from "./flow-changes";
 import { inputTypeLabel, producesLabel, readLabel, stepLabel } from "./flow-labels";
 import { stepName, stepReaders, stepReads, type StepPrompts } from "./flow-steps";
+import { useSuggestionFix, type SuggestionFix } from "./flow-suggestion-item";
+import { StepCardSuggestions, SuggestionsSummary } from "./flow-suggestions-section";
 import {
+  flowSuggestions,
   flowSuggestionsQueryOptions,
   shownSuggestions,
-  suggestionCounts
+  suggestionsByStep,
+  type ShownSuggestion
 } from "./flow-suggestions";
 
 /** The id of a step's control, so focus can be put back on it after the list re-renders. */
@@ -68,7 +73,7 @@ function StepCard({
   prompts,
   index,
   canEdit,
-  suggestionCount,
+  suggestions,
   speakerOffer,
   change,
   actions
@@ -78,8 +83,13 @@ function StepCard({
   prompts: StepPrompts;
   index: number;
   canEdit: boolean;
-  /** How many of the core's suggestions are about this step. */
-  suggestionCount: number;
+  /** The core's suggestions about this step, with what they offer. */
+  suggestions: {
+    items: readonly ShownSuggestion[];
+    onAskChat?: (text: string) => void;
+    onFix?: (fingerprints: string[]) => void;
+    fixPending?: boolean;
+  };
   speakerOffer: SpeakerStepOffer | null;
   /** What the chat just did to this step, while the mark lasts. */
   change: StepChange | null;
@@ -110,7 +120,7 @@ function StepCard({
             </span>
             <span className="text-base">{stepName(step) ?? t("flows_step_unnamed")}</span>
           </Heading>
-          {review || change || suggestionCount > 0 ? (
+          {review || change ? (
             <span className="flex flex-wrap gap-1.5">
               {review ? (
                 <Badge
@@ -124,22 +134,6 @@ function StepCard({
                   color="blue"
                   label={t(`flows_step_change_${change}`)}
                   className="motion-safe:animate-in motion-safe:fade-in"
-                />
-              ) : null}
-              {suggestionCount > 0 ? (
-                <Badge
-                  variant="neutral"
-                  icon={<Lightbulb aria-hidden="true" className="size-3" />}
-                  label={
-                    <>
-                      <span aria-hidden="true">
-                        {t("flow_suggestion_marker", { count: suggestionCount })}
-                      </span>
-                      <span className="sr-only">
-                        {t("flow_suggestion_marker_named", { count: suggestionCount, step: label })}
-                      </span>
-                    </>
-                  }
                 />
               ) : null}
             </span>
@@ -232,6 +226,14 @@ function StepCard({
           {producesLabel(step, t)}
         </MetadataListItem>
       </MetadataList>
+      <StepCardSuggestions
+        items={suggestions.items}
+        steps={steps}
+        onAskChat={suggestions.onAskChat}
+        onFix={suggestions.onFix}
+        fixPending={suggestions.fixPending}
+        onRemoveStep={canEdit ? actions.onAskRemove : undefined}
+      />
       {speakerOffer && speakerOffer.stepId === step.id ? (
         <Banner
           status="info"
@@ -275,9 +277,13 @@ function useStepPrompts(flowId: string, steps: readonly FlowStep[]): StepPrompts
  * its prompt), what it takes and what it produces. Editors open a step, move it up or down with buttons
  * (there is no drag), add a step before or after it and remove it after a
  * confirmation that names the steps that read it. After the step that
- * transcribes, `speakerOffer` offers the step that names the speakers. For
- * editors, a step the core has suggestions about carries a quiet marker with
- * their count; it reads the draft check's query (same key, one request).
+ * transcribes, `speakerOffer` offers the step that names the speakers.
+ *
+ * For editors, the core's suggestions sit on the cards of the steps they are
+ * about, with a summary above the list ("Åtgärda alla" for those a patch
+ * fixes) that also holds the ones about the run form. "Åtgärda" and
+ * "Åtgärda alla" are offered while `suggestionFix` is given; "Fråga
+ * assistenten" while `onAskChat` is (the chat is on the page).
  */
 export function FlowStepList({
   flowId,
@@ -287,6 +293,8 @@ export function FlowStepList({
   headingRef,
   speakerOffer = null,
   changes = null,
+  onAskChat,
+  suggestionFix,
   ...actions
 }: StepActions & {
   flowId: string;
@@ -298,6 +306,10 @@ export function FlowStepList({
   speakerOffer?: SpeakerStepOffer | null;
   /** The steps the chat just added, changed or moved, by id, while the mark lasts. */
   changes?: ReadonlyMap<string, StepChange> | null;
+  /** Puts a prepared request about a suggestion in the flow chat's composer. */
+  onAskChat?: (text: string) => void;
+  /** Makes suggestions' patches; absent, no "Åtgärda" is offered. */
+  suggestionFix?: SuggestionFix;
 }) {
   const t = useTranslations();
   const headingId = useId();
@@ -308,9 +320,15 @@ export function FlowStepList({
     ...flowSuggestionsQueryOptions(flowId, draftRevision),
     enabled: canEdit
   });
-  const counts = canEdit
-    ? suggestionCounts(shownSuggestions(suggestions.data?.items, steps))
-    : new Map<string, number>();
+  const shown = canEdit ? shownSuggestions(suggestions.data?.items, steps) : [];
+  const byStep = suggestionsByStep(shown);
+  const formItems = canEdit ? flowSuggestions(suggestions.data?.items) : [];
+  // A fixed suggestion leaves its card; focus stays on the card's step.
+  const fixedStepId = useRef<string | null>(null);
+  const fixOnCard = useSuggestionFix(suggestionFix, () =>
+    fixedStepId.current ? document.getElementById(stepControlId(fixedStepId.current, "open")) : null
+  );
+  const listHeading = () => document.getElementById(headingId);
   const readers = removing ? stepReaders(removing, steps, prompts) : [];
 
   const addButton = (
@@ -337,6 +355,23 @@ export function FlowStepList({
         </Heading>
         {canEdit && steps.length > 0 ? addButton : null}
       </div>
+      {suggestions.isError ? (
+        <ListError
+          error={suggestions.error}
+          title={t("flow_suggestions_error_title")}
+          isRetrying={suggestions.isFetching}
+          onRetry={() => void suggestions.refetch()}
+        />
+      ) : (
+        <SuggestionsSummary
+          shown={shown}
+          formItems={formItems}
+          steps={steps}
+          fix={suggestionFix}
+          onAskChat={onAskChat}
+          rescueTarget={listHeading}
+        />
+      )}
       {steps.length === 0 ? (
         <EmptyState
           icon={<Workflow />}
@@ -359,7 +394,17 @@ export function FlowStepList({
                 prompts={prompts}
                 index={index}
                 canEdit={canEdit}
-                suggestionCount={step.id ? (counts.get(step.id) ?? 0) : 0}
+                suggestions={{
+                  items: (step.id && byStep.get(step.id)) || [],
+                  onAskChat,
+                  onFix: fixOnCard
+                    ? (fingerprints) => {
+                        fixedStepId.current = step.id ?? null;
+                        fixOnCard(fingerprints);
+                      }
+                    : undefined,
+                  fixPending: suggestionFix?.pending
+                }}
                 speakerOffer={speakerOffer}
                 change={(step.id && changes?.get(step.id)) || null}
                 actions={{ ...actions, onAskRemove: setRemoving }}

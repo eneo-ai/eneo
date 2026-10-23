@@ -27,14 +27,13 @@ import { partnerCompletionModel } from "@/features/chat/partner-model";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
 import { useSpace } from "@/features/spaces/use-space";
 import { useSpaceDisplayName } from "@/features/spaces/frame/space-header";
-import { FlowReferences, insertMessage } from "./chat/reference-pill";
+import type { ComposerInsert } from "@/features/chat/chat-references";
 import { useFlowChatReferences } from "./chat/use-flow-chat-references";
 import {
   FlowChatModelPickers,
   NewConversationButton,
   OptimizeFlowButton
 } from "./flow-chat-controls";
-import { showStepCard } from "./flow-step-list";
 import {
   authoringChatQueryOptions,
   flowKeys,
@@ -58,19 +57,18 @@ type ChatPanelProps = {
   /** A refused mode change, shown with the page's other refusals. */
   onRefused: (error: unknown, title: string) => void;
   /**
-   * A request the page prepared ("Fråga assistenten", "Optimera flödet"):
-   * it goes into the composer at the caret, mentions as pills, and is never
-   * sent by itself. The mode stays as the person set it.
+   * The chat's composer while it is on screen, or null: the page's
+   * FlowReferences (the one reference card of the page, for the chat and
+   * the definition alike) and "Fråga assistenten" put things into it.
    */
-  request: ChatRequest | null;
-  /** The composer took `request`. */
-  onRequestTaken: () => void;
-  /** Prepares a request for the composer (the page shows the chat first, on a phone). */
-  onAskChat: (text: string) => void;
+  onComposer: (composer: ComposerInsert | null) => void;
+  /**
+   * Puts a prepared request ("Optimera flödet") into the composer at the
+   * caret, never sending it nor changing the mode; absent until the
+   * composer is on the page.
+   */
+  onAskChat?: (text: string) => void;
 };
-
-/** A request prepared for the flow chat's composer; a new object is a new request. */
-export type ChatRequest = { text: string };
 
 /**
  * The mode a message is sent in, picked beside the send button: Fråga
@@ -178,9 +176,8 @@ function AuthoringConversation({
   chat,
   onFlowMayHaveChanged,
   onRefused,
-  request,
-  onRequestTaken
-}: Pick<ChatPanelProps, "request" | "onRequestTaken"> & {
+  onComposer
+}: Pick<ChatPanelProps, "onComposer"> & {
   flow: FlowPublic;
   chat: FlowAuthoringChat;
   onFlowMayHaveChanged: () => void;
@@ -188,15 +185,11 @@ function AuthoringConversation({
 }) {
   const t = useTranslations();
   const { references, composer } = useFlowChatReferences(flow);
-  // A prepared request goes in once the composer is on screen, the same way
-  // the reference card's "Infoga i meddelandet" puts a pill there.
-  const takenRequest = useRef<ChatRequest | null>(null);
+  // The page's references (pills, the card, "Fråga assistenten") reach the composer through it.
   useEffect(() => {
-    if (!request || !composer || takenRequest.current === request) return;
-    takenRequest.current = request;
-    insertMessage(composer, request.text, flow);
-    onRequestTaken();
-  }, [request, composer, flow, onRequestTaken]);
+    onComposer(composer);
+  }, [composer, onComposer]);
+  useEffect(() => () => onComposer(null), [onComposer]);
   const { space } = useSpace();
   const spaceName = useSpaceDisplayName();
   const [activity, setActivity] = useState<ActivityState | null>(null);
@@ -267,26 +260,24 @@ function AuthoringConversation({
   };
 
   return (
-    <FlowReferences flow={flow} onShowStep={showStepCard} composer={composer}>
-      <ChatView
-        key={chat.session_id}
-        partner={partner}
-        initialSessionId={chat.session_id}
-        initialMessages={initialMessages}
-        activity={activity}
-        onActivityChange={setActivity}
-        startHeadingLevel={3}
-        references={references}
-        footerActions={<ModePicker chat={chat} onRefused={onRefused} />}
-        placeholder={
-          chat.editing ? t("flows_chat_placeholder_edit") : t("flows_chat_placeholder_ask")
-        }
-        onToolCallFinished={(call) => {
-          if (isFlowsToolCall(call)) onFlowMayHaveChanged();
-        }}
-        onAnswerFinished={onFlowMayHaveChanged}
-      />
-    </FlowReferences>
+    <ChatView
+      key={chat.session_id}
+      partner={partner}
+      initialSessionId={chat.session_id}
+      initialMessages={initialMessages}
+      activity={activity}
+      onActivityChange={setActivity}
+      startHeadingLevel={3}
+      references={references}
+      footerActions={<ModePicker chat={chat} onRefused={onRefused} />}
+      placeholder={
+        chat.editing ? t("flows_chat_placeholder_edit") : t("flows_chat_placeholder_ask")
+      }
+      onToolCallFinished={(call) => {
+        if (isFlowsToolCall(call)) onFlowMayHaveChanged();
+      }}
+      onAnswerFinished={onFlowMayHaveChanged}
+    />
   );
 }
 
@@ -308,8 +299,7 @@ export function FlowChatPanel({
   flow,
   onFlowMayHaveChanged,
   onRefused,
-  request,
-  onRequestTaken,
+  onComposer,
   onAskChat
 }: ChatPanelProps) {
   const t = useTranslations();
@@ -338,7 +328,7 @@ export function FlowChatPanel({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <FlowChatModelPickers chat={chat.data} onRefused={onRefused} />
             <span className="flex flex-wrap items-center gap-1">
-              <OptimizeFlowButton onAskChat={onAskChat} />
+              {onAskChat ? <OptimizeFlowButton onAskChat={onAskChat} /> : null}
               <NewConversationButton chat={chat.data} onRefused={onRefused} />
             </span>
           </div>
@@ -350,8 +340,7 @@ export function FlowChatPanel({
           chat={chat.data}
           onFlowMayHaveChanged={onFlowMayHaveChanged}
           onRefused={onRefused}
-          request={request}
-          onRequestTaken={onRequestTaken}
+          onComposer={onComposer}
         />
       ) : mayEdit && !chat.isError ? (
         <LoadingState label={t("flows_chat_loading")} rows={3} className="p-4" />

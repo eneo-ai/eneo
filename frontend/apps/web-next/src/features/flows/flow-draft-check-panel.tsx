@@ -46,7 +46,6 @@ import {
   type FlowProblem,
   type StepProblem
 } from "./flow-draft-check";
-import { FlowSuggestionsSection } from "./flow-suggestions-section";
 import type { SpeakerServiceLink } from "./flow-transcription";
 
 type Translate = ReturnType<typeof useTranslations>;
@@ -203,23 +202,20 @@ function RemovedReadRepair({
  * step, worked out again whenever the draft changes. Each step's problems
  * link to the step in the editor; the flow's own (no steps, no transcription
  * model) say where they are fixed. A read of a removed step in a step's
- * underlag can be replaced here in one choice (`onRepair` saves it). Below
- * them, the core's suggestions (`onAskChat` hands one to the flow chat).
+ * underlag can be replaced here in one choice (`onRepair` saves it). The
+ * core's suggestions are not listed here: they sit on the step cards.
  */
 export function FlowDraftCheck({
   flow,
   speakerServices,
   onOpenStep,
-  onRepair,
-  onAskChat
+  onRepair
 }: {
   flow: FlowPublic;
   speakerServices: readonly SpeakerServiceLink[];
   onOpenStep: (step: FlowStep) => void;
   /** Saves the step's repaired underlag; resolves to whether it was saved. */
   onRepair?: (step: FlowStep, inputBindings: JsonObject | null) => Promise<boolean>;
-  /** Puts a prepared request in the flow chat's composer; absent while the chat is unavailable. */
-  onAskChat?: (text: string) => void;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -367,7 +363,6 @@ export function FlowDraftCheck({
           </ul>
         </Banner>
       )}
-      <FlowSuggestionsSection flow={flow} onOpenStep={onOpenStep} onAskChat={onAskChat} />
     </section>
   );
 }

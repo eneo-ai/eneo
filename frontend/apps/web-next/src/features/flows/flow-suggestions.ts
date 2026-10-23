@@ -96,24 +96,24 @@ function joinReads(parts: string[], t: Translate): string {
   return t("flow_suggestion_reads_pair", { first: head, second: parts[parts.length - 1]! });
 }
 
-/**
- * A step the suggestion names, as the chat writes it (`@[Name](step:<id>)`,
- * a pill), or "steg 2" when the draft does not have it.
- */
-function producerText(
-  params: Record<string, unknown>,
-  steps: readonly FlowStep[],
-  t: Translate
-): string {
-  const order = typeof params.producer_step_order === "number" ? params.producer_step_order : 0;
+/** A step a suggestion names, as the chat writes it (a pill), or "steg 2" when the draft lacks it. */
+function stepText(order: unknown, id: unknown, steps: readonly FlowStep[], t: Translate): string {
   const step = steps.find((candidate) =>
-    typeof params.producer_step_id === "string"
-      ? candidate.id === params.producer_step_id
-      : candidate.step_order === order
+    typeof id === "string" ? candidate.id === id : candidate.step_order === order
   );
   return step?.id
     ? stepMention({ id: step.id, user_description: step.user_description })
-    : t("flow_suggestion_producer_order", { order });
+    : t("flow_suggestion_producer_order", { order: typeof order === "number" ? order : 0 });
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function records(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
 }
 
 /**
@@ -121,19 +121,22 @@ function producerText(
  * step it is shown on, when known, says how its input reads the earlier step.
  * Steps and values are written as the flow chat writes them, so
  * `ReferenceText` shows them as the chat's pills (`referencePlainText` gives
- * the words for an accessible name).
+ * the words for an accessible name). A code this version does not know gets
+ * a generic text, never the API's English message.
  */
 export function suggestionText(
   suggestion: FlowSuggestion,
   t: Translate,
-  step?: Pick<FlowStep, "input_source">,
+  step?: Pick<FlowStep, "input_source" | "step_order">,
   steps: readonly FlowStep[] = []
 ): SuggestionText {
   const code: string = suggestion.code;
+  const params = suggestion.params;
+  const ref = (order: unknown, id: unknown) => stepText(order, id, steps, t);
+  const runInput = t("flow_suggestion_run_input");
   switch (code) {
     case "duplicate_read": {
-      const params = suggestion.params;
-      const producer = producerText(params, steps, t);
+      const producer = ref(params.producer_step_order, params.producer_step_id);
       const contained = params.contained === true;
       const reads = joinReads(
         duplicateReads(params).map((read) => readText(read, t, step)),
@@ -148,6 +151,96 @@ export function suggestionText(
             title: t("flow_suggestion_duplicate_read_title", { producer }),
             explanation: t("flow_suggestion_duplicate_read_explanation", { reads })
           };
+    }
+    case "broad_all_previous_steps": {
+      const count = typeof params.earlier_step_count === "number" ? params.earlier_step_count : 0;
+      const derived = records(params.derived)[0];
+      return {
+        title: t("flow_suggestion_broad_all_previous_steps_title", { count }),
+        explanation: derived
+          ? t("flow_suggestion_broad_all_previous_steps_explanation_derived", {
+              later: ref(derived.step_order, undefined),
+              source: ref(derived.from_step_order, undefined)
+            })
+          : t("flow_suggestion_broad_all_previous_steps_explanation")
+      };
+    }
+    case "whole_structured_read": {
+      const producer = ref(params.producer_step_order, params.producer_step_id);
+      const fields = strings(params.fields);
+      return {
+        title: t("flow_suggestion_whole_structured_read_title", { producer, count: fields.length }),
+        explanation: t("flow_suggestion_whole_structured_read_explanation", {
+          producer,
+          fields: joinReads(fields, t)
+        })
+      };
+    }
+    case "unread_contract_fields": {
+      // The fields as values of the step's result, so each is a pill.
+      const order = step?.step_order;
+      const fields = strings(params.fields).map((field) =>
+        order ? valueReference(`step_${order}.output.structured.${field}`) : field
+      );
+      return {
+        title: t("flow_suggestion_unread_contract_fields_title", {
+          count: fields.length,
+          fields: joinReads(fields, t)
+        }),
+        explanation: t("flow_suggestion_unread_contract_fields_explanation", {
+          count: fields.length
+        })
+      };
+    }
+    case "unread_result":
+      return {
+        title: t("flow_suggestion_unread_result_title"),
+        explanation: t("flow_suggestion_unread_result_explanation")
+      };
+    case "relay_step": {
+      const source =
+        params.source_step_order == null
+          ? runInput
+          : ref(params.source_step_order, params.source_step_id);
+      const readers = joinReads(
+        records(params.readers).map((reader) => ref(reader.step_order, reader.step_id)),
+        t
+      );
+      return {
+        title: t("flow_suggestion_relay_step_title", { source }),
+        explanation: t("flow_suggestion_relay_step_explanation", { source, readers })
+      };
+    }
+    case "per_item_prompt_read": {
+      const producer = ref(params.producer_step_order, params.producer_step_id);
+      return {
+        title: t("flow_suggestion_per_item_prompt_read_title", { producer }),
+        explanation: t("flow_suggestion_per_item_prompt_read_explanation", { producer })
+      };
+    }
+    case "repeated_long_material": {
+      const earlier = ref(params.earlier_step_order, params.earlier_step_id);
+      const shared = Array.isArray(params.shared_step_orders)
+        ? params.shared_step_orders.map((order) => ref(order, undefined))
+        : [];
+      const material = joinReads(
+        [...(params.shares_run_input === true ? [runInput] : []), ...shared],
+        t
+      );
+      return {
+        title: t("flow_suggestion_repeated_long_material_title", { earlier }),
+        explanation: t("flow_suggestion_repeated_long_material_explanation", {
+          earlier,
+          material: material || runInput
+        })
+      };
+    }
+    case "unused_form_field": {
+      const field = typeof params.field === "string" ? params.field : "";
+      return {
+        title: t("flow_suggestion_unused_form_field_title", { field }),
+        explanation: t("flow_suggestion_unused_form_field_explanation")
+      };
     }
     default:
       return {
@@ -175,13 +268,26 @@ export function shownSuggestions(
   });
 }
 
-/** How many suggestions are about each step, by step id. */
-export function suggestionCounts(shown: readonly ShownSuggestion[]): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const { step } of shown) {
-    if (step.id) counts.set(step.id, (counts.get(step.id) ?? 0) + 1);
+/** The suggestions about each step, by step id, in the core's order. */
+export function suggestionsByStep(
+  shown: readonly ShownSuggestion[]
+): Map<string, ShownSuggestion[]> {
+  const byStep = new Map<string, ShownSuggestion[]>();
+  for (const item of shown) {
+    if (!item.step.id) continue;
+    byStep.set(item.step.id, [...(byStep.get(item.step.id) ?? []), item]);
   }
-  return counts;
+  return byStep;
+}
+
+/** The suggestions about the flow rather than a step (an unused run form field). */
+export function flowSuggestions(items: readonly FlowSuggestion[] | undefined): FlowSuggestion[] {
+  return (items ?? []).filter((suggestion) => suggestion.steps.length === 0);
+}
+
+/** Whether "Åtgärda" can make the suggestion's fix in one step. */
+export function isPatchable(suggestion: FlowSuggestion): boolean {
+  return suggestion.fix.kind === "patch";
 }
 
 /**
@@ -202,8 +308,13 @@ export function suggestionRequest(
   const mentions = named.flatMap((step) =>
     step.id ? [stepMention({ id: step.id, user_description: step.user_description })] : []
   );
+  const title = suggestionText(suggestion, t, named[0], steps).title;
+  // A suggestion about the run form names no step.
+  if (mentions.length === 0) {
+    return t("flow_suggestion_ask_request_flow", { title, code: suggestion.code });
+  }
   return t("flow_suggestion_ask_request", {
-    title: suggestionText(suggestion, t, named[0], steps).title,
+    title,
     code: suggestion.code,
     // Pills in the composer, side by side; a pill brings its own space.
     steps: mentions.join(" ")

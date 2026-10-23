@@ -5,6 +5,7 @@ import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testQueryClient } from "@/test/render";
 import messages from "@/lib/i18n/messages/sv.json";
+import type { SuggestionFix } from "../flow-suggestion-item";
 import type { FlowPublic } from "./step-types";
 import { makeAssistant, makeFlow, makeStep } from "./testing/fixtures";
 
@@ -69,6 +70,7 @@ function renderEditor(
     readOnly?: boolean;
     space?: ReturnType<typeof makeSpace>;
     onAskChat?: (text: string) => void;
+    suggestionFix?: SuggestionFix;
   } = {}
 ) {
   const queryClient = testQueryClient();
@@ -83,6 +85,7 @@ function renderEditor(
       onSaved={onSaved}
       onCancel={onCancel}
       onAskChat={overrides.onAskChat}
+      suggestionFix={overrides.suggestionFix}
     />,
     { queryClient }
   );
@@ -197,12 +200,14 @@ describe("FlowStepEditor", () => {
     await expectNoAxeViolations(container);
     fireEvent.click(
       within(section).getByRole("button", {
-        name: "Fråga assistenten om ”Förslag” (Steg 1: Sammanfatta)"
+        name: "Fråga assistenten om ”Förslag”"
       })
     );
     expect(onAskChat).toHaveBeenCalledWith(expect.stringContaining("(some_later_code)"));
     // Only the open step is open: no way to open it again from here.
     expect(within(section).queryByRole("button", { name: /^Öppna/ })).toBeNull();
+    // Without a way to fix it, nothing offers to.
+    expect(within(section).queryByRole("button", { name: /^Åtgärda/ })).toBeNull();
 
     const fetched = () =>
       api.stub.calls.filter((call) => `${call.method} ${call.path}` === SUGGESTIONS).length;
@@ -211,6 +216,44 @@ describe("FlowStepEditor", () => {
     fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
     // The saved revision keys the suggestions anew.
     await waitFor(() => expect(fetched()).toBe(2));
+  });
+
+  it("offers Åtgärda on the open step, and holds it while the step has unsaved changes", async () => {
+    api.routes["GET /api/v1/flows/{id}/suggestions/"] = () => ({
+      body: {
+        flow_id: "flow-1",
+        draft_revision: 4,
+        items: [
+          {
+            code: "some_later_code",
+            fingerprint: "b".repeat(64),
+            steps: ["step-1"],
+            params: {},
+            message: "A suggestion.",
+            impact: { basis: "definition", level: "high" },
+            fix: { kind: "patch", patch: {} }
+          }
+        ]
+      }
+    });
+    const fix = { onFix: vi.fn(async () => true), pending: false };
+    const { container } = renderEditor(makeFlow(), { suggestionFix: fix });
+
+    const button = await screen.findByRole("button", { name: "Åtgärda ”Förslag”" });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.change(await nameField(), { target: { value: "Sammanfatta ärendet" } });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(true));
+    const reason = screen.getByText(messages.flow_suggestions_fix_blocked_unsaved);
+    expect(button.getAttribute("aria-describedby")).toBe(reason.id);
+    fireEvent.click(button);
+    expect(fix.onFix).not.toHaveBeenCalled();
+    await expectNoAxeViolations(container);
+
+    // Undone, it is offered again and fixes the one suggestion.
+    fireEvent.change(await nameField(), { target: { value: "Sammanfatta" } });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+    await waitFor(() => expect(fix.onFix).toHaveBeenCalledWith(["b".repeat(64)]));
   });
 
   it("reads long material in parts as one step setting, and explains what it costs", async () => {
