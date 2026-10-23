@@ -9066,5 +9066,6 @@
   "flows_chat_mode_ask_description": "Chatten läser flödet men ändrar inget.",
   "flows_chat_mode_edit_description": "Chatten ändrar utkastet direkt.",
   "flows_chat_placeholder_ask": "Fråga om flödet…",
-  "flows_chat_placeholder_edit": "Beskriv ändringen…"
+  "flows_chat_placeholder_edit": "Beskriv ändringen…",
+  "flows_chat_resize_handle": "Ändra storlek på chatten"
 }

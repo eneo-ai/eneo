@@ -3686,5 +3686,6 @@
   "flows_chat_mode_ask_description": "The chat reads the flow and changes nothing.",
   "flows_chat_mode_edit_description": "The chat changes the draft right away.",
   "flows_chat_placeholder_ask": "Ask about the flow…",
-  "flows_chat_placeholder_edit": "Describe the change…"
+  "flows_chat_placeholder_edit": "Describe the change…",
+  "flows_chat_resize_handle": "Resize the chat"
 }

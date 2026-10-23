@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import type { Permission } from "@/lib/auth/permissions";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { makeKindOption, makeKindPlace } from "./editor/testing/fixtures";
 import { flowPermissions, makeFlow, makeStep } from "./flow-fixtures";
@@ -155,6 +156,19 @@ describe("FlowPage", () => {
     expect(screen.getByRole("heading", { level: 2, name: "Steg" })).toBeTruthy();
     expect(await screen.findByText("Chatten är inte tillgänglig")).toBeTruthy();
     await expectNoAxeViolations(container);
+  });
+
+  it("offers a handle to resize the chat beside the definition, not on a phone", async () => {
+    renderPage();
+    const handle = screen.getByRole("separator", { name: "Ändra storlek på chatten" });
+    expect(handle.getAttribute("aria-orientation")).toBe("vertical");
+    expect(handle.getAttribute("aria-valuemin")).toBe("352");
+    expect(handle.tabIndex).toBe(0);
+
+    act(() => setViewport("phone"));
+    expect(screen.queryByRole("separator", { name: "Ändra storlek på chatten" })).toBeNull();
+    // The chat is one of the tabbed views there, laid out by the stylesheet alone.
+    expect(screen.getByRole("region", { name: "Chatt om flödet" }).style.width).toBe("");
   });
 
   it("moves a step through the editor, fenced on the revision on screen", async () => {

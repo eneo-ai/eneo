@@ -2,7 +2,8 @@
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { useAnnounce } from "@astryxdesign/core/hooks";
+import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
+import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
@@ -58,6 +59,8 @@ type EditorChange = Omit<FlowEditorUpdate, "expected_revision" | "definition"> &
   definition?: FlowDefinitionUpdate;
 };
 
+const CHAT_WIDTH_STORAGE_KEY = "eneo:flow-chat-width";
+
 /** After a move the moved step's button keeps focus; at an end, where it is disabled, its twin. */
 function focusMoveControl(stepId: string, delta: -1 | 1) {
   requestAnimationFrame(() => {
@@ -103,6 +106,19 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const noticeKey = useRef(0);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [view, setView] = useState<View>("definition");
+  // From lg the chat sits beside the definition with a handle between them;
+  // below that the tabs toggle the two. The row is the basis of the chat's
+  // share only while it is beside: a phone-wide row would clamp the
+  // remembered width down and lose it.
+  const beside = useMediaQuery("(min-width: 1024px)");
+  const row = useRef<HTMLDivElement>(null);
+  const chat = useResizable({
+    containerRef: row,
+    defaultSize: "44%",
+    minSize: 352,
+    maxSize: "60%",
+    autoSaveId: CHAT_WIDTH_STORAGE_KEY
+  });
   const [openStepId, setOpenStepId] = useState<string | null>(null);
   const [addAt, setAddAt] = useState<number | null>(null);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
@@ -406,11 +422,14 @@ export function FlowPage({ flowId }: { flowId: string }) {
         </div>
       </div>
 
-      <div className="flex min-w-0 flex-col lg:grid lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(22rem,0.8fr)]">
+      <div
+        ref={beside ? row : null}
+        className="flex min-w-0 flex-col lg:min-h-0 lg:flex-1 lg:flex-row"
+      >
         <section
           aria-label={t("flows_view_definition")}
           className={cn(
-            "flex min-w-0 flex-col gap-6 px-6 py-5 lg:min-h-0 lg:overflow-y-auto",
+            "flex min-w-0 flex-col gap-6 px-6 py-5 lg:min-h-0 lg:flex-1 lg:overflow-y-auto",
             view !== "definition" && "max-lg:hidden"
           )}
         >
@@ -530,10 +549,20 @@ export function FlowPage({ flowId }: { flowId: string }) {
           </div>
         </section>
 
+        {beside && (
+          // The chat sits at the end of the row: dragging the handle left widens it.
+          <ResizeHandle
+            isReversed
+            hasDivider
+            label={t("flows_chat_resize_handle")}
+            resizable={chat.props}
+          />
+        )}
         <section
           aria-label={t("flows_chat_heading")}
+          style={beside ? { width: chat.size } : undefined}
           className={cn(
-            "border-ax-border flex h-[85dvh] min-h-[28rem] min-w-0 flex-col border-t lg:h-auto lg:min-h-0 lg:border-t-0 lg:border-l",
+            "border-ax-border flex h-[85dvh] min-h-[28rem] min-w-0 flex-col border-t lg:h-auto lg:min-h-0 lg:shrink-0 lg:border-t-0",
             view !== "chat" && "max-lg:hidden"
           )}
         >
