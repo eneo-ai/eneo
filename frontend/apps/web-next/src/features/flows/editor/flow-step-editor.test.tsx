@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -20,7 +21,7 @@ vi.mock("@/lib/api/browser", async () => {
   return { browserApi: api.stub.client };
 });
 
-import { FlowStepEditor } from "./flow-step-editor";
+import { FlowStepEditor, type EditorLeave, type StepNavigation } from "./flow-step-editor";
 
 const EDITOR = "PATCH /api/v1/flows/{id}/editor/";
 const ASSISTANT = "GET /api/v1/flows/{id}/assistants/{assistant_id}/";
@@ -71,6 +72,8 @@ function renderEditor(
     space?: ReturnType<typeof makeSpace>;
     onAskChat?: (text: string) => void;
     suggestionFix?: SuggestionFix;
+    navigation?: StepNavigation;
+    leaveRef?: React.Ref<EditorLeave>;
   } = {}
 ) {
   const queryClient = testQueryClient();
@@ -86,6 +89,8 @@ function renderEditor(
       onCancel={onCancel}
       onAskChat={overrides.onAskChat}
       suggestionFix={overrides.suggestionFix}
+      navigation={overrides.navigation}
+      leaveRef={overrides.leaveRef}
     />,
     { queryClient }
   );
@@ -254,6 +259,69 @@ describe("FlowStepEditor", () => {
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(button);
     await waitFor(() => expect(fix.onFix).toHaveBeenCalledWith(["b".repeat(64)]));
+  });
+
+  it("leads back to all steps and on to the neighbouring ones from the top", async () => {
+    const onGo = vi.fn();
+    const navigation: StepNavigation = {
+      position: 1,
+      count: 2,
+      previous: null,
+      next: { id: "step-2", name: "Skriv svar" },
+      onGo
+    };
+    const { onCancel, container } = renderEditor(makeFlow(), { navigation });
+    await nameField();
+    const bar = screen.getByRole("navigation", { name: "Stegen" });
+    expect(within(bar).getByText("Steg 1 av 2")).toBeTruthy();
+    // Disabled at the first step, so the bar does not move.
+    expect(
+      (within(bar).getByRole("button", { name: "Föregående steg" }) as HTMLButtonElement).disabled
+    ).toBe(true);
+    fireEvent.click(within(bar).getByRole("button", { name: "Nästa steg: Skriv svar" }));
+    expect(onGo).toHaveBeenCalledWith("step-2");
+    fireEvent.click(within(bar).getByRole("button", { name: "Alla steg" }));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    await expectNoAxeViolations(container);
+  });
+
+  it("asks before unsaved changes are left, by every way out", async () => {
+    const onGo = vi.fn();
+    const leaveRef = createRef<EditorLeave>();
+    const { onCancel } = renderEditor(makeFlow(), {
+      leaveRef,
+      navigation: {
+        position: 1,
+        count: 2,
+        previous: null,
+        next: { id: "step-2", name: "Skriv svar" },
+        onGo
+      }
+    });
+    fireEvent.change(await nameField(), { target: { value: "Sammanfatta ärendet" } });
+    expect(leaveRef.current?.isDirty()).toBe(true);
+
+    for (const name of ["Alla steg", "Nästa steg: Skriv svar", messages.cancel]) {
+      fireEvent.click(screen.getByRole("button", { name }));
+      const dialog = await screen.findByRole("alertdialog", {
+        name: "Lämna steget utan att spara?"
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: messages.cancel }));
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("alertdialog", { name: "Lämna steget utan att spara?" })
+        ).toBeNull()
+      );
+    }
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(onGo).not.toHaveBeenCalled();
+
+    // The page's own way out (browser Back) asks the same, and goes on when told.
+    const proceed = vi.fn();
+    act(() => leaveRef.current?.requestLeave(proceed));
+    const dialog = await screen.findByRole("alertdialog", { name: "Lämna steget utan att spara?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lämna utan att spara" }));
+    expect(proceed).toHaveBeenCalledTimes(1);
   });
 
   it("reads long material in parts as one step setting, and explains what it costs", async () => {

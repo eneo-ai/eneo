@@ -9,7 +9,7 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useId, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
@@ -23,7 +23,7 @@ import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
 import { useSpace } from "@/features/spaces/use-space";
 import { AddStepDialog } from "./editor/add-step-dialog";
 import { insertionKindsQueryOptions } from "./editor/editor-api";
-import { FlowStepEditor } from "./editor/flow-step-editor";
+import { FlowStepEditor, type EditorLeave } from "./editor/flow-step-editor";
 import type { StepKindOption } from "./editor/step-kinds";
 import {
   flowKeys,
@@ -49,7 +49,7 @@ import { flowRefusalMessage, STALE_REVISION } from "./flow-refusals";
 import { FlowSettings } from "./flow-settings";
 import { FlowStatusBadge } from "./flow-status";
 import { FlowStepList, showStepCard, stepControlId } from "./flow-step-list";
-import { orderWithMove, orderWithout, stepsInOrder } from "./flow-steps";
+import { orderWithMove, orderWithout, stepName, stepsInOrder } from "./flow-steps";
 import { speakerStepCandidate, speakerStepOption, speakerStepUpdate } from "./speaker-step-offer";
 import { runKeys } from "./runs/runs-api";
 import { FlowRunsList, runHref } from "./runs/runs-list";
@@ -66,6 +66,14 @@ type EditorChange = Omit<FlowEditorUpdate, "expected_revision" | "definition"> &
 const CHAT_WIDTH_STORAGE_KEY = "eneo:flow-chat-width";
 /** How long a card the chat touched stays marked. */
 const CHAT_CHANGE_MARK_MS = 8000;
+
+/** The page's address with ?step= set to `stepId`, or without it; other parameters stay. */
+function stepUrl(stepId: string | null): URL {
+  const url = new URL(window.location.href);
+  if (stepId) url.searchParams.set("step", stepId);
+  else url.searchParams.delete("step");
+  return url;
+}
 
 /** After a move the moved step's button keeps focus; at an end, where it is disabled, its twin. */
 function focusMoveControl(stepId: string, delta: -1 | 1) {
@@ -111,6 +119,12 @@ export function FlowPage({ flowId }: { flowId: string }) {
 
   const stepsHeadingRef = useRef<HTMLHeadingElement>(null);
   const editorRef = useRef<HTMLElement>(null);
+  // The open editor: whether leaving it loses edits, and leaving after asking.
+  const editorLeave = useRef<EditorLeave>(null);
+  // How many history entries this page pushed for steps since the list.
+  const stepDepth = useRef(0);
+  // The next popstate leaves the editor without asking (the person agreed).
+  const leaving = useRef(false);
   const noticeKey = useRef(0);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [view, setView] = useState<View>("definition");
@@ -127,7 +141,6 @@ export function FlowPage({ flowId }: { flowId: string }) {
     maxSize: "60%",
     autoSaveId: CHAT_WIDTH_STORAGE_KEY
   });
-  const [openStepId, setOpenStepId] = useState<string | null>(null);
   const [addAt, setAddAt] = useState<number | null>(null);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
   const [starting, setStarting] = useState(false);
@@ -136,6 +149,9 @@ export function FlowPage({ flowId }: { flowId: string }) {
   const [chatComposer, setChatComposer] = useState<ComposerInsert | null>(null);
   const router = useRouter();
   const searchParams = useSearchParams();
+  // The open step lives in ?step=, so a refresh or a shared link opens it
+  // again (an id the flow does not have shows the list).
+  const [openStepId, setOpenStepId] = useState<string | null>(() => searchParams.get("step"));
   const [chosenTab, setTab] = useState<PageTab>(
     searchParams.get("tab") === "runs" ? "runs" : "definition"
   );
@@ -304,18 +320,40 @@ export function FlowPage({ flowId }: { flowId: string }) {
     publish.mutate();
   }
 
-  function openStep(step: FlowStep) {
-    if (!step.id) return;
-    // Rendered before focus moves, so the editor is there to take it.
-    flushSync(() => setOpenStepId(step.id ?? null));
+  /** Shows the step's editor and puts focus on it; rendered first, so it is there to take it. */
+  function showEditor(id: string) {
+    flushSync(() => setOpenStepId(id));
     editorRef.current?.focus();
   }
 
-  function closeStep() {
-    const id = openStepId;
+  /** Shows the list again, with focus on the open button of the step that was open. */
+  function showList(id: string | null) {
     setOpenStepId(null);
     if (id)
       requestAnimationFrame(() => document.getElementById(stepControlId(id, "open"))?.focus());
+  }
+
+  /** Opens a step (from the list, or the editor's previous and next) as a new history entry. */
+  function openStep(step: Pick<FlowStep, "id">) {
+    if (!step.id) return;
+    stepDepth.current += 1;
+    window.history.pushState({ flowStepDepth: stepDepth.current }, "", stepUrl(step.id));
+    showEditor(step.id);
+  }
+
+  /**
+   * Back to the list, once the editor has agreed: through the history when
+   * the steps were opened here (so Back does not reopen them), else by
+   * taking ?step= out of the address.
+   */
+  function closeStep() {
+    if (stepDepth.current > 0) {
+      leaving.current = true;
+      window.history.go(-stepDepth.current);
+      return;
+    }
+    window.history.replaceState(window.history.state, "", stepUrl(null));
+    showList(openStepId);
   }
 
   function moveStep(step: FlowStep, delta: -1 | 1) {
@@ -400,6 +438,43 @@ export function FlowPage({ flowId }: { flowId: string }) {
   }
 
   const openedStep = openStepId ? steps.find((step) => step.id === openStepId) : undefined;
+  const openedIndex = openedStep ? steps.indexOf(openedStep) : -1;
+  const neighbour = (step: FlowStep | undefined) =>
+    step?.id
+      ? {
+          id: step.id,
+          name: stepName(step) ?? t("flows_step_label_unnamed", { order: step.step_order })
+        }
+      : null;
+
+  // Browser Back and Forward move between the list and the steps opened
+  // here. A popstate cannot be cancelled: with unsaved edits the step goes
+  // back into the address while the editor asks, and leaving goes Back again.
+  const popState = useEffectEvent((event: PopStateEvent) => {
+    const target = new URL(window.location.href).searchParams.get("step");
+    const state = event.state as { flowStepDepth?: unknown } | null;
+    const depth = typeof state?.flowStepDepth === "number" ? state.flowStepDepth : 0;
+    const current = openStepId;
+    if (target !== current && !leaving.current && current && editorLeave.current?.isDirty()) {
+      stepDepth.current = depth + 1;
+      window.history.pushState({ flowStepDepth: stepDepth.current }, "", stepUrl(current));
+      editorLeave.current.requestLeave(() => {
+        leaving.current = true;
+        window.history.back();
+      });
+      return;
+    }
+    leaving.current = false;
+    stepDepth.current = depth;
+    if (target === current) return;
+    if (target && steps.some((step) => step.id === target)) showEditor(target);
+    else showList(current);
+  });
+  useEffect(() => {
+    const listener = (event: PopStateEvent) => popState(event);
+    window.addEventListener("popstate", listener);
+    return () => window.removeEventListener("popstate", listener);
+  }, []);
   const speakerCandidate = canEdit
     ? speakerStepCandidate(flow, space.transcription_services ?? [])
     : null;
@@ -556,6 +631,14 @@ export function FlowPage({ flowId }: { flowId: string }) {
                       announce(t("flows_step_saved", { step: stepLabel(openedStep, t) }));
                     }}
                     onCancel={closeStep}
+                    leaveRef={editorLeave}
+                    navigation={{
+                      position: openedIndex + 1,
+                      count: steps.length,
+                      previous: neighbour(steps[openedIndex - 1]),
+                      next: neighbour(steps[openedIndex + 1]),
+                      onGo: (id) => openStep({ id })
+                    }}
                   />
                 </section>
               ) : (

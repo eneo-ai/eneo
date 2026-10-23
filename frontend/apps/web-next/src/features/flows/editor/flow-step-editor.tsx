@@ -3,12 +3,13 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Suspense, useId, useRef, useState } from "react";
+import { Suspense, useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -90,6 +91,31 @@ type EditorProps = {
   onAskChat?: (text: string) => void;
   /** Makes a suggestion's patch; absent, no "Åtgärda" is offered. */
   suggestionFix?: SuggestionFix;
+  /** The steps before and after this one, for "Föregående steg" and "Nästa steg". */
+  navigation?: StepNavigation;
+  /** For the page: whether leaving loses edits, and leaving after asking. */
+  leaveRef?: Ref<EditorLeave>;
+};
+
+/** Where the editor's top bar can go besides back to the list. */
+export type StepNavigation = {
+  /** 1-based, and the number of steps. */
+  position: number;
+  count: number;
+  previous: { id: string; name: string } | null;
+  next: { id: string; name: string } | null;
+  /** Opens that step instead (the page writes it to the address). */
+  onGo: (stepId: string) => void;
+};
+
+/**
+ * Leaving the editor (back to the list, to another step, browser Back):
+ * with unsaved changes it asks first ("Lämna steget utan att spara?") and
+ * goes only when the person agrees; without, it goes at once.
+ */
+export type EditorLeave = {
+  isDirty: () => boolean;
+  requestLeave: (proceed: () => void) => void;
 };
 
 /**
@@ -101,15 +127,81 @@ type EditorProps = {
  * suggestions about the step show at the top. Read-only shows the same
  * settings as text.
  */
-export function FlowStepEditor(props: EditorProps): React.JSX.Element {
+export function FlowStepEditor({ leaveRef, navigation, ...props }: EditorProps): React.JSX.Element {
   const t = useTranslations();
+  const session = useRef<EditorLeave | null>(null);
+  const leave = (proceed: () => void) =>
+    session.current ? session.current.requestLeave(proceed) : proceed();
+  useImperativeHandle(leaveRef, () => ({
+    isDirty: () => session.current?.isDirty() ?? false,
+    requestLeave: leave
+  }));
   return (
-    // The knowledge picker and the model list read the flow's space.
-    <SpaceProvider routeId={props.flow.space_id}>
-      <Suspense fallback={<LoadingState label={t("flow_step_editor_loading")} rows={6} />}>
-        <StepEditorSession key={`${props.flow.id}:${props.stepId}`} {...props} />
-      </Suspense>
-    </SpaceProvider>
+    <div className="flex flex-col gap-4">
+      {/* The way back and to the neighbouring steps, above the step, while it loads too. */}
+      <nav
+        aria-label={t("flow_step_editor_navigation")}
+        className="flex flex-wrap items-center justify-between gap-2"
+      >
+        <Button
+          label={t("flow_step_editor_all_steps")}
+          variant="ghost"
+          size="sm"
+          icon={<ArrowLeft aria-hidden="true" className="size-4" />}
+          onClick={() => leave(props.onCancel)}
+        />
+        {navigation ? (
+          <span className="flex items-center gap-1">
+            <Text type="supporting" size="sm" className="px-1">
+              {t("flow_step_editor_position", {
+                position: navigation.position,
+                count: navigation.count
+              })}
+            </Text>
+            <IconButton
+              label={
+                navigation.previous
+                  ? t("flow_step_editor_previous_named", { step: navigation.previous.name })
+                  : t("flow_step_editor_previous")
+              }
+              icon={<ChevronLeft aria-hidden="true" />}
+              variant="ghost"
+              size="sm"
+              isDisabled={!navigation.previous}
+              onClick={() => {
+                const target = navigation.previous;
+                if (target) leave(() => navigation.onGo(target.id));
+              }}
+            />
+            <IconButton
+              label={
+                navigation.next
+                  ? t("flow_step_editor_next_named", { step: navigation.next.name })
+                  : t("flow_step_editor_next")
+              }
+              icon={<ChevronRight aria-hidden="true" />}
+              variant="ghost"
+              size="sm"
+              isDisabled={!navigation.next}
+              onClick={() => {
+                const target = navigation.next;
+                if (target) leave(() => navigation.onGo(target.id));
+              }}
+            />
+          </span>
+        ) : null}
+      </nav>
+      {/* The knowledge picker and the model list read the flow's space. */}
+      <SpaceProvider routeId={props.flow.space_id}>
+        <Suspense fallback={<LoadingState label={t("flow_step_editor_loading")} rows={6} />}>
+          <StepEditorSession
+            key={`${props.flow.id}:${props.stepId}`}
+            {...props}
+            leaveRef={session}
+          />
+        </Suspense>
+      </SpaceProvider>
+    </div>
   );
 }
 
@@ -144,8 +236,9 @@ function StepEditorSession({
   onSaved,
   onCancel,
   onAskChat,
-  suggestionFix
-}: EditorProps) {
+  suggestionFix,
+  leaveRef
+}: Omit<EditorProps, "navigation">) {
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
@@ -168,6 +261,8 @@ function StepEditorSession({
   const [checked, setChecked] = useState(false);
   const [stale, setStale] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  // Where the person was going when the editor asked about the unsaved changes.
+  const pendingLeave = useRef<(() => void) | null>(null);
 
   const latestStep = findStep(latest, stepId);
   // Files uploaded in this edit go again when it ends without saving them.
@@ -212,6 +307,18 @@ function StepEditorSession({
   const dirty = session?.dirty ?? false;
   const effectiveReadOnly = readOnly || latest.published_version != null;
   useBeforeUnloadWarning(dirty && !effectiveReadOnly);
+  useImperativeHandle(leaveRef, () => ({
+    isDirty: () => dirty && !effectiveReadOnly,
+    requestLeave: (proceed) => {
+      if (dirty && !effectiveReadOnly) {
+        pendingLeave.current = proceed;
+        setConfirmDiscard(true);
+        return;
+      }
+      uploads.release();
+      proceed();
+    }
+  }));
 
   const stepPatch = session ? stepChanges(session.saved, session.draft) : null;
   const previewJson = JSON.stringify(
@@ -476,6 +583,7 @@ function StepEditorSession({
 
   function requestCancel() {
     if (dirty && !effectiveReadOnly) {
+      pendingLeave.current = onCancel;
       setConfirmDiscard(true);
       return;
     }
@@ -744,7 +852,9 @@ function StepEditorSession({
         onConfirm={() => {
           setConfirmDiscard(false);
           uploads.release();
-          onCancel();
+          const proceed = pendingLeave.current ?? onCancel;
+          pendingLeave.current = null;
+          proceed();
         }}
       />
     </section>

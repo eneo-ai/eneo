@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import type { Permission } from "@/lib/auth/permissions";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { resetNavigation, setRoute } from "@/test/navigation";
 import { setViewport } from "@/test/setup-dom";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { makeKindOption, makeKindPlace } from "./editor/testing/fixtures";
@@ -32,6 +33,7 @@ const state = vi.hoisted(() => ({
   mode: null as unknown,
   kinds: null as unknown,
   suggestions: null as unknown,
+  dirty: false,
   // What went into the chat's composer, text and pills (by the value they send) in order.
   inserted: [] as string[],
   composer: {
@@ -121,6 +123,57 @@ vi.mock("@/features/chat/chat-view", async () => {
     }
   };
 });
+// The editor is its own tests'; the page owns where it is (?step=) and what
+// leaving it asks. The stub reports `state.dirty` as unsaved changes and asks
+// as the editor does, with "Lämna utan att spara" to go on.
+vi.mock("./editor/flow-step-editor", async () => {
+  const { useImperativeHandle, useState } = await import("react");
+  return {
+    FlowStepEditor: function FlowStepEditor({
+      stepId,
+      onCancel,
+      leaveRef,
+      navigation
+    }: {
+      stepId: string;
+      onCancel: () => void;
+      leaveRef: React.Ref<{ isDirty: () => boolean; requestLeave: (go: () => void) => void }>;
+      navigation: { next: { id: string } | null; onGo: (id: string) => void };
+    }) {
+      const [asking, setAsking] = useState<(() => void) | null>(null);
+      const leave = (go: () => void) => (state.dirty ? setAsking(() => go) : go());
+      useImperativeHandle(leaveRef, () => ({ isDirty: () => state.dirty, requestLeave: leave }));
+      const next = navigation.next;
+      return (
+        <div>
+          <p>Redigerar {stepId}</p>
+          <button type="button" onClick={() => leave(onCancel)}>
+            Alla steg
+          </button>
+          <button
+            type="button"
+            disabled={!next}
+            onClick={() => next && leave(() => navigation.onGo(next.id))}
+          >
+            Nästa
+          </button>
+          {asking ? (
+            <button
+              type="button"
+              onClick={() => {
+                state.dirty = false;
+                setAsking(null);
+                asking();
+              }}
+            >
+              Lämna utan att spara
+            </button>
+          ) : null}
+        </div>
+      );
+    }
+  };
+});
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   const { makeSpace: space } = await import("@/features/spaces/testing/space-fixture");
@@ -170,6 +223,7 @@ beforeEach(() => {
   state.flow = ok(makeFlow({ steps }));
   state.suggestions = suggestions(4, []);
   state.inserted = [];
+  state.dirty = false;
   // Without edit access the chat is not offered; most tests are about the definition.
   state.chat = refused(403, { code: "insufficient_space_permission", message: "No." });
 });
@@ -177,6 +231,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  resetNavigation();
+  window.history.replaceState(null, "", "/");
 });
 
 function renderPage(
@@ -685,5 +741,93 @@ describe("FlowPage", () => {
     expect(state.inserted).toEqual(["@[Sammanfatta](step:step-1)"]);
     expect(chat.className).not.toContain("max-lg:hidden");
     expect(screen.queryByRole("dialog", { name: "Referens" })).toBeNull();
+  });
+
+  it("opens a step in the address, and Back and Forward close and reopen it", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 2: Skriv svar" }));
+    expect(screen.getByText("Redigerar step-2")).toBeTruthy();
+    expect(new URL(window.location.href).searchParams.get("step")).toBe("step-2");
+    expect(document.activeElement).toBe(
+      screen.getByRole("region", { name: "Inställningar för Steg 2: Skriv svar" })
+    );
+
+    window.history.back();
+    const open = await screen.findByRole("button", { name: "Redigera Steg 2: Skriv svar" });
+    await waitFor(() => expect(document.activeElement).toBe(open));
+    expect(window.location.search).toBe("");
+
+    window.history.forward();
+    expect(await screen.findByText("Redigerar step-2")).toBeTruthy();
+  });
+
+  it("goes back to the list from the editor, through the history it opened", async () => {
+    const { container } = renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 1: Sammanfatta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Nästa" }));
+    expect(screen.getByText("Redigerar step-2")).toBeTruthy();
+    expect(new URL(window.location.href).searchParams.get("step")).toBe("step-2");
+
+    fireEvent.click(screen.getByRole("button", { name: "Alla steg" }));
+    const open = await screen.findByRole("button", { name: "Redigera Steg 2: Skriv svar" });
+    await waitFor(() => expect(document.activeElement).toBe(open));
+    expect(window.location.search).toBe("");
+    await expectNoAxeViolations(container);
+  });
+
+  it("walks Back through the steps visited before the list", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 1: Sammanfatta" }));
+    fireEvent.click(screen.getByRole("button", { name: "Nästa" }));
+    window.history.back();
+    expect(await screen.findByText("Redigerar step-1")).toBeTruthy();
+    expect(new URL(window.location.href).searchParams.get("step")).toBe("step-1");
+  });
+
+  it("opens the step a link names, and the list for a step the flow does not have", () => {
+    setRoute("/?step=step-2");
+    window.history.replaceState(null, "", "/?step=step-2");
+    renderPage();
+    expect(screen.getByText("Redigerar step-2")).toBeTruthy();
+    cleanup();
+
+    setRoute("/?step=step-9");
+    renderPage();
+    expect(screen.getByRole("button", { name: "Redigera Steg 1: Sammanfatta" })).toBeTruthy();
+  });
+
+  it("asks before Back leaves unsaved changes, and stays on the step until told", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 1: Sammanfatta" }));
+    state.dirty = true;
+
+    window.history.back();
+    const leave = await screen.findByRole("button", { name: "Lämna utan att spara" });
+    // The step went back into the address while the editor asks.
+    expect(screen.getByText("Redigerar step-1")).toBeTruthy();
+    expect(new URL(window.location.href).searchParams.get("step")).toBe("step-1");
+
+    fireEvent.click(leave);
+    expect(
+      await screen.findByRole("button", { name: "Redigera Steg 1: Sammanfatta" })
+    ).toBeTruthy();
+    expect(window.location.search).toBe("");
+  });
+
+  it("asks before the back control or the next step leave unsaved changes", async () => {
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Redigera Steg 1: Sammanfatta" }));
+    state.dirty = true;
+
+    fireEvent.click(screen.getByRole("button", { name: "Nästa" }));
+    expect(screen.getByText("Redigerar step-1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Lämna utan att spara" }));
+    expect(screen.getByText("Redigerar step-2")).toBeTruthy();
+
+    state.dirty = true;
+    fireEvent.click(screen.getByRole("button", { name: "Alla steg" }));
+    expect(screen.getByText("Redigerar step-2")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Lämna utan att spara" }));
+    expect(await screen.findByRole("button", { name: "Redigera Steg 2: Skriv svar" })).toBeTruthy();
   });
 });
