@@ -73,6 +73,7 @@ from eneo.flows.flow_resource_bindings import (
 )
 from eneo.flows.flow_review_policy import dump_flow_step_review_policy
 from eneo.flows.flow_run_step_inputs import primary_runtime_input_format
+from eneo.flows.flow_runtime_file_integrity import constraint_name_from_integrity_error
 from eneo.main.exceptions import NotFoundException
 
 
@@ -223,10 +224,7 @@ _ACTIVE_FLOW_NAME_INDEX = "uq_flows_space_id_name_active"
 
 
 def _is_active_flow_name_violation(exc: IntegrityError) -> bool:
-    # asyncpg names the violated constraint on its own error; SQLAlchemy's
-    # dialect wraps that error and copies only the SQLSTATE to the wrapper.
-    driver_error = exc.orig.__cause__ if exc.orig is not None else None
-    return getattr(driver_error, "constraint_name", None) == _ACTIVE_FLOW_NAME_INDEX
+    return constraint_name_from_integrity_error(exc) == _ACTIVE_FLOW_NAME_INDEX
 
 
 def _stale_revision_error(

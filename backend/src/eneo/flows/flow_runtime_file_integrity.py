@@ -16,33 +16,16 @@ RUNTIME_FILE_ATTACHMENT_CONSTRAINT_NAMES = frozenset(
 )
 
 
-def _constraint_name_from_object(value: object) -> str | None:
-    diagnostic = getattr(value, "diag", None)
-    constraint_name = getattr(diagnostic, "constraint_name", None)
-    if isinstance(constraint_name, str):
-        return constraint_name
-    constraint_name = getattr(value, "constraint_name", None)
-    if isinstance(constraint_name, str):
-        return constraint_name
-    return None
-
-
-def _known_constraint_name_from_message(value: object) -> str | None:
-    message = str(value)
-    return next(
-        (
-            constraint_name
-            for constraint_name in RUNTIME_FILE_ATTACHMENT_CONSTRAINT_NAMES
-            if constraint_name in message
-        ),
-        None,
-    )
-
-
 def constraint_name_from_integrity_error(exc: IntegrityError) -> str | None:
-    return _constraint_name_from_object(
-        exc.orig
-    ) or _known_constraint_name_from_message(exc.orig)
+    """Name the violated constraint the way SQLAlchemy's asyncpg adapter reports it.
+
+    The adapter wraps the driver error (``translated_error from error``): the
+    wrapper in ``exc.orig`` carries only the SQLSTATE, and asyncpg's own error
+    in ``exc.orig.__cause__`` names the constraint.
+    """
+    driver_error = exc.orig.__cause__ if exc.orig is not None else None
+    constraint_name = getattr(driver_error, "constraint_name", None)
+    return constraint_name if isinstance(constraint_name, str) else None
 
 
 def is_runtime_file_attachment_integrity_error(exc: IntegrityError) -> bool:

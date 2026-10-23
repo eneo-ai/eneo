@@ -24,11 +24,6 @@ from eneo.flows.flow_run_step_result_file import FlowStepResultFileReference
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 
 
-class _Diagnostic:
-    def __init__(self, constraint_name: str):
-        self.constraint_name = constraint_name
-
-
 @pytest.mark.asyncio
 async def test_claim_initializes_execution_heartbeat_in_the_same_update() -> None:
     session = AsyncMock()
@@ -154,17 +149,18 @@ async def test_retained_input_snapshot_selects_only_file_identities():
     assert tenant_id in compiled.params.values()
 
 
-class _ConstraintOrigin(Exception):
+class _DriverError(Exception):
     def __init__(self, constraint_name: str):
         super().__init__(constraint_name)
-        self.diag = _Diagnostic(constraint_name)
+        self.constraint_name = constraint_name
 
 
 def _integrity_error_for_constraint(constraint_name: str) -> IntegrityError:
+    # SQLAlchemy's asyncpg adapter names the constraint on the wrapped cause.
+    wrapper = Exception("asyncpg IntegrityConstraintViolationError")
+    wrapper.__cause__ = _DriverError(constraint_name)
     return IntegrityError(
-        statement="INSERT INTO flow_run_step_input_files",
-        params={},
-        orig=_ConstraintOrigin(constraint_name),
+        statement="INSERT INTO flow_run_step_input_files", params={}, orig=wrapper
     )
 
 
