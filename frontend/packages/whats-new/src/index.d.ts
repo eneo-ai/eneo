@@ -1,3 +1,5 @@
+import type { Permission } from "@eneo/eneo-js";
+
 export type Locale = "en" | "sv";
 export type Localized = Record<Locale, string>;
 
@@ -5,6 +7,10 @@ export type EntryType = "new" | "improved" | "fixed";
 export type EntryArea =
   "chat" | "assistants" | "knowledge" | "spaces" | "skills" | "account" | "admin" | "platform";
 export type EntryAudience = "all" | "admin";
+
+/** Uses the same allOf AND anyOf contract as the app permission checker. */
+export type EntryPermissions = { allOf?: Permission[]; anyOf?: Permission[] };
+export type PermissionCheck = (required: Permission | EntryPermissions) => boolean;
 
 export interface ShowMe {
   /** App-relative path without locale prefix. */
@@ -20,6 +26,8 @@ export interface ReleaseEntry {
   type: EntryType;
   area: EntryArea;
   audience?: EntryAudience;
+  /** Omit for general news. Admin audience is an additional requirement. */
+  permissions?: EntryPermissions;
   title: Localized;
   body: Localized;
   showMe?: ShowMe;
@@ -57,5 +65,5 @@ export function releasesForVersion(installedVersion: string): Release[];
  */
 export function hasUnseenRelease(seenVersion: string | null | undefined, latest?: Release): boolean;
 
-/** Entries the given user may see (admin-only entries need `isAdmin`). */
-export function visibleEntries(release: Release, isAdmin: boolean): ReleaseEntry[];
+/** Entries allowed by the user’s actual permission checker; admin is not a bypass. */
+export function visibleEntries(release: Release, can: PermissionCheck): ReleaseEntry[];

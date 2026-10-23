@@ -34,7 +34,6 @@ export function WhatsNewPage({ title }: { title: string }) {
   const { can, settings } = useAppContext();
   const { seenVersion, markLatestSeen, resetState } = useWhatsNew();
   const { running, start } = useTour();
-  const isAdmin = can("admin");
   const [seenAtOpen] = useState<string | null>(() => seenVersion ?? null);
   const [selectedVersion, setSelectedVersion] = useState<string | null>(
     releases[0]?.version ?? null
@@ -46,8 +45,8 @@ export function WhatsNewPage({ title }: { title: string }) {
   // tour runs, starting another is ignored.
   const [tourFrom, setTourFrom] = useState<string | null>(null);
   const current = releases.find((release) => release.version === selectedVersion) ?? null;
-  const entries = current ? filterEntries(current, filters, isAdmin) : [];
-  const total = current ? visibleEntries(current, isAdmin).length : 0;
+  const entries = current ? filterEntries(current, filters, can) : [];
+  const total = current ? visibleEntries(current, can).length : 0;
   const countText = t("whats_new_count", { shown: entries.length, total });
   const announce = useAnnounce();
   const announcedCount = useRef<string | null>(null);
@@ -58,7 +57,7 @@ export function WhatsNewPage({ title }: { title: string }) {
     }
     announcedCount.current = countText;
   }, [countText, announce]);
-  const areas = current ? areasPresent(current, isAdmin) : [];
+  const areas = current ? areasPresent(current, can) : [];
 
   useEffect(() => {
     void markLatestSeen();
@@ -66,7 +65,7 @@ export function WhatsNewPage({ title }: { title: string }) {
 
   function selectRelease(release: Release) {
     setSelectedVersion(release.version);
-    if (filters.area && !areasPresent(release, isAdmin).includes(filters.area)) {
+    if (filters.area && !areasPresent(release, can).includes(filters.area)) {
       setFilters((previous) => ({ ...previous, area: null }));
     }
   }
@@ -159,14 +158,14 @@ export function WhatsNewPage({ title }: { title: string }) {
                     {t("whats_new_new_for_you")}
                   </Badge>
                 ))}
-              {tourEntries(current, isAdmin).length > 0 && (
+              {tourEntries(current, can).length > 0 && (
                 <Button
                   size="sm"
                   variant={isReadRelease(current, seenAtOpen) ? "outline" : "default"}
                   className="ml-auto"
                   aria-busy={(running && tourFrom === "release") || undefined}
                   onClick={() =>
-                    void startEntries("release", tourEntries(current, isAdmin), current.version)
+                    void startEntries("release", tourEntries(current, can), current.version)
                   }
                 >
                   {t("whats_new_tour_start")}

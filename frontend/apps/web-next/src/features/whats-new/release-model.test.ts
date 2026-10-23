@@ -52,11 +52,11 @@ describe("What's new release behavior", () => {
   });
 
   it("hides admin content from non-admins in lists, filters, and tours", () => {
-    expect(areasPresent(release, false)).toEqual(["chat"]);
+    expect(areasPresent(release, () => false)).toEqual(["chat"]);
     expect(
-      filterEntries(release, { area: null, showMeOnly: false }, false).map((e) => e.id)
+      filterEntries(release, { area: null, showMeOnly: false }, () => false).map((e) => e.id)
     ).toEqual(["chat"]);
-    expect(tourEntries(release, false)).toEqual([]);
-    expect(tourEntries(release, true).map((e) => e.id)).toEqual(["admin"]);
+    expect(tourEntries(release, () => false)).toEqual([]);
+    expect(tourEntries(release, () => true).map((e) => e.id)).toEqual(["admin"]);
   });
 });

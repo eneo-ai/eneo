@@ -43,7 +43,7 @@ class Sessions(BasePublic):
     )
 
     __table_args__ = (
-        Index("created_at_idx", "created_at"),
+        Index("ix_sessions_created_id", "created_at", "id"),
         CheckConstraint(
             "(user_id IS NOT NULL) <> (api_key_id IS NOT NULL)",
             name="ck_sessions_user_xor_api_key",

@@ -134,6 +134,36 @@ class TestBasicLogging:
         mock_repository.create.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_required_log_bypasses_tenant_audit_configuration(
+        self, mock_repository, mock_config_service, mock_feature_flag_service
+    ):
+        """Mutant: a disabled audit setting suppresses a required event."""
+        mock_feature_flag_service.check_is_feature_enabled.return_value = False
+        mock_config_service.is_action_enabled.return_value = False
+        mock_repository.create.return_value = MagicMock(spec=AuditLog)
+        service = AuditService(
+            mock_repository,
+            audit_config_service=mock_config_service,
+            feature_flag_service=mock_feature_flag_service,
+        )
+
+        result = await service.log(
+            tenant_id=uuid4(),
+            actor_id=uuid4(),
+            action=ActionType.RETENTION_POLICY_APPLIED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=uuid4(),
+            description="Retention policy applied",
+            metadata={},
+            required=True,
+        )
+
+        assert result is not None
+        mock_repository.create.assert_called_once()
+        mock_feature_flag_service.check_is_feature_enabled.assert_not_called()
+        mock_config_service.is_action_enabled.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_log_without_config_service_always_logs(self, mock_repository):
         """When audit_config_service is None, all actions are logged."""
         mock_repository.create.return_value = MagicMock(spec=AuditLog)
