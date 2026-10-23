@@ -4743,6 +4743,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/flows/execution-limits/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Flow Execution Limits
+     * @description Return the step timeout limits of the caller's organisation, so an editor can show them at a step's `timeout_seconds`: the default a step without one runs with and the maximum a step may set. They are the values a run resolves each step's timeout with, from the flow runtime policy administrators edit at `/settings/flow-runtime-policy`. It needs the permission to manage flows; service keys are refused.
+     */
+    get: operations["get_flow_execution_limits"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/flows/runs/capacity/": {
     parameters: {
       query?: never;
@@ -5605,8 +5625,9 @@ export interface paths {
      *
      *     When the checkpoint has an `output_contract`, the edited JSON value is validated before any
      *     checkpoint, step-result projection, or audit state is persisted. Contract failures return `400`
-     *     with code `typed_io_contract_violation` and context fields `checkpoint_id`, `step_id`,
-     *     `step_order`, and `payload_field`.
+     *     with code `typed_io_contract_violation`, and a check that does not finish within its time limit
+     *     returns `400` with code `typed_io_contract_not_checked`; both carry context fields
+     *     `checkpoint_id`, `step_id`, `step_order`, and `payload_field`.
      *
      *     The edit must be submitted before the checkpoint `expires_at` deadline. Late edits return
      *     `400` with code `flow_review_expired`.
@@ -18144,6 +18165,7 @@ export interface components {
       | "flow_task_timeout"
       | "flow_task_failure"
       | "flow_worker_stalled"
+      | "flow_worker_shutdown"
       | "flow_run_abandoned"
       | "flow_run_error_payload_invalid"
       | "flow_run_evidence_forbidden"
@@ -18191,6 +18213,7 @@ export interface components {
       | "flow_llm_output_whitespace_abort"
       | "flow_llm_request_timeout"
       | "flow_step_timeout"
+      | "flow_step_timeout_exceeds_tenant_max"
       | "flow_runtime_input_not_consumed"
       | "flow_mapped_provider_call_limit_exceeded"
       | "flow_summarization_non_convergent"
@@ -18979,6 +19002,26 @@ export interface components {
       allow_service_key_raw_export_class3?: boolean;
       /** Allow Space Admin Raw Export Class3 */
       allow_space_admin_raw_export_class3?: boolean;
+    };
+    /**
+     * FlowExecutionLimitsPublic
+     * @description The organisation's step timeout limits, as a run applies them.
+     * @example {
+     *       "default_step_timeout_seconds": 900,
+     *       "max_step_timeout_seconds": 1800
+     *     }
+     */
+    FlowExecutionLimitsPublic: {
+      /**
+       * Default Step Timeout Seconds
+       * @description Seconds a step may run when its `timeout_seconds` is empty: the organisation's default, otherwise the deployment ceiling.
+       */
+      default_step_timeout_seconds: number;
+      /**
+       * Max Step Timeout Seconds
+       * @description The largest `timeout_seconds` a step may set; a save or run with a larger one is refused with `flow_step_timeout_exceeds_tenant_max`.
+       */
+      max_step_timeout_seconds: number;
     };
     /** FlowFinalOutputContractPublic */
     FlowFinalOutputContractPublic: {
@@ -22038,12 +22081,14 @@ export interface components {
         | "flow_step_execution_failed"
         | "flow_step_missing"
         | "flow_step_timeout"
+        | "flow_step_timeout_exceeds_tenant_max"
         | "flow_summarization_non_convergent"
         | "flow_task_failure"
         | "flow_task_timeout"
         | "flow_unsupported_output_mode"
         | "flow_unsupported_output_type"
         | "flow_webhook_delivery_failed"
+        | "flow_worker_shutdown"
         | "flow_worker_stalled"
         | "typed_io_audio_exceeds_limit"
         | "typed_io_audio_invalid_file_type"
@@ -22274,12 +22319,14 @@ export interface components {
         | "flow_step_execution_failed"
         | "flow_step_missing"
         | "flow_step_timeout"
+        | "flow_step_timeout_exceeds_tenant_max"
         | "flow_summarization_non_convergent"
         | "flow_task_failure"
         | "flow_task_timeout"
         | "flow_unsupported_output_mode"
         | "flow_unsupported_output_type"
         | "flow_webhook_delivery_failed"
+        | "flow_worker_shutdown"
         | "flow_worker_stalled"
         | "typed_io_audio_exceeds_limit"
         | "typed_io_audio_invalid_file_type"
@@ -25281,12 +25328,14 @@ export interface components {
             | "flow_step_execution_failed"
             | "flow_step_missing"
             | "flow_step_timeout"
+            | "flow_step_timeout_exceeds_tenant_max"
             | "flow_summarization_non_convergent"
             | "flow_task_failure"
             | "flow_task_timeout"
             | "flow_unsupported_output_mode"
             | "flow_unsupported_output_type"
             | "flow_webhook_delivery_failed"
+            | "flow_worker_shutdown"
             | "flow_worker_stalled"
             | "typed_io_audio_exceeds_limit"
             | "typed_io_audio_invalid_file_type"
@@ -26768,12 +26817,14 @@ export interface components {
             | "flow_step_execution_failed"
             | "flow_step_missing"
             | "flow_step_timeout"
+            | "flow_step_timeout_exceeds_tenant_max"
             | "flow_summarization_non_convergent"
             | "flow_task_failure"
             | "flow_task_timeout"
             | "flow_unsupported_output_mode"
             | "flow_unsupported_output_type"
             | "flow_webhook_delivery_failed"
+            | "flow_worker_shutdown"
             | "flow_worker_stalled"
             | "typed_io_audio_exceeds_limit"
             | "typed_io_audio_invalid_file_type"
@@ -26997,12 +27048,14 @@ export interface components {
             | "flow_step_execution_failed"
             | "flow_step_missing"
             | "flow_step_timeout"
+            | "flow_step_timeout_exceeds_tenant_max"
             | "flow_summarization_non_convergent"
             | "flow_task_failure"
             | "flow_task_timeout"
             | "flow_unsupported_output_mode"
             | "flow_unsupported_output_type"
             | "flow_webhook_delivery_failed"
+            | "flow_worker_shutdown"
             | "flow_worker_stalled"
             | "typed_io_audio_exceeds_limit"
             | "typed_io_audio_invalid_file_type"
@@ -27180,7 +27233,7 @@ export interface components {
       step_order: number;
       /**
        * Timeout Seconds
-       * @description Optional per-step execution budget in seconds: one wall-clock deadline for the whole step execution, covering input resolution (including transcription), retrieval, every provider request of the step and finalization. Unset, the effective runtime policy's default applies (the organisation's flow runtime settings, else the deployment default); a value above that policy's maximum fails the step with a validation error when it starts. Exhaustion fails the run with `flow_step_timeout`.
+       * @description Optional per-step execution budget in seconds: one wall-clock deadline for the whole step execution, covering input resolution (including transcription), retrieval, every provider request of the step and finalization. Unset, the effective runtime policy's default applies (the organisation's flow runtime settings, else the deployment default). A value above that policy's maximum is refused with `flow_step_timeout_exceeds_tenant_max` when the flow is saved or published, and fails a run that still meets it. Exhaustion fails the run with `flow_step_timeout`.
        */
       timeout_seconds?: number | null;
       /** User Description */
@@ -27876,7 +27929,7 @@ export interface components {
       step_order: number;
       /**
        * Timeout Seconds
-       * @description Optional per-step execution budget in seconds: one wall-clock deadline for the whole step execution, covering input resolution (including transcription), retrieval, every provider request of the step and finalization. Unset, the effective runtime policy's default applies (the organisation's flow runtime settings, else the deployment default); a value above that policy's maximum fails the step with a validation error when it starts. Exhaustion fails the run with `flow_step_timeout`.
+       * @description Optional per-step execution budget in seconds: one wall-clock deadline for the whole step execution, covering input resolution (including transcription), retrieval, every provider request of the step and finalization. Unset, the effective runtime policy's default applies (the organisation's flow runtime settings, else the deployment default). A value above that policy's maximum is refused with `flow_step_timeout_exceeds_tenant_max` when the flow is saved or published, and fails a run that still meets it. Exhaustion fails the run with `flow_step_timeout`.
        */
       timeout_seconds?: number | null;
       /** User Description */
@@ -33614,7 +33667,7 @@ export interface components {
       step_order?: number | null;
       /**
        * Timeout Seconds
-       * @description Optional per-step execution budget in seconds: one wall-clock deadline for the whole step execution, covering input resolution (including transcription), retrieval, every provider request of the step and finalization. Unset, the effective runtime policy's default applies (the organisation's flow runtime settings, else the deployment default); a value above that policy's maximum fails the step with a validation error when it starts. Exhaustion fails the run with `flow_step_timeout`.
+       * @description Optional per-step execution budget in seconds: one wall-clock deadline for the whole step execution, covering input resolution (including transcription), retrieval, every provider request of the step and finalization. Unset, the effective runtime policy's default applies (the organisation's flow runtime settings, else the deployment default). A value above that policy's maximum is refused with `flow_step_timeout_exceeds_tenant_max` when the flow is saved or published, and fails a run that still meets it. Exhaustion fails the run with `flow_step_timeout`.
        */
       timeout_seconds?: number | null;
       /** User Description */
@@ -58899,6 +58952,45 @@ export interface operations {
       };
     };
   };
+  get_flow_execution_limits: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description The organisation's effective step timeout limits. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowExecutionLimitsPublic"];
+        };
+      };
+      /** @description The caller may not manage flows (`insufficient_tenant_permission`), or is a service key (`service_key_principal_not_supported`). */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "context": {
+           *         "auth_layer": "tenant_role"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to manage flows."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_flow_run_capacity: {
     parameters: {
       query?: never;
@@ -62029,7 +62121,7 @@ export interface operations {
           "application/json": components["schemas"]["FlowRunReviewCheckpointPublic"];
         };
       };
-      /** @description Review edit failed. Representative machine-readable codes include `typed_io_validation_failed`, `typed_io_contract_violation`, `flow_review_stale_revision`, `flow_review_expired`, `flow_review_not_active`, `flow_review_edit_not_allowed`, `flow_review_edit_file_backed_unsupported`, `flow_review_edit_output_too_large`, and `flow_review_step_result_not_found`. Contract validation errors include context.checkpoint_id, context.step_id, context.step_order, and context.payload_field. */
+      /** @description Review edit failed. Representative machine-readable codes include `typed_io_validation_failed`, `typed_io_contract_violation`, `typed_io_contract_not_checked`, `flow_review_stale_revision`, `flow_review_expired`, `flow_review_not_active`, `flow_review_edit_not_allowed`, `flow_review_edit_file_backed_unsupported`, `flow_review_edit_output_too_large`, and `flow_review_step_result_not_found`. Contract validation errors include context.checkpoint_id, context.step_id, context.step_order, and context.payload_field. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -62235,6 +62327,22 @@ export interface operations {
            *       "code": "flow_review_checkpoint_not_found",
            *       "eneo_error_code": 9000,
            *       "message": "Review checkpoint not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The Idempotency-Key already resumed another review checkpoint of this run. Send a new key for this checkpoint. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_run_idempotency_conflict",
+           *       "eneo_error_code": 9057,
+           *       "message": "The Idempotency-Key already resumed another review checkpoint of this run."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
@@ -62777,6 +62885,22 @@ export interface operations {
            *       "code": "flow_review_checkpoint_not_found",
            *       "eneo_error_code": 9000,
            *       "message": "Review checkpoint not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The Idempotency-Key already resumed another review checkpoint of this run. Send a new key for this checkpoint. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_run_idempotency_conflict",
+           *       "eneo_error_code": 9057,
+           *       "message": "The Idempotency-Key already resumed another review checkpoint of this run."
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
