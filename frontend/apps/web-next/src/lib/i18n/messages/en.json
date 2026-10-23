@@ -5214,6 +5214,7 @@
   "specialist_role": "What to consult it for",
   "specialist_role_help": "Tells the orchestrating assistant when this specialist is the right one to ask. Empty uses the specialist's own description.",
   "specialist_description_required": "Add a description; the specialist has none of its own.",
+  "reference_via_specialist": "via {name}",
   "edit_specialist": "Edit specialist",
   "remove_specialist": "Remove specialist",
   "activation_failed": "Activation failed — your account could not be created yet. Ask your administrator to create an invitation for your email address, then try again.",
