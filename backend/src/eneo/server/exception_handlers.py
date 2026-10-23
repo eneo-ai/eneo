@@ -381,7 +381,12 @@ def add_exception_handlers(app: FastAPI):
             }
             for error in validation_exc.errors()
         ]
-        return JSONResponse(status_code=422, content={"detail": details})
+        request_id = _extract_request_id(request)
+        return JSONResponse(
+            status_code=422,
+            content={"detail": details},
+            headers={"X-Correlation-ID": request_id} if request_id else None,
+        )
 
     app.add_exception_handler(RequestValidationError, request_validation_error_handler)
 
@@ -425,6 +430,7 @@ def add_exception_handlers(app: FastAPI):
 
             return JSONResponse(
                 status_code=status_code,
+                headers={"X-Correlation-ID": request_id} if request_id else None,
                 content=GeneralError(
                     message=message,
                     eneo_error_code=error_code,

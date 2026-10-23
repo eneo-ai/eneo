@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import aiohttp
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,7 +50,12 @@ from eneo.main import config
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import validate_public_origin
 from eneo.main.container.container import Container
-from eneo.main.exceptions import AuthenticationException, FederatedLoginDenied
+from eneo.main.exceptions import (
+    AuthenticationException,
+    FederatedLoginDenied,
+    TenantSuspendedException,
+    UserInactiveException,
+)
 from eneo.main.logging import get_logger
 from eneo.main.models import CursorPaginatedResponse
 from eneo.main.request_context import set_request_context
@@ -254,7 +260,7 @@ async def _resolve_single_tenant_redirect_uri(
     response_model=AccessToken,
     name="Login",
     description="Authenticate with email and password (OAuth2 password flow).",
-    responses=responses.get_responses([401, 429, 500]),
+    responses=responses.get_responses([401, 403, 429, 500]),
 )
 @endpoint_access(
     authentication=Authentication.PUBLIC,
@@ -280,7 +286,23 @@ async def user_login_with_email_and_password(
     email = form_data.username
     password = form_data.password
 
-    # Log login attempt
+    # The shared request-validation handler owns the public 422 contract.
+    # Do not pass credentials into its exception or into structured logs.
+    try:
+        UserLogin(email=email, password=password)
+    except ValidationError as e:
+        errors = e.errors(include_input=False, include_context=False, include_url=False)
+        logger.warning(
+            "Login failed: validation error",
+            extra={
+                "correlation_id": correlation_id,
+                "auth_method": "password",
+                "source_ip": source_ip,
+                "validation_types": [error["type"] for error in errors],
+            },
+        )
+        raise RequestValidationError(errors) from None
+
     logger.info(
         "Username/password login initiated",
         extra={
@@ -290,26 +312,6 @@ async def user_login_with_email_and_password(
             "source_ip": source_ip,
         },
     )
-
-    # Validate input format
-    try:
-        UserLogin(email=email, password=password)
-    except ValidationError as e:
-        logger.error(
-            "Login failed: validation error",
-            extra={
-                "correlation_id": correlation_id,
-                "auth_method": "password",
-                "email": email,
-                "source_ip": source_ip,
-                "errors": e.errors(),
-            },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=e.errors(),
-            headers={"X-Correlation-ID": correlation_id},
-        )
 
     redis_client = container.redis_client()
     attempt: LoginAttempt | None
@@ -375,7 +377,7 @@ async def user_login_with_email_and_password(
 
         return result
 
-    except AuthenticationException as e:
+    except AuthenticationException:
         # Expected authentication failure - use warning level (not error)
         logger.warning(
             "Login failed: invalid credentials",
@@ -384,7 +386,6 @@ async def user_login_with_email_and_password(
                 "auth_method": "password",
                 "email": email,
                 "source_ip": source_ip,
-                "error": str(e),
             },
         )
         detail: dict[str, object] = {
@@ -399,27 +400,41 @@ async def user_login_with_email_and_password(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=detail,
             headers={"X-Correlation-ID": correlation_id},
-        )
+        ) from None
+
+    except (UserInactiveException, TenantSuspendedException):
+        # These are verified-account denials, with canonical 403 responses.
+        raise
 
     except Exception as e:
-        # Unexpected system error - use error level with full traceback
+        # Exception values and chained tracebacks can contain credentials.
+        # Keep the type and frame locations for diagnosis without those values.
         logger.error(
             "Login failed: unexpected error",
-            exc_info=True,  # Include stack trace
             extra={
                 "correlation_id": correlation_id,
                 "auth_method": "password",
                 "email": email,
                 "source_ip": source_ip,
                 "error_type": type(e).__name__,
-                "error": str(e),
+                "stack_frames": [
+                    {
+                        "file": frame.filename,
+                        "line": frame.lineno,
+                        "function": frame.name,
+                    }
+                    for frame in traceback.extract_tb(e.__traceback__)
+                ],
             },
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An unexpected error occurred during login",
+            detail={
+                "code": "login_unavailable",
+                "message": "An unexpected error occurred during login",
+            },
             headers={"X-Correlation-ID": correlation_id},
-        )
+        ) from None
 
 
 @router.post(
