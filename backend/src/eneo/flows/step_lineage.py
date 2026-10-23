@@ -21,7 +21,11 @@ from eneo.flows.input_binding_contract_rules import (
     question_binding,
     source_ref_bindings,
 )
-from eneo.flows.template_reference_analyzer import TemplateReference, analyze_template
+from eneo.flows.template_reference_analyzer import (
+    TemplateReference,
+    analyze_template,
+    referenced_form_fields,
+)
 from eneo.flows.variable_resolver import decimal_number
 
 
@@ -373,6 +377,103 @@ def _channel_orders(
 ) -> list[int]:
     wanted = set(channels)
     return sorted({read.step_order for read in reads if read.channel in wanted})
+
+
+@dataclass(frozen=True, slots=True)
+class FormFieldRead:
+    """One read a step makes of a run form field: the channel and the site,
+    named as in ``StepRead``."""
+
+    channel: ReadChannel
+    field: str
+    site: str
+
+
+def step_form_field_reads(
+    *,
+    input_source: FlowInputSource | str,
+    step_order: int,
+    input_bindings: object,
+    prompt_template: str | None,
+    output_mode: FlowOutputMode | str,
+    input_config: Mapping[str, object] | None,
+    output_config: Mapping[str, object] | None,
+    step_ref_mapping: dict[str, int],
+    form_field_names: Iterable[str],
+) -> tuple[FormFieldRead, ...]:
+    """Every read the step makes of the run form fields ``form_field_names``,
+    in the templates ``step_reads_by_channel`` reads steps in.
+
+    A step that takes the whole run input reads every field: one whose input
+    is ``flow_input`` without underlag, and a template that reads
+    ``flow_input`` (or ``flow.input``) whole. So does a configuration that
+    cannot be read, as it counts as reading every earlier step. A field is
+    read by ``flow_input.<field>`` or by its bare name, by the rule of
+    ``template_reference_analyzer.referenced_form_fields``.
+    """
+    fields = set(form_field_names)
+    if not fields:
+        return ()
+    reads: list[FormFieldRead] = []
+
+    def every_field(channel: ReadChannel, site: str) -> None:
+        reads.extend(FormFieldRead(channel, name, site) for name in sorted(fields))
+
+    def template(channel: ReadChannel, text: str, site: str | None) -> None:
+        for reference in analyze_template(
+            text, step_refs=step_ref_mapping, form_field_names=fields
+        ):
+            reads.extend(
+                FormFieldRead(
+                    channel,
+                    name,
+                    site or f"{PROMPT_READ_SITE_PREFIX}{reference.expression}",
+                )
+                for name in sorted(
+                    referenced_form_fields([reference], form_field_names=fields)
+                )
+            )
+
+    source = FlowInputSource(input_source)
+    if effective_question_binding(input_bindings) is not None:
+        question = question_binding(input_bindings)
+        if question is not None:
+            template("input", question, "input_bindings.question")
+        for index, ref in enumerate(source_ref_bindings(input_bindings)):
+            template(
+                "input",
+                ref.template_expression(),
+                f"input_bindings.source_refs[{index}]",
+            )
+    elif source is FlowInputSource.FLOW_INPUT:
+        every_field("input", INPUT_SOURCE_READ_SITE)
+    if prompt_template:
+        template("prompt", prompt_template, None)
+    mode = FlowOutputMode(output_mode)
+    configs: tuple[tuple[ConfigColumn, Mapping[str, object] | None], ...] = (
+        ("output_config", output_config),
+        ("input_config", input_config),
+    )
+    for column, config in configs:
+        channel = config_channel(
+            column=column,
+            config=config,
+            input_source=source,
+            output_mode=mode,
+            step_order=step_order,
+        )
+        if channel is None:
+            continue
+        if channel.sites is None:
+            every_field("config", column)
+            continue
+        for path, text in channel.sites:
+            template(
+                "config",
+                text,
+                ".".join((column, *(str(segment) for segment in path))),
+            )
+    return tuple(reads)
 
 
 def resolve_step_input_orders(

@@ -13,6 +13,7 @@ from eneo.flows.domain.flow_suggestions import (
     MAX_FLOW_SUGGESTIONS,
     FlowSuggestion,
     FlowSuggestionCode,
+    SuggestionFlow,
     SuggestionStep,
     analyze_flow,
     suggestion_fingerprint,
@@ -48,14 +49,25 @@ def _step(
     )
 
 
+def _analyze(steps: list[SuggestionStep]) -> tuple[FlowSuggestion, ...]:
+    return analyze_flow(SuggestionFlow(steps=steps))
+
+
+def _duplicates(suggestions: tuple[FlowSuggestion, ...]) -> list[FlowSuggestion]:
+    return [s for s in suggestions if s.code is FlowSuggestionCode.DUPLICATE_READ]
+
+
 def _only(suggestions: tuple[FlowSuggestion, ...]) -> FlowSuggestion:
-    assert len(suggestions) == 1, suggestions
-    return suggestions[0]
+    """The one ``duplicate_read`` of a draft; other rules may fire on the
+    same fixture and are tested in their own files."""
+    duplicates = _duplicates(suggestions)
+    assert len(duplicates) == 1, suggestions
+    return duplicates[0]
 
 
 def test_previous_step_and_a_prompt_read_of_that_step_is_a_duplicate() -> None:
     suggestion = _only(
-        analyze_flow(
+        _analyze(
             [_step(1), _step(2, prompt_text="Sammanfatta.\n{{ step_1.output.text }}")]
         )
     )
@@ -135,12 +147,12 @@ def test_previous_step_and_a_prompt_read_of_that_step_is_a_duplicate() -> None:
 def test_no_duplicate_without_a_second_read_of_the_same_step(
     steps: list[SuggestionStep],
 ) -> None:
-    assert analyze_flow(steps) == ()
+    assert _duplicates(_analyze(steps)) == []
 
 
 def test_all_previous_steps_and_a_prompt_read_is_a_medium_duplicate() -> None:
     suggestion = _only(
-        analyze_flow(
+        _analyze(
             [
                 _step(1),
                 _step(2),
@@ -161,7 +173,7 @@ def test_all_previous_steps_and_a_prompt_read_is_a_medium_duplicate() -> None:
 
 def test_a_question_and_the_prompt_reading_the_same_step_is_a_duplicate() -> None:
     suggestion = _only(
-        analyze_flow(
+        _analyze(
             [
                 _step(1),
                 _step(2),
@@ -185,7 +197,7 @@ def test_a_question_and_the_prompt_reading_the_same_step_is_a_duplicate() -> Non
 
 def test_two_prompt_reads_of_the_same_whole_text_are_a_duplicate() -> None:
     suggestion = _only(
-        analyze_flow(
+        _analyze(
             [
                 _step(1),
                 _step(
@@ -209,7 +221,7 @@ def test_two_prompt_reads_of_the_same_whole_text_are_a_duplicate() -> None:
 
 def test_a_field_read_next_to_the_whole_text_is_contained() -> None:
     suggestion = _only(
-        analyze_flow(
+        _analyze(
             [
                 _step(1),
                 _step(2, prompt_text="Titel: {{ step_1.output.structured.title }}"),
@@ -231,7 +243,7 @@ def test_a_field_in_the_input_next_to_the_whole_text_in_the_prompt_is_the_redund
     None
 ):
     suggestion = _only(
-        analyze_flow(
+        _analyze(
             [
                 _step(1),
                 _step(
@@ -251,7 +263,7 @@ def test_a_field_in_the_input_next_to_the_whole_text_in_the_prompt_is_the_redund
 
 def test_the_whole_input_next_to_a_field_in_the_prompt_keeps_the_input() -> None:
     suggestion = _only(
-        analyze_flow(
+        _analyze(
             [_step(1), _step(2, prompt_text="{{ step_1.output.structured.title }}")]
         )
     )
@@ -263,7 +275,7 @@ def test_the_whole_input_next_to_a_field_in_the_prompt_keeps_the_input() -> None
 
 def test_every_narrower_read_a_wider_read_contains_is_redundant() -> None:
     suggestion = _only(
-        analyze_flow(
+        _analyze(
             [
                 _step(1),
                 _step(
@@ -282,7 +294,7 @@ def test_every_narrower_read_a_wider_read_contains_is_redundant() -> None:
 
 def test_a_path_under_a_structured_source_ref_is_contained() -> None:
     suggestion = _only(
-        analyze_flow(
+        _analyze(
             [
                 _step(1),
                 _step(
@@ -302,7 +314,7 @@ def test_a_path_under_a_structured_source_ref_is_contained() -> None:
 
 def test_the_question_being_exactly_the_expression_is_patchable() -> None:
     suggestion = _only(
-        analyze_flow(
+        _analyze(
             [
                 _step(1),
                 _step(
@@ -327,7 +339,7 @@ def test_the_question_being_exactly_the_expression_is_patchable() -> None:
 
 def test_an_inline_prompt_read_needs_an_assisted_fix() -> None:
     suggestion = _only(
-        analyze_flow(
+        _analyze(
             [_step(1), _step(2, prompt_text="Bakgrund: {{ step_1.output.text }} slut")]
         )
     )
@@ -346,11 +358,11 @@ def _three_steps(
 
 
 def test_the_fingerprint_holds_under_unrelated_edits() -> None:
-    before = _only(analyze_flow(_three_steps()))
+    before = _only(_analyze(_three_steps()))
 
-    renamed = _only(analyze_flow(_three_steps(third_name="Annat namn")))
+    renamed = _only(_analyze(_three_steps(third_name="Annat namn")))
     reworded = _only(
-        analyze_flow(_three_steps(prompt="Ny text.\n{{ step_1.output.text }}\nMer."))
+        _analyze(_three_steps(prompt="Ny text.\n{{ step_1.output.text }}\nMer."))
     )
 
     assert renamed.fingerprint == before.fingerprint
@@ -358,12 +370,12 @@ def test_the_fingerprint_holds_under_unrelated_edits() -> None:
 
 
 def test_the_fingerprint_follows_the_premise() -> None:
-    before = _only(analyze_flow(_three_steps()))
+    before = _only(_analyze(_three_steps()))
 
-    assert analyze_flow(_three_steps(prompt="Ingen läsning.")) == ()
+    assert _duplicates(_analyze(_three_steps(prompt="Ingen läsning."))) == []
     # The same producer reached another way is another premise.
     through_question = _only(
-        analyze_flow(
+        _analyze(
             [
                 _step(1),
                 _step(
@@ -390,18 +402,20 @@ def test_the_fingerprint_follows_the_premise() -> None:
 
 
 def test_suggestions_are_ordered_by_level_then_step_order() -> None:
-    suggestions = analyze_flow(
-        [
-            _step(1),
-            _step(2, prompt_text="{{ step_1.output.structured.a }}"),
-            _step(3, prompt_text="{{ step_2.output.text }}"),
-            _step(
-                4,
-                input_source=FlowInputSource.ALL_PREVIOUS_STEPS,
-                prompt_text="{{ step_1.output.text }}",
-            ),
-            _step(5, prompt_text="{{ step_4.output.text }}"),
-        ]
+    suggestions = _duplicates(
+        _analyze(
+            [
+                _step(1),
+                _step(2, prompt_text="{{ step_1.output.structured.a }}"),
+                _step(3, prompt_text="{{ step_2.output.text }}"),
+                _step(
+                    4,
+                    input_source=FlowInputSource.ALL_PREVIOUS_STEPS,
+                    prompt_text="{{ step_1.output.text }}",
+                ),
+                _step(5, prompt_text="{{ step_4.output.text }}"),
+            ]
+        )
     )
 
     assert [(s.impact.level, s.steps[0]) for s in suggestions] == [
@@ -418,7 +432,7 @@ def test_at_most_fifty_suggestions_are_returned() -> None:
         for order in range(2, MAX_FLOW_SUGGESTIONS + 5)
     ]
 
-    suggestions = analyze_flow(steps)
+    suggestions = _analyze(steps)
 
     assert len(suggestions) == MAX_FLOW_SUGGESTIONS
     assert [s.steps[0] for s in suggestions] == [
