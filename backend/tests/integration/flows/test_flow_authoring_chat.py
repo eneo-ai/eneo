@@ -587,6 +587,9 @@ async def test_chat_renames_carry_reads_and_a_refused_edit_audits_nothing(
         ctx, revision, UUID(collect["id"]), {"user_description": "Facts"}
     )
     assert not renamed.isError, renamed.content[0].text
+    # The change is judged against the suggestions: a rename introduces none.
+    assert _page(renamed)["introduced_suggestions"] == []
+    assert isinstance(_page(renamed)["suggestion_count"], int)
     revision += 1
     assert await _prompt(client, base, headers, write) == (
         "Write from {{ Facts }} for {{ flow_input.kommun }}."
