@@ -171,9 +171,14 @@ class FederatedLoginDenied(AuthenticationException):
 
 
 class BadRequestException(Exception):
+    code: str | None = None
+
     def __init__(self, message: str = "", *, code: str | None = None):
         super().__init__(message)
-        self.code = code
+        # Subclasses declare their code as a class attribute; an unset code
+        # must not shadow it.
+        if code is not None:
+            self.code = code
 
 
 class ModelInUseException(Exception):
