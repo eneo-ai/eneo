@@ -37,6 +37,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
     MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT,
     MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
+    BundledUnavailableReason,
     MCPServer,
     MCPServerAudienceGroup,
     MCPServerTool,
@@ -107,6 +108,7 @@ if TYPE_CHECKING:
     from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
         McpAppViewRepo,
     )
+    from eneo.mcp_servers.application.runtime_status import RuntimeStatus
     from eneo.mcp_servers.domain.repositories.mcp_server_repo import (
         MCPServerRepository,
     )
@@ -182,10 +184,14 @@ class BundledTool:
     tool: str
     # The purpose the added server serves ("general" or a capability).
     purpose: str
-    # The deployment configures the runtime (URL and token are both set).
+    # Whether it can be added and run: see ``unavailable_reason`` when not.
     available: bool
     # The tenant's row for it, once an admin has added it.
     mcp_server_id: UUID | None = None
+    # "runtime_not_configured" when the deployment has no runtime (URL and
+    # token); "model_missing" when the runtime lacks the model the tool runs
+    # on, such as the forecast checkpoint the operator mounts.
+    unavailable_reason: BundledUnavailableReason | None = None
 
 
 # Initial name and description of a bundled server when an admin adds it;
@@ -193,6 +199,7 @@ class BundledTool:
 BUNDLED_TOOL_NAMES: dict[str, str] = {
     "compute": "Compute",
     "charts": "Charts",
+    "forecast": "Forecast",
     "file-analysis": "Ask a file",
     "file-creation": "Create a file",
 }
@@ -215,6 +222,12 @@ BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
         "Runs JavaScript over JSON in an isolated sandbox for exact "
         "calculations, and can export a tabular result as a CSV file for "
         "charts, spreadsheets and documents. No network or state between calls."
+    ),
+    "forecast": (
+        "Forecasts the coming days of a daily series in a CSV/XLSX file in the "
+        "conversation, with a P10-P90 interval and a check against the last "
+        "days, using a model installed with the runtime. Runs in an isolated "
+        "sandbox; the data never leaves the deployment."
     ),
 }
 
@@ -689,8 +702,15 @@ class MCPServerService:
         )
 
     @validate_permissions(Permission.ADMIN)
-    async def list_bundled_tools(self) -> list[BundledTool]:
-        """The bundled runtime's tools and whether this tenant has added them."""
+    async def list_bundled_tools(
+        self, runtime: "RuntimeStatus | None" = None
+    ) -> list[BundledTool]:
+        """The bundled runtime's tools and whether this tenant has added them.
+
+        ``runtime`` is the runtime's advisory diagnostic: a tool whose endpoint
+        it says cannot run (no model mounted) is offered as unavailable, with
+        that reason, instead of warning on every deployment.
+        """
         added = {
             tool: server
             for server in await self.repo.query(
@@ -699,12 +719,21 @@ class MCPServerService:
             if (tool := self._bundled_tool_of(server)) is not None
             and server.purpose == BUNDLED_TOOLS[tool].purpose
         }
+
+        def reason(tool: str) -> BundledUnavailableReason | None:
+            if self.bundled_tool_url(tool) is None:
+                return "runtime_not_configured"
+            if runtime is not None and runtime.cannot_run(tool):
+                return "model_missing"
+            return None
+
         return [
             BundledTool(
                 tool=tool,
                 purpose=spec.purpose,
-                available=self.bundled_tool_url(tool) is not None,
+                available=reason(tool) is None,
                 mcp_server_id=added[tool].id if tool in added else None,
+                unavailable_reason=reason(tool),
             )
             for tool, spec in BUNDLED_TOOLS.items()
         ]

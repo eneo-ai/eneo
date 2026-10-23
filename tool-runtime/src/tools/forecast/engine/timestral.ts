@@ -8,10 +8,11 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { ToolError } from "../../../errors";
+import { forecastPython } from "../config";
 import type { EngineResult, ForecastEngine } from "../ports";
 
-/** The Python with torch and timestral; the image installs it here, a developer may point elsewhere. */
-export const FORECAST_PYTHON = process.env.FORECAST_PYTHON ?? "/opt/forecast/bin/python3";
+export const FORECAST_PYTHON = forecastPython();
+
 const SCRIPT = fileURLToPath(new URL("../../../../scripts/forecast.py", import.meta.url));
 const SIDECAR_TIMEOUT_MS = 25_000;
 const MAX_STDERR = 2_000;
@@ -19,8 +20,17 @@ const MAX_STDERR = 2_000;
 const REFUSED = 3;
 
 /** Whether the sidecar is installed; tests skip engine cases without it. */
-export async function forecastAvailable(): Promise<boolean> {
-  return (await Bun.file(FORECAST_PYTHON).exists()) && (await Bun.file(SCRIPT).exists());
+export async function forecastAvailable(python = FORECAST_PYTHON, script = SCRIPT): Promise<boolean> {
+  return (await Bun.file(python).exists()) && (await Bun.file(script).exists());
+}
+
+/**
+ * Whether a forecast can run here: the sidecar and the checkpoint the operator mounts (Eneo
+ * ships no weights). Asked on each diagnostic, so a model mounted later counts at once.
+ */
+export async function forecastReady(modelPath: string, python = FORECAST_PYTHON, script = SCRIPT): Promise<boolean> {
+  const checkpoint = ["config.json", "model.safetensors"].map((file) => Bun.file(join(modelPath, file)).exists());
+  return (await forecastAvailable(python, script)) && (await Promise.all(checkpoint)).every(Boolean);
 }
 
 export function timestralEngine(options: { modelPath: string; threads: number }): ForecastEngine {

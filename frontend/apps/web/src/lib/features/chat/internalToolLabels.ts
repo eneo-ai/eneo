@@ -169,6 +169,10 @@ const CAPABILITY_STEPS: Record<
   compute: {
     running: () => m.tool_compute(),
     done: () => m.tool_compute_done()
+  },
+  forecast: {
+    running: () => m.tool_forecast(),
+    done: () => m.tool_forecast_done()
   }
 };
 

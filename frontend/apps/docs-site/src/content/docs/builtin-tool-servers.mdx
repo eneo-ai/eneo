@@ -46,8 +46,8 @@ Three servers are registered:
 /internal-mcp/image_generation/mcp   one tool  (generate_image)
 ```
 
-Web search has no loopback server. File analysis, file creation, compute and
-charts run in the bundled tool runtime (see
+Web search has no loopback server. File analysis, file creation, compute,
+charts and forecast run in the bundled tool runtime (see
 [below](#bundled-isolated-providers)), never in the backend.
 
 ## Two attachment patterns
@@ -185,6 +185,7 @@ as the backend and frontend, and included in the standard Compose stack.
 |---|---|---|
 | `/mcp/compute` | `run_javascript` | `compute` source (**Compute** function, built into Eneo) |
 | `/mcp/charts` | `create_chart` | `charts` source (**Charts** function, built into Eneo) |
+| `/mcp/forecast` | `create_forecast` | `forecast` source (**Forecast** function, built into Eneo) |
 | `/mcp/file-analysis` | `inspect_table`, `query_table`, `assert_table` | `file_analysis` source (**Ask a file** function, built into Eneo) |
 | `/mcp/file-creation` | `create_document`, `edit_document`, `fill_template`, `create_spreadsheet` | `file_creation` source (**Create a file** function, built into Eneo) |
 
@@ -211,8 +212,10 @@ independently operated one, in the backend's data:
 - **Admin > Tools** reports connectivity, version, confinement and file-origin
   diagnostics from the runtime's `/diagnostics` endpoint
   (`mcp_servers/application/runtime_status.py`), advisory only and never on
-  the execution path. Version mismatches warn without blocking calls; runtime
-  failure does not change backend readiness or ordinary chat.
+  the execution path. Version mismatches warn without blocking calls. An
+  endpoint the runtime lists as `unavailable` (`forecast` while its model is
+  missing) is offered as unavailable with reason `model_missing` instead of a
+  warning; runtime failure does not change backend readiness or ordinary chat.
 
 Why this work runs outside the backend, and what the runtime does to contain
 it, are covered in [Tools and MCP Architecture](/docs/tool-architecture#why-heavy-and-untrusted-work-runs-in-a-separate-runtime)

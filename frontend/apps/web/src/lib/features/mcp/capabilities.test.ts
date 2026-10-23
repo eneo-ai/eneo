@@ -11,7 +11,8 @@ vi.mock("@lucide/svelte", () => ({
   FilePlus: "FilePlus",
   FileSearch: "FileSearch",
   Globe: "Globe",
-  Image: "Image"
+  Image: "Image",
+  TrendingUp: "TrendingUp"
 }));
 
 import {
@@ -31,7 +32,8 @@ describe("capability descriptors", () => {
       "file_analysis",
       "file_creation",
       "charts",
-      "compute"
+      "compute",
+      "forecast"
     ]);
   });
 

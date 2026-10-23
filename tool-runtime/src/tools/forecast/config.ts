@@ -21,3 +21,11 @@ export const forecastConfigSchema = z
   })
   .strict();
 export type ForecastConfig = z.infer<typeof forecastConfigSchema>;
+
+/**
+ * The Python with torch and timestral; the image installs it here, a developer may point
+ * elsewhere. Read when asked, so a sandbox started later sees the environment of that moment.
+ */
+export function forecastPython(): string {
+  return process.env.FORECAST_PYTHON ?? "/opt/forecast/bin/python3";
+}

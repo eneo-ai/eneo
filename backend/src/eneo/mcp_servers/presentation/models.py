@@ -13,6 +13,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCP_TOOL_CATALOG_HARD_MAX_COUNT,
     MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES,
     MCP_TOOL_DEFINITION_HARD_MAX_BYTES,
+    BundledUnavailableReason,
 )
 from eneo.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
@@ -28,6 +29,7 @@ MCPServerPurpose = Literal[
     "file_creation",
     "charts",
     "compute",
+    "forecast",
 ]
 MCPServerAudience = Literal["everyone", "groups"]
 
@@ -110,10 +112,13 @@ class BundledToolPublic(BaseModel):
     tool: str
     # "general", or the capability purpose the server provides.
     purpose: str
-    # False when the deployment has no tool runtime configured.
+    # False when it cannot be added and run here; see unavailable_reason.
     available: bool
     # Set once an admin has added it; the server is then managed like any other.
     mcp_server_id: Optional[UUID] = None
+    # Why not: no tool runtime in the deployment, or the runtime lacks the
+    # model the tool runs on (the forecast checkpoint the operator mounts).
+    unavailable_reason: Optional[BundledUnavailableReason] = None
 
 
 class BundledToolList(BaseListModel[BundledToolPublic]):

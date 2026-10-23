@@ -44,9 +44,16 @@ const bundled = {
     { tool: "file-analysis", purpose: "file_analysis", available: true, mcp_server_id: null },
     { tool: "file-creation", purpose: "file_creation", available: true, mcp_server_id: null },
     { tool: "charts", purpose: "charts", available: true, mcp_server_id: null },
-    { tool: "compute", purpose: "compute", available: false, mcp_server_id: null }
+    { tool: "compute", purpose: "compute", available: false, mcp_server_id: null },
+    {
+      tool: "forecast",
+      purpose: "forecast",
+      available: false,
+      mcp_server_id: null,
+      unavailable_reason: "model_missing"
+    }
   ],
-  count: 4,
+  count: 5,
   runtime: {
     configured: true,
     state: "ready",
@@ -145,16 +152,20 @@ describe("admin function sources", () => {
     show();
     expect(await screen.findByRole("heading", { name: "file_analysis" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "compute" })).toBeTruthy();
-    // The runtime's state and its one warning, said once each.
+    // The runtime's state and its warnings, said once each.
     const status = await screen.findByRole("region", { name: "tools_runtime_title" });
     expect(status.textContent).toContain("tools_runtime_ready");
     expect(status.textContent).toContain("tools_runtime_confinement");
     expect(status.textContent).toContain("tools_runtime_versions");
-    // Four offers: a deployment without the runtime cannot turn compute on.
+    // Five offers: a deployment without the runtime cannot turn compute on, and a runtime
+    // without the forecast model cannot turn forecast on; each says why.
     const turnOn = screen.getAllByRole("button", { name: "tools_builtin_turn_on" });
-    expect(turnOn).toHaveLength(4);
+    expect(turnOn).toHaveLength(5);
     expect((turnOn[3] as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getAllByText("tools_builtin_unavailable")).toHaveLength(1);
+    expect((turnOn[4] as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getAllByText("tools_builtin_unavailable")).toHaveLength(2);
+    expect(screen.getByText(/tools_builtin_unavailable_hint/)).toBeTruthy();
+    expect(screen.getByText(/tools_builtin_model_missing_hint/)).toBeTruthy();
     fireEvent.click(turnOn[0]!);
     await waitFor(() =>
       expect(post).toHaveBeenCalledWith("/api/v1/mcp-servers/bundled/{tool}/", {
@@ -198,6 +209,54 @@ describe("admin function sources", () => {
     expect(screen.queryByText("Charts (bundled)")).toBeNull();
     expect(screen.queryByRole("button", { name: "tools_change" })).toBeNull();
     expect(screen.getByRole("button", { name: "deactivate" })).toBeTruthy();
+  });
+
+  it("says on an added forecast source when the runtime has lost its model, and only there", async () => {
+    const added = (id: string, purpose: string) => ({
+      ...source,
+      id,
+      mcp_server_id: id,
+      name: `${id} (bundled)`,
+      http_url: `http://runtime:8765/${id}`,
+      http_auth_type: "bundled",
+      purpose,
+      is_enabled: true
+    });
+    const diagnose = (missing: boolean) =>
+      get.mockImplementation((path?: string) => {
+        if (path === "/api/v1/mcp-servers/settings/")
+          return ok({ items: [added("forecast", "forecast"), added("charts", "charts")] });
+        if (path === "/api/v1/mcp-servers/bundled/")
+          return ok({
+            ...bundled,
+            items: bundled.items.map((item) =>
+              item.tool === "forecast"
+                ? {
+                    ...item,
+                    mcp_server_id: "forecast",
+                    ...(missing ? {} : { available: true, unavailable_reason: null })
+                  }
+                : item.tool === "charts"
+                  ? { ...item, mcp_server_id: "charts" }
+                  : item
+            )
+          });
+        return ok({ items: [] });
+      });
+    // The runtime card shows once the runtime's diagnostic has loaded.
+    const loaded = () => screen.findByRole("region", { name: "tools_runtime_title" });
+    diagnose(true);
+    show();
+    await loaded();
+    expect(await screen.findAllByText("tools_builtin_model_missing_hint")).toHaveLength(1);
+    cleanup();
+
+    // Once the model is back, the hint goes.
+    diagnose(false);
+    show();
+    await loaded();
+    expect(await screen.findByRole("heading", { level: 3, name: "forecast" })).toBeTruthy();
+    expect(screen.queryByText("tools_builtin_model_missing_hint")).toBeNull();
   });
 
   it("activates an existing source through the capability endpoint", async () => {

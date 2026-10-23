@@ -1,7 +1,7 @@
 # Bundled tool runtime: operator guide
 
 The tool runtime is an isolated container included in the standard Eneo
-deployment. It serves the Eneo-maintained MCP tools behind four Functions, from
+deployment. It serves the Eneo-maintained MCP tools behind five Functions, from
 its own process and network, never from the backend:
 
 | Endpoint | Function | Tools |
@@ -10,6 +10,7 @@ its own process and network, never from the backend:
 | `/mcp/file-analysis` | **Ask a file** (`file_analysis`, "Fråga fil") | `inspect_table`, `query_table`, `assert_table` |
 | `/mcp/file-creation` | **Create a file** (`file_creation`, "Skapa fil") | `create_document`, `edit_document`, `fill_template`, `create_spreadsheet` |
 | `/mcp/charts` | **Charts** (`charts`, "Diagram") | `create_chart` |
+| `/mcp/forecast` | **Forecast** (`forecast`, "Prognos") | `create_forecast` |
 
 This guide covers deploying, configuring, upgrading, diagnosing and omitting
 the runtime. Other pages own the rest:
@@ -103,8 +104,8 @@ would serve show **Not enabled in this deployment** under **Admin > Tools**.
 ## Turning Functions on
 
 In **Admin > Tools > Functions**, turn on **Ask a file**, **Create a file**,
-**Charts** or **Compute** (**Built into Eneo**), then make each Function
-available on the spaces and assistants that should use it. Roles still need
+**Charts**, **Compute** or **Forecast** (**Built into Eneo**), then make each
+Function available on the spaces and assistants that should use it. Roles still need
 the matching permission; active external providers are not replaced
 automatically. The [Functions guide](https://docs.eneo.ai/dev/guides/capabilities)
 covers the administrator workflow.
@@ -129,6 +130,15 @@ the space and assistant. The migration grants the `compute` permission to the
 predefined Owner role only, as new installs do. A bundled compute server added
 earlier from the MCP servers tab keeps its attachments and coexists with the
 new provider; retire it once the Function is configured.
+
+### After upgrading to a release that adds Forecast
+
+Mount a checkpoint as described in [The forecast model](#the-forecast-model)
+and apply migration `202610201000`, then add **Built into Eneo** under
+**Admin > Tools > Functions > Forecast** and activate it. Enable **Forecast**
+on the space and assistant, or allow it for the personal assistant under
+**Admin > Personal assistant > Tools**. The migration grants the `forecast` permission to the predefined Owner role only,
+as new installs do; an administrator opts other roles in.
 
 ## Configuration
 
@@ -213,7 +223,8 @@ licence from Mistral. Keep the licence file with the weights.
 
 Without a checkpoint, or with a directory that is not a Timestral checkpoint, a
 forecast fails with `MODEL_UNAVAILABLE` and every other tool keeps working.
-A larger checkpoint (Timestral 123M or 209M) fits the same steps; give the
+While the checkpoint files are missing, **Admin > Tools** says so; see
+[Diagnostics](#diagnostics). A larger checkpoint (Timestral 123M or 209M) fits the same steps; give the
 runtime more memory and threads before you raise `FORECAST_CONCURRENCY`.
 
 ## Isolation checklist
@@ -285,6 +296,16 @@ Backend probes call the runtime's private `GET /diagnostics` (bearer required)
 with a three-second deadline and cache the answer for 30 seconds. They never
 gate tool execution or ordinary chat. The public `GET /health/live` and
 `GET /health/ready` endpoints report liveness only.
+
+The diagnostics also list, under `unavailable`, the endpoints that cannot run
+now. `forecast` is listed while the sidecar's Python or the checkpoint files
+(`config.json` and `model.safetensors` in `FORECAST_MODEL_PATH`) are missing.
+The runtime checks on each diagnostics request, so a checkpoint copied into
+the mounted directory later counts without a restart. **Admin > Tools** then
+offers Forecast as unavailable, saying "This function needs a model that your
+operator adds to the tool runtime." (reason `model_missing`); it raises no
+warning on the runtime card. Calls are not refused: a forecast fails with
+`MODEL_UNAVAILABLE` and every other tool keeps working.
 
 Structured runtime events report request ID, tool, queue and execution time,
 cache revalidation, transferred bytes and cancellation. They omit tokens,

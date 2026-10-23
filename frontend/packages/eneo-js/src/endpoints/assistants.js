@@ -137,7 +137,7 @@ export function initAssistants(client) {
      * @param {(partialResponse: AssistantResponse, controller: AbortController) => void} [params.onAnswer] Callback to run when a new token/word of the answer is received
      * @param {(response: Response) => Promise<void>} [params.onOpen] Callback to run once the initial response of the backend is received
      * @param {AbortController} [params.abortController] Optionally pass in an AbortController that can abort the stream
-     * @param {("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute")[]} [params.disabledCapabilities] Purpose-based opt-outs
+     * @param {import('../types/schema').components["schemas"]["AskAssistant"]["disabled_capabilities"]} [params.disabledCapabilities] Purpose-based opt-outs
      * @param {string[]} [params.disabledMcpServerIds] Ordinary server opt-outs
      * @returns {Promise<AssistantResponse>} Once the full answer is received it will be returned
      * @throws {EneoError}

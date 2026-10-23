@@ -68,6 +68,10 @@
   );
   const bundledProviderFor = (purpose: string) =>
     bundledToAdd.find((tool) => tool.purpose === purpose);
+  // What the runtime says now about a bundled source already added, such as a model it lacks.
+  const modelMissing = (sourceId: string) =>
+    (data.bundled.items ?? []).find((tool) => tool.mcp_server_id === sourceId)
+      ?.unavailable_reason === "model_missing";
   const DEPLOYMENT_GUIDE_URL =
     "https://docs.eneo.ai/docs/builtin-tool-servers#bundled-isolated-providers";
   let addingBundled = $state(false);
@@ -346,7 +350,9 @@
                             {capability.bundledDescription?.() ??
                               m.tools_builtin_menu_description()}
                           {:else}
-                            {m.tools_builtin_unavailable_hint()}
+                            {bundled.unavailable_reason === "model_missing"
+                              ? m.tools_builtin_model_missing_hint()
+                              : m.tools_builtin_unavailable_hint()}
                             <a
                               href={DEPLOYMENT_GUIDE_URL}
                               target="_blank"
@@ -442,6 +448,11 @@
                         {#if source.readiness_reason}
                           <p class="text-warning-stronger mt-2 text-sm">
                             {readinessMessage(source.readiness_reason)}
+                          </p>
+                        {/if}
+                        {#if modelMissing(source.id)}
+                          <p class="text-warning-stronger mt-2 text-sm">
+                            {m.tools_builtin_model_missing_hint()}
                           </p>
                         {/if}
                         {#if !source.is_enabled && active && source.audience === "everyone"}
