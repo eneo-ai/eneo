@@ -1904,7 +1904,8 @@ async def test_flow_webhook_delivery_does_not_retry_a_destination_the_sender_ref
 
 @pytest.mark.parametrize(
     ("status_code", "expected_retry", "expected_dead_letter"),
-    [(408, 1, 0), (429, 1, 0), (422, 0, 1)],
+    # A redirect is never followed; it retries, since it can be temporary.
+    [(302, 1, 0), (308, 1, 0), (408, 1, 0), (429, 1, 0), (422, 0, 1)],
 )
 @pytest.mark.asyncio
 @pytest.mark.integration

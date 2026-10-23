@@ -22,11 +22,11 @@
   },
   "dependencies": {
     "@ai-sdk/react": "3.0.294",
-    "@astryxdesign/core": "0.6.4",
-    "@astryxdesign/theme-neutral": "0.6.4",
+    "@astryxdesign/core": "0.7.3",
+    "@astryxdesign/theme-neutral": "0.7.3",
+    "@eneo/eneo-js": "workspace:*",
     "@eneo/markdown-math": "workspace:*",
     "@eneo/whats-new": "workspace:*",
-    "@eneo/eneo-js": "workspace:*",
     "@modelcontextprotocol/ext-apps": "2.0.3",
     "@radix-ui/react-use-controllable-state": "^1.2.3",
     "@streamdown/cjk": "^1.0.3",
@@ -53,7 +53,7 @@
     "hast-util-to-text": "^4.0.2",
     "highlight.js": "^11.11.1",
     "jose": "^6.2.3",
-    "katex": "^0.16.47",
+    "katex": "^0.18.11",
     "lowlight": "3.3.0",
     "lucide-react": "^1.17.0",
     "mdast-util-math": "^3.0.0",
@@ -82,7 +82,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@astryxdesign/cli": "0.6.4",
+    "@astryxdesign/cli": "0.7.3",
     "@axe-core/playwright": "4.13.0",
     "@eneo/eslint-plugin": "workspace:*",
     "@playwright/test": "1.61.1",
@@ -109,7 +109,7 @@
     "remark-math": "^6.0.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "4.1.11"
+    "vitest": "4.1.12"
   },
   "ignoreScripts": [
     "sharp",

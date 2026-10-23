@@ -10,8 +10,7 @@ import { ArrowRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { Suspense, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { TextInput } from "@/components/astryx/text-input";
-import { QuietBanner } from "@/components/astryx/banner";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -314,7 +313,12 @@ function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel
   if (!session) {
     return (
       <div className="flex flex-col gap-4">
-        <Banner status="warning" title={t("flow_step_editor_step_missing")} collapsible={false} />
+        <Banner
+          role="alert"
+          status="warning"
+          title={t("flow_step_editor_step_missing")}
+          collapsible={false}
+        />
         <div>
           <Button label={t("close")} onClick={onCancel} />
         </div>
@@ -493,7 +497,7 @@ function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel
       <section aria-labelledby={headingId} className="flex flex-col gap-6">
         {header}
         {latest.published_version != null && !readOnly && (
-          <QuietBanner status="info" title={t("flow_step_editor_published")} collapsible={false} />
+          <Banner status="info" title={t("flow_step_editor_published")} collapsible={false} />
         )}
         <StepReadOnly flow={flow} step={draft} assistant={assistantDraft} />
         <div>
@@ -521,6 +525,7 @@ function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel
         >
           {stale && (
             <Banner
+              role="alert"
               status="error"
               title={t("flow_step_editor_stale_title")}
               description={t("flow_step_editor_stale_description")}
@@ -540,13 +545,14 @@ function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel
           )}
           {reload.isError && (
             <Banner
+              role="alert"
               status="error"
               title={t("flow_step_editor_reload_failed")}
               collapsible={false}
             />
           )}
           {newerElsewhere && !stale && (
-            <QuietBanner
+            <Banner
               status="info"
               title={t("flow_step_editor_newer_title")}
               description={t("flow_step_editor_newer_description")}
@@ -565,6 +571,7 @@ function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel
           )}
           {formProblems.length > 0 && (
             <Banner
+              role="alert"
               status="error"
               title={t("flow_step_editor_save_refused")}
               description={formProblems.join(" ")}
@@ -573,6 +580,7 @@ function StepEditorSession({ flow: propFlow, stepId, readOnly, onSaved, onCancel
           )}
           {checked && Object.keys(localProblems(draft)).length > 0 && (
             <Banner
+              role="alert"
               status="error"
               title={t("flow_step_editor_fix_fields", {
                 count: Object.keys(localProblems(draft)).length

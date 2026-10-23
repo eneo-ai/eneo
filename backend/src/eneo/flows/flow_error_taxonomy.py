@@ -1093,7 +1093,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     FlowApiErrorCode.TYPED_IO_CONTRACT_NOT_CHECKED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
-        cause="A step's input or output could not be checked against its contract in time, which a larger value or a contract with more work per item reaches sooner, or at all.",
+        cause="A step's input or output, or its tool call's arguments, could not be checked against its contract in time, which a larger value or more work per item reaches sooner, or at all.",
         consumer_action="Send a smaller value or simplify the contract, then start a new run.",
         user_action="Ask a flow editor to simplify the step's format, or use less material.",
     ),
@@ -1290,7 +1290,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     FlowApiErrorCode.TYPED_IO_TOOL_INVALID_SCHEMA: _entry(
         category="Typed input/output",
         surfaced_through="API response and run error payload",
-        cause="The tool's input schema is invalid, of an unsupported draft or has a reference that does not resolve, or the arguments could not be checked against it in time or at all.",
+        cause="The tool's input schema is invalid, of an unsupported draft or has a reference that does not resolve.",
         consumer_action="Leave the step as it is and publish or run again once the MCP server gives a valid input schema and an administrator has approved it.",
         user_action="Ask the instance administrator to take the tool's input schema up with whoever runs the MCP server, or choose another tool.",
     ),
@@ -1416,7 +1416,7 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
     FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED: _entry(
         category="Typed input/output",
         surfaced_through="Run error payload",
-        cause="The model output could not be parsed into the expected JSON shape.",
+        cause="The model's output, or a step's output value, is not JSON the platform can read (malformed, or nested too deep).",
         consumer_action="Adjust the prompt or schema, republish, then start a new run.",
         user_action="Ask a flow editor to adjust the prompt or schema.",
     ),

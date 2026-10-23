@@ -1,8 +1,6 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
 
-    Licensed under the MIT License.
-
     Bundles the three pieces of the chat composer — attachments, the context
     (token) usage bar and the input box. Their shared width is also the query
     container for controls, including when a side panel narrows the chat.

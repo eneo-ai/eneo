@@ -1,8 +1,10 @@
 import io
+import struct
 import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from PIL import Image
 
 from eneo.files.image_processing import (
@@ -27,6 +29,61 @@ def _image_bytes(width: int, height: int, mode: str = "RGB", fmt: str = "PNG") -
         mode, (width, height), color=(120, 30, 30) if mode == "RGB" else None
     ).save(buffer, format=fmt)
     return buffer.getvalue()
+
+
+def _jpeg_tiff_bytes(*, tiled: bool, jpeg_height: int) -> bytes:
+    jpeg = io.BytesIO()
+    Image.new("L", (256, jpeg_height), color=200).save(jpeg, format="JPEG")
+    payload = jpeg.getvalue()
+    # The TIFF declares 256 rows even when its JPEG contains only eight.
+    # GHSA-q45j-58j2-45rg left the missing rows as uninitialized process memory.
+    tags = {
+        256: (4, 256),  # ImageWidth
+        257: (4, 256),  # ImageLength
+        258: (3, 8),  # BitsPerSample
+        259: (3, 7),  # JPEG compression
+        262: (3, 1),  # BlackIsZero
+        277: (3, 1),  # SamplesPerPixel
+        284: (3, 1),  # Chunky planar configuration
+    }
+    if tiled:
+        tags.update({322: (4, 256), 323: (4, 256), 324: (4, 0), 325: (4, len(payload))})
+    else:
+        tags.update({273: (4, 0), 278: (4, 256), 279: (4, len(payload))})
+    tags[324 if tiled else 273] = (4, 8 + 2 + 12 * len(tags) + 4)
+    entries = b"".join(
+        struct.pack("<HHII", tag, field_type, 1, value)
+        for tag, (field_type, value) in sorted(tags.items())
+    )
+    return (
+        b"II*\x00\x08\x00\x00\x00"
+        + struct.pack("<H", len(tags))
+        + entries
+        + b"\x00" * 4
+        + payload
+    )
+
+
+@pytest.mark.parametrize("tiled", [False, True], ids=["strip", "tile"])
+@pytest.mark.parametrize("jpeg_height", [8, 256], ids=["short-jpeg", "complete-jpeg"])
+def test_downscale_jpeg_tiff_does_not_expose_uninitialized_rows(
+    tiled: bool, jpeg_height: int
+):
+    # Exercise the upload's client-supplied MIME type and the real conversion.
+    processed = downscale_image(
+        _jpeg_tiff_bytes(tiled=tiled, jpeg_height=jpeg_height), "image/png"
+    )
+
+    assert processed.mimetype == "image/jpeg"
+    with Image.open(io.BytesIO(processed.blob)) as result:
+        assert result.format == "JPEG"
+        assert result.size == (256, 256)
+        assert result.crop((0, 0, 256, 8)).getextrema() == ((200, 200),) * 3
+        expected_tail = 0 if jpeg_height == 8 else 200
+        assert (
+            result.crop((0, 64, 256, 256)).getextrema()
+            == ((expected_tail, expected_tail),) * 3
+        )
 
 
 def test_downscale_resizes_oversized_image():

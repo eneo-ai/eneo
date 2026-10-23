@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import {
   failureFacts,
   reviewPolicySteps,
@@ -158,7 +158,7 @@ export function RunFailure({
   const catalog = runErrorCatalogText(error, t);
   const guidance = catalog ? null : (error.user_action?.trim() ?? null);
   return (
-    <QuietBanner
+    <Banner
       status="error"
       title={reviewPolicy ? t("flow_run_error_not_started") : t("flow_runs_failed_title")}
       description={
@@ -216,6 +216,6 @@ export function RunFailure({
           ) : null}
         </Collapsible>
       </div>
-    </QuietBanner>
+    </Banner>
   );
 }

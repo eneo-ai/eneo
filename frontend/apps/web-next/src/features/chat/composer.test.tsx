@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen } from "@testing-library/react";
-import { useState } from "react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
+import { createRef, useState, type Ref } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { typeIntoComposer } from "@/test/composer";
 import { renderInApp } from "@/test/render";
-import { Composer } from "./composer";
+import { Composer, type ComposerHandle } from "./composer";
 import { useAttachments } from "./use-attachments";
 
 afterEach(cleanup);
@@ -21,12 +22,14 @@ function Harness({
   busy = false,
   onSubmit = vi.fn(),
   onStop = vi.fn(),
-  initial = ""
+  initial = "",
+  inputRef
 }: {
   busy?: boolean;
   onSubmit?: () => void;
   onStop?: () => void;
   initial?: string;
+  inputRef?: Ref<ComposerHandle>;
 }) {
   const [value, setValue] = useState(initial);
   const attachments = useAttachments(partner);
@@ -43,6 +46,7 @@ function Harness({
       attachments={attachments}
       onOpenFileDialog={vi.fn()}
       knowledge={partner.knowledge}
+      inputRef={inputRef}
     />
   );
 }
@@ -52,12 +56,12 @@ function renderComposer(props: Parameters<typeof Harness>[0] = {}) {
 }
 
 describe("Composer", () => {
-  it("is a named textarea with the keyboard hint as its description", () => {
+  it("is a named multi-line text field with the keyboard hint as its description", () => {
     renderComposer();
     const textarea = screen.getByRole("textbox", {
       name: "Meddelande till Upphandlingsassistenten"
     });
-    expect(textarea.tagName).toBe("TEXTAREA");
+    expect(textarea.getAttribute("aria-multiline")).toBe("true");
     const hint = document.getElementById(textarea.getAttribute("aria-describedby") ?? "");
     expect(hint?.textContent).toBe("Enter skickar, Skift+Enter ger en ny rad.");
   });
@@ -72,7 +76,7 @@ describe("Composer", () => {
     fireEvent.keyDown(textarea, { key: "Enter" });
     expect(onSubmit).not.toHaveBeenCalled();
 
-    fireEvent.change(textarea, { target: { value: "Hej" } });
+    typeIntoComposer(textarea, "Hej");
     expect(send.hasAttribute("disabled")).toBe(false);
     fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
     expect(onSubmit).not.toHaveBeenCalled();
@@ -113,6 +117,25 @@ describe("Composer", () => {
         "Data behandlas inom er infrastruktur. Kontrollera viktiga uppgifter mot källorna."
       )
     ).toBeTruthy();
+  });
+
+  it("counts a pill put in from outside as content: placeholder gone, Send enabled", () => {
+    const ref = createRef<ComposerHandle>();
+    renderInApp(<Harness inputRef={ref} />);
+    const textbox = screen.getByRole("textbox");
+    expect(textbox.parentElement?.textContent).toContain(
+      "Fråga, klistra in text eller släpp filer här"
+    );
+    act(() => {
+      ref.current?.insertToken({ value: "{{step_1.output.text}}", render: () => <b>pill</b> });
+    });
+    expect(
+      textbox.querySelector("[data-astryx-token-value]")?.getAttribute("data-astryx-token-value")
+    ).toBe("{{step_1.output.text}}");
+    expect(textbox.parentElement?.textContent).not.toContain("Fråga, klistra in text");
+    expect(screen.getByRole("button", { name: "Skicka meddelande" }).hasAttribute("disabled")).toBe(
+      false
+    );
   });
 
   it("has no axe violations", async () => {

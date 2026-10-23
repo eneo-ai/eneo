@@ -146,6 +146,13 @@ def _extract_embedded_json(raw_text: str) -> StructuredOutputValue | None:
     return cast(StructuredOutputValue, parsed)
 
 
+def _nested_too_deep() -> TypedIOValidationException:
+    return TypedIOValidationException(
+        "LLM response is nested too deep to be read as JSON.",
+        code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED.value,
+    )
+
+
 def parse_json_output(raw_text: str) -> StructuredOutputValue:
     """Parse LLM text as JSON. Raises TypedIOValidationException."""
     normalized = raw_text.strip()
@@ -161,8 +168,15 @@ def parse_json_output(raw_text: str) -> StructuredOutputValue:
 
     try:
         return _parse_json_candidate(normalized)
+    except RecursionError:
+        # Not the embedded-JSON extraction below: it would decode the same
+        # nesting again.
+        raise _nested_too_deep() from None
     except (json.JSONDecodeError, ValueError) as exc:
-        embedded = _extract_embedded_json(normalized)
+        try:
+            embedded = _extract_embedded_json(normalized)
+        except RecursionError:
+            raise _nested_too_deep() from None
         if embedded is not None:
             return embedded
         raise TypedIOValidationException(

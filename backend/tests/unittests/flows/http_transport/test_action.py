@@ -293,3 +293,23 @@ async def test_execute_http_test_reraises_unknown_typed_codes(failure_phase) -> 
             send_http_request=_raise_unknown,
             max_timeout=120.0,
         )
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_reports_a_redirect_as_a_status_error() -> None:
+    async def _send_http_request(**kwargs: Any) -> httpx.Response:
+        request = httpx.Request(method=kwargs["method"], url=kwargs["url"])
+        return httpx.Response(status_code=302, request=request)
+
+    result = await execute_http_test(
+        config=_config(),
+        direction="output",
+        method="POST",
+        interpolate=_transport_interpolate,
+        send_http_request=_send_http_request,
+        max_timeout=120,
+    )
+
+    assert result.success is False
+    assert result.status_code == 302
+    assert result.error_code == HttpTransportError.STATUS_ERROR

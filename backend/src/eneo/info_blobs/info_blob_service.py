@@ -22,6 +22,7 @@ from eneo.info_blobs.info_blob import (
 from eneo.info_blobs.info_blob_repo import (
     InfoBlobPublication,
     InfoBlobRepository,
+    WebsiteContentFolderPage,
     WebsiteInfoBlobPage,
 )
 from eneo.main.exceptions import (
@@ -618,17 +619,34 @@ class InfoBlobService:
         *,
         limit: int,
         cursor: UUID | None = None,
+        q: str = "",
+        prefix: str = "",
     ) -> WebsiteInfoBlobPage:
         await self._authorize_website_info_blobs(id)
         page = await self.repo.get_by_website_page(
             website_id=id,
             limit=limit,
             cursor=cursor,
+            q=q,
+            prefix=prefix,
         )
         return WebsiteInfoBlobPage(
             items=await self._project_original_availability(page.items),
             total_count=page.total_count,
             next_cursor=page.next_cursor,
+        )
+
+    async def get_website_folders(
+        self,
+        id: UUID,
+        *,
+        prefix: str = "",
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> WebsiteContentFolderPage:
+        await self._authorize_website_info_blobs(id)
+        return await self.repo.get_website_folders(
+            website_id=id, prefix=prefix, cursor=cursor, limit=limit
         )
 
     async def delete(self, id: UUID):

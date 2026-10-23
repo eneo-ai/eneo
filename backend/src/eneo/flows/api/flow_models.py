@@ -104,6 +104,7 @@ from eneo.flows.domain.review_reject_reason import (
     FLOW_REVIEW_REJECT_REASON_MAX_LENGTH,
     normalize_review_reject_reason,
 )
+from eneo.flows.domain.runtime import StepDiagnosticSeverity
 from eneo.flows.domain.step_output import StepMaterialReference, parse_step_text_aliases
 from eneo.flows.domain.text_processing import TextProcessingConfig
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
@@ -2228,7 +2229,7 @@ class FlowStepDiagnosticPublic(BaseModel):
 
     code: str = Field(description="Stable diagnostic code.")
     message: str = Field(description="Human-readable diagnostic message.")
-    severity: Literal["info", "warning", "error"] = Field(
+    severity: StepDiagnosticSeverity = Field(
         default="warning",
         description="Diagnostic severity.",
     )

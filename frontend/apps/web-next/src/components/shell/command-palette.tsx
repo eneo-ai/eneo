@@ -271,11 +271,11 @@ export default function ShellCommandPalette({
     // Both wait until the palette has closed and returned focus: the dialog
     // then returns focus to the same place, and the drawer (when the palette
     // was opened from it) hands focus back to its menu button.
-    if (entry.action.type === "create-space") {
+    if (entry.command.type === "create-space") {
       window.setTimeout(onCreateSpace, 0);
       return;
     }
-    router.push(entry.action.href);
+    router.push(entry.command.href);
     if (onNavigate) window.setTimeout(onNavigate, 0);
   }
 

@@ -8,7 +8,7 @@ import { ExternalLink } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useFormatter, useTranslations } from "next-intl";
 import { useId, useRef, useState, type ReactNode } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { ClientTime } from "@/components/composites/client-time";
 import { PageHeader } from "@/components/composites/page-header";
 import { useAppContext } from "@/components/providers/app-context";
@@ -306,7 +306,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
         </div>
 
         {failureTitle !== null && tab !== "problems" ? (
-          <QuietBanner
+          <Banner
             status="error"
             title={failureTitle}
             description={
@@ -327,11 +327,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
         ) : null}
 
         {summary.state === "queued" && !summary.progress ? (
-          <QuietBanner
-            status="info"
-            title={t("integration_source_queued_notice")}
-            collapsible={false}
-          />
+          <Banner status="info" title={t("integration_source_queued_notice")} collapsible={false} />
         ) : null}
 
         {summary.progress ? (

@@ -18,7 +18,8 @@ function eventWithPolicy(policy: unknown) {
               counts: { active: 0, inactive: 0 }
             }
           }),
-          passwordPolicy: async () => policy
+          passwordPolicy: async () => policy,
+          getPasswordLifecyclePolicy: async () => lifecyclePolicy
         }
       }
     }),
@@ -26,6 +27,8 @@ function eventWithPolicy(policy: unknown) {
     url: new URL("https://eneo.example/admin/users")
   };
 }
+
+const lifecyclePolicy = { max_age_days: null };
 
 describe("admin password policy loading", () => {
   test("loads the local policy independently of the administrator's own password provider", async () => {
@@ -57,6 +60,26 @@ describe("admin password policy loading", () => {
   test("fails instead of displaying guessed rules when the policy is missing", async () => {
     await expect(load(eventWithPolicy(null) as never)).rejects.toMatchObject({ status: 503 });
   });
+
+  test("still lists users when the lifecycle policy cannot be loaded", async () => {
+    const base = eventWithPolicy(policy);
+    const { eneo } = await base.parent();
+    const event = {
+      ...base,
+      parent: async () => ({
+        eneo: {
+          users: {
+            ...eneo.users,
+            getPasswordLifecyclePolicy: async () => {
+              throw new Error("older backend");
+            }
+          }
+        }
+      })
+    };
+    const result = await load(event as never);
+    expect(result).toMatchObject({ passwordLifecyclePolicy: null });
+  });
 });
 
 const policy = {
@@ -82,9 +105,15 @@ function makeEvent(search: string) {
   const event = {
     url: new URL(`https://eneo.test/admin/users${search}`),
     depends: vi.fn(),
-    parent: vi
-      .fn()
-      .mockResolvedValue({ eneo: { users: { list, passwordPolicy: async () => policy } } })
+    parent: vi.fn().mockResolvedValue({
+      eneo: {
+        users: {
+          list,
+          passwordPolicy: async () => policy,
+          getPasswordLifecyclePolicy: async () => lifecyclePolicy
+        }
+      }
+    })
   };
   return { event: event as unknown as Parameters<typeof load>[0], list, users };
 }

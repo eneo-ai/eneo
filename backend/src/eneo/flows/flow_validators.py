@@ -1994,6 +1994,16 @@ def _validate_binding_references(
                     step_order=current_step_order,
                 )
             if reference.kind is not TemplateReferenceKind.STEP:
+                # A runtime read that names a step (föregående_steg) is
+                # judged as the prompt's is; the others the run always binds.
+                _validate_template_read(
+                    reference,
+                    field="input_bindings.question",
+                    step_order=current_step_order,
+                    context_order=current_step_order,
+                    steps_by_order=steps_by_order,
+                    step_ref_mapping=step_ref_mapping,
+                )
                 continue
             if names_step_by_its_name(reference, step_ref_mapping) and reference.tail:
                 raise FlowStepValidationError(

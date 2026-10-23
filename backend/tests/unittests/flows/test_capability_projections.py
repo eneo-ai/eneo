@@ -74,9 +74,16 @@ def _legal(cell: Cell) -> bool:
         FlowInputType.AUDIO,
     }:
         return False
-    if source is FlowInputSource.TOOL and (
-        input_type not in {FlowInputType.TEXT, FlowInputType.JSON}
-        or output_mode is FlowOutputMode.TEMPLATE_FILL
+    if source is FlowInputSource.TOOL and input_type not in {
+        FlowInputType.TEXT,
+        FlowInputType.JSON,
+    }:
+        return False
+    # A template fill never resolves the step's input, so a source fetched
+    # from outside the run would never be read.
+    if (
+        source in {FlowInputSource.TOOL, FlowInputSource.HTTP_GET}
+        and output_mode is FlowOutputMode.TEMPLATE_FILL
     ):
         return False
     if (
@@ -104,7 +111,7 @@ LEGAL_CELLS = frozenset(cell for cell in ALL_CELLS if _legal(cell))
 def test_inspectable_is_every_cell_the_listed_rules_admit() -> None:
     inspectable = projection_cells(CapabilityProjection.INSPECTABLE)
     assert inspectable == LEGAL_CELLS
-    assert (len(inspectable), len(_triples(inspectable))) == (180, 67)
+    assert (len(inspectable), len(_triples(inspectable))) == (177, 67)
 
 
 def test_http_cells_stay_inspectable() -> None:
@@ -114,7 +121,7 @@ def test_http_cells_stay_inspectable() -> None:
         for cell in inspectable
         if FlowInputSource.HTTP_GET in cell or FlowOutputMode.HTTP_POST in cell
     }
-    assert len(http) == 93
+    assert len(http) == 90
     assert any(FlowInputType.IMAGE in cell for cell in inspectable)
 
 
@@ -173,9 +180,9 @@ def test_coverage_report_counts_every_cell_once() -> None:
     report = coverage_report()
     assert dict(report.by_classification) == {
         "exposed": 59,
-        "not_exposed": 121,
+        "not_exposed": 118,
         "illegal_io_triple": 785,
-        "illegal_source_type_pair": 155,
+        "illegal_source_type_pair": 158,
     }
     assert report.has_drift is False
 

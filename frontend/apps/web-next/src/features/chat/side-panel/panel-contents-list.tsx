@@ -5,7 +5,7 @@ import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton
 import { Activity, AppWindow, Check, Download, Search } from "lucide-react";
 import { useLocale, useTranslations } from "next-intl";
 import { useEffect, useRef, useState } from "react";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { FileTypeTile } from "@/features/chat/attachments";
 import { signedOriginalUrl } from "@/features/files/signed-original-url";
 import { previewKindOf, type PreviewFile } from "@/features/workspace/preview/preview-kind";

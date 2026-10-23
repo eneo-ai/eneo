@@ -200,7 +200,7 @@ async def execute_http_test(
     # An authenticated target can echo credentials in arbitrary encodings.
     response_preview = None if effective.secret_header_names else response.text[:2000]
 
-    success = response.status_code < 400
+    success = response.is_success
     error_code = None
     error_message = None
     if not success:

@@ -264,22 +264,21 @@ def _restore(postgres, path, database_name):
 
 
 def _seed_sources(url):
-    from init_db import add_tenant_user
-
+    # This fixture represents the released schema, before password lifecycle
+    # columns exist. Current deployment seeding runs only after upgrade to head.
+    tenant_id, user_id = str(uuid4()), str(uuid4())
     with _connect(url) as connection:
-        add_tenant_user(
-            connection,
-            "test_tenant",
-            1_000_000,
-            "test_user",
-            "test@example.com",
-            "test_password",
-        )
         with connection.cursor() as cursor:
             cursor.execute(
-                "SELECT tenant_id, id FROM users WHERE email='test@example.com'"
+                "INSERT INTO tenants (id, name, quota_limit, state) "
+                "VALUES (%s, 'test_tenant', 1000000, 'active')",
+                (tenant_id,),
             )
-            tenant_id, user_id = cursor.fetchone()
+            cursor.execute(
+                "INSERT INTO users (id, tenant_id, username, email, used_tokens, state) "
+                "VALUES (%s, %s, 'test_user', 'test@example.com', 0, 'active')",
+                (user_id, tenant_id),
+            )
             files = []
             workload = [("text", "small text åäö".encode(), b"original text")]
             workload += [("image", b"", None), ("text", b"", b"")]
@@ -428,6 +427,19 @@ async def setup_database(
             time.perf_counter() - application_upgrade_started
         )
         assert _source_facts(url) == expected_sources
+        # Reuse deployment seeding for the current roles and organization space
+        # needed by the API checks, preserving the historical file owner.
+        from init_db import add_tenant_user
+
+        with _connect(url) as connection:
+            add_tenant_user(
+                connection,
+                "test_tenant",
+                1_000_000,
+                "test_user",
+                "test@example.com",
+                "test_password",
+            )
         sessionmanager.init(test_settings.database_url)
         try:
             yield {
