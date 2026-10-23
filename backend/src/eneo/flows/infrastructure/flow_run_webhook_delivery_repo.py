@@ -203,6 +203,9 @@ class FlowRunWebhookDeliveryRepository:
             return []
         claim_token = uuid4()
         claim_expires_at = now + timedelta(seconds=claim_ttl_seconds)
+        # A pending row always has a next_delivery_at
+        # (ck_flow_run_webhook_deliveries_pending_next_delivery), so this reads
+        # ix_flow_run_webhook_deliveries_pending_delivery in key order.
         candidate_ids = (
             (
                 await self.session.execute(
@@ -212,12 +215,7 @@ class FlowRunWebhookDeliveryRepository:
                         == FlowOutboxDeliveryStatus.PENDING.value
                     )
                     .where(FlowRunWebhookDeliveries.delivery_attempts < max_attempts)
-                    .where(
-                        sa.or_(
-                            FlowRunWebhookDeliveries.next_delivery_at.is_(None),
-                            FlowRunWebhookDeliveries.next_delivery_at <= now,
-                        )
-                    )
+                    .where(FlowRunWebhookDeliveries.next_delivery_at <= now)
                     .where(
                         sa.or_(
                             FlowRunWebhookDeliveries.claim_token.is_(None),
@@ -225,7 +223,7 @@ class FlowRunWebhookDeliveryRepository:
                         )
                     )
                     .order_by(
-                        FlowRunWebhookDeliveries.next_delivery_at.asc().nullsfirst(),
+                        FlowRunWebhookDeliveries.next_delivery_at.asc(),
                         FlowRunWebhookDeliveries.created_at.asc(),
                     )
                     .limit(limit)

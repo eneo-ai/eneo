@@ -2187,6 +2187,11 @@ class FlowRunAuditOutbox(BasePublic):
             ")",
             name="ck_flow_run_audit_outbox_delivery_timestamps",
         ),
+        # The due-row claim reads the pending-delivery index in key order.
+        CheckConstraint(
+            "delivery_status <> 'pending' OR next_delivery_at IS NOT NULL",
+            name="ck_flow_run_audit_outbox_pending_next_delivery",
+        ),
         Index("ix_flow_run_audit_outbox_tenant_created", "tenant_id", "created_at"),
         Index("ix_flow_run_audit_outbox_action", "action"),
         Index(
@@ -2325,6 +2330,11 @@ class FlowRunWebhookDeliveries(BasePublic):
             "AND dead_lettered_at IS NOT NULL)"
             ")",
             name="ck_flow_run_webhook_deliveries_delivery_timestamps",
+        ),
+        # The due-row claim reads the pending-delivery index in key order.
+        CheckConstraint(
+            "delivery_status <> 'pending' OR next_delivery_at IS NOT NULL",
+            name="ck_flow_run_webhook_deliveries_pending_next_delivery",
         ),
         CheckConstraint(
             "("

@@ -284,7 +284,9 @@ class FlowRunAuditOutboxRepository:
         if limit <= 0:
             return []
         # Delivery uses per-row savepoints; PostgreSQL keeps these claims locked
-        # until the outer transaction commits.
+        # until the outer transaction commits. A pending row always has a
+        # next_delivery_at (ck_flow_run_audit_outbox_pending_next_delivery), so
+        # this reads ix_flow_run_audit_outbox_pending_delivery in key order.
         rows = (
             (
                 await self.session.execute(
@@ -293,14 +295,9 @@ class FlowRunAuditOutboxRepository:
                         FlowRunAuditOutbox.delivery_status
                         == FlowOutboxDeliveryStatus.PENDING.value
                     )
-                    .where(
-                        sa.or_(
-                            FlowRunAuditOutbox.next_delivery_at.is_(None),
-                            FlowRunAuditOutbox.next_delivery_at <= now,
-                        )
-                    )
+                    .where(FlowRunAuditOutbox.next_delivery_at <= now)
                     .order_by(
-                        FlowRunAuditOutbox.next_delivery_at.asc().nullsfirst(),
+                        FlowRunAuditOutbox.next_delivery_at.asc(),
                         FlowRunAuditOutbox.created_at.asc(),
                     )
                     .limit(limit)
