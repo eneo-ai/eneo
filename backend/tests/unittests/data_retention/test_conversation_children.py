@@ -24,6 +24,7 @@ from eneo.data_retention.infrastructure.conversation_retention_repo import (
             {
                 ("info_blob_references", "question_id"),
                 ("mcp_tool_references", "question_id"),
+                ("question_feedback", "question_id"),
                 ("questions_files", "question_id"),
             },
         ),

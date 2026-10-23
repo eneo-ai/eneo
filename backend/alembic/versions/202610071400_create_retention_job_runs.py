@@ -1,7 +1,7 @@
 """Create generic retention bookkeeping and complete adopter keysets.
 
 Revision ID: 202610071400
-Revises: 202610011100
+Revises: 202610161000
 Build indexes on existing tables concurrently (the retention keysets, and the
 question index info_blob_references lacks) before removing their shorter
 prefixes, then create the new bookkeeping table transactionally. An interrupted
@@ -18,7 +18,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "202610071400"
-down_revision: str = "202610011100"
+down_revision: str = "202610161000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
