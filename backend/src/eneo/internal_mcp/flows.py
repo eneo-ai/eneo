@@ -29,8 +29,9 @@ mcp = FastMCP(
     stateless_http=True,
     instructions="""Configure the flow bound to this chat. Tools cannot be pointed at another flow.
 Read the current saved revision and configuration before editing; use that revision
-on every change. Keep unchanged fields. All changes use the flow core's validation,
-permissions, classification and audit. The user must enter edit mode in the editor.
+on every change. Keep unchanged fields. Every change goes through the flow's own
+validation, permissions, classification and audit. The user must enter edit mode in
+the editor.
 Read pages until next_offset is null before claiming you reviewed the whole value.
 Credentials belong in the editor and must never be requested or placed in tools.
 A completion step whose input may exceed its model's window can set
@@ -389,7 +390,7 @@ async def update_step(
     changes: dict[str, Any],
     assistant_changes: dict[str, Any] | None = None,
 ) -> CallToolResult:
-    """Patch one saved step and optionally its assistant in one revision. Use core
+    """Patch one saved step and optionally its assistant in one revision. Use the flow's own
     field names; input_config is replaced whole (long material:
     input_config.long_material). Renaming the step (user_description) rewrites
     the reads of its old name in every step. When other steps share the step's
@@ -469,7 +470,7 @@ async def add_step(
     position: int | None = None,
 ) -> CallToolResult:
     """Add a step with a new managed assistant, atomically: last, or at `position`
-    (1 is first). Reads of the steps after it move with them. Use core
+    (1 is first). Reads of the steps after it move with them. Use the flow's own
     configuration field names."""
 
     async def operation(container, chat, request):
@@ -639,7 +640,7 @@ async def unpublish_flow(ctx: Context, expected_revision: int) -> CallToolResult
 async def read_tool_options(ctx: Context, offset: int = 0) -> CallToolResult:
     """Read the MCP tools a tool step may call unattended, and why others are
     refused, with pagination. It says nothing about HTTP steps: http_get and
-    http_post need no tool option, and the core checks their destination when
+    http_post need no tool option; their destination is checked when
     the step is saved and run."""
 
     async def operation(container, chat, request):
@@ -697,7 +698,7 @@ async def run_flow(
 
 @mcp.tool()
 async def read_run(ctx: Context, run_id: UUID, offset: int = 0) -> CallToolResult:
-    """Read paged run results through the core's authorized evidence snapshot and audit."""
+    """Read paged run results through the authorized evidence snapshot and audit."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_run_lifecycle_router import get_flow_run
