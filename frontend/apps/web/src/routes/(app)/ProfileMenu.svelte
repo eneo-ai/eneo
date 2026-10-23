@@ -98,7 +98,7 @@
     {#if $whatsNewEnabled}
       <DropdownMenu.Item>
         {#snippet child({ props })}
-          <a {...props} href={localizeHref("/whats-new")}>
+          <a {...props} href={localizeHref("/news")}>
             <Sparkles />
             {m.whats_new()}
             {#if $hasUnseen}

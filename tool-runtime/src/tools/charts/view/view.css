@@ -1,0 +1,34 @@
+.eneo-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-1);
+  padding: var(--spacing-2) var(--spacing-3) 0;
+}
+/* A series that is showing has a filled dot in its colour; a hidden one keeps the outline. */
+.eneo-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--series);
+}
+.eneo-dot[data-showing] {
+  background: var(--series);
+}
+.eneo-plot {
+  width: 100%;
+  height: 420px;
+  min-height: 420px;
+}
+[data-view="chart"] .eneo-rows {
+  max-height: 260px;
+}
+/* Grow into spare room, but never flatten the plot to fit a legend or table.
+   The shared view scrolls when the content needs more than the panel offers. */
+:root[data-mode="fullscreen"] .eneo-plot {
+  flex: 1 0 420px;
+  height: auto;
+}
+
+:root[data-mode="fullscreen"] [data-view="chart"] .eneo-rows {
+  max-height: none;
+}

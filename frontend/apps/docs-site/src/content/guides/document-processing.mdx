@@ -164,8 +164,33 @@ is reused. The general worker admits due crawls and the crawler worker executes 
 
 ### Monitor Progress
 
-Each crawl records progress, its terminal outcome and any failures. The website
-page shows run history and lets you stop an active crawl or request another run.
+Open a website from **Knowledge → Websites**. Its overview shows the latest crawl
+status, the number of indexed resources and the last completed crawl.
+
+- **Content** lists the indexed pages and files. Expand the URL structure and
+  select a directory to see its contents, including subdirectories. Search matches
+  titles and the part of the address below the selected directory, across the
+  entire section and including resources that have not yet been loaded into the
+  list; the website's own domain never matches. Select a title to preview its
+  indexed text.
+- **Problems** groups failed addresses from the latest completed crawl by reason,
+  with guidance and separate page/file filters. Counts distinguish the addresses
+  currently displayed from the recorded total; use **Load more** for remaining
+  details. **See problems** opens this tab directly, without a dialog. Choose an
+  earlier crawl to inspect its recorded problems; older runs without recorded
+  details are explicitly identified.
+- **Activity** groups crawl history by date, with each run's time, status,
+  updated/unchanged resources and duration. **See problems** opens that run in
+  the Problems tab.
+
+The URL structure describes resource addresses, not which page linked to a file.
+Directory counts include descendants, while **All content** also includes resources
+without a usable URL. Paths retain their case, so `/Docs/` and `/docs/` are distinct.
+A failed address can still have an older indexed version: the Content tab describes
+saved knowledge, while Problems describes the selected attempt.
+
+Each crawl records progress, its terminal outcome and any failures. You can stop
+an active crawl or request another run from the website header.
 If a website fails ten crawls in a row it is automatically disabled; change its
 update interval to re-enable it.
 
@@ -275,6 +300,12 @@ When a user asks a question:
 
 The score is `1 - cosine distance`. Its scale depends on the embedding model,
 which is why `INJECT_KNOWLEDGE_MIN_SCORE` is unset by default.
+
+A rerank model registered under AI models adds an optional second step: the
+reranker scores the question against the best candidates and returns them in
+its own order with its scores. In this release only the collection search API
+uses it, `POST /api/v1/groups/{id}/searches/` with `rerank: true`; a reranker
+failure falls back to the vector order.
 
 See [Knowledge Retrieval and MCP](/docs/knowledge-retrieval-and-mcp) for the
 retrieval versions, the search-as-a-tool mode, and how the candidate count is

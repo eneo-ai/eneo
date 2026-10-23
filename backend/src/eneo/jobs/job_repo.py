@@ -7,6 +7,7 @@ from eneo.database.affected_rows import affected_row_count
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.job_table import Jobs
+from eneo.jobs.job_events import publish_job_update_after_commit
 from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import (
     KNOWLEDGE_TASKS,
@@ -86,7 +87,21 @@ class JobRepository:
             .returning(Jobs)
         )
 
-        return await self.delegate.get_model_from_query(stmt)
+        updated = await self.delegate.get_model_from_query(stmt)
+        if updated is not None:
+            publish_job_update_after_commit(self.delegate.session, updated)
+        return updated
+
+    async def _announce(self, *ids: UUID) -> None:
+        """Publish the current state of these jobs once the transaction commits.
+
+        Every status write goes through this repository, so this is the one
+        place live updates (eneo.jobs.job_events) come from.
+        """
+        for id in ids:
+            job = await self.get_job(id)
+            if job is not None:
+                publish_job_update_after_commit(self.delegate.session, job)
 
     async def get_job(self, id: UUID):
         return await self.delegate.get_by(conditions={Jobs.id: id})
@@ -139,7 +154,10 @@ class JobRepository:
             )
         )
         result = await self.delegate.session.execute(stmt)
-        return affected_row_count(result) > 0
+        started = affected_row_count(result) > 0
+        if started:
+            await self._announce(id)
+        return started
 
     async def mark_job_completed(self, id: UUID, result_location: str) -> bool:
         from eneo.main.models import Status
@@ -156,7 +174,10 @@ class JobRepository:
             )
         )
         result = await self.delegate.session.execute(stmt)
-        return affected_row_count(result) > 0
+        completed = affected_row_count(result) > 0
+        if completed:
+            await self._announce(id)
+        return completed
 
     async def mark_knowledge_job_failed_if_running(
         self,
@@ -180,7 +201,10 @@ class JobRepository:
             )
         )
         result = await self.delegate.session.execute(stmt)
-        return affected_row_count(result)
+        failed = affected_row_count(result)
+        if failed:
+            await self._announce(id)
+        return failed
 
     async def mark_stale_jobs_failed(
         self,
@@ -198,15 +222,28 @@ class JobRepository:
         ``stale_before`` (the threshold must exceed the longest legitimate run/queue
         wait so live or merely-slow jobs are never killed).
 
+        Rows another transaction has locked are skipped, not waited for: a task
+        that runs in one transaction holds its job row from the IN_PROGRESS
+        write until it commits, so a locked row is a job that is still running,
+        and waiting for it would hold this worker slot for the rest of that run.
+
         Returns the ids of the jobs that were failed.
         """
         from eneo.main.models import Status
 
+        active = (Status.IN_PROGRESS.value, Status.QUEUED.value)
+        candidates = (
+            sa.select(Jobs.id)
+            .where(Jobs.task.in_(tasks))
+            .where(Jobs.status.in_(active))
+            .where(Jobs.updated_at < stale_before)
+            .with_for_update(skip_locked=True)
+            .cte("stale_jobs")
+        )
         stmt = (
             sa.update(Jobs)
-            .where(Jobs.task.in_(tasks))
-            .where(Jobs.status.in_([Status.IN_PROGRESS.value, Status.QUEUED.value]))
-            .where(Jobs.updated_at < stale_before)
+            .where(Jobs.id.in_(sa.select(candidates.c.id)))
+            .where(Jobs.status.in_(active))
             .values(
                 status=Status.FAILED.value,
                 finished_at=sa.func.now(),
@@ -215,7 +252,9 @@ class JobRepository:
             .returning(Jobs.id)
         )
         result = await self.delegate.session.execute(stmt)
-        return [row[0] for row in result.all()]
+        failed_ids = [row[0] for row in result.all()]
+        await self._announce(*failed_ids)
+        return failed_ids
 
     async def mark_stale_in_progress_jobs_failed(
         self,
@@ -224,7 +263,9 @@ class JobRepository:
         result = await self.delegate.session.execute(
             stale_in_progress_jobs_statement(stale_before)
         )
-        return [(row.id, row.task) for row in result.all()]
+        failed = [(row.id, row.task) for row in result.all()]
+        await self._announce(*(id for id, _task in failed))
+        return failed
 
     async def get_running_jobs(self, user_id: UUID):
         one_week_ago = datetime.now(timezone.utc) - timedelta(weeks=1)

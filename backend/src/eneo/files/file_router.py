@@ -430,6 +430,8 @@ def _download_response(
     if include_repr_digest:
         digest = base64.b64encode(download.sha256).decode("ascii")
         headers["Repr-Digest"] = f"sha-256=:{digest}:"
+        headers["ETag"] = f'"{download.sha256.hex()}"'
+        headers["Cache-Control"] = "private, no-cache"
     if download.content_range is not None:
         headers["Content-Range"] = download.content_range
 
@@ -521,6 +523,7 @@ async def download_file_signed(
     responses={
         200: {"description": "Successfully downloaded the entire original file"},
         206: {"description": "Successfully downloaded part of the original audio"},
+        304: {"description": "Access revalidated; original content is unchanged"},
         **responses.get_responses([400, 401, 403, 404, 409, 416, 503]),
     },
 )
@@ -539,6 +542,7 @@ async def download_original_file_signed(
         Depends(get_container(with_transaction=False)),
     ],
     range: Annotated[str | None, Header()] = None,
+    if_none_match: Annotated[str | None, Header()] = None,
 ) -> ClosingStreamingResponse | Response:
     content_disposition, expected_tenant_id = access
     service = container.file_service(user=None)
@@ -550,12 +554,30 @@ async def download_original_file_signed(
         )
     except FileContentRangeError as exc:
         return _range_not_satisfiable_response(exc)
+    # Resolve/open through the ordinary authorized path first. This preserves
+    # tenant, existence, integrity and storage-access checks even on a cache hit.
+    etag = f'"{download.sha256.hex()}"'
+    revalidated = (
+        range is None
+        and if_none_match is not None
+        and any(
+            value.strip().removeprefix("W/") in (etag, "*")
+            for value in if_none_match.split(",")
+        )
+    )
     await _audit_original_download_redeemed(
         container,
         download,
         content_disposition=content_disposition,
         ranged=range is not None,
+        revalidated=revalidated,
     )
+    if revalidated:
+        await download.aclose()
+        return Response(
+            status_code=304,
+            headers={"ETag": etag, "Cache-Control": "private, no-cache"},
+        )
     return _download_response(
         download,
         content_disposition=content_disposition,
@@ -569,6 +591,7 @@ async def _audit_original_download_redeemed(
     *,
     content_disposition: ContentDisposition,
     ranged: bool,
+    revalidated: bool = False,
 ) -> None:
     """Record that a signed original link was redeemed.
 
@@ -588,7 +611,7 @@ async def _audit_original_download_redeemed(
                 entity_type=EntityType.FILE,
                 entity_id=download.file_id,
                 description=(
-                    f"Original file '{download.filename}' downloaded with a signed link"
+                    f"Original file '{download.filename}' accessed with a signed link"
                 ),
                 metadata=AuditMetadata.system_action(
                     description="Signed original download link redeemed",
@@ -596,6 +619,10 @@ async def _audit_original_download_redeemed(
                     extra={
                         "content_disposition": content_disposition.value,
                         "ranged": ranged,
+                        "cache_revalidated": revalidated,
+                        "transferred_bytes": 0
+                        if revalidated
+                        else download.content_length,
                         "content_length": download.content_length,
                     },
                 ),

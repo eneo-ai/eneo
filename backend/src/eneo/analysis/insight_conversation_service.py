@@ -98,7 +98,6 @@ _FORWARDED_RESPONSE_TYPES = frozenset(
         ResponseType.TOOL_APPROVAL_REQUIRED,
         ResponseType.TOOL_APPROVAL_TIMEOUT,
         ResponseType.FILES,
-        ResponseType.ENEO_EVENT,
         ResponseType.ERROR,
     }
 )

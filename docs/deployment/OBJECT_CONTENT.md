@@ -128,6 +128,11 @@ CRCs, and user metadata never replace that digest. The same read-back contract
 also applies to a bypassing upload, migration, restore, or ambiguous
 reconciliation.
 
+Compose needs the release bundle for every command here: pass
+`--env-file .env --env-file release.env`, or run
+`export COMPOSE_ENV_FILES=.env,release.env` once in the shell (Docker Compose
+2.24 or later).
+
 For an external endpoint, set `OBJECT_CONTENT_ENDPOINT_URL`, TLS, addressing,
 signing region, bucket, credentials, and the stable deployment ID in `.env`,
 then start the normal stack:

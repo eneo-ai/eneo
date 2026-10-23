@@ -1,16 +1,20 @@
 from typing import Any, Protocol
 
-from typing_extensions import TypedDict
+from typing_extensions import NotRequired, TypedDict
 
 # Owned by the domain layer; re-exported here so existing infrastructure importers
 # keep working without the domain importing upward.
 from eneo.integration.domain.value_objects import (
+    ChangedDetail,
+    ChangeKind,
     OAuthResource,
     SkippedDetail,
     SyncMetadata,
 )
 
 __all__ = [
+    "ChangedDetail",
+    "ChangeKind",
     "GraphParentReference",
     "SharePointItem",
     "OAuthResource",
@@ -31,6 +35,10 @@ class GraphParentReference(TypedDict, total=False):
     path: str
 
 
+class GraphListItem(TypedDict, total=False):
+    fields: dict[str, object]
+
+
 class SharePointItem(TypedDict, total=False):
     id: str
     name: str
@@ -39,12 +47,14 @@ class SharePointItem(TypedDict, total=False):
     deleted: bool | dict[str, Any]
     folder: dict[str, Any]
     file: dict[str, Any]
+    package: dict[str, Any]
     parentReference: GraphParentReference
     size: int
     title: str
     description: str
     createdDateTime: str
     lastModifiedDateTime: str
+    listItem: GraphListItem
 
 
 class SyncStats(TypedDict):
@@ -53,8 +63,29 @@ class SyncStats(TypedDict):
     out_of_scope_deleted: int
     folders_processed: int
     pages_processed: int
+    unchanged_items: int
     skipped_items: int
     skipped_details: list[SkippedDetail]
+    failed_items: NotRequired[int]
+    # Per-pass bookkeeping; never part of a summary.
+    download_attempts: NotRequired[int]
+    download_forbidden: NotRequired[int]
+    download_not_found: NotRequired[int]
+    download_missing: NotRequired[int]
+    # Items the pass could not decide about; their record stays.
+    undecided_items: NotRequired[set[str]]
+    # Item id -> name of each file whose download was refused (403).
+    refused_downloads: NotRequired[dict[str, str]]
+    # Item id -> indexes into skipped_details of the failures that name it.
+    failures_by_item: NotRequired[dict[str, list[int]]]
+    items_attempted: NotRequired[int]
+    failures_in_a_row: NotRequired[int]
+    skipped_total: NotRequired[int]
+    skipped_truncated: NotRequired[bool]
+    changed_details: NotRequired[list[ChangedDetail]]
+    changed_total: NotRequired[int]
+    changed_truncated: NotRequired[bool]
+    reconcile_warning: NotRequired[str]
 
 
 class SharePointTokenProtocol(Protocol):

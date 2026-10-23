@@ -12,6 +12,9 @@
     mergeAdjacentCitations
   } from "../../mcpReferenceDocs";
   import { m } from "$lib/paraglide/messages";
+  import { sanitizeWebHref } from "$lib/components/markdown/index.js";
+  import SourceMetadataList from "$lib/features/knowledge/components/SourceMetadataList.svelte";
+  import { hasSourceMetadata } from "$lib/features/knowledge/sourceMetadata";
 
   let { token }: EneoInrefCustomComponentProps = $props();
 
@@ -54,6 +57,7 @@
     title?: string;
     pageRange?: string;
     section?: string;
+    source_metadata?: unknown;
   };
 
   const mcpReference = $derived.by(() => {
@@ -81,6 +85,7 @@
         sourceType: sourceType ?? null,
         pageRange,
         section,
+        source_metadata: meta.source_metadata,
         // Number by DOCUMENT, matching the deduped chip list in
         // MessageTools: passages from the same document share one number.
         number: documentNumber(mcpToolReferences, ref)
@@ -102,24 +107,26 @@
 {/snippet}
 
 {#if reference}
-  {#if reference.metadata.url}
+  <!-- A stored url is whatever its editor wrote: only http(s) links out, anything
+       else opens the document's preview. -->
+  {@const href = sanitizeWebHref(reference.metadata.url)}
+  {#if href}
     <Tooltip.Root>
       <Tooltip.Trigger>
         {#snippet child({ props })}
           <!-- eslint-disable svelte/no-navigation-without-resolve -- external reference URL from message metadata -->
-          <a
-            {...props}
-            href={reference.metadata.url}
-            target="_blank"
-            rel="noreferrer"
-            class={["reference", token.level]}
-          >
+          <a {...props} {href} target="_blank" rel="noreferrer" class={["reference", token.level]}>
             {@render label(reference.number, reference.metadata.title)}
           </a>
           <!-- eslint-enable svelte/no-navigation-without-resolve -->
         {/snippet}
       </Tooltip.Trigger>
-      <Tooltip.Content class="break-all">{reference.metadata.url}</Tooltip.Content>
+      <Tooltip.Content class="flex-col items-start break-all">
+        <span>{reference.metadata.url}</span>
+        {#if hasSourceMetadata(reference)}
+          <SourceMetadataList entries={reference.source_metadata} variant="inline" />
+        {/if}
+      </Tooltip.Content>
     </Tooltip.Root>
   {:else}
     {@const title = reference.metadata.title}
@@ -136,7 +143,12 @@
               </button>
             {/snippet}
           </Tooltip.Trigger>
-          <Tooltip.Content>{title}</Tooltip.Content>
+          <Tooltip.Content class="flex-col items-start">
+            <span>{title}</span>
+            {#if hasSourceMetadata(reference)}
+              <SourceMetadataList entries={reference.source_metadata} variant="inline" />
+            {/if}
+          </Tooltip.Content>
         </Tooltip.Root>
       {:else}
         <button type="button" onclick={showBlob} class={["reference", token.level]}>
@@ -194,7 +206,12 @@
               </button>
             {/snippet}
           </Tooltip.Trigger>
-          <Tooltip.Content>{mcpReference?.title}</Tooltip.Content>
+          <Tooltip.Content class="flex-col items-start">
+            <span>{mcpReference?.title}</span>
+            {#if hasSourceMetadata(mcpReference)}
+              <SourceMetadataList entries={mcpReference.source_metadata} variant="inline" />
+            {/if}
+          </Tooltip.Content>
         </Tooltip.Root>
       {/snippet}
     </McpResourceSnippetModal>

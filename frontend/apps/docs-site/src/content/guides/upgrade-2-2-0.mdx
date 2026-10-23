@@ -130,8 +130,8 @@ Before upgrading:
 
 - **SCIM-managed tenants:** explicitly keep `provisioning: false`. Ensure intended users have been provisioned before their first sign-in. OIDC remains the sign-in method for existing active members.
 - **Global OIDC:** configure a valid `OIDC_TENANT_ID`. Existing accounts must belong to that tenant; the older endpoint no longer accepts accounts from another tenant or a missing tenant configuration.
-- **Tenants using JIT:** require a non-empty domain list and an ID token containing boolean `email_verified: true` for `email`. Per-tenant federation uses `allowed_domains`; global OIDC uses the new `OIDC_ALLOWED_DOMAINS` environment variable, for example `OIDC_ALLOWED_DOMAINS=["your-company.com"]`.
-- **IdPs without verified-email claims:** use SCIM or administrative provisioning. Missing claims, strings such as `"true"`, and custom mapped addresses that differ from the standard `email` claim do not authorize JIT creation.
+- **Tenants using JIT:** require a non-empty domain list and an ID token containing `email_verified: true` for `email`. From 2.2.3, the strings `"true"` and `"1"` are also accepted for identity providers that cannot send boolean claims. Per-tenant federation uses `allowed_domains`; global OIDC uses the new `OIDC_ALLOWED_DOMAINS` environment variable, for example `OIDC_ALLOWED_DOMAINS=["your-company.com"]`.
+- **IdPs without verified-email claims:** use SCIM or administrative provisioning. Missing claims, other values, and custom mapped addresses that differ from the standard `email` claim do not authorize JIT creation.
 
 An empty domain list still applies no domain restriction to existing active members, but blocks new JIT accounts. Inactive and removed users cannot be recreated by signing in; restore them through SCIM or an administrator. Existing active accounts do not gain a new `email_verified` requirement.
 
@@ -156,6 +156,35 @@ The event type field changed on every streaming event that carries it: tool
 calls, tool approvals, token usage and image generation. Regenerate clients that
 are generated from the OpenAPI schema. The error envelope is described in
 [API](/docs/api).
+
+---
+
+## Files nothing uses anymore
+
+Eneo 2.2 deletes uploaded files after their last use. Deleting a conversation or
+app run, by hand or through conversation retention, deletes the files only it
+used, including audio recordings and transcriptions. A daily cleanup at 03:30
+UTC deletes every other file that no chat, assistant, app or app run uses and
+that is older than 24 hours. Knowledge is not affected: documents in
+collections and the originals retained for them are not uploaded files.
+
+The first cleanup after the upgrade also deletes files left behind by earlier
+versions, for example recordings from app runs that retention already removed.
+This cannot be undone, so take the backup in [Updating
+Eneo](/guides/deployment#updating-eneo) as usual. To see what the cleanup will
+delete, run the preview in the worker container after deploying and before
+03:30 UTC:
+
+```bash
+docker compose exec worker python -m eneo.files.unused_file_cleanup preview
+```
+
+API integrations that delete a conversation
+and then each of its files now receive `404` for files already deleted with the
+conversation. A chat message, app run or service call that names a deleted file
+is refused with `400` and the missing file id instead of being sent without it;
+upload the file again. See [Files nothing uses
+anymore](/guides/object-content-storage#files-nothing-uses-anymore).
 
 ---
 

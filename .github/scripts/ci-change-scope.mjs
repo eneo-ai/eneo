@@ -14,6 +14,9 @@ const outputNames = [
   "docker_backend",
   "docker_frontend",
   "docker_devcontainer",
+  "web_next",
+  "web_next_e2e",
+  "docker_web_next",
 ];
 
 if (process.argv.includes("--self-test")) {
@@ -49,14 +52,24 @@ function classify(rawFiles) {
   const backend = full || whatsNewContract || files.some(isBackendFile)
     || files.includes("scripts/backend_test_shard.py");
   // The release-notes check runs in the frontend job against the real file.
+  // Shared workspace files (root manifests, the lockfile, patches, packages)
+  // belong to both apps; each app's own directory only to that app.
   const frontend =
-    full || files.some(isShippedFrontendFile) || files.includes("scripts/check_whats_new.py");
+    full
+    || files.some((file) => isShippedFrontendFile(file) && !isWebNextFile(file))
+    || files.includes("scripts/check_whats_new.py");
+  const webNext =
+    full || files.some((file) => isShippedFrontendFile(file) && !isSvelteAppFile(file));
   const frontendE2e = full || backend || frontend || files.some(isE2eFile);
+  const webNextE2e = full || backend || webNext || files.some(isE2eFile);
   const schema = full || backend || files.some(isSchemaFile);
-  const scripts = full || whatsNewContract || files.some(isScriptTestFile);
+  // The news vocabulary contract test also depends on the backend permission enum.
+  const scripts = full || whatsNewContract || files.some(isScriptTestFile)
+    || files.includes("backend/src/eneo/roles/permissions.py");
   const routeMetadata = full || backend || files.includes("scripts/check_route_metadata.py");
   const dockerBackend = full || backend;
   const dockerFrontend = full || frontend;
+  const dockerWebNext = full || webNext;
   const dockerDevcontainer = full || files.some((file) => file.startsWith(".devcontainer/"));
 
   return {
@@ -70,6 +83,9 @@ function classify(rawFiles) {
     docker_backend: dockerBackend,
     docker_frontend: dockerFrontend,
     docker_devcontainer: dockerDevcontainer,
+    web_next: webNext,
+    web_next_e2e: webNextE2e,
+    docker_web_next: dockerWebNext,
   };
 }
 
@@ -89,6 +105,14 @@ function isBackendFile(file) {
 
 function isShippedFrontendFile(file) {
   return file.startsWith("frontend/") && !file.startsWith("frontend/apps/docs-site/");
+}
+
+function isWebNextFile(file) {
+  return file.startsWith("frontend/apps/web-next/");
+}
+
+function isSvelteAppFile(file) {
+  return file.startsWith("frontend/apps/web/");
 }
 
 function isE2eFile(file) {
@@ -149,6 +173,9 @@ function runSelfTest() {
       docker_backend: false,
       docker_frontend: false,
       docker_devcontainer: false,
+      web_next: false,
+      web_next_e2e: false,
+      docker_web_next: false,
     },
     "docs-site-only changes should not run expensive app/backend CI",
   );
@@ -158,6 +185,12 @@ function runSelfTest() {
   assert.equal(classify(["backend/src/eneo/server/main.py"]).schema, true);
   assert.equal(classify(["backend/src/eneo/server/main.py"]).route_metadata, true);
   assert.equal(classify(["backend/src/eneo/server/main.py"]).docker_backend, true);
+  assert.equal(classify(["backend/src/eneo/server/main.py"]).scripts, false);
+  assert.equal(
+    classify(["backend/src/eneo/roles/permissions.py"]).scripts,
+    true,
+    "permission changes must check the What's new vocabulary against the backend",
+  );
 
   assert.equal(classify(["scripts/backend_test_shard.py"]).backend, true);
   assert.equal(classify(["scripts/backend_test_shard.py"]).scripts, true);
@@ -166,6 +199,26 @@ function runSelfTest() {
   assert.equal(classify(["frontend/apps/web/src/routes/+page.svelte"]).frontend_e2e, true);
   assert.equal(classify(["frontend/apps/web/src/routes/+page.svelte"]).docker_frontend, true);
   assert.equal(classify(["frontend/apps/web/src/routes/+page.svelte"]).schema, false);
+  // Each app's own files run only that app; shared workspace files run both.
+  const svelteScope = classify(["frontend/apps/web/src/routes/+page.svelte"]);
+  assert.equal(svelteScope.web_next, false);
+  assert.equal(svelteScope.web_next_e2e, false);
+  assert.equal(svelteScope.docker_web_next, false);
+  const webNextScope = classify(["frontend/apps/web-next/src/app/(public)/login/page.tsx"]);
+  assert.equal(webNextScope.web_next, true);
+  assert.equal(webNextScope.web_next_e2e, true);
+  assert.equal(webNextScope.docker_web_next, true);
+  assert.equal(webNextScope.frontend, false);
+  assert.equal(webNextScope.frontend_e2e, false);
+  assert.equal(webNextScope.docker_frontend, false);
+  for (const shared of ["frontend/bun.lock", "frontend/packages/whats-new/src/index.ts", "frontend/patches/x.patch"]) {
+    const sharedScope = classify([shared]);
+    assert.equal(sharedScope.frontend, true, `${shared} runs the Svelte app`);
+    assert.equal(sharedScope.web_next, true, `${shared} runs the Next app`);
+  }
+  // Both apps consume the API: a backend change exercises both E2E suites.
+  assert.equal(classify(["backend/src/eneo/server/main.py"]).web_next_e2e, true);
+  assert.equal(classify(["backend/src/eneo/server/main.py"]).web_next, false);
 
   assert.equal(classify(["frontend/knip.json"]).frontend, true);
   assert.equal(classify(["frontend/knip.json"]).frontend_e2e, true);

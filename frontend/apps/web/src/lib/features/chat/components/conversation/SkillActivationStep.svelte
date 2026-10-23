@@ -35,7 +35,11 @@
   let open = $state(false);
   const failed = $derived(status === "failed" || status === "denied");
   const label = $derived(
-    failed ? m.tool_activate_skill_failed({ name }) : m.skill_used_in_reply({ name })
+    failed
+      ? m.tool_activate_skill_failed({ name })
+      : args?.mode === "always"
+        ? m.skill_instructions_included({ name })
+        : m.skill_instructions_loaded({ name })
   );
   const always = $derived(args?.mode === "always");
   // Rejection reasons share the debug panel's wording so the two never drift.

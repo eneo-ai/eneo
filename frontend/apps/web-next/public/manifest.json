@@ -1,0 +1,17 @@
+{
+  "name": "Eneo",
+  "description": "Easy access to your assistants in Eneo",
+  "short_name": "eneo",
+  "display": "standalone",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "theme_color": "#1E40AF",
+  "icons": [
+    {
+      "src": "/eneo_pwa_logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

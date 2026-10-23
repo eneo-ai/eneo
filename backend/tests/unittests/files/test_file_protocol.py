@@ -73,7 +73,7 @@ def protocol(tmp_path):
     file_size_service.get_file_checksum.return_value = "fakechecksum"
 
     text_extractor = MagicMock()
-    text_extractor.extract.return_value = "extracted text"
+    text_extractor.extract_bounded = AsyncMock(return_value="extracted text")
 
     image_extractor = MagicMock()
     image_extractor.extract.return_value = b"image-bytes"

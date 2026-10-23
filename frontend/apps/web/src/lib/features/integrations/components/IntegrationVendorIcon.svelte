@@ -2,7 +2,7 @@
   import { integrationData, type IntegrationType } from "../IntegrationData";
 
   type Props = {
-    size: "sm" | "lg";
+    size: "sm" | "md" | "lg";
     type?: IntegrationType;
   };
 
@@ -10,6 +10,7 @@
   const logoUrl = $derived.by(() => {
     return integrationData[type].logo;
   });
+  const widths = { sm: "w-6", md: "w-8", lg: "w-12" };
 </script>
 
-<img src={logoUrl} alt="" class={size === "sm" ? "w-6" : "w-12"} />
+<img src={logoUrl} alt="" class="shrink-0 {widths[size]}" />

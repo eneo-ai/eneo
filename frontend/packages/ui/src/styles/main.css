@@ -49,6 +49,8 @@
   --color-warning-stronger: var(--warning-stronger);
   --color-warning-default: var(--warning-default);
   --color-warning-dimmer: var(--warning-dimmer);
+  --color-highlight: var(--highlight);
+  --color-highlight-foreground: var(--highlight-foreground);
   --color-positive-stronger: var(--positive-stronger);
   --color-positive-default: var(--positive-default);
   --color-positive-dimmer: var(--positive-dimmer);

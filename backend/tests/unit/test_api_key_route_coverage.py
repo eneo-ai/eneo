@@ -20,6 +20,7 @@ from eneo.authentication.auth_dependencies import (
     FILES_READ_OVERRIDES,
     INFO_BLOBS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
+    MCP_APPS_READ_OVERRIDES,
 )
 from eneo.authentication.endpoint_access import access_for
 from eneo.main.config import get_settings
@@ -123,6 +124,7 @@ INTENTIONALLY_UNGUARDED = {
     "/embedding-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/transcription-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/image-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
+    "/rerank-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/ai-models": "Model listing aggregation",
     "/user-groups": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/allowed-origins": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
@@ -137,6 +139,7 @@ INTENTIONALLY_UNGUARDED = {
     "/ws": "WebSocket endpoint — separate auth",
     "/audit": "Admin audit endpoints with admin scope + admin key guards",
     "/mcp-servers": "MCP server management is tenant-admin infrastructure with admin scope + admin key guards",
+    "/document-templates": "Document template library is tenant-admin infrastructure with admin scope + admin key guards; the signed runtime download and the read-only name listing are authenticated per route",
     "/skills": "Skill catalogue and organisation lifecycle endpoints require session authentication; service-layer actor and tenant checks authorize reads, bindings, and admin-only publication",
     "/whats-new": "Per-user What's new read state; session-only (Authentication.SESSION) and scoped to the caller's own row",
     "/auth": "Public federation/auth endpoints — no user auth required",
@@ -151,6 +154,7 @@ INTENTIONALLY_UNGUARDED = {
 # Route prefixes that intentionally do NOT have scope guards.
 # These are authenticated by bearer/super-key flows or are public endpoints.
 INTENTIONALLY_SCOPE_FREE = {
+    "/document-templates": "Admin routes carry tenant-admin scope + admin key guards; the signed runtime download needs no key and the read-only name listing is user-bound",
     "/users": "User profile/login/provisioning endpoints and legacy compatibility flows",
     "/settings": "Tenant settings read/models endpoints",
     "/icons": "Static icon catalog",
@@ -326,6 +330,7 @@ class TestReadOverrideValidity:
             | FILES_READ_OVERRIDES
             | INFO_BLOBS_READ_OVERRIDES
             | KNOWLEDGE_READ_OVERRIDES
+            | MCP_APPS_READ_OVERRIDES
         )
         stale = all_overrides - all_endpoint_names
         assert not stale, (
@@ -435,6 +440,7 @@ class TestTenantAdminApiKeyGuards:
             "/embedding-models",
             "/transcription-models",
             "/image-models",
+            "/rerank-models",
             "/audit",
             "/integrations",
             "/storage",
@@ -515,6 +521,15 @@ class TestHighRiskExactRouteGuards:
         )
         assert route_is_session_only(route)
         assert access_for(route.endpoint).authorization is Permission.ASSISTANT_DEBUG
+
+    def test_recent_conversations_is_session_only(self):
+        route = _find_route_by_method_and_paths(
+            "GET", "/conversations/recent/", "/conversations/recent"
+        )
+        assert route_is_session_only(route), (
+            "GET /conversations/recent/ spans every space of the signed-in "
+            "user and filters by membership only; it must reject API keys"
+        )
 
     def test_integrations_admin_route_has_scope_and_admin_key_guards(self):
         route = _find_route_by_method_and_paths(
@@ -650,6 +665,8 @@ class TestHighRiskExactRouteGuards:
             ("GET", "/conversations/"),
             ("GET", "/conversations/{session_id}/"),
             ("DELETE", "/conversations/{session_id}/"),
+            ("PUT", "/conversations/{session_id}/messages/{message_id}/feedback/"),
+            ("DELETE", "/conversations/{session_id}/messages/{message_id}/feedback/"),
             ("GET", "/assistants/{id}/sessions/"),
             ("GET", "/assistants/{id}/sessions/{session_id}/"),
             ("DELETE", "/assistants/{id}/sessions/{session_id}/"),
@@ -1061,6 +1078,12 @@ class TestScopeCheckPathParamSafety:
     PATH_PARAM_NONE_ALLOWLIST_EXACT: dict[tuple[str, str], str] = {
         (
             "POST",
+            "/mcp-apps/views/{view_id}/token/",
+        ): "A tool view is not a scoped resource: the endpoint mints a link only for a "
+        "view stored for the caller's tenant and approved for a tool, and the link "
+        "serves nothing but that view's HTML.",
+        (
+            "POST",
             "/files/",
         ): "File upload; service layer associates the new file with user.tenant_id. "
         "scope=file + basic POST→write is sufficient.",
@@ -1151,6 +1174,7 @@ class TestReadOverrideUniqueness:
             ("FILES_READ_OVERRIDES", FILES_READ_OVERRIDES),
             ("INFO_BLOBS_READ_OVERRIDES", INFO_BLOBS_READ_OVERRIDES),
             ("KNOWLEDGE_READ_OVERRIDES", KNOWLEDGE_READ_OVERRIDES),
+            ("MCP_APPS_READ_OVERRIDES", MCP_APPS_READ_OVERRIDES),
         ]
 
         collisions: list[str] = []
@@ -1196,7 +1220,10 @@ class TestReadOverrideSnapshot:
         ],
         "CONVERSATIONS_READ_OVERRIDES": [
             "chat",
+            "delete_message_feedback",
+            "export_conversation_document",
             "leave_feedback",
+            "set_message_feedback",
         ],
         "APPS_READ_OVERRIDES": [
             "run_app",
@@ -1212,6 +1239,9 @@ class TestReadOverrideSnapshot:
         "KNOWLEDGE_READ_OVERRIDES": [
             "run_semantic_search",
         ],
+        "MCP_APPS_READ_OVERRIDES": [
+            "mint_app_view_token",
+        ],
     }
 
     def test_read_override_contents_match_snapshot(self):
@@ -1222,6 +1252,7 @@ class TestReadOverrideSnapshot:
             "FILES_READ_OVERRIDES": sorted(FILES_READ_OVERRIDES),
             "INFO_BLOBS_READ_OVERRIDES": sorted(INFO_BLOBS_READ_OVERRIDES),
             "KNOWLEDGE_READ_OVERRIDES": sorted(KNOWLEDGE_READ_OVERRIDES),
+            "MCP_APPS_READ_OVERRIDES": sorted(MCP_APPS_READ_OVERRIDES),
         }
         assert actual == self.EXPECTED_READ_OVERRIDES, (
             "Read-override frozenset contents changed. Adding a name downgrades "

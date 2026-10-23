@@ -10,6 +10,7 @@
 -->
 
 <script lang="ts">
+  import type { OutboundHeaderOptions } from "@eneo/eneo-js";
   import { onMount, tick, untrack } from "svelte";
   import { ArrowLeft, LoaderCircle } from "@lucide/svelte";
   import { getEneo } from "$lib/core/Eneo";
@@ -22,6 +23,13 @@
   import * as Field from "$lib/components/ui/field/index.js";
 
   import ProviderGlyph from "../components/ProviderGlyph.svelte";
+  import OutboundHeadersEditor from "../OutboundHeadersEditor.svelte";
+  import {
+    headersPayload,
+    isRowComplete,
+    loadOutboundHeaderOptions,
+    type HeaderRow
+  } from "../outboundHeaders";
   import {
     formatProviderLabel,
     formatFieldLabel,
@@ -55,6 +63,9 @@
   // warning that $state would otherwise emit.
   let providerName = $state(untrack(() => formatProviderLabel(providerType)));
   let fieldValues = $state<Record<string, string>>({});
+  let headerRows = $state<HeaderRow[]>([]);
+  let headerOptions = $state<OutboundHeaderOptions | null>(null);
+  let headerOptionsError = $state(false);
 
   let isSubmitting = $state(false);
   let error = $state<string | null>(null);
@@ -74,10 +85,22 @@
 
   const isValid = $derived(
     providerName.trim() !== "" &&
-      fields.every((f) => !f.required || (fieldValues[f.name] ?? "").trim() !== "")
+      fields.every((f) => !f.required || (fieldValues[f.name] ?? "").trim() !== "") &&
+      headerRows.every((row) => isRowComplete(row, headerOptions))
   );
 
+  async function loadHeaderOptions() {
+    headerOptionsError = false;
+    try {
+      headerOptions = await loadOutboundHeaderOptions(eneo);
+    } catch {
+      // The editor offers a retry; the provider can still be created without headers.
+      headerOptionsError = true;
+    }
+  }
+
   onMount(async () => {
+    void loadHeaderOptions();
     await tick();
     document.getElementById("cred-provider-name")?.focus();
   });
@@ -103,7 +126,8 @@
         provider_type: providerType,
         credentials,
         config,
-        is_active: true
+        is_active: true,
+        outbound_headers: headersPayload(headerRows)
       });
 
       toast.success(m.provider_created_success());
@@ -173,6 +197,16 @@
         {/if}
       </Field.Field>
     {/each}
+
+    <OutboundHeadersEditor
+      {providerType}
+      options={headerOptions}
+      bind:rows={headerRows}
+      idPrefix="cred-header"
+      endpoint={fieldValues.endpoint}
+      optionsError={headerOptionsError}
+      onRetry={loadHeaderOptions}
+    />
   </form>
 
   <div class="border-border flex items-center justify-between border-t pt-4">

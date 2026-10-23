@@ -2,10 +2,368 @@
   "$schema": "./releases.schema.json",
   "releases": [
     {
+      "version": "2.3.0",
+      "entries": [
+        {
+          "id": "file-creation-progress",
+          "permissions": {
+            "allOf": ["file_creation"],
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
+          "type": "new",
+          "area": "chat",
+          "aliases": ["charts-in-documents", "file-download-links"],
+          "title": {
+            "en": "Create, edit and restore documents",
+            "sv": "Skapa, redigera och återställ dokument"
+          },
+          "body": {
+            "en": "When file creation is enabled for your assistant, you can follow a document as it is written in the side panel and download it as Word or PDF, including charts. In the standard Eneo app, you can also edit the text yourself, save a new version, compare changes and restore an earlier version. Open files from the Files and views panel to preview them before downloading.",
+            "sv": "När filskapande är aktiverat för din assistent kan du följa dokumentet medan det skrivs i sidopanelen och ladda ner det som Word eller PDF, med diagram. I den ordinarie Eneo-appen kan du även redigera texten själv, spara en ny version, jämföra ändringar och återställa en tidigare version. Öppna filer från panelen Filer och vyer för att förhandsvisa dem innan du laddar ner dem."
+          }
+        },
+        {
+          "id": "file-analysis-trace",
+          "permissions": {
+            "allOf": ["file_analysis"],
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
+          "type": "new",
+          "area": "chat",
+          "aliases": ["spreadsheet-selection-quotes"],
+          "title": {
+            "en": "Explore CSV and Excel files in chat",
+            "sv": "Utforska CSV- och Excel-filer i chatten"
+          },
+          "body": {
+            "en": "When file analysis is enabled for your assistant, you can ask questions about CSV and Excel files and explore results in interactive tables with sorting and filtering. In the file preview, select a cell or row and choose Ask about selection to include it in your next message. Expand an analysis step to see which file was used and what was done.",
+            "sv": "När filanalys är aktiverat för din assistent kan du ställa frågor om CSV- och Excel-filer och utforska resultaten i interaktiva tabeller med sortering och filtrering. Markera en cell eller rad i filens förhandsvisning och välj Fråga om markeringen för att ta med den i nästa meddelande. Fäll ut ett analyssteg för att se vilken fil som användes och vad som gjordes."
+          }
+        },
+        {
+          "id": "compute-and-charts",
+          "permissions": {
+            "allOf": ["compute", "charts"],
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
+          "type": "new",
+          "area": "chat",
+          "aliases": ["intermediate-query-tables", "chat-widget-scroll"],
+          "title": {
+            "en": "Calculate and explore interactive charts",
+            "sv": "Beräkna och utforska interaktiva diagram"
+          },
+          "body": {
+            "en": "Assistants with the calculation and chart tools enabled can calculate from your figures and display interactive charts in chat. For calculations based on values you supplied, you can change the inputs and calculate again to compare outcomes. Charts can be included in Word and PDF reports without showing every intermediate table in chat.",
+            "sv": "Assistenter som har verktygen för beräkningar och diagram aktiverade kan räkna på dina siffror och visa interaktiva diagram i chatten. För beräkningar utifrån värden du själv angett kan du ändra indata och beräkna igen för att jämföra resultat. Diagram kan tas med i Word- och PDF-rapporter utan att varje mellantabell visas i chatten."
+          }
+        },
+        {
+          "id": "conversation-uploads",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
+          "type": "improved",
+          "area": "chat",
+          "title": {
+            "en": "Send messages while files are uploading",
+            "sv": "Skicka meddelanden medan filer laddas upp"
+          },
+          "body": {
+            "en": "Your message appears in chat as soon as you submit it, even while attachments are uploading; you can stop it there, and your draft is restored if sending fails. The Files and views panel groups uploads by question for preview and download; attaching the same file again reuses its upload in the conversation. Multiple attachments are grouped to keep the chat readable.",
+            "sv": "Ditt meddelande visas i chatten direkt när du skickar det, även medan bilagor laddas upp; du kan stoppa det där, och utkastet återställs om det inte går att skicka. Panelen Filer och vyer grupperar uppladdningar efter fråga för förhandsvisning och nedladdning; bifogar du samma fil igen behöver den inte laddas upp på nytt i konversationen. Flera bilagor grupperas för att göra chatten lättare att läsa."
+          }
+        },
+        {
+          "id": "assistant-attachment-modes",
+          "permissions": {
+            "allOf": ["assistants"]
+          },
+          "type": "new",
+          "area": "assistants",
+          "title": {
+            "en": "Choose how assistants read attached files",
+            "sv": "Välj hur assistenten läser bifogade filer"
+          },
+          "body": {
+            "en": "For each file attached to an assistant, you can choose whether its contents are always included or read only when needed. New attachments default to on-demand reading, while existing attachments keep their previous behaviour. Use always-included files for material the assistant needs in every conversation.",
+            "sv": "För varje fil som bifogas en assistent kan du välja om innehållet alltid ska tas med eller läsas vid behov. Nya bilagor läses som standard vid behov, medan befintliga bilagor behåller sitt tidigare beteende. Välj att alltid ta med filer som assistenten behöver i varje konversation."
+          }
+        },
+        {
+          "id": "sharepoint-document-properties",
+          "permissions": {
+            "allOf": ["integrations"]
+          },
+          "type": "improved",
+          "area": "knowledge",
+          "title": {
+            "en": "Find SharePoint documents by their properties",
+            "sv": "Hitta SharePoint-dokument på deras egenskaper"
+          },
+          "body": {
+            "en": "SharePoint library columns, such as document type or business area, follow each document into Eneo and appear on sources and in the preview. Assistants can search these properties as well as document contents. When importing, you can search within a document library, filter by column values and select all displayed matches; refine your search if the result or scan limit is reached.",
+            "sv": "Kolumner i SharePoint-biblioteket, till exempel dokumenttyp eller verksamhet, följer med dokumenten till Eneo och visas på källor och i förhandsvisningen. Assistenter kan söka på egenskaperna och i dokumentens innehåll. Vid import kan du söka inom ett dokumentbibliotek, filtrera på kolumnvärden och välja alla visade träffar; förfina sökningen om gränsen för resultat eller genomsökning nås."
+          }
+        },
+        {
+          "id": "sharepoint-sync-status",
+          "type": "improved",
+          "area": "knowledge",
+          "title": {
+            "en": "See how each SharePoint source is doing",
+            "sv": "Se hur varje SharePoint-källa mår"
+          },
+          "body": {
+            "en": "Each SharePoint source in a space's Knowledge list now has one status (up to date, syncing, needs attention, empty or waiting) and a live progress bar while it syncs, and you can filter the list by status. A banner tells you when sources stop updating because the SharePoint sign-in was refused, and the source's Activity tab shows its syncs with what changed and which files were skipped. When an answer used none of the assistant's knowledge, the chat says so.",
+            "sv": "Varje SharePoint-källa i ytans kunskapslista har nu en enda status (aktuell, synkar, behöver åtgärd, tom eller väntar) och ett förloppsfält medan den synkar, och du kan filtrera listan på status. En banner säger till när källor slutar uppdateras för att inloggningen till SharePoint nekats, och källans flik Aktivitet visar dess synkar med vad som ändrades och vilka filer som hoppades över. När ett svar inte använde något ur assistentens kunskap säger chatten det."
+          }
+        },
+        {
+          "id": "sharepoint-imported-documents",
+          "type": "new",
+          "area": "knowledge",
+          "title": {
+            "en": "See what a SharePoint import contains",
+            "sv": "Se vad en SharePoint-import innehåller"
+          },
+          "body": {
+            "en": "Open a SharePoint source from a space's Knowledge list to see its folders and the documents in each, with search, sorting and a preview of the text. The Problems tab groups the files that did not become searchable by cause, says what to do about each and points out when only an administrator can fix it. When an import finishes its first sync, a notice tells you how many files were indexed and skipped.",
+            "sv": "Öppna en SharePoint-källa i ytans kunskapslista för att se dess mappar och dokumenten i varje mapp, med sökning, sortering och förhandsvisning av texten. Fliken Problem grupperar filerna som inte blev sökbara efter orsak, säger vad du kan göra åt dem och visar när bara en administratör kan åtgärda felet. När en imports första synkronisering är klar får du en notis om hur många filer som indexerades och hoppades över."
+          }
+        },
+        {
+          "id": "sharepoint-file-formats",
+          "type": "fixed",
+          "area": "knowledge",
+          "title": {
+            "en": "Read SharePoint files like uploads",
+            "sv": "Läs SharePoint-filer som uppladdningar"
+          },
+          "body": {
+            "en": "PDF, Word, Excel and PowerPoint files from SharePoint are now read with the same parsers as files you upload, so tables and spreadsheets come through correctly. Older formats such as .doc and .ppt, scanned PDFs without text and empty pages are skipped with a clear reason instead of producing unreadable text, and a failed download never removes a document Eneo already has.",
+            "sv": "PDF-, Word-, Excel- och PowerPoint-filer från SharePoint läses nu med samma tolkar som filer du laddar upp, så tabeller och kalkylblad kommer med korrekt. Äldre format som .doc och .ppt, skannade PDF:er utan text och tomma sidor hoppas över med en tydlig orsak i stället för att ge oläslig text, och en misslyckad nedladdning tar aldrig bort ett dokument som Eneo redan har."
+          }
+        },
+        {
+          "id": "sharepoint-credential-health",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Check SharePoint credentials and sign in again",
+            "sv": "Kontrollera SharePoint-inloggningen och logga in igen"
+          },
+          "body": {
+            "en": "Under Admin > Integrations a health list shows whether the SharePoint sign-in, change notifications and connection still work, with Microsoft's error, guidance and the fix next to each check. A service account can be signed in again with one button, keeping the configuration and all imported knowledge.",
+            "sv": "Under Administration > Integrationer visar en hälsolista om SharePoint-inloggningen, ändringsaviseringarna och anslutningen fortfarande fungerar, med Microsofts fel, en vägledning och åtgärden bredvid varje kontroll. Ett tjänstekonto kan loggas in igen med en knapp, och konfigurationen och all importerad kunskap behålls."
+          },
+          "showMe": {
+            "href": "/admin/integrations",
+            "anchor": "admin-integrations"
+          }
+        },
+        {
+          "id": "sharepoint-webhook-recovery",
+          "type": "fixed",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Keep SharePoint webhooks working after a move",
+            "sv": "Behåll SharePoint-webhooks efter ett adressbyte"
+          },
+          "body": {
+            "en": "If Eneo moves to a new address, its SharePoint webhook subscriptions are recreated with the new address at the next renewal instead of silently going quiet, and expired subscriptions are recreated automatically at the next sync. Your operator can also recreate all of them at once.",
+            "sv": "Om Eneo flyttar till en ny adress återskapas SharePoint-prenumerationerna med den nya adressen vid nästa förnyelse i stället för att tyst sluta fungera, och utgångna prenumerationer återskapas automatiskt vid nästa synkronisering. Driftansvarig kan också återskapa alla på en gång."
+          }
+        },
+        {
+          "id": "sharepoint-picker-keyboard",
+          "permissions": {
+            "allOf": ["integrations"]
+          },
+          "type": "improved",
+          "area": "knowledge",
+          "title": {
+            "en": "Browse SharePoint folders with the keyboard",
+            "sv": "Bläddra i SharePoint-mappar med tangentbordet"
+          },
+          "body": {
+            "en": "In the import dialog, the folder tree follows the arrow keys, Home, End, Space and Enter. A folder with more items than the list shows says so, and the search still finds the rest.",
+            "sv": "I importdialogen styrs mappträdet med piltangenterna, Home, End, mellanslag och Enter. När en mapp innehåller fler objekt än listan visar får du veta det, och sökningen hittar ändå resten."
+          }
+        },
+        {
+          "id": "website-indexing",
+          "permissions": {
+            "allOf": ["websites"]
+          },
+          "type": "improved",
+          "area": "knowledge",
+          "title": {
+            "en": "Follow and control website indexing",
+            "sv": "Följ och styr indexering av webbplatser"
+          },
+          "body": {
+            "en": "You can follow website indexing with clearer progress and status, stop a running crawl and start it again. Synchronize, stop or remove several websites at once. Administrators can also review crawls across the organisation under Administration › Crawler.",
+            "sv": "Du kan följa indexeringen av webbplatser med tydligare förlopp och status, stoppa en pågående genomsökning och starta om den. Synkronisera, stoppa eller ta bort flera webbplatser samtidigt. Administratörer kan även granska organisationens genomsökningar under Administration › Crawler."
+          }
+        },
+        {
+          "id": "space-changes-preserve-resources",
+          "type": "fixed",
+          "area": "spaces",
+          "title": {
+            "en": "Keep resources when changing a Space",
+            "sv": "Behåll resurser när du ändrar ett Space"
+          },
+          "body": {
+            "en": "Changing a Space or one of its resources preserves other assistants, group chat members and saved selections, including resources that are temporarily unavailable. Memberships also remain when a removed user is reactivated.",
+            "sv": "När du ändrar ett Space eller en av dess resurser bevaras andra assistenter, gruppchattmedlemmar och sparade val, även för resurser som tillfälligt inte är tillgängliga. Medlemskap finns också kvar när en borttagen användare återaktiveras."
+          }
+        },
+        {
+          "id": "clearer-errors",
+          "type": "fixed",
+          "area": "platform",
+          "aliases": ["sign-in-behind-reverse-proxy"],
+          "title": {
+            "en": "Understand why a request failed",
+            "sv": "Förstå varför en förfrågan misslyckades"
+          },
+          "body": {
+            "en": "When an assistant's reply fails, you get a clearer reason, such as an unavailable model or a usage limit. File uploads explain when your storage quota is exceeded, and sign-in distinguishes an unreachable service from an incorrect password. Password sign-in also works behind a reverse proxy without requiring a separately registered public address.",
+            "sv": "Om assistentens svar misslyckas får du en tydligare orsak, till exempel att modellen inte är tillgänglig eller att en användningsgräns nåtts. Filuppladdning visar när lagringsutrymmet är slut, och inloggning skiljer på en tjänst som inte kan nås och ett felaktigt lösenord. Lösenordsinloggning fungerar också bakom en omvänd proxy utan att den publika adressen måste registreras separat."
+          }
+        },
+        {
+          "id": "knowledge-moves-removed",
+          "permissions": { "allOf": ["assistants"] },
+          "type": "improved",
+          "area": "spaces",
+          "title": {
+            "en": "Check knowledge when moving an assistant",
+            "sv": "Kontrollera kunskapen när du flyttar en assistent"
+          },
+          "body": {
+            "en": "Collections and websites can no longer be moved between Spaces. When you move an assistant, its knowledge does not move with it; check and attach the knowledge it needs in the destination Space.",
+            "sv": "Samlingar och webbplatser kan inte längre flyttas mellan Spaces. När du flyttar en assistent följer kunskapen inte med; kontrollera och koppla den kunskap som assistenten behöver i det nya Spacet."
+          }
+        },
+        {
+          "id": "roles-redesign",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Manage permissions in grouped roles",
+            "sv": "Hantera behörigheter i grupperade roller"
+          },
+          "body": {
+            "en": "Under Administration › Roles, permissions are grouped by area so you can more easily review what a role allows. Use the redesigned editor when creating or updating roles.",
+            "sv": "Under Administration › Roller är behörigheterna grupperade efter område så att du lättare kan granska vad en roll tillåter. Använd den omarbetade redigeraren när du skapar eller uppdaterar roller."
+          },
+          "showMe": {
+            "href": "/admin/roles",
+            "anchor": "admin-roles"
+          }
+        },
+        {
+          "id": "bundled-tool-status",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Enable and check built-in tools",
+            "sv": "Aktivera och kontrollera inbyggda verktyg"
+          },
+          "body": {
+            "en": "Under Administration › Tools, you can enable file analysis, file creation, calculations and charts, and check the tool service status. Connection and version problems include guidance on what to do next. Users also need the corresponding role permissions to use the enabled tools.",
+            "sv": "Under Administration › Verktyg kan du aktivera filanalys, filskapande, beräkningar och diagram och kontrollera verktygstjänstens status. Vid anslutnings- och versionsproblem får du vägledning om nästa steg. Användare behöver även motsvarande rollbehörigheter för att använda de aktiverade verktygen."
+          },
+          "showMe": {
+            "href": "/admin/tools",
+            "anchor": "admin-tools"
+          }
+        },
+        {
+          "id": "document-templates",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Word and PDF files follow your document template",
+            "sv": "Word- och PDF-filer följer er dokumentmall"
+          },
+          "body": {
+            "en": "Under Administration › Tools › File creation you can upload your organisation's Word templates and make one the default. Documents the assistants create as Word or PDF are written in the template's own styles, with its header, footer and logo, and PDFs are tagged for accessibility. An assistant can be set to another template or to Eneo's built-in one, which you can download and adapt in Word.",
+            "sv": "Under Administration › Verktyg › Filskapande kan du ladda upp organisationens Word-mallar och göra en till standard. Dokument som assistenterna skapar som Word eller PDF skrivs i mallens egna format, med dess sidhuvud, sidfot och logotyp, och PDF-filerna taggas för tillgänglighet. En assistent kan ställas in på en annan mall eller på Eneos inbyggda, som du kan ladda ner och anpassa i Word."
+          },
+          "showMe": {
+            "href": "/admin/tools",
+            "anchor": "admin-tools"
+          }
+        },
+        {
+          "id": "model-provider-headers",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Send headers to self-hosted models",
+            "sv": "Skicka headers till självhostade modeller"
+          },
+          "body": {
+            "en": "When you add or edit a vLLM provider under Administration › Models, you can set outbound headers that are sent with every request: fixed text, or attributes from your identity provider such as department or cost centre. A gateway or proxy in front of the model can then route, meter or rate-limit requests by them, and Preview for a user shows what a chosen user's requests would send.",
+            "sv": "När du lägger till eller redigerar en vLLM-leverantör under Administration › Modeller kan du ange utgående headers som skickas med varje förfrågan: fast text eller attribut från er identitetsleverantör, till exempel avdelning eller kostnadsställe. En gateway eller proxy framför modellen kan då styra, mäta eller begränsa förfrågningarna utifrån dem, och med Förhandsgranska för en användare ser du vad en vald användares förfrågningar skulle skicka."
+          },
+          "showMe": {
+            "href": "/admin/models",
+            "anchor": "admin-models"
+          }
+        },
+        {
+          "id": "mcp-https-required",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Use HTTPS for MCP servers with credentials",
+            "sv": "Använd HTTPS för MCP-servrar med autentisering"
+          },
+          "body": {
+            "en": "MCP servers that use credentials must now connect over HTTPS, except for local loopback addresses. Review existing server addresses under Administration › Tools and update external HTTP addresses before using them again.",
+            "sv": "MCP-servrar med autentiseringsuppgifter måste nu ansluta via HTTPS, med undantag för lokala loopback-adresser. Gå igenom befintliga serveradresser under Administration › Verktyg och uppdatera externa HTTP-adresser innan du använder dem igen."
+          },
+          "showMe": {
+            "href": "/admin/tools",
+            "anchor": "admin-tools"
+          }
+        },
+        {
+          "id": "account-news-navigation",
+          "type": "improved",
+          "area": "account",
+          "title": {
+            "en": "Browse news from your account sidebar",
+            "sv": "Läs nyheter från kontots sidomeny"
+          },
+          "body": {
+            "en": "You can switch between My account, Integrations, API keys and What's new in the same sidebar, with release notes using the available width at /news. News and guided tours follow your feature permissions. Choose Later to see unread news again after 24 hours, or Not interested to dismiss this version.",
+            "sv": "Du kan växla mellan Mitt konto, Integrationer, API-nycklar och Nyheter i samma sidomeny, med nyheter över hela bredden på /news. Nyheter och guidade turer anpassas efter dina behörigheter. Välj Senare för att se olästa nyheter igen efter 24 timmar, eller Inte intresserad för att stänga för den här versionen."
+          }
+        }
+      ]
+    },
+    {
       "version": "2.2.0",
+      "date": "2026-10-07",
       "entries": [
         {
           "id": "skills",
+          "permissions": {
+            "allOf": ["skills", "skills_management"]
+          },
           "type": "new",
           "area": "skills",
           "title": {
@@ -41,6 +399,9 @@
         },
         {
           "id": "knowledge-on-demand",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "improved",
           "area": "chat",
           "title": {
@@ -54,6 +415,10 @@
         },
         {
           "id": "image-variations",
+          "permissions": {
+            "allOf": ["image_generation"],
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "new",
           "area": "chat",
           "title": {
@@ -67,6 +432,9 @@
         },
         {
           "id": "copy-rich-text",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "new",
           "area": "chat",
           "title": {
@@ -120,6 +488,9 @@
         },
         {
           "id": "model-details",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "improved",
           "area": "chat",
           "title": {
@@ -133,6 +504,9 @@
         },
         {
           "id": "chat-polish",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "improved",
           "area": "chat",
           "title": {
@@ -146,6 +520,9 @@
         },
         {
           "id": "attachments",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "improved",
           "area": "chat",
           "title": {
@@ -159,6 +536,9 @@
         },
         {
           "id": "download-original",
+          "permissions": {
+            "allOf": ["collections"]
+          },
           "type": "new",
           "area": "knowledge",
           "title": {
@@ -172,6 +552,9 @@
         },
         {
           "id": "open-shared-sources",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "fixed",
           "area": "knowledge",
           "title": {
@@ -185,6 +568,9 @@
         },
         {
           "id": "knowledge-reliability",
+          "permissions": {
+            "allOf": ["collections"]
+          },
           "type": "improved",
           "area": "knowledge",
           "title": {
@@ -198,6 +584,9 @@
         },
         {
           "id": "sharepoint-import",
+          "permissions": {
+            "allOf": ["integrations"]
+          },
           "type": "improved",
           "area": "knowledge",
           "title": {
@@ -211,6 +600,9 @@
         },
         {
           "id": "prompt-guide",
+          "permissions": {
+            "allOf": ["assistants"]
+          },
           "type": "improved",
           "area": "assistants",
           "title": {
@@ -241,6 +633,9 @@
         },
         {
           "id": "legacy-api-keys",
+          "permissions": {
+            "allOf": ["api_keys"]
+          },
           "type": "improved",
           "area": "account",
           "title": {
@@ -288,7 +683,23 @@
           }
         },
         {
+          "id": "unused-files-deleted",
+          "type": "fixed",
+          "area": "platform",
+          "title": {
+            "en": "Files are deleted after their last use",
+            "sv": "Filer raderas efter sista användningen"
+          },
+          "body": {
+            "en": "When a conversation or app run is deleted, by you or by a retention setting, the files only it used are deleted too, including recordings and transcriptions. Files nothing uses anymore are removed daily.",
+            "sv": "När en konversation eller appkörning raderas, av dig eller av en gallringsinställning, raderas även filerna som bara den använde, inklusive inspelningar och transkriberingar. Filer som inget längre använder tas bort dagligen."
+          }
+        },
+        {
           "id": "modules-admin",
+          "permissions": {
+            "allOf": ["modules"]
+          },
           "type": "new",
           "area": "admin",
           "audience": "admin",
@@ -349,6 +760,9 @@
       "entries": [
         {
           "id": "crawler-restored",
+          "permissions": {
+            "allOf": ["websites"]
+          },
           "type": "fixed",
           "area": "knowledge",
           "title": {
@@ -368,6 +782,9 @@
       "entries": [
         {
           "id": "prompt-guide",
+          "permissions": {
+            "allOf": ["assistants"]
+          },
           "type": "new",
           "area": "assistants",
           "title": {
@@ -381,6 +798,9 @@
         },
         {
           "id": "rename-conversations",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "new",
           "area": "chat",
           "title": {
@@ -394,6 +814,9 @@
         },
         {
           "id": "aborted-answers-saved",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "improved",
           "area": "chat",
           "title": {
@@ -407,6 +830,9 @@
         },
         {
           "id": "provider-outage-message",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "improved",
           "area": "chat",
           "title": {
@@ -420,6 +846,9 @@
         },
         {
           "id": "webp-avif-uploads",
+          "permissions": {
+            "anyOf": ["personal_chat", "assistants", "group_chats"]
+          },
           "type": "fixed",
           "area": "chat",
           "title": {
@@ -459,6 +888,9 @@
         },
         {
           "id": "knowledge-selector",
+          "permissions": {
+            "allOf": ["assistants"]
+          },
           "type": "improved",
           "area": "assistants",
           "title": {
@@ -498,6 +930,9 @@
         },
         {
           "id": "api-key-file-cleanup",
+          "permissions": {
+            "allOf": ["api_keys"]
+          },
           "type": "improved",
           "area": "account",
           "title": {

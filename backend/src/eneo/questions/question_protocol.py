@@ -20,7 +20,7 @@ def to_question_public(question: Question) -> Message:
 
     tools = UseTools(assistants=assistants)
     public_tool_calls = [
-        tool_call.model_copy(update={"result": None})
+        tool_call.model_copy(update={"result": None, "structured_content": None})
         for tool_call in (question.tool_calls or [])
     ]
 

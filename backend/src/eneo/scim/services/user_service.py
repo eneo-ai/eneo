@@ -3,12 +3,23 @@ from datetime import datetime, timezone
 from typing import Any, cast
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.database.tables.users_table import Users as UserModel
 from eneo.main.logging import get_logger
+from eneo.scim.constants import SCIM_CORE_USER_URN, SCIM_ENTERPRISE_USER_URN
+from eneo.scim.domain.enterprise_user import (
+    EnterpriseUser,
+    apply_patch_operations,
+    enterprise_from_column,
+    enterprise_to_column,
+    parse_enterprise_object,
+    split_request_extensions,
+)
 from eneo.scim.domain.errors import (
     ScimInvalidFilterError,
     ScimUserConflictError,
@@ -20,6 +31,7 @@ from eneo.scim.schemas.common import ScimFilter, ScimSort, clamp_count
 from eneo.scim.schemas.user import (
     PatchOperation,
     ScimEmail,
+    ScimEnterpriseUser,
     ScimMeta,
     ScimUser,
     ScimUserRequest,
@@ -42,8 +54,45 @@ def _resolve_email(data: ScimUserRequest) -> str:
     return email
 
 
+def _enterprise_response(model: UserModel) -> ScimEnterpriseUser | None:
+    """The stored extension as returned over SCIM.
+
+    A stored value that does not validate was not written through SCIM (a
+    direct database edit, another writer). It omits the extension for that
+    user, and is logged, rather than failing every list page with the user on
+    it and stalling the IdP's sync for the whole tenant.
+    """
+    enterprise = enterprise_from_column(model.scim_extensions)
+    if not enterprise:
+        return None
+    try:
+        return ScimEnterpriseUser.model_validate(enterprise)
+    except ValidationError as exc:
+        logger.warning(
+            "scim.user.enterprise_extension_unreadable",
+            extra={
+                "tenant_id": str(model.tenant_id),
+                "user_id": str(model.id),
+                # Locations only: the errors also carry the stored values.
+                "attributes": sorted(
+                    {
+                        ".".join(str(part) for part in error["loc"])
+                        for error in exc.errors()
+                    }
+                ),
+            },
+        )
+        return None
+
+
 def _to_scim_user(model: UserModel) -> ScimUser:
+    enterprise = _enterprise_response(model)
     return ScimUser(
+        schemas=(
+            [SCIM_CORE_USER_URN, SCIM_ENTERPRISE_USER_URN]
+            if enterprise is not None
+            else [SCIM_CORE_USER_URN]
+        ),
         id=str(model.id),
         externalId=model.external_id,
         userName=model.username or model.email,
@@ -54,6 +103,7 @@ def _to_scim_user(model: UserModel) -> ScimUser:
             created=model.created_at,
             lastModified=model.updated_at,
         ),
+        enterprise_user=enterprise,
     )
 
 
@@ -147,7 +197,38 @@ class ScimUserService:
                     f"External ID '{external_id}' already exists"
                 )
 
+    def _log_dropped(self, dropped: list[str]) -> None:
+        """Attributes the extension does not define are dropped, not rejected;
+        WARNING so a mapping that targets one is visible. Names only."""
+        if dropped:
+            logger.warning(
+                "scim.user.enterprise_attributes_dropped",
+                extra={
+                    "tenant_id": str(self._tenant_id),
+                    "attributes": sorted(set(dropped)),
+                },
+            )
+
+    def _enterprise_from_request(self, data: ScimUserRequest) -> EnterpriseUser:
+        """The request's Enterprise User object, validated. Absent means empty:
+        POST and PUT both describe the whole resource."""
+        present, raw, ignored = split_request_extensions(data.model_extra)
+        if ignored:
+            logger.debug(
+                "scim.user.extensions_ignored",
+                extra={"tenant_id": str(self._tenant_id), "keys": sorted(ignored)},
+            )
+        if not present:
+            return {}
+        dropped: list[str] = []
+        enterprise = parse_enterprise_object(raw, dropped=dropped)
+        self._log_dropped(dropped)
+        return enterprise
+
     async def create_user(self, data: ScimUserRequest) -> ScimUser:
+        # Validate before any lookup or write so an invalid extension can never
+        # leave a partially applied create behind.
+        enterprise = self._enterprise_from_request(data)
         existing = await self._repository.get_by_username(
             data.userName, tenant_id=self._tenant_id
         )
@@ -199,6 +280,7 @@ class ScimUserService:
                 previous_username = existing.username
                 existing.external_id = data.externalId
                 existing.username = data.userName
+                existing.scim_extensions = enterprise_to_column(enterprise)
                 # Honour SCIM `active`: if the IdP claims this local account
                 # while signalling it as inactive, the reconciled user must end
                 # up deprovisioned rather than silently staying active.
@@ -242,6 +324,7 @@ class ScimUserService:
                         f"External ID '{data.externalId}' already exists"
                     )
             existing.external_id = data.externalId
+            existing.scim_extensions = enterprise_to_column(enterprise)
             # Honour SCIM `active`: a create targeting an already soft-deleted
             # row must only reactivate it when the payload says active=true.
             # active=false keeps the row deprovisioned (it stays DELETED) while
@@ -293,6 +376,7 @@ class ScimUserService:
             email=email,  # pyright: ignore[reportCallIssue]
             state=ScimUserState.ACTIVE,  # pyright: ignore[reportCallIssue]
             tenant_id=self._tenant_id,  # pyright: ignore[reportCallIssue]
+            scim_extensions=enterprise_to_column(enterprise),  # pyright: ignore[reportCallIssue]
         )
         # Honour SCIM `active`: an IdP that provisions a user as active=false
         # (e.g. a disabled account synced ahead of activation) must NOT result
@@ -369,6 +453,7 @@ class ScimUserService:
         return [_to_scim_user(m) for m in models], total
 
     async def replace_user(self, user_id: UUID, data: ScimUserRequest) -> ScimUser:
+        enterprise = self._enterprise_from_request(data)
         model = await self._repository.get_by_id(user_id, tenant_id=self._tenant_id)
         if model is None:
             raise ScimUserNotFoundError(f"User '{user_id}' not found")
@@ -382,6 +467,8 @@ class ScimUserService:
         model.external_id = data.externalId
         model.username = data.userName
         model.email = email
+        # PUT replaces the resource, so an absent extension clears it.
+        model.scim_extensions = enterprise_to_column(enterprise)
         _set_active(model, data.active)
         model = await self._repository.update(model)
         logger.info(
@@ -408,8 +495,20 @@ class ScimUserService:
         model = await self._repository.get_by_id(user_id, tenant_id=self._tenant_id)
         if model is None:
             raise ScimUserNotFoundError(f"User '{user_id}' not found")
+        # Fold and validate every extension operation before touching the row:
+        # RFC 7644 §3.5.2 requires an unappliable request to leave the resource
+        # unchanged, and an IdP told 200 about a partial PATCH never retries.
+        current_enterprise = enterprise_from_column(model.scim_extensions)
+        dropped: list[str] = []
+        enterprise = apply_patch_operations(
+            current_enterprise, operations, dropped=dropped
+        )
+        self._log_dropped(dropped)
         for op in operations:
             _apply_patch_operation(model, op)
+        if enterprise != current_enterprise:
+            # Assign a new object: the JSONB column has no mutation tracking.
+            model.scim_extensions = enterprise_to_column(enterprise)
         await self._validate_unique_fields(
             user_id=model.id,
             username=model.username or model.email,

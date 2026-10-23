@@ -7,6 +7,9 @@ from uuid import UUID
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import MCPProxySession
 
 if TYPE_CHECKING:
+    from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
+        McpAppViewRepo,
+    )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.mcp_servers.domain.repositories.mcp_server_tool_repo import (
         MCPServerToolRepository,
@@ -57,12 +60,18 @@ class MCPProxySessionFactory:
         mcp_servers: list["MCPServer"],
         identity_headers: dict[str, str] | None = None,
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
+        app_view_repo: "McpAppViewRepo | None" = None,
+        for_view: bool = False,
     ) -> MCPProxySession:
         """
         Create a new MCPProxySession for the given servers.
 
         Args:
             mcp_servers: List of MCP servers (already filtered by permissions)
+            app_view_repo: Cache for MCP App view HTML. Without one the proxy
+                never fetches views.
+            for_view: The caller is one of a server's views, not the model; it
+                is offered the tools the server makes visible to its views.
 
         Returns:
             Configured MCPProxySession instance
@@ -88,4 +97,6 @@ class MCPProxySessionFactory:
             auth_credentials_map=auth_map,
             identity_headers=identity_headers,
             mcp_server_tool_repo=mcp_server_tool_repo,
+            app_view_repo=app_view_repo,
+            for_view=for_view,
         )

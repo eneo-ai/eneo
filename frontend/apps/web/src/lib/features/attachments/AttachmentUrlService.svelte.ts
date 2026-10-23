@@ -5,12 +5,14 @@ import type { Eneo } from "@eneo/eneo-js";
 import { SvelteMap } from "svelte/reactivity";
 
 const EXPIRES_AFTER_SECONDS = 3600;
+// Original-bytes links are capped server-side at one hour.
+const ORIGINAL_MAX_EXPIRES_IN_SECONDS = 3600;
 
 /** We cache generated Attachment URLs to not constantly regenerate them */
 class AttachmentUrlService {
   #eneo: Eneo;
   #attachmentUrls = new SvelteMap<string, { url: string | undefined; expiresAt: number }>();
-  #queuedFiles = new Set<string>();
+  #pending = new Map<string, Promise<string | undefined>>();
 
   constructor({ eneo = getEneo() }: { eneo: Eneo }) {
     this.#eneo = eneo;
@@ -22,29 +24,86 @@ class AttachmentUrlService {
    *
    *  */
   getUrl(file: { id: string }) {
-    if (!browser || !file.id) return;
-    const record = this.#attachmentUrls.get(file.id);
-    if (record) {
-      if (Date.now() < record.expiresAt) {
-        return record.url;
-      }
-    }
-    if (!this.#queuedFiles.has(file.id)) {
-      this.#queuedFiles.add(file.id);
-      this.#generateUrl(file.id);
-    }
+    return this.#cached(file.id, "primary");
+  }
 
+  /**
+   * Returns a signed URL for the exact bytes originally stored, never a processed
+   * representation. Use it to download documents: for a file of type TEXT (a DOCX, PDF or XLSX
+   * a tool created) the primary representation is its extracted text.
+   */
+  getOriginalUrl(file: { id: string }) {
+    return this.#cached(file.id, "original");
+  }
+
+  /**
+   * Resolves the signed URL for the exact bytes originally stored, for code that
+   * needs to read the file rather than link to it. Shares the cache with
+   * `getOriginalUrl`; rejects when no link can be minted for the file.
+   */
+  async resolveOriginalUrl(file: { id: string }): Promise<string> {
+    const key = `original:${file.id}`;
+    const url = this.#fresh(key) ?? (await this.#request(file.id, "original", key));
+    if (!url) throw new Error("No original download link for this file");
+    return url;
+  }
+
+  /**
+   * Resolves the signed URL of the file's primary representation, for code
+   * that needs the link rather than a template. Shares the cache with
+   * `getUrl`; undefined when no link can be minted for the file.
+   */
+  async resolveUrl(file: { id: string }): Promise<string | undefined> {
+    const key = `primary:${file.id}`;
+    return this.#fresh(key) ?? (await this.#request(file.id, "primary", key));
+  }
+
+  #fresh(key: string) {
+    const record = this.#attachmentUrls.get(key);
+    return record && Date.now() < record.expiresAt ? record.url : undefined;
+  }
+
+  #cached(fileId: string, kind: "primary" | "original") {
+    if (!browser || !fileId) return;
+    const key = `${kind}:${fileId}`;
+    const url = this.#fresh(key);
+    if (url) return url;
+    void this.#request(fileId, kind, key);
     return undefined;
   }
 
-  async #generateUrl(fileId: string) {
-    const { url, expires_at } = await this.#eneo.files.generateSignedUrl({
-      fileId,
-      contentDisposition: "attachment",
-      expiresIn: EXPIRES_AFTER_SECONDS + 60
-    });
-    this.#attachmentUrls.set(fileId, { url, expiresAt: expires_at * 1000 });
-    this.#queuedFiles.delete(fileId);
+  /** One request per link at a time; concurrent callers share it. */
+  #request(fileId: string, kind: "primary" | "original", key: string) {
+    let pending = this.#pending.get(key);
+    if (!pending) {
+      pending = this.#generateUrl(fileId, kind, key);
+      this.#pending.set(key, pending);
+    }
+    return pending;
+  }
+
+  async #generateUrl(fileId: string, kind: "primary" | "original", key: string) {
+    try {
+      const { url, expires_at } =
+        kind === "original"
+          ? await this.#eneo.files.generateOriginalSignedUrl({
+              fileId,
+              contentDisposition: "attachment",
+              expiresIn: ORIGINAL_MAX_EXPIRES_IN_SECONDS
+            })
+          : await this.#eneo.files.generateSignedUrl({
+              fileId,
+              contentDisposition: "attachment",
+              expiresIn: EXPIRES_AFTER_SECONDS + 60
+            });
+      this.#attachmentUrls.set(key, { url, expiresAt: expires_at * 1000 });
+      return url;
+    } catch {
+      // Left uncached: the next lookup asks again instead of blocking the file.
+      return undefined;
+    } finally {
+      this.#pending.delete(key);
+    }
   }
 }
 

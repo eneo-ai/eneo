@@ -107,7 +107,7 @@
       <AlertDialog.Cancel disabled={isDeleting}>{m.cancel()}</AlertDialog.Cancel>
       <Button variant="destructive" onclick={handleDelete} disabled={!isConfirmed || isDeleting}>
         {#if isDeleting}
-          <LoaderCircle class="animate-spin" aria-hidden="true" />
+          <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
         {/if}
         {isDeleting ? m.deleting() : m.permanent_delete()}
       </Button>

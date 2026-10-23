@@ -1,7 +1,12 @@
 from dataclasses import dataclass
 
+from eneo.integration.infrastructure.preview_service.sharepoint_search import (
+    MAX_SEARCH_RESULTS,
+    row_matches,
+)
 from eneo.integration.presentation.models import (
     IntegrationPreviewData,
+    SharePointFilterColumn,
     SharePointTreeItem,
 )
 from eneo.integration.sharepoint_fixture.catalog import (
@@ -13,6 +18,7 @@ from eneo.integration.sharepoint_fixture.catalog import (
 from eneo.integration.sharepoint_fixture.models import (
     SharePointFixturePreviewResponse,
     SharePointFixtureScenario,
+    SharePointFixtureSearchResponse,
     SharePointFixtureTreeResponse,
 )
 from eneo.main.exceptions import BadRequestException, NotFoundException
@@ -81,7 +87,81 @@ class SharePointFixtureService:
             parent_id=parent_id,
             drive_id=resolved_drive_id,
             site_id=site.key if site.resource_type == "site" else None,
+            columns=self._filter_columns(roots),
         )
+
+    def get_search(
+        self,
+        scenario: SharePointFixtureScenario,
+        *,
+        site_id: str | None,
+        drive_id: str | None,
+        text: str = "",
+        filters: dict[str, str] | None = None,
+    ) -> SharePointFixtureSearchResponse:
+        """Every fixture file in the site matching the text and column filters."""
+        site = self._find_site(scenario, site_id=site_id, drive_id=drive_id)
+        roots = TREE_BY_PROFILE[site.tree_profile]
+        text = text.strip()
+        filters = {k: v for k, v in (filters or {}).items() if v.strip()}
+        items: list[SharePointTreeItem] = []
+        if text or filters:
+            for node, parent_path in self._walk(roots):
+                if node.item_type != "file":
+                    continue
+                item = self._to_tree_item(site=site, node=node, parent_path=parent_path)
+                if row_matches(item.model_dump(), text, filters):
+                    items.append(item)
+        truncated = len(items) > MAX_SEARCH_RESULTS
+        resolved_drive_id = (
+            site.key
+            if site.resource_type == "onedrive"
+            else f"fixture-drive-for-{site.key.removeprefix('fixture-site-')}"
+        )
+        return SharePointFixtureSearchResponse(
+            scenario=scenario,
+            items=items[:MAX_SEARCH_RESULTS],
+            truncated=truncated,
+            drive_id=resolved_drive_id,
+            site_id=site.key if site.resource_type == "site" else None,
+        )
+
+    @classmethod
+    def _walk(
+        cls, nodes: tuple[FixtureTreeNode, ...], parent_path: str = "/"
+    ) -> list[tuple[FixtureTreeNode, str]]:
+        found: list[tuple[FixtureTreeNode, str]] = []
+        for node in nodes:
+            found.append((node, parent_path))
+            found.extend(
+                cls._walk(node.children, cls._join_path(parent_path, node.name))
+            )
+        return found
+
+    @classmethod
+    def _filter_columns(
+        cls, roots: tuple[FixtureTreeNode, ...]
+    ) -> list[SharePointFilterColumn]:
+        """The profile's yes/no and choice columns, with the values its files use."""
+        columns: dict[str, SharePointFilterColumn] = {}
+        for node, _ in cls._walk(roots):
+            for entry in node.source_metadata:
+                if entry.kind not in ("choice", "boolean"):
+                    continue
+                column = columns.get(entry.name)
+                if column is None:
+                    column = SharePointFilterColumn(
+                        name=entry.name, label=entry.label, kind=entry.kind
+                    )
+                    columns[entry.name] = column
+                if entry.kind == "choice":
+                    values = (
+                        entry.value if isinstance(entry.value, list) else [entry.value]
+                    )
+                    for value in values:
+                        if value not in column.choices:
+                            column.choices.append(value)
+        return list(columns.values())
 
     @staticmethod
     def _to_preview_item(site: FixtureSite) -> IntegrationPreviewData:
@@ -156,6 +236,7 @@ class SharePointFixtureService:
             size=node.size,
             modified=node.modified,
             web_url=(f"https://sharepoint-fixture.invalid/item/{site.key}/{node.id}"),
+            source_metadata=list(node.source_metadata),
         )
 
     @staticmethod

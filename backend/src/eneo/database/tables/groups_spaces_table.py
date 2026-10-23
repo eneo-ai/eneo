@@ -3,12 +3,14 @@ from uuid import UUID
 from sqlalchemy import ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from eneo.database.tables.base_class import BaseCrossReference
+from eneo.database.tables.base_class import BaseWithTableName, CreatedAtMixin
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.spaces_table import Spaces
 
 
-class GroupsSpaces(BaseCrossReference):
+class GroupsSpaces(CreatedAtMixin, BaseWithTableName):
+    """Distribution links are inserted or deleted; the schema only tracks creation."""
+
     __tablename__ = "groups_spaces"  # type: ignore[assignment]
 
     collection_id: Mapped[UUID] = mapped_column(

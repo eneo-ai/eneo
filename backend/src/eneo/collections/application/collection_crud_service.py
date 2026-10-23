@@ -2,12 +2,12 @@ from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 from eneo.collections.domain.collection import Collection
+from eneo.groups_legacy.api.group_models import GroupUpdatePublic
 from eneo.main.exceptions import UnauthorizedException
 
 if TYPE_CHECKING:
     from eneo.actors.actor_manager import ActorManager
     from eneo.groups_legacy.group_service import GroupService
-    from eneo.spaces.space_repo import SpaceRepository
     from eneo.spaces.space_service import SpaceService
     from eneo.users.user import UserInDB
 
@@ -17,14 +17,12 @@ class CollectionCRUDService:
         self,
         user: "UserInDB",
         space_service: "SpaceService",
-        space_repo: "SpaceRepository",
         actor_manager: "ActorManager",
         group_service: "GroupService",
     ):
         super().__init__()
         self.user = user
         self.space_service = space_service
-        self.space_repo = space_repo
         self.actor_manager = actor_manager
         self.group_service = group_service
 
@@ -70,15 +68,7 @@ class CollectionCRUDService:
         collection = space.get_collection(collection_id=collection_id)
         collection.update(name=name)
 
-        updated_space = await self.space_repo.update(space=space)
-        return updated_space.get_collection(collection_id=collection_id)
-
-    async def delete_collection(self, collection_id: "UUID") -> None:
-        space = await self.space_service.get_space_by_collection(collection_id)
-        actor = self.actor_manager.get_space_actor_from_space(space=space)
-        if not actor.can_delete_collections():
-            raise UnauthorizedException()
-
-        collection = space.get_collection(collection_id=collection_id)
-        space.remove_collection(collection)
-        await self.space_repo.update(space=space)
+        await self.group_service.update_group(
+            GroupUpdatePublic(name=name), collection_id
+        )
+        return collection

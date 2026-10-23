@@ -9,10 +9,15 @@
   import { initAttachmentManager } from "../AttachmentManager";
   import AttachmentUploadIconButton from "./AttachmentUploadIconButton.svelte";
 
-  type Props = { eneo: Eneo };
-  const { eneo }: Props = $props();
+  type Props = {
+    eneo: Eneo;
+    /** Hands the manager to the test so it can act on the list. */
+    onManager?: (manager: ReturnType<typeof initAttachmentManager>) => void;
+  };
+  const { eneo, onManager }: Props = $props();
 
-  initAttachmentManager({ eneo: untrack(() => eneo) });
+  const manager = initAttachmentManager({ eneo: untrack(() => eneo) });
+  untrack(() => onManager?.(manager));
 </script>
 
 <AttachmentUploadIconButton />

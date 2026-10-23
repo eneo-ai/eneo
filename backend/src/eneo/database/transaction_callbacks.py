@@ -12,11 +12,17 @@ def after_outer_transaction(
     *,
     on_commit: Callable[[], Awaitable[None]],
     on_rollback: Callable[[], None] | None = None,
+    tasks: set[asyncio.Task[None]] | None = None,
 ) -> None:
-    """Run one callback after the surrounding transaction is durably resolved."""
+    """Run one callback after the surrounding transaction is durably resolved.
+
+    ``tasks`` keeps the strong reference to the commit task until it is done,
+    so a caller can await its own callbacks; the module's set does otherwise.
+    """
     if session.in_nested_transaction():
         raise ValueError("Post-commit work cannot be registered in a savepoint")
 
+    registry = _BACKGROUND_TASKS if tasks is None else tasks
     outer_committed = False
     active = True
 
@@ -44,8 +50,8 @@ def after_outer_transaction(
                 await on_commit()
 
             task = loop.create_task(run_on_commit())
-            _BACKGROUND_TASKS.add(task)
-            task.add_done_callback(_BACKGROUND_TASKS.discard)
+            registry.add(task)
+            task.add_done_callback(registry.discard)
         elif on_rollback is not None:
             on_rollback()
         loop.call_soon(remove_listeners)

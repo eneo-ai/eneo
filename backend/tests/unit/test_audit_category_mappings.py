@@ -53,8 +53,8 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "admin_actions"
         ]
-        assert len(admin_actions) == 49, (
-            f"Expected 49 admin actions, got {len(admin_actions)}"
+        assert len(admin_actions) == 56, (
+            f"Expected 56 admin actions, got {len(admin_actions)}"
         )
 
     def test_admin_actions_mapping(self):
@@ -88,6 +88,9 @@ class TestCategoryMappings:
             ActionType.MODULE_ADDED_TO_TENANT,
             ActionType.MODULE_REMOVED_FROM_TENANT,
             ActionType.MODULE_CLIENT_CONFIG_UPDATED,
+            ActionType.MODEL_PROVIDER_HEADERS_UPDATED,
+            ActionType.MODEL_PROVIDER_DESTINATION_CHANGED,
+            ActionType.MODEL_PROVIDER_HEADERS_PREVIEWED,
         ]
 
         for action_type in admin_action_types:
@@ -100,8 +103,8 @@ class TestCategoryMappings:
         user_actions = [
             action for action, cat in CATEGORY_MAPPINGS.items() if cat == "user_actions"
         ]
-        assert len(user_actions) == 50, (
-            f"Expected 50 user actions, got {len(user_actions)}"
+        assert len(user_actions) == 54, (
+            f"Expected 54 user actions, got {len(user_actions)}"
         )
         assert ActionType.TOOL_APPROVAL_SUBMITTED.value in user_actions
 
@@ -153,8 +156,8 @@ class TestCategoryMappings:
             for action, cat in CATEGORY_MAPPINGS.items()
             if cat == "integration_events"
         ]
-        assert len(integration_actions) == 22, (
-            f"Expected 22 integration events, got {len(integration_actions)}"
+        assert len(integration_actions) == 24, (
+            f"Expected 24 integration events, got {len(integration_actions)}"
         )
 
     def test_mcp_events_mapping(self):
@@ -262,11 +265,11 @@ class TestCategoryDistribution:
     def test_category_counts_match_expected(self):
         """Verify exact counts for each category."""
         expected_counts = {
-            "admin_actions": 49,
-            "user_actions": 51,
+            "admin_actions": 56,
+            "user_actions": 54,
             "security_events": 12,
-            "file_operations": 6,
-            "integration_events": 22,
+            "file_operations": 8,
+            "integration_events": 24,
             "system_actions": 3,
             "audit_access": 3,  # Includes AUDIT_SESSION_CREATED
         }

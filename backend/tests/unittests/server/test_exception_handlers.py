@@ -17,6 +17,8 @@ from eneo.main.exceptions import (
     EncryptionNotConfiguredException,
     ErrorCodes,
     FileTooLargeException,
+    TenantQuotaExceededException,
+    UserQuotaExceededException,
 )
 from eneo.server.exception_handlers import (
     add_exception_handlers,
@@ -329,3 +331,34 @@ def test_encryption_not_configured_returns_actionable_503_and_logs_it(caplog):
     )
     assert "POST /providers → 503" in caplog.text
     assert "ENCRYPTION_KEY" in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (
+            TenantQuotaExceededException("Tenant quota limit exceeded."),
+            "tenant_quota_exceeded",
+        ),
+        (
+            UserQuotaExceededException("User quota limit exceeded."),
+            "user_quota_exceeded",
+        ),
+    ],
+)
+def test_quota_refusal_names_which_limit_was_hit(error: Exception, code: str):
+    # Both limits share status and error code; only `code` lets a client tell
+    # the user whether deleting their own knowledge can help at all.
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.post("/publish")
+    async def publish():
+        raise error
+
+    response = TestClient(app).post("/publish")
+
+    assert response.status_code == 403
+    body = response.json()
+    assert body["eneo_error_code"] == ErrorCodes.QUOTA_EXCEEDED
+    assert body["code"] == code

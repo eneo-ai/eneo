@@ -10,7 +10,11 @@ from uuid import uuid4
 import pytest
 
 from eneo.authentication.auth_service import AuthService
-from eneo.internal_mcp.foundation import assistant_id_from_token, verified_claims
+from eneo.internal_mcp.foundation import (
+    assistant_id_from_token,
+    table_tools_from_token,
+    verified_claims,
+)
 from eneo.internal_mcp.insights import insight_target_from_token
 
 pytestmark = pytest.mark.filterwarnings("ignore::jwt.warnings.InsecureKeyLengthWarning")
@@ -26,10 +30,11 @@ def _user():
     )
 
 
-def test_insight_target_claims_round_trip():
+@pytest.mark.parametrize("table_tools", [False, True])
+def test_insight_target_claims_round_trip(table_tools):
     target_id = uuid4()
     token = AuthService().create_scoped_mcp_token(
-        _user(), insight_target=("group_chat", target_id)
+        _user(), insight_target=("group_chat", target_id), table_tools=table_tools
     )
 
     assert insight_target_from_token(token) == ("group_chat", target_id)
@@ -37,6 +42,7 @@ def test_insight_target_claims_round_trip():
     assert claims["insight_target_type"] == "group_chat"
     assert claims["insight_target_id"] == str(target_id)
     assert "assistant_id" not in claims
+    assert table_tools_from_token(token) is table_tools
 
 
 def test_insights_token_is_not_an_assistant_scope():

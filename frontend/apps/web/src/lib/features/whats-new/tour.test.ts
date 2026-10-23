@@ -27,7 +27,7 @@ const release: Release = {
   version: "2.2.0",
   entries: [entry("a"), { ...entry("b"), showMe: undefined }, entry("c", "admin"), entry("d")]
 };
-const steps = tourSteps(release, true, "en");
+const steps = tourSteps(release, () => true, "en");
 const labels = { done: "Done", progress: "Step {{current}} of {{total}}" };
 let tour: ReturnType<typeof createWhatsNewTour>;
 
@@ -35,7 +35,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.stubGlobal(
     "window",
-    Object.assign(new EventTarget(), { location: { href: "https://eneo.test/whats-new" } })
+    Object.assign(new EventTarget(), { location: { href: "https://eneo.test/news" } })
   );
   tour = createWhatsNewTour();
   preloadData.mockResolvedValue({ type: "loaded", status: 200, data: {} });
@@ -54,7 +54,7 @@ afterEach(() => {
 
 describe("what's new walkthrough", () => {
   it("derives localized steps from visible entries only", () => {
-    expect(tourSteps(release, false, "sv").map((step) => [step.anchor, step.title])).toEqual([
+    expect(tourSteps(release, () => false, "sv").map((step) => [step.anchor, step.title])).toEqual([
       ["a", "a sv"],
       ["d", "d sv"]
     ]);

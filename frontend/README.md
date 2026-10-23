@@ -1,8 +1,15 @@
 # Eneo Frontend
 
+**SvelteKit in `apps/web` is the primary frontend and the default for frontend
+development.** React/Next.js with Astryx in `apps/web-next` is an optional beta.
+Implement ordinary frontend fixes and new features in Svelte; work in web-next
+must be explicitly intended for the beta. See
+[the frontend development policy](../AGENTS.md#frontend-development).
+
 Multirepo containing:
 
-- The Eneo Web GUI, a SvelteKit app in `/apps/web`
+- The primary Eneo Web GUI, a SvelteKit app in `/apps/web`
+- The optional React/Next.js beta with Astryx in `/apps/web-next`
 - The Eneo.js API client, a plain JS client wrapping all Eneo endpoints used in the Web GUI in `packages/eneo.js`
 - The Eneo design tokens, themes and icons shared by the frontend apps in `packages/ui` (UI components live in `apps/web` on shadcn-svelte)
 
@@ -18,7 +25,7 @@ Will install all required dependencies. Have a look at the README files in the r
 
 ### Local dev server
 
-If you want to develop the Web GUI while also working on the UI library at the same time, run
+To start the SvelteKit web app and its UI package watcher, run:
 
 ```bash
 bun run dev
@@ -41,7 +48,14 @@ The stop and restart commands only signal a Vite process that is verified to bel
 checkout. If another application owns port 3000, they report the conflict and leave it running.
 Production build and runtime commands do not use this development lifecycle.
 
+For work explicitly targeting the React/Next.js beta, start it separately on port
+3100 with `bun run dev:web-next`.
+
 ### Formatting & Linting
+
+Workspace-wide `build`, `check`, `lint` and `test` commands include both frontend
+apps so shared changes are validated in both. Svelte remains the default for
+frontend development.
 
 Prettier is configured for this project, you can format your code before committing either through a format action in your code editor, or by running:
 
@@ -55,17 +69,18 @@ The same goes for linting, you can run it via
 bun run lint
 ```
 
-__Hint:__ The linter will also check formatting, so it makes sense to first format your code befor running the linter.
+**Hint:** The linter will also check formatting, so it makes sense to first format your code befor running the linter.
 
 ### Testing
 
 The stack is **Vitest** (unit + component) and **Playwright** (E2E). From this directory:
 
 ```bash
-bun run test          # unit + component (one-shot)
-bun run test:watch    # same, watch mode for local dev
-bun run test:e2e      # E2E against an isolated throwaway backend (needs Docker)
-bun run test:e2e:ui   # E2E in Playwright's interactive runner
+bun run test          # lifecycle and both web apps' unit + component tests
+bun run test:web-next # React/Next.js unit + component tests only
+bun run test:watch:web-next # React/Next.js watch mode for local dev
+bun run test:e2e      # E2E for both web apps against an isolated throwaway backend (needs Docker)
+bun run test:e2e:ui   # React/Next.js E2E in Playwright's interactive runner
 bun run test:all      # everything (installs Chromium if missing)
 ```
 

@@ -654,11 +654,14 @@ class SkillRepoImpl:
             # Mirrors SpaceActor.can_perform_action(READ) for a signed-in user:
             # the tenant permission for the kind, then owner of the personal
             # space or a member of the shared space, where a viewer only reads
-            # published resources. API-key scope does not apply to this page.
+            # published resources. The organization space opens for every
+            # admin, and only admins read this page (OrganizationSkillService).
+            # API-key scope does not apply to this page.
             if kind not in readable_kinds:
                 return sa.false().label("can_open")
             return sa.case(
                 (Spaces.user_id.is_not(None), Spaces.user_id == actor_user_id),
+                (Spaces.tenant_space_id.is_(None), sa.true()),
                 else_=sa.and_(
                     membership(non_viewer=False),
                     sa.or_(published, membership(non_viewer=True)),

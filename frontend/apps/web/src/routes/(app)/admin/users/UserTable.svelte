@@ -41,15 +41,20 @@
             </div>
           </Table.Cell>
           <Table.Cell>
-            <Badge variant={user.state === "active" ? "default" : "secondary"}>
-              {user.state === "active"
-                ? m.active()
-                : user.state === "inactive"
-                  ? m.inactive()
-                  : user.state === "invited"
-                    ? m.invited()
-                    : user.state}
-            </Badge>
+            <div class="flex flex-wrap gap-1">
+              <Badge variant={user.state === "active" ? "default" : "secondary"}>
+                {user.state === "active"
+                  ? m.active()
+                  : user.state === "inactive"
+                    ? m.inactive()
+                    : user.state === "invited"
+                      ? m.invited()
+                      : user.state}
+              </Badge>
+              {#if user.password_change_required}
+                <Badge variant="outline">{m.admin_password_change_required_badge()}</Badge>
+              {/if}
+            </div>
           </Table.Cell>
           <Table.Cell><div class="flex justify-end"><UserActions {user} /></div></Table.Cell>
         </Table.Row>

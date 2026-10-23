@@ -11,6 +11,8 @@ import { Callout } from "nextra/components";
 
 <Callout type="info">
   This page is the engineering reference for how the pieces fit together. For
+  the map of the three places a tool can run and why the design is split that
+  way, see [Tools and MCP Architecture](/docs/tool-architecture). For
   administrator-facing setup and tool-catalog approval, see [MCP
   Servers](/guides/mcp-servers). For knowledge ingestion, see [Document
   Processing](/guides/document-processing).
@@ -59,10 +61,18 @@ file attachments and existing knowledge selectors together. **Bilagor**
 shows whether it is loaded before every answer or opened on demand; changing
 its reading mode does not move it out of Attachments.
 
-**Kunskap** (Knowledge) and **Organisationskunskap** (Organization knowledge)
-are separate sections below the attachments and uploader. The knowledge summary
-states whether searches run on demand or before every answer. Personal and
-organization knowledge retain their existing selectors and origins.
+Below the attachments and uploader, **Organisationskunskap** (Organization
+knowledge) contains sources owned by the organization space and **Kunskap**
+(Knowledge) contains every other source the space can use. Organization identity
+comes from the current space's API response, independently of whether the user
+can open the organization space. When organization identity is unavailable, all
+sources appear in Knowledge.
+
+The available options and selected sources use the same ownership classification.
+Every selected source remains visible and removable, including when its embedding
+model is disabled. The knowledge summary states whether searches run on demand or
+before every answer. These sections describe ownership; they do not grant access
+or change sharing permissions.
 
 Use **Ändra** (Change) on a file to choose between **Öppna vid behov** (Open
 when needed) and **Läs in inför varje svar** (Load before every answer). The
@@ -99,7 +109,7 @@ but they have different roles in the architecture.
 | --- | --- | --- |
 | **Knowledge source** | A collection, website, or integration knowledge source attached to an assistant and indexed for retrieval. | An MCP server merely because its content came from an integration. |
 | **Injected retrieval** | A backend search performed before the model is called. | A tool call or an MCP exchange. |
-| **Internal/loopback MCP server** | A built-in Eneo Streamable HTTP endpoint, attached ephemerally to a completion and backed by Eneo services. | An administrator-created catalog record or a separate deployment. |
+| **Knowledge/file loopback server** | A built-in Eneo Streamable HTTP endpoint, attached ephemerally to a completion and backed by Eneo services. | An administrator-created catalog record or a separate deployment. |
 | **External MCP server** | A tenant-scoped Streamable HTTP service configured by an administrator and selected through organization, space, assistant, and conversation controls. | Automatically trusted because it uses MCP. |
 
 An integration knowledge source is normalized into the same searchable
@@ -357,12 +367,13 @@ the files tool resolves an attachment.
 
 The second built-in server, `files`, exposes `files__read_file`. It is attached
 when the effective model supports tools and the conversation contains files for
-which Eneo renders signed download-reference entries.
+which Eneo can provide authorised file references.
 
-The model receives a reference object containing the filename, media type,
-size, and URL. The built-in reader treats the URL as a signed capability handle:
-it verifies the token, authorizes the file, and loads already-extracted text
-from Eneo's durable content path. It does **not** fetch the URL over HTTP.
+The model receives the filename, media type, size and a credential-free
+`file_ref`. Eneo replaces that handle with a signed URL immediately before
+calling the reader. The reader verifies the token, authorises the file, and
+loads already-extracted text from Eneo's durable content path. It does **not**
+fetch the URL over HTTP.
 
 This matters in two cases:
 
@@ -375,6 +386,56 @@ This matters in two cases:
 Image files still reach vision-capable models as images. Audio references report
 that their transcription, when available, is already represented in the
 conversation.
+
+### URL-only attachments
+
+A document is **URL-only** when the model receives its reference entry and
+nothing else: no extracted text and no rendered page images. The model decides
+whether to open it, and reads it through `files__read_file` or another tool
+that accepts the URL. This is what the editor calls opening a file on demand.
+
+Three settings decide it, each for its own kind of file:
+
+| Files | Setting | Default |
+| --- | --- | --- |
+| Documents a user uploads in chat | **Dokument från användare i chatten** (Documents uploaded by users in chat) under **Hantering av material**, stored as `inline_file_text` on the assistant | Loaded directly |
+| Documents a user uploads to the personal assistant | The **Bilagor** (Attachments) governance policy, when it sets a value. It replaces the assistant's own setting for the request | Not set: the personal setting applies |
+| Files attached to the assistant by its author | The reading mode of each file, **Öppnas vid behov** (Opened on demand) or **Läses in inför varje svar** (Loaded before every answer) | On demand for new uploads |
+
+A file selected for on-demand access is still loaded directly when any of the
+following holds. For the assistant's own files the editor shows the reason next
+to the file.
+
+- The effective model does not support tool calling. A model that cannot call
+  the reader would only see a link it cannot open.
+- The file is not a text document. Images and audio are never URL-only.
+- The file has no readable stored original, for example a row that predates
+  durable originals. Upload it again to make it available on demand.
+- The deployment has neither `FILE_REFERENCE_BASE_URL` nor a public origin, so
+  Eneo cannot build a reference.
+
+URL-only mode changes when the text enters the context, not how much of it a
+full read costs:
+
+- `files__read_file` returns the extracted text in pages of at most 20,000
+  characters, or half of `MCP_TOOL_OUTPUT_MAX_CHARS` when that is smaller
+  (16,384 characters with the default settings). Each page ends with the
+  offset for the next one.
+- Every page the model reads is a tool result in the conversation. A request
+  such as "summarise this document" makes the model page through the whole
+  file, so the full text ends up in context anyway. The saving comes from
+  questions that need none or only part of the file, and from turns where the
+  file is not opened at all.
+- Pages that were read follow the replay rules in
+  [Conversation replay of tool use](#conversation-replay-of-tool-use).
+- The check that rejects attachments too large for the model's context window
+  counts only directly loaded files. A URL-only document of any size is
+  accepted, and it is the model's paging that has to fit.
+
+Eneo has no built-in tool that summarises a document outside the context
+window. For files that are too large to read in full, connect a tool that
+processes the file itself and returns a bounded result, and let it take the
+same reference URL.
 
 ## Internal and external MCP servers use one proxy
 
@@ -392,15 +453,24 @@ governance, per-message, and enabled-state filters.
 
 ### Comparison
 
+This comparison covers the ephemeral knowledge/file servers and independently
+operated servers. The registered internal image provider has a different
+lifecycle but the same per-call approval rule; the bundled runtime is a separate
+service whose catalog follows Eneo's code and whose calls follow the
+conversation's approval setting. [Tools and MCP
+Architecture](/docs/tool-architecture#one-protocol-one-proxy-three-places-to-run)
+compares all three tiers; [Built-in Tool Servers](/docs/builtin-tool-servers)
+describes the two loopback attachment patterns.
+
 | Property | Internal loopback MCP | External MCP |
 | --- | --- | --- |
 | Endpoint owner | Eneo backend | Another configured service |
 | Catalog record | Ephemeral, never persisted | Persistent, tenant-scoped |
 | Tool definitions | Derived from trusted built-in code | Synced, stored, and admin-approved |
-| Credentials | Short-lived user and assistant-scoped bearer token | Configured public or encrypted bearer authentication |
+| Credentials | Short-lived user and assistant-scoped bearer token | Configured public, encrypted bearer or API-key header authentication; a credential only over https (plain http only to a loopback host) |
 | User identity | Encoded in Eneo's scoped token | Optional `X-Eneo-*` forwarding, off by default |
 | Availability | Derived automatically from the current assistant, model, and files | Selected through admin, space, assistant/governance, and conversation controls |
-| Per-call user approval | Always auto-approved because tools are read-only core capabilities | Controlled by the conversation's tool-approval setting |
+| Per-call user approval | Skipped: the scope is fixed by Eneo's code and the completion token | Controlled by the conversation's tool-approval setting |
 | MCP protocol state | Stateless | Stateless (fresh connection per completion) |
 | Circuit-breaker persistence | Throwaway server IDs mean failures remain request-local | Failures accumulate against the persistent server ID until cooldown |
 
@@ -469,30 +539,41 @@ input.
 
 Per-call approval happens after the model chooses an external tool. When the
 conversation requires approval, Eneo pauses execution and asks the user to
-approve or deny the proposed external calls. Built-in `knowledge` and `files`
-calls bypass this prompt: they are read-only Eneo capabilities whose scope is
-already fixed by the authenticated completion.
+approve or deny the proposed external calls. Built-in calls (`knowledge`,
+`files` and the built-in image provider) bypass this prompt: their scope is
+fixed by Eneo's own code and the completion token, and the role, space and
+classification checks that attached them already decided that this user may
+use them. Bundled runtime calls are not built-in in this sense and follow the
+conversation setting.
 
 An external tool can still be read-only, but Eneo does not infer safety from
 its name or description. It remains subject to the external approval policy.
 
 ## How attachment references interoperate with external MCP
 
-Signed attachment references are deliberately useful beyond
-`files__read_file`. A model can pass the same URL to an external MCP tool that
-accepts a URL—for example, a spreadsheet analyzer or large-document service.
-In that case:
+File references are useful beyond `files__read_file`. The model receives a
+credential-free `file_ref` (`eneo-file:…`) and passes it unchanged in an MCP
+tool's URL input—for example, to a spreadsheet analysis service:
 
-1. Eneo mints a short-lived original-download reference.
-2. The external MCP server receives the URL as a normal tool argument.
-3. That server must be able to reach `FILE_REFERENCE_BASE_URL` and download the
-   original before the reference expires.
-4. The external server applies its own processing and returns an MCP result.
+1. Eneo resolves the handle against the current request's authorised file map
+   and replaces it with a short-lived signed original-download URL.
+2. The MCP server receives that URL as a normal argument. Its stored schema
+   and implementation need no support for Eneo's model-facing handles.
+3. The server must reach `FILE_REFERENCE_BASE_URL` and download the original
+   before the reference expires; the download still checks access.
+4. The server processes the bytes and returns an MCP result. Accepted generated
+   files receive their own handles for subsequent calls.
+
+An unknown or unavailable handle fails before dispatch. Knowing a file ID is
+not authority to read it. Signed URLs remain the provider-facing transport;
+they are not the file identifiers exposed to the model.
 
 The built-in files server remains the authorized raw-text fallback. If another
 tool fails while its arguments contain an Eneo reference URL, the proxy appends
-a hint telling the model to retry the same URL with `files__read_file` instead
-of repeatedly calling the failed service.
+a hint: when the files server is attached, to retry the same file reference
+with `files__read_file` instead of repeatedly calling the failed service;
+otherwise, that the reference is valid, so the model reports that the tool
+cannot reach the file rather than asking the user to upload it again.
 
 <Callout type="warning">
   Passing a reference URL to an external MCP server is data egress. The URL is
@@ -652,7 +733,7 @@ incidents right now?"
 ### Attachment plus specialized external processing
 
 The user attaches a spreadsheet and asks for an analysis. Eneo provides a
-signed attachment reference and the built-in files server.
+credential-free file reference and the built-in files server.
 
 1. The model may pass the reference to an approved spreadsheet-analysis MCP
    tool.

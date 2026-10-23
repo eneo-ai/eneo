@@ -8,13 +8,14 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from eneo.database.tables.ai_models_table import CompletionModels, TranscriptionModels
 from eneo.database.tables.app_template_table import AppTemplates
 from eneo.database.tables.base_class import BaseCrossReference, BasePublic
-from eneo.database.tables.files_table import Files
+from eneo.database.tables.files_table import Files, file_usage
 from eneo.database.tables.icons_table import Icons
 from eneo.database.tables.job_table import Jobs
 from eneo.database.tables.prompts_table import Prompts
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
+from eneo.files.file_models import FileUsageKind
 
 
 class Apps(BasePublic):
@@ -112,7 +113,9 @@ class AppsFiles(BaseCrossReference):
         ForeignKey(Apps.id, ondelete="CASCADE"), primary_key=True
     )
     file_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Files.id, ondelete="CASCADE"), primary_key=True
+        ForeignKey(Files.id, ondelete="CASCADE"),
+        primary_key=True,
+        info=file_usage(FileUsageKind.APP_ATTACHMENT),
     )
 
     # Relationships
@@ -136,7 +139,9 @@ class AppRunsFiles(BaseCrossReference):
         ForeignKey(AppRuns.id, ondelete="CASCADE"), primary_key=True
     )
     file_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Files.id, ondelete="CASCADE"), primary_key=True
+        ForeignKey(Files.id, ondelete="CASCADE"),
+        primary_key=True,
+        info=file_usage(FileUsageKind.APP_RUN_INPUT),
     )
 
     # Relationships

@@ -40,26 +40,7 @@ describe("MoveToSpaceDialog", () => {
     await chooseTarget();
     await page.getByRole("button", { name: "Move service" }).click();
 
-    expect(onMove).toHaveBeenCalledWith({ id: "target" }, { moveResources: false });
+    expect(onMove).toHaveBeenCalledWith({ id: "target" });
     await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("passes the resources switch and shows its hint while it is on", async () => {
-    const onMove = vi.fn(() => Promise.resolve());
-    render(MoveToSpaceDialog, {
-      open: true,
-      title: "Move assistant",
-      submitLabel: "Move assistant",
-      resourcesOption: { label: "Include knowledge", hint: "Knowledge moves too" },
-      onMove
-    });
-
-    await chooseTarget();
-    await expect.element(page.getByText("Knowledge moves too")).not.toBeInTheDocument();
-    await page.getByRole("switch", { name: "Include knowledge" }).click();
-    await expect.element(page.getByText("Knowledge moves too")).toBeVisible();
-    await page.getByRole("button", { name: "Move assistant" }).click();
-
-    expect(onMove).toHaveBeenCalledWith({ id: "target" }, { moveResources: true });
   });
 });

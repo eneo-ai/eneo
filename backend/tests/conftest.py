@@ -73,6 +73,7 @@ pytest_plugins = [
     "tests.integration.fixtures.completion_models",  # Completion model fixtures
     "tests.integration.fixtures.transcription_models",  # Transcription model fixtures
     "tests.integration.fixtures.image_models",  # Image model fixtures
+    "tests.integration.fixtures.rerank_models",  # Rerank model fixtures
     "tests.integration.fixtures.assistants",  # Assistant fixtures
     "tests.integration.fixtures.apps",  # App fixtures
     "tests.integration.fixtures.services",  # Service fixtures

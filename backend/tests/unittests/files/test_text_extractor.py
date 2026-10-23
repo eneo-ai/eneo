@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 
+from eneo.files.extraction_limits import FileExtractionLimits
 from eneo.files.text import (
     CorruptFileError,
     EncryptedFileError,
@@ -25,6 +26,7 @@ from eneo.files.text import (
     TextSanitizer,
     UnsupportedFormatError,
 )
+from tests.unittests.integration.sharepoint_fixtures import text_pdf
 
 
 class TestTextSanitizer:
@@ -186,6 +188,35 @@ class TestTextExtractorPDF:
 
             assert "[PAGE 1]\nFirst page" in result
             assert "[PAGE 2]\nSecond page" in result
+
+    def test_extract_from_pdf_releases_each_page(self):
+        """Each page's parsed objects are released once its text is read."""
+        with patch("eneo.files.text.pdfplumber.open") as mock_open:
+            pages = [MagicMock(page_number=number) for number in (1, 2)]
+            for page in pages:
+                page.extract_text.return_value = "text"
+                page.find_tables.return_value = []
+            mock_open.return_value.__enter__ = MagicMock(
+                return_value=MagicMock(pages=pages)
+            )
+            mock_open.return_value.__exit__ = MagicMock(return_value=False)
+
+            TextExtractor.extract_from_pdf(Path("dummy.pdf"))
+
+            for page in pages:
+                page.close.assert_called_once_with()
+
+    def test_extract_from_pdf_over_layout_budget_reads_text_layer(self, tmp_path):
+        """PDFs longer than the layout budget keep their text and page markers."""
+        path = text_pdf(tmp_path / "long.pdf", ["First page", "Second page"])
+
+        within_budget = TextExtractor.extract_from_pdf(path)
+        over_budget = TextExtractor.extract_from_pdf(
+            path, limits=FileExtractionLimits(pdf_layout_max_pages=1)
+        )
+
+        assert within_budget == "[PAGE 1]\nFirst page\n\n[PAGE 2]\nSecond page"
+        assert over_budget == within_budget
 
     def test_extract_from_pdf_renders_tables_as_markdown(self):
         """Tables should be appended as markdown, with table text excluded
@@ -421,6 +452,25 @@ class TestTextExtractorXLSX:
         result = TextExtractor.extract_from_xlsx(xlsx_path)
         assert isinstance(result, str)
         assert "File: empty.xlsx" in result
+
+    def test_extract_from_xlsx_header_only_sheet(self, tmp_path):
+        """A sheet holding only its first row is text; a blank sheet adds nothing."""
+        from openpyxl import Workbook
+
+        xlsx_path = tmp_path / "names.xlsx"
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Members"
+        ws["A1"] = "Name"
+        ws["C1"] = "Role\nin board"
+        wb.create_sheet("Blank")
+        wb.save(xlsx_path)
+
+        result = TextExtractor.extract_from_xlsx(xlsx_path)
+
+        assert result == (
+            "File: names.xlsx\n\nSheet: Members | headers: Name | Role in board"
+        )
 
     def test_extract_from_xlsx_with_special_characters(self, tmp_path):
         """Should handle special characters in cells."""

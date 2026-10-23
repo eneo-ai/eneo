@@ -211,7 +211,11 @@ async def _explain_statement(
     savepoint = await session.begin_nested()
     try:
         connection = await session.connection()
-        await connection.exec_driver_sql("ANALYZE assistant_skill_bindings")
+        # The joined tables too: with 10 000 fresh assistants still counted as
+        # a handful, the planner drives the join from assistants through the
+        # bindings' assistant_id index instead of walking (skill_id, assistant_id).
+        for relation in ("assistant_skill_bindings", "assistants", "spaces"):
+            await connection.exec_driver_sql(f"ANALYZE {relation}")
         explained = await connection.exec_driver_sql(
             f"EXPLAIN (ANALYZE, COSTS OFF, SUMMARY OFF, FORMAT JSON) {statement}",
             parameters,

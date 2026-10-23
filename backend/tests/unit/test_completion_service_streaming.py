@@ -11,10 +11,14 @@ from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModel,
     Context,
-    GeneratedImage,
+    GeneratedFile,
     ResponseType,
+    ToolCallMetadata,
 )
-from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.completion_models.infrastructure.completion_service import (
+    CompletionService,
+    _name_app_views,
+)
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 
 
@@ -171,7 +175,7 @@ async def test_non_streaming_uses_adapter_cumulative_input_estimate():
 async def test_generated_image_chunks_pass_through_tool_call_handling():
     """MCP image blocks reach the ask path as FILES chunks, in stream order."""
     completion_model = _make_completion_model()
-    image = GeneratedImage(data=b"\x89PNG", mime_type="image/png")
+    image = GeneratedFile(data=b"\x89PNG", mime_type="image/png")
 
     class _ImageAdapter(_DummyAdapter):
         async def iterate_stream(self, **kwargs):
@@ -208,3 +212,127 @@ async def test_generated_image_chunks_pass_through_tool_call_handling():
         ResponseType.TEXT,
     ]
     assert chunks[0].image is image
+
+
+async def test_adapter_events_without_text_reach_the_caller():
+    """Typed adapter events pass through whether or not they carry text; an
+    approval timeout must reach the chat so the pending approval resolves."""
+    completion_model = _make_completion_model()
+    tools = [
+        ToolCallMetadata(server_name="files", tool_name="read", tool_call_id="call-1")
+    ]
+
+    class _ApprovalAdapter(_DummyAdapter):
+        async def iterate_stream(self, **kwargs):
+            yield Completion(
+                response_type=ResponseType.TOOL_APPROVAL_REQUIRED,
+                approval_id="approval-1",
+                tool_calls_metadata=tools,
+            )
+            yield Completion(
+                response_type=ResponseType.TOOL_APPROVAL_TIMEOUT,
+                approval_id="approval-1",
+                tool_calls_metadata=tools,
+            )
+            yield Completion(
+                response_type=ResponseType.TOOL_CALL, tool_calls_metadata=tools
+            )
+            yield Completion(text="Okej.")
+            yield Completion()
+            yield Completion(text="", stop=True)
+
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+        redis_client=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(
+        return_value=_ApprovalAdapter(model=completion_model)
+    )
+
+    response = await service.get_response(
+        model=completion_model,
+        text_input="read a.txt",
+        session=SimpleNamespace(
+            id=uuid4(),
+            user_id=uuid4(),
+            assistant=SimpleNamespace(id=uuid4()),
+            questions=[],
+        ),
+        stream=True,
+    )
+    chunks = [chunk async for chunk in response.completion]
+
+    # The empty untyped chunk carries nothing and is the only one dropped.
+    assert [(chunk.response_type, chunk.stop) for chunk in chunks] == [
+        (ResponseType.TOOL_APPROVAL_REQUIRED, False),
+        (ResponseType.TOOL_APPROVAL_TIMEOUT, False),
+        (ResponseType.TOOL_CALL, False),
+        (ResponseType.TEXT, False),
+        (None, True),
+    ]
+
+
+class _ViewProxy:
+    """Proxy whose ``weather__get_weather`` tool has an approved view."""
+
+    def __init__(self, *, fails: bool = False):
+        self.fails = fails
+        self.view = SimpleNamespace(
+            view_id=uuid4(), mcp_server_id=uuid4(), ui_meta={"prefersBorder": True}
+        )
+
+    async def approved_app_view(self, prefixed_tool_name: str):
+        if self.fails:
+            raise RuntimeError("database unavailable")
+        return self.view if prefixed_tool_name == "weather__get_weather" else None
+
+
+def _tool_call_chunk(**call) -> Completion:
+    return Completion(
+        response_type=ResponseType.TOOL_CALL,
+        tool_calls_metadata=[
+            ToolCallMetadata(server_name="weather", tool_name="get_weather", **call)
+        ],
+    )
+
+
+async def test_view_is_named_on_a_call_from_the_moment_it_is_announced():
+    proxy = _ViewProxy()
+    pending = _tool_call_chunk(
+        mcp_tool_name="weather__get_weather", result_status="pending"
+    )
+
+    await _name_app_views(pending, proxy)
+
+    assert pending.tool_calls_metadata[0].app_view == {
+        "view_id": str(proxy.view.view_id),
+        "mcp_server_id": str(proxy.view.mcp_server_id),
+        "ui": {"prefersBorder": True},
+    }
+
+
+async def test_call_of_a_tool_without_a_view_is_left_as_it_is():
+    chunk = _tool_call_chunk(mcp_tool_name="weather__get_forecast")
+
+    await _name_app_views(chunk, _ViewProxy())
+
+    assert chunk.tool_calls_metadata[0].app_view is None
+
+
+async def test_failed_view_lookup_never_breaks_the_answer():
+    chunk = _tool_call_chunk(mcp_tool_name="weather__get_weather")
+
+    await _name_app_views(chunk, _ViewProxy(fails=True))
+
+    assert chunk.tool_calls_metadata[0].app_view is None
+
+
+async def test_proxy_that_knows_no_views_is_harmless():
+    chunk = _tool_call_chunk(mcp_tool_name="weather__get_weather")
+
+    await _name_app_views(chunk, object())
+    await _name_app_views(chunk, None)
+
+    assert chunk.tool_calls_metadata[0].app_view is None

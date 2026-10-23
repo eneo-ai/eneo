@@ -1,7 +1,5 @@
 <!--
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <script lang="ts">
@@ -16,6 +14,7 @@
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
   import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
   import { CAPABILITIES, getCapability, hasBuiltinProvider } from "$lib/features/mcp/capabilities";
+  import { sendsCredentialOverPlainHttp } from "$lib/features/mcp/credentialTransport";
   import { imageQualityLabel, imageSizeLabel } from "$lib/features/ai-models/imageModelOptions";
   import { resolve } from "$app/paths";
   import { untrack, tick } from "svelte";
@@ -119,7 +118,9 @@
   let name = $state("");
   let description = $state("");
   let http_url = $state("");
-  let http_auth_type = $state<"none" | "bearer" | "api_key_header" | "internal">("none");
+  let http_auth_type = $state<"none" | "bearer" | "api_key_header" | "internal" | "bundled">(
+    "none"
+  );
   let documentation_url = $state("");
   let security_classification = $state<SecurityClassification | null>(null);
   let forward_identity = $state(false);
@@ -179,6 +180,14 @@
 
   const builtinAvailable = $derived(hasBuiltinProvider(selectedPurpose));
   const isBuiltin = $derived(builtinAvailable && http_auth_type === "internal");
+  // A bundled tool runtime server: its connection comes from the deployment.
+  const isBundled = $derived(http_auth_type === "bundled");
+  // Shown before submit; the backend refuses the same combination. A built-in
+  // provider's URL is never submitted (the backend sets its own endpoint), so a
+  // URL left over from the external source must not block saving it.
+  const credentialOverPlainHttp = $derived(
+    !isBuiltin && sendsCredentialOverPlainHttp(http_auth_type, http_url)
+  );
   const submitLabel = $derived(
     !isEditMode && isBuiltin && activateOnSave
       ? m.tools_save_activate()
@@ -271,7 +280,8 @@
       description = mcpServer.description || "";
       http_url = mcpServer.http_url || "";
       http_auth_type =
-        (mcpServer.http_auth_type as "none" | "bearer" | "api_key_header" | "internal") || "none";
+        (mcpServer.http_auth_type as
+          "none" | "bearer" | "api_key_header" | "internal" | "bundled") || "none";
       source = mcpServer.http_auth_type === "internal" ? "builtin" : "external";
       imageModelId = mcpServer.image_model_id ?? "";
       documentation_url = mcpServer.documentation_url || "";
@@ -621,8 +631,13 @@
               </fieldset>
             {/if}
 
-            <!-- Server Identity Section -->
-            <fieldset class="space-y-4">
+            <!-- Server Identity Section. A server built into Eneo is named in
+                 the UI language from the tool it serves; its stored row keeps
+                 the backend default and is not edited here. -->
+            {#if isBundled}
+              <p class="text-muted text-xs leading-relaxed">{m.mcp_bundled_identity_hint()}</p>
+            {/if}
+            <fieldset class="space-y-4" class:hidden={isBundled}>
               <legend class="sr-only">{m.mcp_server_info_legend()}</legend>
 
               <div>
@@ -799,7 +814,9 @@
               </fieldset>
             {/if}
 
-            {#if !isBuiltin}
+            {#if isBundled}
+              <p class="text-muted text-xs leading-relaxed">{m.mcp_bundled_hint()}</p>
+            {:else if !isBuiltin}
               <fieldset class="border-dimmer bg-secondary/20 space-y-4 rounded-xl border p-4 pt-3">
                 <legend
                   class="bg-secondary text-muted -ml-1 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] font-medium tracking-wider uppercase"
@@ -836,11 +853,14 @@
                       bind:value={http_url}
                       required
                       aria-required="true"
-                      aria-describedby="url-hint"
+                      aria-invalid={credentialOverPlainHttp}
+                      aria-describedby={credentialOverPlainHttp
+                        ? "url-hint mcp-url-https-error"
+                        : "url-hint"}
                       placeholder={m.mcp_url_placeholder()}
                       class="border-default bg-primary ring-accent-default focus:border-accent-default hover:border-stronger w-full rounded-lg border py-2.5 pr-10 pl-3 font-mono text-sm shadow-sm transition-shadow focus:ring-2 focus:outline-none"
                     />
-                    {#if http_url}
+                    {#if http_url && !credentialOverPlainHttp}
                       <div class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2">
                         <span
                           class="bg-positive-dimmer flex h-5 w-5 items-center justify-center rounded-full"
@@ -864,6 +884,11 @@
                     {/if}
                   </div>
                   <p id="url-hint" class="text-muted mt-1.5 text-xs">{m.server_url_hint()}</p>
+                  {#if credentialOverPlainHttp}
+                    <Field.Error id="mcp-url-https-error" class="mt-1.5 text-xs">
+                      {m.mcp_credential_requires_https()}
+                    </Field.Error>
+                  {/if}
                 </div>
               </fieldset>
 
@@ -1000,8 +1025,8 @@
                 />
               </div>
 
-              <!-- The backend forces identity forwarding off for built-in providers. -->
-              {#if !isBuiltin}
+              <!-- The backend forces identity forwarding off for built-in and bundled servers. -->
+              {#if !isBuiltin && !isBundled}
                 <div class="mt-4">
                   <label for="mcp-forward_identity" class="flex items-start gap-2.5">
                     <input
@@ -1158,6 +1183,7 @@
           disabled={submitting ||
             !name ||
             (!isBuiltin && !http_url) ||
+            credentialOverPlainHttp ||
             builtinIncomplete ||
             audienceIncomplete ||
             (http_auth_type === "api_key_header" &&

@@ -15,7 +15,8 @@
     EmbeddingModel,
     ModelProviderPublic,
     TranscriptionModel,
-    ImageModel
+    ImageModel,
+    RerankModel
   } from "@eneo/eneo-js";
   import { getEneo } from "$lib/core/Eneo";
   import { invalidate } from "$app/navigation";
@@ -28,6 +29,7 @@
     Sparkles,
     AudioLines,
     Image,
+    ListOrdered,
     Ellipsis,
     Check
   } from "@lucide/svelte";
@@ -37,8 +39,9 @@
   import ConfirmDialog from "$lib/components/ConfirmDialog.svelte";
   import { Button } from "$lib/components/ui/button/index.js";
 
-  type ModelKind = "completion" | "embedding" | "transcription" | "image";
-  type ProviderModel = CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel;
+  type ModelKind = "completion" | "embedding" | "transcription" | "image" | "rerank";
+  type ProviderModel =
+    CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel;
 
   type BlockingModel = {
     id: string;
@@ -111,7 +114,8 @@
           m.transcription_model(),
           AudioLines
         ),
-        ...tagModels(models.imageModels, "image", m.image_model(), Image)
+        ...tagModels(models.imageModels, "image", m.image_model(), Image),
+        ...tagModels(models.rerankModels ?? [], "rerank", m.rerank_model(), ListOrdered)
       ].sort((a, b) => a.name.localeCompare(b.name));
       modelsLoaded = true;
     } catch (e: unknown) {

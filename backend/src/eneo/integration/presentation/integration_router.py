@@ -12,19 +12,29 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
+from eneo.integration.domain.value_objects import TenantIntegrationFilter
 from eneo.integration.presentation.models import (
+    MAX_PAGE_OFFSET,
     Integration,
     IntegrationList,
     IntegrationPreviewDataList,
     PaginatedSyncLogList,
+    SharePointSearchResponse,
     SharePointTreeResponse,
     SyncLog,
     TenantIntegration,
-    TenantIntegrationFilter,
     TenantIntegrationList,
     UserIntegrationList,
 )
+from eneo.integration.presentation.validation import (
+    FOLDER_PATH_MAX_LENGTH,
+    FOLDER_PATH_PATTERN,
+    GRAPH_ID_MAX_LENGTH,
+    GRAPH_ID_PATTERN,
+    validate_folder_path,
+)
 from eneo.main.container.container import Container
+from eneo.observability.error_text import user_visible_error
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 
@@ -304,7 +314,10 @@ async def disconnect_user_integration(
 async def get_sync_logs(
     integration_knowledge_id: UUID,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    skip: Annotated[int, Query(ge=0, description="Number of items to skip")] = 0,
+    skip: Annotated[
+        int,
+        Query(ge=0, le=MAX_PAGE_OFFSET, description="Number of items to skip"),
+    ] = 0,
     limit: Annotated[
         int, Query(ge=1, le=100, description="Number of items per page")
     ] = 10,
@@ -329,20 +342,7 @@ async def get_sync_logs(
     )
 
     # Convert domain entities to presentation models
-    sync_log_models = [
-        SyncLog(
-            id=log.id,
-            integration_knowledge_id=log.integration_knowledge_id,
-            sync_type=log.sync_type,
-            status=log.status,
-            metadata=log.metadata,
-            error_message=log.error_message,
-            started_at=log.started_at,
-            completed_at=log.completed_at,
-            created_at=log.created_at or log.started_at,
-        )
-        for log in sync_logs
-    ]
+    sync_log_models = [SyncLog.from_domain(log) for log in sync_logs]
 
     return PaginatedSyncLogList(
         items=sync_log_models, total_count=total_count, page_size=limit, offset=skip
@@ -376,6 +376,77 @@ async def get_integration_preview(
 
 
 @router.get(
+    "/{user_integration_id:uuid}/sharepoint/search/",
+    response_model=SharePointSearchResponse,
+    status_code=200,
+    description=(
+        "Search a SharePoint library or OneDrive by free text and column values, "
+        "across every folder."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="Integration services enforce tenant, user and space access for this operation.",
+)
+async def search_sharepoint_library(
+    user_integration_id: UUID,
+    space_id: Annotated[
+        UUID, Query(description="Space ID (requires integration import rights)")
+    ],
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    site_id: Annotated[
+        Optional[str],
+        Query(
+            description="SharePoint site ID (required for SharePoint)",
+            max_length=GRAPH_ID_MAX_LENGTH,
+            pattern=GRAPH_ID_PATTERN,
+        ),
+    ] = None,
+    drive_id: Annotated[
+        Optional[str],
+        Query(
+            description="Drive ID (required for OneDrive)",
+            max_length=GRAPH_ID_MAX_LENGTH,
+            pattern=GRAPH_ID_PATTERN,
+        ),
+    ] = None,
+    q: Annotated[
+        str,
+        Query(description="Free text matched against names, content and properties"),
+    ] = "",
+    filter: Annotated[
+        list[str],
+        Query(
+            description=(
+                "Column filter as `Column:value`, repeatable. Columns come from the "
+                "tree response; yes/no columns take true or false."
+            )
+        ),
+    ] = [],
+):
+    """Find files anywhere in a library, so a person need not browse folder by folder."""
+    from eneo.integration.infrastructure.preview_service.sharepoint_search import (
+        parse_filter_params,
+    )
+    from eneo.main.exceptions import BadRequestException
+
+    service = container.sharepoint_tree_service()
+    if not site_id and not drive_id:
+        raise BadRequestException("Either site_id or drive_id must be provided")
+    result = await service.search_library(
+        user_integration_id=user_integration_id,
+        space_id=space_id,
+        site_id=site_id,
+        drive_id=drive_id,
+        text=q,
+        filters=parse_filter_params(filter),
+    )
+    return SharePointSearchResponse(**result)
+
+
+@router.get(
     "/{user_integration_id:uuid}/sharepoint/tree/",
     response_model=SharePointTreeResponse,
     status_code=200,
@@ -395,15 +466,36 @@ async def get_sharepoint_folder_tree(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     site_id: Annotated[
         Optional[str],
-        Query(description="SharePoint site ID (required for SharePoint)"),
+        Query(
+            description="SharePoint site ID (required for SharePoint)",
+            max_length=GRAPH_ID_MAX_LENGTH,
+            pattern=GRAPH_ID_PATTERN,
+        ),
     ] = None,
     drive_id: Annotated[
-        Optional[str], Query(description="Drive ID (required for OneDrive)")
+        Optional[str],
+        Query(
+            description="Drive ID (required for OneDrive)",
+            max_length=GRAPH_ID_MAX_LENGTH,
+            pattern=GRAPH_ID_PATTERN,
+        ),
     ] = None,
     folder_id: Annotated[
-        Optional[str], Query(description="Folder ID (null for root)")
+        Optional[str],
+        Query(
+            description="Folder ID (null for root)",
+            max_length=GRAPH_ID_MAX_LENGTH,
+            pattern=GRAPH_ID_PATTERN,
+        ),
     ] = None,
-    folder_path: Annotated[str, Query(description="Current folder path")] = "",
+    folder_path: Annotated[
+        str,
+        Query(
+            description="Current folder path",
+            max_length=FOLDER_PATH_MAX_LENGTH,
+            pattern=FOLDER_PATH_PATTERN,
+        ),
+    ] = "",
 ):
     """Browse an authorized SharePoint/OneDrive connection in an importable space.
 
@@ -429,6 +521,10 @@ async def get_sharepoint_folder_tree(
     # Convert string "null" or empty string to actual None
     if folder_id == "null" or folder_id == "":
         folder_id = None
+    try:
+        validate_folder_path(folder_path)
+    except ValueError as e:
+        raise BadRequestException(str(e)) from e
 
     try:
         tree_data = await service.get_folder_tree(
@@ -455,7 +551,9 @@ async def get_sharepoint_folder_tree(
             },
             exc_info=True,
         )
-        raise BadRequestException(f"Failed to fetch SharePoint folder tree: {str(e)}")
+        raise BadRequestException(
+            f"Failed to fetch SharePoint folder tree: {user_visible_error(e)}"
+        )
 
 
 @router.get(

@@ -44,9 +44,9 @@ def mock_tenant_app_not_service_account():
 
 
 @pytest.fixture
-def mock_settings():
+def mock_settings(test_settings):
     """Mock settings with oauth_callback_url configured."""
-    settings = MagicMock()
+    settings = test_settings.model_copy()
     settings.oauth_callback_url = (
         "https://test.example.com/integrations/callback/token/"
     )
@@ -307,61 +307,93 @@ class TestRefreshAccessToken:
         assert posted_data["grant_type"] == "refresh_token"
 
 
-class TestTestRefreshToken:
-    """Tests for test_refresh_token method."""
+async def test_refresh_refusals_are_logged_without_the_body(service, mock_tenant_app):
+    error_response = MagicMock(spec=httpx.Response)
+    error_response.status_code = 400
+    error_response.text = (
+        '{"error_description": "... Trace ID: abc Correlation ID: def"}'
+    )
+    error_response.json.return_value = {
+        "error": "invalid_client",
+        "error_description": "AADSTS7000215: Invalid client secret provided. Trace ID: abc\r\nCorrelation ID: def",
+    }
+    error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+        "Bad Request", request=MagicMock(), response=error_response
+    )
 
-    async def test_returns_success_tuple_on_valid_token(
+    with (
+        patch("httpx.AsyncClient", return_value=_posting_client([error_response])),
+        patch(
+            "eneo.integration.infrastructure.auth_service.service_account_auth_service.logger"
+        ) as log,
+    ):
+        with pytest.raises(httpx.HTTPStatusError):
+            await service.refresh_access_token(mock_tenant_app)
+
+    logged = [str(call.args[0]) % call.args[1:] for call in log.error.call_args_list]
+    assert logged == [
+        f"Service account token refresh failed for tenant {mock_tenant_app.tenant_id}: "
+        "invalid_client AADSTS7000215"
+    ]
+
+
+def _posting_client(responses: list[MagicMock]) -> AsyncMock:
+    client = AsyncMock()
+    client.__aenter__.return_value = client
+    client.__aexit__.return_value = None
+    client.post.side_effect = responses
+    return client
+
+
+def _token_response(payload: dict[str, object]) -> MagicMock:
+    response = MagicMock(spec=httpx.Response)
+    response.status_code = 200
+    response.json.return_value = payload
+    return response
+
+
+class TestAccessTokenCache:
+    """One refresh per token lifetime, not one per acquisition."""
+
+    async def test_a_cached_token_is_reused_without_a_rotation(
         self, service, mock_tenant_app, mock_token_response
     ):
-        """Returns (True, None) when refresh succeeds."""
-        mock_response = MagicMock(spec=httpx.Response)
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_token_response
+        client = _posting_client([_token_response(mock_token_response)])
 
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client.post.return_value = mock_response
-            mock_client_class.return_value = mock_client
+        with patch("httpx.AsyncClient", return_value=client):
+            first = await service.refresh_access_token(mock_tenant_app)
+            second = await service.refresh_access_token(mock_tenant_app)
 
-            success, error = await service.test_refresh_token(mock_tenant_app)
+        assert first["refresh_token"] == "new-refresh-token-abc"
+        assert second["access_token"] == first["access_token"]
+        assert second.get("refresh_token") is None
+        assert client.post.call_count == 1
 
-        assert success is True
-        assert error is None
-
-    async def test_returns_error_on_http_failure(self, service, mock_tenant_app):
-        """Returns (False, error_message) on HTTP error."""
-        error_response = MagicMock(spec=httpx.Response)
-        error_response.status_code = 400
-        error_response.text = "invalid_grant"
-        error_response.raise_for_status.side_effect = httpx.HTTPStatusError(
-            "Bad Request", request=MagicMock(), response=error_response
-        )
-
-        with patch("httpx.AsyncClient") as mock_client_class:
-            mock_client = AsyncMock()
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client.post.return_value = error_response
-            mock_client_class.return_value = mock_client
-
-            success, error = await service.test_refresh_token(mock_tenant_app)
-
-        assert success is False
-        assert error is not None
-        assert "400" in error or "invalid_grant" in error
-
-    async def test_returns_error_on_value_error(
-        self, service, mock_tenant_app_not_service_account
+    @pytest.mark.parametrize(
+        "miss", ["secret-changed", "account-changed", "expiring", "forced"]
+    )
+    async def test_the_cache_misses_when_it_must(
+        self, service, mock_tenant_app, mock_token_response, miss
     ):
-        """Returns (False, error_message) for configuration errors."""
-        success, error = await service.test_refresh_token(
-            mock_tenant_app_not_service_account
+        if miss == "expiring":
+            mock_token_response = {**mock_token_response, "expires_in": 60}
+        later = {**mock_token_response, "access_token": "later-access-token"}
+        client = _posting_client(
+            [_token_response(mock_token_response), _token_response(later)]
         )
 
-        assert success is False
-        assert "not configured for service account" in error
+        with patch("httpx.AsyncClient", return_value=client):
+            await service.refresh_access_token(mock_tenant_app)
+            if miss == "secret-changed":
+                mock_tenant_app.client_secret = "rotated-secret"
+            elif miss == "account-changed":
+                mock_tenant_app.service_account_email = "other@contoso.com"
+            second = await service.refresh_access_token(
+                mock_tenant_app, force_refresh=miss == "forced"
+            )
+
+        assert second["access_token"] == "later-access-token"
+        assert client.post.call_count == 2
 
 
 class TestServiceAccountCredentials:

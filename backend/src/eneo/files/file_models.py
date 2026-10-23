@@ -80,8 +80,14 @@ class FileContentRangeError(Exception):
 class FileBase(BaseModel):
     name: str
     checksum: str
+    # Bytes of the primary representation: for a text file its extracted text,
+    # which is what attachment budgets count.
     size: int
     mimetype: Optional[str] = None
+    # Bytes of the exact original (what a download delivers), when one is
+    # stored. Differs from ``size`` for documents, whose primary
+    # representation is extracted text.
+    original_size: Optional[int] = None
 
     file_type: FileType
 
@@ -102,6 +108,7 @@ class FileBaseWithContent(FileBase):
 class FileInfo(InDB, FileBase):
     user_id: UUID
     tenant_id: UUID
+    revises_file_id: Optional[UUID] = None
 
 
 class FileMetadataCreate(BaseModel):
@@ -111,6 +118,7 @@ class FileMetadataCreate(BaseModel):
     user_id: UUID
     tenant_id: UUID
     parent_file_id: Optional[UUID] = None
+    revises_file_id: Optional[UUID] = None
 
 
 class FileMetadata(InDB, FileMetadataCreate):
@@ -121,6 +129,9 @@ class File(InDB, FileBaseWithContent):
     user_id: UUID
     tenant_id: UUID
     parent_file_id: Optional[UUID] = None
+    # The earlier version of a conversation document this file was saved
+    # from, when a user edited it in Eneo.
+    revises_file_id: Optional[UUID] = None
     # True when a signed original-download URL can serve this file: the exact
     # original upload is durably stored, or (for images) the generated artifact
     # that is the file's only original. False for rows predating durable
@@ -132,6 +143,9 @@ class FilePublic(InDB):
     name: str
     mimetype: str
     size: int
+    # Size of the file as downloaded, when its exact original is stored; show
+    # this to users rather than ``size``.
+    original_size: Optional[int] = None
     transcription: Optional[str] = None
     token_count: Optional[int] = None  # Token count for the file's content
     # Public capability signal only; never expose storage internals. The chat
@@ -139,6 +153,9 @@ class FilePublic(InDB):
     # conversation attachment can actually be represented by a signed URL
     # (a TEXT file whose exact original is durably stored).
     has_download_reference: bool = False
+    # The earlier version of a conversation document this file was saved
+    # from; clients chain a document's versions by it.
+    revises_file_id: Optional[UUID] = None
 
 
 class AcceptedFileType(BaseModel):

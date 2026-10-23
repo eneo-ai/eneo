@@ -390,7 +390,7 @@ async def test_provider_timeout_with_crawler_deadline_keeps_existing_retry(
 
 
 @pytest.mark.asyncio
-async def test_terminal_provider_timeout_keeps_public_error_mapping(monkeypatch):
+async def test_terminal_provider_timeout_maps_to_provider_timeout(monkeypatch):
     attempts = 0
 
     async def timing_out_aembedding(**_kwargs):
@@ -417,7 +417,7 @@ async def test_terminal_provider_timeout_keeps_public_error_mapping(monkeypatch)
     with pytest.raises(OpenAIException) as exc_info:
         await get_embeddings(adapter, ["hello"])
 
-    assert exc_info.value.code == "provider_unavailable"
+    assert exc_info.value.code == "provider_timeout"
     assert attempts == 3
 
 

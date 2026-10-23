@@ -39,6 +39,9 @@ class _AsyncChunkStream:
 
 
 class _FakeMCPProxy:
+    def model_result_text(self, text: str) -> str:
+        return text
+
     def __init__(self) -> None:
         self.calls: list[list[tuple[str, dict[str, object]]]] = []
 
@@ -59,6 +62,10 @@ class _FakeMCPProxy:
         return None
 
     def is_internal_tool(self, name: str) -> bool:
+        del name
+        return False
+
+    def is_bundled_tool(self, name: str) -> bool:
         del name
         return False
 
@@ -741,7 +748,12 @@ async def test_streaming_activates_skill_without_mcp_proxy() -> None:
             )
         ]
 
-    assert any(completion.text == "Payroll answer" for completion in output)
+    # The follow-up round's answer starts a new paragraph in the stream; the
+    # provider history below keeps each round's text as the model wrote it.
+    assert [completion.text for completion in output if completion.text] == [
+        "I will load the payroll procedure.",
+        "\n\nPayroll answer",
+    ]
     assert runtime.snapshot().accepted == ("skill-1",)
     follow_up_messages = completion_call.await_args.kwargs["messages"]
     assert "Use the exact payroll procedure." in follow_up_messages[0]["content"]

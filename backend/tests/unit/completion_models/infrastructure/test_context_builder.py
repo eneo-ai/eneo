@@ -8,15 +8,19 @@ fresh reference URL per generated image, so the model can pass any earlier
 image back to an image tool. Uploaded images follow the vision gate as before.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
 from eneo.completion_models.infrastructure import context_builder
-from eneo.completion_models.infrastructure.context_builder import ContextBuilder
+from eneo.completion_models.infrastructure.context_builder import (
+    ContextBuilder,
+    current_user_revisions,
+)
 from eneo.files.file_models import File, FileType
+from eneo.files.model_file_references import file_handle
 from eneo.questions.question import ToolCallInfo
 
 
@@ -56,6 +60,21 @@ def _names(files: list[File]) -> list[str]:
     return [file.name for file in files]
 
 
+def test_knowledge_prompt_places_citations_after_sourced_sentences():
+    prompt = context_builder._Prompt(version=2)
+    prompt.knowledge = '"""source_id: a5477f85\nBrasilianskt kaffe har låg syra."""'
+
+    text = str(prompt)
+
+    assert "after the punctuation ending its complete sourced sentence" in text
+    assert "If a list item or table cell has no sentence" in text
+    assert "Never put it after a heading, bold label" in text
+    assert (
+        'Example: **Smakprofil:** Brasilianskt kaffe är fylligt och milt. <inref id="<source_id>"/>'
+        in text
+    )
+
+
 def test_generated_images_replay_only_from_latest_turn():
     session = SimpleNamespace(questions=[_turn(1), _turn(2), _turn(3)])
 
@@ -92,6 +111,76 @@ def _image_tool_call(result: str, generated_file_ids) -> ToolCallInfo:
     )
 
 
+def test_replayed_legacy_arguments_carry_handles_without_credentials():
+    file_id = uuid4()
+    call = ToolCallInfo(
+        server_name="tabular",
+        tool_name="query_table",
+        tool_call_id="call-1",
+        arguments={
+            "file": {
+                "url": f"http://b/api/v1/files/{file_id}/original/download/?token=old.sig",
+                "filename": "a.xlsx",
+            }
+        },
+        result="{}",
+        mcp_tool_name="tabular__query_table",
+    )
+    # Persisted arguments never keep the token.
+    assert "token=old.sig" not in str(call.arguments)
+    session = SimpleNamespace(
+        questions=[
+            SimpleNamespace(
+                question="q",
+                answer="a",
+                files=[],
+                generated_files=[],
+                tool_calls=[call],
+            )
+        ]
+    )
+    fresh = f"http://b/api/v1/files/{file_id}/original/download/?token=fresh.sig"
+
+    messages, _ = ContextBuilder()._build_messages(
+        session, max_tokens=10_000, file_reference_urls={file_id: fresh}
+    )
+
+    assert messages[0].tool_calls[0].arguments == {
+        "file": {"url": file_handle(file_id), "filename": "a.xlsx"}
+    }
+
+
+def test_replayed_references_follow_image_and_file_placeholders():
+    image, document = uuid4(), uuid4()
+    result = (
+        "[Image 1 (image/png) was generated and is shown to the user.]\n"
+        "[File 1 (report.docx) was created and is offered to the user as a download.]"
+    )
+    session = SimpleNamespace(
+        questions=[
+            SimpleNamespace(
+                question="q",
+                answer="a",
+                files=[],
+                generated_files=[],
+                tool_calls=[_image_tool_call(result, [image, document])],
+            )
+        ]
+    )
+
+    messages, _ = ContextBuilder()._build_messages(
+        session,
+        max_tokens=10_000,
+        file_reference_urls={image: "https://x/i", document: "https://x/d"},
+    )
+
+    assert messages[0].tool_calls[0].result == (
+        f"{result}\n"
+        f"File reference for Image 1: {file_handle(image)}\n"
+        f"File reference for File 1: {file_handle(document)}"
+    )
+
+
 def test_replayed_tool_result_carries_a_reference_url_per_generated_image():
     first, second = uuid4(), uuid4()
     result = (
@@ -119,8 +208,8 @@ def test_replayed_tool_result_carries_a_reference_url_per_generated_image():
 
     assert messages[0].tool_calls[0].result == (
         f"{result}\n"
-        "Reference url for Image 1: https://x/1\n"
-        "Reference url for Image 2: https://x/2"
+        f"File reference for Image 1: {file_handle(first)}\n"
+        f"File reference for Image 2: {file_handle(second)}"
     )
     # The persisted row is untouched: URLs are short-lived and replay-time only.
     assert call.result == result
@@ -143,3 +232,127 @@ def test_replayed_tool_result_is_unchanged_without_a_minted_url():
     messages, _ = ContextBuilder()._build_messages(session, max_tokens=10_000)
 
     assert messages[0].tool_calls[0].result == result
+
+
+@pytest.mark.parametrize("has_files", [False, True])
+def test_deliverable_defaults_apply_with_tools_even_without_new_attachments(has_files):
+    from eneo.completion_models.infrastructure.context_builder import _Prompt
+    from eneo.completion_models.infrastructure.static_prompts import (
+        TOOL_DELIVERABLE_INSTRUCTION,
+    )
+
+    prompt = _Prompt(has_tools=True, has_file_references=has_files)
+    assert TOOL_DELIVERABLE_INSTRUCTION in str(prompt)
+    assert TOOL_DELIVERABLE_INSTRUCTION not in str(_Prompt(has_tools=False))
+
+
+def _document(name: str, *, revises: UUID | None = None, seconds: int = 0) -> File:
+    at = datetime.now(timezone.utc) + timedelta(seconds=seconds)
+    return File(
+        id=uuid4(),
+        created_at=at,
+        updated_at=at,
+        name=name,
+        checksum="0",
+        size=1,
+        mimetype="text/markdown",
+        file_type=FileType.TEXT,
+        text="# Plan",
+        user_id=uuid4(),
+        tenant_id=uuid4(),
+        revises_file_id=revises,
+    )
+
+
+def _document_turn(result: str, tool_made: list[UUID], generated_files: list[File]):
+    return SimpleNamespace(
+        questions=[
+            SimpleNamespace(
+                question="q",
+                answer="a",
+                files=[],
+                generated_files=generated_files,
+                tool_calls=[_image_tool_call(result, tool_made)],
+            )
+        ]
+    )
+
+
+DOCUMENT_RESULT = (
+    "[File 1 (Plan.md) was created and is shown to the user with your answer.]"
+)
+
+
+def test_replayed_result_names_the_readers_current_version_of_a_document():
+    original = _document("Plan.md")
+    edited = _document("Plan.md", revises=original.id, seconds=1)
+    session = _document_turn(DOCUMENT_RESULT, [original.id], [original, edited])
+
+    messages, _ = ContextBuilder()._build_messages(
+        session,
+        max_tokens=10_000,
+        file_reference_urls={original.id: "https://x/o", edited.id: "https://x/e"},
+    )
+
+    assert messages[0].tool_calls[0].result == (
+        f"{DOCUMENT_RESULT}\n"
+        f"File reference for File 1: {file_handle(original.id)}\n"
+        "User-edited revision of File 1 (current version): "
+        f"{file_handle(edited.id)}"
+    )
+
+
+def test_chained_reader_versions_name_only_the_head():
+    original = _document("Plan.md")
+    first = _document("Plan.md", revises=original.id, seconds=1)
+    second = _document("Plan.md", revises=first.id, seconds=2)
+
+    assert current_user_revisions([original.id], [original, first, second]) == {
+        original.id: second.id
+    }
+
+
+def test_a_forked_version_resolves_to_the_later_save():
+    original = _document("Plan.md")
+    older = _document("Plan.md", revises=original.id, seconds=1)
+    newer = _document("Plan.md", revises=original.id, seconds=2)
+
+    assert current_user_revisions([original.id], [original, newer, older]) == {
+        original.id: newer.id
+    }
+
+
+def test_a_tool_made_revision_is_not_a_reader_version():
+    # The model's own edit_document output is a generated file of its own
+    # turn with its own File reference line; it never counts as the reader's.
+    original = _document("Plan.md")
+    tool_edit = _document("Plan.md", revises=original.id, seconds=1)
+
+    assert (
+        current_user_revisions([original.id, tool_edit.id], [original, tool_edit]) == {}
+    )
+
+
+def test_a_reader_version_without_a_minted_url_adds_no_line():
+    original = _document("Plan.md")
+    edited = _document("Plan.md", revises=original.id, seconds=1)
+    session = _document_turn(DOCUMENT_RESULT, [original.id], [original, edited])
+
+    messages, _ = ContextBuilder()._build_messages(
+        session,
+        max_tokens=10_000,
+        file_reference_urls={original.id: "https://x/o"},
+    )
+
+    assert messages[0].tool_calls[0].result == (
+        f"{DOCUMENT_RESULT}\nFile reference for File 1: {file_handle(original.id)}"
+    )
+
+
+def test_a_revision_cycle_ends_at_the_last_unseen_version():
+    a = _document("Plan.md")
+    b = _document("Plan.md", revises=a.id, seconds=1)
+    # Impossible through the API; the walk must still terminate.
+    a.revises_file_id = b.id
+
+    assert current_user_revisions([a.id], [a, b]) == {a.id: b.id}

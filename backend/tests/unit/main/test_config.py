@@ -212,3 +212,49 @@ def test_get_settings_exits_with_a_readable_message(monkeypatch, caplog) -> None
     assert "  JWT_EXPIRY_TIME is the session lifetime in minutes" in message
     assert "86400" not in message
     assert "Traceback" not in message
+
+
+def test_mcp_app_host_origins_are_validated_like_the_public_origin() -> None:
+    settings = Settings.model_validate(
+        {
+            **get_settings().model_dump(),
+            "public_origin": "https://eneo.example.org",
+            "mcp_app_host_origins": [
+                "https://next.example.org/",
+                "https://next.example.org",
+                "http://localhost:3100",
+            ],
+        }
+    )
+
+    assert settings.mcp_app_host_origins == [
+        "https://next.example.org",
+        "http://localhost:3100",
+    ]
+    assert settings.mcp_app_view_host_origins() == [
+        "https://eneo.example.org",
+        "https://next.example.org",
+        "http://localhost:3100",
+    ]
+
+
+def test_mcp_app_host_origins_reject_an_insecure_remote_origin() -> None:
+    with pytest.raises(ValidationError, match="MCP_APP_HOST_ORIGINS entry 0"):
+        Settings.model_validate(
+            {
+                **get_settings().model_dump(),
+                "mcp_app_host_origins": ["http://next.example.org"],
+            }
+        )
+
+
+def test_view_host_origins_list_the_public_origin_once() -> None:
+    settings = Settings.model_validate(
+        {
+            **get_settings().model_dump(),
+            "public_origin": "https://eneo.example.org",
+            "mcp_app_host_origins": ["https://eneo.example.org"],
+        }
+    )
+
+    assert settings.mcp_app_view_host_origins() == ["https://eneo.example.org"]

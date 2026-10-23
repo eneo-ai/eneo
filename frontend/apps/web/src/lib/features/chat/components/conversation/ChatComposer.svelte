@@ -1,12 +1,9 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
 
-    Licensed under the MIT License.
-
     Bundles the three pieces of the chat composer — attachments, the context
-    (token) usage bar and the input box — so callers mount a single component
-    instead of stacking them by hand. Attachments and the usage bar are
-    unchanged; only the input box was redesigned.
+    (token) usage bar and the input box. Their shared width is also the query
+    container for controls, including when a side panel narrows the chat.
 -->
 <script lang="ts">
   import ConversationAttachments from "./ConversationAttachments.svelte";
@@ -17,9 +14,11 @@
   const { scrollToBottom, onNewConversation }: Props = $props();
 </script>
 
-<div class="flex w-full flex-col items-center gap-2 md:gap-4">
+<div
+  class="mx-auto flex w-full min-w-0 max-w-[74ch] flex-col items-center gap-2 @container/composer md:gap-4"
+>
   <ConversationAttachments></ConversationAttachments>
-  <div class="w-[100%] max-w-[74ch] md:w-full">
+  <div class="w-full min-w-0">
     <ContextUsageBar {onNewConversation}></ContextUsageBar>
   </div>
   <ConversationInput {scrollToBottom} {onNewConversation}></ConversationInput>

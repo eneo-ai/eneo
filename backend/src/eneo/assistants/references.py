@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
+    from eneo.rerank_models.domain.rerank_spec import RerankSpec
     from eneo.sessions.session import SessionInDB
     from eneo.websites.domain.website import Website
 
@@ -62,6 +63,7 @@ class ReferencesService:
         integration_knowledge_list: Sequence["IntegrationKnowledge"] | None = None,
         context_window_tokens: Optional[int] = None,
         version: int = 1,
+        rerank: Optional["RerankSpec"] = None,
     ) -> list["InfoBlobChunkInDBWithScore"]:
         integration_knowledge_list = list(integration_knowledge_list or [])
         if (collections or websites or integration_knowledge_list) and input_string:
@@ -100,6 +102,7 @@ class ReferencesService:
                 min_score=get_settings().inject_knowledge_min_score,
                 num_chunks=chunk_limit,
                 autocut_cutoff=autocut_cutoff,
+                rerank=rerank,
             )
 
         return []
@@ -189,6 +192,7 @@ class ReferencesService:
         embed_method: EmbedMethod = EmbedMethod.CONCATENATE,
         context_window_tokens: Optional[int] = None,
         version: int = 1,
+        rerank: Optional["RerankSpec"] = None,
     ) -> "DatastoreResult":
         files = files or []
         collections = collections or []
@@ -210,6 +214,7 @@ class ReferencesService:
             integration_knowledge_list=integration_knowledge_list,
             context_window_tokens=context_window_tokens,
             version=version,
+            rerank=rerank,
         )
         no_duplicate_chunks = self._get_info_blob_chunks_without_duplicates(chunks)
         info_blobs = await self._get_info_blobs_from_chunks(no_duplicate_chunks)

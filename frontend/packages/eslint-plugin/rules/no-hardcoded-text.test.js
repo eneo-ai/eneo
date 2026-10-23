@@ -11,6 +11,14 @@ const ruleTester = new RuleTester({
   },
 });
 
+const jsxRuleTester = new RuleTester({
+  languageOptions: {
+    ecmaVersion: 2022,
+    parserOptions: { ecmaFeatures: { jsx: true } },
+    sourceType: "module",
+  },
+});
+
 ruleTester.run("no-hardcoded-text", rule, {
   valid: [
     // Text routed through paraglide is fine.
@@ -57,6 +65,59 @@ ruleTester.run("no-hardcoded-text", rule, {
       filename: "Test.svelte",
       code: "<p>Dashboard</p>",
       options: [{ ignore: ["Eneo\\.ai"] }],
+      errors: [{ messageId: "hardcodedText" }],
+    },
+  ],
+});
+
+jsxRuleTester.run("no-hardcoded-text-jsx", rule, {
+  valid: [
+    { code: "<p>{t('hello')}</p>" },
+    { code: "<span>—</span>" },
+    { code: '<button aria-label={t("close")} />' },
+    {
+      code: "<title>Eneo.ai</title>",
+      options: [{ ignore: ["Eneo\\.ai"] }],
+    },
+  ],
+  invalid: [
+    {
+      code: "<p>Hello world</p>",
+      errors: [{ messageId: "hardcodedText" }],
+    },
+    {
+      code: '<button aria-label="Close" />',
+      errors: [{ messageId: "hardcodedAttr" }],
+    },
+    {
+      code: '<input placeholder={"Search users"} />',
+      errors: [{ messageId: "hardcodedAttr" }],
+    },
+    // `attributes` narrows which attributes are checked.
+    {
+      code: '<Field hint="Pick a file" aria-label="Close" />',
+      options: [{ attributes: ["hint"] }],
+      errors: [
+        {
+          messageId: "hardcodedAttr",
+          data: { attr: "hint", text: '"Pick a file"' },
+        },
+      ],
+    },
+  ],
+});
+
+jsxRuleTester.run("no-hardcoded-text-jsx (attributes option)", rule, {
+  valid: [
+    // Attribute literals left to eneo/no-literal-accessible-name.
+    { code: '<button aria-label="Close" />', options: [{ attributes: [] }] },
+    { code: '<Button label="Save" />', options: [{ attributes: ["hint"] }] },
+  ],
+  invalid: [
+    // Text between tags is still checked.
+    {
+      code: '<button aria-label="Close">Close</button>',
+      options: [{ attributes: [] }],
       errors: [{ messageId: "hardcodedText" }],
     },
   ],

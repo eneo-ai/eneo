@@ -136,11 +136,16 @@ def effective_chunk_config(embedding_model: ChunkTarget) -> ChunkConfig:
     return ChunkConfig(size, overlap)
 
 
-def build_text_splitter(embedding_model: ChunkTarget) -> RecursiveCharacterTextSplitter:
-    """The splitter every ingest path uses, sized for ``embedding_model``."""
+def build_text_splitter(
+    embedding_model: ChunkTarget, *, reserved_tokens: int = 0
+) -> RecursiveCharacterTextSplitter:
+    """The shared splitter, leaving room for text prepended before embedding."""
     config = effective_chunk_config(embedding_model)
+    if not 0 <= reserved_tokens < config.chunk_size:
+        raise ValueError("Reserved tokens must leave room for the chunk's text")
+    chunk_size = config.chunk_size - reserved_tokens
     return RecursiveCharacterTextSplitter(
-        chunk_size=config.chunk_size,
-        chunk_overlap=config.chunk_overlap,
+        chunk_size=chunk_size,
+        chunk_overlap=config.chunk_overlap * chunk_size // config.chunk_size,
         length_function=count_tokens,
     )

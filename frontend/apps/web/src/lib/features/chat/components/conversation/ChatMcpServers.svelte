@@ -1,8 +1,6 @@
 <!--
     Copyright (c) 2026 Sundsvalls Kommun
 
-    Licensed under the MIT License.
-
     MCP server controls for the chat input toolbar: pick which of the partner's
     MCP servers are active for this conversation and whether tool calls run
     automatically or require per-call approval. State is owned by the parent
@@ -109,15 +107,15 @@
 <Popover.Root>
   <Popover.Trigger
     class={buttonVariants({ variant: activeCount > 0 ? "secondary" : "ghost", size: "sm" }) +
-      " h-9 gap-1.5 rounded-lg"}
-    title={m.tools()}
+      " h-9 shrink-0 gap-1 rounded-lg px-2 @[40rem]/composer:gap-1.5 @[40rem]/composer:px-3"}
+    title={m.mcp_servers_status_aria({ active: activeCount, total })}
     aria-label={m.mcp_servers_status_aria({ active: activeCount, total })}
   >
     <Plug class="size-4" aria-hidden="true" />
-    <span class="hidden sm:inline">{m.tools()}</span>
+    <span class="hidden @[40rem]/composer:inline">{m.tools()}</span>
     <Badge
       variant={activeCount > 0 ? "default" : "outline"}
-      class="ml-0.5 px-1.5 tabular-nums"
+      class="hidden px-1.5 tabular-nums @[24rem]/composer:inline-flex"
       aria-hidden="true">{activeCount}</Badge
     >
   </Popover.Trigger>

@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
 """Deterministic OpenAI-compatible mock model server for E2E tests.
 
-The seeded test completion model points its provider `endpoint` here, so the
-backend's litellm calls land on this server instead of a real provider. Every
-chat completion returns the same fixed text — fast, free, and fully
-deterministic. Streaming and non-streaming are both supported.
+The seeded test models point their provider `endpoint` here, so the backend's
+litellm calls land on this server instead of a real provider. Every chat
+completion returns the same fixed text, and every embedding is a fixed-size
+vector derived from its input text alone — fast, free, and fully
+deterministic. Streaming and non-streaming chat are both supported.
 
 Stdlib only (no deps) so it runs on the bare image. Listens on :8200.
 """
 
+import hashlib
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from workflow_model import response as workflow_response
+
 REPLY = os.environ.get("MOCK_REPLY", "E2E mock completion: pong")
 ERROR_MARKER = os.environ.get("MOCK_ERROR_MARKER", "E2E_FORCE_MODEL_ERROR")
 PORT = int(os.environ.get("MOCK_PORT", "8200"))
+# Vector size for a request without `dimensions`; the seeded embedding model
+# sends none (e2e/seed.py).
+EMBEDDING_DIMENSIONS = int(os.environ.get("MOCK_EMBEDDING_DIMENSIONS", "32"))
 
 
 def _chunk(delta: dict, finish_reason=None) -> bytes:
@@ -43,13 +50,22 @@ def _request_text(payload: dict) -> str:
     return "\n".join(parts)
 
 
+def _embedding(text: str, dimensions: int) -> list[float]:
+    """The same text always gets the same vector; no component is ever zero,
+    so the cosine distances the backend ranks by are always defined."""
+    digest = hashlib.shake_256(text.encode()).digest(dimensions)
+    return [(byte - 127.5) / 127.5 for byte in digest]
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # keep test output clean
         pass
 
     def do_GET(self):
         # Health + a stub /models so any litellm preflight is happy.
-        self._json(200, {"status": "ok"} if self.path.endswith("/health") else {"data": []})
+        self._json(
+            200, {"status": "ok"} if self.path.endswith("/health") else {"data": []}
+        )
 
     def do_POST(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -58,6 +74,10 @@ class Handler(BaseHTTPRequestHandler):
             req = json.loads(body or b"{}")
         except json.JSONDecodeError:
             req = {}
+
+        if self.path.endswith("/embeddings"):
+            self._embeddings(req)
+            return
 
         if not self.path.endswith("/chat/completions"):
             self._json(404, {"error": "not found"})
@@ -76,8 +96,9 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        message = workflow_response(req) or {"role": "assistant", "content": REPLY}
         if req.get("stream"):
-            self._stream()
+            self._stream(message)
         else:
             self._json(
                 200,
@@ -88,22 +109,56 @@ class Handler(BaseHTTPRequestHandler):
                     "choices": [
                         {
                             "index": 0,
-                            "message": {"role": "assistant", "content": REPLY},
-                            "finish_reason": "stop",
+                            "message": message,
+                            "finish_reason": "tool_calls"
+                            if message.get("tool_calls")
+                            else "stop",
                         }
                     ],
-                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
                 },
             )
 
-    def _stream(self):
+    def _embeddings(self, req: dict):
+        texts = req.get("input") or []
+        if isinstance(texts, str):
+            texts = [texts]
+        dimensions = req.get("dimensions") or EMBEDDING_DIMENSIONS
+        data = [
+            {
+                "object": "embedding",
+                "index": index,
+                "embedding": _embedding(str(text), dimensions),
+            }
+            for index, text in enumerate(texts)
+        ]
+        self._json(
+            200,
+            {
+                "object": "list",
+                "model": req.get("model", "e2e-mock-embedding"),
+                "data": data,
+                "usage": {"prompt_tokens": len(texts), "total_tokens": len(texts)},
+            },
+        )
+
+    def _stream(self, message):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(_chunk({"role": "assistant"}))
-        self.wfile.write(_chunk({"content": REPLY}))
-        self.wfile.write(_chunk({}, finish_reason="stop"))
+        if message.get("tool_calls"):
+            for index, call in enumerate(message["tool_calls"]):
+                self.wfile.write(_chunk({"tool_calls": [{"index": index, **call}]}))
+            self.wfile.write(_chunk({}, finish_reason="tool_calls"))
+        else:
+            self.wfile.write(_chunk({"content": message.get("content") or ""}))
+            self.wfile.write(_chunk({}, finish_reason="stop"))
         self.wfile.write(b"data: [DONE]\n\n")
         self.wfile.flush()
 

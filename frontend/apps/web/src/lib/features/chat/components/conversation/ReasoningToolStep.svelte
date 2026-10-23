@@ -7,7 +7,7 @@
 -->
 <script lang="ts">
   import { m } from "$lib/paraglide/messages";
-  import { Check, X, LoaderCircle, ChevronRight } from "@lucide/svelte";
+  import { Check, X, LoaderCircle, ChevronRight, RotateCcw } from "@lucide/svelte";
   import ToolCallDetailsPanel from "./ToolCallDetailsPanel.svelte";
 
   type Status = "preparing" | "running" | "complete" | "failed" | "denied";
@@ -19,6 +19,7 @@
     args,
     toolCallId,
     onLoadResult,
+    previousAttempt = false,
     status = "complete"
   }: {
     toolName: string;
@@ -29,6 +30,7 @@
     toolCallId?: string;
     onLoadResult?: () => Promise<string | null>;
     status?: Status;
+    previousAttempt?: boolean;
   } = $props();
 
   let argsOpen = $state(false);
@@ -43,36 +45,44 @@
     argsOpen = !argsOpen;
   }
 
+  const isPreviousAttempt = $derived(status === "failed" && previousAttempt);
+
   // Visuals per status: icon colour, badge label, and badge tone. Kept in one
   // map so the header and badge never drift out of sync.
   const ui = $derived(
-    {
-      preparing: {
-        ring: "border-accent-default/40 bg-accent-dimmer text-accent-default",
-        badge: "bg-accent-dimmer text-accent-default",
-        label: m.chat_tool_status_preparing()
-      },
-      running: {
-        ring: "border-accent-default/40 bg-accent-dimmer text-accent-default",
-        badge: "bg-accent-dimmer text-accent-default",
-        label: m.chat_reasoning_running()
-      },
-      complete: {
-        ring: "border-positive-default/30 bg-positive-dimmer text-positive-default",
-        badge: "bg-positive-dimmer text-positive-default",
-        label: m.chat_tool_status_done()
-      },
-      failed: {
-        ring: "border-negative-default/30 bg-negative-dimmer text-negative-default",
-        badge: "bg-negative-dimmer text-negative-default",
-        label: m.chat_tool_status_failed()
-      },
-      denied: {
-        ring: "border-negative-default/30 bg-negative-dimmer text-negative-default",
-        badge: "bg-negative-dimmer text-negative-default",
-        label: m.tool_rejected_by_user()
-      }
-    }[status]
+    isPreviousAttempt
+      ? {
+          ring: "border-dimmer bg-secondary text-muted",
+          badge: "bg-secondary text-muted",
+          label: m.chat_tool_status_previous_attempt()
+        }
+      : {
+          preparing: {
+            ring: "border-accent-default/40 bg-accent-dimmer text-accent-default",
+            badge: "bg-accent-dimmer text-accent-default",
+            label: m.chat_tool_status_preparing()
+          },
+          running: {
+            ring: "border-accent-default/40 bg-accent-dimmer text-accent-default",
+            badge: "bg-accent-dimmer text-accent-default",
+            label: m.chat_reasoning_running()
+          },
+          complete: {
+            ring: "border-positive-default/30 bg-positive-dimmer text-positive-default",
+            badge: "bg-positive-dimmer text-positive-default",
+            label: m.chat_tool_status_done()
+          },
+          failed: {
+            ring: "border-negative-default/30 bg-negative-dimmer text-negative-default",
+            badge: "bg-negative-dimmer text-negative-default",
+            label: m.chat_tool_status_failed()
+          },
+          denied: {
+            ring: "border-negative-default/30 bg-negative-dimmer text-negative-default",
+            badge: "bg-negative-dimmer text-negative-default",
+            label: m.tool_rejected_by_user()
+          }
+        }[status]
   );
 </script>
 
@@ -84,9 +94,12 @@
       : 'cursor-default'}"
     onclick={toggleOpen}
     disabled={!canExpand}
+    aria-expanded={canExpand ? argsOpen : undefined}
   >
     <div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border {ui.ring}">
-      {#if status === "running" || status === "preparing"}
+      {#if isPreviousAttempt}
+        <RotateCcw class="h-3.5 w-3.5" aria-hidden="true" />
+      {:else if status === "running" || status === "preparing"}
         <LoaderCircle class="h-3.5 w-3.5 animate-spin" />
       {:else if status === "complete"}
         <Check class="h-3.5 w-3.5" />

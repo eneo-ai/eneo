@@ -25,8 +25,8 @@ from mcp import types as mcp_types
 from pydantic import ValidationError
 from starlette.responses import JSONResponse, StreamingResponse
 
+from eneo.files.model_file_references import FILE_HANDLE_INSTRUCTION
 from eneo.main.exceptions import (
-    BadRequestException,
     MCPAuthenticationError,
     NotFoundException,
     UnauthorizedException,
@@ -41,6 +41,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
 )
 from eneo.mcp_servers.infrastructure.client import mcp_client as mcp_client_module
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
+    STRUCTURED_CONTENT_MAX_BYTES,
     MCPClient,
     MCPClientError,
 )
@@ -170,6 +171,69 @@ class TestMCPClientListToolsErrorPropagation:
                     description="x" * 128,
                     inputSchema={"type": "object"},
                     annotations=None,
+                )
+            ]
+        )
+
+        with pytest.raises(MCPClientError, match="definition exceeds"):
+            await client.list_tools()
+
+    @pytest.mark.asyncio
+    async def test_list_tools_captures_tool_meta(self):
+        ui_meta = {
+            "io.modelcontextprotocol/ui": {"resourceUri": "ui://weather/dashboard"}
+        }
+        mock_server = MagicMock()
+        mock_server.name = "test-server"
+        mock_server.tool_catalog_max_count = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT
+        mock_server.tool_catalog_max_bytes = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES
+        mock_server.tool_definition_max_bytes = MCP_TOOL_DEFINITION_DEFAULT_MAX_BYTES
+        client = MCPClient(mock_server)
+        client.session = AsyncMock()
+        client.session.list_tools.return_value = SimpleNamespace(
+            tools=[
+                SimpleNamespace(
+                    name="with_meta",
+                    title=None,
+                    description=None,
+                    inputSchema={"type": "object"},
+                    annotations=None,
+                    meta=ui_meta,
+                ),
+                SimpleNamespace(
+                    name="without_meta",
+                    title=None,
+                    description=None,
+                    inputSchema={"type": "object"},
+                    annotations=None,
+                ),
+            ]
+        )
+
+        tools = await client.list_tools()
+
+        by_name = {tool["name"]: tool for tool in tools}
+        assert by_name["with_meta"]["meta"] == ui_meta
+        assert by_name["without_meta"]["meta"] is None
+
+    @pytest.mark.asyncio
+    async def test_list_tools_meta_counts_toward_definition_budget(self):
+        mock_server = MagicMock()
+        mock_server.name = "test-server"
+        mock_server.tool_catalog_max_count = MCP_TOOL_CATALOG_DEFAULT_MAX_COUNT
+        mock_server.tool_catalog_max_bytes = MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES
+        mock_server.tool_definition_max_bytes = 256
+        client = MCPClient(mock_server)
+        client.session = AsyncMock()
+        client.session.list_tools.return_value = SimpleNamespace(
+            tools=[
+                SimpleNamespace(
+                    name="meta_heavy",
+                    title=None,
+                    description=None,
+                    inputSchema={"type": "object"},
+                    annotations=None,
+                    meta={"padding": "x" * 512},
                 )
             ]
         )
@@ -729,6 +793,45 @@ class TestMCPClientAuthenticationErrorMapping:
 
         assert "meta" not in result
 
+    async def test_call_tool_keeps_structured_content_whole(self):
+        server = MagicMock()
+        server.name = "test-server"
+        server.http_url = "http://localhost:8080"
+        server.http_auth_type = "none"
+
+        client = MCPClient(server)
+        client.session = AsyncMock()
+        client.session.call_tool.return_value = SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="12 degrees")],
+            isError=False,
+            meta=None,
+            structuredContent={"temperature": 12},
+        )
+
+        result = await client.call_tool("tool", {})
+
+        assert result["structured_content"] == {"temperature": 12}
+
+    async def test_call_tool_drops_oversized_structured_content_entirely(self):
+        server = MagicMock()
+        server.name = "test-server"
+        server.http_url = "http://localhost:8080"
+        server.http_auth_type = "none"
+
+        client = MCPClient(server)
+        client.session = AsyncMock()
+        client.session.call_tool.return_value = SimpleNamespace(
+            content=[SimpleNamespace(type="text", text="done")],
+            isError=False,
+            meta=None,
+            structuredContent={"rows": "x" * STRUCTURED_CONTENT_MAX_BYTES},
+        )
+
+        result = await client.call_tool("tool", {})
+
+        assert "structured_content" not in result
+        assert result["content"] == [{"type": "text", "text": "done"}]
+
     @pytest.mark.asyncio
     async def test_non_auth_upstream_error_does_not_map_to_authentication_error(self):
         server = MagicMock()
@@ -742,6 +845,65 @@ class TestMCPClientAuthenticationErrorMapping:
 
         with pytest.raises(MCPClientError):
             await client.list_tools()
+
+
+class TestMCPClientCancellation:
+    """A cancelled caller is not a failed MCP request."""
+
+    @staticmethod
+    def _client() -> MCPClient:
+        server = MagicMock()
+        server.name = "test-server"
+        server.http_url = "http://localhost:8080"
+        server.http_auth_type = "none"
+        client = MCPClient(server)
+        client.session = AsyncMock()
+        return client
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("method", "call"),
+        [
+            ("list_tools", lambda client: client.list_tools()),
+            ("call_tool", lambda client: client.call_tool("tool", {})),
+        ],
+    )
+    async def test_cancellation_during_a_request_propagates(self, method, call):
+        client = self._client()
+
+        async def never_responds(*_args, **_kwargs):
+            await asyncio.Event().wait()
+
+        getattr(client.session, method).side_effect = never_responds
+        request = asyncio.create_task(call(client))
+        for _ in range(3):
+            await asyncio.sleep(0)
+
+        request.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await request
+
+    @pytest.mark.asyncio
+    async def test_cancellation_as_a_tool_call_completes_propagates(self):
+        # The caller is cancelled in the same step as the response arrives.
+        client = self._client()
+        request: asyncio.Task | None = None
+
+        async def respond(*_args, **_kwargs):
+            assert request is not None
+            request.cancel()
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="done")],
+                isError=False,
+                meta=None,
+            )
+
+        client.session.call_tool.side_effect = respond
+        request = asyncio.create_task(client.call_tool("tool", {}))
+
+        with pytest.raises(asyncio.CancelledError):
+            await request
 
 
 # =============================================================================
@@ -795,7 +957,10 @@ class TestMCPProxySessionToolCollision:
             # The registered tool should be from server1
             tools = proxy.get_tools_for_llm()
             assert len(tools) == 1
-            assert tools[0]["function"]["description"] == "First server's list"
+            assert (
+                tools[0]["function"]["description"]
+                == FILE_HANDLE_INSTRUCTION + "\n\n" + "First server's list"
+            )
 
             # Warning should have been logged
             mock_logger.warning.assert_called()
@@ -842,7 +1007,10 @@ class TestMCPProxySessionToolCollision:
 
             # First one wins
             tools = proxy.get_tools_for_llm()
-            assert tools[0]["function"]["description"] == "Dot version"
+            assert (
+                tools[0]["function"]["description"]
+                == FILE_HANDLE_INSTRUCTION + "\n\n" + "Dot version"
+            )
 
             # Warning logged
             mock_logger.warning.assert_called()
@@ -872,19 +1040,25 @@ class TestMCPProxySessionToolDisplayName:
         [tool] = self._proxy("Ladda upp filer").get_tools_for_llm()
 
         assert tool["function"]["name"] == "files__ingest_urls"
-        assert tool["function"]["description"] == (
+        assert tool["function"]["description"] == FILE_HANDLE_INSTRUCTION + "\n\n" + (
             'Display name: "Ladda upp filer".\nFetch files from HTTPS links.'
         )
 
     def test_description_is_untouched_without_a_title(self):
         [tool] = self._proxy(None).get_tools_for_llm()
 
-        assert tool["function"]["description"] == "Fetch files from HTTPS links."
+        assert (
+            tool["function"]["description"]
+            == FILE_HANDLE_INSTRUCTION + "\n\n" + "Fetch files from HTTPS links."
+        )
 
     def test_title_equal_to_the_tool_name_adds_nothing(self):
         [tool] = self._proxy("ingest_urls").get_tools_for_llm()
 
-        assert tool["function"]["description"] == "Fetch files from HTTPS links."
+        assert (
+            tool["function"]["description"]
+            == FILE_HANDLE_INSTRUCTION + "\n\n" + "Fetch files from HTTPS links."
+        )
 
 
 # =============================================================================
@@ -1144,109 +1318,5 @@ class TestMCPServerURLValidation:
         assert dto.http_url == "192.168.1.100:8080"
 
 
-# =============================================================================
-# P6: Tool ownership validation in space updates
-# =============================================================================
-
-
-class TestSpaceRepoToolOwnershipValidation:
-    """Test that _set_mcp_tools validates tool ownership."""
-
-    @pytest.mark.asyncio
-    async def test_rejects_invalid_tool_ids(self):
-        """Should raise BadRequestException for tool IDs not belonging to selected servers."""
-        from eneo.spaces.space_repo import SpaceRepository
-
-        # Create mock session with query support
-        mock_session = AsyncMock()
-
-        # When querying for valid tools, return empty (no valid tools)
-        mock_result = MagicMock()
-        mock_result.fetchall.return_value = []
-        mock_session.execute.return_value = mock_result
-
-        # Create minimal repo (we'll call _set_mcp_tools directly)
-        repo = object.__new__(SpaceRepository)
-        repo.session = mock_session
-
-        mock_space_in_db = MagicMock()
-        mock_space_in_db.id = uuid4()
-
-        invalid_tool_id = uuid4()
-        valid_server_id = uuid4()
-
-        # Call _set_mcp_tools with a tool that doesn't belong to any selected server
-        with pytest.raises(BadRequestException) as exc_info:
-            await repo._set_mcp_tools(
-                mock_space_in_db,
-                tool_settings=[(invalid_tool_id, True)],
-                valid_server_ids=[valid_server_id],
-            )
-
-        assert "Invalid tool IDs" in str(exc_info.value)
-        assert str(invalid_tool_id) in str(exc_info.value)
-
-    @pytest.mark.asyncio
-    async def test_accepts_valid_tool_ids(self):
-        """Should accept tool IDs that belong to selected servers."""
-        from eneo.spaces.space_repo import SpaceRepository
-
-        valid_tool_id = uuid4()
-        valid_server_id = uuid4()
-
-        # Create mock session
-        mock_session = AsyncMock()
-
-        # First execute: DELETE existing settings
-        # Second execute: SELECT valid tools (returns our tool)
-        # Third execute: INSERT new settings
-        call_count = [0]
-
-        async def mock_execute(stmt):
-            call_count[0] += 1
-            if call_count[0] == 2:  # Second call is the validation query
-                mock_result = MagicMock()
-                mock_result.fetchall.return_value = [(valid_tool_id,)]
-                return mock_result
-            return MagicMock()
-
-        mock_session.execute = mock_execute
-
-        repo = object.__new__(SpaceRepository)
-        repo.session = mock_session
-
-        mock_space_in_db = MagicMock()
-        mock_space_in_db.id = uuid4()
-
-        # Should NOT raise - tool is valid
-        await repo._set_mcp_tools(
-            mock_space_in_db,
-            tool_settings=[(valid_tool_id, True)],
-            valid_server_ids=[valid_server_id],
-        )
-
-        # Verify all three queries were executed (delete, select, insert)
-        assert call_count[0] == 3
-
-    @pytest.mark.asyncio
-    async def test_empty_tool_settings_skips_validation(self):
-        """Should handle empty tool settings without error."""
-        from eneo.spaces.space_repo import SpaceRepository
-
-        mock_session = AsyncMock()
-
-        repo = object.__new__(SpaceRepository)
-        repo.session = mock_session
-
-        mock_space_in_db = MagicMock()
-        mock_space_in_db.id = uuid4()
-
-        # Should not raise - empty list
-        await repo._set_mcp_tools(
-            mock_space_in_db,
-            tool_settings=[],
-            valid_server_ids=[],
-        )
-
-        # Only DELETE should have been called
-        assert mock_session.execute.call_count == 1
+# Persistence ownership/override cases execute real rows in
+# spaces/test_space_write_ownership.py.

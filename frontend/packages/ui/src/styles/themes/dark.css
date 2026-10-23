@@ -63,6 +63,10 @@
   --warning-default: var(--color-ui-yellow-500);
   --warning-dimmer: var(--color-ui-yellow-900);
 
+  /* Search hits: a deeper yellow under light text. */
+  --highlight: var(--color-ui-yellow-700);
+  --highlight-foreground: var(--color-ui-yellow-50);
+
   --change-indicator: var(--color-ui-orange-100);
   --beta-indicator: var(--color-amethyst-300);
 

@@ -1,7 +1,7 @@
 # What's new — playbook
 
 `releases.json` is the single source for the **What's new** page in the app
-(`/whats-new`) and the release notes page on docs.eneo.ai. It is written for
+(`/news`) and the release notes page on docs.eneo.ai. It is written for
 the people who use Eneo — case workers, administrators — not for developers.
 Developer-facing notes belong in the GitHub release.
 
@@ -61,17 +61,19 @@ Run this when the release branch is cut or the tag is about to be pushed.
 2. Write one entry per change (merge PRs that describe the same feature) into
    a new release object at the **top** of `releases` in `releases.json`:
 
-   | Field      | Rule                                                                                                                       |
-   | ---------- | -------------------------------------------------------------------------------------------------------------------------- |
-   | `version`  | Semver without `v`, matching the tag (`v2.3.0` → `2.3.0`).                                                                 |
-   | `date`     | Leave out in the draft; set `YYYY-MM-DD` when the tag is pushed.                                                           |
-   | `id`       | Stable kebab-case, unique within the release. Never rename after publishing — it is the deep-link target on docs.          |
-   | `type`     | `new` (could not do before), `improved` (could, now better), `fixed` (was broken for users).                               |
-   | `area`     | Where the user meets it: `chat`, `assistants`, `knowledge`, `spaces`, `skills`, `account`, `admin`, `platform`.            |
-   | `audience` | `admin` when only administrators can see the screen. Omit otherwise. Hidden from non-admins in the app.                    |
-   | `title`    | ≤ 60 characters, verb first ("Change your own password"). Both `en` and `sv`.                                              |
-   | `body`     | 1–3 sentences. What the user can do now and where. Both `en` and `sv`.                                                     |
-   | `showMe`   | Optional. `href` is the app path without locale prefix; `anchor` must exist as `data-tour="…"` in `frontend/apps/web/src`. |
+   | Field         | Rule                                                                                                                                                     |
+   | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `version`     | Semver without `v`, matching the tag (`v2.3.0` → `2.3.0`).                                                                                               |
+   | `date`        | Leave out in the draft; set `YYYY-MM-DD` when the tag is pushed.                                                                                         |
+   | `id`          | Stable kebab-case, unique within the release. Never rename after publishing — it is the deep-link target on docs.                                        |
+   | `aliases`     | When merging published entries, keep their former ids here so existing links still work. Unique across all ids and aliases in the release.               |
+   | `type`        | `new` (could not do before), `improved` (could, now better), `fixed` (was broken for users).                                                             |
+   | `area`        | Where the user meets it: `chat`, `assistants`, `knowledge`, `spaces`, `skills`, `account`, `admin`, `platform`.                                          |
+   | `audience`    | `admin` when only administrators can see the screen. Omit otherwise. Hidden from non-admins in the app.                                                  |
+   | `permissions` | Optional `{ "allOf": [...], "anyOf": [...] }` using actual Eneo permission names. Both groups must pass when present. See Permission requirements below. |
+   | `title`       | ≤ 60 characters, verb first ("Change your own password"). Both `en` and `sv`.                                                                            |
+   | `body`        | 1–3 sentences. What the user can do now and where. Both `en` and `sv`.                                                                                   |
+   | `showMe`      | Optional. `href` is the app path without locale prefix; `anchor` must exist as `data-tour="…"` in `frontend/apps/web/src`.                               |
 
 3. Editorial rules — the check script enforces the mechanical ones:
 
@@ -98,6 +100,14 @@ Run this when the release branch is cut or the tag is about to be pushed.
 
 ## 3. Review (release owner, 15–30 minutes)
 
+Before each RC, rerun the collector against the exact candidate commit, with
+an explicit `--since` tag. Reconcile every described and missing-section PR
+in the release PR: link it to an entry, or record why it is excluded (already
+released, internal-only, beta-only, or part of another entry). Inspect the
+titles of PRs marked No as well; the presence check cannot judge correctness.
+Repeat this reconciliation for commits added since the previous RC, especially
+late UI changes. A passing schema check proves shape and links, not coverage.
+
 Read it as a user would. Cut, reorder, sharpen. Set `date`. Merge to the
 release branch before the tag is pushed so the release image ships with its
 own notes, and run the tag rule before creating the GitHub release:
@@ -113,6 +123,70 @@ the tag fails (notes for a later version must not ship in an older release).
 A hotfix tag needs no entry of its own, but all the notes it does ship must be
 dated. Running it first avoids a published GitHub release whose image build
 then fails.
+
+### RC notification identity
+
+Author one content entry for the final core version, such as `2.3.0`.
+The tag validator rejects an RC with no matching release content, so a new
+candidate cannot silently reuse an older version's notification identity.
+The primary web app uses the installed frontend version from `APP_VERSION`
+to resolve that content as `2.3.0-rc.1` while running that candidate. The page,
+popup and persisted seen/announced markers use the same resolved identity.
+Do not copy the release entry for each RC or use an RC's core version as its
+progress marker. RCs ignore the draft's eventual final date; docs keep the
+authored release list. Local unversioned builds keep the authored identity.
+
+Validate RC0 → RC1 → RC10 → final, reload on the same version, and rollback
+to an older RC. The store and Chromium tests cover these boundaries. A newer
+RC backend ignores future markers sent by stale clients, so an old tab cannot
+pre-record the final release. The 2.3 migration corrects RC0's already stored
+`2.3.0` markers to `2.3.0-rc.0` and must ship before the first 2.3 final.
+
+### Permission requirements
+
+`visibleEntries(release, can)` is the canonical app visibility rule. Pass the
+app's existing permission checker, never a role name or an admin boolean.
+`audience: "admin"` requires `admin`; `permissions` adds requirements that even
+administrators must meet. Omit requirements for general news. An omitted group
+places no constraint; a present group must be non-empty. The schema and the CI
+validator reject unknown permissions, empty groups and misspelled keys. Types
+reuse the SDK's `Permission` contract.
+
+When adding or renaming a backend permission, update the permission enum in
+`releases.schema.json` too. The contract test compares it with
+`backend/src/eneo/roles/permissions.py`; CI runs that test when either file
+changes. Assign requirements to relevant news entries explicitly: a new
+permission does not classify news automatically.
+
+Check the actual feature owner before assigning requirements, not the entry's
+area. Current examples:
+
+- Assistant editing needs `assistants`; personal chat has its separate
+  `personal_chat` permission. General chat entries also apply to assistant and
+  group chats (`anyOf: personal_chat, assistants, group_chats`).
+- Capability use additionally needs its capability permission (`file_creation`,
+  `file_analysis`, `image_generation`, `compute`, `charts`). The combined
+  calculation-and-chart workflow needs both `compute` and `charts`.
+- Creating/editing Skills needs both `skills` and `skills_management`.
+- Website crawling needs `websites`; SharePoint import needs `integrations`.
+  Reading websites and integration knowledge has no tenant permission gate
+  (`SpaceActor.tenant_permits`), so read-only status/sync news stays general.
+- Module administration needs both the admin audience and `modules`. Storage,
+  model and organisation Skill administration use their actual `admin` gate;
+  do not infer extra permissions from a feature's name.
+
+Requirements filter relevance to tenant permissions. Resource membership,
+provider availability and tenant feature settings still belong to their feature
+owners; news is not an authorization boundary. Tour preloading continues to
+skip inaccessible resources. The public docs render all entries.
+
+The app hides releases with no visible entries from its picker and computes
+unread state from visible news. The latest bundled release is announced only
+when it has visible entries; an empty latest release does not announce an older
+release instead. Reading visible history still advances the installed release
+marker. Empty news does not write progress or consume reminders, so a later
+permission grant can make that release available. Version/RC ordering and
+per-account reminder keys are unchanged.
 
 ## Maintenance
 
@@ -188,7 +262,7 @@ when their layout data reloads. New tenants follow the global default (on).
   for, and **announced** (`PUT …/announced/`), the newest release they have
   been shown the one-time announcement dialog for. The profile menu shows a
   dot while `releases[0].version` is newer than the seen marker, and the dot
-  clears when the user opens `/whats-new`.
+  clears when the user opens `/news`.
 - **Announcement.** On the first app load after a release reaches the user,
   a dialog shows the first four visible entries and the total entry count.
   Its primary action starts the walkthrough, or opens the page if there are
@@ -196,6 +270,13 @@ when their layout data reloads. New tenants follow the global default (on).
   seen marker alone, so the dot stays until the user opens the page. Accounts
   created after a dated release are marked announced without opening the
   dialog. Undated development releases announce to all existing accounts.
+- **Reminder.** "Later" saves a local-storage deadline scoped to the
+  user id and installed version. It may announce again in that browser on an app
+  load after 24 hours, only while unread. Showing it consumes the reminder; "Not
+  interested" or Escape closes it until a newer version. Opening the news cancels
+  its reminder. A newer version announces immediately; older clients cannot
+  overwrite another version's local reminder. The developer reset clears the
+  current local reminder along with the server's seen/announced markers.
 - "Unseen" means `releases[0].version` is **newer** (semver) than the seen
   version, so a rollback or an older frontend pod during a rolling deploy
   does not re-light the dot. No coupling to the deployed version number:

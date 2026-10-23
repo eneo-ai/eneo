@@ -2,8 +2,13 @@
   import { onMount } from "svelte";
   import { quadInOut } from "svelte/easing";
   import { fly } from "svelte/transition";
+  import { m } from "$lib/paraglide/messages";
 
-  export let parent: { title?: string; href: string } | null = null;
+  type Crumb = { title?: string; href: string };
+
+  export let parent: Crumb | null = null;
+  /** The pages above this one, nearest last; takes precedence over `parent`. */
+  export let parents: Crumb[] | null = null;
   export let title: string | undefined = undefined;
   export let truncate = false;
   /** Anchor for the What's new "Show me" spotlight (rendered as data-tour). */
@@ -14,6 +19,9 @@
   // When truncating always start in overflow state, it's better to have a too small component expand than
   // a too large one shrink when the value is computed for the first time
   let isOverflowing = truncate;
+
+  $: crumbs = parents ?? (parent ? [parent] : []);
+  $: lastCrumb = crumbs.at(-1);
 
   function setThreshold() {
     if (titleContainer && titleContainer.parentElement && truncate) {
@@ -50,27 +58,42 @@
 >
   <div class="overflow-hidden pl-2 text-[1.4rem]">
     <div class="flex w-full items-baseline gap-2">
-      {#if parent}
-        <!-- eslint-disable svelte/no-navigation-without-resolve -- href is a typed prop passed from caller -->
-        <a
-          href={parent.href}
-          class="text-muted hover:border-dimmer hover:bg-hover-default hover:text-primary -mx-2 inline-block rounded-lg border border-transparent px-2 py-0.5 text-[1.35rem] tracking-[-0.01rem] whitespace-nowrap"
-          >←
-          {#if parent.title}
-            <span class:sr-only={isOverflowing}>
-              &nbsp;{parent.title}
-            </span>
-          {/if}
-        </a>
-        <!-- eslint-enable svelte/no-navigation-without-resolve -->
-        {#if parent.title}
-          <div class="text-muted" class:hidden={isOverflowing}>/</div>
+      {#if crumbs.length > 0}
+        <nav aria-label={m.breadcrumb()}>
+          <ol class="flex items-baseline gap-2">
+            <!-- Overflowing, every crumb keeps a visible, focusable link and hides only its
+                 text: the first shows the arrow, the others an ellipsis. -->
+            {#each crumbs as crumb, index (crumb.href)}
+              <li class="flex items-baseline gap-2">
+                {#if index > 0}
+                  <span class="text-muted" class:hidden={isOverflowing} aria-hidden="true">/</span>
+                {/if}
+                <!-- eslint-disable svelte/no-navigation-without-resolve -- href is a typed prop passed from caller -->
+                <a
+                  href={crumb.href}
+                  class="text-muted hover:border-dimmer hover:bg-hover-default hover:text-primary -mx-2 inline-block rounded-lg border border-transparent px-2 py-0.5 text-[1.35rem] tracking-[-0.01rem] whitespace-nowrap"
+                  >{#if index === 0}←&nbsp;{:else if isOverflowing}<span aria-hidden="true">…</span
+                    >{/if}{#if crumb.title}<span class:sr-only={isOverflowing}>{crumb.title}</span
+                    >{/if}</a
+                >
+                <!-- eslint-enable svelte/no-navigation-without-resolve -->
+              </li>
+            {/each}
+          </ol>
+        </nav>
+        {#if lastCrumb?.title}
+          <div class="text-muted" aria-hidden="true" class:hidden={isOverflowing}>/</div>
         {/if}
       {/if}
 
       {#if title}
         <h1
-          in:fly|global={{ x: -5, duration: parent ? 300 : 0, easing: quadInOut, opacity: 0.3 }}
+          in:fly|global={{
+            x: -5,
+            duration: crumbs.length > 0 ? 300 : 0,
+            easing: quadInOut,
+            opacity: 0.3
+          }}
           class:pl-2={isOverflowing}
           class="text-primary inline-block w-full items-center gap-2 truncate pr-4 text-[1.45rem] leading-normal font-extrabold"
         >

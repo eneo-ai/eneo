@@ -15,6 +15,7 @@
     Trash2,
     Users
   } from "@lucide/svelte";
+  import HighlightedText from "$lib/components/HighlightedText.svelte";
   import * as Alert from "$lib/components/ui/alert/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -26,7 +27,14 @@
   import { createAsyncState } from "$lib/core/helpers/createAsyncState.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { getJobManager } from "$lib/features/jobs/JobManager";
+  import { trackImports } from "$lib/features/integrations/importCompletion";
+  import { integrationDocumentsHref } from "$lib/features/integrations/integrationDocuments";
+  import {
+    KNOWLEDGE_NAME_MAX_LENGTH,
+    fitKnowledgeName
+  } from "$lib/features/integrations/knowledgeNames";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import { embeddingModelLabel } from "$lib/features/ai-models/modelLabels";
   import type { IntegrationImportDialogProps } from "../IntegrationData";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -124,6 +132,26 @@
   let selectedItems = $state<SelectedImportItem[]>([]);
   let wrapperName = $state("");
   let wrapperNameTouched = $state(false);
+  let importResult = $state<{ queued: number; failed: number; knowledgeIds: string[] } | null>(
+    null
+  );
+
+  // The batch response carries no wrapper id; the refreshed space does.
+  let importResultHref = $derived.by(() => {
+    const integrationsHref = `/spaces/${$currentSpace.routeId}/knowledge?tab=integrations`;
+    if (!importResult) return integrationsHref;
+    const created = $currentSpace.knowledge.integrationKnowledge.filter((item) =>
+      importResult?.knowledgeIds.includes(item.id)
+    );
+    const wrapperId = created.find((item) => item.wrapper_id)?.wrapper_id;
+    if (wrapperId) {
+      return `/spaces/${$currentSpace.routeId}/knowledge/integrations/wrapper/${wrapperId}`;
+    }
+    if (importResult.knowledgeIds.length === 1) {
+      return integrationDocumentsHref($currentSpace.routeId, importResult.knowledgeIds[0]);
+    }
+    return integrationsHref;
+  });
 
   onMount(() => openController.subscribe((value) => (dialogOpen = value)));
   $effect(() => {
@@ -273,6 +301,7 @@
 
   function resetSelection() {
     activeStep = "source";
+    importResult = null;
     sourceFilter = "";
     selectedSite = null;
     selectedItems = [];
@@ -352,6 +381,31 @@
     selectedItems = [...remainingItems, { selectionKey, item, importName: item.name }];
   }
 
+  /** Adds every item not already selected or covered by a selected folder; a folder replaces its selected contents. */
+  function selectManyItems(items: SelectedTreeItem[]) {
+    let next = selectedItems;
+    for (const item of items) {
+      const selectionKey = getSelectionKey(item);
+      if (next.some((entry) => entry.selectionKey === selectionKey)) continue;
+      const covered = next.some(
+        (entry) =>
+          (entry.item.type === "folder" || entry.item.type === "site_root") &&
+          isSharePointDescendantPath(item.path, entry.item.path)
+      );
+      if (covered) continue;
+      if (item.type === "folder") {
+        next = next.filter((entry) => !isSharePointDescendantPath(entry.item.path, item.path));
+      }
+      next = [...next, { selectionKey, item, importName: item.name }];
+    }
+    selectedItems = next;
+  }
+
+  function deselectManyItems(items: SelectedTreeItem[]) {
+    const keys = new Set(items.map(getSelectionKey));
+    selectedItems = selectedItems.filter((entry) => !keys.has(entry.selectionKey));
+  }
+
   let selectedItemKeys = $derived(selectedItems.map((entry) => entry.selectionKey));
   let selectedPaths = $derived(selectedItems.map((entry) => entry.item.path));
   let dedupedSelection = $derived.by(() => {
@@ -407,7 +461,8 @@
   });
 
   function getModelDisplayName(model: EmbeddingModel): string {
-    return model.open_source ? `${model.name} (${m.model_label_open_source()})` : model.name;
+    const label = embeddingModelLabel(model);
+    return model.open_source ? `${label} (${m.model_label_open_source()})` : label;
   }
 
   function selectEmbeddingModel(id: string) {
@@ -427,10 +482,10 @@
 
     try {
       const site = selectedSite;
-      const resourceType = site.type === "onedrive" ? "onedrive" : "site";
+      const resourceType = site.type === "onedrive" ? ("onedrive" as const) : ("site" as const);
       const batchItems = dedupedSelection.effectiveEntries.map((entry) => ({
         key: site.key,
-        name: entry.importName.trim() || entry.item.name,
+        name: fitKnowledgeName(entry.importName.trim() || entry.item.name),
         url: entry.item.type === "site_root" ? (site.url ?? "") : (entry.item.web_url ?? ""),
         folder_id: entry.item.type === "site_root" ? undefined : entry.item.id,
         folder_path: entry.item.type === "site_root" ? undefined : entry.item.path,
@@ -451,6 +506,29 @@
       createdItems.forEach((item) => {
         if (item.job) addJob(item.job);
       });
+      // One notice for the whole import; the first job's id names the batch.
+      const batch =
+        createdItems.length > 1 && createdItems[0].job
+          ? {
+              batchId: createdItems[0].job.id,
+              batchName: requiresWrapperName ? wrapperName.trim() : site.name
+            }
+          : {};
+      trackImports(
+        createdItems.flatMap((item) =>
+          item.job && item.integration_knowledge_id
+            ? [
+                {
+                  jobId: item.job.id,
+                  knowledgeId: item.integration_knowledge_id,
+                  name: item.name,
+                  spaceRouteId: $currentSpace.routeId,
+                  ...batch
+                }
+              ]
+            : []
+        )
+      );
       refreshCurrentSpace();
       startFastUpdatePolling();
 
@@ -466,12 +544,16 @@
             failed: failedItems.length
           })
         );
-      } else {
-        toast.success(m.sharepoint_batch_import_success({ count: createdItems.length }));
       }
 
-      dialogOpen = false;
-      resetFlow();
+      importResult = {
+        queued: createdItems.length,
+        failed: failedItems.length,
+        knowledgeIds: createdItems.flatMap((item) =>
+          item.integration_knowledge_id ? [item.integration_knowledge_id] : []
+        )
+      };
+      activeStep = "complete";
     } catch (error) {
       toastError(error);
     }
@@ -574,11 +656,15 @@
           >
             <Command.Input
               bind:value={sourceFilter}
+              variant="field"
               placeholder={m.find_sharepoint_site()}
               aria-label={m.find_sharepoint_site()}
             />
+            <!-- The shared list caps its height at 18rem and hides the scrollbar
+                 for the command palette; here the list owns the rest of the box
+                 and a tenant with hundreds of sites must be visibly scrollable. -->
             <Command.List
-              class="min-h-0 flex-1 border-t"
+              class="mt-2 min-h-0 max-h-none flex-1 border-t [scrollbar-width:thin]! [&::-webkit-scrollbar]:block!"
               aria-busy={loadPreview.isLoading}
               aria-label={m.sharepoint_available_sources()}
             >
@@ -587,7 +673,7 @@
                   class="text-muted-foreground flex items-center justify-center gap-2 px-4 py-10"
                   role="status"
                 >
-                  <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+                  <LoaderCircle class="size-4 motion-safe:animate-spin" aria-hidden="true" />
                   {m.loading_available_sites()}
                 </div>
               {:else if previewLoadFailed}
@@ -611,7 +697,12 @@
                         onSelect={() => handleSiteSelect(previewItem.value)}
                       >
                         <CategoryIcon class="text-muted-foreground size-4" aria-hidden="true" />
-                        <span class="min-w-0 flex-1 truncate">{previewItem.label}</span>
+                        <span class="min-w-0 flex-1 truncate">
+                          <HighlightedText
+                            text={previewItem.label}
+                            query={sourceFilter.trim().toLowerCase()}
+                          />
+                        </span>
                       </Command.Item>
                     {/each}
                   </Command.Group>
@@ -651,6 +742,8 @@
             {selectedItemKeys}
             {selectedPaths}
             onToggleSelect={toggleSelectedItem}
+            onSelectMany={selectManyItems}
+            onDeselectMany={deselectManyItems}
           />
 
           {#if dedupedSelection.skippedCount > 0}
@@ -691,6 +784,7 @@
               <Input
                 id="sharepoint-wrapper-name"
                 bind:value={wrapperName}
+                maxlength={KNOWLEDGE_NAME_MAX_LENGTH}
                 placeholder={m.sharepoint_wrapper_name_placeholder()}
                 aria-invalid={showWrapperNameError}
                 aria-describedby="sharepoint-wrapper-description"
@@ -770,6 +864,7 @@
                     <Input
                       id={`sharepoint-import-name-${index}`}
                       value={selection.importName}
+                      maxlength={KNOWLEDGE_NAME_MAX_LENGTH}
                       oninput={(event) =>
                         updateSelectionName(selection.selectionKey, event.currentTarget.value)}
                     />
@@ -807,16 +902,43 @@
           >
             <CircleCheck class="text-positive-stronger size-8" aria-hidden="true" />
           </span>
-          <div>
-            <h3 id="sharepoint-simulation-complete-heading" class="text-lg font-semibold">
-              {m.sharepoint_fixture_simulation_complete_title()}
-            </h3>
-            <p class="text-muted-foreground mt-1 max-w-md text-sm">
-              {m.sharepoint_fixture_simulation_complete_description({
-                count: dedupedSelection.effectiveEntries.length
-              })}
-            </p>
-          </div>
+          {#if importResult}
+            <div>
+              <h3 id="sharepoint-simulation-complete-heading" class="text-lg font-semibold">
+                {m.integration_import_complete_title()}
+              </h3>
+              <p class="text-muted-foreground mt-1 max-w-md text-sm">
+                {importResult.queued === 1
+                  ? m.integration_import_complete_description_one()
+                  : m.integration_import_complete_description({ count: importResult.queued })}
+              </p>
+              {#if importResult.failed > 0}
+                <p class="text-warning-stronger mt-1 max-w-md text-sm">
+                  {importResult.failed === 1
+                    ? m.integration_import_complete_failed_one()
+                    : m.integration_import_complete_failed({ failed: importResult.failed })}
+                </p>
+              {/if}
+            </div>
+            <Button
+              variant="outline"
+              href={importResultHref}
+              onclick={() => handleDialogOpenChange(false)}
+            >
+              {m.integration_import_view_site()}
+            </Button>
+          {:else}
+            <div>
+              <h3 id="sharepoint-simulation-complete-heading" class="text-lg font-semibold">
+                {m.sharepoint_fixture_simulation_complete_title()}
+              </h3>
+              <p class="text-muted-foreground mt-1 max-w-md text-sm">
+                {m.sharepoint_fixture_simulation_complete_description({
+                  count: dedupedSelection.effectiveEntries.length
+                })}
+              </p>
+            </div>
+          {/if}
         </section>
       {/if}
     </div>
@@ -845,7 +967,7 @@
             onclick={isFixtureSession ? simulateImport : importKnowledge}
           >
             {#if importKnowledge.isLoading}
-              <LoaderCircle class="animate-spin" aria-hidden="true" />
+              <LoaderCircle class="motion-safe:animate-spin" aria-hidden="true" />
               {m.importing()}
             {:else if isFixtureSession}
               <FlaskConical aria-hidden="true" />

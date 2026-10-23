@@ -27,6 +27,14 @@ export async function readEvents(response, { onOpen, onMessage, onClose }) {
     onClose?.();
     return true;
   } else {
-    throw new PartialError("RESPONSE", response.status, await response.json());
+    // A gateway in front of the backend answers with an HTML page; its markup
+    // is no message for a user, so the caller's generic message applies.
+    let parsed;
+    try {
+      parsed = await response.json();
+    } catch {
+      parsed = { message: "", eneo_error_code: 0 };
+    }
+    throw new PartialError("RESPONSE", response.status, parsed);
   }
 }

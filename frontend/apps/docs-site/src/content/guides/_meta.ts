@@ -8,7 +8,7 @@ const meta: MetaRecord = {
   skills: "Skills",
   "ai-providers": "AI Provider Configuration",
   "mcp-servers": "MCP Servers",
-  capabilities: "Web Search & Image Generation",
+  capabilities: "Functions",
   deployment: "Deploy Eneo",
   "file-icon-storage-upgrade": "Upgrade File & Icon Storage",
   "object-content-storage": "Choose Content Storage",

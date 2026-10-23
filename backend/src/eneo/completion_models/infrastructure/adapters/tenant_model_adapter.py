@@ -25,7 +25,7 @@ from typing_extensions import override
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
-    GeneratedImage,
+    GeneratedFile,
     McpToolReference,
     ModelKwargs,
     ResponseType,
@@ -33,6 +33,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
     function_definition_to_tool,
 )
+from eneo.authentication.signed_urls import redact_reference_tokens_in_json
 from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
     InvalidSkillToolCallError,
@@ -55,6 +56,7 @@ from eneo.completion_models.infrastructure.message_payload import (
 from eneo.completion_models.infrastructure.static_prompts import (
     MCP_TOOL_REFERENCES_INSTRUCTION,
 )
+from eneo.files.model_file_references import file_handle
 from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
 from eneo.main.logging import get_logger
@@ -62,15 +64,17 @@ from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
 )
+from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+    ProviderOutboundHeaders,
+    apply_outbound_headers,
+    mask_outbound_headers,
+)
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
 )
 from eneo.tokens.token_utils import count_tokens, measure_provider_input_tokens
 
 logger = get_logger(__name__)
-
-PROVIDER_UNAVAILABLE_MESSAGE = litellm_transport.PROVIDER_UNAVAILABLE_MESSAGE
-PROVIDER_UNAVAILABLE_CODE = litellm_transport.PROVIDER_UNAVAILABLE_CODE
 
 
 # Regex to match Qwen3 thinking blocks: <think>...</think>
@@ -80,6 +84,11 @@ THINKING_BLOCK_PATTERN = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 # persisted tool-result text; the bytes themselves become a generated file.
 MCP_IMAGE_PLACEHOLDER_TEMPLATE = (
     "[Image {index} ({mime_type}) was generated and is shown to the user.]"
+)
+# The same for a generated document or spreadsheet (an admitted binary
+# resource); the user opens or downloads it from the answer.
+MCP_FILE_PLACEHOLDER_TEMPLATE = (
+    "[File {index} ({filename}) was created and is shown to the user with your answer.]"
 )
 
 # Markdown image token: ![alt](url "optional title"). Captures the url only.
@@ -135,7 +144,7 @@ def _build_tool_result_with_references(
     tool_call_id: Optional[str],
     mcp_tool_name: Optional[str],
     existing_prefixes: set[str],
-) -> tuple[str, str, list[McpToolReference], list[GeneratedImage]]:
+) -> tuple[str, str, list[McpToolReference], list[GeneratedFile]]:
     """Build LLM-facing and user-facing tool result texts; capture resource refs.
 
     Two texts are produced because they serve different audiences:
@@ -162,15 +171,21 @@ def _build_tool_result_with_references(
     that emits both an inline ``![](url)`` and a ``resource_link`` for the same
     object renders it once (inline wins).
 
-    ``image`` blocks (base64 bytes) become ``GeneratedImage`` values that the
-    ask path persists as generated files. The base64 never reaches the model
-    or the persisted result text; both see a short placeholder instead.
+    ``image`` blocks (base64 bytes) and ``file`` blocks (binary resources the
+    proxy admitted from a document or spreadsheet provider) become
+    ``GeneratedFile`` values that the ask path persists as generated files.
+    The base64 never reaches the model or the persisted result text; both see
+    a short placeholder instead.
     """
     text_parts: list[str] = []
     resource_texts: list[str] = []
     llm_blocks: list[str] = []
     refs: list[McpToolReference] = []
-    images: list[GeneratedImage] = []
+    images: list[GeneratedFile] = []
+    # Placeholders number images and documents separately ("Image N",
+    # "File N"); replay appends reference urls in the same numbering.
+    pictures = 0
+    documents = 0
 
     # Inline Markdown wins. Collect every image url already embedded in any
     # text/resource block so a resource_link for the same object is suppressed
@@ -217,17 +232,39 @@ def _build_tool_result_with_references(
             if not data:
                 continue
             images.append(
-                GeneratedImage(
+                GeneratedFile(
                     data=data,
                     mime_type=mime_type,
                     tool_call_id=tool_call_id,
                     mcp_tool_name=mcp_tool_name,
                 )
             )
+            pictures += 1
             text_parts.append(
                 MCP_IMAGE_PLACEHOLDER_TEMPLATE.format(
-                    index=len(images), mime_type=mime_type
+                    index=pictures, mime_type=mime_type
                 )
+            )
+        elif block_type == "file":
+            try:
+                data = base64.b64decode(ci.get("data") or "", validate=True)
+            except (binascii.Error, ValueError):
+                continue
+            if not data:
+                continue
+            filename = ci.get("filename") or "document"
+            images.append(
+                GeneratedFile(
+                    data=data,
+                    mime_type=ci.get("mime_type") or "application/octet-stream",
+                    tool_call_id=tool_call_id,
+                    mcp_tool_name=mcp_tool_name,
+                    filename=filename,
+                )
+            )
+            documents += 1
+            text_parts.append(
+                MCP_FILE_PLACEHOLDER_TEMPLATE.format(index=documents, filename=filename)
             )
         elif block_type == "resource_link":
             # Typed image block (MCP spec, 2025-11-25). Display-only: it carries
@@ -273,6 +310,88 @@ def _build_tool_result_with_references(
     llm_segments = [seg for seg in (upstream_text, *llm_blocks) if seg]
     llm_text = "\n".join(llm_segments) + "\n\n" + MCP_TOOL_REFERENCES_INSTRUCTION
     return llm_text, display_text, refs, images
+
+
+class _GeneratedFileChunks:
+    """The FILES chunks of one tool result, and the reference lines they earn.
+
+    The consumer saves each file when its chunk is yielded and the service
+    then sets ``reference_url`` on that same chunk. Lines follow the result's
+    "[Image N ...]" and "[File N ...]" placeholders, like history replay.
+    """
+
+    def __init__(self, files: list[GeneratedFile]) -> None:
+        self.chunks = [
+            Completion(response_type=ResponseType.FILES, image=file) for file in files
+        ]
+
+    def append_references(self, text: str) -> str:
+        lines: list[str] = []
+        pictures = documents = 0
+        for chunk in self.chunks:
+            assert chunk.image is not None
+            if chunk.image.filename is None:
+                pictures += 1
+                label = f"Image {pictures}"
+            else:
+                documents += 1
+                label = f"File {documents}"
+            if chunk.reference_url and chunk.generated_file is not None:
+                lines.append(
+                    f"File reference for {label}: {file_handle(chunk.generated_file.id)}"
+                )
+        return "\n".join([text, *lines]) if text else "\n".join(lines)
+
+
+class _ArgumentDeltas:
+    """The argument text of pending tool calls, handed out in pieces.
+
+    A client shows what a call still being written will do (the text of a
+    document) from these pieces. Each piece is cut from the redacted text so
+    far, so a signed reference token is never sent. A call whose redacted
+    text stops extending what was already sent gets no further pieces.
+    """
+
+    # Smaller pieces wait for more text: one event per provider token would
+    # rescan a long document's arguments thousands of times.
+    _MIN_PIECE = 32
+
+    def __init__(self) -> None:
+        self._sent: dict[int, str] = {}
+        self._seen: dict[int, int] = {}
+        self._stopped: set[int] = set()
+
+    def next(self, index: int, arguments: str, *, flush: bool = False) -> str | None:
+        """The text of call ``index`` not yet handed out, or None to wait."""
+        if index in self._stopped:
+            return None
+        unseen = len(arguments) - self._seen.get(index, 0)
+        if unseen <= 0 or (unseen < self._MIN_PIECE and not flush):
+            return None
+        self._seen[index] = len(arguments)
+        sent = self._sent.get(index, "")
+        redacted = redact_reference_tokens_in_json(arguments)
+        if not redacted.startswith(sent):
+            self._stopped.add(index)
+            return None
+        self._sent[index] = redacted
+        return redacted[len(sent) :] or None
+
+
+async def _has_app_view(mcp_proxy: Any, prefixed_tool_name: str) -> bool:
+    """Whether the tool has an approved MCP App view.
+
+    Stub proxies without ``approved_app_view`` and every lookup failure read
+    as no view.
+    """
+    lookup = getattr(mcp_proxy, "approved_app_view", None)
+    if lookup is None:
+        return False
+    try:
+        return await lookup(prefixed_tool_name) is not None
+    except Exception:
+        logger.warning("Failed to resolve MCP app view for %s", prefixed_tool_name)
+        return False
 
 
 class _LiteLLMUsageDetails(Protocol):
@@ -426,6 +545,35 @@ class _ToolResultBudget:
         return llm_text
 
 
+class _RoundJoiner:
+    """Separates the text successive model rounds stream into one string.
+
+    Callers append every chunk of a turn's answer (or reasoning), so the text
+    a model writes before a tool call would run straight into the next
+    round's text. The first chunk of a later round therefore starts a new
+    paragraph unless a newline already divides the rounds; text within a
+    round passes through unchanged.
+    """
+
+    def __init__(self) -> None:
+        self._ends_mid_line = False
+        self._round_started = False
+
+    def start_round(self) -> None:
+        self._round_started = False
+
+    def join(self, text: str) -> str:
+        if (
+            not self._round_started
+            and self._ends_mid_line
+            and not text.startswith("\n")
+        ):
+            text = f"\n\n{text}"
+        self._round_started = True
+        self._ends_mid_line = not text.endswith("\n")
+        return text
+
+
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import (
         CompletionModel,
@@ -450,6 +598,9 @@ class TenantModelAdapter(CompletionModelAdapter):
 
     MAX_TOOL_ROUNDS = 10
 
+    # Class-level default so adapters built without __init__ (tests) send none.
+    outbound_headers: ProviderOutboundHeaders | None = None
+
     # Tool-result payload for calls refused because the round budget ran out.
     # The forced follow-up runs with tool_choice="none", so the model must
     # produce a final answer from what it already gathered instead of the
@@ -466,6 +617,7 @@ class TenantModelAdapter(CompletionModelAdapter):
         model: "CompletionModel",
         credential_resolver: TenantModelCredentialResolver,
         provider_type: str,
+        outbound_headers: ProviderOutboundHeaders | None = None,
     ):
         """
         Initialize adapter with tenant model.
@@ -474,6 +626,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             model: Tenant completion model (must have provider_id)
             credential_resolver: Resolver for tenant provider credentials
             provider_type: LiteLLM provider type (e.g., "openai", "azure", "anthropic")
+            outbound_headers: The provider's configured headers for the acting user
 
         Raises:
             ValueError: If model is not a tenant model
@@ -488,8 +641,15 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         self.litellm_model = model.get_model_route(provider_type=provider_type)
         self.provider_type = provider_type
+        self.outbound_headers = outbound_headers
 
-    def _record_provider_unavailable(self, *, phase: str, exc: BaseException) -> None:
+    def _record_provider_unavailable(
+        self,
+        *,
+        phase: str,
+        exc: BaseException,
+        failure: litellm_transport.ProviderFailure,
+    ) -> None:
         span = trace.get_current_span()
         if span.is_recording():
             is_streaming = phase in {"stream_preparation", "stream_iteration"}
@@ -497,14 +657,14 @@ class TenantModelAdapter(CompletionModelAdapter):
             span.set_attribute("gen_ai.provider.name", self.provider_type)
             span.set_attribute("gen_ai.request.model", self.model.name)
             span.set_attribute("gen_ai.request.stream", is_streaming)
-            span.set_attribute("error.type", PROVIDER_UNAVAILABLE_CODE)
+            span.set_attribute("error.type", failure.code)
             span.set_attribute("eneo.ai.provider_unavailable", True)
             span.set_attribute("eneo.ai.provider_type", self.provider_type)
             span.set_attribute("eneo.ai.model", self.litellm_model)
             span.set_attribute("eneo.ai.operation", phase)
             span.set_attribute("eneo.ai.error_type", exc.__class__.__name__)
             span.record_exception(exc)
-            span.set_status(Status(StatusCode.ERROR, PROVIDER_UNAVAILABLE_MESSAGE))
+            span.set_status(Status(StatusCode.ERROR, failure.message))
 
         logger.exception(
             f"[TenantModelAdapter] Provider unavailable for {self.litellm_model} during {phase}",
@@ -513,23 +673,20 @@ class TenantModelAdapter(CompletionModelAdapter):
                 "model": self.litellm_model,
                 "operation": phase,
                 "error_type": exc.__class__.__name__,
-                "error_code": PROVIDER_UNAVAILABLE_CODE,
+                "error_code": failure.code,
             },
         )
 
     def _raise_provider_unavailable(
         self, *, phase: str, exc: BaseException
     ) -> NoReturn:
-        self._record_provider_unavailable(phase=phase, exc=exc)
-        raise OpenAIException(
-            PROVIDER_UNAVAILABLE_MESSAGE,
-            code=PROVIDER_UNAVAILABLE_CODE,
-            details={"reason": PROVIDER_UNAVAILABLE_CODE, "retryable": True},
-        ) from exc
+        failure = litellm_transport.classify_provider_failure(exc)
+        self._record_provider_unavailable(phase=phase, exc=exc, failure=failure)
+        raise failure.to_exception() from exc
 
     def _mask_sensitive_params(self, params: dict[str, Any]) -> dict[str, Any]:
-        """Return copy of params with masked API key for safe logging."""
-        safe_params = params.copy()
+        """Return copy of params with masked API key and header values for safe logging."""
+        safe_params = mask_outbound_headers(params.copy())
         if "api_key" in safe_params:
             key = safe_params["api_key"]
             safe_params["api_key"] = f"...{key[-4:]}" if len(key) > 4 else "***"
@@ -545,6 +702,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             "api_type",
             "organization",
             "deployment_name",
+            "extra_headers",
         }
 
         try:
@@ -958,27 +1116,26 @@ class TenantModelAdapter(CompletionModelAdapter):
         eneo_tools: list[dict[str, Any]],
         tool_names: list[str],
         litellm_kwargs: dict[str, Any],
-        allowed_tools: set[str],
         skill_runtime: SkillActivationRuntime | None = None,
-    ) -> set[str]:
-        """Re-list MCP tools after a tool round; update the advertised set if changed.
+    ) -> None:
+        """Re-list MCP tools after a tool round; re-advertise them if changed.
 
         Progressive-discovery MCP servers reveal tools lazily: a tool such as
         ``load_tools`` activates new tools and the server emits
         ``notifications/tools/list_changed``. Without re-listing, the model never
         sees the activated tools and loops calling the activator. When the tool
         set changed, rewrite ``litellm_kwargs["tools"]`` (consumed by the
-        follow-up request) and return a refreshed allow-list; otherwise return
-        the current allow-list unchanged.
+        follow-up request). The proxy's allow-list follows the refreshed set, so
+        both tool loops validate each round against ``get_allowed_tool_names()``.
         """
         try:
             tools_changed = await mcp_proxy.refresh_tools(touched_tool_names=tool_names)
         except Exception as exc:
             logger.warning(f"[MCP] Tool refresh failed: {exc}")
-            return allowed_tools
+            return
 
         if not tools_changed:
-            return allowed_tools
+            return
 
         refreshed_tools = self._merge_mcp_tools(
             eneo_tools,
@@ -987,7 +1144,6 @@ class TenantModelAdapter(CompletionModelAdapter):
         )
         if refreshed_tools:
             litellm_kwargs["tools"] = refreshed_tools
-        return mcp_proxy.get_allowed_tool_names()
 
     def _create_messages_from_context(self, context: "Context") -> list[dict[str, Any]]:
         """
@@ -1133,6 +1289,10 @@ class TenantModelAdapter(CompletionModelAdapter):
         # Merge with additional kwargs
         kwargs.update(additional_kwargs)
 
+        # Last, so the destination check sees the final api_base. Every
+        # _acompletion_call site spreads these kwargs, tool rounds included.
+        apply_outbound_headers(kwargs, self.outbound_headers)
+
         return kwargs
 
     @override
@@ -1237,7 +1397,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 tool_round = 0
                 seen_prefixes: set[str] = set()
                 captured_refs: list[McpToolReference] = []
-                captured_images: list[GeneratedImage] = []
+                captured_images: list[GeneratedFile] = []
                 collected_tool_metadata: list[ToolCallMetadata] = (
                     self._always_active_skill_metadata(skill_runtime)
                 )
@@ -1250,6 +1410,27 @@ class TenantModelAdapter(CompletionModelAdapter):
                     and skill_runtime.tool_definition is not None
                 )
                 forced_final = False
+                answer_rounds = _RoundJoiner()
+                reasoning_rounds = _RoundJoiner()
+                answer_text: str | None = None
+                reasoning_text: str | None = None
+
+                def _keep_round(round_msg: _LiteLLMMessage) -> None:
+                    # Every round's text and reasoning belong to the answer,
+                    # as they do when the same turn is streamed.
+                    nonlocal answer_text, reasoning_text
+                    answer_rounds.start_round()
+                    reasoning_rounds.start_round()
+                    if round_msg.content:
+                        text = self._strip_thinking_content(round_msg.content)
+                        joined = answer_rounds.join(text) if text else ""
+                        answer_text = (answer_text or "") + joined
+                    reasoning = getattr(round_msg, "reasoning_content", None)
+                    if reasoning:
+                        joined = reasoning_rounds.join(reasoning)
+                        reasoning_text = (reasoning_text or "") + joined
+
+                _keep_round(msg)
 
                 async def _follow_up_completion() -> bool:
                     """Run the next completion and refresh msg; False when empty."""
@@ -1298,6 +1479,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         return False
                     choice = response.choices[0]
                     msg = choice.message
+                    _keep_round(msg)
                     return True
 
                 while msg.tool_calls and (mcp_proxy or activation_available):
@@ -1426,6 +1608,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                             mcp_tool_name=call.name,
                             existing_prefixes=seen_prefixes,
                         )
+                        has_app_view = not result.get(
+                            "is_error"
+                        ) and await _has_app_view(mcp_proxy, call.name)
                         captured_refs.extend(refs_for_call)
                         captured_images.extend(images_for_call)
                         result_status = "succeeded"
@@ -1435,6 +1620,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
                             display_text = llm_text
                             result_status = "failed"
+                        assert mcp_proxy is not None
+                        llm_text = mcp_proxy.model_result_text(llm_text)
                         messages.append(
                             {
                                 "role": "tool",
@@ -1464,8 +1651,23 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 mcp_tool_name=call.name,
                                 purpose=mcp_proxy.get_tool_purpose(call.name),
                                 is_internal=mcp_proxy.is_internal_tool(call.name),
+                                is_bundled=mcp_proxy.is_bundled_tool(call.name),
                                 meta=result.get("meta") or None,
+                                structured_content=(
+                                    result.get("structured_content")
+                                    if has_app_view
+                                    else None
+                                ),
                             )
+                        )
+                    if external_calls:
+                        assert mcp_proxy is not None
+                        await self._refresh_mcp_tools_after_round(
+                            mcp_proxy=mcp_proxy,
+                            eneo_tools=provider_input.built_in_tools,
+                            tool_names=[call.name for call in external_calls],
+                            litellm_kwargs=litellm_kwargs,
+                            skill_runtime=skill_runtime,
                         )
                     if not await _follow_up_completion():
                         break
@@ -1476,8 +1678,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                     completion.generated_images = captured_images
                 if collected_tool_metadata:
                     completion.tool_calls_metadata = collected_tool_metadata
-                if msg.content:
-                    completion.text = self._strip_thinking_content(msg.content)
+                completion.text = answer_text
+                completion.reasoning_content = reasoning_text
                 completion.stop = choice.finish_reason == "stop"
 
             if used_input_estimate:
@@ -1660,11 +1862,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                     tool_calls_metadata=always_active_metadata,
                 )
             mcp_tools_active = bool(mcp_proxy and prepared and prepared.has_tools)
-            pending_allowed_tools: set[str] = (
-                mcp_proxy.get_allowed_tool_names()
-                if mcp_proxy is not None and mcp_tools_active
-                else set()
-            )
+
+            def _allowed_tool_names() -> set[str]:
+                # Read live: a refresh after a tool round can activate tools.
+                return mcp_proxy.get_allowed_tool_names() if mcp_proxy else set()
 
             def _resolve_tool_names(name: str) -> tuple[str, str, str | None]:
                 info = mcp_proxy.get_tool_info(name) if mcp_proxy else None
@@ -1681,6 +1882,9 @@ class TenantModelAdapter(CompletionModelAdapter):
             def _tool_is_internal(name: str) -> bool:
                 return mcp_proxy.is_internal_tool(name) if mcp_proxy else False
 
+            def _tool_is_bundled(name: str) -> bool:
+                return mcp_proxy.is_bundled_tool(name) if mcp_proxy else False
+
             # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
                 def __init__(self) -> None:
@@ -1696,6 +1900,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                     self.cumulative_output_tokens = 0
                     self.used_output_estimate = False
                     self.context_output_token_estimate: int | None = None
+                    self.answer_rounds = _RoundJoiner()
+                    self.reasoning_rounds = _RoundJoiner()
 
             result = _StreamResult()
 
@@ -1719,6 +1925,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 inside_thinking = False
                 thinking_stripped = False
                 pending_emitted: set[int] = set()
+                argument_deltas = _ArgumentDeltas()
                 request_prompt_tokens = 0
                 provider_reported_prompt_tokens = False
                 request_completion_tokens = 0
@@ -1727,6 +1934,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                 res.tool_calls_acc = {}
                 res.assistant_content = []
                 res.reasoning_content = []
+                res.answer_rounds.start_round()
+                res.reasoning_rounds.start_round()
                 if res.usage is not None:
                     res.usage = res.usage.model_copy(
                         update={
@@ -1769,7 +1978,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     if reasoning_delta:
                         res.reasoning_content.append(reasoning_delta)
                         yield Completion(
-                            reasoning_content=reasoning_delta,
+                            reasoning_content=res.reasoning_rounds.join(
+                                reasoning_delta
+                            ),
                             response_type=ResponseType.REASONING,
                         )
 
@@ -1810,7 +2021,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 if (
                                     not call_id
                                     or not name
-                                    or name not in pending_allowed_tools
+                                    or name not in _allowed_tool_names()
                                 ):
                                     continue
                                 server_name, tool_name, title = _resolve_tool_names(
@@ -1830,8 +2041,26 @@ class TenantModelAdapter(CompletionModelAdapter):
                                             mcp_tool_name=name,
                                             purpose=_tool_purpose(name),
                                             is_internal=_tool_is_internal(name),
+                                            is_bundled=_tool_is_bundled(name),
                                         )
                                     ],
+                                )
+
+                        # Forward the arguments of announced calls as they are
+                        # written, so a client can show them before the call runs.
+                        for idx in sorted(
+                            {tc_delta.index for tc_delta in delta.tool_calls}
+                            & pending_emitted
+                        ):
+                            acc = res.tool_calls_acc[idx]
+                            piece = argument_deltas.next(
+                                idx, acc["function"]["arguments"]
+                            )
+                            if piece:
+                                yield Completion(
+                                    response_type=ResponseType.TOOL_CALL_DELTA,
+                                    tool_call_id=acc["id"],
+                                    arguments_delta=piece,
                                 )
 
                     # Handle text content with thinking-block stripping
@@ -1845,7 +2074,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             inside_thinking = True
                             pre_think = buffer.split("<think>")[0]
                             if pre_think.strip():
-                                yield Completion(text=pre_think)
+                                yield Completion(text=res.answer_rounds.join(pre_think))
                             buffer = buffer[buffer.index("<think>") :]
 
                         if inside_thinking and "</think>" in buffer:
@@ -1854,14 +2083,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                             post_think = buffer.split("</think>", 1)[1].lstrip()
                             buffer = post_think
                             if buffer:
-                                yield Completion(text=buffer)
+                                yield Completion(text=res.answer_rounds.join(buffer))
                                 buffer = ""
 
                         if not inside_thinking and buffer and not thinking_stripped:
-                            yield Completion(text=buffer)
+                            yield Completion(text=res.answer_rounds.join(buffer))
                             buffer = ""
                         elif not inside_thinking and buffer and thinking_stripped:
-                            yield Completion(text=buffer)
+                            yield Completion(text=res.answer_rounds.join(buffer))
                             buffer = ""
 
                     # Handle final chunk (flush buffer but don't yield stop yet)
@@ -1869,8 +2098,20 @@ class TenantModelAdapter(CompletionModelAdapter):
                         if buffer and not inside_thinking:
                             cleaned = self._strip_thinking_content(buffer)
                             if cleaned:
-                                yield Completion(text=cleaned)
+                                yield Completion(text=res.answer_rounds.join(cleaned))
                         buffer = ""
+
+                for idx in sorted(pending_emitted):
+                    acc = res.tool_calls_acc[idx]
+                    piece = argument_deltas.next(
+                        idx, acc["function"]["arguments"], flush=True
+                    )
+                    if piece:
+                        yield Completion(
+                            response_type=ResponseType.TOOL_CALL_DELTA,
+                            tool_call_id=acc["id"],
+                            arguments_delta=piece,
+                        )
 
                 if provider_reported_prompt_tokens:
                     res.cumulative_input_tokens += request_prompt_tokens
@@ -1931,11 +2172,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                 messages = prepared.messages
                 litellm_kwargs = prepared.kwargs
                 eneo_tools: list[dict[str, Any]] = prepared.eneo_tools
-                allowed_tools: set[str] = (
-                    mcp_proxy.get_allowed_tool_names()
-                    if mcp_proxy is not None
-                    else set()
-                )
 
                 max_rounds = self.MAX_TOOL_ROUNDS
                 tool_round = 0
@@ -2016,6 +2252,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         result_status="deferred",
                                         purpose=_tool_purpose(call.name),
                                         is_internal=_tool_is_internal(call.name),
+                                        is_bundled=_tool_is_bundled(call.name),
                                         result=json.dumps(
                                             {
                                                 "deferred": True,
@@ -2055,6 +2292,7 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     # Security validation
                     assert mcp_proxy is not None
+                    allowed_tools = _allowed_tool_names()
                     for tc in tool_calls:
                         name = tc["function"]["name"]
                         if name not in allowed_tools:
@@ -2091,6 +2329,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 mcp_tool_name=name,
                                 purpose=mcp_proxy.get_tool_purpose(name),
                                 is_internal=mcp_proxy.is_internal_tool(name),
+                                is_bundled=mcp_proxy.is_bundled_tool(name),
                             )
                         )
                     tool_args_by_call_id: dict[str, dict[str, Any] | None] = {}
@@ -2182,6 +2421,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         mcp_tool_name=tm.mcp_tool_name,
                                         purpose=tm.purpose,
                                         is_internal=tm.is_internal,
+                                        is_bundled=tm.is_bundled,
                                     )
                                     for tm in approval_metadata
                                 ],
@@ -2211,6 +2451,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     mcp_tool_name=tm.mcp_tool_name,
                                     purpose=tm.purpose,
                                     is_internal=tm.is_internal,
+                                    is_bundled=tm.is_bundled,
                                 )
                                 for tm in tool_metadata
                             ],
@@ -2241,6 +2482,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     mcp_tool_name=tm.mcp_tool_name,
                                     purpose=tm.purpose,
                                     is_internal=tm.is_internal,
+                                    is_bundled=tm.is_bundled,
                                 )
                                 for tm in tool_metadata
                             ],
@@ -2297,14 +2539,19 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 mcp_tool_name=tc["function"]["name"],
                                 existing_prefixes=seen_prefixes,
                             )
+                            has_app_view = not result_data.get(
+                                "is_error"
+                            ) and await _has_app_view(mcp_proxy, tc["function"]["name"])
                             captured_refs.extend(refs_for_call)
-                            # Generated images ride their own chunks so the
+                            # Generated files ride their own chunks so the
                             # ask path can persist each as a file before the
                             # tool-call metadata that references it arrives.
-                            for image in images_for_call:
-                                yield Completion(
-                                    response_type=ResponseType.FILES, image=image
-                                )
+                            # Once saved, a chunk carries the file's reference
+                            # URL. Only its stable handle reaches the model so it
+                            # can pass the file to another tool in this turn.
+                            generated = _GeneratedFileChunks(images_for_call)
+                            for chunk in generated.chunks:
+                                yield chunk
                             result_status = "succeeded"
                             if result_data.get("is_error"):
                                 error_payload = json.dumps(
@@ -2313,6 +2560,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 llm_text = error_payload
                                 display_text = error_payload
                                 result_status = "failed"
+                            else:
+                                llm_text = generated.append_references(llm_text)
+                            llm_text = mcp_proxy.model_result_text(llm_text)
                             messages.append(
                                 {
                                     "role": "tool",
@@ -2351,7 +2601,15 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     is_internal=mcp_proxy.is_internal_tool(
                                         tc["function"]["name"]
                                     ),
+                                    is_bundled=mcp_proxy.is_bundled_tool(
+                                        tc["function"]["name"]
+                                    ),
                                     meta=result_data.get("meta") or None,
+                                    structured_content=(
+                                        result_data.get("structured_content")
+                                        if has_app_view
+                                        else None
+                                    ),
                                 )
                             )
 
@@ -2413,6 +2671,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 is_internal=mcp_proxy.is_internal_tool(
                                     tc["function"]["name"]
                                 ),
+                                is_bundled=mcp_proxy.is_bundled_tool(
+                                    tc["function"]["name"]
+                                ),
                             )
                         )
 
@@ -2424,15 +2685,13 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     # Re-fetch tools in case a tool we just ran (e.g. load_tools
                     # on a progressive-discovery server) activated new tools via
-                    # notifications/tools/list_changed. Updates the advertised
-                    # tools on litellm_kwargs (consumed by the follow-up below)
-                    # and returns a fresh allow-list for next round's validation.
-                    allowed_tools = await self._refresh_mcp_tools_after_round(
+                    # notifications/tools/list_changed; the follow-up below then
+                    # advertises them.
+                    await self._refresh_mcp_tools_after_round(
                         mcp_proxy=mcp_proxy,
                         eneo_tools=eneo_tools,
                         tool_names=[tc["function"]["name"] for tc in tool_calls],
                         litellm_kwargs=litellm_kwargs,
-                        allowed_tools=allowed_tools,
                         skill_runtime=skill_runtime,
                     )
 
@@ -2511,6 +2770,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     mcp_tool_name=name,
                                     purpose=_tool_purpose(name),
                                     is_internal=_tool_is_internal(name),
+                                    is_bundled=_tool_is_bundled(name),
                                 )
                             )
                         yield Completion(
@@ -2580,23 +2840,30 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         except Exception as exc:
             # Mid-stream errors: yield error event instead of raising
-            if _is_provider_unavailable_error(exc):
-                self._record_provider_unavailable(phase="stream_iteration", exc=exc)
-                # Streaming Completion events expose numeric error_code, not JSON details.
-                error = PROVIDER_UNAVAILABLE_MESSAGE
-                error_code = 503
+            failure = litellm_transport.classify_stream_failure(exc)
+            if failure is not None and failure.unavailable:
+                self._record_provider_unavailable(
+                    phase="stream_iteration", exc=exc, failure=failure
+                )
             else:
                 logger.error(
                     f"[TenantModelAdapter] {self.litellm_model}: Error during stream iteration: {exc}",
                     exc_info=True,
                 )
-                error = litellm_transport.STREAM_ERROR_MESSAGE
-                error_code = 500
 
             yield Completion(
                 text="",
-                error=error,
-                error_code=error_code,
+                error=(
+                    failure.message
+                    if failure is not None
+                    else litellm_transport.STREAM_ERROR_MESSAGE
+                ),
+                error_code=failure.status if failure is not None else 500,
+                error_reason=(
+                    failure.code
+                    if failure is not None
+                    else litellm_transport.STREAM_ERROR_CODE
+                ),
                 response_type=ResponseType.ERROR,
                 stop=True,
             )

@@ -6,8 +6,11 @@ Quick deployment reference for Eneo using Docker Compose.
 
 ## Files in This Directory
 
-- `docker-compose.yml` - Complete production stack (Traefik, frontend, backend, worker, PostgreSQL, Redis)
+- `docker-compose.yml` - Complete production stack (Traefik, frontend, backend, worker, tools runtime, PostgreSQL, Redis)
+- `docker-compose.web-next.yml` / `env_web_next.template` - Optional Next beta sharing the existing backend; see [parallel frontend deployment](https://docs.eneo.ai/dev/guides/deployment#run-the-next-beta-alongside-the-existing-app)
 - `docker-compose.object-content.yml` - Optional bundled SeaweedFS profile
+- `docker-compose.without-tools.yml` - Optional overlay that omits the tools runtime (see [TOOL_RUNTIME.md](TOOL_RUNTIME.md))
+- `setup.py` - Generates the missing tools runtime token in `.env`, preserving existing settings
 - `.env.template` - Optional object-store profile, endpoint, and secret inputs
 - `docker-compose.modules.yml` - Optional module overlay (inert unless a `--profile` is passed; see [MODULES.md](MODULES.md))
 - `env_backend.template` - Backend configuration (API keys, OIDC, multi-tenancy)
@@ -15,6 +18,8 @@ Quick deployment reference for Eneo using Docker Compose.
 - `env_db.template` - Database credentials
 - `env_modules.template` / `env_module_ttt.template` - Module configuration (only needed when enabling modules)
 - `OBJECT_CONTENT.md` - Offline object-content operations reference
+- `TOOL_RUNTIME.md` - Bundled tools runtime operator guide: release bundle, configuration, isolation checklist, upgrade, diagnostics and omitting it (architecture and security model on [docs.eneo.ai](https://docs.eneo.ai/dev/docs/tool-architecture))
+- `MCP_APPS.md` - Optional interactive tool views (MCP Apps): the extra hostname, settings and what administrators approve
 
 ## Quick Start
 
@@ -26,9 +31,9 @@ cp env_db.template env_db.env
 cp .env.template .env
 chmod 600 .env env_backend.env env_frontend.env env_db.env
 
-# 2. Edit docker-compose.yml (replace your-domain.com with your actual domain):
-#    - Line 55: your-email@domain.com (Let's Encrypt email)
-#    - Lines 88, 91, 116, 119: your-domain.com (4 locations)
+# 2. Edit docker-compose.yml (every line to edit is marked "# CHANGE THIS"):
+#    - your-email@domain.com (Let's Encrypt email, 1 location)
+#    - your-domain.com (your actual domain, 4 locations)
 
 # 3. Configure env_db.env:
 #    - POSTGRES_PASSWORD=your-secure-password
@@ -54,15 +59,17 @@ chmod 600 .env env_backend.env env_frontend.env env_db.env
 #    - ORIGIN=https://your-domain.com
 #    - PUBLIC_ORIGIN=https://your-domain.com
 
-# 6. Deploy
+# 6. Download release.env and release.json from the selected Eneo release.
+# Generate only the missing runtime token, preserving existing settings.
+python3 setup.py
 docker network create proxy_tier
-docker compose up -d
+docker compose --env-file .env --env-file release.env up -d
 
 # 7. Verify db-init completed successfully (wait ~30 seconds for startup)
 docker logs eneo_db_init
 # Should see: "Great! Your Tenant and User are all set up."
 
-# 8. Login with DEFAULT_USER_EMAIL / DEFAULT_USER_PASSWORD (change password immediately!)
+# 8. Login with DEFAULT_USER_EMAIL / DEFAULT_USER_PASSWORD; Eneo asks for a new password at this first login
 ```
 
 The default stack does not require a separate object store. Eneo can keep
@@ -77,16 +84,17 @@ installations.
 
 ## Network Isolation
 
-The stack uses four Docker networks:
+The stack uses five Docker networks:
 
 | Network | Services | Purpose |
 |---|---|---|
 | `proxy_tier` (external, created in step 6) | Traefik, frontend, backend, worker | Ingress and outbound access (LLM APIs, OIDC, crawling) |
 | `data_net` (`internal: true`) | db, redis, backend, worker, db-init | Data layer — no internet egress, unreachable from Traefik/frontend |
+| `tool_runtime_net` (`internal: true`) | tool-runtime, backend, worker | Bundled tools runtime; no internet, database, or Redis route (see [TOOL_RUNTIME.md](TOOL_RUNTIME.md)) |
 | `object_content_net` (`internal: true`) | optional object-content, backend, worker | Private S3-compatible byte plane when enabled; no public route |
 | `module_net` | Traefik, backend, optional modules | Module traffic — modules reach the backend only (see [MODULES.md](MODULES.md)) |
 
-The backend is the only service on all four networks. PostgreSQL, Redis, and
+The backend is the only service on all five networks. PostgreSQL, Redis, and
 the optional object-content service are not reachable from the frontend or
 Traefik containers and have no outbound internet access.
 
@@ -184,3 +192,13 @@ This usually means db-init started before PostgreSQL was ready. The docker-compo
 **Step-by-Step Guide:** [DEPLOYMENT.md](../DEPLOYMENT.md)
 
 **Multi-Tenancy Setup:** See [Advanced Configuration](../DEPLOYMENT.md#advanced-configuration--features) for per-tenant credentials and federation
+
+## Application release bundle
+
+Frontend, backend, workers and tools runtime use one verified release bundle.
+Use the same environment-file arguments for later Compose commands.
+Commands that do not show those arguments need them too. To avoid repeating
+them, run `export COMPOSE_ENV_FILES=.env,release.env` once in the shell
+(Docker Compose 2.24 or later). Keep both
+bundle files for rollback; update them together. See [TOOL_RUNTIME.md](TOOL_RUNTIME.md)
+for diagnostics, migration from the old overlay, and explicitly omitting tools.

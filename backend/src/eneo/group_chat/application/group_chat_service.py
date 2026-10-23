@@ -1,6 +1,4 @@
 # Copyright (c) 2025 Sundsvalls Kommun
-#
-# Licensed under the MIT License.
 import asyncio
 import re
 from dataclasses import dataclass
@@ -14,6 +12,7 @@ from eneo.group_chat.domain.entities.group_chat import (
     GroupChatAssistant,
     GroupChatAssistantData,
 )
+from eneo.group_chat.infrastructure.group_chat_repo import GroupChatRepository
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.main.models import NOT_PROVIDED, NotProvided
 from eneo.questions.question import ToolAssistant, UseTools
@@ -56,6 +55,7 @@ class GroupChatService:
         user: "UserInDB",
         space_service: "SpaceService",
         space_repo: "SpaceRepository",
+        group_chat_repo: GroupChatRepository,
         actor_manager: "ActorManager",
         assistant_service: "AssistantService",
         session_service: "SessionService",
@@ -66,6 +66,7 @@ class GroupChatService:
         self.user = user
         self.space_service = space_service
         self.space_repo = space_repo
+        self.group_chat_repo = group_chat_repo
         self.actor_manager = actor_manager
         self.assistant_service = assistant_service
         self.session_service = session_service
@@ -91,8 +92,8 @@ class GroupChatService:
             name=name, space_id=space_id, user_id=self.user.id
         )
 
-        space.add_group_chat(group_chat)
-        updated_space = await self.space_repo.update(space=space)
+        await self.group_chat_repo.add(group_chat)
+        updated_space = await self.space_service.get_space(space_id)
 
         return updated_space.get_group_chat(group_chat_id=group_chat.id)
 
@@ -116,8 +117,7 @@ class GroupChatService:
         group_chat = space.get_group_chat(group_chat_id=group_chat_id)
         icon_id = group_chat.icon_id
 
-        space.remove_group_chat(group_chat)
-        await self.space_repo.update(space=space)
+        await self.group_chat_repo.delete(group_chat_id, group_chat.space_id)
 
         if icon_id:
             await self.icon_repo.delete(icon_id)
@@ -180,7 +180,23 @@ class GroupChatService:
             icon_id=icon_id,
         )
 
-        updated_space = await self.space_repo.update(space=space)
+        await self.group_chat_repo.update(
+            id,
+            group_chat.space_id,
+            name=name,
+            allow_mentions=allow_mentions,
+            show_response_label=show_response_label,
+            published=published,
+            insight_enabled=insight_enabled,
+            metadata_json=metadata_json,
+            icon_id=icon_id,
+            members=(
+                {member.id: member.user_description for member in current_assistants}
+                if current_assistants is not None
+                else None
+            ),
+        )
+        updated_space = await self.space_service.get_space(group_chat.space_id)
 
         updated_group_chat = updated_space.get_group_chat(group_chat_id=id)
         updated_group_chat.permissions = actor.get_group_chat_permissions(
@@ -359,18 +375,13 @@ class GroupChatService:
         if stream:
 
             async def response_stream():
-                response_string = ""
                 completed = False
 
                 try:
-                    chunk_response = response.split()
-                    for i, chunk in enumerate(chunk_response):
-                        if i < len(chunk_response):
-                            chunk_text = chunk + " "
-                        else:
-                            chunk_text = chunk
-
-                        response_string += chunk_text
+                    # Echo the reply a word at a time, each word with the
+                    # whitespace that follows it, so the streamed text adds up
+                    # to the reply exactly, line breaks included.
+                    for chunk_text in re.findall(r"\S+\s*|\s+", response):
                         # yield empty references and chunk text, matching assistant_service format
                         yield Completion(
                             text=chunk_text,
@@ -395,24 +406,24 @@ class GroupChatService:
                     completed = True
                 finally:
                     # Selector-echo stream did not reach normal completion. The
-                    # placeholder already captures the question; only schedule a
-                    # background UPDATE when there's actual content to persist.
-                    if not completed and response_string:
+                    # reply was complete before the echo began, so persist all
+                    # of it, as a finished echo does; the placeholder already
+                    # captures the question when there is no reply.
+                    if not completed and response:
                         from eneo.sessions.session_service import (
                             persist_partial_question_answer,
                             safe_count_tokens,
                             schedule_background_save,
                         )
 
-                        partial_tokens_answer = safe_count_tokens(
-                            response_string, completion_model.name
-                        )
                         schedule_background_save(
                             persist_partial_question_answer(
                                 tenant_id=tenant_id,
                                 question_id=question_id,
-                                answer=response_string,
-                                num_tokens_answer=partial_tokens_answer,
+                                answer=response,
+                                num_tokens_answer=safe_count_tokens(
+                                    response, completion_model.name
+                                ),
                             )
                         )
 
@@ -592,7 +603,12 @@ class GroupChatService:
         group_chat.update(published=publish)
 
         # Pass the updated group chat to the repository
-        updated_space = await self.space_repo.update(space=space)
+        await self.group_chat_repo.update(
+            group_chat_id,
+            group_chat.space_id,
+            published=publish,
+        )
+        updated_space = await self.space_service.get_space(group_chat.space_id)
         updated_group_chat = updated_space.get_group_chat(group_chat_id=group_chat_id)
         updated_group_chat.permissions = actor.get_group_chat_permissions(
             group_chat=updated_group_chat

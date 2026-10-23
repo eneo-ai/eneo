@@ -318,6 +318,57 @@ async def test_list_tenant_admins_excludes_system_user(db_container, admin_user)
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_list_tenant_admins_is_oldest_first(db_container, admin_user):
+    """Callers acting as "a tenant admin" take the first, and that admin's
+    attributes can be sent to a model provider, so the order is fixed."""
+    async with db_container() as container:
+        session = container.session()
+        repo = container.user_repo()
+
+        await session.execute(
+            sa.update(Users)
+            .where(Users.id == admin_user.id)
+            .values(created_at=datetime(2026, 1, 2, tzinfo=timezone.utc))
+        )
+        others: dict[str, UUID] = {}
+        for label, day in (("newer", 3), ("older", 1)):
+            user_id = uuid4()
+            others[label] = user_id
+            await session.execute(
+                sa.insert(Users).values(
+                    id=user_id,
+                    email=f"admin-{label}-{user_id.hex[:8]}@example.com",
+                    username=f"admin-{label}-{user_id.hex[:8]}",
+                    email_verified=False,
+                    is_active=True,
+                    state=UserState.ACTIVE.value,
+                    used_tokens=0,
+                    tenant_id=admin_user.tenant_id,
+                    is_system_user=False,
+                    created_at=datetime(2026, 1, day, tzinfo=timezone.utc),
+                )
+            )
+            for role in admin_user.roles:
+                await session.execute(
+                    sa.text(
+                        "INSERT INTO users_roles (user_id, role_id) VALUES (:uid, :rid)"
+                    ),
+                    {"uid": user_id, "rid": role.id},
+                )
+        await session.flush()
+
+        admins = await repo.list_tenant_admins(tenant_id=admin_user.tenant_id)
+
+        # A user holding several admin roles appears once per role.
+        assert list(dict.fromkeys(u.id for u in admins)) == [
+            others["older"],
+            admin_user.id,
+            others["newer"],
+        ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_count_users_with_admin_permission_excludes_system_user(
     db_container, admin_user
 ):

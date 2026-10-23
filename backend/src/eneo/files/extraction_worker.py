@@ -17,6 +17,7 @@ class ExtractionExit(IntEnum):
     ENCRYPTED = 4
     CORRUPT = 5
     UNSUPPORTED = 6
+    PDF_PAGE_LIMIT = 7
 
 
 def configure_process_limits(
@@ -45,6 +46,7 @@ def main() -> int:
         CorruptFileError,
         EncryptedFileError,
         ExtractionLimitError,
+        PdfPageLimitError,
         TextExtractor,
         UnsupportedFormatError,
     )
@@ -72,6 +74,8 @@ def main() -> int:
             return ExtractionExit.LIMIT
         sys.stdout.buffer.write(encoded)
         return ExtractionExit.SUCCESS
+    except PdfPageLimitError:
+        return ExtractionExit.PDF_PAGE_LIMIT
     except (MemoryError, ExtractionLimitError):
         return ExtractionExit.LIMIT
     except EncryptedFileError:

@@ -1,10 +1,12 @@
+import io
 from collections import defaultdict
-from collections.abc import AsyncGenerator, Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable, Iterable, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from uuid import UUID
 
 from fastapi import UploadFile
+from starlette.datastructures import Headers
 
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import (
@@ -42,6 +44,8 @@ from eneo.files.file_repo import (
     select_primary_file_content,
 )
 from eneo.files.file_usage import FileUsageRepository
+from eneo.files.generated_documents import validate_generated_document
+from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -63,6 +67,31 @@ from eneo.object_content.content_service import (
 )
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.users.user import UserInDB
+
+
+def require_requested_files(file_ids: Iterable[UUID], files: Sequence[File]) -> None:
+    """Refuse a request that names a File the caller can no longer send.
+
+    ``get_files_by_ids`` returns only the caller's own Files whose content is
+    available. A File that was deleted after its last use (the daily cleanup,
+    or a conversation deleted meanwhile) is simply absent. Sending the message
+    or run without it would hide the loss, so the request fails here with the
+    missing ids and the user uploads the File again.
+    """
+    found = {file.id for file in files}
+    missing = [
+        str(file_id) for file_id in dict.fromkeys(file_ids) if file_id not in found
+    ]
+    if not missing:
+        return
+    if len(missing) == 1:
+        raise BadRequestException(
+            f"The attached file is no longer available: {missing[0]}. Upload it again."
+        )
+    raise BadRequestException(
+        "The attached files are no longer available: "
+        f"{', '.join(missing)}. Upload them again."
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,10 +286,12 @@ class FileService:
         *,
         policy_revision: int | None = None,
         parent_file_id: UUID | None = None,
+        revises_file_id: UUID | None = None,
     ) -> _PersistedCapturedFile:
         metadata = await self._add_metadata(
             captured_file,
             parent_file_id=parent_file_id,
+            revises_file_id=revises_file_id,
         )
         references: list[FileContentReferenceRecord] = []
         for entry in captured_file.contents:
@@ -339,6 +370,7 @@ class FileService:
         captured_file: _CapturedPreparedFile,
         *,
         parent_file_id: UUID | None = None,
+        revises_file_id: UUID | None = None,
     ) -> FileMetadata:
         user = self._authenticated_user()
         prepared = captured_file.prepared
@@ -350,6 +382,7 @@ class FileService:
                 user_id=user.id,
                 tenant_id=user.tenant_id,
                 parent_file_id=parent_file_id,
+                revises_file_id=revises_file_id,
             )
         )
 
@@ -452,17 +485,75 @@ class FileService:
         # once the write block closes, so a read after it would fail.
         async with self._write_transaction():
             file_id = await self._persist_prepared_file(prepared)
-            info = await self.get_file_by_id(file_id)
+            return await self._generated_file(file_id, image_data)
+
+    async def _generated_file(self, file_id: UUID, data: bytes) -> File:
+        """The File for content a tool produced and this service just stored.
+
+        ``original_available`` is read from what was stored, by the loader's
+        rule. The completion layer mints a reference URL only for a file that
+        carries it, and that URL is how a later tool in the same answer is
+        handed the file. Call inside the write transaction.
+        """
+        info = await self.get_file_by_id(file_id)
+        references = await self.repo.get_content_references([file_id])
+        original = readable_original_reference(
+            info.file_type,
+            references,
+            object_store_configured=self._object_content.object_store_configured,
+        )
         return File(
             **info.model_dump(),
-            blob=image_data,
+            blob=data,
             text=None,
             transcription=None,
+            original_available=original is not None,
         )
+
+    async def save_generated_document(
+        self,
+        data: bytes,
+        name: str,
+        mimetype: str,
+        *,
+        revises_file_id: UUID | None = None,
+    ) -> File:
+        """Persist a tool-generated document (DOCX, XLSX, PDF) as a File.
+
+        The bytes must pass the format checks in ``generated_documents``
+        (raises ``GeneratedDocumentRejected``). The document is then prepared
+        exactly like an uploaded one, so it keeps its exact original (signed
+        references and downloads work) and gains extracted text; page images
+        are not derived. Like generated images it is stored inline.
+
+        ``revises_file_id`` names the version of a conversation document the
+        bytes were edited from. The caller has reached that file through an
+        authorized conversation; this method records the link and checks
+        nothing further about it.
+        """
+        self._authenticated_user()
+        validate_generated_document(data, mimetype)
+        upload = UploadFile(
+            file=io.BytesIO(data),
+            filename=name,
+            headers=Headers({"content-type": mimetype}),
+        )
+        async with self.protocol.prepare_upload(
+            upload,
+            max_size=get_settings().mcp_tool_file_max_bytes,
+        ) as prepared:
+            async with self._write_transaction():
+                file_id = await self._persist_prepared_file(
+                    replace(prepared, derivatives=()),
+                    revises_file_id=revises_file_id,
+                )
+                return await self._generated_file(file_id, data)
 
     async def _persist_prepared_file(
         self,
         prepared: PreparedFileUpload,
+        *,
+        revises_file_id: UUID | None = None,
     ) -> UUID:
         async with AsyncExitStack() as capture_stack:
             captured = await self._capture_prepared_file(
@@ -472,7 +563,9 @@ class FileService:
                 business_maximum_bytes=None,
             )
             async with self._write_transaction():
-                persisted = await self._persist_captured_file(captured)
+                persisted = await self._persist_captured_file(
+                    captured, revises_file_id=revises_file_id
+                )
         return persisted.metadata.id
 
     async def get_file_by_id(self, file_id: UUID) -> FileInfo:

@@ -3,10 +3,13 @@
   import { goto } from "$app/navigation";
   import { enhance } from "$app/forms";
   import { IconLoadingSpinner } from "@eneo/icons/loading-spinner";
+  import { buttonVariants } from "$lib/components/ui/button/index.js";
   import { m } from "$lib/paraglide/messages";
+  import { cn } from "$lib/utils.js";
+
+  import { SHAREPOINT_SERVICE_ACCOUNT_OAUTH_KEY as SERVICE_ACCOUNT_STORAGE_KEY } from "$lib/features/integrations/sharepoint/serviceAccountAuth";
 
   const MESSAGE_TYPE = "eneo/integration-callback";
-  const SERVICE_ACCOUNT_STORAGE_KEY = "sharepoint_service_account_oauth";
 
   // Flow types
   type FlowType = "popup" | "service_account" | "unknown";
@@ -71,7 +74,12 @@
   function handlePopupFlow(code: string | null, state: string | null, rawParams: string): void {
     const opener = window.opener;
     if (opener) {
-      opener.postMessage({ type: MESSAGE_TYPE, code, state, params: rawParams }, "*");
+      // The integration page only accepts callbacks from its own origin. Keep
+      // OAuth credentials inside that origin even when a foreign site opened us.
+      opener.postMessage(
+        { type: MESSAGE_TYPE, code, state, params: rawParams },
+        window.location.origin
+      );
       status = "popup_complete";
       window.close();
     }
@@ -183,11 +191,13 @@
   </title>
 </svelte:head>
 
-<main class="callback">
+<main
+  class="bg-primary text-primary flex min-h-screen flex-col items-center justify-center gap-4 p-8 text-center"
+>
   {#if status === "processing"}
     <!-- Processing state -->
     {#if flowType === "service_account"}
-      <IconLoadingSpinner class="h-12 w-12 animate-spin text-blue-500" />
+      <IconLoadingSpinner class="text-accent-default h-12 w-12 animate-spin" />
       <h1 class="text-primary text-xl font-semibold">
         {m.completing_authentication()}
       </h1>
@@ -204,12 +214,17 @@
     <p>{m.integration_callback_close_window()}</p>
   {:else if status === "service_success"}
     <!-- Service account success -->
-    <div class="rounded-full bg-green-100 p-4">
-      <svg class="h-12 w-12 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="bg-positive-dimmer rounded-full p-4">
+      <svg
+        class="text-positive-default h-12 w-12"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
       </svg>
     </div>
-    <h1 class="text-xl font-semibold text-green-700">
+    <h1 class="text-positive-stronger text-xl font-semibold">
       {m.service_account_configured()}
     </h1>
     {#if serviceAccountEmail}
@@ -222,8 +237,13 @@
     </p>
   {:else if status === "error"}
     <!-- Error state -->
-    <div class="rounded-full bg-red-100 p-4">
-      <svg class="h-12 w-12 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div class="bg-negative-dimmer rounded-full p-4">
+      <svg
+        class="text-negative-default h-12 w-12"
+        fill="none"
+        stroke="currentColor"
+        viewBox="0 0 24 24"
+      >
         <path
           stroke-linecap="round"
           stroke-linejoin="round"
@@ -232,17 +252,14 @@
         />
       </svg>
     </div>
-    <h1 class="text-xl font-semibold text-red-700">
+    <h1 class="text-negative-stronger text-xl font-semibold">
       {m.authentication_failed()}
     </h1>
     {#if errorMessage}
       <p class="text-secondary max-w-md text-center">{errorMessage}</p>
     {/if}
     <!-- eslint-disable svelte/no-navigation-without-resolve -- static literal route, public callback layout -->
-    <a
-      href="/admin/integrations"
-      class="mt-4 rounded-lg bg-blue-600 px-6 py-2 text-white hover:bg-blue-700"
-    >
+    <a href="/admin/integrations" class={cn(buttonVariants(), "mt-4")}>
       {m.back_to_integrations()}
     </a>
     <!-- eslint-enable svelte/no-navigation-without-resolve -->
@@ -282,20 +299,3 @@
     </form>
   {/if}
 </main>
-
-<style>
-  /* Basic styling that works both in popup (minimal CSS) and full page */
-  .callback {
-    margin: 0;
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 1rem;
-    padding: 2rem;
-    text-align: center;
-    background: var(--color-primary-bg, #fff);
-    color: var(--color-primary-text, #111);
-  }
-</style>

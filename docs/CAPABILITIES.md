@@ -1,15 +1,29 @@
-# Capabilities (web search, image generation)
+# Capabilities
 
 **Status:** provider-independent capability configuration
 **Audience:** Tenant administrators configuring providers, operators tuning limits, developers extending the capability set
 
-Capabilities are functions an assistant can use: **Webbsökning** and
-**Bildgenerering**. Image generation can run through a configured image model
-or an external MCP server; web search uses an external server.
+Capabilities are functions an assistant can use: **Webbsökning**
+(`web_search`), **Bildgenerering** (`image_generation`), **Fråga fil**
+(`file_analysis`), **Skapa fil** (`file_creation`), **Diagram** (`charts`) and
+**Beräkning** (`compute`). Image generation can
+run through a configured image model or an external MCP server; web search
+uses an external server; file analysis, file creation, charts and compute run in the
+bundled tool runtime or an external MCP server.
+
+For the three places a provider can run, the relationship between Skills,
+Functions, providers, interactive MCP Apps and native document views, and the
+reasons behind that split, see the docs site's
+[Tools and MCP Architecture](../frontend/apps/docs-site/src/content/docs/tool-architecture.mdx).
+The runtime's isolation is described in
+[Tool Runtime Security](../frontend/apps/docs-site/src/content/docs/tool-runtime-security.mdx).
+The [Functions guide](../frontend/apps/docs-site/src/content/guides/capabilities.mdx)
+owns user workflows and UI instructions; this page records the contributor contract.
 
 ## 1. Configuration and navigation
 
-Open **Admin → Verktyg** (/admin/tools). **Funktioner** is the default tab.
+Open **Admin → Verktyg** (/admin/tools). **Funktioner** is selected by default;
+**MCP-servrar** appears first in the tab bar.
 Each function keeps its source identity, configuration status and activation
 action visible. The source's ellipsis menu contains **Ändra** and **Ta bort**;
 deletion still requires confirmation. Use the arrow beside the source to expand
@@ -40,7 +54,8 @@ activation action identifies the default that will be replaced.
 ## 2. Saved intent and provider lifecycle
 
 Spaces and assistants store enabled_capabilities, a list of purposes
-(web_search, image_generation). Governance policies store purposes with
+(web_search, image_generation, file_analysis, file_creation, charts, compute). Governance
+policies store purposes with
 is_default_enabled. These rows reference their owner, never a provider.
 They remain intact when a provider is switched, disabled or deleted—even
 when the last provider disappears. A replacement restores availability.
@@ -75,22 +90,39 @@ Activation, audiences and permissions work exactly as for external providers, an
 
 The backend must be able to reach its own loopback URL (`INTERNAL_MCP_BASE_URL`, the same requirement as the knowledge and files servers).
 
+### Bundled tool runtime providers
+
+File analysis, file creation and charts can be served by the bundled tool runtime
+(`tool-runtime/`, operator guide `docs/deployment/TOOL_RUNTIME.md`). A function
+card offers it as **Inbyggd i Eneo**: **Slå på** (or the Add source menu)
+creates the source through `POST /api/v1/mcp-servers/bundled/{tool}/`,
+activating it when the function has no active default. The row has `http_auth_type = "bundled"`: its URL comes
+from `TOOL_RUNTIME_URL` and its bearer from `TOOL_RUNTIME_TOKEN` at connect
+time, and the connection fields are read-only. Everything else (audiences,
+permissions, classification and replacement) works as for external providers.
+Bundled tool definitions and view snapshots follow the deployed runtime
+automatically, preserving stored enablement and display names and recording
+catalog updates in the audit log. Per-call user approval still follows the
+conversation setting. Charts and Compute are Functions with purposes `charts`
+and `compute`; a compute server added as a general server before the function
+existed keeps working until an administrator retires it.
+
 ## 3. Ask-time resolution
 
 For each capability an assistant requests, the provider is attached only when all of these hold:
 
-- the user's role grants the capability permission (`web_search` or `image_generation`; roles can be edited under **Admin → Roles**);
+- the user's role grants the capability permission (the purpose name, for example `web_search` or `file_analysis`; roles can be edited under **Admin → Roles**);
 - a provider serves the user: a group-targeted provider covering one of their groups, else the tenant default;
 - the provider has at least one enabled, approved tool;
 - for a built-in provider, its image model is enabled, not deprecated or deleted, and its model provider is active;
 - the provider's security classification (for a built-in provider, its image model's) meets the space's classification;
 - the completion model supports tool calling.
 
-Otherwise the capability is silently unavailable for that turn. Service API keys can use web search but not image generation: a generated image is stored as a file owned by a user, and a service key has no user.
+Otherwise the capability is silently unavailable for that turn. Service API keys can use web search only: generated images and files are stored as files owned by a user, a service key has no user, and file analysis is not in the service-key permission set.
 
 Conversation requests carry purpose-based disabled_capabilities; ordinary server opt-outs remain in disabled_mcp_server_ids. The chat toolbar persists purpose keys, so an opt-out survives a provider switch.
 
-## 4. Generated images
+## 4. Generated files
 
 An MCP `image` content block returned by any tool becomes a generated file shown in the chat. Before persistence the proxy applies these guards:
 
@@ -100,32 +132,78 @@ An MCP `image` content block returned by any tool becomes a generated file shown
 | `MCP_TOOL_IMAGE_MAX_COUNT` | 4 | Images admitted per tool result; the rest are dropped with one notice. |
 | `MCP_TOOL_OUTPUT_MAX_CHARS` | 32768 | Text budget per tool result. Images do not count against it. |
 
-Only `image/png`, `image/jpeg`, `image/webp` and `image/gif` are accepted. The model sees a short placeholder instead of the bytes. Only the latest turn's generated images are replayed to the model as vision input on follow-ups; older ones are described by the placeholder in their tool result plus a reference URL (below). Generated files are deleted with their conversation.
+Only `image/png`, `image/jpeg`, `image/webp` and `image/gif` are accepted. The model sees a short placeholder instead of the bytes. Only the latest turn's generated images are replayed to the model as vision input on follow-ups; older ones are described by the placeholder in their tool result plus a file reference (below). Generated files are deleted with their conversation.
 
 ### Reference images (variations and follow-up edits)
 
-A user can attach an image and ask for a variation or edit, and a follow-up turn can pass an image the assistant generated earlier back to the image tool. Both the built-in provider and external `purpose=image_generation` servers use the same mechanism: signed file reference URLs.
+A user can attach an image and ask for a variation or edit, and a follow-up turn can pass an image the assistant generated earlier back to the image tool. Both the built-in provider and external `purpose=image_generation` servers receive the same signed file references from Eneo.
 
-- Attached images and generated images get signed reference URLs in the prompt, tagged `"kind": "image"` next to the document entries. Images are never URL-only; the entry is an extra handle beside the vision input. The system prompt directs image entries to image tools, never to `read_file`.
+- Attached and generated images get credential-free `file_ref` handles in the
+  model context, tagged `"kind": "image"` next to document entries. The handle
+  accompanies vision input when available. Eneo resolves it to an authorised
+  signed URL before calling the tool; provider schemas remain unchanged.
+  The system prompt directs image entries to image tools, never to `read_file`.
 - The built-in `generate_image` tool takes an optional `reference_images` list of those URLs. With references it calls the image edit API (`litellm.aimage_edit`) with the file bytes; the URL is verified locally like `read_file` does, never fetched. Count and size caps reuse `MCP_TOOL_IMAGE_MAX_COUNT` and `MCP_TOOL_IMAGE_MAX_BYTES`.
 - A model without edit support, or a provider that rejects the edit request, returns a tool error the model can recover from (generate from the description, or tell the user the image cannot be edited). Never a silent plain generation.
-- `ToolCallInfo.generated_file_ids` records which files a call produced. Replayed tool results get a fresh `Reference url for Image N` line per image; URLs are never persisted.
+- `ToolCallInfo.generated_file_ids` records which files a call produced.
+  Current and replayed model-facing results use stable file handles; download
+  credentials are not persisted in the tool trace.
 - External image servers fetch the bytes through the signed download endpoint, so `FILE_REFERENCE_BASE_URL` must be reachable from the external server. A failed call carrying a reference URL tells the model the URL is valid, so it reports that the tool cannot reach the file rather than asking for a re-upload.
 - Image attachments are offered in the chat whenever image generation is available, even without a vision model.
 
-Known limitation: an image generated earlier in the same turn cannot be edited in that turn, because the file is persisted after the tool result reaches the model. Follow-ups work from the next turn on.
+In streaming chat, a generated file is saved before its result reaches the
+model, which receives a stable `file_ref` for chaining another call in the same
+turn. Non-streaming requests persist files after the model finishes; there
+the reference arrives on the next turn.
+
+The model passes handles unchanged in URL inputs. Dispatch resolves them only
+against the current authorised file map, including nested arguments; unknown
+or unavailable handles fail before execution. Stored legacy URL arguments have
+their tokens removed and are supported on replay. Providers receive fresh
+signed URLs and downloads still enforce file access. See
+`backend/src/eneo/files/model_file_references.py`.
+
+### Documents, spreadsheets and exports
+
+A binary embedded resource (`resource` with `blob`) becomes a generated file only when the producing server's purpose delivers that type (`GENERATED_FILE_TYPES_BY_PURPOSE`):
+
+| Purpose | Types |
+|---------|-------|
+| `file_creation` | Markdown, plain text, DOCX, PDF, XLSX |
+| `file_analysis` | CSV |
+
+Every other blob is stripped by the proxy, so the resource stays an ordinary result and bytes never reach the model, which sees `[File N (name) ...]`. `files/generated_documents.py` then checks the bytes: OOXML packages are bounded (entries, expansion ratio) and must not contain macros, embedded objects, unsafe paths or non-hyperlink external relationships; PDFs must be complete and contain no JavaScript, launch actions, embedded files, rich media or XFA; CSV must be UTF-8 without NUL bytes. Accepted documents are prepared like uploads (exact original plus extracted text), linked to the question and the tool call, and available in the native document workspace or file preview, with an explicit download action. A refused document is logged and skipped. Limits: `MCP_TOOL_FILE_MAX_BYTES` (20 MiB) and `MCP_TOOL_FILE_MAX_COUNT` (4) per tool result.
+
+Generated files that were saved before an answer failed or was aborted are still linked to the question, so they stay visible and are deleted with the conversation.
+
+### Document templates
+
+Word and PDF files from the `file_creation` capability are rendered into a Word template. Administrators keep a library of templates under Admin > Tools > File creation (`document_templates`, one `is_default` per tenant, soft deleted); an assistant inherits the default, selects another template or uses Eneo's built-in one (`assistant_document_templates`, a row only when it departs from the default). The runtime reads two conventions: content controls as Word's Developer tab makes them (a rich control tagged `content` or `dokument` takes the document, text controls take one value each) and `{{name}}` placeholders. Title, date, year and organisation are filled from the call; other fields come from `create_document.fields`. Content is written in the template's own styles, resolved by style name (a Swedish template's `Rubrik1` is "heading 1"), with the template's list styles and numbering where it has them.
+
+Eneo hands the template to the provider itself: `MCPProxySession._with_document_template` adds a signed link (`/api/v1/document-templates/{id}/original/download/?token=…`, minted per turn by `document_templates.service.resolve_document_template`) to `create_document` calls whose approved schema takes a `template`, that render docx or pdf, and that name no template of their own and revise nothing. The document export resolves the same template and reports it in its availability. The link ends in `/original/download/` so the reference-token redaction keeps it out of stored tool calls, while the file-id patterns never take it for a conversation file.
+
+A PDF follows the same template: the runtime renders the Word file, reads its page, fonts, heading faces, header, footer and logo into a stylesheet, keeps the template's own text, tables and pictures around the content, and lays the document out with WeasyPrint as a tagged PDF/UA-1 file (validated with veraPDF on the runtime's fixtures). Uploads are checked for macros and bounds in the backend (`document_templates/validation.py`), then inspected by the runtime (`POST /templates/inspect`), whose fields and style checks the admin view shows; a template is `unchecked` when the runtime cannot be reached. Every library change is audited (`DOCUMENT_TEMPLATE_*`).
 
 ## 5. Extending the capability set
 
-Adding a capability requires updating the backend `CapabilityPurpose` type and `CAPABILITY_PURPOSES` list, adding the matching permission and frontend `capabilities.ts` descriptor with its messages, and migrating the association-table purpose constraints and existing role permissions. All admin, space, assistant and chat surfaces render from those lists.
+Adding a capability requires:
 
-Whether a capability should be served by a built-in loopback server at all, and which attachment pattern it should use, is covered in the docs site page **Built-in Tool Servers** (`frontend/apps/docs-site/src/content/docs/builtin-tool-servers.mdx`). The rule in short: a loopback tool is a pure function of the request, the tenant database and at most one outbound provider call, finishing inside a tool-call timeout; anything with a runtime footprint (engine, process, storage, heavy dependency) is an external MCP server that receives the signed reference URL.
+- backend: the `CapabilityPurpose` type and `CAPABILITY_PURPOSES` list, `MCPServerPurpose`, the matching `Permission` and its description in `permissions_mapper.py`, the predefined roles in `predefined_roles.yml` (web search, image generation and file analysis go to User, AI Configurator and Owner; a function that writes files or runs code, such as file creation, charts and compute, goes to Owner only and an administrator opts other roles in), and the purpose CHECK constraints in `capabilities_table.py`;
+- a migration that replaces the three purpose constraints and decides which existing roles get the permission (`202610081000` grants `file_analysis` and `file_creation` to the predefined User, AI Configurator and Owner roles; `202610081100` grants `charts` to no existing role and `202610091100` adds it to Owner; `202610131300` grants `compute` to Owner only);
+- frontend: the `capabilities.ts` descriptor, `CAPABILITY_STEPS` in `internalToolLabels.ts`, `permission-labels.ts`, `permission-groups.ts` and the Paraglide messages; the JSDoc unions in `packages/eneo-js/src/endpoints/*.js`, and a regenerated `schema.d.ts`;
+- for a capability that delivers files, its types in `GENERATED_FILE_TYPES_BY_PURPOSE`;
+- for a bundled provider, an entry in `BUNDLED_TOOLS` naming its purpose and whether it needs forwarded identity.
+
+All admin, space, assistant and chat surfaces render from those lists.
+
+Whether a capability should be served by a built-in loopback server at all, and which attachment pattern it should use, is covered in the docs site page **Built-in Tool Servers** (`frontend/apps/docs-site/src/content/docs/builtin-tool-servers.mdx`); the reasoning behind the split between loopback, bundled and external providers is in **Tools and MCP Architecture** (`frontend/apps/docs-site/src/content/docs/tool-architecture.mdx`). The rule in short: a loopback tool is a pure function of the request, the tenant database and at most one outbound provider call, finishing inside a tool-call timeout; anything with a runtime footprint (engine, process, storage, heavy dependency) runs outside the backend, as an Eneo-bundled isolated provider in the tool runtime or an independently operated MCP server, and receives the signed reference URL.
 
 
 ## 6. Deployment and client changes
 
-Ship migration **202609041000**, backend, frontend and the bundled JavaScript
-client together. The migration backfills active and inactive capability
+Ship migrations **202609041000** and **202610081000** (`file_analysis`,
+`file_creation`), **202610081100** (`charts`) and **202610131300** (`compute`), backend,
+frontend and the bundled JavaScript client together. The migration backfills active and inactive capability
 attachments, collapses duplicate purposes, preserves a policy default as on
 when any duplicate was on, and removes obsolete provider attachments and
 capability tool overrides. Ordinary MCP associations and tool settings remain.

@@ -965,7 +965,13 @@ async def test_adoption_rows_name_personal_owners_and_spaces_the_admin_can_open(
             "member": await space_factory(session, "Member space", [model.id]),
             "group member": await space_factory(session, "Group space", [model.id]),
             "stranger": await space_factory(session, "Stranger space", [model.id]),
+            "organization": organization,
         }
+        # An admin opens the organization space without a membership row, as
+        # right after the admin role was given.
+        await session.execute(
+            sa.delete(SpacesUsers).where(SpacesUsers.space_id == organization.id)
+        )
         session.add(
             SpacesUsers(
                 space_id=spaces["member"].id, user_id=admin_user.id, role="admin"
@@ -1045,10 +1051,11 @@ async def test_adoption_rows_name_personal_owners_and_spaces_the_admin_can_open(
             "Assistant in member": (None, True),
             "Assistant in group member": (None, False),
             "Assistant in stranger": (None, False),
+            "Assistant in organization": (None, True),
         }
-        assert everything.matched_count == 5
+        assert everything.matched_count == 6
         assert everything.summary is not None
-        assert everything.summary.assistant_count == 5
+        assert everything.summary.assistant_count == 6
 
         with_group = await rows(SkillAdoptionFilter(), group_ids=frozenset({group.id}))
         assert {resource.name: resource.can_open for resource in with_group.items}[
@@ -1089,7 +1096,7 @@ async def test_adoption_rows_name_personal_owners_and_spaces_the_admin_can_open(
             "Assistant in other personal"
         ]
         assert by_owner.matched_count == 1
-        assert by_owner.summary is not None and by_owner.summary.assistant_count == 5
+        assert by_owner.summary is not None and by_owner.summary.assistant_count == 6
         by_space = await rows(SkillAdoptionFilter(query="stranger"))
         assert by_space.matched_count == 1
         apps_only = await rows(SkillAdoptionFilter(kind=SkillAdoptionResourceKind.APP))
@@ -1097,7 +1104,7 @@ async def test_adoption_rows_name_personal_owners_and_spaces_the_admin_can_open(
         behind = await rows(SkillAdoptionFilter(drift=SkillAdoptionDrift.BEHIND))
         assert behind.matched_count == 0
         current = await rows(SkillAdoptionFilter(drift=SkillAdoptionDrift.CURRENT))
-        assert current.matched_count == 5
+        assert current.matched_count == 6
         # LIKE wildcards are literal in the search: "%" matches no name.
         wildcard = await rows(SkillAdoptionFilter(query="%"))
         assert wildcard.matched_count == 0

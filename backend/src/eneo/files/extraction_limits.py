@@ -17,6 +17,10 @@ class FileExtractionLimits(BaseSettings):
     max_archive_bytes: int = Field(default=134_217_728, gt=0)
     max_archive_entries: int = Field(default=10_000, gt=0)
     max_pdf_pages: int = Field(default=1_000, gt=0)
+    # Table detection and visual-content scanning parse each page's layout in
+    # pure Python (tens of milliseconds per page). Longer PDFs take their text
+    # from the PDF text layer instead, without table reconstruction.
+    pdf_layout_max_pages: int = Field(default=200, gt=0)
 
 
 @lru_cache(maxsize=1)

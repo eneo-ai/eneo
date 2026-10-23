@@ -36,11 +36,17 @@ from eneo.internal_mcp.file_references import (
     verify_reference_url,
 )
 from eneo.internal_mcp.foundation import (
+    bearer_from_ctx,
     build_ephemeral_server,
     default_page_cap,
     internal_tool_context,
+    table_tools_from_token,
 )
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    CSV_MIME_TYPE,
+    XLSX_MIME_TYPE,
+    MCPServer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +70,32 @@ __all__ = [
 ]
 
 
+# Files the table tools read whole: when they are attached, read_file points at
+# them instead of paging the extracted text into context.
+TABULAR_MIME_TYPES = frozenset(
+    {CSV_MIME_TYPE, "text/tab-separated-values", XLSX_MIME_TYPE}
+)
+
+
 def _text(message: str) -> list[TextContent]:
     return [TextContent(type="text", text=message)]
+
+
+def _table_tools_offered(ctx: Context) -> bool:
+    """Whether this completion attached inspect_table and query_table."""
+    try:
+        return table_tools_from_token(bearer_from_ctx(ctx))
+    except Exception:  # noqa: BLE001 - no header or claim means no table tools
+        return False
+
+
+def _table_tools_redirect(file) -> list[TextContent]:
+    return _text(
+        f"'{file.name}' ({file.mimetype}) is a table. Use inspect_table with the "
+        "same url to see its sheets, columns, types and sample rows, and "
+        "query_table to answer from its rows; both read the file itself. Call "
+        "read_file again with raw=true only if those tools could not read it."
+    )
 
 
 def _file_content(file, *, offset: int, page_cap: int) -> list[TextContent]:
@@ -117,6 +147,7 @@ async def read_file(
     url: str,
     ctx: Context,
     offset: int = 0,
+    raw: bool = False,
 ) -> list[TextContent]:
     """Read the text content of a file attached to this conversation or assistant.
 
@@ -134,7 +165,13 @@ async def read_file(
     task (for example tabular or spreadsheet analysis tools, or tools that
     summarize files too large to read into context), prefer that tool and
     pass it the same url; if it fails or no such tool exists, use this one
-    rather than telling the user the file cannot be read.
+    rather than telling the user the file cannot be read. For a CSV, TSV or
+    Excel file, inspect_table and query_table, when available, describe and
+    query the file far better than its raw text, also when the user only asks
+    what the file contains; while they are available this tool points such a
+    file at them instead of returning its text. Set raw=true only when they
+    could not read the file: the extracted text is then returned as for any
+    other file.
     """
     try:
         file_id, payload = verify_reference_url(url)
@@ -150,6 +187,10 @@ async def read_file(
         except FileReferenceRejected as exc:
             return _text(str(exc))
 
+    if not raw and file.mimetype in TABULAR_MIME_TYPES and _table_tools_offered(ctx):
+        logger.info("[FILES] read_file file=%s pointed at the table tools", file_id)
+        return _table_tools_redirect(file)
+
     logger.info(
         "[FILES] read_file file=%s type=%s offset=%d size=%d",
         file_id,
@@ -158,6 +199,13 @@ async def read_file(
         len(file.text or ""),
     )
     return _file_content(file, offset=offset, page_cap=default_page_cap())
+
+
+_TABLE_TOOLS_SUFFIX = (
+    "\n\nAttached CSV, TSV and Excel files belong to inspect_table and "
+    "query_table, which read the file itself; for such a file this tool points "
+    "at them instead of returning its text, unless raw=true."
+)
 
 
 def _attachments_suffix(attachment_labels: Sequence[str]) -> str:
@@ -178,16 +226,25 @@ def _attachments_suffix(attachment_labels: Sequence[str]) -> str:
 
 
 async def build_files_mcp_server(
-    *, token: str, tenant_id: UUID, attachment_labels: Sequence[str] = ()
+    *,
+    token: str,
+    tenant_id: UUID,
+    attachment_labels: Sequence[str] = (),
+    table_tools: bool = False,
 ) -> MCPServer:
-    """Build the ephemeral MCP server eneo attaches for referenced attachments."""
+    """Build the ephemeral MCP server eneo attaches for referenced attachments.
+
+    ``table_tools`` says the completion also attached the file-analysis tools;
+    the token must then carry the same claim for read_file to act on it.
+    """
+    suffix = _attachments_suffix(attachment_labels) + (
+        _TABLE_TOOLS_SUFFIX if table_tools else ""
+    )
     return await build_ephemeral_server(
         mcp,
         name=FILES_SERVER_NAME,
         description="Loopback server for reading files attached to this conversation.",
         token=token,
         tenant_id=tenant_id,
-        tool_description_suffixes={"read_file": _attachments_suffix(attachment_labels)}
-        if attachment_labels
-        else None,
+        tool_description_suffixes={"read_file": suffix} if suffix else None,
     )

@@ -1,11 +1,14 @@
 /*
     Copyright (c) 2026 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 */
 
 import { m } from "$lib/paraglide/messages";
-import { getCapability, type CapabilityPurpose } from "$lib/features/mcp/capabilities";
+import {
+  getCapability,
+  type CapabilityDescriptor,
+  type CapabilityPurpose
+} from "$lib/features/mcp/capabilities";
+import { referencedFileId } from "./fileReference";
 
 type ToolArgs = Record<string, unknown> | undefined;
 
@@ -14,6 +17,8 @@ type ToolCallLike = {
   server_name: string;
   purpose?: string | null;
   is_internal?: boolean | null;
+  /** Stamped by the backend for a server built into Eneo (the bundled tool runtime). */
+  is_bundled?: boolean | null;
 };
 
 type CatalogLabels = { title: () => string; description: () => string };
@@ -189,7 +194,23 @@ const CAPABILITY_STEPS: Record<
       return query ? m.tool_web_search_query_done({ query }) : m.tool_web_search_done();
     }
   },
-  image_generation: INTERNAL_SERVERS.image_generation.tools.generate_image
+  image_generation: INTERNAL_SERVERS.image_generation.tools.generate_image,
+  file_analysis: {
+    running: () => m.tool_file_analysis(),
+    done: () => m.tool_file_analysis_done()
+  },
+  charts: {
+    running: () => m.tool_charts(),
+    done: () => m.tool_charts_done()
+  },
+  file_creation: {
+    running: () => m.tool_file_creation(),
+    done: () => m.tool_file_creation_done()
+  },
+  compute: {
+    running: () => m.tool_compute(),
+    done: () => m.tool_compute_done()
+  }
 };
 
 function capabilityPurpose(purpose: string | null | undefined): CapabilityPurpose | null {
@@ -233,13 +254,39 @@ export function isInternalToolCall(call: ToolCallLike): boolean {
 }
 
 /**
+ * How a tool call reads in the chat. A `function` step is a capability call
+ * (a chart, a file analysis, a web search), whichever provider served it: the
+ * assistant did work and may have produced something, so the step carries the
+ * function's icon and leads to the result. A `context` step is a lookup on
+ * one of Eneo's own loopback servers (knowledge, files, a Skill): a plain
+ * line. Everything else ran on a general external server and keeps its card.
+ * Rows persisted before `purpose` existed fall back to the server name alone.
+ */
+export type ToolStepKind = "context" | "function" | "external";
+
+export function toolStepKind(call: ToolCallLike): ToolStepKind {
+  if (capabilityPurpose(call.purpose) !== null) return "function";
+  return isInternalToolCall(call) ? "context" : "external";
+}
+
+/**
+ * The function's icon for a function step, the same glyph the admin and
+ * settings surfaces show for that capability; null for every other step.
+ */
+export function toolStepIcon(
+  purpose: string | null | undefined
+): CapabilityDescriptor["icon"] | null {
+  const capability = capabilityPurpose(purpose);
+  return capability ? (getCapability(capability)?.icon ?? null) : null;
+}
+
+/**
  * Whether a tool call renders as a built-in step (slim line, localized
  * labels) rather than as an external tool card: capability calls whichever
- * provider served them, and calls on Eneo's own loopback servers. Rows
- * persisted before `purpose` existed fall back to the server name alone.
+ * provider served them, and calls on Eneo's own loopback servers.
  */
 export function isBuiltinToolCall(call: ToolCallLike): boolean {
-  return capabilityPurpose(call.purpose) !== null || isInternalToolCall(call);
+  return toolStepKind(call) !== "external";
 }
 
 /**
@@ -301,17 +348,18 @@ export function serverDisplayName(
 /**
  * The provider's own name for a capability call served by an external
  * provider ("GDM Safe Search"), shown as the step's detail so the source
- * stays visible; null for Eneo's own servers and general tools.
+ * stays visible; null for Eneo's own servers (loopback or built in), and
+ * for general tools.
  */
 export function capabilityProviderDetail(call: ToolCallLike): string | null {
   if (capabilityPurpose(call.purpose) === null || isInternalToolCall(call)) {
     return null;
   }
+  // A provider built into Eneo is Eneo's own, like the loopback servers: the
+  // step label already says what happened, so no provider is named.
+  if (call.is_bundled) return null;
   return call.server_name;
 }
-
-/** Path of a signed file reference URL, mirroring the backend's parser. */
-const FILE_DOWNLOAD_PATH = /\/api\/v1\/files\/([0-9a-fA-F-]{36})\/original\/download\/?$/;
 
 /**
  * File id referenced by a read_file call on Eneo's internal files server, or
@@ -325,13 +373,7 @@ export function internalReadFileId(
   isInternal?: boolean | null
 ): string | null {
   if (serverName !== "files" || toolName !== "read_file" || !isOwnServer(isInternal)) return null;
-  const url = args?.url;
-  if (typeof url !== "string") return null;
-  try {
-    return FILE_DOWNLOAD_PATH.exec(new URL(url).pathname)?.[1] ?? null;
-  } catch {
-    return null;
-  }
+  return referencedFileId(args?.url);
 }
 
 /** Whether a generate_image call edits reference images rather than starting from text. */

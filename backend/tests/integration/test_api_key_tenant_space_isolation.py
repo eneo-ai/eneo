@@ -249,7 +249,7 @@ async def test_tenant_key_cannot_move_foreign_assistant_into_own_tenant(
 
     resp = await client.post(
         f"/api/v1/assistants/{foreign_assistant}/transfer/",
-        json={"target_space_id": own_space, "move_resources": False},
+        json={"target_space_id": own_space},
         headers=_key(secret),
     )
 
@@ -274,7 +274,7 @@ async def test_tenant_key_cannot_move_own_assistant_into_foreign_tenant(
 
     resp = await client.post(
         f"/api/v1/assistants/{own_assistant}/transfer/",
-        json={"target_space_id": foreign_space, "move_resources": False},
+        json={"target_space_id": foreign_space},
         headers=_key(secret),
     )
 
@@ -297,7 +297,7 @@ async def test_session_user_cannot_move_own_assistant_into_foreign_tenant(
 
     resp = await client.post(
         f"/api/v1/assistants/{own_assistant}/transfer/",
-        json={"target_space_id": foreign_space, "move_resources": False},
+        json={"target_space_id": foreign_space},
         headers=_bearer(bearer_token),
     )
 
@@ -318,7 +318,7 @@ async def test_tenant_key_moves_assistant_between_own_tenant_spaces(
 
     resp = await client.post(
         f"/api/v1/assistants/{assistant}/transfer/",
-        json={"target_space_id": target, "move_resources": False},
+        json={"target_space_id": target},
         headers=_key(secret),
     )
 

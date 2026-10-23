@@ -1,7 +1,5 @@
 <!--
     Copyright (c) 2024 Sundsvalls Kommun
-
-    Licensed under the MIT License.
 -->
 
 <!-- Needs to be a svelte 4 component for compatibility reasons with the table -->

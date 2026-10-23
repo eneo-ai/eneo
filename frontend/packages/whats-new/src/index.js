@@ -22,6 +22,27 @@ export function latestRelease() {
 }
 
 /**
+ * Use the installed RC's identity for its release notes, without keeping a
+ * duplicate content entry for every candidate. Docs keep using `releases`.
+ * Unversioned/local builds keep the authored identity. Never assign another
+ * release line's content to a build just because it is the newest entry.
+ * @param {string} installedVersion
+ * @returns {import("./index").Release[]}
+ */
+export function releasesForVersion(installedVersion) {
+  const version = installedVersion.replace(/^v/, "");
+  const match = /^(\d+\.\d+\.\d+)-rc\.\d+$/.exec(version);
+  if (!match) return releases;
+  return releases.map((release) => {
+    if (release.version !== match[1]) return release;
+    // A final release's date must not suppress an RC announcement for users
+    // created after that date. Candidates always announce to their testers.
+    const { date: _date, ...notes } = release;
+    return { ...notes, version };
+  });
+}
+
+/**
  * Semver order for release ids as written in releases.json ("2.2.0",
  * "2.3.0-rc.1"). A pre-release sorts before its final release; pre-release
  * identifiers compare numerically when both are numeric, otherwise as text.
@@ -75,9 +96,9 @@ function parseVersion(version) {
  * seen. Comparing by order (not equality) keeps the dot off after a
  * rollback or when an older frontend serves a request mid-deploy.
  * @param {string | null | undefined} seenVersion
+ * @param {import("./index").Release | undefined} latest
  */
-export function hasUnseenRelease(seenVersion) {
-  const latest = latestRelease();
+export function hasUnseenRelease(seenVersion, latest = latestRelease()) {
   if (!latest) return false;
   if (!seenVersion) return true;
   return compareVersions(latest.version, seenVersion) > 0;
@@ -85,8 +106,11 @@ export function hasUnseenRelease(seenVersion) {
 
 /**
  * @param {import("./index").Release} release
- * @param {boolean} isAdmin
+ * @param {import("./index").PermissionCheck} can
  */
-export function visibleEntries(release, isAdmin) {
-  return release.entries.filter((entry) => isAdmin || (entry.audience ?? "all") === "all");
+export function visibleEntries(release, can) {
+  return release.entries.filter(
+    (entry) =>
+      (entry.audience !== "admin" || can("admin")) && (!entry.permissions || can(entry.permissions))
+  );
 }

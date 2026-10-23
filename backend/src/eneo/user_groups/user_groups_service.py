@@ -1,5 +1,3 @@
-# MIT License
-
 from uuid import UUID
 
 from eneo.main.exceptions import AuthenticationException, NotFoundException

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Optional
 from urllib.parse import quote
 
 from eneo.authentication.auth_models import is_service_api_key
+from eneo.main.header_values import is_unsafe_header_char
 
 if TYPE_CHECKING:
     from eneo.tenants.tenant import TenantInDB
@@ -37,7 +38,7 @@ def _sanitize(value: Optional[str]) -> Optional[str]:
     """
     if value is None:
         return None
-    cleaned = "".join(ch for ch in value if ch == " " or ch.isprintable())
+    cleaned = "".join(ch for ch in value if not is_unsafe_header_char(ch))
     cleaned = cleaned.replace("\r", "").replace("\n", "").strip()
     if not cleaned:
         return None

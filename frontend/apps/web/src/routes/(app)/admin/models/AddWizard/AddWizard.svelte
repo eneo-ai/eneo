@@ -435,6 +435,20 @@
           : null
       });
     }
+    if (modelType === "rerank") {
+      return eneo.tenantModels.createRerank({
+        provider_id: providerId,
+        name: model.name,
+        display_name: model.displayName,
+        family: model.family ?? "openai",
+        hosting: model.hosting ?? "swe",
+        is_active: true,
+        description: model.description ?? null,
+        security_classification: model.securityClassification
+          ? { id: model.securityClassification.id }
+          : null
+      });
+    }
     return eneo.tenantModels.createImage({
       provider_id: providerId,
       name: model.name,

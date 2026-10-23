@@ -1,10 +1,14 @@
 import logging
+from dataclasses import asdict
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from dependency_injector import providers
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import TypedDict
 
 from eneo.database.database import sessionmanager
+from eneo.files.unused_file_cleanup import sweep_unused_files
 from eneo.main.container.container import Container
 from eneo.worker.worker import Worker
 
@@ -36,8 +40,10 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
     Uses explicit sessionmanager.session() to avoid nested transaction issues
     when cron wrapper already has a transaction open.
 
-    Runs separate transactions for each deletion type to ensure partial
-    success is possible if one type fails.
+    Every deletion batch commits on its own, so the locks a batch takes on the
+    records and the Files they used are released at once, an error keeps the
+    progress made so far, and one deletion type failing does not stop the
+    others.
 
     Returns:
         Dictionary with deletion counts and any errors encountered
@@ -68,15 +74,14 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
 
             # Delete old questions
             try:
-                async with session.begin():
-                    questions_count = (
-                        await data_retention_service.delete_old_questions()
+                questions_count = await data_retention_service.delete_old_questions(
+                    commit_each_batch=True
+                )
+                results["deleted"]["questions"] = questions_count
+                if questions_count > 0:
+                    logger.info(
+                        f"Deleted {questions_count} old questions based on retention policies"
                     )
-                    results["deleted"]["questions"] = questions_count
-                    if questions_count > 0:
-                        logger.info(
-                            f"Deleted {questions_count} old questions based on retention policies"
-                        )
             except Exception as e:
                 error_msg = f"Failed to delete old questions: {str(e)}"
                 logger.error(error_msg, exc_info=True)
@@ -85,13 +90,14 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
 
             # Delete old app runs
             try:
-                async with session.begin():
-                    app_runs_count = await data_retention_service.delete_old_app_runs()
-                    results["deleted"]["app_runs"] = app_runs_count
-                    if app_runs_count > 0:
-                        logger.info(
-                            f"Deleted {app_runs_count} old app runs based on retention policies"
-                        )
+                app_runs_count = await data_retention_service.delete_old_app_runs(
+                    commit_each_batch=True
+                )
+                results["deleted"]["app_runs"] = app_runs_count
+                if app_runs_count > 0:
+                    logger.info(
+                        f"Deleted {app_runs_count} old app runs based on retention policies"
+                    )
             except Exception as e:
                 error_msg = f"Failed to delete old app runs: {str(e)}"
                 logger.error(error_msg, exc_info=True)
@@ -100,11 +106,12 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
 
             # Delete old orphaned sessions
             try:
-                async with session.begin():
-                    sessions_count = await data_retention_service.delete_old_sessions()
-                    results["deleted"]["sessions"] = sessions_count
-                    if sessions_count > 0:
-                        logger.info(f"Deleted {sessions_count} orphaned sessions")
+                sessions_count = await data_retention_service.delete_old_sessions(
+                    commit_each_batch=True
+                )
+                results["deleted"]["sessions"] = sessions_count
+                if sessions_count > 0:
+                    logger.info(f"Deleted {sessions_count} orphaned sessions")
             except Exception as e:
                 error_msg = f"Failed to delete old sessions: {str(e)}"
                 logger.error(error_msg, exc_info=True)
@@ -143,3 +150,23 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         )
 
     return results
+
+
+@worker.cron_job(hour=3, minute=30, manages_own_session=True)
+async def delete_unused_files(container: Container) -> dict[str, Any]:
+    """Daily deletion of uploaded files that nothing uses anymore.
+
+    Runs after the retention cleanup so that files its deleted records used
+    are already released. Catches files left unused by cascades (deleting an
+    assistant, app, space or group chat), uploads never attached, and files
+    left behind before this cleanup existed. Each page commits on its own.
+    """
+    result = await sweep_unused_files(
+        cast(AsyncSession, container.session()), dry_run=False
+    )
+    logger.info(
+        f"Unused file cleanup deleted {result.files} files "
+        f"({result.managed_bytes} managed bytes) across "
+        f"{len(result.files_by_tenant)} tenants"
+    )
+    return asdict(result)

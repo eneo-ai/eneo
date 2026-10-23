@@ -10,6 +10,14 @@ from uuid import uuid4
 import httpx
 import pytest
 
+from eneo.main.config import get_settings, set_settings
+
+
+@pytest.fixture(autouse=True)
+def configure_settings(test_settings):
+    set_settings(test_settings.model_copy())
+
+
 from eneo.integration.infrastructure.auth_service.sharepoint_auth_service import (
     SharepointAuthService,
 )
@@ -65,7 +73,7 @@ class TestGetCredentials:
         with patch(
             "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
-            settings = MagicMock()
+            settings = get_settings().model_copy()
             settings.oauth_callback_url = "https://example.com/callback"
             settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
@@ -100,7 +108,7 @@ class TestGetCredentials:
         with patch(
             "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
-            settings = MagicMock()
+            settings = get_settings().model_copy()
             settings.oauth_callback_url = None
             settings.public_origin = "https://myapp.example.com"
             mock_settings.return_value = settings
@@ -121,7 +129,7 @@ class TestGetCredentials:
         with patch(
             "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
-            settings = MagicMock()
+            settings = get_settings().model_copy()
             settings.oauth_callback_url = None
             settings.public_origin = None
             mock_settings.return_value = settings
@@ -141,7 +149,7 @@ class TestGenAuthUrl:
         with patch(
             "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
-            settings = MagicMock()
+            settings = get_settings().model_copy()
             settings.oauth_callback_url = "https://example.com/callback"
             settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
@@ -159,7 +167,7 @@ class TestGenAuthUrl:
         with patch(
             "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
-            settings = MagicMock()
+            settings = get_settings().model_copy()
             settings.oauth_callback_url = "https://example.com/callback"
             settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
@@ -181,7 +189,7 @@ class TestGenAuthUrl:
         with patch(
             "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
-            settings = MagicMock()
+            settings = get_settings().model_copy()
             settings.oauth_callback_url = "https://example.com/callback"
             settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
@@ -197,7 +205,7 @@ class TestGenAuthUrl:
         with patch(
             "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
-            settings = MagicMock()
+            settings = get_settings().model_copy()
             settings.oauth_callback_url = "https://example.com/callback"
             settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
@@ -221,7 +229,7 @@ class TestExchangeToken:
         with patch(
             "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
-            settings = MagicMock()
+            settings = get_settings().model_copy()
             settings.oauth_callback_url = "https://example.com/callback"
             settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
@@ -254,7 +262,7 @@ class TestExchangeToken:
         with patch(
             "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
-            settings = MagicMock()
+            settings = get_settings().model_copy()
             settings.oauth_callback_url = "https://example.com/callback"
             settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
@@ -293,7 +301,7 @@ class TestExchangeToken:
         with patch(
             "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
-            settings = MagicMock()
+            settings = get_settings().model_copy()
             settings.oauth_callback_url = "https://example.com/callback"
             settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
@@ -326,7 +334,7 @@ class TestRefreshAccessToken:
         with patch(
             "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
-            settings = MagicMock()
+            settings = get_settings().model_copy()
             settings.oauth_callback_url = "https://example.com/callback"
             settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
@@ -357,7 +365,7 @@ class TestRefreshAccessToken:
         with patch(
             "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
-            settings = MagicMock()
+            settings = get_settings().model_copy()
             settings.oauth_callback_url = "https://example.com/callback"
             settings.public_origin = "https://example.com"
             mock_settings.return_value = settings
@@ -392,7 +400,7 @@ class TestRefreshAccessToken:
         with patch(
             "eneo.integration.infrastructure.auth_service.sharepoint_auth_service.get_settings"
         ) as mock_settings:
-            settings = MagicMock()
+            settings = get_settings().model_copy()
             settings.oauth_callback_url = "https://example.com/callback"
             settings.public_origin = "https://example.com"
             mock_settings.return_value = settings

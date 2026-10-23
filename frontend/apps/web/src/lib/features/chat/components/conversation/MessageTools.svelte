@@ -12,13 +12,22 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import BlobPreview from "$lib/features/knowledge/components/BlobPreview.svelte";
   import LinkReference from "$lib/features/knowledge/components/LinkReference.svelte";
+  import { sanitizeWebHref } from "$lib/components/markdown/index.js";
   import McpResourceSnippetModal from "./McpResourceSnippetModal.svelte";
   import { getFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte";
   import { getMessageContext } from "../../MessageContext.svelte";
+  import { getChatService } from "../../ChatService.svelte";
   import { citedTextDocumentReferences, dedupeByDocument } from "../../mcpReferenceDocs";
+  import {
+    getPartnerKnowledgeMode,
+    getPartnerKnowledgeSources,
+    hasKnowledgeSources,
+    shouldShowNoSourcesNotice
+  } from "../../knowledgeSources";
 
   const { settings } = getAppContext();
-  const { current, isLast } = getMessageContext();
+  const { current, isLast, isLoading } = getMessageContext();
+  const chat = getChatService();
   const message = $derived(current());
   const preferredCopyFormat = $derived(getPreferredAssistantCopyFormat(settings));
   const copyLabel = $derived(
@@ -73,6 +82,15 @@
   }
 
   const totalRefs = $derived(message.references.length + mcpRefDocs.length);
+  const showNoSourcesNotice = $derived(
+    shouldShowNoSourcesNotice({
+      hasKnowledge: hasKnowledgeSources(getPartnerKnowledgeSources(chat.partner)),
+      knowledgeMode: getPartnerKnowledgeMode(chat.partner),
+      referenceCount: totalRefs,
+      // isLoading is conversation-wide; only the streaming answer is undecided.
+      isLoading: isLoading() && isLast()
+    })
+  );
 
   async function handleCopy(format: AssistantCopyFormat = preferredCopyFormat) {
     await copyAssistantAnswer(message.answer, format);
@@ -140,6 +158,10 @@
           {totalRefs}
           {m.references()}
         </button>
+      {:else if showNoSourcesNotice}
+        <span class="text-muted flex items-center px-2 text-xs" role="status">
+          {m.chat_no_sources_found()}
+        </span>
       {/if}
     </div>
   </div>
@@ -156,7 +178,7 @@
   {#if referencesExpanded}
     <div class="mb-2 flex w-full flex-wrap gap-2 pt-2 md:pb-6">
       {#each message.references as reference, index (reference.id)}
-        {#if reference.metadata.url}
+        {#if sanitizeWebHref(reference.metadata.url)}
           <LinkReference blob={reference} index={index + 1} />
         {:else}
           <BlobPreview blob={reference} index={index + 1} />

@@ -1,11 +1,12 @@
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from eneo.questions.question import Message, Question, ToolCallInfo
+from eneo.questions.question import Message, MessageFeedback, Question, ToolCallInfo
 from eneo.questions.question_protocol import to_question_public
 from eneo.sessions.session import SessionInDB, SessionMetadataPublic
 from eneo.sessions.session_protocol import (
     to_session_metadata_paginated_response,
+    to_session_public,
     to_sessions_paginated_response,
 )
 from eneo.skills.domain.skill import (
@@ -192,3 +193,48 @@ def test_message_schema_documents_legacy_and_cumulative_context_usage():
         in properties["context_prompt_tokens"]["description"]
     )
     assert "do not add it" in properties["skill_context_tokens"]["description"]
+
+
+def _question(**overrides: object) -> Question:
+    now = datetime.now(timezone.utc)
+    values: dict[str, object] = {
+        "id": uuid4(),
+        "created_at": now,
+        "updated_at": now,
+        "question": "Question",
+        "answer": "Answer",
+        "num_tokens_question": 1,
+        "num_tokens_answer": 1,
+        "tenant_id": uuid4(),
+        "session_id": uuid4(),
+    }
+    values.update(overrides)
+    return Question.model_validate(values)
+
+
+def test_conversation_payload_carries_each_answers_rating_beside_the_session_rating():
+    rated = _question(feedback=MessageFeedback(value=-1, text="Fel paragraf"))
+    unrated = _question()
+    session = SessionInDB(
+        id=uuid4(),
+        name="Samtal",
+        user_id=uuid4(),
+        feedback_value=1,
+        questions=[rated, unrated],
+    )
+
+    public = to_session_public(session)
+
+    assert public.messages[0].feedback == MessageFeedback(value=-1, text="Fel paragraf")
+    assert public.messages[1].feedback is None
+    # The conversation-level rating is reported separately and unchanged.
+    assert public.feedback is not None
+    assert public.feedback.value == 1
+
+
+def test_question_public_omits_the_rater():
+    question = _question(feedback=MessageFeedback(value=1))
+
+    dumped = to_question_public(question).model_dump()
+
+    assert dumped["feedback"] == {"value": 1, "text": None}

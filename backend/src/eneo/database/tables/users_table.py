@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import (
@@ -12,6 +12,7 @@ from sqlalchemy import (
     false,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.base_class import Base, BasePublic
@@ -24,10 +25,25 @@ class Users(BasePublic):
     username: Mapped[Optional[str]] = mapped_column()
     email: Mapped[str] = mapped_column(index=True)
     external_id: Mapped[Optional[str]] = mapped_column(index=True)
+    # SCIM schema extensions keyed by URN. Only the Enterprise User extension is
+    # written (eneo.scim.domain.enterprise_user); SQL NULL when none is stored,
+    # as on rows that predate the column. none_as_null keeps Python None from
+    # being written as the JSON literal 'null'.
+    scim_extensions: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB(none_as_null=True)
+    )
     email_verified: Mapped[bool] = mapped_column(server_default="False")
     salt: Mapped[Optional[str]] = mapped_column()
     password: Mapped[Optional[str]] = mapped_column()
     credential_version: Mapped[int] = mapped_column(nullable=False, server_default="0")
+    # Local password lifecycle (eneo.users.password). NULL changed_at means no
+    # local password was ever written; the lifecycle migration stamps the rest.
+    password_changed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
+    password_change_required: Mapped[bool] = mapped_column(
+        nullable=False, server_default=false()
+    )
     is_active: Mapped[bool] = mapped_column(server_default="True")
     state: Mapped[str] = mapped_column()
     used_tokens: Mapped[int] = mapped_column(default=0)

@@ -28,6 +28,8 @@ import { initIntegrations } from "./endpoints/integrations.js";
 import { initConversations } from "./endpoints/conversations.js";
 import { initSecurityClassifications } from "./endpoints/security-classifications.js";
 import { initMCPServers } from "./endpoints/mcp-servers.js";
+import { initDocumentTemplates } from "./endpoints/document-templates.js";
+import { initMcpApps } from "./endpoints/mcp-apps.js";
 import { initPromptLibrary } from "./endpoints/prompt-library.js";
 import { initGovernancePolicy } from "./endpoints/governance-policy.js";
 import { initSettings } from "./endpoints/settings.js";
@@ -52,6 +54,7 @@ import { initModules } from "./endpoints/modules.js";
  * @param  {string} [args.token] Eneo auth token obtained through logging in
  * @param  {string} args.baseUrl Base URL of the Eneo backend
  * @param {(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>} [args.fetch] Alternative fetch function to use, defaults to native fetch
+ * @param {(error: import("./client/client.js").EneoError) => void} [args.onError] Observe normalized request failures before they are thrown.
  */
 export function createEneo(args) {
   const client = createClient(args);
@@ -85,6 +88,8 @@ export function createEneo(args) {
     conversations: initConversations(client),
     securityClassifications: initSecurityClassifications(client),
     mcpServers: initMCPServers(client),
+    documentTemplates: initDocumentTemplates(client),
+    mcpApps: initMcpApps(client),
     promptLibrary: initPromptLibrary(client),
     governancePolicy: initGovernancePolicy(client),
     settings: initSettings(client),

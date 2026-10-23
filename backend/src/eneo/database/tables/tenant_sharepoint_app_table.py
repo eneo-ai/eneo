@@ -56,6 +56,16 @@ class TenantSharePointApp(BasePublic):
         String(255), nullable=True
     )
 
+    # Credential health, written by the token/refresh paths so an expired
+    # secret or revoked refresh token is visible to administrators.
+    last_auth_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_auth_error_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_auth_success_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_by: Mapped[UUID] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )

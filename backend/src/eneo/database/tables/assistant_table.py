@@ -6,23 +6,28 @@ from sqlalchemy import ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.ai_models_table import CompletionModels, RerankModels
 from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.base_class import BaseCrossReference, BasePublic
 from eneo.database.tables.capabilities_table import AssistantCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
-from eneo.database.tables.files_table import Files
+from eneo.database.tables.document_templates_table import AssistantDocumentTemplates
+from eneo.database.tables.files_table import Files, file_usage
 from eneo.database.tables.icons_table import Icons
 from eneo.database.tables.integration_table import IntegrationKnowledge
 from eneo.database.tables.mcp_server_table import MCPServers
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import Websites
+from eneo.files.file_models import FileUsageKind
 
 
 class Assistants(BasePublic):
     capabilities: Mapped[list[AssistantCapabilities]] = relationship(
         lazy="selectin", cascade="all, delete-orphan"
+    )
+    document_template_choice: Mapped[Optional[AssistantDocumentTemplates]] = (
+        relationship(lazy="selectin", cascade="all, delete-orphan", uselist=False)
     )
     name: Mapped[str] = mapped_column()
     completion_model_kwargs: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
@@ -67,6 +72,13 @@ class Assistants(BasePublic):
     )
     icon_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Icons.id, ondelete="SET NULL"), nullable=True
+    )
+    # The reranker the assistant's retrieval uses; NULL = vector order only.
+    # SET NULL: a reranker can be removed while assistants point at it, they
+    # fall back to vector order (#1035). Read by the retrieval step, written
+    # by the assistant editor; both arrive in later tasks.
+    rerank_model_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(RerankModels.id, ondelete="SET NULL"), nullable=True, index=True
     )
 
     # relationships
@@ -146,7 +158,9 @@ class AssistantsFiles(BaseCrossReference):
         ForeignKey(Assistants.id, ondelete="CASCADE"), primary_key=True
     )
     file_id: Mapped[UUID] = mapped_column(
-        ForeignKey(Files.id, ondelete="CASCADE"), primary_key=True
+        ForeignKey(Files.id, ondelete="CASCADE"),
+        primary_key=True,
+        info=file_usage(FileUsageKind.ASSISTANT_ATTACHMENT),
     )
     # False = "open with tool": the attachment reaches the model only as a
     # signed reference URL a tool can read, never as inlined text.

@@ -1,11 +1,12 @@
 from dataclasses import dataclass
-from typing import Any, List, TypeVar
+from typing import Any, List, Literal, TypeVar
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID as PostgreSQLUUID
-from sqlalchemy.orm import defer, selectinload
+from sqlalchemy.orm import InstrumentedAttribute, defer, selectinload
 from sqlalchemy.sql.elements import ColumnElement
 
 from eneo.database.affected_rows import affected_row_count
@@ -17,6 +18,8 @@ from eneo.database.tables.info_blobs_table import (
     InfoBlobs,
     InfoBlobVersionState,
     active_info_blob_version,
+    website_navigation_path,
+    website_path_below,
     website_source_url_equals,
 )
 from eneo.database.tables.integration_table import IntegrationKnowledge
@@ -86,6 +89,126 @@ class WebsiteInfoBlobPage:
     items: list[InfoBlobInDBNoText]
     total_count: int
     next_cursor: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class WebsiteContentFolder:
+    """A URL prefix, not a page-to-document ownership relationship."""
+
+    path: str
+    count: int
+    has_children: bool
+
+
+@dataclass(frozen=True, slots=True)
+class WebsiteContentFolderPage:
+    items: list[WebsiteContentFolder]
+    next_cursor: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class IntegrationDocumentsPage:
+    items: list[InfoBlobInDBNoText]
+    total_count: int
+    total_size: int
+
+
+IntegrationDocumentSort = Literal["name", "path", "size", "updated_at"]
+_Column = ColumnElement[Any] | InstrumentedAttribute[Any]
+_LIKE_ESCAPE = "\\"
+
+
+def _like_literal(needle: str) -> str:
+    return (
+        needle.replace(_LIKE_ESCAPE, _LIKE_ESCAPE * 2)
+        .replace("%", _LIKE_ESCAPE + "%")
+        .replace("_", _LIKE_ESCAPE + "_")
+    )
+
+
+def _contains(column: _Column, needle: str) -> ColumnElement[bool]:
+    return column.ilike(f"%{_like_literal(needle)}%", escape=_LIKE_ESCAPE)
+
+
+def _starts_with(column: _Column, prefix: str) -> ColumnElement[bool]:
+    return column.ilike(f"{_like_literal(prefix)}%", escape=_LIKE_ESCAPE)
+
+
+# Every property value except booleans'. In lax mode ``value[*]`` yields a
+# plain value as well as each entry of a multi-value list. An entry without a
+# kind is kept: ``@.kind == "boolean"`` is false when the key is missing.
+_SEARCHABLE_PROPERTY_VALUES_PATH = '$[*] ? (!(@.kind == "boolean")).value[*]'
+
+
+def _property_value_matches(q: str) -> ColumnElement[bool]:
+    """``q`` in a value of the document's ``source_metadata``.
+
+    Only values are searched: every document of a library shares the same
+    property names and labels, so matching those would match them all.
+    Booleans are left out as well: they are stored as "true" and "false" but
+    shown as yes and no, so "true" would match every document of a library
+    with a yes/no column. A date-only value is shown as the date part of its
+    stored ISO form, so it matches as shown.
+    """
+    values = sa.func.jsonb_array_elements_text(
+        sa.func.jsonb_path_query_array(
+            InfoBlobs.source_metadata,
+            sa.literal_column(f"'{_SEARCHABLE_PROPERTY_VALUES_PATH}'"),
+        )
+    ).column_valued("value", joins_implicitly=True)
+    return sa.exists().where(_contains(values, q))
+
+
+def _title_or_path_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
+    """``q`` in the title, or in the URL below the item's own URL.
+
+    Document URLs are percent-encoded, so the encoded form of ``q`` is tried
+    as well. Only the part after ``url_anchor`` (the item's site, library or
+    folder URL) is searched, so a site named KS does not match every document
+    under /sites/KS. Items without a stored URL fall back to the whole URL, as
+    do documents whose URL no longer starts with the anchor: a sync refreshes
+    document URLs after the selected folder was renamed, but not the item's
+    own URL, and cutting the old anchor's width out of a shorter URL would
+    hide part of a nested folder name.
+    """
+    path: _Column = InfoBlobs.url
+    if url_anchor:
+        path = sa.case(
+            (
+                _starts_with(InfoBlobs.url, url_anchor),
+                sa.func.substring(InfoBlobs.url, len(url_anchor) + 1),
+            ),
+            else_=InfoBlobs.url,
+        )
+    return _title_or_url_matches(q, path)
+
+
+def _title_or_url_matches(
+    q: str, path: _Column | ColumnElement[str]
+) -> ColumnElement[bool]:
+    """``q`` in the title, or in ``path``: the searchable part of the URL."""
+    needles = [q]
+    if (encoded := quote(q, safe="/")) != q:
+        needles.append(encoded)
+    return sa.or_(
+        _contains(InfoBlobs.title, q), *(_contains(path, needle) for needle in needles)
+    )
+
+
+def _document_matches(q: str, url_anchor: str | None) -> ColumnElement[bool]:
+    return sa.or_(_title_or_path_matches(q, url_anchor), _property_value_matches(q))
+
+
+def _document_sort_keys(sort: IntegrationDocumentSort) -> list[_Column]:
+    if sort == "name":
+        return [InfoBlobs.title]
+    if sort == "size":
+        return [InfoBlobs.size]
+    if sort == "updated_at":
+        return [InfoBlobs.updated_at]
+    # The URL without its file name orders documents by folder; within one
+    # item every URL shares the same prefix, so this equals their relative path.
+    return [sa.func.regexp_replace(InfoBlobs.url, "/[^/]*$", ""), InfoBlobs.title]
 
 
 class InfoBlobRepository:
@@ -182,6 +305,26 @@ class InfoBlobRepository:
         *,
         original_sha256: bytes | None = None,
     ) -> None:
+        """Serialize publishers of one identity until the transaction ends.
+
+        Without it two transactions that both find no active version insert
+        two. A sync publishes a whole library in one transaction, and an
+        advisory lock per document would stay held until it commits and fill
+        the shared lock table; an integration knowledge's publications lock its
+        row instead, whose lock lives in the tuple and which the sync already
+        holds from recording its start.
+        """
+        if (
+            info_blob.group_id is None
+            and info_blob.website_id is None
+            and info_blob.integration_knowledge_id is not None
+        ):
+            await self.session.execute(
+                sa.select(IntegrationKnowledge.id)
+                .where(IntegrationKnowledge.id == info_blob.integration_knowledge_id)
+                .with_for_update(key_share=True)
+            )
+            return
         identities = {
             identity
             for identity in (
@@ -516,6 +659,11 @@ class InfoBlobRepository:
                     if info_blob.website_id is not None and info_blob.url
                     else None
                 ),
+                source_metadata=(
+                    [entry.model_dump() for entry in info_blob.source_metadata]
+                    if info_blob.source_metadata
+                    else None
+                ),
             )
             .returning(InfoBlobs.id)
         )
@@ -784,6 +932,36 @@ class InfoBlobRepository:
         )
         return InfoBlobInDB.model_validate(record) if record is not None else None
 
+    async def refresh_sharepoint_citation(
+        self,
+        *,
+        sharepoint_item_id: str,
+        integration_knowledge_id: UUID,
+        title: str,
+        url: str,
+    ) -> bool:
+        """Point the active version at the item's current name and address.
+
+        Neither is embedded for a document without source properties, and a
+        document with them re-embeds on a rename anyway (its title is in the
+        header), so nothing else needs to change. True when a row changed.
+        """
+        updated = await self.session.execute(
+            sa.update(InfoBlobs)
+            .where(
+                InfoBlobs.sharepoint_item_id == sharepoint_item_id,
+                InfoBlobs.integration_knowledge_id == integration_knowledge_id,
+                active_info_blob_version(),
+                sa.or_(
+                    InfoBlobs.title.is_distinct_from(title),
+                    InfoBlobs.url.is_distinct_from(url),
+                ),
+            )
+            .values(title=title, url=url)
+            .execution_options(synchronize_session=False)
+        )
+        return affected_row_count(updated) > 0
+
     async def get_by_sharepoint_item_and_integration_knowledge(
         self,
         sharepoint_item_id: str,
@@ -834,11 +1012,20 @@ class InfoBlobRepository:
         *,
         limit: int,
         cursor: UUID | None = None,
+        q: str = "",
+        prefix: str = "",
     ) -> WebsiteInfoBlobPage:
-        conditions = (
+        conditions = [
             InfoBlobs.website_id == website_id,
             active_info_blob_version(),
-        )
+        ]
+        if q.strip():
+            conditions.append(
+                _title_or_url_matches(q.strip(), self._website_search_path(prefix))
+            )
+        if prefix:
+            # URL paths are case sensitive; the range compares them byte by byte.
+            conditions.append(website_path_below(prefix))
         total_count = await self.session.scalar(
             sa.select(sa.func.count()).select_from(InfoBlobs).where(*conditions)
         )
@@ -864,6 +1051,80 @@ class InfoBlobRepository:
             items=items,
             total_count=total_count or 0,
             next_cursor=items[-1].id if has_more else None,
+        )
+
+    @staticmethod
+    def _website_search_path(prefix: str) -> ColumnElement[str]:
+        """The URL below the selected directory, or below the origin.
+
+        The scheme and host are never searched, so the website's own name does
+        not match every resource. Mirrors ``url_anchor`` for integrations.
+        """
+        url = website_navigation_path()
+        if prefix:
+            return sa.func.substr(url, len(prefix) + 1)
+        return sa.func.regexp_replace(url, r"^https?://[^/]+", "")
+
+    async def get_website_folders(
+        self,
+        website_id: UUID,
+        *,
+        prefix: str = "",
+        cursor: str | None = None,
+        limit: int = 100,
+    ) -> WebsiteContentFolderPage:
+        """List one level across the entire active index, with bounded output.
+
+        Below a directory, ``ix_info_blobs_active_website_path`` limits the
+        grouping to that directory's rows. The website level groups every
+        active row of the website, so its cost grows with the website's size,
+        not with the page returned.
+        """
+        url = website_navigation_path()
+        conditions = [
+            InfoBlobs.website_id == website_id,
+            active_info_blob_version(),
+            url.op("~")(r"^https?://[^/]+"),
+        ]
+        if prefix:
+            remainder = sa.func.substr(url, len(prefix) + 1)
+            conditions.extend(
+                [
+                    website_path_below(prefix),
+                    sa.func.strpos(remainder, "/") > 0,
+                    sa.func.split_part(remainder, "/", 1) != "",
+                ]
+            )
+            path = sa.literal(prefix) + sa.func.split_part(remainder, "/", 1) + "/"
+            tail = sa.func.substr(remainder, sa.func.strpos(remainder, "/") + 1)
+        else:
+            origin = sa.func.substring(url, r"^https?://[^/]+")
+            path = origin + "/"
+            tail = sa.func.substr(url, sa.func.length(origin) + 2)
+
+        groups = (
+            sa.select(
+                path.label("path"),
+                sa.func.count().label("item_count"),
+                sa.func.bool_or(sa.func.strpos(tail, "/") > 1).label("has_children"),
+            )
+            .where(*conditions)
+            .group_by(path)
+            .subquery()
+        )
+        query = sa.select(groups).order_by(groups.c.path).limit(limit + 1)
+        if cursor is not None:
+            query = query.where(groups.c.path > cursor)
+        rows = (await self.session.execute(query)).all()
+        items = [
+            WebsiteContentFolder(
+                path=row.path, count=row.item_count, has_children=row.has_children
+            )
+            for row in rows[:limit]
+        ]
+        return WebsiteContentFolderPage(
+            items=items,
+            next_cursor=items[-1].path if len(rows) > limit else None,
         )
 
     @staticmethod
@@ -964,6 +1225,57 @@ class InfoBlobRepository:
         )
 
         return await self.session.scalar(stmt)
+
+    async def get_integration_knowledge_page(
+        self,
+        integration_knowledge_id: UUID,
+        *,
+        q: str | None = None,
+        url_anchor: str | None = None,
+        sort: IntegrationDocumentSort = "path",
+        descending: bool = False,
+        limit: int,
+        offset: int = 0,
+    ) -> IntegrationDocumentsPage:
+        """Active documents of one item, filtered on title, path or a property
+        value, as one page.
+
+        ``url_anchor`` is the item's own URL without a trailing slash; the
+        search covers the URL part after it.
+        """
+        conditions: list[ColumnElement[bool]] = [
+            InfoBlobs.integration_knowledge_id == integration_knowledge_id,
+            active_info_blob_version(),
+        ]
+        if q:
+            conditions.append(_document_matches(q, url_anchor))
+        totals = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count(), sa.func.coalesce(sa.func.sum(InfoBlobs.size), 0)
+                )
+                .select_from(InfoBlobs)
+                .where(*conditions)
+            )
+        ).one()
+        ordering = [
+            (key.desc() if descending else key.asc()).nulls_last()
+            for key in _document_sort_keys(sort)
+        ]
+        query = (
+            sa.select(InfoBlobs)
+            .where(*conditions)
+            .order_by(*ordering, InfoBlobs.id.asc())
+            .options(defer(InfoBlobs.text))
+            .limit(limit)
+            .offset(offset)
+        )
+        records = await self.session.scalars(query)
+        return IntegrationDocumentsPage(
+            items=[InfoBlobInDBNoText.model_validate(record) for record in records],
+            total_count=int(totals[0] or 0),
+            total_size=int(totals[1] or 0),
+        )
 
     async def get_by_filter_integration_knowledge(
         self, integration_knowledge_id: UUID

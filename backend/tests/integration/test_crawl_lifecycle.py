@@ -697,10 +697,11 @@ async def test_stopping_attempt_with_dead_worker_is_reaped(
             lease_duration=timedelta(minutes=5),
         )
         assert (await repo.request_cancel(run.id)).run.phase == CrawlPhase.STOPPING
+        # Match the repository's transaction clock, independent of setup duration.
         await session.execute(
             sa.update(CrawlAttempts)
             .where(CrawlAttempts.id == attempt_id)
-            .values(lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+            .values(lease_expires_at=sa.func.now() - timedelta(seconds=1))
         )
 
         assert await repo.interrupt_expired_attempts() == 1
@@ -815,7 +816,6 @@ async def test_expired_lease_becomes_a_terminal_interruption(
     admin_user,
     space_factory,
 ) -> None:
-    now = datetime.now(timezone.utc)
     async with db_session() as session:
         website = await _website_identity(session, admin_user, space_factory)
         repo = CrawlRunRepository(session)
@@ -843,7 +843,7 @@ async def test_expired_lease_becomes_a_terminal_interruption(
         await session.execute(
             sa.update(CrawlAttempts)
             .where(CrawlAttempts.id == attempt_id)
-            .values(lease_expires_at=now - timedelta(seconds=1))
+            .values(lease_expires_at=sa.func.now() - timedelta(seconds=1))
         )
 
         assert (
@@ -924,7 +924,7 @@ async def test_health_snapshot_reports_authoritative_phase_and_expired_lease(
         await session.execute(
             sa.update(CrawlAttempts)
             .where(CrawlAttempts.id == attempt_id)
-            .values(lease_expires_at=datetime.now(timezone.utc) - timedelta(seconds=1))
+            .values(lease_expires_at=sa.func.now() - timedelta(seconds=1))
         )
 
         running = await repo.health_snapshot()

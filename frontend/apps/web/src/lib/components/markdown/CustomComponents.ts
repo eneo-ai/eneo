@@ -45,8 +45,44 @@ export type EneoMentionCustomComponentProps = {
 
 export type CustomMentionComponent = Component<EneoMentionCustomComponentProps>;
 
-export type EneoToken = EneoInrefToken | EneoMentionToken;
+/**
+ * 3. EneoFile: the name of a file of the conversation, where the text mentions it
+ */
+export type EneoFileToken = {
+  type: "eneoFile";
+  level: "inline";
+  raw: string;
+  name: string;
+};
+
+export type EneoFileCustomComponentProps = {
+  /**
+   * The generated token with the file's name as written in the text
+   */
+  token: EneoFileToken;
+};
+
+export type CustomFileComponent = Component<EneoFileCustomComponentProps>;
+
+/**
+ * 4. EneoMath: a LaTeX formula, rendered with KaTeX (see math.ts)
+ */
+export type EneoMathToken = {
+  type: "eneoMath";
+  /** Block when the formula is a paragraph or fence of its own. */
+  level: "block" | "inline";
+  raw: string;
+  /** The TeX source between the delimiters. */
+  text: string;
+  /** KaTeX display mode: centred on its own line. */
+  display: boolean;
+  /** Written with `$$` or `\[`, so display math when it stands alone. */
+  displayDelimiter: boolean;
+};
+
+export type EneoToken = EneoInrefToken | EneoMentionToken | EneoFileToken | EneoMathToken;
 export type CustomRenderers = {
   inref?: CustomInfoBlobComponent;
   mention?: CustomMentionComponent;
+  file?: CustomFileComponent;
 };

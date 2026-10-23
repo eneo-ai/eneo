@@ -1,5 +1,5 @@
 from enum import StrEnum
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from sqlalchemy import (
@@ -8,10 +8,14 @@ from sqlalchemy import (
     Index,
     LargeBinary,
     String,
+    Text,
     and_,
+    case,
     func,
+    literal_column,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine.default import DefaultExecutionContext
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql.elements import ColumnElement
@@ -57,6 +61,19 @@ class InfoBlobs(BasePublic):
             "website_id",
             "id",
             postgresql_where=text("version_state = 'active'"),
+        ),
+        # Serves active_document_counts; its predicate must stay identical.
+        Index(
+            "ix_info_blobs_active_integration_knowledge",
+            "integration_knowledge_id",
+            postgresql_where=text("version_state = 'active'"),
+        ),
+        # Per-file lookups and deletes of a SharePoint sync, all versions.
+        Index(
+            "ix_info_blobs_integration_knowledge_sharepoint_item",
+            "integration_knowledge_id",
+            "sharepoint_item_id",
+            postgresql_where=text("sharepoint_item_id IS NOT NULL"),
         ),
         Index(
             "ix_info_blobs_active_website_source_url",
@@ -107,6 +124,13 @@ class InfoBlobs(BasePublic):
         ForeignKey(IntegrationKnowledge.id, ondelete="CASCADE"), index=True
     )
     sharepoint_item_id: Mapped[Optional[str]] = mapped_column()
+    # Ordered [{name, label, value, kind}] entries from the source system's own
+    # document properties (SharePoint library columns). NULL when the source has
+    # none. Kept as a list, not an object, because JSONB does not preserve key
+    # order and the column order is meaningful to the people who defined it.
+    source_metadata: Mapped[Optional[list[dict[str, Any]]]] = mapped_column(
+        JSONB, nullable=True
+    )
 
     # relationships
     group: Mapped[CollectionsTable] = relationship()
@@ -126,3 +150,52 @@ def website_source_url_equals(url: str | ColumnElement[str]) -> ColumnElement[bo
         func.md5(InfoBlobs.website_source_url) == func.md5(url),
         InfoBlobs.website_source_url == url,
     )
+
+
+def website_navigation_path() -> ColumnElement[str]:
+    """A website resource's address as URL directories see it.
+
+    Query and fragment are dropped and a bare origin gets its slash; rows from
+    before ``website_source_url`` use their public URL. The migration of
+    ``ix_info_blobs_active_website_path`` freezes this expression, and the
+    planner uses that index only for an identical one. Its constants are
+    literals, as in the index, rather than bound parameters.
+    """
+    address = func.split_part(
+        func.split_part(
+            func.coalesce(InfoBlobs.website_source_url, InfoBlobs.url),
+            literal_column("'?'"),
+            literal_column("1"),
+            type_=Text,
+        ),
+        literal_column("'#'"),
+        literal_column("1"),
+        type_=Text,
+    )
+    return case(
+        (
+            address.op("~")(literal_column("'^https?://[^/]+$'")),
+            address.concat(literal_column("'/'")),
+        ),
+        else_=address,
+    )
+
+
+def website_path_below(prefix: str) -> ColumnElement[bool]:
+    """The navigation path starts with ``prefix``, as an index range.
+
+    In byte order every string that starts with ``prefix`` sorts from it up to
+    its last character's successor, so the range is exact and needs no LIKE
+    escaping.
+    """
+    path = website_navigation_path().collate("C")
+    return and_(path >= prefix, path < prefix[:-1] + chr(ord(prefix[-1]) + 1))
+
+
+# Directory listings and prefix filters range over one website's active paths.
+Index(
+    "ix_info_blobs_active_website_path",
+    InfoBlobs.website_id,
+    website_navigation_path().collate("C"),
+    postgresql_where=text("version_state = 'active'"),
+)

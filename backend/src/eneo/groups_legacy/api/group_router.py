@@ -40,7 +40,6 @@ from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.models.api import InfoBlobUpsertRequest
 from eneo.server.protocol import responses
-from eneo.spaces.api.space_models import TransferRequest
 
 _COLLECTION_SERVICE_ACCESS_REASON = (
     "Collection services enforce collection permissions and space membership."
@@ -479,34 +478,23 @@ async def run_semantic_search(
 
     collection = await service.get_collection(id)
 
+    rerank = None
+    if search_parameters.rerank:
+        # The installation's default reranker, if the collection's space may
+        # use it; otherwise the search runs as without the flag.
+        space = await container.space_service().get_space(collection.space_id)
+        rerank = await container.rerank_service().spec_for_default(
+            query=search_parameters.search_string,
+            security_classification=space.security_classification,
+        )
+
     results = await datastore.semantic_search(
         search_string=search_parameters.search_string,
         embedding_model=collection.embedding_model,
         collections=[collection],
         num_chunks=search_parameters.num_chunks,
         autocut_cutoff=search_parameters.autocut_cutoff,
+        rerank=rerank,
     )
 
     return protocol.to_paginated_response(results)
-
-
-@router.post(
-    "/{id}/transfer/",
-    status_code=204,
-    description="Transfer a collection (legacy group) to another space.",
-    responses=responses.get_responses([400, 403, 404]),
-)
-@endpoint_access(
-    authentication=Authentication.USER,
-    authorization=Authorization.AUTHENTICATED,
-    reason=_COLLECTION_SERVICE_ACCESS_REASON,
-)
-async def transfer_group_to_space(
-    id: UUID,
-    transfer_req: TransferRequest,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
-):
-    service = container.resource_mover_service()
-    await service.move_collection_to_space(
-        collection_id=id, space_id=transfer_req.target_space_id
-    )

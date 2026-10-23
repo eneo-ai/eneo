@@ -39,7 +39,9 @@ class SharepointAuthService(BaseOauthService):
         self.tenant_sharepoint_app_service = tenant_sharepoint_app_service
         self.default_scopes = self.DEFAULT_SCOPES
 
-    async def get_credentials(self, tenant_id: Optional[UUID] = None):
+    async def get_credentials(
+        self, tenant_id: Optional[UUID] = None, *, redirect_uri: str | None = None
+    ):
         """Get SharePoint OAuth credentials from admin panel configuration."""
         settings = get_settings()
 
@@ -56,15 +58,7 @@ class SharepointAuthService(BaseOauthService):
                 "SharePoint OAuth not configured. Please configure a SharePoint app in the admin panel."
             )
 
-        redirect_uri = settings.oauth_callback_url
-        if not redirect_uri:
-            if not settings.public_origin:
-                raise ValueError(
-                    "SharePoint OAuth requires either OAUTH_CALLBACK_URL or PUBLIC_ORIGIN to be configured. "
-                    "Set one of these environment variables to the public-facing URL of your application."
-                )
-            logger.warning("OAUTH_CALLBACK_URL not set, using public_origin fallback")
-            redirect_uri = f"{settings.public_origin}/integrations/callback/token/"
+        redirect_uri = settings.integration_callback_uri(redirect_uri)
 
         return {
             "client_id": tenant_app.client_id,
@@ -76,7 +70,11 @@ class SharepointAuthService(BaseOauthService):
 
     @override
     async def gen_auth_url(
-        self, state: Optional[str] = None, tenant_id: Optional[UUID] = None
+        self,
+        state: Optional[str] = None,
+        tenant_id: Optional[UUID] = None,
+        *,
+        redirect_uri: str | None = None,
     ) -> dict[str, str]:
         """Generate OAuth authorization URL.
 
@@ -84,7 +82,7 @@ class SharepointAuthService(BaseOauthService):
             state: OAuth state parameter
             tenant_id: Optional tenant ID to use tenant-specific configuration
         """
-        creds = await self.get_credentials(tenant_id)
+        creds = await self.get_credentials(tenant_id, redirect_uri=redirect_uri)
         auth_endpoint = f"{creds['authority']}/oauth2/v2.0/authorize"
         scope_param = " ".join(["offline_access", *self.default_scopes])
         params = {
@@ -102,7 +100,11 @@ class SharepointAuthService(BaseOauthService):
 
     @override
     async def exchange_token(
-        self, auth_code: str, tenant_id: Optional[UUID] = None
+        self,
+        auth_code: str,
+        tenant_id: Optional[UUID] = None,
+        *,
+        redirect_uri: str | None = None,
     ) -> TokenResponse | None:
         """Exchange authorization code for access token.
 
@@ -110,7 +112,7 @@ class SharepointAuthService(BaseOauthService):
             auth_code: OAuth authorization code
             tenant_id: Optional tenant ID to use tenant-specific configuration
         """
-        creds = await self.get_credentials(tenant_id)
+        creds = await self.get_credentials(tenant_id, redirect_uri=redirect_uri)
         token_endpoint = f"{creds['authority']}/oauth2/v2.0/token"
         data = {
             "client_id": creds["client_id"],

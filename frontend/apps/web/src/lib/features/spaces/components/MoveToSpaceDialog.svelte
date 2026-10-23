@@ -4,7 +4,6 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
-  import { Switch } from "$lib/components/ui/switch/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
   import Hint from "$lib/components/Hint.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
@@ -18,30 +17,19 @@
     submitLabel: string;
     /** Always shown under the destination picker. */
     hint?: string;
-    /** Adds a switch to move the resource's own knowledge along; `hint` is shown while it is on. */
-    resourcesOption?: { label: string; hint: string };
     /** The dialog closes when this resolves; when it throws, it stays open and shows the error. */
-    onMove: (targetSpace: { id: string }, options: { moveResources: boolean }) => unknown;
+    onMove: (targetSpace: { id: string }) => unknown;
   };
 
-  let {
-    open = $bindable(false),
-    title,
-    submitLabel,
-    hint,
-    resourcesOption,
-    onMove
-  }: Props = $props();
+  let { open = $bindable(false), title, submitLabel, hint, onMove }: Props = $props();
 
   const {
     state: { currentSpace, accessibleSpaces }
   } = getSpacesManager();
 
   const destinationId = useId();
-  const resourcesId = useId();
 
   let destinationSpaceId = $state("");
-  let moveResources = $state(false);
   let pending = $state(false);
 
   const targets = $derived(
@@ -55,7 +43,7 @@
     if (pending || !destinationSpaceId) return;
     pending = true;
     try {
-      await onMove({ id: destinationSpaceId }, { moveResources });
+      await onMove({ id: destinationSpaceId });
       open = false;
     } catch (error) {
       toastError(error);
@@ -112,15 +100,6 @@
           </Field.Field>
           {#if hint}
             <Hint class="mx-4 mt-1.5 mb-4">{hint}</Hint>
-          {/if}
-          {#if resourcesOption}
-            <Field.Field orientation="horizontal" class="hover:bg-hover-dimmer border-t px-4 py-4">
-              <Field.Label for={resourcesId}>{resourcesOption.label}</Field.Label>
-              <Switch id={resourcesId} bind:checked={moveResources} />
-            </Field.Field>
-            {#if moveResources}
-              <Hint class="mx-4 mb-3">{resourcesOption.hint}</Hint>
-            {/if}
           {/if}
         </div>
       </div>

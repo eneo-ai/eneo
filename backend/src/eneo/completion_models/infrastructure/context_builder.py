@@ -1,8 +1,9 @@
 import json
 import logging
+import re
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Any, Collection, Optional, Protocol, Sequence
+from dataclasses import dataclass, field
+from typing import Any, Collection, Mapping, Optional, Protocol, Sequence, cast
 from uuid import UUID
 
 from typing_extensions import override
@@ -25,10 +26,15 @@ from eneo.completion_models.infrastructure.static_prompts import (
     ATTACHED_FILE_REFERENCES_INSTRUCTION,
     HALLUCINATION_GUARD,
     SHOW_REFERENCES_PROMPT,
+    TOOL_DELIVERABLE_INSTRUCTION,
     TOOL_NAMING_INSTRUCTION,
     TRANSCRIPTION_PROMPT,
 )
+from eneo.completion_models.infrastructure.table_selection import parse_table_selection
 from eneo.files.file_models import File, FileType
+from eneo.files.model_file_references import file_handle, model_file_references
+from eneo.info_blobs.info_blob import SourceMetadataEntry
+from eneo.info_blobs.source_metadata import format_source_metadata_lines
 from eneo.questions.question import ToolCallInfo
 from eneo.sessions.session import SessionInDB
 from eneo.tokens.token_utils import (
@@ -44,6 +50,7 @@ logger = logging.getLogger(__name__)
 def _replayable_tool_calls(
     tool_calls: Optional[list[ToolCallInfo]],
     file_reference_urls: Optional[dict[UUID, str]] = None,
+    generated_files: Sequence[File] = (),
 ) -> list[MessageToolCall]:
     """Filter persisted tool calls down to those that can be replayed to the LLM.
 
@@ -58,12 +65,20 @@ def _replayable_tool_calls(
     fall back to the split `tool_name` for legacy rows that predate this field.
 
     Images the call generated are named in `result` only by placeholder. When
-    a fresh reference URL exists for one, it is appended here (never
-    persisted: the URL is short-lived), so the model can hand the image back
+    an authorized reference exists for one, its stable handle is appended
+    here so the model can hand the image back
     to an image tool on a later turn.
+
+    `generated_files` are the turn's generated files, among which a reader may
+    have saved versions of a document the call made; the newest such version
+    is named as current so the model revises the reader's text, not its own.
     """
     if not tool_calls:
         return []
+    tool_made = {
+        file_id for tc in tool_calls for file_id in (tc.generated_file_ids or [])
+    }
+    revisions = current_user_revisions(tool_made, generated_files)
     replayable: list[MessageToolCall] = []
     for tc in tool_calls:
         if tc.tool_call_id is None or tc.tool_call_id == "":
@@ -78,29 +93,95 @@ def _replayable_tool_calls(
             MessageToolCall(
                 tool_call_id=tc.tool_call_id,
                 tool_name=tc.mcp_tool_name or tc.tool_name,
-                arguments=tc.arguments,
-                result=_with_generated_image_references(tc, file_reference_urls),
+                # Legacy URLs become credential-free handles on replay, too.
+                arguments=cast(
+                    "dict[str, object] | None",
+                    model_file_references(tc.arguments, file_reference_urls or {}),
+                ),
+                result=_with_generated_image_references(
+                    tc, file_reference_urls, revisions
+                ),
             )
         )
     return replayable
 
 
-def _with_generated_image_references(
-    tc: ToolCallInfo, file_reference_urls: Optional[dict[UUID, str]]
-) -> str:
-    """The persisted result plus one reference line per generated image.
+def current_user_revisions(
+    tool_generated_ids: Collection[UUID], generated_files: Sequence[File]
+) -> dict[UUID, UUID]:
+    """For each file a tool made this turn, the newest version a reader saved of it.
 
-    Numbering follows the "[Image N ...]" placeholders the result already
-    carries, in the order the files were persisted for this call.
+    A reader's version is a generated file of the turn that revises another
+    and that no tool call produced. Versions chain (a version of a version);
+    the head, revised by no other version, is current. Only files that have a
+    current version other than themselves are returned. Cycles cannot be made
+    through the API but are guarded against anyway.
     """
-    result = tc.result or ""
+    tool_made = set(tool_generated_ids)
+    next_version: dict[UUID, UUID] = {}
+    created: dict[UUID, Any] = {}
+    for file in generated_files:
+        if file.revises_file_id is None or file.id in tool_made:
+            continue
+        # Two versions of the same base: the later save is the one kept.
+        earlier = next_version.get(file.revises_file_id)
+        if earlier is not None and created[earlier] >= file.created_at:
+            continue
+        next_version[file.revises_file_id] = file.id
+        created[file.id] = file.created_at
+    current: dict[UUID, UUID] = {}
+    for root in tool_made:
+        head = root
+        seen = {root}
+        while (
+            following := next_version.get(head)
+        ) is not None and following not in seen:
+            seen.add(following)
+            head = following
+        if head != root:
+            current[root] = head
+    return current
+
+
+_GENERATED_PLACEHOLDER = re.compile(r"\[(Image|File) (\d+) \(")
+
+
+def _with_generated_image_references(
+    tc: ToolCallInfo,
+    file_reference_urls: Optional[dict[UUID, str]],
+    revisions: Mapping[UUID, UUID] | None = None,
+) -> str:
+    """The persisted result plus one reference line per generated file.
+
+    Labels follow the "[Image N ...]" and "[File N ...]" placeholders the
+    result already carries: they appear in the order the files were persisted
+    for this call, so the n-th placeholder names the n-th generated file. A
+    file a reader has since edited gets a second line naming the current
+    version, so a later revision starts from the reader's text.
+    """
+    result = model_file_references(tc.result or "", file_reference_urls or {})
     if not tc.generated_file_ids or not file_reference_urls:
         return result
-    lines = [
-        f"Reference url for Image {index}: {file_reference_urls[file_id]}"
-        for index, file_id in enumerate(tc.generated_file_ids, start=1)
-        if file_id in file_reference_urls
+    labels = [
+        f"{kind} {number}" for kind, number in _GENERATED_PLACEHOLDER.findall(result)
     ]
+
+    def label(position: int) -> str:
+        # Results persisted before documents existed carry image placeholders
+        # only, which the list covers; fall back to the old numbering anyway.
+        return labels[position] if position < len(labels) else f"Image {position + 1}"
+
+    lines: list[str] = []
+    for position, file_id in enumerate(tc.generated_file_ids):
+        if file_id not in file_reference_urls:
+            continue
+        lines.append(f"File reference for {label(position)}: {file_handle(file_id)}")
+        current = (revisions or {}).get(file_id)
+        if current is not None and current in file_reference_urls:
+            lines.append(
+                f"User-edited revision of {label(position)} (current version): "
+                f"{file_handle(current)}"
+            )
     if not lines:
         return result
     return "\n".join([result, *lines]) if result else "\n".join(lines)
@@ -154,11 +235,33 @@ class _InfoBlobChunkLike(Protocol):
     info_blob_id: UUID
     info_blob_title: str | None
 
+    @property
+    def info_blob_source_metadata(self) -> Sequence[SourceMetadataEntry]: ...
+
 
 class _InformationChunkLike(Protocol):
     id: UUID
     title: str
     content: str
+
+    @property
+    def source_metadata(self) -> Sequence[SourceMetadataEntry]: ...
+
+
+def _source_header(
+    title: str | None, source_id: UUID, source_metadata: Sequence[SourceMetadataEntry]
+) -> str:
+    """The attribution line(s) a source carries in the prompt.
+
+    Source properties follow the title so the model can tell a policy from a
+    meeting note and say so, in the same words retrieval matched on and the
+    reference UI shows.
+    """
+    header = "source_title: {}, source_id: {}".format(title, str(source_id)[:8])
+    properties = format_source_metadata_lines(source_metadata)
+    if properties:
+        header += "\nsource_properties: " + "; ".join(properties)
+    return header
 
 
 USER_FILES_PREAMBLE = (
@@ -204,7 +307,7 @@ def _file_reference_entries(
                 "filename": file.name,
                 "mimetype": file.mimetype,
                 "size_bytes": file.size,
-                "url": file_reference_urls[file.id],
+                "file_ref": file_handle(file.id),
             }
         )
         for file in files
@@ -240,10 +343,9 @@ def build_assistant_file_references_string(
 def build_file_references_string(
     files: list[File], file_reference_urls: dict[UUID, str]
 ) -> str:
-    """Surface signed download URLs for attached files to the model.
+    """Surface credential-free handles for attached files to the model.
 
-    Lets the model pass a URL to whichever MCP tool accepts a URL input so the
-    tool can fetch the original file. Only files present in
+    The proxy resolves these into URLs for whichever MCP tool consumes them. Only files present in
     ``file_reference_urls`` (those with a durably stored original) get an
     entry; the rest keep relying on the inlined text from
     ``build_files_string``.
@@ -254,14 +356,14 @@ def build_file_references_string(
 
     references = "\n".join(entries)
     # Mechanics only: the behavioral rules (never judge readability from the
-    # url, never ask for re-upload, read_file as fallback, images go to image
+    # reference, never ask for re-upload, read_file as fallback, images go to image
     # tools) live in ATTACHED_FILE_REFERENCES_INSTRUCTION, stated once in the
     # system prompt. This block repeats per message with referenced files,
     # history included.
     return (
         "Files in this message (one JSON entry per file). Their raw bytes are "
-        'NOT in this prompt; each "url" is a signed file reference for tools '
-        "that accept a URL input.\n\n"
+        "NOT in this prompt; pass file_ref in the tool's URL input. "
+        "Eneo resolves it before execution; do not construct URLs or tokens.\n\n"
         f"{references}"
     )
 
@@ -275,6 +377,9 @@ class ChunkGrouping:
     content: str
     chunk_count: int
     relevance_score: float = 0.0
+    source_metadata: list[SourceMetadataEntry] = field(
+        default_factory=list[SourceMetadataEntry]
+    )
 
 
 class _Prompt:
@@ -308,6 +413,7 @@ class _Prompt:
         # ahead of the data blocks below.
         if self.has_tools:
             components.append(TOOL_NAMING_INSTRUCTION)
+            components.append(TOOL_DELIVERABLE_INSTRUCTION)
 
         # Attached-file reference entries render in the messages; state the
         # tool-arbitration rule once here instead of per message. Meaningless
@@ -386,44 +492,91 @@ class _Prompt:
         chunks: list[_InfoBlobChunkLike],
         max_tokens: int,
     ) -> str:
+        selected: list[_InfoBlobChunkLike] = []
+        chunk_numbers: dict[UUID, set[int]] = {}
+        header_tokens: dict[UUID, int] = {}
+        estimated_tokens = 0
+        overflow_rendered = False
+        for chunk in chunks:
+            numbers = chunk_numbers.setdefault(chunk.info_blob_id, set())
+            if chunk.info_blob_id not in header_tokens:
+                header = (
+                    _source_header(
+                        chunk.info_blob_title,
+                        chunk.info_blob_id,
+                        chunk.info_blob_source_metadata,
+                    )
+                    if self.version == 2
+                    else ""
+                )
+                header_tokens[chunk.info_blob_id] = count_tokens(
+                    f'"""{header}\n"""\n', self.model_name
+                )
+            # Adding a chunk creates a group, extends one, or joins two.
+            # Repeated chunk numbers split a coherent group in the renderer.
+            group_delta = (
+                1
+                if chunk.chunk_no in numbers
+                else 1
+                - int(chunk.chunk_no - 1 in numbers)
+                - int(chunk.chunk_no + 1 in numbers)
+            )
+            candidate_tokens = (
+                estimated_tokens
+                + count_tokens(chunk.text, self.model_name)
+                + group_delta * header_tokens[chunk.info_blob_id]
+            )
+            if candidate_tokens > max_tokens:
+                # Summing chunk bodies is conservative when they overlap. Only
+                # render at the boundary, rather than tokenizing every prefix
+                # of a potentially very large retrieval candidate set. A chunk
+                # that does not fit is left out and the loop goes on, because
+                # a cheaper chunk further down the ranking may still fit. Once
+                # a rendering has shown an overflow, that verdict holds until
+                # the selection changes: later rejections come from the
+                # estimate alone, so the list is never rendered once per
+                # rejected chunk, and an accepted chunk reopens the boundary
+                # check, so overlap and shared headers keep being credited.
+                if overflow_rendered:
+                    continue
+                candidate = self._render_reconstructed_chunks([*selected, chunk])
+                candidate_tokens = count_tokens(candidate, self.model_name)
+                if candidate_tokens > max_tokens:
+                    overflow_rendered = True
+                    continue
+            selected.append(chunk)
+            numbers.add(chunk.chunk_no)
+            estimated_tokens = candidate_tokens
+            overflow_rendered = False
+
+        # Tokenization at joined boundaries can differ from the running sum.
+        # The stored cost and final admission always use the actual rendering.
+        while selected:
+            rendered = self._render_reconstructed_chunks(selected)
+            used_tokens = count_tokens(rendered, self.model_name)
+            if used_tokens <= max_tokens:
+                self._knowledge_tokens = used_tokens
+                return rendered
+            selected.pop()
+        self._knowledge_tokens = 0
+        return ""
+
+    def _render_reconstructed_chunks(self, chunks: list[_InfoBlobChunkLike]) -> str:
         # Create a dictionary to store chunk indices
         chunk_indices = {id(chunk): i for i, chunk in enumerate(chunks)}
 
         # Group chunks by info_blob
         chunks_by_info_blob: dict[UUID, list[_InfoBlobChunkLike]] = {}
-        used_tokens = 0
         for chunk in chunks:
-            chunk_tokens = count_tokens(chunk.text, self.model_name)
-
             if chunks_by_info_blob.get(chunk.info_blob_id) is None:
                 chunks_by_info_blob[chunk.info_blob_id] = []
-
-                # Count the tokens for the metadata
-                chunk_tokens += count_tokens(
-                    '"""source_title: {}, source_id: {}\n"""'.format(
-                        chunk.info_blob_title, str(chunk.info_blob_id)[:8]
-                    ),
-                    self.model_name,
-                )
-
-            if chunk_tokens + used_tokens > max_tokens:
-                break
-
             chunks_by_info_blob[chunk.info_blob_id].append(chunk)
-            used_tokens += chunk_tokens
-
-        # Save the used_tokens for later
-        self._knowledge_tokens = used_tokens
 
         # Process each document
         chunk_groupings: list[ChunkGrouping] = []
         grouping_scores: defaultdict[int, float] = defaultdict(float)
 
         for doc_id, doc_chunks in chunks_by_info_blob.items():
-            # Edgecase if the first chunk of a new info-blob is the cutoff point
-            if not doc_chunks:
-                continue
-
             # Sort chunks by their order in the original document
             doc_chunks.sort(key=lambda x: x.chunk_no)
 
@@ -451,6 +604,7 @@ class _Prompt:
                     end_chunk=group[-1].chunk_no,
                     content=full_text,
                     chunk_count=len(group),
+                    source_metadata=list(group[0].info_blob_source_metadata),
                 )
 
                 # Calculate score based on the position of chunks in the original input
@@ -485,9 +639,8 @@ class _Prompt:
             return ""
 
         return "\n".join(
-            '"""source_title: {}, source_id: {}\n{}"""'.format(
-                chunk.title,
-                str(chunk.id)[:8],
+            '"""{}\n{}"""'.format(
+                _source_header(chunk.title, chunk.id, chunk.source_metadata),
                 chunk.content,
             )
             for chunk in information_chunks
@@ -554,7 +707,20 @@ class ContextBuilder:
         # reachable via a signed URL are represented by that URL only (skips the
         # extracted text — e.g. a large CSV that would blow the context window).
         # Files without a URL are always inlined so the model still sees them.
+        selection = parse_table_selection(input_str)
         text_files = self._get_files_by_type(files, FileType.TEXT)
+        if (
+            selection
+            and file_reference_urls
+            and selection.file_id in file_reference_urls
+        ):
+            # A coordinate selection must be queried, not answered from the preview
+            # or an inlined dump of the original file.
+            text_files = [file for file in text_files if file.id != selection.file_id]
+            input_str += (
+                "\n\nSelected table rows (file reference for table tools):\n"
+                + json.dumps(selection.reference(), ensure_ascii=False)
+            )
         if not inline_file_text and file_reference_urls:
             text_files = [f for f in text_files if f.id not in file_reference_urls]
         if text_files:
@@ -627,7 +793,11 @@ class ContextBuilder:
             else:
                 images = []
                 generated_images = []
-            tool_calls = _replayable_tool_calls(message.tool_calls, file_reference_urls)
+            tool_calls = _replayable_tool_calls(
+                message.tool_calls,
+                file_reference_urls,
+                generated_files=message.generated_files,
+            )
 
             message_tokens = _turn_tokens(
                 question=question,

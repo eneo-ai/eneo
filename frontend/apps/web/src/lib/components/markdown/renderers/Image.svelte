@@ -2,11 +2,11 @@
   import type { Tokens } from "marked";
   import { sanitizeImageSrc } from "../sanitizeUrl.js";
 
-  export let token: Tokens.Image;
+  let { token }: { token: Tokens.Image } = $props();
 
   // Only http(s) and image data: URIs reach <img src>; everything else
   // (javascript:, data:text/html, …) is dropped.
-  $: safeSrc = sanitizeImageSrc(token.href);
+  const safeSrc = $derived(sanitizeImageSrc(token.href));
 </script>
 
 {#if safeSrc}

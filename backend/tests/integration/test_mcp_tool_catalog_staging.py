@@ -18,6 +18,7 @@ from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import (
 )
 from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_tool_repo_impl import (
     MCPServerToolRepoImpl,
+    store_own_catalog,
 )
 
 
@@ -49,6 +50,7 @@ async def test_concurrent_runtime_discovery_stages_one_pending_tool(
                         title="Ordinary only",
                         description=description,
                         input_schema={"type": "object", "properties": {}},
+                        meta=None,
                     )
                 ]
             )
@@ -104,6 +106,7 @@ async def test_runtime_staging_completes_inside_read_only_request_transaction(
                         title=None,
                         description="Observed while the request transaction is open",
                         input_schema={"type": "object"},
+                        meta=None,
                     )
                 ]
             ),
@@ -166,6 +169,7 @@ async def test_runtime_staging_times_out_behind_conflicting_request_lock(
                         title=None,
                         description="Must not be partially written",
                         input_schema={"type": "object"},
+                        meta=None,
                     )
                 ]
             )
@@ -212,6 +216,7 @@ async def test_runtime_discovery_rejects_disjoint_catalog_beyond_persisted_limit
             title=None,
             description=f"Contract for {name}",
             input_schema={"type": "object", "properties": {}},
+            meta=None,
         )
 
     try:
@@ -387,6 +392,7 @@ async def test_runtime_and_admin_refresh_share_one_bounded_catalog_union(
                         title=None,
                         description="runtime",
                         input_schema={},
+                        meta=None,
                     )
                 ]
             )
@@ -450,6 +456,7 @@ async def test_concurrent_disjoint_catalogs_cannot_exceed_persisted_byte_limit(
                         title=None,
                         description="x" * 3000,
                         input_schema={"type": "object", "properties": {}},
+                        meta=None,
                     )
                 ]
             )
@@ -524,6 +531,7 @@ async def test_runtime_staging_queues_approved_drift_once(
                         title=None,
                         description="Changed contract",
                         input_schema=changed_schema,
+                        meta=None,
                     )
                 ]
             )
@@ -539,6 +547,7 @@ async def test_runtime_staging_queues_approved_drift_once(
                         title=None,
                         description="Later unreviewed contract",
                         input_schema={"type": "object", "required": ["other"]},
+                        meta=None,
                     )
                 ]
             )
@@ -552,6 +561,99 @@ async def test_runtime_staging_queues_approved_drift_once(
         assert tool.pending_description == "Changed contract"
         assert tool.pending_input_schema == changed_schema
         assert tool.requires_approval is True
+    finally:
+        async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
+            await cleanup_session.execute(
+                sa.delete(MCPServers).where(MCPServers.id == server_id)
+            )
+
+
+async def test_own_catalog_becomes_the_approved_rows_and_keeps_admin_decisions(
+    setup_database: None,
+    admin_user,
+) -> None:
+    async with sessionmanager.session() as seed_session, seed_session.begin():
+        server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name=f"own-catalog-{uuid4()}",
+            http_url="http://tool-runtime:3010/mcp/file-analysis",
+            http_auth_type="bundled",
+            is_enabled=True,
+        )
+        seed_session.add(server)
+        await seed_session.flush()
+        server_id = server.id
+        repo = MCPServerToolRepoImpl(seed_session, MCPServerToolMapper())
+        await repo.add_many(
+            [
+                MCPServerTool(
+                    mcp_server_id=server_id,
+                    name="query_table",
+                    description="Old",
+                    input_schema={"type": "object"},
+                    display_name="Fråga tabell",
+                    is_enabled_by_default=False,
+                    pending_description="Staged by an earlier sync",
+                    requires_approval=True,
+                ),
+                MCPServerTool(
+                    mcp_server_id=server_id,
+                    name="gone_tool",
+                    description="No longer in the runtime",
+                    input_schema={},
+                ),
+            ]
+        )
+
+    view_hash = "a" * 64
+    meta = {"ui": {"resourceUri": "ui://file-analysis/query-result.html"}}
+    try:
+        # Inside a request's transaction, as an answer finds the difference.
+        async with sessionmanager.session() as request_session, request_session.begin():
+            await request_session.scalar(
+                sa.select(MCPServers.name).where(MCPServers.id == server_id)
+            )
+            await store_own_catalog(
+                server_id,
+                admin_user.tenant_id,
+                [
+                    {
+                        "name": "query_table",
+                        "title": "Query table",
+                        "description": "New",
+                        "input_schema": {"type": "object", "properties": {}},
+                        "meta": meta,
+                        "ui_resource_sha256": view_hash,
+                    },
+                    {"name": "inspect_table", "description": "Inspect"},
+                ],
+            )
+
+        async with sessionmanager.session() as verify_session, verify_session.begin():
+            repo = MCPServerToolRepoImpl(verify_session, MCPServerToolMapper())
+            tools = {tool.name: tool for tool in await repo.by_server(server_id)}
+
+        assert set(tools) == {"query_table", "inspect_table"}
+        query = tools["query_table"]
+        assert (query.title, query.description) == ("Query table", "New")
+        assert query.meta == meta
+        assert query.ui_resource_sha256 == view_hash
+        assert query.requires_approval is False
+        assert query.pending_description is None
+        assert query.pending_input_schema is None
+        # What the administrator decided about the tool stays.
+        assert query.display_name == "Fråga tabell"
+        assert query.is_enabled_by_default is False
+        inspect = tools["inspect_table"]
+        assert inspect.is_enabled_by_default is True
+        assert inspect.requires_approval is False
+        assert inspect.input_schema is None
+        # The write is bound to the server's own tenant.
+        with pytest.raises(ValueError):
+            await store_own_catalog(server_id, uuid4(), [{"name": "other"}])
+        async with sessionmanager.session() as verify_session, verify_session.begin():
+            repo = MCPServerToolRepoImpl(verify_session, MCPServerToolMapper())
+            assert {tool.name for tool in await repo.by_server(server_id)} == set(tools)
     finally:
         async with sessionmanager.session() as cleanup_session, cleanup_session.begin():
             await cleanup_session.execute(

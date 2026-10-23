@@ -5,6 +5,7 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 
 const bulkRun = vi.hoisted(() => vi.fn());
+const getSyncProgress = vi.hoisted(() => vi.fn(async () => ({ items: [] })));
 const refreshCurrentSpace = vi.hoisted(() => vi.fn());
 const startFastUpdatePolling = vi.hoisted(() => vi.fn(async () => {}));
 const toastSuccess = vi.hoisted(() => vi.fn());
@@ -26,7 +27,9 @@ vi.mock("$app/navigation", () => ({
   pushState: vi.fn(),
   replaceState: vi.fn()
 }));
-vi.mock("$lib/core/Eneo", () => ({ getEneo: () => ({ websites: { bulkRun } }) }));
+vi.mock("$lib/core/Eneo", () => ({
+  getEneo: () => ({ websites: { bulkRun }, integrations: { knowledge: { getSyncProgress } } })
+}));
 vi.mock("$lib/features/jobs/JobManager", () => ({
   jobCompletionEvents: writable(null),
   getJobManager: () => ({ startFastUpdatePolling })
@@ -76,6 +79,7 @@ beforeEach(() => {
   bulkRun.mockReset().mockResolvedValue({ total: 3, queued: 3, failed: 0, errors: [] });
   refreshCurrentSpace.mockReset().mockResolvedValue(undefined);
   startFastUpdatePolling.mockClear();
+  getSyncProgress.mockClear();
   toastSuccess.mockClear();
   toastError.mockClear();
 });
@@ -126,4 +130,37 @@ test("partial bulk acceptance reports both counts and keeps the failed website s
       })
     )
     .toBeVisible();
+});
+
+test("polls the integrations' sync progress only while their tab is open", async () => {
+  currentSpace.set({
+    ...space,
+    hasPermission: (_action: string, type: string) =>
+      type === "website" || type === "integrationKnowledge",
+    knowledge: {
+      ...space.knowledge,
+      integrationKnowledge: [
+        {
+          id: "ik-1",
+          name: "Protokoll",
+          integration_type: "sharepoint",
+          space_id: "space-1",
+          permissions: [],
+          wrapper_id: null,
+          wrapper_name: null,
+          embedding_model: { id: "model-1", name: "Embedding model" },
+          metadata: { size: 0, last_sync_status: "success", document_count: 3 }
+        }
+      ]
+    }
+  } as typeof space);
+  render(KnowledgePage, {
+    data: { currentSpace: space, environment: {}, settings: {}, availableIntegrations: [] }
+  });
+  await expect.element(page.getByText(/2026-09-08/)).toBeVisible();
+  expect(getSyncProgress).not.toHaveBeenCalled();
+
+  await page.getByRole("tab", { name: m.integrations() }).click();
+
+  await expect.poll(() => getSyncProgress.mock.calls.length).toBe(1);
 });

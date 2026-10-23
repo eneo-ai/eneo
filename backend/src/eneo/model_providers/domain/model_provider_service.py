@@ -1,50 +1,96 @@
-from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from collections.abc import Sequence
+from datetime import date, datetime, timezone
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Literal, Optional
 from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from eneo.embedding_models.domain.embedding_model_repo import (
     guard_embedding_provider_update,
 )
-from eneo.main.exceptions import BadRequestException, NameCollisionException
+from eneo.main.config import get_settings
+from eneo.main.exceptions import (
+    BadRequestException,
+    EncryptionNotConfiguredException,
+    NameCollisionException,
+)
+from eneo.model_providers.domain.connection_check import (
+    ConnectionCheck,
+    ConnectionCheckError,
+)
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from eneo.model_providers.domain.model_provider import ModelProvider
+from eneo.model_providers.domain.outbound_header_destinations import (
+    DestinationProblem,
+    destination_problem,
+    parse_allow_list,
+)
+from eneo.model_providers.domain.outbound_header_writes import (
+    OutboundHeaderWrite,
+    StoredSecretUnreadable,
+    apply_header_writes,
+    retained_secret_headers,
+)
+from eneo.model_providers.domain.outbound_headers import (
+    HeaderOutcome,
+    OutboundHeaderConfigError,
+    OutboundHeadersBlocked,
+    evaluate_headers,
+    request_headers,
+)
+from eneo.model_providers.domain.provider_api import (
+    DEFAULT_ENDPOINTS,
+    configured_endpoint,
+    connection_check_request,
+    models_list_request,
+)
+from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     embedding_provider_configuration,
 )
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
+from eneo.model_providers.infrastructure.outbound_headers_runtime import (
+    decrypt_stored_headers,
+)
+from eneo.model_providers.infrastructure.provider_connection_probe import (
+    probe_connection,
+)
+from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
+    TenantModelCredentialResolver,
+)
 from eneo.settings.encryption_service import EncryptionService
+from eneo.tenants.provider_field_config import is_field_required
 
 if TYPE_CHECKING:
-    pass
+    from eneo.users.user import UserInDB
 
-
-# Default base URLs for providers that don't ask the user for one.
-# Any provider configured with its own ``endpoint`` wins over the default.
-_DEFAULT_ENDPOINTS: dict[str, str] = {
-    "openai": "https://api.openai.com",
-    "anthropic": "https://api.anthropic.com",
+_DESTINATION_MESSAGES: dict[DestinationProblem, str] = {
+    "no_endpoint": (
+        "Outbound headers need an explicitly configured endpoint; without one, "
+        "requests go to the vendor's public default"
+    ),
+    "invalid_endpoint": "The provider endpoint is not a valid http(s) URL",
+    "credentials_in_url": "The provider endpoint must not contain credentials",
+    "not_allowed": (
+        "The provider endpoint is not in this deployment's allowed destinations "
+        "for outbound headers"
+    ),
 }
 
 
-def _auth_headers_for(provider_type: str, api_key: str) -> dict[str, str]:
-    """Auth header set per provider. Bearer for everyone except Anthropic,
-    which uses its own header pair."""
-    if provider_type == "anthropic":
-        return {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
-    return {"Authorization": f"Bearer {api_key}"}
+class Unchanged(Enum):
+    """An update argument the caller did not send, where None means "clear"."""
+
+    UNCHANGED = "unchanged"
 
 
-def _normalize_endpoint_base(base: str) -> str:
-    """Strip a trailing slash and an optional ``/v1`` suffix so users can
-    paste either ``https://api.example.com`` or ``https://api.example.com/v1``
-    without us producing ``/v1/v1/models``."""
-    s = base.rstrip("/")
-    if s.endswith("/v1"):
-        s = s[:-3].rstrip("/")
-    return s
+UNCHANGED = Unchanged.UNCHANGED
+
+
+class ConnectionCheckNotSupportedException(BadRequestException):
+    """No cheap authenticated call is known for this provider."""
 
 
 def effective_endpoint(provider_type: str, config: dict[str, Any]) -> str | None:
@@ -57,7 +103,7 @@ def effective_endpoint(provider_type: str, config: dict[str, Any]) -> str | None
     raw = config.get("endpoint")
     if isinstance(raw, str) and raw.strip():
         return raw.strip()
-    return _DEFAULT_ENDPOINTS.get(provider_type)
+    return DEFAULT_ENDPOINTS.get(provider_type)
 
 
 def normalize_destination(endpoint: str | None) -> str | None:
@@ -127,8 +173,8 @@ def _extract_mode_hint(m: dict[str, Any]) -> str | None:
        use ``model_type: "text"`` for everything and rely on the flag.
 
     Returns one of ``"completion"``, ``"embedding"``, ``"transcription"``,
-    ``"image"``, or ``None`` when the response carries neither field and the
-    caller should fall back to name-based inference.
+    ``"image"``, ``"rerank"``, or ``None`` when the response carries neither
+    field and the caller should fall back to name-based inference.
     """
     raw_capabilities: Any = m.get("capabilities")
     embeddings_flag: bool = (
@@ -143,6 +189,8 @@ def _extract_mode_hint(m: dict[str, Any]) -> str | None:
         return "transcription"
     if model_type in ("image", "image_generation"):
         return "image"
+    if model_type == "rerank":
+        return "rerank"
     if model_type == "text":
         # Could still be an embedding flagged via capabilities.
         return "embedding" if embeddings_flag else "completion"
@@ -181,6 +229,7 @@ LITELLM_MODE_TO_OUR_MODE: dict[str, str] = {
     "embedding": "embedding",
     "audio_transcription": "transcription",
     "image_generation": "image",
+    "rerank": "rerank",
 }
 
 # Name fragments that mark an image generation model when the name is not in
@@ -242,6 +291,8 @@ def _infer_mode_from_name(name: str) -> str | None:
         return None
     if any(kw in lower for kw in _IMAGE_NAME_KEYWORDS):
         return "image"
+    if "rerank" in lower:
+        return "rerank"
     if "whisper" in lower:
         return "transcription"
     if "embedding" in lower:
@@ -356,13 +407,32 @@ class ModelProviderService:
 
         return decrypted_creds
 
+    def masked_api_key(self, provider: ModelProvider) -> str | None:
+        """The provider's API key reduced to its last four characters, or None.
+
+        The stored key is ciphertext when encryption is on, so it is decrypted
+        here and only its last four characters leave this method. A key too
+        short to hide, or one that cannot be decrypted, still reads as
+        configured without revealing any of it.
+        """
+        stored_key = provider.credentials.get("api_key")
+        if not stored_key:
+            return None
+        try:
+            api_key = self.encryption.decrypt(stored_key)
+        except (ValueError, EncryptionNotConfiguredException):
+            return "****"
+        return f"...{api_key[-4:]}" if len(api_key) > 4 else "****"
+
     async def get_all(self, active_only: bool = False) -> list[ModelProvider]:
         """Get all providers for the tenant."""
         return await self.repository.all(active_only=active_only)
 
-    async def get_by_id(self, provider_id: UUID) -> ModelProvider:
-        """Get a provider by ID."""
-        return await self.repository.get_by_id(provider_id)
+    async def get_by_id(
+        self, provider_id: UUID, *, for_update: bool = False
+    ) -> ModelProvider:
+        """Get a provider by ID; ``for_update`` holds its row lock until commit."""
+        return await self.repository.get_by_id(provider_id, for_update=for_update)
 
     @staticmethod
     def _validate_required_fields(
@@ -383,6 +453,67 @@ class ModelProviderService:
                         f"Field '{field['name']}' is required for provider '{provider_type}'"
                     )
 
+    def _apply_header_writes(
+        self,
+        stored: list[dict[str, Any]],
+        writes: Sequence[OutboundHeaderWrite],
+        provider_type: str,
+    ) -> list[dict[str, Any]]:
+        try:
+            return apply_header_writes(
+                stored,
+                writes,
+                provider_type=provider_type,
+                encrypt=self.encryption.encrypt,
+                decrypt=self.read_header_secret,
+            )
+        except OutboundHeaderConfigError as exc:
+            raise BadRequestException(str(exc)) from exc
+
+    def read_header_secret(self, ciphertext: str) -> str:
+        """Decrypt a stored header secret. A rotated or missing key raises
+        ``StoredSecretUnreadable``, which the edit that repairs it turns into
+        a 400 instead of a 500."""
+        try:
+            return self.encryption.decrypt(ciphertext)
+        except (ValueError, EncryptionNotConfiguredException):
+            # Not chained: the message can quote the ciphertext.
+            raise StoredSecretUnreadable from None
+
+    def request_endpoint(self, provider: ModelProvider) -> str | None:
+        """The endpoint this provider's requests go to.
+
+        Resolved by the same lookup the request kwargs use, so an ``endpoint``
+        in ``credentials`` shadowing the visible one in ``config`` is what gets
+        checked. Only the endpoint is read: a stored key that no longer
+        decrypts must not block the edit that replaces it. Unlike the
+        module-level ``effective_endpoint``, which the API-key rule uses, there
+        is no vendor default: headers need an explicitly configured endpoint.
+        """
+        resolver = TenantModelCredentialResolver(
+            provider_id=provider.id,
+            provider_type=provider.provider_type,
+            credentials=provider.credentials,
+            config=provider.config,
+            encryption_service=self.encryption,
+        )
+        return resolver.get_credential_field("endpoint")
+
+    def _header_destination_problem(
+        self, provider: ModelProvider
+    ) -> DestinationProblem | None:
+        allowed = parse_allow_list(get_settings().outbound_headers_allowed_destinations)
+        return destination_problem(self.request_endpoint(provider), allowed)
+
+    def _check_header_destination(self, provider: ModelProvider) -> None:
+        """Refuse to save headers aimed at a disallowed destination — including
+        when only the endpoint changed. Re-checked at send as well."""
+        if not provider.outbound_headers:
+            return
+        problem = self._header_destination_problem(provider)
+        if problem is not None:
+            raise BadRequestException(_DESTINATION_MESSAGES[problem])
+
     async def create(
         self,
         tenant_id: UUID,
@@ -391,6 +522,8 @@ class ModelProviderService:
         credentials: dict[str, Any],
         config: dict[str, Any],
         is_active: bool = True,
+        key_expires_on: date | None = None,
+        outbound_headers: Sequence[OutboundHeaderWrite] = (),
     ) -> ModelProvider:
         """Create a new provider."""
         # Check for duplicate names
@@ -405,8 +538,6 @@ class ModelProviderService:
         encrypted_credentials = self._encrypt_credentials(credentials)
 
         # Create domain entity
-        from datetime import datetime, timezone
-
         now = datetime.now(timezone.utc)
         provider = ModelProvider(
             id=uuid4(),
@@ -418,7 +549,12 @@ class ModelProviderService:
             is_active=is_active,
             created_at=now,
             updated_at=now,
+            key_expires_on=key_expires_on,
         )
+        provider.outbound_headers = self._apply_header_writes(
+            [], outbound_headers, provider_type
+        )
+        self._check_header_destination(provider)
 
         return await self.repository.create(provider)
 
@@ -429,10 +565,30 @@ class ModelProviderService:
         credentials: Optional[dict[str, Any]] = None,
         config: Optional[dict[str, Any]] = None,
         is_active: Optional[bool] = None,
+        key_expires_on: date | None | Literal[Unchanged.UNCHANGED] = UNCHANGED,
+        outbound_headers: Optional[Sequence[OutboundHeaderWrite]] = None,
     ) -> ModelProvider:
-        """Update an existing provider."""
+        """Update an existing provider.
+
+        New credentials or a changed config clear the stored connection check:
+        it describes settings the provider no longer has.
+
+        ``outbound_headers`` replaces the header list (``None`` leaves it
+        unchanged). The destination is re-validated when the header list or
+        the destination changes, because an edit to ``config`` or
+        ``credentials`` alone can move where headers are sent. An edit that
+        changes neither, such as a rename or deactivation, is not refused for
+        a destination the deployment no longer allows: sends stay blocked.
+        """
         # Get existing provider
         provider = await self.repository.get_by_id(provider_id, for_update=True)
+        connection_settings_changed = False
+        # Captured before the edit: kept secrets were entered for this destination.
+        kept_secrets = retained_secret_headers(
+            provider.outbound_headers, outbound_headers
+        )
+        previous_headers = list(provider.outbound_headers)
+        previous_destination = self.request_endpoint(provider)
 
         merged_config = {**provider.config, **(config or {})}
         next_credentials = (
@@ -463,15 +619,63 @@ class ModelProviderService:
 
         if credentials is not None:
             provider.credentials = self._encrypt_credentials(credentials)
+            connection_settings_changed = True
 
         if config is not None:
             # Merge with existing config so unchanged fields are preserved
+            connection_settings_changed |= merged_config != provider.config
             provider.config = merged_config
 
         if is_active is not None:
             provider.is_active = is_active
 
-        return await self.repository.update(provider)
+        if key_expires_on is not UNCHANGED:
+            provider.key_expires_on = key_expires_on
+
+        if outbound_headers is not None:
+            provider.outbound_headers = self._apply_header_writes(
+                provider.outbound_headers, outbound_headers, provider.provider_type
+            )
+        destination_moved = normalize_destination(
+            previous_destination
+        ) != normalize_destination(self.request_endpoint(provider))
+        if destination_moved or provider.outbound_headers != previous_headers:
+            self._check_header_destination(provider)
+        self._require_reentered_secrets_for_new_destination(
+            provider, kept_secrets, previous_destination
+        )
+
+        return await self.repository.update(
+            provider, clear_connection_check=connection_settings_changed
+        )
+
+    async def preview_outbound_headers(
+        self, provider: ModelProvider, user: "UserInDB"
+    ) -> tuple[list[HeaderOutcome], DestinationProblem | None, bool, str | None]:
+        """What this provider's headers would do for ``user``, without sending.
+
+        Returns the per-header outcomes, any destination problem, whether the
+        user's requests would be blocked, and the reason the headers themselves
+        block them (e.g. ``total_size_exceeded``, which no single header
+        explains). Callers must not return a secret header's value.
+        """
+        problem = (
+            self._header_destination_problem(provider)
+            if provider.outbound_headers
+            else None
+        )
+        try:
+            headers = decrypt_stored_headers(provider.outbound_headers, self.encryption)
+        except (ValueError, EncryptionNotConfiguredException):
+            # Blocked at send for the same reason. Not logged: the exception
+            # message can quote the ciphertext.
+            return [], problem, True, "decryption_failed"
+        outcomes = evaluate_headers(headers, user)
+        try:
+            request_headers(outcomes)
+        except OutboundHeadersBlocked as exc:
+            return outcomes, problem, True, exc.reason
+        return outcomes, problem, problem is not None, None
 
     @staticmethod
     def _require_replacement_key_for_new_destination(
@@ -510,6 +714,32 @@ class ModelProviderService:
                 "the stored key is not reused for a different destination."
             )
 
+    def _require_reentered_secrets_for_new_destination(
+        self,
+        provider: ModelProvider,
+        kept_secrets: list[str],
+        previous_destination: str | None,
+    ) -> None:
+        """A stored secret header value or fallback is never sent to a
+        destination it was not entered for, just like the API key.
+
+        Destinations are compared as the request resolves them (credentials
+        before config). When the edit moves it, each secret header must be
+        re-entered in full or removed.
+        """
+        if not kept_secrets:
+            return
+        if normalize_destination(previous_destination) == normalize_destination(
+            self.request_endpoint(provider)
+        ):
+            return
+        names = ", ".join(f"'{name}'" for name in kept_secrets)
+        raise BadRequestException(
+            "Changing the provider endpoint requires entering the value and any "
+            f"fallback of each secret header again, or removing it: {names}. "
+            "Stored secrets are not reused for a different destination."
+        )
+
     async def delete(self, provider_id: UUID) -> None:
         """Delete a provider.
 
@@ -541,6 +771,7 @@ class ModelProviderService:
         For transcription models: skips validation (requires audio file).
         For image models: skips validation (a real generation is billed and
         slow; a wrong name surfaces on first use through the provider error).
+        For rerank models: sends one short query with two documents.
         """
         if model_type in ("transcription", "image"):
             return {
@@ -581,6 +812,14 @@ class ModelProviderService:
         try:
             if model_type == "embedding":
                 await aembedding(input=["test"], **kwargs)
+            elif model_type == "rerank":
+                await litellm_transport.arerank(
+                    query="test",
+                    documents=["first document", "second document"],
+                    top_n=1,
+                    timeout=get_settings().rerank_request_timeout_seconds,
+                    **kwargs,
+                )
             else:
                 await acompletion(
                     messages=[{"role": "user", "content": "hi"}],
@@ -606,32 +845,24 @@ class ModelProviderService:
 
         Most providers expose ``GET /v1/models`` returning
         ``{"data": [{"id": ...}]}``. The two things that vary are the auth
-        header and the base URL — captured by ``_auth_headers_for`` and
-        ``_DEFAULT_ENDPOINTS``. Fields beyond ``id`` are pulled
-        opportunistically through fallback chains in ``_normalize_live_model``
-        so providers with richer responses get more metadata, while
-        minimal-shape providers still work.
+        header and the base URL — captured by ``models_list_request``, which
+        also skips providers without a usable list (see there). Fields beyond
+        ``id`` are pulled opportunistically through fallback chains in
+        ``_normalize_live_model`` so providers with richer responses get more
+        metadata, while minimal-shape providers still work.
 
         Returns entries with ``id``, optional ``display_name``, a
         ``created_at`` epoch-seconds value used to sort newest-first, and
         an optional ``mode_hint`` from provider-supplied capability fields.
-        Azure is skipped — its ``/openai/models`` returns every model in
-        the region, not deployed ones.
         """
         import httpx
 
-        if provider_type == "azure":
-            return []
-
-        base = endpoint or _DEFAULT_ENDPOINTS.get(provider_type)
-        if not base:
+        request = models_list_request(provider_type, api_key, endpoint)
+        if request is None:
             return []
 
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                f"{_normalize_endpoint_base(base)}/v1/models",
-                headers=_auth_headers_for(provider_type, api_key),
-            )
+            resp = await client.get(request.url, headers=request.headers)
             resp.raise_for_status()
             return [_normalize_live_model(m) for m in resp.json().get("data", [])]
 
@@ -655,7 +886,7 @@ class ModelProviderService:
         decrypted_creds = self._decrypt_credentials(provider.credentials)
         api_key = decrypted_creds.get("api_key", "")
         provider_type = provider.provider_type.lower()
-        endpoint = provider.config.get("endpoint", "")
+        endpoint = configured_endpoint(provider.config)
 
         try:
             items = await self._fetch_live_models(provider_type, api_key, endpoint)
@@ -688,100 +919,37 @@ class ModelProviderService:
             enriched.append(entry)
         return enriched
 
-    async def test_connection(self, provider_id: UUID) -> dict[str, Any]:
-        """Test connectivity to a model provider by making a minimal LiteLLM call.
+    async def check_connection(
+        self, provider_id: UUID
+    ) -> tuple[ModelProvider, ConnectionCheck]:
+        """Call the provider with its stored credentials and store the result.
 
-        Tries multiple test models per provider as fallback in case older models
-        have been deprecated.
+        The call lists the provider's models: authenticated, cheap and free of
+        token costs. Returns the provider as stored afterwards (the result is
+        dropped if its credentials changed during the call) and the result.
+
+        Raises:
+            ConnectionCheckNotSupportedException: No such call is known for
+                this provider type without an endpoint.
         """
-        import litellm
-
-        acompletion: Any = getattr(litellm, "acompletion")
-
         provider = await self.repository.get_by_id(provider_id)
-        decrypted_creds = self._decrypt_credentials(provider.credentials)
-        api_key = decrypted_creds.get("api_key", "")
-
         provider_type = provider.provider_type.lower()
-        base_kwargs: dict[str, Any] = {
-            "messages": [{"role": "user", "content": "hi"}],
-            "max_tokens": 1,
-            "api_key": api_key,
-        }
-
-        # Multiple candidates per provider, ordered from cheapest/newest to oldest.
-        # If a model is retired, the next one in the list is tried.
-        test_model_candidates: dict[str, list[str]] = {
-            "openai": [
-                "openai/gpt-4o-mini",
-                "openai/gpt-4.1-nano",
-                "openai/gpt-3.5-turbo",
-            ],
-            "anthropic": [
-                "anthropic/claude-3-5-haiku-20241022",
-                "anthropic/claude-3-haiku-20240307",
-                "anthropic/claude-3-5-sonnet-20241022",
-            ],
-            "gemini": [
-                "gemini/gemini-2.0-flash",
-                "gemini/gemini-1.5-flash",
-                "gemini/gemini-pro",
-            ],
-            "cohere": [
-                "cohere/command-r",
-                "cohere/command-r-plus",
-                "cohere/command",
-            ],
-            "mistral": [
-                "mistral/mistral-small-latest",
-                "mistral/mistral-tiny",
-                "mistral/open-mistral-7b",
-            ],
-        }
-
-        # Azure and vLLM use provider config, not a candidate list
-        if provider_type == "azure":
-            deployment = provider.config.get("deployment_name", "gpt-4o-mini")
-            base_kwargs["model"] = f"azure/{deployment}"
-            base_kwargs["api_base"] = provider.config.get("endpoint", "")
-            base_kwargs["api_version"] = provider.config.get(
-                "api_version", "2024-02-15-preview"
+        api_key = str(
+            self._decrypt_credentials(provider.credentials).get("api_key") or ""
+        )
+        request = connection_check_request(
+            provider_type, api_key, configured_endpoint(provider.config)
+        )
+        if request is None:
+            raise ConnectionCheckNotSupportedException(
+                f"Connection checks are not supported for provider type "
+                f"'{provider.provider_type}' without an endpoint."
             )
-            candidates = [base_kwargs["model"]]
-        elif provider_type == "vllm":
-            base_kwargs["api_base"] = provider.config.get("endpoint", "")
-            candidates = ["openai/test"]
-        elif provider_type in test_model_candidates:
-            candidates = test_model_candidates[provider_type]
+
+        if not api_key and is_field_required(provider_type, "api_key"):
+            check = ConnectionCheck.failed(ConnectionCheckError.MISSING_CREDENTIALS)
         else:
-            model_name = provider.config.get("model_name", "test")
-            if provider.config.get("endpoint"):
-                base_kwargs["api_base"] = provider.config["endpoint"]
-            candidates = [f"openai/{model_name}"]
-
-        for model in candidates:
-            kwargs = {**base_kwargs, "model": model}
-            try:
-                await acompletion(**kwargs)
-                return {"success": True, "message": "Connection successful"}
-            except Exception as e:
-                error_name = e.__class__.__name__
-                if error_name == "AuthenticationError":
-                    return {"success": False, "error": "Invalid API key"}
-                if error_name == "APIConnectionError":
-                    return {"success": False, "error": "Could not connect to the API"}
-                if error_name == "NotFoundError":
-                    # Model not found — try next candidate
-                    continue
-                # For non-model errors, no point retrying with a different model
-                return {"success": False, "error": f"Connection test failed: {str(e)}"}
-
-        # All candidates returned NotFound
-        return {
-            "success": False,
-            "error": (
-                "None of the test models could be found. "
-                "The provider may not support completion models, "
-                "or the API endpoint may be misconfigured."
-            ),
-        }
+            check = await probe_connection(
+                request, provider_label=f"{provider.id} ({provider_type})"
+            )
+        return await self.repository.record_connection_check(provider, check), check

@@ -1,5 +1,8 @@
 from datetime import datetime, timezone
+from typing import cast
 from uuid import UUID, uuid4
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.jobs.job_manager import job_manager
@@ -31,17 +34,60 @@ class JobService:
         self.job_repo = job_repo
 
     async def queue_job(
-        self, task: Task, *, name: str, task_params: TaskParams, enqueue: bool = True
+        self,
+        task: Task,
+        *,
+        name: str,
+        task_params: TaskParams,
+        enqueue: bool = True,
+        after_commit: bool = False,
     ) -> JobInDb:
+        """Add a QUEUED job row and hand the job to the worker.
+
+        ``after_commit`` hands it over only once the surrounding transaction
+        has committed: a worker that picked the job up earlier would not see
+        the row, and a job that finished before the commit would be left
+        QUEUED until the stale-job reaper fails it. A rolled-back transaction
+        never dispatches. Sessions that are not ``AsyncSession`` (tests with
+        fakes) dispatch immediately.
+        """
         if task in KNOWLEDGE_TASKS:
             raise ValueError(f"Knowledge task {task.value} requires durable dispatch")
         job = Job(task=task, name=name, status=Status.QUEUED, user_id=self.user.id)
         job_in_db = await self.job_repo.add_job(job=job)
 
-        if enqueue:
+        if not enqueue:
+            return job_in_db
+        if after_commit:
+            await self.dispatch_after_commit(task, job_in_db.id, task_params)
+        else:
             await job_manager.enqueue(task, job_in_db.id, task_params)
-
         return job_in_db
+
+    async def dispatch_after_commit(
+        self, task: Task, job_id: UUID, task_params: TaskParams
+    ) -> None:
+        """Hand a job queued with ``enqueue=False`` to the worker once the
+        surrounding transaction has committed; never after a rollback.
+
+        Must be called outside any savepoint. Sessions that are not
+        ``AsyncSession`` (tests with fakes) dispatch immediately.
+        """
+        session = cast(object, self.job_repo.delegate.session)
+        if not isinstance(session, AsyncSession):
+            await job_manager.enqueue(task, job_id, task_params)
+            return
+
+        async def dispatch() -> None:
+            try:
+                await job_manager.enqueue(task, job_id, task_params)
+            except Exception:
+                logger.exception(
+                    "Job dispatch after commit failed; the stale-job reaper fails it",
+                    extra={"job_id": str(job_id), "task": task.value},
+                )
+
+        after_outer_transaction(session.sync_session, on_commit=dispatch)
 
     async def queue_durable_knowledge_job(
         self,

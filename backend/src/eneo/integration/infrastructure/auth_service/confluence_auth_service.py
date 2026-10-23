@@ -46,22 +46,19 @@ class ConfluenceAuthService(BaseOauthService):
             raise ValueError("CONFLUENCE_CLIENT_SECRET is not set")
         return client_secret
 
-    @property
-    def _redirect_uri(self) -> str:
-        redirect_uri = get_settings().oauth_callback_url
-        if redirect_uri is None:
-            raise ValueError("OAUTH_CALLBACK_URL is not set")
-        return redirect_uri
-
     @override
     async def gen_auth_url(
-        self, state: Optional[str] = None, tenant_id: Optional[uuid.UUID] = None
+        self,
+        state: Optional[str] = None,
+        tenant_id: Optional[uuid.UUID] = None,
+        *,
+        redirect_uri: str | None = None,
     ) -> dict[str, str]:
         params = {
             "audience": "api.atlassian.com",
             "client_id": self._client_id,
             "scope": self.SCOPE_SEPARATOR.join(self._scopes),
-            "redirect_uri": self._redirect_uri,
+            "redirect_uri": get_settings().integration_callback_uri(redirect_uri),
             "state": state or str(uuid.uuid4()),
             "response_type": "code",
             "prompt": "consent",
@@ -92,7 +89,11 @@ class ConfluenceAuthService(BaseOauthService):
 
     @override
     async def exchange_token(
-        self, auth_code: str, tenant_id: Optional[uuid.UUID] = None
+        self,
+        auth_code: str,
+        tenant_id: Optional[uuid.UUID] = None,
+        *,
+        redirect_uri: str | None = None,
     ) -> TokenResponse | None:
         async with httpx.AsyncClient() as client:
             response = await client.post(
@@ -104,7 +105,9 @@ class ConfluenceAuthService(BaseOauthService):
                         "client_id": self._client_id,
                         "client_secret": self._client_secret,
                         "code": auth_code,
-                        "redirect_uri": self._redirect_uri,
+                        "redirect_uri": get_settings().integration_callback_uri(
+                            redirect_uri
+                        ),
                     }
                 ),
                 timeout=DEFAULT_AUTH_TIMEOUT,

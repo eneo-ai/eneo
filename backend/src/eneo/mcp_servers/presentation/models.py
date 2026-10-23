@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import AnyHttpUrl, BaseModel, Field, computed_field, model_validator
 
 from eneo.main.models import NOT_PROVIDED, ModelId, NotProvided
+from eneo.mcp_servers.application.runtime_status import RuntimeStatus
 from eneo.mcp_servers.domain.entities.mcp_server import (
     DEFAULT_AUDIENCE_PRIORITY,
     MCP_TOOL_CATALOG_DEFAULT_MAX_BYTES,
@@ -19,7 +20,15 @@ from eneo.security_classifications.presentation.security_classification_models i
 
 T = TypeVar("T", bound=BaseModel)
 
-MCPServerPurpose = Literal["general", "web_search", "image_generation"]
+MCPServerPurpose = Literal[
+    "general",
+    "web_search",
+    "image_generation",
+    "file_analysis",
+    "file_creation",
+    "charts",
+    "compute",
+]
 MCPServerAudience = Literal["everyone", "groups"]
 
 
@@ -34,6 +43,8 @@ class MCPServerAudienceGroupPublic(BaseModel):
 # "internal" marks a built-in provider: the endpoint is one of Eneo's own
 # loopback MCP servers, authenticated with a per-request scoped token, and
 # ``image_model_id`` names the catalog image model it calls.
+# A fifth, read-only type, "bundled", marks a server of the bundled tool
+# runtime; only POST /mcp-servers/bundled/{tool}/ creates it.
 MCPServerAuthType = Literal["none", "bearer", "api_key_header", "internal"]
 
 
@@ -62,7 +73,7 @@ class MCPServerPublic(BaseModel):
     name: str
     description: Optional[str]
     http_url: str
-    http_auth_type: str  # "none", "bearer", "api_key_header", "internal"
+    http_auth_type: str  # "none", "bearer", "api_key_header", "internal", "bundled"
     purpose: MCPServerPurpose = "general"
     # Built-in providers only: the image model the loopback tool calls.
     image_model_id: Optional[UUID] = None
@@ -91,6 +102,27 @@ class MCPServerPublic(BaseModel):
 
 class MCPServerList(BaseListModel[MCPServerPublic]):
     pass
+
+
+class BundledToolPublic(BaseModel):
+    """A server the bundled tool runtime offers to this tenant."""
+
+    tool: str
+    # "general", or the capability purpose the server provides.
+    purpose: str
+    # False when the deployment has no tool runtime configured.
+    available: bool
+    # Set once an admin has added it; the server is then managed like any other.
+    mcp_server_id: Optional[UUID] = None
+
+
+class BundledToolList(BaseListModel[BundledToolPublic]):
+    runtime: RuntimeStatus | None = None
+
+
+class BundledServerCreate(BaseModel):
+    # Capability providers only: switch it in as the tenant default right away.
+    activate: bool = False
 
 
 class MCPServerCreate(BaseModel):
@@ -246,9 +278,19 @@ class MCPServerToolPublic(BaseModel):
     display_name: Optional[str] = None
     description: Optional[str]
     input_schema: Optional[dict[str, Any]]
+    meta: Optional[dict[str, Any]] = None
+    ui_resource_sha256: Optional[str] = Field(
+        default=None,
+        description="Hash of the approved interactive view (MCP App), if any.",
+    )
     is_enabled_by_default: bool
     pending_description: Optional[str] = None
     pending_input_schema: Optional[dict[str, Any]] = None
+    pending_meta: Optional[dict[str, Any]] = None
+    pending_ui_resource_sha256: Optional[str] = Field(
+        default=None,
+        description="Hash of the interactive view awaiting approval, if any.",
+    )
     requires_approval: bool = False
     removed_from_remote: bool = False
 
@@ -294,8 +336,32 @@ class ToolChangePublic(BaseModel):
     change_type: str  # "new", "changed", "removed"
     current_description: Optional[str] = None
     current_input_schema: Optional[dict[str, Any]] = None
+    current_meta: Optional[dict[str, Any]] = None
+    current_ui_resource_sha256: Optional[str] = None
     pending_description: Optional[str] = None
     pending_input_schema: Optional[dict[str, Any]] = None
+    pending_meta: Optional[dict[str, Any]] = None
+    pending_ui_resource_sha256: Optional[str] = None
+
+
+class MCPToolViewPublic(BaseModel):
+    """What a tool's interactive view (MCP App) may do, for review."""
+
+    uri: str
+    pending: bool = Field(
+        description="The view awaits approval; otherwise it is the approved one."
+    )
+    size_bytes: int
+    connect_domains: list[str] = Field(
+        description="Hosts the view may send requests to."
+    )
+    resource_domains: list[str] = Field(
+        description="Hosts the view may load scripts, styles, images and fonts from."
+    )
+    frame_domains: list[str] = Field(description="Hosts the view may embed.")
+    permissions: list[str] = Field(
+        description="Browser permissions the view asks for. Only clipboardWrite is granted."
+    )
 
 
 class MCPServerToolSyncResponse(BaseModel):

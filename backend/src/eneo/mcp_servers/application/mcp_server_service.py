@@ -1,11 +1,12 @@
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
+from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     NameCollisionException,
@@ -15,11 +16,21 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided
+from eneo.mcp_apps.application.view_snapshots import snapshot_app_views
+from eneo.mcp_apps.domain.csp import declared_domains
+from eneo.mcp_apps.domain.mcp_app_view import get_ui_resource_uri
+from eneo.mcp_servers.application.bundled_tools import forget_catalogs
+from eneo.mcp_servers.domain.credential_transport import (
+    CREDENTIAL_TRANSPORT_REQUIREMENT,
+    credential_transport_violation,
+)
 from eneo.mcp_servers.domain.entities.mcp_server import (
     AUDIENCE_EVERYONE,
     AUDIENCE_GROUPS,
     AUDIENCES,
     BUILTIN_PROVIDER_PURPOSES,
+    BUNDLED_AUTH_TYPE,
+    BUNDLED_TOOLS,
     DEFAULT_AUDIENCE_PRIORITY,
     GENERAL_PURPOSE,
     INTERNAL_AUTH_TYPE,
@@ -29,12 +40,15 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCPServer,
     MCPServerAudienceGroup,
     MCPServerTool,
+    bundled_tool_name,
     is_builtin_provider,
+    is_bundled_server,
     is_capability_purpose,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
+    bundled_endpoint,
     endpoint_url,
     loopback_endpoint,
 )
@@ -46,6 +60,22 @@ from eneo.roles.permissions import Permission, validate_permissions
 
 _NAME_CONSTRAINT = "uq_mcp_servers_tenant_name_purpose"
 _ACTIVE_CAPABILITY_INDEX = "uq_mcp_servers_tenant_active_capability"
+
+
+class MCPServerCredentialTransportError(BadRequestException):
+    """The saved server would send its credential to a plain-http address."""
+
+    code = "mcp_credential_requires_https"
+
+    def __init__(self) -> None:
+        super().__init__(CREDENTIAL_TRANSPORT_REQUIREMENT)
+
+
+def _require_credential_transport(http_auth_type: str, http_url: str) -> None:
+    """Refuse a server state that would expose its credential, before any
+    connection test sends it."""
+    if credential_transport_violation(http_auth_type, http_url) is not None:
+        raise MCPServerCredentialTransportError()
 
 
 def _violated_constraint(error: IntegrityError) -> str:
@@ -74,6 +104,9 @@ def _raise_for_integrity_error(error: IntegrityError) -> None:
 if TYPE_CHECKING:
     from eneo.image_models.domain.image_model import ImageModel
     from eneo.image_models.domain.image_model_repo import ImageModelRepository
+    from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
+        McpAppViewRepo,
+    )
     from eneo.mcp_servers.domain.repositories.mcp_server_repo import (
         MCPServerRepository,
     )
@@ -143,6 +176,50 @@ class MCPServerCreateResult:
 
 
 @dataclass
+class BundledTool:
+    """A server the bundled tool runtime offers, as seen by one tenant."""
+
+    tool: str
+    # The purpose the added server serves ("general" or a capability).
+    purpose: str
+    # The deployment configures the runtime (URL and token are both set).
+    available: bool
+    # The tenant's row for it, once an admin has added it.
+    mcp_server_id: UUID | None = None
+
+
+# Initial name and description of a bundled server when an admin adds it;
+# both are ordinary editable fields afterwards.
+BUNDLED_TOOL_NAMES: dict[str, str] = {
+    "compute": "Compute",
+    "charts": "Charts",
+    "file-analysis": "Ask a file",
+    "file-creation": "Create a file",
+}
+BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
+    "charts": (
+        "Creates interactive bar, line, pie and scatter charts, with PNG image "
+        "export, from inline values or a CSV/XLSX file in the conversation."
+    ),
+    "file-analysis": (
+        "Answers questions about attached files in an isolated sandbox: CSV "
+        "and Excel files are inspected and queried with DuckDB. Files are "
+        "fetched through short-lived signed links."
+    ),
+    "file-creation": (
+        "Creates Word (DOCX), PDF and Excel (XLSX) files in an isolated "
+        "sandbox, optionally from a Word template in the conversation. The "
+        "files are saved in the conversation."
+    ),
+    "compute": (
+        "Runs JavaScript over JSON in an isolated sandbox for exact "
+        "calculations, and can export a tabular result as a CSV file for "
+        "charts, spreadsheets and documents. No network or state between calls."
+    ),
+}
+
+
+@dataclass
 class MCPServerUpdateResult:
     """Result of MCP server update including optional connection status."""
 
@@ -158,8 +235,26 @@ class ToolChange:
     change_type: str  # "new", "changed", "removed", "unchanged"
     current_description: str | None = None
     current_input_schema: dict[str, Any] | None = None
+    current_meta: dict[str, Any] | None = None
+    current_ui_resource_sha256: str | None = None
     pending_description: str | None = None
     pending_input_schema: dict[str, Any] | None = None
+    pending_meta: dict[str, Any] | None = None
+    pending_ui_resource_sha256: str | None = None
+
+
+@dataclass
+class ToolViewFacts:
+    """What a tool's interactive view may do, for an administrator's review."""
+
+    uri: str
+    # The view awaits approval; otherwise it is the approved one.
+    pending: bool
+    size_bytes: int
+    # Hosts the view's declaration opens, by the declaration's list names.
+    domains: dict[str, list[str]]
+    # Browser permissions the view asks for.
+    permissions: list[str]
 
 
 @dataclass
@@ -196,10 +291,12 @@ class MCPServerService:
         encryption_service: "EncryptionService | None" = None,
         user_groups_repo: "UserGroupsRepository | None" = None,
         image_model_repo: "ImageModelRepository | None" = None,
+        app_view_repo: "McpAppViewRepo | None" = None,
     ):
         super().__init__()
         self.repo = mcp_server_repo
         self.tool_repo = mcp_server_tool_repo
+        self.app_view_repo = app_view_repo
         self.user = user
         self.encryption_service = encryption_service
         self.image_model_repo = image_model_repo
@@ -259,10 +356,10 @@ class MCPServerService:
     ) -> None:
         """Validate a plaintext auth config before it is tested or stored.
 
-        Enforces that credentials ride in headers (never URLs), that an
-        api_key_header name is legal HTTP token syntax and not a reserved
-        transport/session header, and that no secret can smuggle CR/LF into
-        the request stream.
+        Enforces that an api_key_header name is legal HTTP token syntax and
+        not a reserved transport/session header, and that no secret can
+        smuggle CR/LF into the request stream. Which addresses may receive a
+        credential is decided by ``credential_transport_violation``.
         """
         if http_auth_type == "none":
             return
@@ -271,6 +368,13 @@ class MCPServerService:
                 raise BadRequestException(
                     "A built-in provider carries no credentials; the ask path "
                     "authenticates it with a scoped token."
+                )
+            return
+        if is_bundled_server(http_auth_type):
+            if config:
+                raise BadRequestException(
+                    "A bundled server carries no credentials; Eneo authenticates "
+                    "it with the deployment's tool runtime token."
                 )
             return
 
@@ -313,6 +417,26 @@ class MCPServerService:
         ``INTERNAL_MCP_BASE_URL`` takes effect without saving the provider.
         """
         return loopback_endpoint(purpose)
+
+    @staticmethod
+    def bundled_tool_url(tool: str) -> str | None:
+        """Endpoint of ``tool`` in the bundled tool runtime, if one is configured.
+
+        Stored on the row to name the tool it serves: connections resolve the
+        endpoint again each time (``endpoint_url``), so a changed
+        ``TOOL_RUNTIME_URL`` takes effect without adding the server again.
+        """
+        return bundled_endpoint(tool)
+
+    @staticmethod
+    def _bundled_tool_name(http_url: str) -> str | None:
+        return bundled_tool_name(http_url)
+
+    @classmethod
+    def _bundled_tool_of(cls, server: MCPServer) -> str | None:
+        if not is_bundled_server(server.http_auth_type):
+            return None
+        return cls._bundled_tool_name(server.http_url)
 
     async def _resolve_builtin_image_model(
         self, purpose: str, image_model_id: UUID | None
@@ -469,7 +593,16 @@ class MCPServerService:
             )
         elif not http_url:
             raise BadRequestException("http_url is required")
+        if is_bundled_server(http_auth_type):
+            # The runtime endpoint fixes the row's purpose and identity mode.
+            spec = BUNDLED_TOOLS.get(self._bundled_tool_name(str(http_url)) or "")
+            if spec is None or purpose != spec.purpose:
+                raise BadRequestException(
+                    "A bundled server serves its tool's own purpose"
+                )
+            forward_identity = spec.forward_identity
         http_url = str(http_url)
+        _require_credential_transport(http_auth_type, http_url)
         user_groups = await self._resolve_audience(
             purpose, audience, list(user_group_ids or [])
         )
@@ -535,6 +668,10 @@ class MCPServerService:
                 title=tool_def.get("title"),
                 description=tool_def.get("description"),
                 input_schema=tool_def.get("input_schema"),
+                # Kept from the start so a tool its server offers to its view
+                # only is never offered to the model. A view itself is shown
+                # only after a sync has stored it and it has been approved.
+                meta=tool_def.get("meta"),
                 is_enabled_by_default=True,
             )
             await self.tool_repo.upsert_by_server_and_name(tool)
@@ -549,6 +686,63 @@ class MCPServerService:
             server=mcp_server,
             connection=connection_result,
             deactivated_server_ids=deactivated_server_ids,
+        )
+
+    @validate_permissions(Permission.ADMIN)
+    async def list_bundled_tools(self) -> list[BundledTool]:
+        """The bundled runtime's tools and whether this tenant has added them."""
+        added = {
+            tool: server
+            for server in await self.repo.query(
+                tenant_id=self.user.tenant_id, http_auth_type=BUNDLED_AUTH_TYPE
+            )
+            if (tool := self._bundled_tool_of(server)) is not None
+            and server.purpose == BUNDLED_TOOLS[tool].purpose
+        }
+        return [
+            BundledTool(
+                tool=tool,
+                purpose=spec.purpose,
+                available=self.bundled_tool_url(tool) is not None,
+                mcp_server_id=added[tool].id if tool in added else None,
+            )
+            for tool, spec in BUNDLED_TOOLS.items()
+        ]
+
+    @validate_permissions(Permission.ADMIN)
+    async def create_bundled_mcp_server(
+        self, tool: str, activate: bool = False
+    ) -> MCPServerCreateResult:
+        """Add one of the bundled tool runtime's servers to this tenant.
+
+        The row is an ordinary server: it goes through the same connection
+        test and tool discovery as any other. A general server is then enabled
+        per space like any other; a capability provider is saved inactive
+        unless ``activate`` switches it in as the tenant's default. Only its
+        URL and credential come from the deployment instead of the admin.
+        """
+        if tool not in BUNDLED_TOOLS:
+            raise NotFoundException(f"Unknown bundled tool '{tool}'")
+        url = self.bundled_tool_url(tool)
+        if url is None:
+            raise BadRequestException(
+                "The bundled tool runtime is not configured for this deployment"
+            )
+        if any(
+            self._bundled_tool_of(server) == tool
+            and server.purpose == BUNDLED_TOOLS[tool].purpose
+            for server in await self.repo.query(
+                tenant_id=self.user.tenant_id, http_auth_type=BUNDLED_AUTH_TYPE
+            )
+        ):
+            raise NameCollisionException(f"The bundled '{tool}' server already exists")
+        return await self.create_mcp_server(
+            name=BUNDLED_TOOL_NAMES[tool],
+            http_url=url,
+            http_auth_type=BUNDLED_AUTH_TYPE,
+            purpose=BUNDLED_TOOLS[tool].purpose,
+            description=BUNDLED_TOOL_DESCRIPTIONS[tool],
+            activate=activate,
         )
 
     @validate_permissions(Permission.ADMIN)
@@ -595,6 +789,29 @@ class MCPServerService:
         active is rejected by the activation index.
         """
         mcp_server = await self._get_server_for_tenant(mcp_server_id)
+        if is_bundled_server(http_auth_type) and not is_bundled_server(
+            mcp_server.http_auth_type
+        ):
+            raise BadRequestException(
+                "Bundled servers are added from the bundled tool runtime"
+            )
+        if is_bundled_server(mcp_server.http_auth_type) and (
+            (http_url is not None and str(http_url) != mcp_server.http_url)
+            or (
+                http_auth_type is not None
+                and http_auth_type != mcp_server.http_auth_type
+            )
+            or http_auth_config_schema is not None
+            or (
+                forward_identity is not None
+                and forward_identity != mcp_server.forward_identity
+            )
+            or (purpose is not None and purpose != mcp_server.purpose)
+        ):
+            raise BadRequestException(
+                "A bundled server's connection is managed by the deployment; "
+                "only its name, description, limits and tools can change"
+            )
         # Track whether connection-affecting fields are actually changing
         url_changed = http_url is not None and str(http_url) != mcp_server.http_url
         auth_type_changed = (
@@ -674,6 +891,12 @@ class MCPServerService:
                 )
             mcp_server.image_model_id = None
             mcp_server.image_model = None
+        # The state being saved: requested values over stored ones. Checked
+        # before anything below writes or the connection test runs.
+        _require_credential_transport(
+            effective_auth_type,
+            str(http_url) if http_url is not None else mcp_server.http_url,
+        )
 
         # Apply changes to domain object
         if name is not None:
@@ -756,7 +979,11 @@ class MCPServerService:
             or credentials_changed
             or identity_mode_changed
         ):
-            if mcp_server.http_auth_type in ("none", INTERNAL_AUTH_TYPE):
+            if mcp_server.http_auth_type in (
+                "none",
+                INTERNAL_AUTH_TYPE,
+                BUNDLED_AUTH_TYPE,
+            ):
                 test_credentials = None
             elif http_auth_config_schema is not None:
                 # New credentials provided — use plaintext for test
@@ -910,6 +1137,12 @@ class MCPServerService:
                 identity_headers=build_identity_headers(self.user, None),
             ) as client:
                 tool_defs = await client.list_tools()
+                # A view is reviewed with the definition that declares it, so
+                # its HTML is read on this same connection and kept.
+                if get_settings().mcp_apps_enabled and self.app_view_repo is not None:
+                    await snapshot_app_views(
+                        client, mcp_server, tool_defs, self.app_view_repo
+                    )
 
             logger.info(f"Discovered {len(tool_defs)} tools from {mcp_server.name}")
 
@@ -961,6 +1194,8 @@ class MCPServerService:
                 title=tool_def.get("title"),
                 description=tool_def.get("description"),
                 input_schema=tool_def.get("input_schema"),
+                meta=tool_def.get("meta"),
+                ui_resource_sha256=tool_def.get("ui_resource_sha256"),
             )
             for tool_def in tool_defs
             if (
@@ -970,6 +1205,8 @@ class MCPServerService:
                     and existing_by_name[tool_def["name"]].has_definition_drift(
                         description=tool_def.get("description"),
                         input_schema=tool_def.get("input_schema"),
+                        meta=tool_def.get("meta"),
+                        ui_resource_sha256=tool_def.get("ui_resource_sha256"),
                     )
                 )
             )
@@ -990,6 +1227,7 @@ class MCPServerService:
             remote_title = tool_def.get("title")
             remote_desc = tool_def.get("description")
             remote_schema = tool_def.get("input_schema")
+            remote_meta = tool_def.get("meta")
             previous = existing_by_name.get(name)
             current = current_by_name.get(name) or staged_by_name.get(name)
             if current is None:
@@ -1002,6 +1240,8 @@ class MCPServerService:
                         change_type="new",
                         pending_description=current.pending_description,
                         pending_input_schema=current.pending_input_schema,
+                        pending_meta=current.pending_meta,
+                        pending_ui_resource_sha256=current.pending_ui_resource_sha256,
                     )
                 )
                 continue
@@ -1018,6 +1258,8 @@ class MCPServerService:
             if previous.has_definition_drift(
                 description=remote_desc,
                 input_schema=remote_schema,
+                meta=remote_meta,
+                ui_resource_sha256=tool_def.get("ui_resource_sha256"),
             ):
                 result.changed_tools.append(
                     ToolChange(
@@ -1025,8 +1267,12 @@ class MCPServerService:
                         change_type="changed",
                         current_description=current.description,
                         current_input_schema=current.input_schema,
+                        current_meta=current.meta,
+                        current_ui_resource_sha256=current.ui_resource_sha256,
                         pending_description=current.pending_description,
                         pending_input_schema=current.pending_input_schema,
+                        pending_meta=current.pending_meta,
+                        pending_ui_resource_sha256=current.pending_ui_resource_sha256,
                     )
                 )
             else:
@@ -1070,11 +1316,59 @@ class MCPServerService:
             )
 
         result = await self.discover_and_sync_tools(mcp_server, auth_credentials)
-        if is_builtin_provider(mcp_server.http_auth_type):
+        if is_builtin_provider(mcp_server.http_auth_type) or is_bundled_server(
+            mcp_server.http_auth_type
+        ):
             # The approval gate guards against a compromised remote; a built-in
-            # provider's definitions are Eneo's own code.
+            # provider's and the bundled runtime's definitions are Eneo's own
+            # code. Completions list the runtime live, so forget what they
+            # cached and let the next answer see the refreshed catalog too.
             await self.approve_all_tool_changes(mcp_server_id)
+            forget_catalogs()
         return result
+
+    @validate_permissions(Permission.ADMIN)
+    async def describe_tool_view(
+        self, mcp_server_id: UUID, tool_id: UUID
+    ) -> ToolViewFacts | None:
+        """What the tool's view may do: the one awaiting approval, else the approved one.
+
+        None when the tool has no stored view.
+        """
+        server = await self._get_server_for_tenant(mcp_server_id)
+        tool = await self.tool_repo.one(id=tool_id)
+        if tool.mcp_server_id != server.id or self.app_view_repo is None:
+            return None
+        pending = tool.pending_ui_resource_sha256 is not None
+        content_hash = tool.pending_ui_resource_sha256 or tool.ui_resource_sha256
+        uri = get_ui_resource_uri(tool.pending_meta if pending else tool.meta)
+        if content_hash is None or uri is None:
+            return None
+        stored = await self.app_view_repo.describe_view(
+            tenant_id=server.tenant_id,
+            mcp_server_id=server.id,
+            uri=uri,
+            content_hash=content_hash,
+        )
+        if stored is None:
+            return None
+        size_bytes, ui_meta = stored
+        policy = ui_meta or {}
+        ui_csp = policy.get("csp")
+        permissions = policy.get("permissions")
+        return ToolViewFacts(
+            uri=uri,
+            pending=pending,
+            size_bytes=size_bytes,
+            domains=declared_domains(
+                cast(dict[str, Any], ui_csp) if isinstance(ui_csp, dict) else None
+            ),
+            permissions=(
+                sorted(cast(dict[str, Any], permissions))
+                if isinstance(permissions, dict)
+                else []
+            ),
+        )
 
     @validate_permissions(Permission.ADMIN)
     async def approve_tool_changes(
@@ -1100,16 +1394,7 @@ class MCPServerService:
                 continue
 
             if tool.requires_approval:
-                # Promote pending values to active
-                if tool.pending_description is not None:
-                    tool.description = tool.pending_description
-                if tool.pending_input_schema is not None:
-                    tool.input_schema = tool.pending_input_schema
-
-                # Clear pending state
-                tool.pending_description = None
-                tool.pending_input_schema = None
-                tool.requires_approval = False
+                tool.approve_pending()
 
                 tool = await self.tool_repo.update(tool)
                 approved_tools.append(tool)
@@ -1145,9 +1430,7 @@ class MCPServerService:
                 continue
 
             # Changed or removed tool — clear pending state
-            tool.pending_description = None
-            tool.pending_input_schema = None
-            tool.requires_approval = False
+            tool.clear_pending()
             tool.removed_from_remote = False
 
             tool = await self.tool_repo.update(tool)

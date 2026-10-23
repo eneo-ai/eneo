@@ -1,6 +1,4 @@
 # Copyright (c) 2025 Sundsvalls Kommun
-#
-# Licensed under the MIT License.
 
 from typing import TYPE_CHECKING, Collection, Optional
 
@@ -18,6 +16,7 @@ from eneo.files.file_reference import (
     url_only_attachment_ids,
     url_only_file_ids,
 )
+from eneo.files.file_service import require_requested_files
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
     select_effective_inline_file_text,
@@ -227,6 +226,7 @@ class ConversationService:
             # User-scoped lookup matches the actual chat endpoint (assistant_service.ask
             # uses get_files_by_ids), so preflight refuses files the user can't send.
             files = await self.file_service.get_files_by_ids(file_ids=file_ids)
+            require_requested_files(file_ids, files)
             file_tokens, excluded_file_count = await self._count_preflight_files(
                 files=files,
                 model=model,

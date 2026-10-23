@@ -18,7 +18,6 @@ from eneo.main.container.container import Container
 from eneo.main.models import CursorPaginatedResponse, PaginatedResponse
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses, to_paginated_response
-from eneo.spaces.api.space_models import TransferRequest
 from eneo.websites.presentation.website_models import (
     BulkCrawlRequest,
     BulkCrawlResponse,
@@ -26,6 +25,8 @@ from eneo.websites.presentation.website_models import (
     BulkWebsiteDeleteResponse,
     CrawlRunPublic,
     WebsiteBulkActionError,
+    WebsiteContentFolderPublic,
+    WebsiteContentFoldersPublic,
     WebsiteCreateRequestDeprecated,
     WebsiteExistsResponse,
     WebsitePublic,
@@ -444,8 +445,6 @@ async def run_crawl(
     id: Annotated[UUID, Path(description="Unique identifier of the website to crawl")],
     container: ContainerDep,
 ):
-    # MIT License
-
     service = container.website_crud_service()
     crawl_run = await service.crawl_website(id)
 
@@ -499,55 +498,6 @@ async def get_latest_crawl_run(
     return CrawlRunPublic.from_domain(run) if run is not None else None
 
 
-@router.post(
-    "/{id}/transfer/",
-    status_code=204,
-    responses=responses.get_responses([403, 404]),
-    description="Transfer a website to another space by id.",
-)
-@endpoint_access(
-    authentication=Authentication.USER,
-    authorization=Authorization.AUTHENTICATED,
-    reason="ResourceMoverService checks source and target space access before transfer.",
-)
-async def transfer_website_to_space(
-    transfer_req: TransferRequest,
-    id: Annotated[
-        UUID, Path(description="Unique identifier of the website to transfer")
-    ],
-    container: ContainerDep,
-):
-    # Transfer website (do this FIRST to avoid DI issues)
-    service = container.resource_mover_service()
-    await service.link_website_to_space(
-        website_id=id, space_id=transfer_req.target_space_id
-    )
-
-    # Get user and website info AFTER transfer for audit logging
-    user = container.user()
-    website_service = container.website_crud_service()
-    website = await website_service.get_website(id)
-
-    # Audit logging
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=user.tenant_id,
-        user=user,
-        action=ActionType.WEBSITE_TRANSFERRED,
-        entity_type=EntityType.WEBSITE,
-        entity_id=id,
-        description=f"Transferred website '{website.url}' to new space",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=website,
-            extra={
-                "url": website.url,
-                "target_space_id": str(transfer_req.target_space_id),
-            },
-        ),
-    )
-
-
 @router.get(
     "/{id}/info-blobs/",
     response_model=PaginatedResponse[InfoBlobPublicNoText],
@@ -585,6 +535,10 @@ async def get_info_blob_page(
     container: ContainerDep,
     limit: Annotated[int, Query(ge=1, le=100)] = 100,
     cursor: Annotated[UUID | None, Query()] = None,
+    q: Annotated[str, Query(max_length=200)] = "",
+    prefix: Annotated[
+        str, Query(max_length=2048, pattern=r"^(https?://[^?#]+/)?$")
+    ] = "",
 ) -> CursorPaginatedResponse[InfoBlobPublicNoText]:
     service = container.info_blob_service()
 
@@ -592,6 +546,8 @@ async def get_info_blob_page(
         id,
         limit=limit,
         cursor=cursor,
+        q=q,
+        prefix=prefix,
     )
 
     info_blobs_public = [
@@ -603,4 +559,37 @@ async def get_info_blob_page(
         limit=limit,
         next_cursor=str(page.next_cursor) if page.next_cursor is not None else None,
         total_count=page.total_count,
+    )
+
+
+@router.get(
+    "/{id}/content-folders/",
+    response_model=WebsiteContentFoldersPublic,
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_BLOB_ACCESS_REASON,
+)
+async def get_content_folders(
+    id: Annotated[UUID, Path(description="Unique identifier of the website")],
+    container: ContainerDep,
+    prefix: Annotated[
+        str, Query(max_length=2048, pattern=r"^(https?://[^?#]+/)?$")
+    ] = "",
+    cursor: Annotated[str | None, Query(max_length=2048)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+) -> WebsiteContentFoldersPublic:
+    page = await container.info_blob_service().get_website_folders(
+        id, prefix=prefix, cursor=cursor, limit=limit
+    )
+    return WebsiteContentFoldersPublic(
+        items=[
+            WebsiteContentFolderPublic(
+                path=folder.path, count=folder.count, has_children=folder.has_children
+            )
+            for folder in page.items
+        ],
+        next_cursor=page.next_cursor,
     )

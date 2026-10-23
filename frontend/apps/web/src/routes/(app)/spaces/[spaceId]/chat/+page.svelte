@@ -18,6 +18,8 @@
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import ChatDebugPanel from "$lib/features/chat/components/debug/ChatDebugPanel.svelte";
+  import { getAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte";
+  import { initFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
 
   const { data: rawData } = $props();
   // +page.ts throws when partnerId is missing, so chatPartner is always set here.
@@ -33,6 +35,8 @@
   } = getSpacesManager();
 
   const chat = untrack(() => initChatService(data));
+  // Keep the conversation's preview state when moving between chat and history.
+  initFilePreview(getAttachmentUrlService());
 
   const debugAvailable = $derived(
     user.hasPermission("assistant_debug") && chat.partner.type !== "group-chat"

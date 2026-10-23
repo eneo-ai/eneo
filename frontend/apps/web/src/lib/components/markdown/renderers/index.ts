@@ -11,6 +11,7 @@ import Emphasis from "./Emphasis.svelte";
 import Code from "./Code.svelte";
 import Inref from "./Inref.svelte";
 import Mention from "./Mention.svelte";
+import FileMention from "./FileMention.svelte";
 import CodeSpan from "./CodeSpan.svelte";
 import Blockquote from "./Blockquote.svelte";
 import Del from "./Del.svelte";
@@ -21,6 +22,8 @@ import Def from "./Def.svelte";
 import Table from "./Table.svelte";
 import Link from "./Link.svelte";
 import Image from "./Image.svelte";
+import MathRenderer from "./Math.svelte";
+import Escape from "./Escape.svelte";
 
 type TokenMap = {
   [K in MarkedToken["type"]]: Extract<MarkedToken, { type: K }>;
@@ -43,6 +46,8 @@ export const renderers: Renderers = {
   // Custom blocks
   eneoInref: Inref,
   eneoMention: Mention,
+  eneoFile: FileMention,
+  eneoMath: MathRenderer,
   // Basic markdown blocks
   heading: Heading,
   text: Text,
@@ -59,7 +64,7 @@ export const renderers: Renderers = {
   hr: Hr,
   space: Space,
   def: Def,
-  escape: Space,
+  escape: Escape,
   table: Table,
   link: Link,
   image: Image,

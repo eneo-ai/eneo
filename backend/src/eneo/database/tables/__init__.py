@@ -2,10 +2,10 @@ from importlib import import_module
 
 _TABLE_MODULES = (
     "eneo.database.tables.capabilities_table",
+    "eneo.database.tables.document_templates_table",
     "eneo.database.tables.ai_models_table",
     "eneo.database.tables.allowed_origins_table",
     "eneo.database.tables.api_keys_v2_table",
-    "eneo.database.tables.audit_action_config_table",
     "eneo.database.tables.audit_category_config_table",
     "eneo.database.tables.audit_log_table",
     "eneo.database.tables.audit_retention_policy_table",
@@ -31,6 +31,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.logging_table",
     "eneo.database.tables.module_table",
     "eneo.database.tables.governance_policy_table",
+    "eneo.database.tables.mcp_app_views_table",
     "eneo.database.tables.mcp_tool_references_table",
     "eneo.database.tables.org_space_assistant_roles_table",
     "eneo.database.tables.object_content_table",

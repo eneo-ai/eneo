@@ -13,6 +13,8 @@ vi.mock("$lib/paraglide/messages", () => ({
     job_failure_processing_interrupted: () => "processing_interrupted",
     job_failure_invalid_job_payload: () => "invalid_job_payload",
     job_failure_quota_exceeded: () => "quota_exceeded",
+    job_failure_tenant_quota_exceeded: () => "upload:tenant_quota_exceeded",
+    job_failure_user_quota_exceeded: () => "upload:user_quota_exceeded",
     job_failure_storage_limit_exceeded: () => "storage_limit_exceeded",
     job_failure_storage_unavailable: () => "storage_unavailable",
     job_failure_storage_verification_failed: () => "storage_verification_failed",
@@ -61,6 +63,13 @@ describe("getJobFailureMessage", () => {
     "identifies which storage quota stopped a crawl: %s",
     (code) => {
       expect(getJobFailureMessage(code, "crawl")).toBe(code);
+    }
+  );
+
+  it.each(["tenant_quota_exceeded", "user_quota_exceeded"])(
+    "identifies which storage quota stopped an upload without crawl wording: %s",
+    (code) => {
+      expect(getJobFailureMessage(code, "upload_info_blob")).toBe(`upload:${code}`);
     }
   );
 

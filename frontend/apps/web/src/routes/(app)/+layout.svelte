@@ -18,6 +18,7 @@
   import EneoWordMark from "$lib/assets/EneoWordMark.svelte";
   import { IconEneo } from "@eneo/icons/eneo";
   import { initAttachmentUrlService } from "$lib/features/attachments/AttachmentUrlService.svelte.js";
+  import { initMcpAppUrlService } from "$lib/features/chat/mcp-apps/McpAppUrlService.svelte.js";
   import { initFaviconUrlService } from "$lib/features/knowledge/FaviconUrlService.svelte.js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
@@ -34,6 +35,7 @@
   $: if (!data.whatsNewEnabled) whatsNewTour.stop();
   beforeNavigate(({ to }) => whatsNewTour.beforeNavigation(to?.url ?? null));
   initAttachmentUrlService(data);
+  initMcpAppUrlService(data);
   initFaviconUrlService();
   const socket = initEneoSocket(data);
 
@@ -93,6 +95,23 @@
   class="bg-secondary mx-auto flex min-h-[100svh] w-full max-w-[2000px] flex-col p-0 md:px-4 md:pt-3"
   data-sveltekit-preload-data="hover"
 >
+  {#if data.featureFlags.showNewAppBanner && data.environment.newAppUrl}
+    <aside
+      class="bg-accent-dimmer text-primary relative z-10 mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg px-4 py-3"
+      aria-label={m.new_app_banner_title()}
+    >
+      <p>{m.new_app_banner_description()}</p>
+      <!-- eslint-disable svelte/no-navigation-without-resolve -- validated deployment URL -->
+      <a
+        href={data.environment.newAppUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="text-accent-stronger rounded font-semibold underline underline-offset-4 focus-visible:outline-2 focus-visible:outline-offset-4"
+        >{m.new_app_banner_action()}</a
+      >
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
+    </aside>
+  {/if}
   <header
     class:max-h-0={!$showHeader}
     class:max-h-14={$showHeader}

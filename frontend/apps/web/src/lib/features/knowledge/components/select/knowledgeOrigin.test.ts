@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { isOrgItem, isPersonalItem, ownerSpaceId, partitionByOrigin } from "./knowledgeOrigin";
+import { classifyKnowledgeOrigin, ownerSpaceId, partitionByOrigin } from "./knowledgeOrigin";
 
 describe("ownerSpaceId", () => {
   test("reads the space id from any of the supported shapes", () => {
@@ -13,41 +13,54 @@ describe("ownerSpaceId", () => {
   });
 });
 
-describe("isPersonalItem", () => {
-  test("unowned items are personal", () => {
-    expect(isPersonalItem({}, "current")).toBe(true);
+describe("classifyKnowledgeOrigin", () => {
+  test("uses ownership for current-space and organization sources", () => {
+    expect(classifyKnowledgeOrigin({ space_id: "current" }, "current", "org")).toBe("space");
+    expect(classifyKnowledgeOrigin({ space_id: "org" }, "current", "org")).toBe("organization");
   });
-  test("items owned by the current space are personal", () => {
-    expect(isPersonalItem({ space_id: "current" }, "current")).toBe(true);
+  test("keeps sources linked from another space in the current-space section", () => {
+    expect(classifyKnowledgeOrigin({ space_id: "other" }, "current", "org")).toBe("space");
   });
-  test("items owned by another space are not personal", () => {
-    expect(isPersonalItem({ space_id: "other" }, "current")).toBe(false);
+  test("does not guess organization ownership when its identity is unavailable", () => {
+    expect(classifyKnowledgeOrigin({ space_id: "other" }, "current", undefined)).toBe("space");
+    expect(classifyKnowledgeOrigin({ space_id: "org" }, "current", undefined)).toBe("space");
   });
-});
-
-describe("isOrgItem", () => {
-  test("matches the configured org space when one is set", () => {
-    expect(isOrgItem({ space_id: "org" }, "current", "org")).toBe(true);
-    expect(isOrgItem({ space_id: "other" }, "current", "org")).toBe(false);
+  test("keeps sources without ownership in the current-space section", () => {
+    expect(classifyKnowledgeOrigin({}, "current", "org")).toBe("space");
+    expect(classifyKnowledgeOrigin({ space_id: null }, undefined, undefined)).toBe("space");
   });
-  test("without an org space, any owned non-current space counts as org", () => {
-    expect(isOrgItem({ space_id: "other" }, "current", undefined)).toBe(true);
-    expect(isOrgItem({ space_id: "current" }, "current", undefined)).toBe(false);
-    expect(isOrgItem({}, "current", undefined)).toBe(false);
+  test("recognises organization sources before current-space identity is available", () => {
+    expect(classifyKnowledgeOrigin({ space_id: "org" }, undefined, "org")).toBe("organization");
   });
-  test("without a current space and no org space, nothing is org", () => {
-    expect(isOrgItem({ space_id: "x" }, undefined, undefined)).toBe(false);
+  test("the organization's own sources belong to the current section when editing its space", () => {
+    expect(classifyKnowledgeOrigin({ space_id: "org" }, "org", "org")).toBe("space");
   });
 });
 
 describe("partitionByOrigin", () => {
-  test("splits unowned/current into personal and the rest into org", () => {
-    const { personal, org } = partitionByOrigin(
-      [{ space_id: "current" }, {}, { space_id: "other" }, { space: { id: "current" } }],
-      "current"
+  test.each(["org", undefined])(
+    "every source appears exactly once with org identity %s",
+    (orgId) => {
+      const items = [
+        { id: "local", space_id: "current" },
+        { id: "organization", space_id: "org" },
+        { id: "linked", space_id: "other" },
+        { id: "unowned" }
+      ];
+      const partitions = partitionByOrigin(items, "current", orgId);
+      const displayedIds = Object.values(partitions)
+        .flat()
+        .map((item) => item.id);
+      expect(displayedIds.sort()).toEqual(items.map((item) => item.id).sort());
+      expect(partitions.space.map((item) => item.id)).toContain("linked");
+      expect(partitions.organization.map((item) => item.id)).toEqual(orgId ? ["organization"] : []);
+    }
+  );
+  test("preserves source order within each origin", () => {
+    const first = { space_id: "other", id: "first" };
+    const second = { space_id: "current", id: "second" };
+    expect(partitionByOrigin([first, { space_id: "org" }, second], "current", "org").space).toEqual(
+      [first, second]
     );
-    expect(personal).toHaveLength(3);
-    expect(org).toHaveLength(1);
-    expect(ownerSpaceId(org[0])).toBe("other");
   });
 });

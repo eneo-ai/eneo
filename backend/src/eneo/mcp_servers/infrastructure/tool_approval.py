@@ -285,7 +285,11 @@ class ToolApprovalManager:
 
                 wait_timeout = min(poll_interval, effective_timeout - elapsed)
                 try:
-                    await asyncio.wait_for(event.wait(), timeout=wait_timeout)
+                    # Not asyncio.wait_for: on Python 3.11 it swallows a
+                    # cancellation that arrives as the event fires, and this
+                    # loop would keep waiting for a stream that has ended.
+                    async with asyncio.timeout(wait_timeout):
+                        await event.wait()
                     event.clear()
                 except asyncio.TimeoutError:
                     continue

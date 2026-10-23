@@ -343,12 +343,34 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
     ),
     (
         "POST",
+        f"/api/v1/spaces/{{space_id}}/knowledge/integrations/add/{_STUB_ID}/",
+        {
+            "name": "x",
+            "embedding_model": {"id": _STUB_ID},
+            "url": "https://contoso.sharepoint.com/sites/x",
+        },
+    ),
+    (
+        "POST",
+        f"/api/v1/spaces/{{space_id}}/knowledge/integrations/add/{_STUB_ID}/batch/",
+        {"embedding_model": {"id": _STUB_ID}, "items": []},
+    ),
+    # A sync queues a job owned by the caller, like a create.
+    (
+        "POST",
+        f"/api/v1/spaces/{{space_id}}/knowledge/integrations/{_STUB_ID}/sync/",
+        None,
+    ),
+    (
+        "POST",
         "/api/v1/groups/",
         {"name": "x", "embedding_model": {"id": _STUB_ID}},
     ),
     ("POST", f"/api/v1/groups/{_STUB_ID}/info-blobs/", {"info_blobs": []}),
     ("POST", "/api/v1/roles/", {"name": "x", "permissions": []}),
     ("POST", "/api/v1/mcp-servers/", {"name": "x", "url": "https://example.com"}),
+    ("POST", "/api/v1/mcp-servers/bundled/compute/", {}),
+    ("POST", "/api/v1/document-templates/", {"name": "x"}),
     (
         "POST",
         "/api/v1/help-assistants/runs/",
@@ -373,6 +395,11 @@ _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
         "POST",
         f"/api/v1/analysis/conversation-insights/chat/{_STUB_ID}/",
         {"question": "x"},
+    ),
+    (
+        "POST",
+        f"/api/v1/conversations/{_STUB_ID}/documents/{_STUB_ID}/versions/",
+        {"content": "# x\n"},
     ),
 ]
 

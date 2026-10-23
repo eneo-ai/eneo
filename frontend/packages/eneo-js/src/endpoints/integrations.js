@@ -1,11 +1,21 @@
+import { createSyncDetailsLoader } from "../integrations/sync-details.js";
+
 /** @typedef {import('../types/resources').Integration} Integration */
 /** @typedef {import('../types/resources').TenantIntegration} TenantIntegration */
 /** @typedef {import('../client/client').EneoError} EneoError */
+/** @typedef {import('../types/schema').components['schemas']['IntegrationSyncProgressList']} IntegrationSyncProgressList */
 
 /**
  * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
  */
 export function initIntegrations(client) {
+  const syncDetails = createSyncDetailsLoader((id, data) =>
+    client.fetch("/api/v1/spaces/{id}/knowledge/integrations/sync-details/", {
+      method: "post",
+      params: { path: { id } },
+      requestBody: { "application/json": data }
+    })
+  );
   return {
     /**
      * List all integrations available to this eneo instance.
@@ -73,6 +83,12 @@ export function initIntegrations(client) {
 
     knowledge: {
       /**
+       * Batches concurrent source history/problem reads while keeping per-item results.
+       * @param {{space: {id: string}, knowledge: {id: string}, offset?: number, limit?: number}} args
+       */
+      getSyncDetails: ({ space, knowledge, offset = 0, limit = 10 }) =>
+        syncDetails(space.id, knowledge.id, offset, limit),
+      /**
        * Preview to knowledge items that can be imported through this integration
        * @param {{id: string}} integration UserIntegration
        * @throws {EneoError}
@@ -93,7 +109,7 @@ export function initIntegrations(client) {
        * Preview to knowledge items that can be imported through this integration
        * @param {Object} args
        * @param {{id: string}} args.integration UserIntegration
-       * @param {import('../types/resources').IntegrationKnowledgePreview & {folder_id?: string, folder_path?: string, resource_type?: string}} args.preview The preview item received from calling the preview
+       * @param {import('../types/resources').IntegrationKnowledgePreview & {folder_id?: string, folder_path?: string, resource_type?: "site" | "onedrive"}} args.preview The preview item received from calling the preview
        * @param {{id: string}} args.space Space to add this to
        * @param {{id: string}} args.embedding_model Embedding model to use
        *
@@ -139,7 +155,7 @@ export function initIntegrations(client) {
        *   folder_id?: string,
        *   folder_path?: string,
        *   type?: string,
-       *   resource_type?: string
+       *   resource_type?: "site" | "onedrive"
        * }>} args.items
        * @param {string=} args.wrapper_name
        * @param {{id: string}} args.space Space to add this to
@@ -290,6 +306,88 @@ export function initIntegrations(client) {
       },
 
       /**
+       * List the indexed documents of an integration knowledge item, one page at a time.
+       * @param {Object} args
+       * @param {{id: string}} args.knowledge IntegrationKnowledge
+       * @param {{id: string}} args.space Space where the knowledge belongs
+       * @param {string=} args.q Matches the title or the path relative to the imported folder
+       * @param {"name" | "path" | "size" | "updated_at"=} args.sort
+       * @param {"asc" | "desc"=} args.order
+       * @param {number=} args.limit 1..100
+       * @param {number=} args.offset
+       *
+       * @returns {Promise<import("../types/schema").components["schemas"]["IntegrationDocumentsPage"]>}
+       * @throws {EneoError}
+       * */
+      listDocuments: async ({ knowledge, space, q, sort, order, limit, offset }) => {
+        const { id: integration_knowledge_id } = knowledge;
+        const { id } = space;
+        const query = Object.fromEntries(
+          Object.entries({ q, sort, order, limit, offset }).filter(
+            ([, value]) => value !== undefined && value !== ""
+          )
+        );
+        const res = await client.fetch(
+          "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/",
+          {
+            method: "get",
+            params: {
+              path: { id, integration_knowledge_id },
+              query
+            }
+          }
+        );
+        return res;
+      },
+
+      /**
+       * The files the newest sync of an integration knowledge item left out, with reasons.
+       * @param {Object} args
+       * @param {{id: string}} args.knowledge IntegrationKnowledge
+       * @param {{id: string}} args.space Space where the knowledge belongs
+       *
+       * @returns {Promise<import("../types/schema").components["schemas"]["IntegrationSkippedDocuments"]>}
+       * @throws {EneoError}
+       * */
+      listSkippedDocuments: async ({ knowledge, space }) => {
+        const { id: integration_knowledge_id } = knowledge;
+        const { id } = space;
+        const res = await client.fetch(
+          "/api/v1/spaces/{id}/knowledge/integrations/{integration_knowledge_id}/documents/skipped/",
+          {
+            method: "get",
+            params: {
+              path: { id, integration_knowledge_id }
+            }
+          }
+        );
+        return res;
+      },
+
+      /**
+       * Live progress of the integration knowledge syncs running in a space.
+       * Items that are not syncing are absent from the list.
+       * @param {Object} args
+       * @param {{id: string}} args.space Space whose integration knowledge to check
+       *
+       * @returns {Promise<IntegrationSyncProgressList>}
+       * @throws {EneoError}
+       * */
+      getSyncProgress: async ({ space }) => {
+        const { id } = space;
+        const res = await client.fetch(
+          "/api/v1/spaces/{id}/knowledge/integrations/sync-progress/",
+          {
+            method: "get",
+            params: {
+              path: { id }
+            }
+          }
+        );
+        return res;
+      },
+
+      /**
        * Rename an integration knowledge item
        * @param {Object} args
        * @param {{id: string}} args.knowledge IntegrationKnowledge to rename
@@ -426,6 +524,19 @@ export function initIntegrations(client) {
         },
 
         /**
+         * Recreate every SharePoint subscription of the tenant, expired or not,
+         * so Graph posts to the currently configured public address.
+         * @returns {Promise<import("../types/schema").components["schemas"]["SubscriptionRenewalResult"]>}
+         * @throws {EneoError}
+         * */
+        recreateAllSubscriptions: async () => {
+          const res = await client.fetch("/api/v1/admin/sharepoint/subscriptions/recreate-all", {
+            method: "post"
+          });
+          return res;
+        },
+
+        /**
          * Recreate a specific SharePoint subscription
          * @param {{id: string}} subscription The subscription to recreate
          * @throws {EneoError}
@@ -441,6 +552,48 @@ export function initIntegrations(client) {
               }
             }
           );
+          return res;
+        },
+
+        /**
+         * Test the stored SharePoint app (tenant app or service account) with a
+         * full token round trip; the backend records the outcome as the app's
+         * credential health.
+         * @returns {Promise<import("../types/schema").components["schemas"]["TenantAppTestResult"]>}
+         * @throws {EneoError}
+         * */
+        testStoredConnection: async () => {
+          const res = await client.fetch("/api/v1/admin/sharepoint/app/test", {
+            method: "post"
+          });
+          return res;
+        },
+
+        /**
+         * Test tenant-app credentials before saving them; nothing is stored.
+         * @param {{client_id: string, client_secret: string, tenant_domain: string, certificate_path?: string | null}} credentials
+         * @returns {Promise<import("../types/schema").components["schemas"]["TenantAppTestResult"]>}
+         * @throws {EneoError}
+         * */
+        testTenantAppCredentials: async (credentials) => {
+          const options = /** @type {any} */ ({
+            method: "post",
+            requestBody: { "application/json": credentials }
+          });
+          const res = await client.fetch("/api/v1/admin/sharepoint/app/test", options);
+          return res;
+        },
+
+        /**
+         * Restart the Microsoft sign-in for the configured service account.
+         * Keeps the app and its imported knowledge; the existing callback completes it.
+         * @returns {Promise<{auth_url: string, state: string}>}
+         * @throws {EneoError}
+         * */
+        restartServiceAccountAuth: async () => {
+          const res = await client.fetch("/api/v1/admin/sharepoint/service-account/auth/reauth", {
+            method: "post"
+          });
           return res;
         }
       }

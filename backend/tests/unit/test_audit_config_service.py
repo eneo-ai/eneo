@@ -27,11 +27,11 @@ ALL_CATEGORIES = [
 
 # Expected action counts per category
 EXPECTED_CATEGORY_COUNTS = {
-    "admin_actions": 49,
-    "user_actions": 51,
+    "admin_actions": 56,
+    "user_actions": 54,
     "security_events": 12,
-    "file_operations": 6,
-    "integration_events": 22,
+    "file_operations": 8,
+    "integration_events": 24,
     "system_actions": 3,
     "audit_access": 3,  # Includes AUDIT_SESSION_CREATED
 }
@@ -634,32 +634,32 @@ class TestUpdateActionConfig:
 class TestAllCategoriesHaveCorrectActionCounts:
     """Verify each category has the expected number of actions mapped."""
 
-    def test_admin_actions_has_49_actions(self):
-        """Verify admin_actions has 49 action types."""
+    def test_admin_actions_has_56_actions(self):
+        """Verify admin_actions has 56 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "admin_actions")
-        assert count == 49
+        assert count == 56
 
-    def test_user_actions_has_50_actions(self):
-        """Verify user_actions has 50 action types."""
+    def test_user_actions_has_54_actions(self):
+        """Verify user_actions has 54 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "user_actions")
-        assert count == 50
+        assert count == 54
 
     def test_security_events_has_12_actions(self):
         """Verify security_events has 12 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "security_events")
         assert count == 12
 
-    def test_file_operations_has_6_actions(self):
-        """Verify file_operations has 6 action types."""
+    def test_file_operations_has_8_actions(self):
+        """Verify file_operations has 8 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "file_operations")
-        assert count == 6
+        assert count == 8
 
-    def test_integration_events_has_22_actions(self):
-        """Verify integration_events has 22 action types."""
+    def test_integration_events_has_24_actions(self):
+        """Verify integration_events has 24 action types."""
         count = sum(
             1 for cat in CATEGORY_MAPPINGS.values() if cat == "integration_events"
         )
-        assert count == 22
+        assert count == 24
 
     def test_system_actions_has_3_actions(self):
         """Verify system_actions has 3 action types."""

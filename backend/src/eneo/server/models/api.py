@@ -13,6 +13,7 @@ from eneo.info_blobs.info_blob import (
 
 class VersionResponse(BaseModel):
     version: str
+    revision: str = "unknown"
 
 
 class UpsertResponse(BaseModel):

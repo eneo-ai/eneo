@@ -21,6 +21,7 @@ from eneo.main.models import PaginatedPermissions, ResourcePermission
 from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
     MCPServerAssembler,
 )
+from eneo.roles.permissions import Permission
 from eneo.security_classifications.presentation.security_classification_models import (
     SecurityClassificationPublic,
 )
@@ -58,6 +59,9 @@ if TYPE_CHECKING:
     from eneo.assistants.assistant import Assistant
     from eneo.completion_models.presentation import CompletionModelAssembler
     from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
+    from eneo.integration.domain.entities.integration_knowledge import (
+        IntegrationKnowledge,
+    )
 
 
 class SpaceAssembler:
@@ -172,8 +176,44 @@ class SpaceAssembler:
         for website in space.websites:
             website.permissions = actor.get_website_permissions()
 
+        integration_permissions = actor.get_integrations_permissions()
         for knowledge in space.integration_knowledge_list:
-            knowledge.permissions = actor.get_integrations_permissions()
+            knowledge.permissions = self._integration_item_permissions(
+                knowledge, space.id, integration_permissions
+            )
+
+    def integration_item_permissions(
+        self, knowledge: "IntegrationKnowledge", *, space_id: UUID, actor: "SpaceActor"
+    ) -> list[ResourcePermission]:
+        """What the caller may do with one item seen from ``space_id``, within
+        the API key's knowledge permission."""
+        permissions = self._integration_item_permissions(
+            knowledge, space_id, actor.get_integrations_permissions()
+        )
+        rp = self._get_api_key_resource_permissions()
+        if rp is None:
+            return permissions
+        return self._cap_permissions(permissions, rp.knowledge.value)
+
+    def _integration_item_permissions(
+        self,
+        knowledge: "IntegrationKnowledge",
+        space_id: UUID | None,
+        permissions: list[ResourcePermission],
+    ) -> list[ResourcePermission]:
+        # The integration service renames, syncs and deletes an item only from
+        # the space that owns it, and what the organization's SharePoint app
+        # imported only for an admin.
+        if knowledge.space_id == space_id and (
+            knowledge.user_integration.auth_type != "tenant_app"
+            or Permission.ADMIN in self.user.permissions
+        ):
+            return permissions
+        return [
+            permission
+            for permission in permissions
+            if permission not in (ResourcePermission.EDIT, ResourcePermission.DELETE)
+        ]
 
     def _get_api_key_resource_permissions(self) -> ResourcePermissions | None:
         """Return the effective fine-grained resource permissions from the API key, if any."""
@@ -250,6 +290,8 @@ class SpaceAssembler:
         for website in knowledge.websites.items:
             if hasattr(website, "permissions"):
                 website.permissions = cap(website.permissions, rp.knowledge.value)
+        for item in knowledge.integration_knowledge_list.items:
+            item.permissions = cap(item.permissions, rp.knowledge.value)
 
     def _apply_api_key_applications_caps(self, applications: Applications) -> None:
         rp = self._get_api_key_resource_permissions()
@@ -756,6 +798,9 @@ class SpaceAssembler:
             skill_permissions=self._get_skill_permissions(space),
             personal=space.is_personal(),
             organization=space.is_organization(),
+            organization_space_id=(
+                space.id if space.is_organization() else space.tenant_space_id
+            ),
             permissions=self._cap_space_permissions(self._get_space_permissions(space)),
             available_roles=available_roles,
             security_classification=security_classification,
@@ -866,10 +911,26 @@ class SpaceAssembler:
 
         return UpdateSpaceDryRunResponse(
             capabilities=result.affected_capabilities,
-            assistants=applications.assistants.items,
-            group_chats=applications.group_chats.items,
-            apps=applications.apps.items,
-            services=applications.services.items,
+            assistants=[
+                item
+                for item in applications.assistants.items
+                if item.id in result.affected_assistant_ids
+            ],
+            group_chats=[
+                item
+                for item in applications.group_chats.items
+                if item.id in result.affected_group_chat_ids
+            ],
+            apps=[
+                item
+                for item in applications.apps.items
+                if item.id in result.affected_app_ids
+            ],
+            services=[
+                item
+                for item in applications.services.items
+                if item.id in result.affected_service_ids
+            ],
             completion_models=[
                 self.completion_model_assembler.from_completion_model_to_model(
                     cm, show_pricing=self.user.can_view_model_pricing

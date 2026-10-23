@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import { m } from "$lib/paraglide/messages";
-  import type { Assistant, Eneo } from "@eneo/eneo-js";
+  import type { Assistant, Eneo, components } from "@eneo/eneo-js";
   import { initEneo } from "$lib/core/Eneo";
   import { initAssistantEditor } from "$lib/features/assistants/AssistantEditor";
   import AssistantSettingsAttachments from "./AssistantSettingsAttachments.svelte";
@@ -10,11 +10,13 @@
   let {
     assistant,
     eneo,
-    fileReferencesEnabled = true
+    fileReferencesEnabled = true,
+    rerankModels = []
   }: {
     assistant: Assistant;
     eneo: Eneo;
     fileReferencesEnabled?: boolean;
+    rerankModels?: components["schemas"]["RerankModelSecurityStatus"][];
   } = $props();
   untrack(() => initEneo({ eneo }));
   const {
@@ -31,7 +33,11 @@
 </script>
 
 <AssistantSettingsAttachments {selectedModel} {fileReferencesEnabled} />
-<AssistantSettingsMaterialHandling modelSupportsTools={supportsTools} {fileReferencesEnabled} />
+<AssistantSettingsMaterialHandling
+  modelSupportsTools={supportsTools}
+  {fileReferencesEnabled}
+  {rerankModels}
+/>
 <button onclick={() => (supportsTools = !supportsTools)}>{m.completion_model()}</button>
 <button onclick={() => saveChanges()}>{m.save_changes()}</button>
 <button onclick={() => discardChanges()}>{m.discard_all_changes()}</button>
@@ -40,6 +46,7 @@
     attachments: $update.attachments,
     inline_file_text: $update.inline_file_text,
     knowledge_mode: $update.knowledge_mode,
+    rerank_model_id: $update.rerank_model_id,
     dirty: $currentChanges.hasUnsavedChanges
   })}</output
 >

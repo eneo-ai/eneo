@@ -180,9 +180,13 @@ class MCPServerSettingsAssembler:
                 display_name=tool.display_name,
                 description=tool.description,
                 input_schema=tool.input_schema,
+                meta=tool.meta,
+                ui_resource_sha256=tool.ui_resource_sha256,
                 is_enabled_by_default=tool.is_enabled_by_default,
                 pending_description=tool.pending_description,
                 pending_input_schema=tool.pending_input_schema,
+                pending_meta=tool.pending_meta,
+                pending_ui_resource_sha256=tool.pending_ui_resource_sha256,
                 requires_approval=tool.requires_approval,
                 removed_from_remote=tool.removed_from_remote,
             )

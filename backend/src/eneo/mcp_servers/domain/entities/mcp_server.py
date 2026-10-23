@@ -1,10 +1,13 @@
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Optional
+from urllib.parse import unquote, urlsplit
 from uuid import UUID
 
 from eneo.base.base_entity import Entity
+from eneo.mcp_apps.domain.mcp_app_view import get_ui_resource_uri
 from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
 from eneo.roles.permissions import Permission
 
@@ -31,7 +34,70 @@ MCP_TOOL_DEFINITION_HARD_MAX_BYTES = 1024 * 1024
 # provider pin, and the ask path substitutes the active provider. The tuple
 # order is the order resolved providers are prepended in at ask time.
 GENERAL_PURPOSE = "general"
-CAPABILITY_PURPOSES: tuple[CapabilityPurpose, ...] = ("web_search", "image_generation")
+CAPABILITY_PURPOSES: tuple[CapabilityPurpose, ...] = (
+    "web_search",
+    "image_generation",
+    "file_analysis",
+    "file_creation",
+    "charts",
+    "compute",
+)
+
+# Purposes whose providers deliver files. A binary embedded resource of one
+# of the listed types, returned by an active provider of that purpose, is
+# admitted as a generated file; the same resource from any other server stays
+# an ordinary result. Eligibility is host configuration, never provider
+# metadata.
+DOCX_MIME_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+)
+XLSX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+PDF_MIME_TYPE = "application/pdf"
+CSV_MIME_TYPE = "text/csv"
+TXT_MIME_TYPE = "text/plain"
+MARKDOWN_MIME_TYPE = "text/markdown"
+GENERATED_FILE_TYPES_BY_PURPOSE: dict[str, frozenset[str]] = {
+    # Text and Markdown come from filling a template of that format.
+    "file_creation": frozenset(
+        {
+            DOCX_MIME_TYPE,
+            PDF_MIME_TYPE,
+            XLSX_MIME_TYPE,
+            TXT_MIME_TYPE,
+            MARKDOWN_MIME_TYPE,
+        }
+    ),
+    # A full query result, so large data moves between tools as a file
+    # instead of through the model.
+    "file_analysis": frozenset({CSV_MIME_TYPE}),
+    # A tabular calculation result, exported so charts, spreadsheets and
+    # documents can take it as a source file.
+    "compute": frozenset({CSV_MIME_TYPE}),
+}
+_GENERATED_FILE_EXTENSIONS: dict[str, str] = {
+    DOCX_MIME_TYPE: "docx",
+    XLSX_MIME_TYPE: "xlsx",
+    PDF_MIME_TYPE: "pdf",
+    CSV_MIME_TYPE: "csv",
+    TXT_MIME_TYPE: "txt",
+    MARKDOWN_MIME_TYPE: "md",
+}
+_UNSAFE_FILENAME_CHARACTERS = re.compile(r"[\x00-\x1f\x7f/\\:*?\"<>|]+")
+
+
+def generated_filename(uri: str | None, mime_type: str) -> str:
+    """A safe display name for a generated file, with the extension its type
+    implies. Taken from the resource URI's last path segment when there is
+    one; the provider cannot choose a path, a hidden name or another type."""
+    extension = _GENERATED_FILE_EXTENSIONS.get(mime_type, "bin")
+    segment = unquote(urlsplit(uri or "").path.rstrip("/").rsplit("/", 1)[-1])
+    stem = _UNSAFE_FILENAME_CHARACTERS.sub("_", segment).strip(" .")
+    base, dot, extension_part = stem.rpartition(".")
+    if dot and base and re.fullmatch(r"[A-Za-z0-9]{1,5}", extension_part):
+        stem = base.strip(" .")
+    stem = stem[:120] or "document"
+    return f"{stem}.{extension}"
+
 
 # Who a capability provider serves. "everyone" is the tenant's default provider
 # for its purpose (at most one active per tenant and purpose); "groups" targets
@@ -56,6 +122,41 @@ BUILTIN_PROVIDER_PURPOSES: tuple[str, ...] = ("image_generation",)
 
 def is_builtin_provider(http_auth_type: str | None) -> bool:
     return http_auth_type == INTERNAL_AUTH_TYPE
+
+
+# A bundled server runs in the tool runtime shipped with Eneo (an
+# isolated container, never the backend process). It is an ordinary server
+# otherwise: its URL is derived from ``tool_runtime_url`` when an admin adds
+# it, and the bearer comes from ``tool_runtime_token`` at connect time, so no
+# credential is ever stored on the row. Only the bundled-server preset creates
+# such rows; the generic create and update API cannot. Each runtime endpoint
+# fixes the purpose its row serves and whether it needs the caller's identity
+# (file analysis scopes its parsed-file cache per tenant and user).
+BUNDLED_AUTH_TYPE = "bundled"
+
+
+@dataclass(frozen=True)
+class BundledToolSpec:
+    purpose: str
+    forward_identity: bool
+
+
+BUNDLED_TOOLS: dict[str, BundledToolSpec] = {
+    "compute": BundledToolSpec(purpose="compute", forward_identity=False),
+    "charts": BundledToolSpec(purpose="charts", forward_identity=False),
+    "file-analysis": BundledToolSpec(purpose="file_analysis", forward_identity=True),
+    "file-creation": BundledToolSpec(purpose="file_creation", forward_identity=False),
+}
+
+
+def is_bundled_server(http_auth_type: str | None) -> bool:
+    return http_auth_type == BUNDLED_AUTH_TYPE
+
+
+def bundled_tool_name(http_url: str) -> str | None:
+    """The runtime tool a bundled row serves: the last segment of its URL."""
+    tool = http_url.rstrip("/").rsplit("/", 1)[-1]
+    return tool if tool in BUNDLED_TOOLS else None
 
 
 @dataclass(frozen=True)
@@ -141,9 +242,13 @@ class MCPServerTool(Entity):
         display_name: Optional[str] = None,
         description: Optional[str] = None,
         input_schema: Optional[dict[str, Any]] = None,
+        meta: Optional[dict[str, Any]] = None,
+        ui_resource_sha256: Optional[str] = None,
         is_enabled_by_default: bool = True,
         pending_description: Optional[str] = None,
         pending_input_schema: Optional[dict[str, Any]] = None,
+        pending_meta: Optional[dict[str, Any]] = None,
+        pending_ui_resource_sha256: Optional[str] = None,
         requires_approval: bool = False,
         removed_from_remote: bool = False,
         id: Optional[UUID] = None,
@@ -157,9 +262,14 @@ class MCPServerTool(Entity):
         self.display_name = display_name
         self.description = description
         self.input_schema = input_schema
+        self.meta = meta
+        # SHA-256 of the MCP App view HTML approved with this definition.
+        self.ui_resource_sha256 = ui_resource_sha256
         self.is_enabled_by_default = is_enabled_by_default
         self.pending_description = pending_description
         self.pending_input_schema = pending_input_schema
+        self.pending_meta = pending_meta
+        self.pending_ui_resource_sha256 = pending_ui_resource_sha256
         self.requires_approval = requires_approval
         self.removed_from_remote = removed_from_remote
 
@@ -172,6 +282,8 @@ class MCPServerTool(Entity):
         title: str | None,
         description: str | None,
         input_schema: dict[str, Any] | None,
+        meta: dict[str, Any] | None,
+        ui_resource_sha256: str | None = None,
     ) -> "MCPServerTool":
         """Create a discovered definition that cannot run before approval."""
         return cls(
@@ -180,9 +292,12 @@ class MCPServerTool(Entity):
             title=title,
             description=None,
             input_schema=None,
+            meta=None,
             is_enabled_by_default=True,
             pending_description=description,
             pending_input_schema=input_schema,
+            pending_meta=meta,
+            pending_ui_resource_sha256=ui_resource_sha256,
             requires_approval=True,
         )
 
@@ -191,9 +306,53 @@ class MCPServerTool(Entity):
         *,
         description: str | None,
         input_schema: dict[str, Any] | None,
+        meta: dict[str, Any] | None,
+        ui_resource_sha256: str | None = None,
     ) -> bool:
-        """Return whether a live contract differs from the approved contract."""
-        return self.description != description or self.input_schema != input_schema
+        """Return whether a live contract differs from the approved contract.
+
+        ``ui_resource_sha256`` is the hash of the view HTML read with this
+        observation. An observation made without reading the view (None) says
+        nothing about it, so it cannot drift on the view's content.
+        """
+        return (
+            self.description != description
+            or self.input_schema != input_schema
+            or self.meta != meta
+            or (
+                ui_resource_sha256 is not None
+                and self.ui_resource_sha256 != ui_resource_sha256
+            )
+        )
+
+    def approve_pending(self) -> None:
+        """Make the pending definition the approved one.
+
+        The approved view follows the definition: a pending hash replaces it,
+        and a definition approved without one keeps the approved view only
+        while it still declares the same view resource. A view is never
+        carried over to a resource nobody approved.
+        """
+        previous_view = get_ui_resource_uri(self.meta)
+        if self.pending_description is not None:
+            self.description = self.pending_description
+        if self.pending_input_schema is not None:
+            self.input_schema = self.pending_input_schema
+        # Catalog observations are complete definitions: None removes metadata.
+        self.meta = self.pending_meta
+        if self.pending_ui_resource_sha256 is not None:
+            self.ui_resource_sha256 = self.pending_ui_resource_sha256
+        elif get_ui_resource_uri(self.meta) != previous_view:
+            self.ui_resource_sha256 = None
+        self.clear_pending()
+
+    def clear_pending(self) -> None:
+        """Drop the pending definition; the approved one stays as it is."""
+        self.pending_description = None
+        self.pending_input_schema = None
+        self.pending_meta = None
+        self.pending_ui_resource_sha256 = None
+        self.requires_approval = False
 
 
 class MCPServer(Entity):
@@ -271,6 +430,16 @@ class MCPServer(Entity):
         return self._is_loopback or is_builtin_provider(self.http_auth_type)
 
     @property
+    def is_bundled(self) -> bool:
+        """Whether this server runs in the bundled tool runtime (built into Eneo).
+
+        Decided by the row's auth type, which only the bundled-server preset
+        can set, never by its name: an admin may rename the row freely and
+        clients still label its calls as Eneo's own.
+        """
+        return is_bundled_server(self.http_auth_type)
+
+    @property
     def user_group_ids(self) -> list[UUID]:
         return [group.id for group in self.user_groups]
 
@@ -332,25 +501,3 @@ class MCPServer(Entity):
         return self.audience == AUDIENCE_GROUPS and any(
             group_id in user_group_ids for group_id in self.user_group_ids
         )
-
-
-class MCPServerSettings(Entity):
-    """Domain entity for MCP server settings (tenant-scoped configuration)."""
-
-    def __init__(
-        self,
-        tenant_id: UUID,
-        mcp_server_id: UUID,
-        is_org_enabled: bool = True,
-        env_vars: Optional[dict[str, Any]] = None,
-        mcp_server: Optional[MCPServer] = None,
-        id: Optional[UUID] = None,
-        created_at: Optional[datetime] = None,
-        updated_at: Optional[datetime] = None,
-    ):
-        super().__init__(id=id, created_at=created_at, updated_at=updated_at)
-        self.tenant_id = tenant_id
-        self.mcp_server_id = mcp_server_id
-        self.is_org_enabled = is_org_enabled
-        self.env_vars = env_vars
-        self.mcp_server = mcp_server

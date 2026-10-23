@@ -1,0 +1,2 @@
+weasyprint>=70,<71
+pillow>=13.0.0,<14

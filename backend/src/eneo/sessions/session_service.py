@@ -22,7 +22,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
-from eneo.questions.question import QuestionAdd, ToolCallInfo
+from eneo.questions.question import MessageFeedback, QuestionAdd, ToolCallInfo
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.sessions.session import (
     SessionAdd,
@@ -30,7 +30,7 @@ from eneo.sessions.session import (
     SessionInDB,
     SessionUpdate,
 )
-from eneo.sessions.sessions_repo import SessionRepository
+from eneo.sessions.sessions_repo import OwnedChatPartner, SessionRepository
 from eneo.skills.domain.skill import (
     SkillActivationEvidenceV1,
     SkillExecutionReference,
@@ -88,15 +88,19 @@ async def persist_partial_question_answer(
     num_tokens_answer: int,
     completion_model_id: UUID | None = None,
     reasoning: str | None = None,
-    tool_calls: list[ToolCallInfo] | None = None,
     skill_provenance: Sequence[SkillExecutionReference] | None = None,
     skill_activation: SkillActivationEvidenceV1 | None = None,
+    generated_files: Sequence[File] | None = None,
+    tool_calls: list[ToolCallInfo] | None = None,
 ) -> None:
     """Persist the answer text on a previously-created placeholder question using a fresh
     DB session.
 
     Called from the streaming generator's `finally` on abort. Decoupled from request scope
     so the write survives even when FastAPI tears down the request-scoped AsyncSession.
+    Files a tool already produced are linked to the question (with the tool calls that
+    reference them), so a failed answer never orphans them: they stay visible, keep
+    their access checks and are deleted with the conversation.
     Exceptions are logged and swallowed (except cancellation) — this is best-effort
     cleanup, not a path that should fail the parent task.
     """
@@ -110,9 +114,10 @@ async def persist_partial_question_answer(
                 num_tokens_answer=num_tokens_answer,
                 completion_model_id=completion_model_id,
                 reasoning=reasoning,
-                tool_calls=tool_calls,
                 skill_provenance=skill_provenance,
                 skill_activation=skill_activation,
+                generated_files=list(generated_files) if generated_files else None,
+                tool_calls=tool_calls or None,
             )
         logger.info(
             "Persisted partial chat answer on stream abort",
@@ -278,13 +283,13 @@ class SessionService:
         self,
         session: SessionInDB,
         tool_call_id: str,
-    ) -> tuple[str | None, str | None]:
-        """Return (result, mcp_tool_name) for one visible tool call."""
+    ) -> ToolCallInfo | None:
+        """The stored record of one visible tool call, with its result."""
         for question in session.questions or []:
             for tc in question.tool_calls or []:
                 if tc.tool_call_id and tc.tool_call_id == tool_call_id:
-                    return tc.result, tc.mcp_tool_name
-        return None, None
+                    return tc
+        return None
 
     async def get_sessions_by_assistant(
         self,
@@ -544,6 +549,66 @@ class SessionService:
         )
         return await self.session_repo.add_feedback(
             feedback=feedback, id=owned_session.id
+        )
+
+    async def get_message_partner(
+        self, *, session_id: UUID, message_id: UUID
+    ) -> OwnedChatPartner:
+        """The assistant or group chat behind a message in the principal's conversation.
+
+        Raises NotFoundException alike for a message outside the session, a
+        conversation of another principal and one without a chat partner, so
+        callers learn nothing about conversations that are not theirs.
+        """
+        user_id, api_key_id = self._principal_columns()
+        partner = await self.session_repo.get_owned_message_partner(
+            session_id=session_id,
+            message_id=message_id,
+            tenant_id=self.user.tenant_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+        )
+        if partner is None:
+            raise NotFoundException("Message not found.")
+        return partner
+
+    async def set_message_feedback(
+        self, *, session_id: UUID, message_id: UUID, feedback: MessageFeedback
+    ) -> MessageFeedback:
+        """Rate an answer in the principal's conversation, replacing an earlier rating.
+
+        Separate from the conversation-level feedback (``leave_feedback``):
+        neither overwrites the other.
+        """
+        user_id, api_key_id = self._principal_columns()
+        stored = await self.session_repo.set_message_feedback(
+            session_id=session_id,
+            message_id=message_id,
+            tenant_id=self.user.tenant_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
+            feedback=feedback,
+        )
+        if stored is None:
+            raise NotFoundException("Message not found.")
+        return stored
+
+    async def clear_message_feedback(
+        self, *, session_id: UUID, message_id: UUID
+    ) -> None:
+        """Remove the rating of an answer in the principal's conversation.
+
+        Idempotent, and scoped to the principal's own messages; resolve the
+        message with ``get_message_partner`` first to report one that is not
+        theirs.
+        """
+        user_id, api_key_id = self._principal_columns()
+        await self.session_repo.delete_message_feedback(
+            session_id=session_id,
+            message_id=message_id,
+            tenant_id=self.user.tenant_id,
+            user_id=user_id,
+            api_key_id=api_key_id,
         )
 
     async def get_sessions_by_group_chat(

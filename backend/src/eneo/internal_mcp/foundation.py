@@ -86,6 +86,18 @@ def mcp_server_id_from_token(token: str) -> UUID:
     return UUID(str(raw))
 
 
+def table_tools_from_token(token: str) -> bool:
+    """Whether the completion this token was minted for attached the table tools."""
+    settings = get_settings()
+    _, claims = AuthService().get_jwt_payload_with_claims(
+        token,
+        key=str(settings.jwt_secret),
+        aud=INTERNAL_MCP_AUDIENCE,
+        algs=[settings.jwt_algorithm],
+    )
+    return claims.get("table_tools") is True
+
+
 @asynccontextmanager
 async def bootstrap_tool_container(token: str):
     """Bootstrap a user-bound container for the token's user.

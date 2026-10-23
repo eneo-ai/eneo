@@ -53,11 +53,25 @@ The repository uses GitHub security features and CI to prevent regressions:
   frontend, GitHub Actions, Dockerfiles, and devcontainer configuration.
 - Dependency Review runs on pull requests into `develop` and blocks newly
   introduced vulnerable dependencies at `high` severity or above.
+- The reusable `Security` workflow audits the complete runtime Python lock and
+  frontend lock, runs Semgrep security-audit/GitHub Actions rules, and scans the
+  added Git history with Gitleaks. It is included in the required CI aggregate
+  and runs before image publication. Reports are retained as CI artifacts.
+- Temporary dependency mitigations belong in `frontend/patches/SECURITY.md`, with
+  an owner, exact advisory, regression tests and review expiry. The audit retains
+  the raw finding and only accepts the named mitigation after its tests pass.
+- Gitleaks exclusions in `.gitleaks.toml` require both an exact file path and
+  an exact reviewed test credential or generated schema example. They apply
+  only to the named rule, survive squash commits and line moves, and do not
+  exclude entire files, directories or rules. The security workflow tests that
+  changed values and values outside their reviewed files are still detected.
+  Release review includes a full-history audit and confirmation that any real
+  historical credentials have been revoked; a diff scan cannot prove revocation.
 - CodeQL advanced setup is paused while maintainers evaluate a code-scanning
   setup that gives developers useful feedback without high false-positive noise.
   Re-enable code scanning only after the query set and triage process are tuned
   enough that alerts are actionable for maintainers.
-- Release SBOMs are generated from the published backend, frontend, and bundled
+- Release SBOMs are generated from the published backend, Svelte frontend, Next frontend, and bundled
   SeaweedFS container
   image digests and attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
   and human-readable table files. The backend release also includes a narrower

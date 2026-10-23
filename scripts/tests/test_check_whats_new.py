@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import copy
 import json
 import shutil
@@ -68,6 +69,43 @@ class _RepoCase(unittest.TestCase):
 
 
 class CheckWhatsNewTests(_RepoCase):
+    def test_permission_vocabulary_matches_backend_contract(self) -> None:
+        source = REPO_ROOT / "backend/src/eneo/roles/permissions.py"
+        permission_class = next(
+            node
+            for node in ast.parse(source.read_text()).body
+            if isinstance(node, ast.ClassDef) and node.name == "Permission"
+        )
+        permissions = {
+            node.value.value
+            for node in permission_class.body
+            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Constant)
+        }
+        self.assertEqual(
+            set(json.loads(SCHEMA.read_text())["$defs"]["permission"]["enum"]), permissions
+        )
+
+    def test_accepts_feature_permission_requirements(self) -> None:
+        data = copy.deepcopy(VALID)
+        data["releases"][0]["entries"][0]["permissions"] = {
+            "allOf": ["file_creation"],
+            "anyOf": ["personal_chat", "assistants"],
+        }
+        result = self.run_check(self.make_repo(data))
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_rejects_invalid_permission_requirements(self) -> None:
+        for permissions in [
+            None, [], {}, "admin", {"any": ["assistants"]},
+            {"allOf": []}, {"anyOf": []}, {"allOf": "admin"},
+            {"allOf": ["administrator"]}, {"anyOf": [None]},
+            {"allOf": [{}]}, {"allOf": ["admin", "admin"]},
+        ]:
+            with self.subTest(permissions=permissions):
+                data = copy.deepcopy(VALID)
+                data["releases"][0]["entries"][0]["permissions"] = permissions
+                self.assert_rejected(data, ".permissions")
+
     def test_release_order_matches_the_shared_cross_runtime_contract(self) -> None:
         cases = SCHEMA.parent / "version-order.cases.json"
         versions = json.loads(cases.read_text())["ordered"]
@@ -78,6 +116,37 @@ class CheckWhatsNewTests(_RepoCase):
         result = self.run_check(self.make_repo(VALID))
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("OK (1 release(s), 1 entries)", result.stdout)
+
+    def test_accepts_merged_entry_aliases(self) -> None:
+        data = copy.deepcopy(VALID)
+        data["releases"][0]["entries"][0]["aliases"] = ["old-password-entry"]
+        result = self.run_check(self.make_repo(data))
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_rejects_invalid_aliases(self) -> None:
+        for aliases in [None, [], "old-entry", [17], [{}], ["Bad ID"], ["bad\n"]]:
+            with self.subTest(aliases=aliases):
+                data = copy.deepcopy(VALID)
+                data["releases"][0]["entries"][0]["aliases"] = aliases
+                self.assert_rejected(data, ".aliases:")
+
+    def test_rejects_duplicate_anchor_targets(self) -> None:
+        for first, second in [
+            (["old-entry", "old-entry"], []),
+            ([ENTRY["id"]], []),
+            (["second-entry"], []),
+            ([], [ENTRY["id"]]),
+            (["old-entry"], ["old-entry"]),
+        ]:
+            with self.subTest(first=first, second=second):
+                entries = [copy.deepcopy(ENTRY), dict(copy.deepcopy(ENTRY), id="second-entry")]
+                for entry, aliases in zip(entries, [first, second]):
+                    if aliases:
+                        entry["aliases"] = aliases
+                self.assert_rejected(
+                    {"releases": [{"version": "2.3.0", "entries": entries}]},
+                    "is not unique in the release",
+                )
 
     def test_requires_newest_release_first(self) -> None:
         data = {
@@ -217,6 +286,15 @@ class ReleaseTagTests(_RepoCase):
         result = self.run_check(self.make_repo(self.releases("2.3.0")), "--release-tag", "v2.2.0")
         self.assertEqual(result.returncode, 1, result.stdout)
         self.assertIn("newer than release tag", result.stdout)
+
+    def test_rc_requires_its_own_release_content_instead_of_reusing_an_older_version(self) -> None:
+        for data in [self.releases("2.2.0", "2026-10-01"), {"releases": []}]:
+            with self.subTest(data=data):
+                result = self.run_check(
+                    self.make_repo(data), "--release-tag", "v2.3.0-rc.1",
+                )
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("RC tag v2.3.0-rc.1 needs notes for 2.3.0", result.stdout)
 
     def test_rejects_malformed_tags(self) -> None:
         result = self.run_check(self.make_repo(self.releases("2.2.0")), "--release-tag", "2.2")

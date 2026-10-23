@@ -1,38 +1,289 @@
-import { latestRelease } from "@eneo/whats-new";
+import { latestRelease, type Release } from "@eneo/whats-new";
+import * as news from "@eneo/whats-new";
 import { get } from "svelte/store";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createWhatsNewStore, type Marker } from "./whatsNewStore";
 
 const latest = latestRelease();
 if (!latest) throw new Error("releases.json must contain at least one release for these tests");
 const version = latest.version;
 
-function makeStore(seen: Marker = null, announced: Marker = null, enabled = true) {
+function makeStore(
+  seen: Marker = null,
+  announced: Marker = null,
+  enabled = true,
+  installedVersion = version,
+  userId = "user-1"
+) {
   const client = {
     markSeen: vi.fn(async (_version: string) => ({
-      seen_version: version,
+      seen_version: _version,
       announced_version: null
     })),
     markAnnounced: vi.fn(async (_version: string) => ({
       seen_version: null,
-      announced_version: version
+      announced_version: _version
     })),
     resetState: vi.fn(async () => ({ seen_version: null, announced_version: null }))
   };
   return {
     client,
     store: createWhatsNewStore({
+      user: { id: userId },
       eneo: { whatsNew: client },
       whatsNewEnabled: enabled,
+      whatsNewVersion: installedVersion,
       whatsNewSeenVersion: seen,
       whatsNewAnnouncedVersion: announced
     })
   };
 }
 
-afterEach(() => vi.restoreAllMocks());
+beforeEach(() => {
+  const values = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      values.set(key, value);
+    },
+    removeItem: (key: string) => {
+      values.delete(key);
+    }
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
 describe("whatsNewStore", () => {
+  it("does not announce, count, or record a release without visible entries", async () => {
+    const hidden: Release = {
+      version,
+      entries: [
+        {
+          id: "assistant",
+          type: "new",
+          area: "assistants",
+          permissions: { allOf: ["assistants"] },
+          title: { en: "Assistant", sv: "Assistent" },
+          body: { en: "Body", sv: "Text" }
+        }
+      ]
+    };
+    vi.spyOn(news, "releasesForVersion").mockReturnValue([hidden]);
+    const { store, client } = makeStore();
+    expect(store.releases).toEqual([]);
+    expect(get(store.hasUnseen)).toBe(false);
+    expect(store.pendingAnnouncement()).toBeNull();
+    store.snoozeLatest();
+    await store.markLatestSeen();
+    await store.markLatestAnnounced();
+    expect(client.markSeen).not.toHaveBeenCalled();
+    expect(client.markAnnounced).not.toHaveBeenCalled();
+    expect(localStorage.getItem(`eneo:whats-new:remind-after:user-1:${version}`)).toBeNull();
+
+    const granted = createWhatsNewStore({
+      user: {
+        id: "user-1",
+        roles: [{ id: "custom", name: "Custom", permissions: ["assistants"] }]
+      },
+      eneo: { whatsNew: client },
+      whatsNewEnabled: true,
+      whatsNewVersion: version,
+      whatsNewSeenVersion: null,
+      whatsNewAnnouncedVersion: null
+    });
+    expect(get(granted.hasUnseen)).toBe(true);
+    expect(granted.pendingAnnouncement()).toBe(hidden);
+  });
+
+  it("counts unread visible history without announcing an older release for a hidden latest", async () => {
+    const general = {
+      id: "general",
+      type: "new" as const,
+      area: "account" as const,
+      title: { en: "General", sv: "Allmänt" },
+      body: { en: "Body", sv: "Text" }
+    };
+    vi.spyOn(news, "releasesForVersion").mockReturnValue([
+      { version, entries: [{ ...general, audience: "admin" }] },
+      { version: "2.1.0", entries: [general] }
+    ]);
+    const { store, client } = makeStore();
+    expect(store.releases.map((r) => r.version)).toEqual(["2.1.0"]);
+    expect(get(store.hasUnseen)).toBe(true);
+    expect(store.pendingAnnouncement()).toBeNull();
+    expect(get(makeStore("2.1.0").store.hasUnseen)).toBe(false);
+    await store.markLatestSeen();
+    expect(client.markSeen).toHaveBeenCalledWith(version);
+    expect(get(store.hasUnseen)).toBe(false);
+  });
+
+  it("preserves a due reminder while permissions hide its release", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-20T10:00:00Z"));
+    const restricted: Release = {
+      version,
+      entries: [
+        {
+          id: "assistant",
+          type: "new",
+          area: "assistants",
+          permissions: { allOf: ["assistants"] },
+          title: { en: "Assistant", sv: "Assistent" },
+          body: { en: "Body", sv: "Text" }
+        }
+      ]
+    };
+    vi.spyOn(news, "releasesForVersion").mockReturnValue([restricted]);
+    const { client } = makeStore();
+    const permitted = () =>
+      createWhatsNewStore({
+        user: {
+          id: "user-1",
+          roles: [{ id: "role", name: "Custom", permissions: ["assistants"] }]
+        },
+        eneo: { whatsNew: client },
+        whatsNewEnabled: true,
+        whatsNewVersion: version,
+        whatsNewSeenVersion: null,
+        whatsNewAnnouncedVersion: version
+      });
+    permitted().snoozeLatest();
+    vi.setSystemTime(new Date("2026-10-21T10:00:00Z"));
+    const hidden = makeStore(null, version);
+    expect(hidden.store.pendingAnnouncement()).toBeNull();
+    await hidden.store.markLatestSeen();
+    await hidden.store.markLatestAnnounced();
+    expect(hidden.client.markSeen).not.toHaveBeenCalled();
+    expect(hidden.client.markAnnounced).not.toHaveBeenCalled();
+    expect(permitted().pendingAnnouncement()).toBe(restricted);
+  });
+
+  it("restores a local reminder after reload, waits 24 hours and consumes it when shown", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-20T10:00:00Z"));
+    makeStore(null, version).store.snoozeLatest();
+    vi.setSystemTime(new Date("2026-10-21T09:59:59Z"));
+    expect(makeStore(null, version).store.pendingAnnouncement()).toBeNull();
+    vi.setSystemTime(new Date("2026-10-21T10:00:00Z"));
+    const returning = makeStore(null, version).store;
+    expect(returning.pendingAnnouncement()?.version).toBe(version);
+    await returning.markLatestAnnounced();
+    expect(makeStore(null, version).store.pendingAnnouncement()).toBeNull();
+  });
+
+  it("isolates reminders by account and release, including newer versions and rollback", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-20T10:00:00Z"));
+    makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1").store.snoozeLatest();
+    expect(
+      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.2").store.pendingAnnouncement()?.version
+    ).toBe("2.3.0-rc.2");
+    vi.setSystemTime(new Date("2026-10-21T10:00:00Z"));
+    expect(
+      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1").store.pendingAnnouncement()?.version
+    ).toBe("2.3.0-rc.1");
+    expect(
+      makeStore(null, "2.3.0-rc.1", true, "2.3.0-rc.1", "user-2").store.pendingAnnouncement()
+    ).toBeNull();
+    expect(
+      makeStore(null, "2.3.0-rc.2", true, "2.3.0-rc.1").store.pendingAnnouncement()
+    ).toBeNull();
+  });
+
+  it("cancels reminders when news is read, including read progress from another browser", async () => {
+    makeStore(null, version).store.snoozeLatest();
+    const readElsewhere = makeStore(version, version).store;
+    expect(readElsewhere.pendingAnnouncement()).toBeNull();
+    // Clearing the local reminder remains effective even with stale read progress.
+    expect(makeStore(null, version).store.pendingAnnouncement()).toBeNull();
+    const { store } = makeStore(null, version);
+    store.snoozeLatest();
+    await store.markLatestSeen();
+    expect(store.pendingAnnouncement()).toBeNull();
+  });
+
+  it("reset clears local postponement and server markers so the announcement returns immediately", async () => {
+    const { store, client } = makeStore(null, version);
+    store.snoozeLatest();
+    expect(store.pendingAnnouncement()).toBeNull();
+    await store.resetState();
+    expect(client.resetState).toHaveBeenCalledOnce();
+    expect(store.pendingAnnouncement()?.version).toBe(version);
+  });
+
+  it("keeps a reminder if an older backend does not accept the read marker", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-20T10:00:00Z"));
+    const { store, client } = makeStore(null, version);
+    store.snoozeLatest();
+    client.markSeen.mockResolvedValueOnce({ seen_version: "0.0.1", announced_version: null });
+    await store.markLatestSeen();
+    expect(store.pendingAnnouncement()).toBeNull();
+    vi.setSystemTime(new Date("2026-10-21T10:00:00Z"));
+    expect(store.pendingAnnouncement()?.version).toBe(version);
+  });
+
+  it("reports failed storage writes and reset instead of claiming success", async () => {
+    const { store, client } = makeStore(null, version);
+    vi.spyOn(globalThis.localStorage, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    expect(() => store.snoozeLatest()).toThrow("blocked");
+    vi.spyOn(globalThis.localStorage, "removeItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    await expect(store.resetState()).rejects.toThrow("blocked");
+    expect(client.resetState).not.toHaveBeenCalled();
+  });
+
+  it("ignores invalid or unavailable local storage without breaking normal announcements", () => {
+    vi.spyOn(globalThis.localStorage, "getItem").mockReturnValue("invalid");
+    expect(makeStore(null, version).store.pendingAnnouncement()).toBeNull();
+    expect(makeStore().store.pendingAnnouncement()?.version).toBe(version);
+    vi.spyOn(globalThis.localStorage, "getItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    expect(makeStore().store.pendingAnnouncement()?.version).toBe(version);
+    vi.stubGlobal("localStorage", undefined);
+    expect(makeStore().store.pendingAnnouncement()?.version).toBe(version);
+  });
+
+  it("announces every RC and the final once, and keeps read progress independent", async () => {
+    let seen: Marker = "2.2.0";
+    let announced: Marker = "2.2.0";
+    for (const installed of ["2.3.0-rc.0", "2.3.0-rc.1", "2.3.0-rc.10", "2.3.0"]) {
+      const { store, client } = makeStore(seen, announced, true, installed);
+      expect(store.pendingAnnouncement()?.version).toBe(installed);
+      expect(get(store.hasUnseen)).toBe(true);
+      await store.markLatestAnnounced();
+      expect(client.markAnnounced).toHaveBeenCalledExactlyOnceWith(installed);
+      announced = get(store.announcedVersion);
+      expect(get(store.seenVersion)).toBe(seen);
+      expect(makeStore(seen, announced, true, installed).store.pendingAnnouncement()).toBeNull();
+      await store.markLatestSeen();
+      expect(client.markSeen).toHaveBeenCalledExactlyOnceWith(installed);
+      seen = get(store.seenVersion);
+      expect(get(makeStore(seen, announced, true, installed).store.hasUnseen)).toBe(false);
+    }
+  });
+
+  it("does not announce an older RC or move markers backwards after rollback", async () => {
+    for (const recorded of ["2.3.0-rc.10", "2.3.0"]) {
+      const { store, client } = makeStore(recorded, recorded, true, "2.3.0-rc.1");
+      expect(store.pendingAnnouncement()).toBeNull();
+      expect(get(store.hasUnseen)).toBe(false);
+      await store.markLatestSeen();
+      await store.markLatestAnnounced();
+      expect(client.markSeen).not.toHaveBeenCalled();
+      expect(client.markAnnounced).not.toHaveBeenCalled();
+    }
+  });
+
   it("shows the dot until the newest bundled release has been seen", () => {
     expect(get(makeStore().store.hasUnseen)).toBe(true);
     expect(get(makeStore("0.0.1").store.hasUnseen)).toBe(true);
@@ -98,8 +349,10 @@ describe("whatsNewStore", () => {
   it("stays quiet when the state could not be read", async () => {
     const { client } = makeStore();
     const store = createWhatsNewStore({
+      user: { id: "user-1" },
       eneo: { whatsNew: client },
       whatsNewEnabled: true,
+      whatsNewVersion: version,
       whatsNewSeenVersion: undefined,
       whatsNewAnnouncedVersion: undefined
     });

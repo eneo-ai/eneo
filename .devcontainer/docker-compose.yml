@@ -28,10 +28,23 @@ services:
       # HTTPS-only default. Container env wins over backend/.env, so override
       # this from the host environment if you need to test the refusal.
       - OBJECT_CONTENT_ALLOW_INSECURE_HTTP=${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
+      # Bundled tool runtime, run inside this container like the backend
+      # (cd tool-runtime && bun run dev). Both processes read the same token;
+      # Admin > Tools offers "Add bundled compute" at this URL.
+      - TOOL_RUNTIME_URL=${TOOL_RUNTIME_URL:-http://localhost:3010}
+      - TOOL_RUNTIME_TOKEN=${TOOL_RUNTIME_TOKEN:-local-development-only-tool-runtime-token}
     volumes:
       - ../:/workspace
       # Isolate .venv from host to prevent host-side uv/python from corrupting it
       - backend_venv:/workspace/backend/.venv
+      # Keep node_modules and the Turbopack dev cache on the VM's native FS,
+      # not bind-mounted through VirtioFS — eliminates the host↔VM roundtrip
+      # storm that otherwise pegs the file-sharing helper during dev/build.
+      # (Bun hoists the real packages into frontend/node_modules; the
+      # per-app/package node_modules are symlink farms and stay on the bind
+      # mount.)
+      - frontend_node_modules:/workspace/frontend/node_modules
+      - web_next_cache:/workspace/frontend/apps/web-next/.next
       # Mount Docker socket for testcontainers support
       - /var/run/docker.sock:/var/run/docker.sock
     # Docker group is created dynamically in post-create.sh with the correct GID
@@ -91,6 +104,8 @@ volumes:
   postgres_data:
   redis_data:
   backend_venv:
+  frontend_node_modules:
+  web_next_cache:
   object_content_data:
 
 networks:

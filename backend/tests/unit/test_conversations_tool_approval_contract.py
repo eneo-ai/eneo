@@ -11,21 +11,27 @@ from starlette.requests import Request
 from eneo.assistants.api.assistant_models import AskAssistant
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
 from eneo.audit.infrastructure.rate_limiting import (
     RateLimitExceededError,
     RateLimitResult,
 )
 from eneo.conversations.conversations_router import (
     approve_tools,
+    call_tool_from_app_view,
+    export_conversation_document,
     get_tool_call_result,
 )
-from eneo.main.exceptions import UnauthorizedException
+from eneo.conversations.document_export import DocumentExportUnavailable
+from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalContext,
     ToolApprovalContextLookupResult,
     ToolApprovalDecision,
     ToolApprovalSubmitResult,
 )
+from eneo.questions.question import ToolCallInfo
+from eneo.sessions.session import DocumentExportRequest, ViewToolCallRequest
 
 
 def _make_request() -> Request:
@@ -72,7 +78,15 @@ async def test_tool_result_rechecks_current_session_access():
     )
     session_service = AsyncMock()
     session_service.get_session_by_uuid.return_value = session
-    session_service.get_tool_call_result.return_value = ("result", "server__tool")
+    session_service.get_tool_call_result.return_value = ToolCallInfo(
+        server_name="server",
+        tool_name="tool",
+        tool_call_id="call_1",
+        result="result",
+        result_status="succeeded",
+        mcp_tool_name="server__tool",
+        structured_content={"temperature": 12},
+    )
     container = SimpleNamespace(session_service=lambda: session_service)
     authorize = AsyncMock()
 
@@ -92,6 +106,8 @@ async def test_tool_result_rechecks_current_session_access():
         tool_call_id="call_1",
     )
     assert response.result == "result"
+    assert response.structured_content == {"temperature": 12}
+    assert response.is_error is False
 
 
 @pytest.mark.asyncio
@@ -541,3 +557,216 @@ def test_legacy_assistant_ask_ignores_require_tool_approval_extra_field():
     assert ask.question == "hello"
     assert ask.stream is True
     assert not hasattr(ask, "require_tool_approval")
+
+
+async def _call_from_view(*, outcome):
+    """Drive the view tool-call endpoint with the service's outcome patched in."""
+    container, user, audit_service = _make_container()
+    session = SimpleNamespace(
+        id=uuid4(), name="Weather", group_chat_id=None, assistant=SimpleNamespace()
+    )
+    session_service = AsyncMock()
+    session_service.get_session_by_uuid.return_value = session
+    container.session_service = lambda: session_service
+    container.assistant_service = lambda: AsyncMock()
+    container.mcp_proxy_session_factory = lambda: SimpleNamespace()
+    container.session = lambda: None
+    container.tenant = lambda: None
+    server_id = uuid4()
+    call = AsyncMock(side_effect=outcome if isinstance(outcome, Exception) else None)
+    if not isinstance(outcome, Exception):
+        call.return_value = SimpleNamespace(
+            mcp_server_id=server_id,
+            tool_name="refresh_weather",
+            text="13 degrees",
+            structured_content={"temperature": 13},
+            is_error=outcome,
+            signed_files=[],
+        )
+    router = "eneo.conversations.conversations_router"
+    with (
+        patch(f"{router}.get_settings", lambda: SimpleNamespace(mcp_apps_enabled=True)),
+        patch(f"{router}.enforce_rate_limit", new=AsyncMock()),
+        patch(f"{router}._validate_conversation_scope", new=AsyncMock()),
+        patch(f"{router}._authorize_session_access", new=AsyncMock()),
+        patch(f"{router}.build_identity_headers", lambda user, tenant: {}),
+        patch(f"{router}.view_server_id", lambda *args: server_id),
+        patch(f"{router}.call_tool_from_view", new=call),
+    ):
+        request = ViewToolCallRequest(
+            view_id=uuid4(), name="refresh_weather", arguments={"city": "Sundsvall"}
+        )
+        try:
+            response = await call_tool_from_app_view(
+                session_id=session.id,
+                tool_call_id="call_1",
+                request=request,
+                http_request=_make_request(),
+                container=container,
+            )
+        except NotFoundException:
+            response = None
+    (logged,) = audit_service.log_async.await_args_list
+    return response, logged.kwargs, server_id
+
+
+async def test_view_tool_call_is_audited_without_its_arguments():
+    response, logged, server_id = await _call_from_view(outcome=False)
+
+    assert response.structured_content == {"temperature": 13}
+    assert logged["action"] == ActionType.MCP_APP_TOOL_CALLED
+    assert logged["entity_type"] == EntityType.MCP_SERVER
+    assert logged["entity_id"] == server_id
+    assert logged["outcome"] == Outcome.SUCCESS
+    assert "Sundsvall" not in str(logged["metadata"])
+
+
+async def test_refused_view_tool_call_is_audited_as_a_failure():
+    response, logged, server_id = await _call_from_view(
+        outcome=NotFoundException("The view cannot call this tool")
+    )
+
+    assert response is None
+    assert logged["action"] == ActionType.MCP_APP_TOOL_CALLED
+    assert logged["entity_id"] == server_id
+    assert logged["outcome"] == Outcome.FAILURE
+    assert logged["error_message"] == "not_allowed"
+    assert "Sundsvall" not in str(logged["metadata"])
+
+
+async def test_document_export_is_audited_and_returned_as_a_download():
+    container, user, audit_service = _make_container()
+    session = SimpleNamespace(
+        id=uuid4(), name="Plan", group_chat_id=None, assistant=SimpleNamespace()
+    )
+    session_service = AsyncMock()
+    session_service.get_session_by_uuid.return_value = session
+    container.session_service = lambda: session_service
+    container.assistant_service = lambda: AsyncMock()
+    container.file_service = lambda: AsyncMock()
+    container.mcp_proxy_session_factory = lambda: SimpleNamespace()
+    container.session = lambda: None
+    container.tenant = lambda: None
+    file_id, server_id = uuid4(), uuid4()
+    exported = SimpleNamespace(
+        filename="Införandeplan.docx",
+        mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        data=b"word-bytes",
+        mcp_server_id=server_id,
+    )
+    router = "eneo.conversations.conversations_router"
+    with (
+        patch(f"{router}._validate_conversation_scope", new=AsyncMock()),
+        patch(f"{router}._authorize_session_access", new=AsyncMock()),
+        patch(f"{router}.build_identity_headers", lambda user, tenant: {}),
+        patch(f"{router}.export_document", new=AsyncMock(return_value=exported)),
+    ):
+        response = await export_conversation_document(
+            session_id=session.id,
+            file_id=file_id,
+            request=DocumentExportRequest(format="docx"),
+            http_request=_make_request(),
+            container=container,
+        )
+
+    assert response.body == b"word-bytes"
+    assert response.media_type == exported.mime_type
+    assert "attachment" in response.headers["content-disposition"]
+    assert response.headers["cache-control"] == "no-store"
+    (logged,) = audit_service.log_async.await_args_list
+    assert logged.kwargs["action"] == ActionType.DOCUMENT_EXPORTED
+    assert logged.kwargs["entity_type"] == EntityType.FILE
+    assert logged.kwargs["entity_id"] == file_id
+
+
+async def test_document_export_without_a_provider_is_a_conflict_audited_as_a_failure():
+    container, user, audit_service = _make_container()
+    session = SimpleNamespace(
+        id=uuid4(), name="Plan", group_chat_id=None, assistant=SimpleNamespace()
+    )
+    session_service = AsyncMock()
+    session_service.get_session_by_uuid.return_value = session
+    container.session_service = lambda: session_service
+    container.assistant_service = lambda: AsyncMock()
+    container.file_service = lambda: AsyncMock()
+    container.mcp_proxy_session_factory = lambda: SimpleNamespace()
+    container.session = lambda: None
+    container.tenant = lambda: None
+    router = "eneo.conversations.conversations_router"
+    with (
+        patch(f"{router}._validate_conversation_scope", new=AsyncMock()),
+        patch(f"{router}._authorize_session_access", new=AsyncMock()),
+        patch(f"{router}.build_identity_headers", lambda user, tenant: {}),
+        patch(
+            f"{router}.export_document",
+            new=AsyncMock(side_effect=DocumentExportUnavailable()),
+        ),
+        pytest.raises(HTTPException) as refused,
+    ):
+        await export_conversation_document(
+            session_id=session.id,
+            file_id=uuid4(),
+            request=DocumentExportRequest(format="pdf"),
+            http_request=_make_request(),
+            container=container,
+        )
+
+    assert refused.value.status_code == 409
+    assert refused.value.detail["code"] == "document_export_unavailable"
+    (logged,) = audit_service.log_async.await_args_list
+    assert logged.kwargs["action"] == ActionType.DOCUMENT_EXPORTED
+    assert logged.kwargs["outcome"] == Outcome.FAILURE
+    assert logged.kwargs["error_message"] == "unavailable"
+
+
+async def test_link_signed_again_for_a_view_is_audited_as_a_mint():
+    container, user, audit_service = _make_container()
+    session = SimpleNamespace(
+        id=uuid4(), name="Costs", group_chat_id=None, assistant=SimpleNamespace()
+    )
+    session_service = AsyncMock()
+    session_service.get_session_by_uuid.return_value = session
+    container.session_service = lambda: session_service
+    container.assistant_service = lambda: AsyncMock()
+    container.mcp_proxy_session_factory = lambda: SimpleNamespace()
+    container.session = lambda: None
+    container.tenant = lambda: None
+    server_id = uuid4()
+    file = SimpleNamespace(id=uuid4(), name="kostnader.csv")
+    result = SimpleNamespace(
+        mcp_server_id=server_id,
+        tool_name="query_table",
+        text="{}",
+        structured_content=None,
+        is_error=False,
+        signed_files=[file],
+    )
+    router = "eneo.conversations.conversations_router"
+    with (
+        patch(
+            f"{router}.get_settings",
+            lambda: SimpleNamespace(
+                mcp_apps_enabled=True, file_reference_url_expiry_seconds=600
+            ),
+        ),
+        patch(f"{router}.enforce_rate_limit", new=AsyncMock()),
+        patch(f"{router}._validate_conversation_scope", new=AsyncMock()),
+        patch(f"{router}._authorize_session_access", new=AsyncMock()),
+        patch(f"{router}.build_identity_headers", lambda user, tenant: {}),
+        patch(f"{router}.view_server_id", lambda *args: server_id),
+        patch(f"{router}.call_tool_from_view", new=AsyncMock(return_value=result)),
+    ):
+        await call_tool_from_app_view(
+            session_id=session.id,
+            tool_call_id="call_1",
+            request=ViewToolCallRequest(view_id=uuid4(), name="query_table"),
+            http_request=_make_request(),
+            container=container,
+        )
+
+    called, minted = audit_service.log_async.await_args_list
+    assert called.kwargs["action"] == ActionType.MCP_APP_TOOL_CALLED
+    assert minted.kwargs["action"] == ActionType.FILE_SIGNED_URL_MINTED
+    assert minted.kwargs["entity_type"] == EntityType.FILE
+    assert minted.kwargs["entity_id"] == file.id
+    assert "mcp_app_view" in str(minted.kwargs["metadata"])

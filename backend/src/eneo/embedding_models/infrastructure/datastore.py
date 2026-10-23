@@ -3,7 +3,10 @@ import time
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from eneo.embedding_models.domain.chunking import build_text_splitter
+from eneo.embedding_models.domain.chunking import (
+    build_text_splitter,
+    effective_chunk_config,
+)
 from eneo.embedding_models.infrastructure.adapters.base import (
     PartialEmbeddingBatchError,
 )
@@ -15,10 +18,12 @@ from eneo.info_blobs.info_blob import (
     InfoBlobInDB,
 )
 from eneo.info_blobs.info_blob_chunk_repo import InfoBlobChunkRepo
+from eneo.info_blobs.source_metadata import build_source_header
 from eneo.integration.domain.entities.integration_knowledge import (
     IntegrationKnowledge,
 )
 from eneo.main.logging import get_logger
+from eneo.tokens.token_utils import count_tokens
 from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
@@ -27,9 +32,15 @@ if TYPE_CHECKING:
     from eneo.embedding_models.infrastructure.create_embeddings_service import (
         CreateEmbeddingsService,
     )
+    from eneo.rerank_models.domain.rerank_spec import RerankSpec
     from eneo.websites.domain.website import Website
 
 logger = get_logger(__name__)
+
+
+# Share of a chunk's token budget the source metadata header may take when it
+# is prepended for embedding. The rest stays for the chunk's own text.
+SOURCE_HEADER_BUDGET_SHARE = 0.25
 
 
 def autocut(y_values: list[float], cutoff: int = 2) -> int:
@@ -78,10 +89,34 @@ class Datastore:
         self.chunk_repo = info_blob_chunk_repo
         self.create_embeddings_service = create_embeddings_service
 
+    @staticmethod
+    def _source_header(
+        info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"
+    ) -> str:
+        """Title and source properties prepended to every chunk for embedding.
+
+        Stored chunk text stays the document's own words: the header is only
+        part of what the embedding model sees, so a query about a document's
+        kind or subject area can find it, while excerpts shown to people and
+        the model remain clean. Empty for documents without source metadata.
+        """
+        if not info_blob.source_metadata:
+            return ""
+        config = effective_chunk_config(embedding_model)
+        return build_source_header(
+            title=info_blob.title,
+            entries=info_blob.source_metadata,
+            token_budget=int(config.chunk_size * SOURCE_HEADER_BUDGET_SHARE),
+            count_tokens=count_tokens,
+        )
+
     def _chunk_text(
         self, info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"
     ) -> list[InfoBlobChunk]:
-        splitter = build_text_splitter(embedding_model)
+        header = self._source_header(info_blob, embedding_model)
+        splitter = build_text_splitter(
+            embedding_model, reserved_tokens=count_tokens(header) if header else 0
+        )
 
         info_blob_chunks = [
             InfoBlobChunk(
@@ -120,6 +155,7 @@ class Datastore:
 
     async def add(self, info_blob: InfoBlobInDB, embedding_model: "EmbeddingModel"):
         logger.debug("Chunking text.")
+        header = self._source_header(info_blob, embedding_model)
         info_blob_chunks = await asyncio.to_thread(
             self._chunk_text, info_blob, embedding_model
         )
@@ -130,13 +166,30 @@ class Datastore:
             )
 
         logger.debug(f"Embedding {len(info_blob_chunks)} info-blob chunks.")
+        embedding_inputs = (
+            [
+                chunk.model_copy(update={"text": header + chunk.text})
+                for chunk in info_blob_chunks
+            ]
+            if header
+            else info_blob_chunks
+        )
         try:
             chunk_embedding_list = await self.create_embeddings_service.get_embeddings(
-                model=embedding_model, chunks=info_blob_chunks
+                model=embedding_model, chunks=embedding_inputs
             )
         except PartialEmbeddingBatchError as error:
             error.completed.close()
             raise error.cause from None
+
+        if header:
+            # Pair each embedding back with the chunk whose text we store: the
+            # header belongs to the vector, not to the excerpt.
+            by_chunk_no = {chunk.chunk_no: chunk for chunk in info_blob_chunks}
+            stored = ChunkEmbeddingList()
+            for embedded, embedding in chunk_embedding_list:
+                stored.add([by_chunk_no[embedded.chunk_no]], [embedding])
+            chunk_embedding_list = stored
 
         logger.debug(f"Adding {len(info_blob_chunks)} info-blob chunks to datastore.")
         await self._add(chunk_embedding_list)
@@ -152,7 +205,11 @@ class Datastore:
         num_chunks: Optional[int] = 30,
         autocut_cutoff: Optional[int] = None,
         min_score: Optional[float] = None,
+        *,
+        rerank: Optional["RerankSpec"] = None,
     ) -> list[InfoBlobChunkInDBWithScore]:
+        """Nearest chunks in scope. With ``rerank`` the K best are returned in
+        reranker order with reranker scores and ``autocut`` does not apply."""
         group_ids = [group.id for group in (collections or [])]
         website_ids = [website.id for website in (websites or [])]
         integration_knowledge_ids = [i.id for i in (integration_knowledge_list or [])]
@@ -167,6 +224,11 @@ class Datastore:
                 "combined with collection, website or integration scopes."
             )
 
+        limit = num_chunks if num_chunks is not None else 30
+        # The search covers the reranker's candidates too, so a reranker failure
+        # falls back to the same result as without a spec.
+        candidates = rerank.candidate_count(limit) if rerank is not None else 0
+
         start = time.time()
         search_string_embedding = (
             await self.create_embeddings_service.get_embedding_for_query(
@@ -180,7 +242,7 @@ class Datastore:
             website_ids=website_ids,
             integration_knowledge_ids=integration_knowledge_ids,
             info_blob_ids=info_blob_ids,
-            limit=num_chunks if num_chunks is not None else 30,
+            limit=max(limit, candidates),
         )
         end = time.time()
 
@@ -198,6 +260,18 @@ class Datastore:
                 res for res in semantic_results if res.score >= min_score
             ]
 
+        if rerank is not None:
+            reranked = await self._rerank(rerank, semantic_results[:candidates])
+            if reranked is not None:
+                logger.info(
+                    f"Reranked search: Embed step: {step_1 - start},"
+                    f" Search step: {end - step_1},"
+                    f" Rerank step: {time.time() - end},"
+                    f" candidates: {len(reranked)}, model: {rerank.model_name}"
+                )
+                return reranked
+            semantic_results = semantic_results[:limit]
+
         scores = [res.score for res in semantic_results]
 
         if autocut_cutoff is not None:
@@ -205,3 +279,30 @@ class Datastore:
             return semantic_results[:cut_point]
 
         return semantic_results
+
+    @staticmethod
+    async def _rerank(
+        spec: "RerankSpec", candidates: list[InfoBlobChunkInDBWithScore]
+    ) -> Optional[list[InfoBlobChunkInDBWithScore]]:
+        """The candidates in reranker order with reranker scores, never mixed
+        with vector scores; ``None`` when the reranker failed."""
+        if not candidates:
+            return []
+        try:
+            scores = await spec.reranker.rerank(
+                spec.query, [chunk.text for chunk in candidates]
+            )
+            if len(scores) != len(candidates):
+                raise ValueError(
+                    f"reranker returned {len(scores)} scores for {len(candidates)} candidates"
+                )
+        except Exception:
+            logger.exception(
+                f"Rerank model {spec.model_name} failed; using vector order"
+            )
+            return None
+        rescored = [
+            chunk.model_copy(update={"score": float(score)})
+            for chunk, score in zip(candidates, scores)
+        ]
+        return sorted(rescored, key=lambda chunk: chunk.score, reverse=True)

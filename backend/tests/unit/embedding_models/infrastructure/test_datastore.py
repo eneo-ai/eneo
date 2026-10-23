@@ -81,7 +81,7 @@ async def test_add_surfaces_the_original_provider_error(monkeypatch):
     )
 
     with pytest.raises(OpenAIException) as exc_info:
-        await datastore.add(MagicMock(), MagicMock())
+        await datastore.add(MagicMock(source_metadata=None), MagicMock())
 
     assert exc_info.value is provider_error
     assert completed._file.closed
@@ -101,7 +101,9 @@ def test_chunk_text_clamps_to_the_embedding_models_limit(monkeypatch):
         info_blob_chunk_repo=MagicMock(),
         create_embeddings_service=MagicMock(),
     )
-    info_blob = SimpleNamespace(id=uuid4(), text=" ".join(f"w{i}" for i in range(300)))
+    info_blob = SimpleNamespace(
+        id=uuid4(), text=" ".join(f"w{i}" for i in range(300)), source_metadata=None
+    )
     small_model = SimpleNamespace(name="small", family=None, max_input=30)
 
     chunks = datastore._chunk_text(info_blob, small_model)  # type: ignore[arg-type]

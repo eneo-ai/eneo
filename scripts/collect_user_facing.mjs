@@ -99,7 +99,12 @@ export function renderJson({ since, head, unlinked }, groups) {
 }
 
 function run(command, args) {
-  const result = spawnSync(command, args, { encoding: "utf8" });
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  if (result.error)
+    throw new Error(`${command} failed: ${result.error.message}`);
   if (result.status !== 0) {
     throw new Error(
       `${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout).trim()}`,
@@ -125,19 +130,56 @@ function mergedSubjects(since, head) {
     .filter(Boolean);
 }
 
-function fetchPullRequests(numbers) {
-  const wanted = new Set(numbers);
-  const found = new Map();
-  const fields = "number,title,body,url,mergedAt";
-  const listed = JSON.parse(
-    run("gh", ["pr", "list", "--state", "merged", "--limit", "500", "--json", fields]),
-  );
-  for (const pr of listed) if (wanted.has(pr.number)) found.set(pr.number, pr);
-  for (const number of numbers) {
-    if (found.has(number)) continue;
-    found.set(number, JSON.parse(run("gh", ["pr", "view", String(number), "--json", fields])));
+export function fetchPullRequests(numbers, execute = run) {
+  if (numbers.length === 0) return [];
+  const [owner, name] = execute("gh", [
+    "repo",
+    "view",
+    "--json",
+    "nameWithOwner",
+    "--jq",
+    ".nameWithOwner",
+  ])
+    .trim()
+    .split("/");
+  const found = [];
+  // Fetch only PRs in the selected git range. Listing 500 full PR bodies
+  // exceeded spawnSync's default buffer and made release collection fail.
+  for (let offset = 0; offset < numbers.length; offset += 15) {
+    const batch = numbers.slice(offset, offset + 15);
+    const fields = batch
+      .map((number) => {
+        if (!Number.isSafeInteger(number) || number < 1)
+          throw new Error(`Invalid PR number: ${number}`);
+        return `pr${number}: pullRequest(number: ${number}) { number title body url mergedAt }`;
+      })
+      .join("\n");
+    const result = JSON.parse(
+      execute("gh", [
+        "api",
+        "graphql",
+        "-f",
+        `query=query($owner: String!, $name: String!) { repository(owner: $owner, name: $name) { ${fields} } }`,
+        "-F",
+        `owner=${owner}`,
+        "-F",
+        `name=${name}`,
+      ]),
+    );
+    if (result.errors?.length)
+      throw new Error(
+        `GitHub could not read the release PRs: ${JSON.stringify(result.errors)}`,
+      );
+    for (const number of batch) {
+      const pr = result.data?.repository?.[`pr${number}`];
+      if (pr?.number !== number || !pr.mergedAt)
+        throw new Error(
+          `Missing merged PR #${number}; refusing an incomplete release inventory`,
+        );
+      found.push(pr);
+    }
   }
-  return numbers.map((number) => found.get(number)).sort((a, b) => a.mergedAt.localeCompare(b.mergedAt));
+  return found.sort((a, b) => a.mergedAt.localeCompare(b.mergedAt));
 }
 
 function parseArgs(argv) {
@@ -171,6 +213,60 @@ function main() {
 }
 
 function runSelfTest() {
+  const requested = Array.from({ length: 31 }, (_, index) => index + 1);
+  const batchSizes = [];
+  const execute = (_command, args) => {
+    if (args[0] === "repo") return "eneo-ai/eneo\n";
+    assert.deepEqual(args.slice(0, 2), ["api", "graphql"]);
+    const numbers = [...args[3].matchAll(/pr(\d+):/g)].map((match) =>
+      Number(match[1]),
+    );
+    batchSizes.push(numbers.length);
+    return JSON.stringify({
+      data: {
+        repository: Object.fromEntries(
+          numbers.map((number) => [
+            `pr${number}`,
+            {
+              number,
+              title: "Feature",
+              body: "## User-facing\nNew feature",
+              url: `pr/${number}`,
+              mergedAt: "2026-10-19T00:00:00Z",
+            },
+          ]),
+        ),
+      },
+    });
+  };
+  assert.deepEqual(
+    fetchPullRequests(requested, execute).map((pr) => pr.number),
+    requested,
+  );
+  assert.deepEqual(batchSizes, [15, 15, 1]);
+  assert.deepEqual(
+    fetchPullRequests([], () => {
+      throw new Error("must not fetch");
+    }),
+    [],
+  );
+  for (const response of [
+    { data: { repository: {} } },
+    { errors: [{ message: "unavailable" }] },
+  ]) {
+    assert.throws(() =>
+      fetchPullRequests([1], (_command, args) =>
+        args[0] === "repo" ? "eneo-ai/eneo" : JSON.stringify(response),
+      ),
+    );
+  }
+  assert.equal(
+    run(process.execPath, [
+      "-e",
+      "process.stdout.write('x'.repeat(2 * 1024 * 1024))",
+    ]).length,
+    2 * 1024 * 1024,
+  );
   const parsed = pullRequestNumbers([
     "feat(skills): add on-demand mode (#616)",
     "fix(crawler): restore HTTPS certificate handling (#799)",

@@ -8,7 +8,6 @@ describe("isConversationSubmitDisabled", () => {
       isConversationSubmitDisabled({
         isLoading: false,
         sendPending: false,
-        isUploading: false,
         hasContent: true,
         hasCompletionModel: true,
         estimatedExceedsContext: true
@@ -21,7 +20,6 @@ describe("isConversationSubmitDisabled", () => {
       isConversationSubmitDisabled({
         isLoading: false,
         sendPending: false,
-        isUploading: false,
         hasContent: false,
         hasCompletionModel: true,
         estimatedExceedsContext: false
@@ -31,12 +29,23 @@ describe("isConversationSubmitDisabled", () => {
 });
 
 describe("isConversationSubmitDisabled", () => {
+  it("lets a message with attachments still uploading be sent", () => {
+    expect(
+      isConversationSubmitDisabled({
+        isLoading: false,
+        sendPending: false,
+        hasContent: true,
+        hasCompletionModel: true,
+        estimatedExceedsContext: false
+      })
+    ).toBe(false);
+  });
+
   it("blocks a second submission while the first send is still waiting to be issued", () => {
     expect(
       isConversationSubmitDisabled({
         isLoading: false,
         sendPending: true,
-        isUploading: false,
         hasContent: true,
         hasCompletionModel: true,
         estimatedExceedsContext: false

@@ -5,7 +5,8 @@ from any space they belong to that sees the blob's source. These cases pin
 where that stops, so a later change cannot widen it unnoticed:
 
 * a source distributed to a sibling child space the reader is not in
-* organization-space viewer/editor membership is not upgraded by the fallback
+* an organization-space member row grants nothing, whatever its role: that
+  space belongs to the tenant's admins, so the admin role held now decides
 * tenant-scoped service keys gain nothing from membership they do not have
 * a user group from another tenant cannot grant membership
 * assistant-scoped user keys never enter the fallback
@@ -153,12 +154,11 @@ async def test_distribution_to_sibling_child_space_does_not_leak(
         assert (await container.info_blob_service().get_by_id(blob_id)).text
 
 
-@pytest.mark.parametrize(
-    "role,allowed", [("viewer", False), ("editor", False), ("admin", True)]
-)
-async def test_org_space_membership_role_semantics_preserved(
-    db_container, boundary, role, allowed
+@pytest.mark.parametrize("role", ["viewer", "editor", "admin"])
+async def test_an_org_space_row_grants_no_read_without_the_admin_role(
+    db_container, boundary, role
 ):
+    """An ADMIN row is what a revoked admin role leaves behind."""
     async with db_container() as container:
         session = container.session()
         session.add(
@@ -174,11 +174,30 @@ async def test_org_space_membership_role_semantics_preserved(
         await session.flush()
 
     async with db_container(user=boundary.reader) as container:
-        if allowed:
-            assert (await container.info_blob_service().get_by_id(blob_id)).text
-        else:
-            with pytest.raises(UnauthorizedException):
-                await container.info_blob_service().get_by_id(blob_id)
+        with pytest.raises(UnauthorizedException):
+            await container.info_blob_service().get_by_id(blob_id)
+
+
+async def test_a_tenant_admin_reads_org_space_documents_without_a_row(
+    db_container, boundary
+):
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.delete(SpacesUsers).where(SpacesUsers.space_id == boundary.org_id)
+        )
+        _, blob_id = await _make_blob(
+            session,
+            space_id=boundary.org_id,
+            tenant_id=boundary.tenant_id,
+            admin_id=boundary.admin_id,
+            model_id=boundary.model_id,
+        )
+        await session.flush()
+
+    # The default container user is the tenant admin.
+    async with db_container() as container:
+        assert (await container.info_blob_service().get_by_id(blob_id)).text
 
 
 def _key(tenant_id, *, owner, scope_type, scope_id, permission):

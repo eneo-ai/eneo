@@ -17,20 +17,15 @@ export function isConversationSubmitDisabled(state: {
    * first one's message.
    */
   sendPending: boolean;
-  isUploading: boolean;
   hasContent: boolean;
   hasCompletionModel: boolean;
   estimatedExceedsContext: boolean;
 }): boolean {
   // The estimate is advisory. Only the provider can authoritatively reject
   // the final payload after all model-specific tokenization has been applied.
-  return (
-    state.isLoading ||
-    state.sendPending ||
-    state.isUploading ||
-    !state.hasContent ||
-    !state.hasCompletionModel
-  );
+  // Attachments still uploading do not block either: the message is sent as
+  // soon as they finish, and it waits as a pending message meanwhile.
+  return state.isLoading || state.sendPending || !state.hasContent || !state.hasCompletionModel;
 }
 
 export function getContextErrorInfo(error: unknown): ContextErrorInfo | null {

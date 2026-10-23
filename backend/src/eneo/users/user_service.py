@@ -8,6 +8,7 @@ from uuid import UUID
 import idna
 import jwt
 import sqlalchemy as sa
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from eneo.audit.application.audit_metadata import AuditMetadata
@@ -59,6 +60,7 @@ from eneo.main.exceptions import (
     FederatedLoginDenied,
     NotFoundException,
     TenantSuspendedException,
+    UniqueException,
     UniqueUserException,
     UserInactiveException,
 )
@@ -76,6 +78,7 @@ from eneo.users.password import (
     PasswordReuseError,
     validate_new_local_password,
 )
+from eneo.users.password_lifecycle import PASSWORD_AUTH_METHOD
 from eneo.users.user import (
     PropUserInvite,
     UserAdd,
@@ -124,9 +127,10 @@ _SERVICE_KEY_BASE_PERMISSIONS: frozenset[Permission] = frozenset(
         Permission.INSIGHTS,
         # Web search: automations asking an assistant keep the capability the
         # assistant offers; the route guards and the tenant's providers still
-        # bound what a key can reach. Image generation is deliberately absent:
-        # a generated image is persisted as a file keyed on user_id, and the
-        # synthetic service user has no users row to key it on.
+        # bound what a key can reach. Image, document and spreadsheet
+        # creation are deliberately absent: their outputs are persisted as
+        # files keyed on user_id, and the synthetic service user has no users
+        # row to key them on.
         Permission.WEB_SEARCH,
     }
 )
@@ -429,7 +433,9 @@ class UserService:
         )
 
         return AccessToken(
-            access_token=self.auth_service.create_access_token_for_user(user=user),
+            access_token=self.auth_service.create_access_token_for_user(
+                user=user, auth_method=PASSWORD_AUTH_METHOD
+            ),
             token_type="bearer",
         )
 
@@ -518,16 +524,29 @@ class UserService:
             if await self.repo.get_user_by_username(username, with_deleted=True):
                 username = None
 
-        user = await self.repo.add(
-            UserAdd(
-                email=identity.email,
-                email_verified=True,
-                username=username,
-                tenant_id=tenant_id,
-                roles=roles,
-                state=UserState.ACTIVE,
+        try:
+            user = await self.repo.add(
+                UserAdd(
+                    email=identity.email,
+                    email_verified=True,
+                    username=username,
+                    tenant_id=tenant_id,
+                    roles=roles,
+                    state=UserState.ACTIVE,
+                )
             )
-        )
+        except UniqueException:
+            # A concurrent first sign-in created the row between the lookup
+            # and the insert. Admit that row under the same membership checks.
+            user = await self.repo.get_user_by_email(identity.email)
+            if (
+                user is None
+                or user.tenant_id != tenant_id
+                or user.state != UserState.ACTIVE
+                or user.deleted_at is not None
+            ):
+                raise FederatedLoginDenied("Access denied for this organization.")
+            return user, False
         logger.info(
             "JIT provisioning: Created user",
             extra={
@@ -570,7 +589,6 @@ class UserService:
         signing_algos: list[str],
         correlation_id: str | None = None,
     ):
-        # MIT License
         correlation_id = correlation_id or "no-correlation-id"
 
         logger.debug(
@@ -696,16 +714,22 @@ class UserService:
         if tenant is None:
             raise BadRequestException(f"Tenant {new_user.tenant_id} does not exist")
 
+        password_changed_at: datetime | None = None
+        password_change_required = False
         if new_user.password is not None:
             validate_new_local_password(new_user.password)
             salt, hashed_pass = self.auth_service.create_salt_and_hashed_password(
                 new_user.password
             )
+            password_changed_at = datetime.now(timezone.utc)
+            # Someone else chose it, so it is one-time unless the sysadmin API
+            # explicitly opted this account out.
+            password_change_required = new_user.password_change_required is not False
         else:
             salt = None
             hashed_pass = None
 
-        payload = new_user.model_dump(exclude={"password"})
+        payload = new_user.model_dump(exclude={"password", "password_change_required"})
 
         # Apply tenant default role when caller didn't specify any.
         # Mirrors the federated-login path so sysadmin-created users can
@@ -728,6 +752,8 @@ class UserService:
             password=hashed_pass,
             salt=salt,
             state=UserState.ACTIVE,
+            password_changed_at=password_changed_at,
+            password_change_required=password_change_required,
         )
 
         user_in_db = await self.repo.add(user_add)
@@ -761,11 +787,116 @@ class UserService:
             self.auth_service.validate_local_credential_version(
                 payload.credential_version, user
             )
+            user.session_auth_method = payload.auth_method
         return user
 
     async def _get_user_from_token(self, token: str):
-        payload = self._get_token_payload(token, aud=get_settings().jwt_audience)
+        settings = get_settings()
+        try:
+            payload = self._get_token_payload(token, aud=settings.jwt_audience)
+        except AuthenticationException:
+            # In resource-server mode, the bearer token may be an IdP token.
+            if not settings.oidc_resource_server_enabled:
+                raise
+            return await self._get_user_from_idp_access_token(token)
         return await self._get_user_from_payload(payload)
+
+    async def _get_user_from_idp_access_token(self, token: str) -> "UserInDB":
+        """Validate an IdP access token and resolve the user by email claim.
+
+        Admission (allowed domains, JIT provisioning, tenant membership) is
+        the same ``resolve_federated_user`` decision the OIDC federation
+        callback takes. Any token problem raises ``AuthenticationException``
+        (401), never a 500.
+        """
+        from eneo.authentication.oidc_resource_server import (
+            validate_idp_access_token,
+        )
+
+        correlation_id = (
+            get_request_context().get("correlation_id") or "oidc-resource-server"
+        )
+
+        payload = await validate_idp_access_token(
+            token, auth_service=self.auth_service, correlation_id=correlation_id
+        )
+
+        try:
+            identity = FederatedIdentity.from_claims(payload)
+        except ValueError as exc:
+            logger.warning(
+                "IdP access token has no usable email claim",
+                extra={
+                    "correlation_id": correlation_id,
+                    "payload_keys": list(payload.keys()),
+                    "reason": str(exc),
+                },
+            )
+            raise AuthenticationException(
+                "Could not validate token credentials."
+            ) from exc
+
+        tenant = await self._resolve_tenant_for_idp_access_token(correlation_id)
+
+        # Resource-server mode is configured globally, like the global OIDC
+        # login: the tenant's federation config wins, the settings fill in.
+        federation_config = tenant.federation_config or {}
+        allowed_domains = (
+            cast("list[str] | None", federation_config.get("allowed_domains"))
+            or get_settings().oidc_allowed_domains
+        )
+
+        try:
+            user, _created = await self.resolve_federated_user(
+                identity=identity,
+                tenant_id=tenant.id,
+                allowed_domains=allowed_domains,
+                correlation_id=correlation_id,
+            )
+        except FederatedLoginDenied as exc:
+            # The token is valid; the identity is not admitted. 403, as the
+            # federation callback answers, not a credentials failure.
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        return user
+
+    async def _resolve_tenant_for_idp_access_token(self, correlation_id: str):
+        """Pick the tenant IdP-token users belong to.
+
+        ``OIDC_TENANT_ID`` wins when configured (same setting the global OIDC
+        login uses for user creation); otherwise the first active tenant —
+        resource-server mode targets single-tenant deployments.
+        """
+        settings = get_settings()
+
+        if settings.oidc_tenant_id:
+            try:
+                tenant_id = UUID(settings.oidc_tenant_id)
+            except ValueError:
+                logger.error(
+                    "Invalid OIDC_TENANT_ID format",
+                    extra={"correlation_id": correlation_id},
+                )
+                raise AuthenticationException("Could not validate token credentials.")
+            tenant = await self.tenant_repo.get(tenant_id)
+            if tenant is None:
+                logger.error(
+                    "OIDC_TENANT_ID does not match an existing tenant",
+                    extra={
+                        "correlation_id": correlation_id,
+                        "tenant_id": str(tenant_id),
+                    },
+                )
+                raise AuthenticationException("Could not validate token credentials.")
+            return tenant
+
+        tenants = await self.tenant_repo.get_all_active()
+        if not tenants:
+            logger.error(
+                "No active tenant available for IdP token resolution",
+                extra={"correlation_id": correlation_id},
+            )
+            raise AuthenticationException("Could not validate token credentials.")
+        return tenants[0]
 
     async def authenticate_internal_mcp_token(self, token: str) -> "UserInDB":
         """Authenticate the principal behind a scoped loopback MCP token.
@@ -836,18 +967,31 @@ class UserService:
         assert self._session is not None
         return await self._session.scalar(query)
 
-    async def _is_space_member(self, space_id: UUID, user_id: UUID) -> bool:
-        """Check if user is a member of space (index-only, no user context)."""
-        from eneo.database.tables.spaces_table import SpacesUsers
+    async def _owner_belongs_to_space(self, space_id: UUID, user: "UserInDB") -> bool:
+        """Whether a key's owner still belongs to its space (no user context).
 
-        query = (
-            sa.select(sa.literal(1))
-            .select_from(SpacesUsers)
-            .where(SpacesUsers.space_id == space_id, SpacesUsers.user_id == user_id)
-            .limit(1)
-        )
+        A member row decides, except in the organization space, which belongs to
+        the tenant's admins: there the admin permission held now decides, as in
+        SpaceActor, since a row outlives the role and a new admin may lack one.
+        """
+        from eneo.database.tables.spaces_table import Spaces, SpacesUsers
+
+        query = sa.select(
+            (Spaces.user_id.is_(None) & Spaces.tenant_space_id.is_(None)).label(
+                "organization"
+            ),
+            sa.exists()
+            .where(SpacesUsers.space_id == space_id, SpacesUsers.user_id == user.id)
+            .label("member"),
+        ).where(Spaces.id == space_id, Spaces.tenant_id == user.tenant_id)
         assert self._session is not None
-        return await self._session.scalar(query) is not None
+        row = (await self._session.execute(query)).one_or_none()
+        if row is None:
+            return False
+        is_organization, is_member = row
+        if is_organization:
+            return Permission.ADMIN in user.permissions
+        return bool(is_member)
 
     async def _build_service_user(self, key: ApiKeyV2InDB) -> "UserInDB":
         """Build a synthetic UserInDB for service keys — no DB user lookup.
@@ -973,8 +1117,8 @@ class UserService:
                     scope_type=resolved.key.scope_type,
                     scope_id=resolved.key.scope_id,
                 )
-                if space_id is not None and not await self._is_space_member(
-                    space_id=space_id, user_id=user.id
+                if space_id is not None and not await self._owner_belongs_to_space(
+                    space_id=space_id, user=user
                 ):
                     raise ApiKeyValidationError(
                         status_code=403,
@@ -2038,12 +2182,14 @@ class UserService:
         new_password: str,
         current_password: str | None,
         require_current_password: bool,
+        set_by_account: bool,
     ) -> "UserInDB":
         """Serialize and persist one local credential mutation.
 
         Both self-service changes and administrator resets use this path, so
-        hashing, password reuse protection and credential-version increments
-        cannot drift apart.
+        hashing, password reuse protection, credential-version increments and
+        the lifecycle stamp cannot drift apart. A password someone else chose
+        is always one-time.
         """
 
         validate_new_local_password(new_password)
@@ -2073,12 +2219,15 @@ class UserService:
         salt, hashed_password = self.auth_service.create_salt_and_hashed_password(
             new_password
         )
+        change_required = not set_by_account
         updated = await self.repo.update(
             UserUpdate(
                 id=user.id,
                 password=hashed_password,
                 salt=salt,
                 credential_version=user.credential_version + 1,
+                password_changed_at=datetime.now(timezone.utc),
+                password_change_required=change_required,
             )
         )
         if updated is None:
@@ -2093,16 +2242,7 @@ class UserService:
             new_password=new_password,
             current_password=current_password,
             require_current_password=True,
-        )
-
-    async def reset_local_password(
-        self, *, user_id: UUID, new_password: str
-    ) -> "UserInDB":
-        return await self._write_local_password(
-            user_id=user_id,
-            new_password=new_password,
-            current_password=None,
-            require_current_password=False,
+            set_by_account=True,
         )
 
     async def invalidate_sessions(self, *, user_id: UUID) -> "UserInDB":
@@ -2121,7 +2261,20 @@ class UserService:
             raise NotFoundException("No such user")
         return updated
 
-    async def update_user(self, user_id: UUID, user_update_public: UserUpdatePublic):
+    async def update_user(
+        self,
+        user_id: UUID,
+        user_update_public: UserUpdatePublic,
+        *,
+        actor_id: UUID | None = None,
+    ):
+        """Apply an administrative update.
+
+        ``actor_id`` is who performs it. A password in the update is one-time
+        unless the actor is the account itself (an administrator editing their
+        own row), which counts as a self-service change.
+        """
+
         await self._validate_email(user_update_public.email)
         await self._validate_username(user_update_public.username)
 
@@ -2191,8 +2344,12 @@ class UserService:
 
         password_updated_user: UserInDB | None = None
         if user_update_public.password is not None:
-            password_updated_user = await self.reset_local_password(
-                user_id=user_id, new_password=user_update_public.password
+            password_updated_user = await self._write_local_password(
+                user_id=user_id,
+                new_password=user_update_public.password,
+                current_password=None,
+                require_current_password=False,
+                set_by_account=actor_id == user_id,
             )
 
         non_password_update = user_update_public.model_dump(

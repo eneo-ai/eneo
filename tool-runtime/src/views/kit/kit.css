@@ -1,0 +1,63 @@
+/* What every view shares beyond Astryx itself: the frame's surface, and how it fills a
+   larger view. Colours, type and spacing all come from the Astryx theme. */
+html,
+body {
+  margin: 0;
+}
+/* The frame is sized to the view's reported height, and in the larger view the view scrolls
+   itself; the document never does, so a line box a pixel taller than its row draws no bar. */
+html {
+  overflow: hidden;
+}
+[hidden] {
+  display: none !important;
+}
+.eneo-view {
+  display: flex;
+  flex-direction: column;
+  background: var(--color-background-surface);
+  color: var(--color-text-primary);
+}
+/* The offer to quote a selection hangs on it, over the view's content. */
+.eneo-quote {
+  position: fixed;
+  z-index: 10;
+  border-radius: var(--radius-element);
+  box-shadow: var(--shadow-med);
+  user-select: none;
+}
+.eneo-rows {
+  max-height: 21rem;
+  overflow: auto;
+}
+/* While a selection is dragged the kit scrolls the rows itself; see useSteadySelection. */
+.eneo-rows[data-selecting] {
+  overflow: hidden;
+}
+.eneo-rows:focus-visible {
+  outline: var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color);
+  outline-offset: calc(-1 * var(--focus-outline-width));
+}
+.eneo-rows thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-background-surface);
+}
+:root[data-mode="fullscreen"],
+:root[data-mode="fullscreen"] body,
+:root[data-mode="fullscreen"] #app,
+:root[data-mode="fullscreen"] #app > [data-astryx-theme],
+:root[data-mode="fullscreen"] .eneo-view {
+  height: 100%;
+}
+
+/* A side panel can be shorter than a view's controls and minimum content size.
+   Keep that content reachable instead of shrinking controls or tables away. */
+:root[data-mode="fullscreen"] .eneo-view {
+  overflow: auto;
+}
+:root[data-mode="fullscreen"] .eneo-view > * {
+  flex-shrink: 0;
+}
+

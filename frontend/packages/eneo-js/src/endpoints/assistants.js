@@ -60,18 +60,17 @@ export function initAssistants(client) {
     /**
      * Transfer an assistant into a different space. Needs matching models to be available
      * Will throw error if not possible
-     * @param {{assistant: {id: string}, targetSpace: {id: string}, moveResources?: boolean}} params
+     * @param {{assistant: {id: string}, targetSpace: {id: string}}} params
      * @throws {EneoError}
      * */
-    transfer: async ({ assistant, targetSpace, moveResources }) => {
+    transfer: async ({ assistant, targetSpace }) => {
       const { id } = assistant;
       await client.fetch("/api/v1/assistants/{id}/transfer/", {
         method: "post",
         params: { path: { id } },
         requestBody: {
           "application/json": {
-            target_space_id: targetSpace.id,
-            move_resources: moveResources
+            target_space_id: targetSpace.id
           }
         }
       });
@@ -138,7 +137,7 @@ export function initAssistants(client) {
      * @param {(partialResponse: AssistantResponse, controller: AbortController) => void} [params.onAnswer] Callback to run when a new token/word of the answer is received
      * @param {(response: Response) => Promise<void>} [params.onOpen] Callback to run once the initial response of the backend is received
      * @param {AbortController} [params.abortController] Optionally pass in an AbortController that can abort the stream
-     * @param {("web_search" | "image_generation")[]} [params.disabledCapabilities] Purpose-based opt-outs
+     * @param {("web_search" | "image_generation" | "file_analysis" | "file_creation" | "charts" | "compute")[]} [params.disabledCapabilities] Purpose-based opt-outs
      * @param {string[]} [params.disabledMcpServerIds] Ordinary server opt-outs
      * @returns {Promise<AssistantResponse>} Once the full answer is received it will be returned
      * @throws {EneoError}

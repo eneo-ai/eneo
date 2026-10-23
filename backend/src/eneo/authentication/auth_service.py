@@ -75,8 +75,12 @@ class AuthService:
         audience: str = JWT_AUDIENCE,
         expires_in: float = JWT_EXPIRY_TIME_MINUTES,
         extra_claims: dict[str, object] | None = None,
+        auth_method: Literal["password"] | None = None,
     ) -> str:
         """Mint an access token; ``expires_in`` is in minutes.
+
+        ``auth_method`` records a local password login so the password
+        lifecycle policy can gate that session without touching federated ones.
 
         ``extra_claims`` is shared by module and scoped MCP tokens:
         unknown claims ride through ``JWTPayload`` on decode and are read out
@@ -105,6 +109,7 @@ class AuthService:
             sub=user.email,
             username=user.username,
             credential_version=user.credential_version,
+            auth_method=auth_method,
         )
         token_payload = JWTPayload(
             **jwt_meta.model_dump(),
@@ -130,6 +135,7 @@ class AuthService:
         assistant_id: UUID | None = None,
         mcp_server_id: UUID | None = None,
         insight_target: tuple[Literal["assistant", "group_chat"], UUID] | None = None,
+        table_tools: bool = False,
         expires_in: int = 15,
     ) -> str:
         """Mint a short-lived access token for a loopback MCP server.
@@ -153,7 +159,9 @@ class AuthService:
 
         ``mcp_server_id`` is set for a built-in provider: the loopback tool
         reads its configuration from that ``mcp_servers`` row, so the row
-        cannot be chosen by the caller.
+        cannot be chosen by the caller. ``table_tools`` records that the
+        completion also attached the file-analysis tools, so the files server
+        can point spreadsheets at them instead of dumping their text.
         """
         if assistant_id is None and insight_target is None:
             raise ValueError("A scoped MCP token needs at least one scope.")
@@ -166,6 +174,8 @@ class AuthService:
             claims["insight_target_id"] = str(target_id)
         if mcp_server_id is not None:
             claims["mcp_server_id"] = str(mcp_server_id)
+        if table_tools:
+            claims["table_tools"] = True
         return self.create_access_token_for_user(
             user,
             audience=INTERNAL_MCP_AUDIENCE,
@@ -249,6 +259,7 @@ class AuthService:
         client_id: str,
         options: dict[str, Any] | None = None,
         correlation_id: str | None = None,
+        verify_at_hash: bool = True,
     ) -> dict[str, Any]:
         correlation_id = correlation_id or "no-correlation-id"
 
@@ -401,7 +412,7 @@ class AuthService:
         # If at_hash NOT present → Skip validation (valid per OIDC spec)
         # This allows compatibility with both MobilityGuard (includes at_hash)
         # and Entra ID (may omit at_hash in authorization code flow)
-        expected_at_hash = payload.get("at_hash")
+        expected_at_hash = payload.get("at_hash") if verify_at_hash else None
 
         if expected_at_hash:
             # at_hash present → MUST validate
@@ -463,5 +474,47 @@ class AuthService:
                 "at_hash not present - skipping validation (optional per OIDC spec)",
                 extra={"correlation_id": correlation_id},
             )
+
+        return payload
+
+    def get_payload_from_idp_access_token(
+        self,
+        *,
+        access_token: str,
+        key: jwt.PyJWK,
+        signing_algos: list[str],
+        audience: str,
+        issuer: str,
+        correlation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Validate an IdP-issued JWT access token (resource-server mode).
+
+        Reuses the OpenID JWT validation (signature, ``aud``, ``exp`` with the
+        configured clock leeway) and additionally enforces the ``iss`` claim.
+        ``at_hash`` validation is skipped — it cross-references an ID token,
+        which does not exist on this path.
+        """
+        payload = self.get_payload_from_openid_jwt(
+            id_token=access_token,
+            access_token=access_token,
+            key=key,
+            signing_algos=signing_algos,
+            client_id=audience,
+            options={"require": ["exp"]},
+            correlation_id=correlation_id,
+            verify_at_hash=False,
+        )
+
+        token_issuer = payload.get("iss")
+        if token_issuer != issuer:
+            logger.error(
+                "JWT issuer validation failed",
+                extra={
+                    "correlation_id": correlation_id or "no-correlation-id",
+                    "expected_issuer": issuer,
+                    "token_issuer": token_issuer,
+                },
+            )
+            raise jwt.InvalidIssuerError("Invalid issuer")
 
         return payload

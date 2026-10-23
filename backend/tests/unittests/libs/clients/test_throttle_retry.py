@@ -5,11 +5,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import aiohttp
 import pytest
 
+from eneo.libs.clients.http_client import WrappedAiohttpClient
 from eneo.libs.clients.throttle_retry import (
     THROTTLE_AND_OVERLOAD_STATUS_CODES,
+    TRANSIENT_STATUS_CODES,
     parse_retry_after,
     retry_on_throttle,
 )
+from eneo.main.exceptions import InternalHTTPException
 
 
 def _response_error(status: int, headers: dict[str, str] | None = None):
@@ -130,6 +133,156 @@ async def test_does_not_retry_non_throttle_error():
     assert excinfo.value.status == 401
     assert calls["n"] == 1
     sleep.assert_not_awaited()
+
+
+def _wrapped(error: BaseException) -> InternalHTTPException:
+    try:
+        raise InternalHTTPException from error
+    except InternalHTTPException as wrapped:
+        return wrapped
+
+
+_TRANSIENT_FAILURES = [
+    pytest.param(lambda: _response_error(502), id="502"),
+    pytest.param(lambda: _response_error(504), id="504"),
+    pytest.param(
+        lambda: aiohttp.ClientOSError(104, "Connection reset by peer"),
+        id="connection-reset",
+    ),
+    pytest.param(lambda: aiohttp.ServerDisconnectedError(), id="disconnected"),
+    pytest.param(
+        lambda: aiohttp.ClientPayloadError("Response payload is not completed"),
+        id="payload",
+    ),
+    pytest.param(lambda: TimeoutError(), id="timeout"),
+    pytest.param(
+        lambda: _wrapped(aiohttp.ClientPayloadError("cut off")),
+        id="wrapped-payload",
+    ),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", _TRANSIENT_FAILURES)
+async def test_transient_failures_are_retried_when_the_request_is_repeatable(failure):
+    calls = {"n": 0}
+
+    async def fn():
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise failure()
+        return "ok"
+
+    with patch("asyncio.sleep", new=AsyncMock()):
+        result = await retry_on_throttle(
+            fn,
+            retryable_status_codes=TRANSIENT_STATUS_CODES,
+            retry_transport_errors=True,
+        )
+
+    assert result == "ok"
+    assert calls["n"] == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", _TRANSIENT_FAILURES)
+async def test_transient_failures_are_not_retried_by_default(failure):
+    calls = {"n": 0}
+
+    async def fn():
+        calls["n"] += 1
+        raise failure()
+
+    with patch("asyncio.sleep", new=AsyncMock()):
+        with pytest.raises(Exception):
+            await retry_on_throttle(fn)
+
+    assert calls["n"] == 1
+
+
+@pytest.mark.asyncio
+async def test_transient_failures_stop_after_the_attempt_budget():
+    calls = {"n": 0}
+
+    async def fn():
+        calls["n"] += 1
+        raise aiohttp.ServerDisconnectedError()
+
+    with patch("asyncio.sleep", new=AsyncMock()):
+        with pytest.raises(aiohttp.ServerDisconnectedError):
+            await retry_on_throttle(fn, retry_transport_errors=True, max_attempts=4)
+
+    assert calls["n"] == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        pytest.param(
+            lambda: aiohttp.ClientSSLError(MagicMock(), OSError("bad certificate")),
+            id="tls",
+        ),
+        pytest.param(lambda: _response_error(500), id="500"),
+        pytest.param(lambda: _response_error(404), id="404"),
+        pytest.param(lambda: ValueError("not a transport error"), id="value"),
+    ],
+)
+async def test_failures_about_the_request_are_never_retried(failure):
+    calls = {"n": 0}
+
+    async def fn():
+        calls["n"] += 1
+        raise failure()
+
+    with patch("asyncio.sleep", new=AsyncMock()):
+        with pytest.raises(Exception):
+            await retry_on_throttle(
+                fn,
+                retryable_status_codes=TRANSIENT_STATUS_CODES,
+                retry_transport_errors=True,
+            )
+
+    assert calls["n"] == 1
+
+
+class _Response:
+    def __init__(self, error: BaseException | None = None) -> None:
+        self._error = error
+
+    async def __aenter__(self):
+        if self._error:
+            raise self._error
+        return self
+
+    async def __aexit__(self, *_exc):
+        return False
+
+    def raise_for_status(self) -> None:
+        pass
+
+    async def json(self):
+        return {"value": ["ok"]}
+
+
+@pytest.mark.asyncio
+async def test_a_get_survives_a_gateway_error_and_a_reset_connection():
+    client = WrappedAiohttpClient("https://graph.microsoft.com")
+    await client.close()
+    client.client = MagicMock()
+    client.client.get = MagicMock(
+        side_effect=[
+            _Response(_response_error(502)),
+            _Response(aiohttp.ClientOSError(104, "Connection reset by peer")),
+            _Response(),
+        ]
+    )
+
+    with patch("asyncio.sleep", new=AsyncMock()):
+        result = await client.get("v1.0/drives/d/root/children")
+
+    assert result == {"value": ["ok"]}
+    assert client.client.get.call_count == 3
 
 
 def test_parse_retry_after_integer_seconds():

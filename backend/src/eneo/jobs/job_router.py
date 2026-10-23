@@ -1,13 +1,15 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
+from sse_starlette import EventSourceResponse
 
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
     endpoint_access,
 )
+from eneo.jobs.job_events import stream_job_events
 from eneo.jobs.job_models import JobPublic
 from eneo.main.container.container import Container
 from eneo.main.models import PaginatedResponse
@@ -36,6 +38,37 @@ async def get_running_jobs(
     jobs = await job_service.get_running_jobs()
 
     return protocol.to_paginated_response(jobs)
+
+
+@router.get(
+    "/events/",
+    description=(
+        "Stream the current user's job updates as server-sent events. Each "
+        "`job` event carries the job as GET /jobs/ returns it, sent whenever "
+        "its status changes; the connection stays open until the client closes it."
+    ),
+    responses=responses.streaming_response(models=[JobPublic]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason="The stream is bound to the authenticated user's own job channel.",
+)
+async def job_events(
+    request: Request,
+    container: Annotated[
+        Container,
+        Depends(get_container(with_user=True, transaction_scope="function")),
+    ],
+) -> EventSourceResponse:
+    # Authentication needs the database; the long-lived Redis stream only
+    # needs this user ID. Release the transaction before sending the body.
+    user = container.user()
+    return EventSourceResponse(
+        stream_job_events(user.id, request),
+        ping=15,
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get(

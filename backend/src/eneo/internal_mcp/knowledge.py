@@ -19,8 +19,10 @@ from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import EmbeddedResource, TextContent, TextResourceContents
 from pydantic import AnyUrl
 
+from eneo.info_blobs.info_blob import SourceMetadataEntry
 from eneo.info_blobs.info_blob_chunk_repo import InfoBlobChunkExcerpt
 from eneo.info_blobs.info_blob_repo import InfoBlobListing
+from eneo.info_blobs.source_metadata import format_source_metadata_lines
 from eneo.internal_mcp.constants import KNOWLEDGE_SERVER_NAME
 from eneo.internal_mcp.foundation import (
     build_ephemeral_server,
@@ -125,6 +127,7 @@ class _SearchResultChunk(NamedTuple):
     info_blob_title: str | None
     score: float | None
     context_for_chunk: int | None
+    info_blob_source_metadata: list[SourceMetadataEntry] = []
 
 
 class _ScopeNotResolved(Exception):
@@ -326,6 +329,9 @@ def _merge_adjacent_chunks(
                 info_blob_title=anchor.info_blob_title,
                 score=anchor.score,
                 context_for_chunk=None,
+                info_blob_source_metadata=getattr(
+                    anchor, "info_blob_source_metadata", []
+                ),
             )
         )
 
@@ -344,6 +350,9 @@ def _merge_adjacent_chunks(
                 info_blob_title=best_anchor.info_blob_title,
                 score=None,
                 context_for_chunk=best_anchor.chunk_no,
+                info_blob_source_metadata=getattr(
+                    best_anchor, "info_blob_source_metadata", []
+                ),
             )
         )
     return merged
@@ -427,22 +436,36 @@ def _chunk_resource(
     title: str,
     text: str,
     meta: dict | None = None,
+    source_metadata: Sequence[SourceMetadataEntry] = (),
 ) -> EmbeddedResource:
     """One chunk as citable content.
 
     Shared by search hits and overview excerpts so both cite identically. The
     document_id is repeated inside the text because the model never sees the
-    resource uri or its ``_meta``.
+    resource uri or its ``_meta``. Source properties (SharePoint columns) go
+    in the text header for the model and in ``_meta`` for the reference UI.
     """
+    header_lines = [f"Title: {title}"]
+    header_lines.extend(format_source_metadata_lines(source_metadata))
+    header_lines.append(f"document_id: {info_blob_id}")
+    resource_meta: dict[str, Any] = {
+        "title": title,
+        "info_blob_id": str(info_blob_id),
+        **(meta or {}),
+    }
+    if source_metadata:
+        resource_meta["source_metadata"] = [
+            entry.model_dump() for entry in source_metadata
+        ]
     return EmbeddedResource(
         type="resource",
         resource=TextResourceContents(
             uri=AnyUrl(f"eneo://info-blob/{info_blob_id}#chunk-{chunk_no}"),
             mimeType="text/plain",
-            text=f"Title: {title}\ndocument_id: {info_blob_id}\n\n{text}",
+            text="\n".join(header_lines) + f"\n\n{text}",
             # `title` is the generic meta key the reference UI reads for the
             # chip label (falls back to the uri host otherwise).
-            _meta={"title": title, "info_blob_id": str(info_blob_id), **(meta or {})},
+            _meta=resource_meta,
         ),
     )
 
@@ -539,6 +562,7 @@ def _search_result_content(query: str, chunks) -> list[TextContent | EmbeddedRes
                 title=chunk.info_blob_title or "Untitled source",
                 text=chunk.text,
                 meta=meta,
+                source_metadata=getattr(chunk, "info_blob_source_metadata", ()) or (),
             )
         )
     return content
@@ -704,6 +728,17 @@ async def search_knowledge(
             )
             return [TextContent(type="text", text=unresolved.message)]
 
+        # The assistant's reranker, if chosen and still allowed in its space;
+        # the model's own search query is what the reranker scores against.
+        rerank = None
+        if assistant.rerank_model_id is not None:
+            space = await container.space_service().get_space(assistant.space_id)
+            rerank = await container.rerank_service().spec_for_model(
+                assistant.rerank_model_id,
+                query=query,
+                security_classification=space.security_classification,
+            )
+
         semantic_chunks = await container.datastore().semantic_search(
             query,
             embedding_model=embedding_model,
@@ -713,6 +748,7 @@ async def search_knowledge(
             info_blob_ids=scope.info_blob_ids,
             num_chunks=fetch,
             autocut_cutoff=autocut_cutoff,
+            rerank=rerank,
         )
 
         fetched = len(semantic_chunks)

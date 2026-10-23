@@ -7,7 +7,7 @@ from eneo.collections.domain.collection import Collection
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.files.file_models import FilePublic
-from eneo.files.file_service import FileService
+from eneo.files.file_service import FileService, require_requested_files
 from eneo.main.exceptions import PydanticParseError
 from eneo.main.logging import get_logger
 from eneo.main.models import ModelId
@@ -52,10 +52,9 @@ class ServiceRunner:
             input, collections=cast(list[Collection], self.service.groups)
         )
 
-        effective_file_ids = file_ids or []
-        files = await self.file_service.get_files_by_ids(
-            [file.id for file in effective_file_ids]
-        )
+        effective_file_ids = [file.id for file in file_ids or []]
+        files = await self.file_service.get_files_by_ids(effective_file_ids)
+        require_requested_files(effective_file_ids, files)
 
         assert self.service.completion_model is not None, (
             "Service must have a completion model"

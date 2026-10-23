@@ -7,6 +7,7 @@
     CompletionModel,
     EmbeddingModel,
     ImageModel,
+    RerankModel,
     TranscriptionModel
   } from "@eneo/eneo-js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -14,9 +15,12 @@
   import { m } from "$lib/paraglide/messages";
   import { toastError } from "$lib/core/errors";
 
-  type ModelTypeKey = "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel";
+  type ModelTypeKey =
+    "completionModel" | "embeddingModel" | "transcriptionModel" | "imageModel" | "rerankModel";
 
-  type LockableModel = (CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel) & {
+  type LockableModel = (
+    CompletionModel | EmbeddingModel | TranscriptionModel | ImageModel | RerankModel
+  ) & {
     is_locked?: boolean | null | undefined;
     lock_reason?: string | null | undefined;
   };
@@ -38,6 +42,9 @@
     }
     if (type === "imageModel") {
       return eneo.models.update({ imageModel: { id: model.id }, update });
+    }
+    if (type === "rerankModel") {
+      return eneo.models.update({ rerankModel: { id: model.id }, update });
     }
     return eneo.models.update({ transcriptionModel: { id: model.id }, update });
   }

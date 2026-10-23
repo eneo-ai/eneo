@@ -362,6 +362,31 @@ def settings_singleton_restored(override_settings_for_session):
         )
 
 
+@pytest.fixture
+def sharepoint_webhook_configured():
+    """Webhook address and clientState as a deployment sets them.
+
+    Test settings carry neither; without them the subscription service skips
+    every subscription, which a local ``backend/.env`` would otherwise hide.
+    """
+    from eneo.main.config import get_settings
+
+    original = get_settings()
+    set_settings(
+        original.model_copy(
+            update={
+                "sharepoint_webhook_notification_url": (
+                    "https://eneo.example/api/v1/integrations/sharepoint/webhook/"
+                ),
+                "sharepoint_webhook_lifecycle_notification_url": None,
+                "sharepoint_webhook_client_state": "integration-test-client-state-0123456789",
+            }
+        )
+    )
+    yield
+    set_settings(original)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def override_settings_for_session(test_settings: Settings):
     """
@@ -426,6 +451,9 @@ def seed_default_tenant_user() -> Callable[[PostgresConnection], None]:
                 user_name="test_user",
                 user_email="test@example.com",
                 user_password=password,
+                # The baseline session must reach every endpoint; the forced
+                # first-login change is covered by its own tests.
+                password_change_required=False,
             )
 
     return seed
@@ -954,6 +982,7 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
         audience: str | None = None,
         expires_in: float | None = None,
         extra_claims: dict[str, object] | None = None,
+        auth_method=None,
     ) -> str:
         return original_create_token(
             self,
@@ -964,6 +993,7 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
             if expires_in is not None
             else test_settings.jwt_expiry_time,
             extra_claims=extra_claims,
+            auth_method=auth_method,
         )
 
     def patched_get_jwt_payload(

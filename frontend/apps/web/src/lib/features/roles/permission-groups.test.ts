@@ -49,6 +49,7 @@ describe("groupPermissions", () => {
 
     expect(groups.map((group) => group.id)).toEqual([
       "chat",
+      "functions",
       "build",
       "knowledge",
       "insight",
@@ -60,10 +61,9 @@ describe("groupPermissions", () => {
     expect(groups[0].permissions.map((p) => p.name)).toEqual([
       "personal_chat",
       "group_chats",
-      "shared_spaces",
-      "web_search",
-      "image_generation"
+      "shared_spaces"
     ]);
+    expect(groups[1].permissions.map((p) => p.name)).toEqual(["web_search", "image_generation"]);
   });
 
   test("labels come from the translation catalogue, not from the backend key", () => {
@@ -101,7 +101,8 @@ describe("summarizeGroups", () => {
     const summary = summarizeGroups(groups, ["personal_chat", "web_search", "admin"]);
 
     expect(summary.map(({ id, granted, total }) => [id, granted, total])).toEqual([
-      ["chat", 2, 5],
+      ["chat", 1, 3],
+      ["functions", 1, 2],
       ["build", 0, 6],
       ["knowledge", 0, 3],
       ["insight", 0, 2],

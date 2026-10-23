@@ -279,6 +279,52 @@ export function initTenantModels(client) {
         method: "delete",
         params: { path: { model_id: id } }
       });
+    },
+
+    /**
+     * Create a new Rerank Model.
+     * @param {import('../types/resources').TenantRerankModelCreate} model
+     * @throws {EneoError}
+     * */
+    createRerank: async (model) => {
+      const res = await client.fetch("/api/v1/admin/tenant-models/rerank/", {
+        method: "post",
+        requestBody: {
+          "application/json": model
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Update a Rerank Model.
+     * @param {{id: string}} model
+     * @param {import('../types/resources').TenantRerankModelUpdate} update
+     * @throws {EneoError}
+     * */
+    updateRerank: async ({ id }, update) => {
+      const res = await client.fetch("/api/v1/admin/tenant-models/rerank/{model_id}/", {
+        method: "put",
+        params: { path: { model_id: id } },
+        requestBody: {
+          "application/json": update
+        }
+      });
+
+      return res;
+    },
+
+    /**
+     * Delete a Rerank Model.
+     * @param {{id: string}} model
+     * @throws {EneoError}
+     * */
+    deleteRerank: async ({ id }) => {
+      await client.fetch("/api/v1/admin/tenant-models/rerank/{model_id}/", {
+        method: "delete",
+        params: { path: { model_id: id } }
+      });
     }
   };
 }

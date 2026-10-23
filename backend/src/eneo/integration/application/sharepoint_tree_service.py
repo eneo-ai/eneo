@@ -1,8 +1,10 @@
 from typing import TYPE_CHECKING, Any, Dict, Optional
 from uuid import UUID
 
+from eneo.integration.infrastructure.graph_errors import user_facing_sharepoint_failure
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
+from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
     from eneo.integration.application.sharepoint_auth_router import (
@@ -32,6 +34,91 @@ class SharePointTreeService:
         self.user_integration_service = user_integration_service
         self.sharepoint_auth_router = sharepoint_auth_router
         self.space_repo = space_repo
+
+    async def _connect(
+        self, user_integration_id: UUID, space_id: UUID
+    ) -> tuple[Any, Any, Any]:
+        """The connection's token, refresh callback and organisation token
+        provider after every authorization check."""
+        space = await self.space_repo.one(id=space_id)
+        connection = await self.user_integration_service.get_authorized_integration(
+            user_integration_id, space=space
+        )
+        user_integration = connection.integration
+        if user_integration.integration_type != "sharepoint":
+            raise BadRequestException("Integration is not a SharePoint connection")
+
+        space_type = (
+            "personal"
+            if space.is_personal()
+            else ("organization" if space.is_organization() else "tenant")
+        )
+        logger.info(
+            "Requesting token via SharePointAuthRouter",
+            extra={
+                "space_type": space_type,
+                "is_personal": space.is_personal(),
+                "user_integration_auth_type": user_integration.auth_type,
+            },
+        )
+
+        try:
+            token = await self.sharepoint_auth_router.get_token_for_integration(
+                connection=connection
+            )
+            assert token is not None
+            logger.info(
+                "Token acquired successfully",
+                extra={
+                    "has_access_token": bool(token.access_token),
+                    "token_id": str(token.id) if token.id else None,
+                    "token_type": token.token_type,
+                },
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to get authentication token: {type(e).__name__}: {str(e)}",
+                extra={
+                    "user_integration_id": str(user_integration_id),
+                    "space_id": str(space_id),
+                    "space_type": space_type,
+                },
+                exc_info=True,
+            )
+            raise (
+                user_facing_sharepoint_failure(e)
+                or BadRequestException(
+                    f"Failed to acquire SharePoint token for integration "
+                    f"{user_integration_id} in {space_type} space: {user_visible_error(e)}"
+                )
+            ) from e
+
+        # Create a callback function for token refresh (only used for user OAuth)
+        # Tenant app tokens are auto-refreshed by TenantAppAuthService
+        async def token_refresh_callback(token_id: Optional[UUID]) -> Dict[str, str]:
+            if token_id is None:
+                logger.debug(
+                    "Token refresh callback called for tenant app token (no-op)"
+                )
+                return {"access_token": token.access_token, "refresh_token": ""}
+
+            logger.debug(
+                "Refreshing user OAuth token", extra={"token_id": str(token_id)}
+            )
+            oauth_service = self.sharepoint_auth_router.oauth_token_service
+            refreshed_token = await oauth_service.refresh_and_update_token(token_id)
+            logger.info(
+                "Token refreshed successfully", extra={"token_id": str(token_id)}
+            )
+            return {
+                "access_token": refreshed_token.access_token,
+                "refresh_token": refreshed_token.refresh_token,
+            }
+
+        access_token_provider = self.sharepoint_auth_router.access_token_provider_for(
+            connection
+        )
+        return token, token_refresh_callback, access_token_provider
 
     async def get_folder_tree(
         self,
@@ -80,81 +167,14 @@ class SharePointTreeService:
             },
         )
 
-        space = await self.space_repo.one(id=space_id)
-        connection = await self.user_integration_service.get_authorized_integration(
-            user_integration_id, space=space
+        token, token_refresh_callback, access_token_provider = await self._connect(
+            user_integration_id, space_id
         )
-        user_integration = connection.integration
-        if user_integration.integration_type != "sharepoint":
-            raise BadRequestException("Integration is not a SharePoint connection")
-
-        space_type = (
-            "personal"
-            if space.is_personal()
-            else ("organization" if space.is_organization() else "tenant")
-        )
-        logger.info(
-            "Requesting token via SharePointAuthRouter",
-            extra={
-                "space_type": space_type,
-                "is_personal": space.is_personal(),
-                "user_integration_auth_type": user_integration.auth_type,
-            },
-        )
-
-        try:
-            token = await self.sharepoint_auth_router.get_token_for_integration(
-                connection=connection
-            )
-            assert token is not None
-            logger.info(
-                "Token acquired successfully",
-                extra={
-                    "has_access_token": bool(token.access_token),
-                    "token_id": str(token.id) if token.id else None,
-                    "token_type": token.token_type,
-                },
-            )
-        except Exception as e:
-            logger.error(
-                f"Failed to get authentication token: {type(e).__name__}: {str(e)}",
-                extra={
-                    "user_integration_id": str(user_integration_id),
-                    "space_id": str(space_id),
-                    "space_type": space_type,
-                },
-                exc_info=True,
-            )
-            raise BadRequestException(
-                f"Failed to acquire SharePoint token for integration {user_integration_id} "
-                f"in {space_type} space: {str(e)}"
-            ) from e
-
-        # Create a callback function for token refresh (only used for user OAuth)
-        # Tenant app tokens are auto-refreshed by TenantAppAuthService
-        async def token_refresh_callback(token_id: Optional[UUID]) -> Dict[str, str]:
-            if token_id is None:
-                logger.debug(
-                    "Token refresh callback called for tenant app token (no-op)"
-                )
-                return {"access_token": token.access_token, "refresh_token": ""}
-
-            logger.debug(
-                "Refreshing user OAuth token", extra={"token_id": str(token_id)}
-            )
-            oauth_service = self.sharepoint_auth_router.oauth_token_service
-            refreshed_token = await oauth_service.refresh_and_update_token(token_id)
-            logger.info(
-                "Token refreshed successfully", extra={"token_id": str(token_id)}
-            )
-            return {
-                "access_token": refreshed_token.access_token,
-                "refresh_token": refreshed_token.refresh_token,
-            }
 
         try:
             service = InfraSharePointTreeService(
-                token_refresh_callback=token_refresh_callback
+                token_refresh_callback=token_refresh_callback,
+                access_token_provider=access_token_provider,
             )
             logger.debug("Calling infrastructure service to fetch folder tree")
             tree_data = await service.get_folder_tree(
@@ -182,6 +202,56 @@ class SharePointTreeService:
                 },
                 exc_info=True,
             )
-            raise BadRequestException(
-                f"Failed to fetch SharePoint folder tree: {str(e)}"
+            raise (
+                user_facing_sharepoint_failure(e)
+                or BadRequestException(
+                    f"Failed to fetch SharePoint folder tree: {user_visible_error(e)}"
+                )
+            ) from e
+
+    async def search_library(
+        self,
+        user_integration_id: UUID,
+        space_id: UUID,
+        site_id: Optional[str] = None,
+        drive_id: Optional[str] = None,
+        text: str = "",
+        filters: Optional[dict[str, str]] = None,
+    ) -> dict[str, Any]:
+        """Files anywhere in a library matching free text and column filters.
+
+        Same authorization as browsing the tree; see ``get_folder_tree``.
+        """
+        if not site_id and not drive_id:
+            raise BadRequestException("Either site_id or drive_id must be provided")
+        from eneo.integration.infrastructure.preview_service.sharepoint_tree_service import (
+            SharePointTreeService as InfraSharePointTreeService,
+        )
+
+        token, token_refresh_callback, access_token_provider = await self._connect(
+            user_integration_id, space_id
+        )
+        try:
+            service = InfraSharePointTreeService(
+                token_refresh_callback=token_refresh_callback,
+                access_token_provider=access_token_provider,
+            )
+            return await service.search_library(
+                token=token,
+                site_id=site_id,
+                drive_id=drive_id,
+                text=text,
+                filters=filters,
+            )
+        except Exception as e:
+            logger.error(
+                f"Failed to search SharePoint library: {type(e).__name__}: {str(e)}",
+                extra={"site_id": site_id, "drive_id": drive_id},
+                exc_info=True,
+            )
+            raise (
+                user_facing_sharepoint_failure(e)
+                or BadRequestException(
+                    f"Failed to search SharePoint library: {user_visible_error(e)}"
+                )
             ) from e

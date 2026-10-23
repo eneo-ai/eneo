@@ -168,7 +168,9 @@
           ? m.model_identifier_placeholder_embedding()
           : modelType === "image"
             ? m.model_identifier_placeholder_image()
-            : m.model_identifier_placeholder_transcription()}
+            : modelType === "rerank"
+              ? m.model_identifier_placeholder_rerank()
+              : m.model_identifier_placeholder_transcription()}
     />
     {#if draft.name.trim() && !isSelfHosted}
       <button
@@ -377,7 +379,7 @@
       </Select.Root>
     </Field.Field>
   </div>
-{:else}
+{:else if modelType !== "rerank"}
   <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
     <Field.Field>
       <Field.Label for="input-cost" class="flex items-center gap-1.5">

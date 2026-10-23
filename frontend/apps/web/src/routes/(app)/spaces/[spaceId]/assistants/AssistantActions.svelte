@@ -31,11 +31,8 @@
     refreshCurrentSpace("applications");
   }
 
-  async function moveAssistant(
-    targetSpace: { id: string },
-    { moveResources }: { moveResources: boolean }
-  ) {
-    await eneo.assistants.transfer({ assistant, moveResources, targetSpace });
+  async function moveAssistant(targetSpace: { id: string }) {
+    await eneo.assistants.transfer({ assistant, targetSpace });
     refreshCurrentSpace();
   }
 
@@ -132,7 +129,7 @@
   bind:open={showMoveDialog}
   title={m.move_assistant()}
   submitLabel={m.move_assistant()}
-  resourcesOption={{ label: m.include_assistants_knowledge(), hint: m.move_assistant_hint() }}
+  hint={m.move_assistant_knowledge_hint()}
   onMove={moveAssistant}
 />
 

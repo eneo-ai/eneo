@@ -140,7 +140,9 @@
         ? m.model_type_embedding()
         : modelType === "image"
           ? m.model_type_image()
-          : m.model_type_transcription()
+          : modelType === "rerank"
+            ? m.model_type_rerank()
+            : m.model_type_transcription()
   );
 
   // --- Handlers ----------------------------------------------------------

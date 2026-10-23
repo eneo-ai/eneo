@@ -29,6 +29,9 @@ function createJobManager(data: { eneo: Eneo }) {
 
   let currentJobs: Map<string, Job> = new Map();
   const currentJobStore = writable<Job[]>([]);
+  // False until the server's list has arrived once: before that, a job missing
+  // from the store has not necessarily finished.
+  const jobsLoaded = writable(false);
 
   function addJob(job: Job) {
     currentJobs.set(job.id, job);
@@ -45,6 +48,7 @@ function createJobManager(data: { eneo: Eneo }) {
       jobs = await eneo.jobs.list();
       // Reset errors on success
       jobUpdateErrors = 0;
+      jobsLoaded.set(true);
     } catch (error) {
       console.error("JobManager: Could not get jobs from server", error);
       jobUpdateErrors += 1;
@@ -307,6 +311,7 @@ function createJobManager(data: { eneo: Eneo }) {
   return {
     state: {
       jobs: { subscribe: currentJobStore.subscribe },
+      jobsLoaded: { subscribe: jobsLoaded.subscribe },
       uploads: { subscribe: currentUploadsStore.subscribe },
       currentlyRunningJobs,
       showJobManagerPanel

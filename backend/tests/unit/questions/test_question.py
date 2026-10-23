@@ -71,3 +71,26 @@ def test_values_without_links_are_untouched():
 
     assert info.arguments == {"query": "token=abc in prose", "limit": 3}
     assert info.result == "plain text"
+
+
+def test_invalid_tool_text_is_visible_and_safe_to_persist_without_changing_inputs():
+    import json
+
+    from eneo.libs.json_text import contains_null_character
+
+    arguments = {"content": "1\x0025", "sheets": [{"rows": [["a\x00b"]]}]}
+    info = ToolCallInfo(
+        server_name="Documents",
+        tool_name="create_document",
+        arguments=arguments,
+        result_status="approved",
+        result="bad\x00text",
+        meta={"message": "bad\x00text"},
+        structured_content={"bad\x00key": "value"},
+    )
+    record = info.model_dump(mode="json")
+    assert not contains_null_character(record)
+    assert record["arguments"]["content"] == "1\\u000025"
+    assert json.loads(info.model_dump_json()) == record
+    assert contains_null_character(info.arguments)
+    assert arguments["content"] == "1\x0025"

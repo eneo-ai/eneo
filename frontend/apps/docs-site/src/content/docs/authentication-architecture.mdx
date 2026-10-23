@@ -69,6 +69,7 @@ Eneo-issued browser, internal MCP and module tokens share one identity contract:
 | `user_id` | Immutable UUID of the authenticated Eneo account |
 | `tenant_id` | UUID of the account's organization when the token was issued |
 | `credential_version` | Required integer matching the account's current credential version |
+| `auth_method` | `password` when the session started with the local password login; absent for federated and exchanged sessions |
 | `iss`, `aud`, `iat`, `exp` | Required issuer, audience, issue time and expiry |
 | `sub`, `username` | Email and optional display name; never used to select the account |
 
@@ -94,6 +95,72 @@ by username and must not remain in a rolling deployment. No account rename,
 account merge or database migration is needed for this change. A recovery build
 must retain the identity validation; rolling back to username-based
 authentication reintroduces the vulnerability.
+
+### Local Password Lifecycle
+
+Accounts that sign in with a password stored in Eneo follow the tenant's
+password lifecycle policy. The decision is owned by one module,
+`eneo/users/password_lifecycle.py`; the admission gate in
+`authentication/endpoint_access.py` and the `password_status` field of
+`GET /api/v1/users/me/` both call it, so they cannot disagree.
+
+Only a session whose `auth_method` claim is `password` is ever affected.
+A session that signed in through an identity provider, a module token, an
+internal MCP token or an API key carries no such claim and is never blocked,
+even when the account also keeps an older local password. Accounts
+provisioned through OIDC or SCIM have no local password at all.
+
+A password set by someone other than the account (generated in
+**Admin → Users**, set through the sysadmin API, or the `DEFAULT_USER_PASSWORD`
+seed) is always a one-time password: the account must choose its own at its
+next password sign-in. This is not a tenant setting. Only two deployment-level
+exceptions keep a set password usable: the sysadmin API's
+`password_change_required: false` (for service accounts) and
+`DEFAULT_USER_PASSWORD_CHANGE_REQUIRED=false` for the seed (for test stacks).
+Neither exempts the password from `max_age_days`.
+
+| Rule | Default | Effect |
+|------|---------|--------|
+| `max_age_days` | unset | A local password must be replaced after this many days. The age counts from the last change; passwords that existed before the lifecycle was introduced count from that upgrade. |
+
+Administrators edit the policy under **Admin → Users → Password policy**
+(`GET`/`PATCH /api/v1/admin/password-policy`).
+
+Administrators never type a password in **Admin → Users**. Creating an
+account, or choosing **Generate a new password** for an existing one, has the
+browser generate a random password that meets the local password policy from
+`GET /api/v1/users/password-policy/`, so a change to that policy needs no change
+in the frontend. The password is shown once after saving, for the administrator
+to hand over.
+
+API-key integrations are unaffected by this policy and by local password
+changes; their existing key permissions, expiry and revocation rules still
+apply. An integration that obtains a bearer token through the password login
+is subject to the policy and may receive `403/9070`. For unattended use,
+prefer a service-owned API key with the permissions and scopes the integration
+needs, provided its endpoints support service identities.
+
+A password session that must replace its password still signs in, so the
+account can do exactly that. Every other endpoint answers `403` with error
+code `9070` (`password_change_required`) until the password has been replaced
+through `POST /api/v1/users/me/password/`, which stays reachable together with
+`GET /api/v1/users/me/`, the password policy and session invalidation.
+`GET /api/v1/users/me/` reports the state as `password_status`:
+`change_required` (true only when the current session is blocked), the
+`reason` (`admin_set` or `expired`), `changed_at` and `expires_at`. The web
+app sends such a session to `/password-change`, where the user enters the
+one-time or expired password as the current password. The change bumps the
+credential version, so the user signs in again with the new password.
+
+Two deliberate exceptions: an administrator who sets a new password on their
+own row in **Admin → Users** keeps it, because the account chose it; and the
+deployment administrator's `POST /api/v1/sysadmin/users/{id}/access-token/`
+mints a session without the claim, so support access is never blocked by a
+pending change. After upgrading to this version, passwords that already
+exist, including an already seeded administrator's, are stamped with the
+upgrade time and stay usable; every password an administrator sets from then
+on is one-time. On a fresh installation the seeded password is one-time. Existing sessions and deployments that still issue tokens without
+the claim keep working during a rolling upgrade.
 
 ### Signed State Token
 
@@ -434,9 +501,9 @@ Global OIDC uses `OIDC_ALLOWED_DOMAINS` (JSON array, default `[]`); per-tenant f
 | Existing active member of the tenant | Sign in, subject to any configured domain restriction. No new email-verification requirement is applied. |
 | Existing account in another tenant, or inactive/removed account | `403`; no account creation or reactivation. |
 | No account, `tenant.provisioning: false` (default) | `403`; provision through SCIM or administration. |
-| No account, `tenant.provisioning: true` | Creation requires a non-empty domain allowlist, a matching domain and the ID token's boolean `email_verified: true` for the selected address. |
+| No account, `tenant.provisioning: true` | Creation requires a non-empty domain allowlist, a matching domain and the ID token's `email_verified: true` for the selected address. |
 
-`FederatedIdentity.from_claims` receives validated token claims and preserves only a valid email address and its verification status. Values such as `"true"` or `1` do not count as verification. When email is selected through a custom claims mapping, standard `email_verified` only authorizes JIT if the selected address equals the standard `email` claim.
+`FederatedIdentity.from_claims` receives validated token claims and preserves only a valid email address and its verification status. OIDC defines `email_verified` as a boolean; as a compatibility deviation for IdPs that can only emit text claims, the strings `"true"` (case-insensitive) and `"1"` and the number `1` also count as verification. Missing claims and all other values do not. When email is selected through a custom claims mapping, standard `email_verified` only authorizes JIT if the selected address equals the standard `email` claim.
 
 Provisioning is a per-tenant flag set through the sysadmin API (`POST /api/v1/sysadmin/tenants/{id}/`). Keep it `false` when SCIM manages membership. A SCIM token does not implicitly change this setting. SCIM or an administrator can restore an account; login cannot.
 

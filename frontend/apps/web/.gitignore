@@ -17,5 +17,8 @@ vite.config.ts.timestamp-*
 /playwright-report
 /playwright/.auth
 
+# Vitest browser-mode failure attachments (screenshots written on test failure)
+/.vitest-attachments
+
 # Coverage reports
 /coverage

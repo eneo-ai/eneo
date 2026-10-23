@@ -8,6 +8,9 @@ import pytest
 from eneo.integration.application.sharepoint_auth_router import SharePointAuthRouter
 from eneo.integration.domain.entities.oauth_token import SharePointToken
 from eneo.integration.domain.value_objects import IntegrationType
+from eneo.integration.infrastructure.auth_service.org_token_provider import (
+    OrgTokenProvider,
+)
 from eneo.main.exceptions import BadRequestException
 from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
 
@@ -30,10 +33,12 @@ def token_router(integration_access):
         "refresh_token": "rotated-refresh",
     }
     return SharePointAuthRouter(
-        tenant_app_service=AsyncMock(),
-        tenant_app_auth_service=app_auth,
         oauth_token_service=oauth,
-        service_account_auth_service=account_auth,
+        org_token_provider=OrgTokenProvider(
+            tenant_app_repo=AsyncMock(),
+            tenant_app_auth_service=app_auth,
+            service_account_auth_service=account_auth,
+        ),
     )
 
 
@@ -47,8 +52,7 @@ async def test_oauth_selection_never_switches_to_organization_credentials(
     token = await token_router.get_token_for_integration(connection)
     assert token.access_token == "personal-token"
     assert token.user_integration.id == case.integration.id
-    token_router.tenant_app_auth_service.get_access_token.assert_not_awaited()
-    token_router.tenant_app_service.get_active_app_for_tenant.assert_not_awaited()
+    token_router.org_token_provider.tenant_app_auth_service.get_access_token.assert_not_awaited()
 
 
 async def test_oauth_selection_in_shared_space_acquires_no_credentials(
@@ -65,7 +69,7 @@ async def test_oauth_selection_in_shared_space_acquires_no_credentials(
             case.integration.id, space=case.space
         )
     token_router.oauth_token_service.get_oauth_token_by_user_integration.assert_not_awaited()
-    token_router.tenant_app_auth_service.get_access_token.assert_not_awaited()
+    token_router.org_token_provider.tenant_app_auth_service.get_access_token.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -90,7 +94,9 @@ async def test_organization_selection_uses_its_approved_app(
     token_router.oauth_token_service.get_oauth_token_by_user_integration.assert_not_awaited()
     if auth_method == "service_account":
         assert case.app.service_account_refresh_token == "rotated-refresh"
-        token_router.tenant_app_service.update.assert_awaited_once_with(case.app)
+        token_router.org_token_provider.tenant_app_repo.update.assert_awaited_once_with(
+            case.app
+        )
 
 
 async def test_missing_oauth_token_is_an_explicit_failure(
@@ -102,7 +108,7 @@ async def test_missing_oauth_token_is_an_explicit_failure(
     token_router.oauth_token_service.get_oauth_token_by_user_integration.return_value = None
     with pytest.raises(ValueError, match="No OAuth token"):
         await token_router.get_token_for_integration(connection)
-    token_router.tenant_app_auth_service.get_access_token.assert_not_awaited()
+    token_router.org_token_provider.tenant_app_auth_service.get_access_token.assert_not_awaited()
 
 
 @pytest.mark.parametrize("auth_method", ["tenant_app", "service_account"])
@@ -113,8 +119,8 @@ async def test_failed_organization_token_never_switches_identity(
     case.use_organization_connection()
     case.app.auth_method = auth_method
     connection = await case.service.get_authorized_integration(case.integration.id)
-    app_token = token_router.tenant_app_auth_service.get_access_token
-    service_token = token_router.service_account_auth_service.refresh_access_token
+    app_token = token_router.org_token_provider.tenant_app_auth_service.get_access_token
+    service_token = token_router.org_token_provider.service_account_auth_service.refresh_access_token
     selected, other = (
         (service_token, app_token)
         if auth_method == "service_account"

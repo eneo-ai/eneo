@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import (
@@ -7,7 +7,9 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -15,6 +17,7 @@ from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.authentication.signed_urls import redact_reference_tokens
 from eneo.files.file_models import File, FileMetadata, FilePublic
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobPublicNoText
+from eneo.libs.json_text import escape_null_characters
 from eneo.logging.logging import (
     LoggingDetails,
     LoggingDetailsInDB,
@@ -49,6 +52,29 @@ class QuestionsFiles(BaseModel):
     file: FileMetadata
 
     model_config = ConfigDict(from_attributes=True)
+
+
+MESSAGE_FEEDBACK_TEXT_MAX_LENGTH = 2000
+
+
+class MessageFeedback(BaseModel):
+    """A rating of one answer: 1 (good) or -1 (bad), with an optional comment."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    value: Literal[-1, 1]
+    text: Optional[str] = Field(
+        default=None,
+        max_length=MESSAGE_FEEDBACK_TEXT_MAX_LENGTH,
+        description="Optional comment on the answer. Blank text is stored as null.",
+    )
+
+    @field_validator("text", mode="before")
+    @classmethod
+    def _blank_text_is_none(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip() or None
+        return value
 
 
 class McpToolReferencePublic(InDB):
@@ -92,7 +118,7 @@ class ToolCallInfo(BaseModel):
     # such rows fall back to text-only replay (the model won't see the tool use).
     result: Optional[str] = None
 
-    @field_validator("arguments", "result", mode="after")
+    @field_validator("arguments", "result", "structured_content", mode="after")
     @classmethod
     def _redact_reference_tokens(cls, value: Any) -> Any:
         """Strip signed download tokens from persisted and displayed tool data.
@@ -104,6 +130,12 @@ class ToolCallInfo(BaseModel):
         panel, the tool-result endpoint, provider replay).
         """
         return redact_reference_tokens(value)
+
+    @model_serializer(mode="wrap")
+    def _storage_safe_record(self, handler: SerializerFunctionWrapHandler):
+        # Failed/pending calls must remain persistable too. Do not mutate the
+        # arguments: execution rejects invalid text and lets the model retry.
+        return escape_null_characters(handler(self))
 
     # The prefixed tool identifier the LLM sees when calling (e.g.
     # `server__tool`). Needed for replay so the tool_use name matches the
@@ -122,6 +154,9 @@ class ToolCallInfo(BaseModel):
     # on rows persisted before this field existed; clients then fall back to
     # the server name.
     is_internal: Optional[bool] = None
+    # Whether the call ran on a server built into Eneo (the bundled tool
+    # runtime). None on rows persisted before this field existed.
+    is_bundled: Optional[bool] = None
     # The tool result's MCP `_meta`, as sent by the server (size-capped by the
     # client). Model-backed tools report their own usage here under the
     # OpenTelemetry GenAI attribute names, e.g. `gen_ai.usage.input_tokens`,
@@ -132,6 +167,15 @@ class ToolCallInfo(BaseModel):
     # model a fresh reference URL per image so it can pass the image back to
     # an image tool. Absent on rows persisted before this field existed.
     generated_file_ids: Optional[list[UUID]] = None
+    # The tool result's MCP `structuredContent`, kept only for a call whose
+    # tool has an approved MCP App view, which renders from it. Like `result`
+    # it is left out of conversation payloads and read through the tool-result
+    # endpoint; it is never replayed to the model.
+    structured_content: Optional[dict[str, Any]] = None
+    # The approved MCP App view of the tool when the call was made, as
+    # `{"view_id", "mcp_server_id", "ui"}`. Clients show that stored view for
+    # the call; a tool the view calls runs on that server.
+    app_view: Optional[dict[str, Any]] = None
 
 
 class QuestionAdd(QuestionBase):
@@ -175,6 +219,7 @@ class Question(QuestionAdd, InDB):
     questions_files: list[QuestionsFiles] = []
     mcp_tool_references: list[McpToolReferencePublic] = []
     tool_calls: Optional[list[ToolCallInfo]] = None
+    feedback: Optional[MessageFeedback] = None
 
     def attach_hydrated_files(self, files_by_id: dict[UUID, File]) -> None:
         """Attach byte-complete Files after the persistent row is authorized."""
@@ -201,6 +246,13 @@ class Message(QuestionBase, InDB):
     tool_calls: list[ToolCallInfo] = []
     skill_provenance: Optional[list[SkillExecutionReference]] = None
     reasoning: Optional[str] = None
+    feedback: Optional[MessageFeedback] = Field(
+        default=None,
+        description=(
+            "The conversation owner's rating of this answer; null when it is not "
+            "rated. Separate from the conversation-level feedback."
+        ),
+    )
     # Cumulative turn usage across provider requests. Historical rows from
     # before measurement was introduced use 0 for unmeasured usage.
     num_tokens_question: int = Field(

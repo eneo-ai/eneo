@@ -7,8 +7,10 @@ import pytest
 import eneo.sessions.session_service as session_service_module
 from eneo.assistants.api.assistant_models import AssistantSparse
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
+from eneo.questions.question import MessageFeedback
 from eneo.sessions.session import SessionInDB, SessionUpdate
 from eneo.sessions.session_service import SessionService
+from eneo.sessions.sessions_repo import OwnedChatPartner
 from eneo.skills.domain.skill import (
     SkillActivationEvidenceV1,
     SkillExecutionReference,
@@ -189,3 +191,84 @@ async def test_question_placeholder_persists_selected_skill_revision(
     assert question_add.skill_provenance == [reference]
     assert question_add.skill_activation == activation
     assert result == question_id
+
+
+async def test_message_partner_hides_whether_a_foreign_message_exists(
+    service: SessionService,
+):
+    service.session_repo.get_owned_message_partner.return_value = None
+
+    with pytest.raises(NotFoundException, match="Message not found"):
+        await service.get_message_partner(session_id=uuid4(), message_id=uuid4())
+
+
+async def test_message_partner_is_resolved_for_the_request_principal(
+    service: SessionService,
+):
+    session_id, message_id = uuid4(), uuid4()
+    partner = OwnedChatPartner(assistant_id=uuid4(), group_chat_id=None)
+    service.session_repo.get_owned_message_partner.return_value = partner
+
+    resolved = await service.get_message_partner(
+        session_id=session_id, message_id=message_id
+    )
+
+    assert resolved == partner
+    service.session_repo.get_owned_message_partner.assert_awaited_once_with(
+        session_id=session_id,
+        message_id=message_id,
+        tenant_id=TEST_USER.tenant_id,
+        user_id=TEST_USER.id,
+        api_key_id=None,
+    )
+
+
+async def test_set_message_feedback_records_who_rated(service: SessionService):
+    session_id, message_id = uuid4(), uuid4()
+    feedback = MessageFeedback(value=1, text="Tydligt")
+    service.session_repo.set_message_feedback.return_value = feedback
+
+    stored = await service.set_message_feedback(
+        session_id=session_id, message_id=message_id, feedback=feedback
+    )
+
+    assert stored == feedback
+    service.session_repo.set_message_feedback.assert_awaited_once_with(
+        session_id=session_id,
+        message_id=message_id,
+        tenant_id=TEST_USER.tenant_id,
+        user_id=TEST_USER.id,
+        api_key_id=None,
+        feedback=feedback,
+    )
+    # The conversation-level rating is a separate record and stays untouched.
+    service.session_repo.add_feedback.assert_not_awaited()
+
+
+async def test_set_message_feedback_on_a_foreign_message_is_not_found(
+    service: SessionService,
+):
+    service.session_repo.set_message_feedback.return_value = None
+
+    with pytest.raises(NotFoundException, match="Message not found"):
+        await service.set_message_feedback(
+            session_id=uuid4(),
+            message_id=uuid4(),
+            feedback=MessageFeedback(value=-1),
+        )
+
+
+async def test_clear_message_feedback_is_scoped_to_the_principal(
+    service: SessionService,
+):
+    session_id, message_id = uuid4(), uuid4()
+
+    await service.clear_message_feedback(session_id=session_id, message_id=message_id)
+
+    service.session_repo.delete_message_feedback.assert_awaited_once_with(
+        session_id=session_id,
+        message_id=message_id,
+        tenant_id=TEST_USER.tenant_id,
+        user_id=TEST_USER.id,
+        api_key_id=None,
+    )
