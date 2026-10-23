@@ -19,6 +19,7 @@ import logging
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from enum import StrEnum
+from typing import TypeVar
 
 import anyio
 
@@ -99,6 +100,7 @@ class FlowOutboundTraffic(StrEnum):
 
     HTTP = "Flow HTTP"
     MCP_TOOL_CALL = "Flow MCP tool call"
+    LIVE_TRANSCRIPTION = "Flow live transcription"
 
 
 class FlowDestinationPolicy:
@@ -143,6 +145,41 @@ class Deadline:
     def share(self, attempts_left: int) -> float | None:
         remaining = self.remaining()
         return None if remaining is None else remaining / max(attempts_left, 1)
+
+
+# More attempts would only spend the shared deadline on hosts that are down.
+MAX_CONNECT_ATTEMPTS = 3
+
+
+ConnectionT = TypeVar("ConnectionT")
+
+
+async def connect_to_first_answering(
+    addresses: Sequence[IPAddress],
+    *,
+    deadline: Deadline,
+    connect: Callable[[IPAddress, float | None], Awaitable[ConnectionT]],
+    retry_on: tuple[type[Exception], ...],
+    timed_out: Callable[[], Exception],
+) -> ConnectionT:
+    """Connect to the first vetted address that answers.
+
+    At most ``MAX_CONNECT_ATTEMPTS`` addresses share the deadline, each its
+    fair part of what remains. A failure in ``retry_on`` tries the next one;
+    when all fail the last failure is raised, and ``timed_out()`` when the time
+    ran out before any attempt failed.
+    """
+    attempts = addresses[:MAX_CONNECT_ATTEMPTS]
+    failure: Exception | None = None
+    for index, address in enumerate(attempts):
+        budget = deadline.share(len(attempts) - index)
+        if budget is not None and budget <= 0:
+            break
+        try:
+            return await connect(address, budget)
+        except retry_on as exc:
+            failure = exc
+    raise failure or timed_out()
 
 
 Resolver = Callable[[str, int], Awaitable[Sequence[str]]]

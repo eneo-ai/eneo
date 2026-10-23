@@ -13,9 +13,21 @@ from dataclasses import dataclass, field
 from typing import Final, cast
 
 from fastapi import WebSocket, WebSocketDisconnect
-from websockets.asyncio.client import ClientConnection, connect
+from websockets.asyncio.client import ClientConnection
+from websockets.asyncio.client import connect as websocket_connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
+from websockets.uri import parse_uri
 
+from eneo.flows.runtime.egress.policy import (
+    Deadline,
+    DestinationRefused,
+    DestinationUnresolvable,
+    FlowDestinationPolicy,
+    FlowOutboundTraffic,
+    connect_to_first_answering,
+    vet_destination,
+)
+from eneo.flows.runtime.egress.resolver import flow_name_resolver
 from eneo.flows.runtime.live_transcription.repository import persist_live_transcript
 from eneo.flows.runtime.live_transcription.segments import TimedPieces
 from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionGrant
@@ -46,7 +58,22 @@ UPSTREAM_MAX_MESSAGE_BYTES: Final = 8 * 2**20
 _RETRYABLE_UPSTREAM_CODES: Final = frozenset(
     {"capacity_exceeded", "falling_behind", "finalize_timeout", "model_loading"}
 )
+# The model server is a tenant administrator's provider endpoint, often a speech
+# service on the organisation's own network: private addresses are allowed, but
+# never loopback, link-local or cloud metadata (decided 2026-10-12).
+UPSTREAM_DESTINATION_POLICY = FlowDestinationPolicy(
+    allow_private_networks=True, traffic=FlowOutboundTraffic.LIVE_TRANSCRIPTION
+)
 logger = get_logger(__name__)
+
+
+class UpstreamConnect(websocket_connect):
+    """Opens the model server's session without following a redirect, as the
+    flow egress never does: a redirect would leave the vetted address. The
+    redirect answer then fails the handshake like any other non-101 answer."""
+
+    def process_redirect(self, exc: Exception) -> Exception | str:
+        return exc
 
 
 class LiveSessionEnded(Exception):
@@ -107,14 +134,17 @@ async def relay_live_session(
     """Run the session to its end and return the outcome for the log line."""
     headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
-        upstream = await connect(
-            upstream_url,
-            additional_headers=headers,
-            open_timeout=UPSTREAM_OPEN_TIMEOUT_SECONDS,
-            close_timeout=UPSTREAM_CLOSE_TIMEOUT_SECONDS,
-            max_size=UPSTREAM_MAX_MESSAGE_BYTES,
+        upstream = await _connect_upstream(upstream_url, headers)
+    except DestinationRefused:
+        await send_error(
+            client,
+            LiveSessionEnded(
+                "model_unavailable",
+                "The transcription server's address is not allowed.",
+            ),
         )
-    except (OSError, TimeoutError, InvalidHandshake):
+        return "model_unavailable"
+    except (OSError, TimeoutError, InvalidHandshake, DestinationUnresolvable):
         await send_error(
             client,
             LiveSessionEnded(
@@ -153,6 +183,44 @@ async def relay_live_session(
             return ended.code
     finally:
         await _close_upstream(upstream)
+
+
+async def _connect_upstream(
+    upstream_url: str, headers: dict[str, str]
+) -> ClientConnection:
+    """Open the session at an address the policy vetted, as the flow egress does.
+
+    The name is resolved once and only a vetted IP literal is connected to, so a
+    DNS answer that changes in between cannot reach a refused address. The URL is
+    kept, so the Host header and the TLS name are the server's own. Proxy
+    environment variables are ignored: a proxy would connect for us, and only
+    the proxy could be vetted.
+    """
+    uri = parse_uri(upstream_url)
+    deadline = Deadline(UPSTREAM_OPEN_TIMEOUT_SECONDS)
+    addresses = await vet_destination(
+        uri.host,
+        uri.port,
+        policy=UPSTREAM_DESTINATION_POLICY,
+        deadline=deadline,
+        resolver=flow_name_resolver(),
+    )
+    return await connect_to_first_answering(
+        addresses,
+        deadline=deadline,
+        connect=lambda address, budget: UpstreamConnect(
+            upstream_url,
+            host=str(address),
+            port=uri.port,
+            proxy=None,
+            additional_headers=headers,
+            open_timeout=budget,
+            close_timeout=UPSTREAM_CLOSE_TIMEOUT_SECONDS,
+            max_size=UPSTREAM_MAX_MESSAGE_BYTES,
+        ),
+        retry_on=(OSError, TimeoutError),
+        timed_out=TimeoutError,
+    )
 
 
 async def _close_upstream(upstream: ClientConnection) -> None:

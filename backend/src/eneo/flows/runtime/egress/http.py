@@ -31,14 +31,12 @@ from eneo.flows.runtime.egress.policy import (
     DestinationRefused,
     FlowDestinationPolicy,
     Resolver,
+    connect_to_first_answering,
     vet_destination,
 )
 from eneo.flows.runtime.egress.resolver import flow_name_resolver
 
 logger = logging.getLogger(__name__)
-
-# More attempts would only spend the shared deadline on hosts that are down.
-MAX_CONNECT_ATTEMPTS = 3
 
 _PROXY_ENVIRONMENT_VARIABLES = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY")
 _proxy_environment_warned = False
@@ -87,24 +85,20 @@ class VettedNetworkBackend(httpcore.AsyncNetworkBackend):
             raise httpcore.ConnectTimeout(
                 f"Resolving {host} exceeded the connect timeout"
             ) from exc
-        attempts = addresses[:MAX_CONNECT_ATTEMPTS]
-        failure: httpcore.ConnectError | httpcore.ConnectTimeout | None = None
-        for index, address in enumerate(attempts):
-            budget = deadline.share(len(attempts) - index)
-            if budget is not None and budget <= 0:
-                break
-            try:
-                return await self._connector.connect_tcp(
-                    str(address),
-                    port,
-                    timeout=budget,
-                    local_address=local_address,
-                    socket_options=socket_options,
-                )
-            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
-                failure = exc
-        raise failure or httpcore.ConnectTimeout(
-            f"Connecting to {host} exceeded the connect timeout"
+        return await connect_to_first_answering(
+            addresses,
+            deadline=deadline,
+            connect=lambda address, budget: self._connector.connect_tcp(
+                str(address),
+                port,
+                timeout=budget,
+                local_address=local_address,
+                socket_options=socket_options,
+            ),
+            retry_on=(httpcore.ConnectError, httpcore.ConnectTimeout),
+            timed_out=lambda: httpcore.ConnectTimeout(
+                f"Connecting to {host} exceeded the connect timeout"
+            ),
         )
 
     async def connect_unix_socket(

@@ -17,6 +17,20 @@ from dataclasses import dataclass, field
 
 from websockets.asyncio.server import ServerConnection, serve
 
+from eneo.flows.runtime.egress.policy import FlowDestinationPolicy
+from eneo.flows.runtime.live_transcription import relay
+from eneo.main.destination_policy import IPAddress
+
+
+class AnyAddress(FlowDestinationPolicy):
+    """Lets the relay reach a stand-in on loopback, which its policy refuses."""
+
+    def __init__(self) -> None:
+        super().__init__(allow_private_networks=True)
+
+    def allows(self, ip: IPAddress) -> bool:
+        return True
+
 
 @dataclass
 class FakeRealtimeServer:
@@ -146,7 +160,12 @@ async def fake_realtime_server(
         finally:
             state.closed.set()
 
-    async with serve(handler, "127.0.0.1", 0, close_timeout=0.5) as server:
-        port = next(iter(server.sockets)).getsockname()[1]
-        state.url = f"ws://127.0.0.1:{port}/v1/realtime"
-        yield state
+    policy = relay.UPSTREAM_DESTINATION_POLICY
+    relay.UPSTREAM_DESTINATION_POLICY = AnyAddress()
+    try:
+        async with serve(handler, "127.0.0.1", 0, close_timeout=0.5) as server:
+            port = next(iter(server.sockets)).getsockname()[1]
+            state.url = f"ws://127.0.0.1:{port}/v1/realtime"
+            yield state
+    finally:
+        relay.UPSTREAM_DESTINATION_POLICY = policy

@@ -15,12 +15,15 @@ import pytest
 
 from eneo.flows.runtime.egress import http as egress_http
 from eneo.flows.runtime.egress.http import (
-    MAX_CONNECT_ATTEMPTS,
     VettedAsyncTransport,
     VettedNetworkBackend,
     build_http_client,
 )
-from eneo.flows.runtime.egress.policy import DestinationRefused, FlowDestinationPolicy
+from eneo.flows.runtime.egress.policy import (
+    MAX_CONNECT_ATTEMPTS,
+    DestinationRefused,
+    FlowDestinationPolicy,
+)
 from tests.unittests.flows.egress.egress_test_support import (
     FixedResolver,
     SpyConnector,
