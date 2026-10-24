@@ -1028,6 +1028,9 @@ class FlowRunExecutor:
             flow_id=flow_id,
             reviewed_results=reviewed_results(payloads, steps=steps),
         )
+        # The state holds what the steps read of these rows; the full rows
+        # would otherwise stay alive for the rest of the run.
+        del persisted_results, payloads
         try:
             await self._validate_assistant_snapshots(
                 steps=steps,
@@ -1099,6 +1102,8 @@ class FlowRunExecutor:
             level=evidence_classification_level(step_output_levels),
             has_completed_steps=bool(state.completed_by_order),
         )
+        # Each step reads the run again; this copy, with its input, is done.
+        del run
         for step in sorted(steps, key=lambda item: item.step_order):
             latest_run = await self.flow_run_repo.get(
                 run_id=run_id, tenant_id=tenant_id, flow_id=flow_id
@@ -1148,6 +1153,10 @@ class FlowRunExecutor:
                     claim_resolution=claim_resolution,
                     step_id=step.step_id,
                 )
+                # The re-read row lives on in the decision only, which ends
+                # with this step too: a completed row must not outlast its
+                # projection into the state.
+                del existing, claim_resolution
                 if postclaim_decision.action == "return":
                     return postclaim_decision.result or {
                         "status": "skipped",
@@ -1176,8 +1185,10 @@ class FlowRunExecutor:
                     and postclaim_decision.completed_result is not None
                 ):
                     state.append_completed(postclaim_decision.completed_result)
+                    del postclaim_decision
                     continue
                 if postclaim_decision.action == "continue":
+                    del postclaim_decision
                     continue
 
             claimed_result = cast(FlowStepResult, claimed)
@@ -1337,6 +1348,12 @@ class FlowRunExecutor:
             step_result = persisted_step_result
 
             state.append_completed(step_result)
+            # Only the delivery intents are read past this point; the step's
+            # output and the rows built and saved for it would otherwise stay
+            # alive through the next step.
+            delivery_intents = success_plan.delivery_intents
+            del execution_result, output, success_plan, step_result
+            del persisted_step_result
 
             review_policy = step.review_policy
             if review_policy is not None:
@@ -1350,8 +1367,8 @@ class FlowRunExecutor:
                     attempt_no=attempt_no,
                 )
 
-            if success_plan.delivery_intents:
-                for delivery_intent in success_plan.delivery_intents:
+            if delivery_intents:
+                for delivery_intent in delivery_intents:
                     await self.webhook_delivery_repo.insert_pending_delivery(
                         flow_id=flow_id,
                         tenant_id=tenant_id,

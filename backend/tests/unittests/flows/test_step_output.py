@@ -16,6 +16,7 @@ from eneo.flows.domain.step_output import (
     interpret_rejected_output,
     interpret_step_text,
     sample_rejected_output,
+    utf8_prefix,
 )
 
 
@@ -197,3 +198,53 @@ def test_interpret_step_text_rejects_malformed_persisted_metadata(
 ) -> None:
     with pytest.raises(StepOutputMetadataError):
         interpret_step_text(payload)
+
+
+def _reencoded_utf8_prefix(text: str, *, max_bytes: int) -> str:
+    """The prefix as utf8_prefix always computed it: encode, slice, decode."""
+    return text.encode("utf-8")[: max(0, max_bytes)].decode("utf-8", errors="ignore")
+
+
+_UTF8_PREFIX_TEXTS = (
+    "",
+    "plain ascii text",
+    "åäö",
+    "a€b",
+    "😀 end",
+    "x😀y€zå",
+    "lone \ud800 surrogate",
+    "\udfff",
+)
+
+
+@pytest.mark.parametrize("text", _UTF8_PREFIX_TEXTS)
+def test_utf8_prefix_keeps_values_and_errors_at_every_byte_limit(text: str) -> None:
+    try:
+        size = len(text.encode("utf-8"))
+    except UnicodeEncodeError:
+        size = len(text) * 3
+    for max_bytes in (-5, -1, *range(size + 3)):
+        try:
+            expected: str | type[BaseException] = _reencoded_utf8_prefix(
+                text, max_bytes=max_bytes
+            )
+        except UnicodeEncodeError:
+            expected = UnicodeEncodeError
+        if expected is UnicodeEncodeError:
+            with pytest.raises(UnicodeEncodeError):
+                utf8_prefix(text, max_bytes=max_bytes)
+        else:
+            assert utf8_prefix(text, max_bytes=max_bytes) == expected
+
+
+@pytest.mark.parametrize(
+    "text", ["plain ascii text", "x😀y€zå", "å" * 4096], ids=["ascii", "mixed", "long"]
+)
+def test_utf8_prefix_returns_text_that_fits_as_is(text: str) -> None:
+    size = len(text.encode("utf-8"))
+
+    assert utf8_prefix(text, max_bytes=size) is text
+    assert utf8_prefix(text, max_bytes=size + 100) is text
+    assert utf8_prefix(text, max_bytes=size - 1) == _reencoded_utf8_prefix(
+        text, max_bytes=size - 1
+    )

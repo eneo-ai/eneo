@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
+import weakref
 from contextlib import nullcontext
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -33,15 +35,11 @@ from eneo.flows.domain.canonical_json_hash import canonical_json_hash
 from eneo.flows.domain.flow import (
     FlowRun,
     FlowRunStatus,
-    FlowStepAttempt,
     FlowStepAttemptStatus,
     FlowStepResult,
     FlowStepResultAnnotation,
     FlowStepResultStatus,
     FlowStepRetrievalPolicy,
-)
-from eneo.flows.domain.flow import (
-    FlowVersion as FlowVersionModel,
 )
 from eneo.flows.domain.flow_run_exceptions import (
     FlowRunNotFoundError,
@@ -103,7 +101,6 @@ from eneo.flows.runtime.executor import (
     StepInputValue,
 )
 from eneo.flows.runtime.flow_run_actor import FlowRunActor
-from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import (
@@ -128,9 +125,22 @@ from eneo.model_providers.domain.provider_call_observer import (
     ProviderCallObserverError,
 )
 from tests.fixtures import retrieved_info_blob_chunk
+from tests.unittests.flows import executor_test_support
+from tests.unittests.flows.executor_test_support import (
+    DEFAULT_SNAPSHOT_PROMPT as _DEFAULT_SNAPSHOT_PROMPT,
+)
+from tests.unittests.flows.executor_test_support import (
+    build_flow_executor as _build_executor,
+)
+from tests.unittests.flows.executor_test_support import (
+    default_snapshot_assistant as _default_snapshot_assistant,
+)
+from tests.unittests.flows.executor_test_support import flow_run as _run
+from tests.unittests.flows.executor_test_support import (
+    published_flow_version as _published_flow_version,
+)
 
-_DEFAULT_SNAPSHOT_MODEL_ID = UUID("00000000-0000-0000-0000-000000000001")
-_DEFAULT_SNAPSHOT_PROMPT = "Execute this flow step."
+active_snapshot_provider = executor_test_support.active_snapshot_provider
 
 
 @pytest.mark.parametrize(
@@ -235,15 +245,6 @@ async def test_complete_material_reaches_provider_and_all_persisted_aliases_are_
     executor.file_service.get_file_content.assert_awaited_once_with(file.id)
 
 
-@pytest.fixture(autouse=True)
-def active_snapshot_provider(monkeypatch):
-    monkeypatch.setattr(
-        executor_module,
-        "load_active_litellm_provider",
-        AsyncMock(return_value=SimpleNamespace(id=UUID(int=2), provider_type="openai")),
-    )
-
-
 @pytest.fixture
 def captured_flow_spans(monkeypatch):
     exporter = InMemorySpanExporter()
@@ -254,111 +255,6 @@ def captured_flow_spans(monkeypatch):
     )
     yield exporter
     exporter.clear()
-
-
-def _run(*, status: FlowRunStatus, user) -> FlowRun:
-    now = datetime.now(timezone.utc)
-    return FlowRun(
-        id=uuid4(),
-        flow_id=uuid4(),
-        flow_version=1,
-        principal_type=PrincipalType.USER,
-        principal_user_id=user.id,
-        tenant_id=user.tenant_id,
-        trace_id=uuid4(),
-        status=status,
-        cancelled_at=None,
-        input_payload_json={"text": "hello"},
-        output_payload_json=None,
-        job_id=None,
-        created_at=now,
-        updated_at=now,
-    )
-
-
-def _default_snapshot_assistant(assistant_id: UUID | str) -> SimpleNamespace:
-    return SimpleNamespace(
-        id=UUID(str(assistant_id)),
-        origin=AssistantOrigin.FLOW_MANAGED,
-        prompt=SimpleNamespace(text=_DEFAULT_SNAPSHOT_PROMPT, user_id=None),
-        get_prompt_text=lambda: _DEFAULT_SNAPSHOT_PROMPT,
-        completion_model=SimpleNamespace(
-            id=_DEFAULT_SNAPSHOT_MODEL_ID,
-            name="gpt-5.4-nano",
-            nickname="Nano",
-            litellm_model_name="openai/gpt-5.4-nano",
-            provider_id=UUID(int=2),
-            provider_type="openai",
-            get_model_route=lambda **_: "openai/gpt-5.4-nano",
-            security_classification=None,
-        ),
-        completion_model_kwargs={"temperature": 0.2},
-        collections=[],
-        websites=[],
-        integration_knowledge_list=[],
-        mcp_servers=[],
-        attachments=[],
-        inline_file_text=False,
-        user=None,
-        name="Assistant",
-        logging_enabled=False,
-    )
-
-
-def _definition_step_with_default_snapshot(step: object) -> object:
-    if not isinstance(step, dict):
-        return step
-    normalized = dict(step)
-    if "assistant_snapshot" in normalized:
-        return normalized
-    assistant_id = normalized.get("assistant_id")
-    if assistant_id is None:
-        return normalized
-    snapshot = build_assistant_execution_snapshot(
-        assistant=_default_snapshot_assistant(str(assistant_id)),
-    )
-    if snapshot is not None:
-        normalized["assistant_snapshot"] = snapshot
-    return normalized
-
-
-def _published_flow_version(
-    *,
-    flow_id: UUID,
-    version: int,
-    tenant_id: UUID,
-    definition_checksum: str | None,
-    definition_json: dict[str, object],
-    created_at: datetime,
-    updated_at: datetime,
-) -> FlowVersionModel:
-    """Complete a published fixture and derive its checksum by default."""
-    if definition_checksum is None:
-        if isinstance(definition_json.get("steps"), list):
-            schema_version_provided = "schema_version" in definition_json
-            steps = definition_json["steps"]
-            if not schema_version_provided:
-                steps = [_definition_step_with_default_snapshot(step) for step in steps]
-            definition_json = {
-                "schema_version": definition_json.get(
-                    "schema_version", FLOW_DEFINITION_SCHEMA_VERSION
-                ),
-                "flow_id": definition_json.get("flow_id", str(flow_id)),
-                "name": definition_json.get("name", "Test flow"),
-                "description": definition_json.get("description"),
-                "metadata_json": definition_json.get("metadata_json"),
-                "steps": steps,
-            }
-        definition_checksum = canonical_json_hash(definition_json)
-    return FlowVersionModel(
-        flow_id=flow_id,
-        version=version,
-        tenant_id=tenant_id,
-        definition_checksum=definition_checksum,
-        definition_json=definition_json,
-        created_at=created_at,
-        updated_at=updated_at,
-    )
 
 
 def _claimed_step_result(
@@ -381,47 +277,6 @@ def _claimed_step_result(
         num_tokens_output=None,
         status=FlowStepResultStatus.RUNNING,
         flow_step_execution_hash=None,
-        created_at=now,
-        updated_at=now,
-    )
-
-
-def _started_step_attempt(
-    *,
-    run_id,
-    flow_id,
-    tenant_id,
-    step_id,
-    step_order: int,
-    attempt_no: int = 1,
-) -> FlowStepAttempt:
-    now = datetime.now(timezone.utc)
-    return FlowStepAttempt(
-        id=uuid4(),
-        flow_run_id=run_id,
-        flow_id=flow_id,
-        tenant_id=tenant_id,
-        step_id=step_id,
-        step_order=step_order,
-        attempt_no=attempt_no,
-        predecessor_attempt_id=None,
-        superseded_by_attempt_id=None,
-        dispatch_task_id="task-1",
-        status=FlowStepAttemptStatus.STARTED,
-        error_code=None,
-        requested_model=None,
-        response_model=None,
-        provider=None,
-        finish_reason=None,
-        provider_response_id=None,
-        num_tokens_input=None,
-        num_tokens_output=None,
-        provenance_json=None,
-        input_payload_json=None,
-        output_payload_json=None,
-        flow_step_execution_hash=None,
-        started_at=now,
-        finished_at=None,
         created_at=now,
         updated_at=now,
     )
@@ -536,133 +391,6 @@ def _service_run(user, service_principal: ServicePrincipalInDB, *, api_key_id: U
         created_by_api_key_id=api_key_id,
         runtime_service_permission=ApiKeyPermission.WRITE,
     )
-
-
-def _build_executor(user, *, runtime_actor: FlowRunActor | None = None):
-    from eneo.flows.flow_input_limits import FlowInputLimits
-
-    flow_repo = AsyncMock()
-    session = AsyncMock()
-    session.commit = AsyncMock()
-    session.rollback = AsyncMock()
-    flow_run_repo = AsyncMock()
-    flow_run_repo.list_step_results.return_value = []
-    # Finalization of a run without step results: completed, without an output.
-    flow_run_repo.list_step_result_annotations.return_value = []
-    flow_run_repo.read_last_completed_output_payload.return_value = None
-    flow_version_repo = AsyncMock()
-    flow_run_review_checkpoint_repo = AsyncMock()
-    space_repo = AsyncMock()
-
-    async def _create_or_get_attempt_started(**kwargs):
-        return _started_step_attempt(
-            run_id=kwargs["run_id"],
-            flow_id=kwargs["flow_id"],
-            tenant_id=kwargs["tenant_id"],
-            step_id=kwargs["step_id"],
-            step_order=kwargs["step_order"],
-            attempt_no=kwargs["attempt_no"],
-        )
-
-    space = SimpleNamespace(
-        id=uuid4(), tenant_id=user.tenant_id, security_classification=None
-    )
-    flow_repo.get.return_value = SimpleNamespace(space_id=space.id)
-    space_repo.get_execution_space.return_value = space
-    space_repo.get_execution_assistant.side_effect = (
-        lambda *, space_id, assistant_id: _default_snapshot_assistant(assistant_id)
-    )
-    model = _default_snapshot_assistant(uuid4()).completion_model
-    model.tenant_id = user.tenant_id
-    space_repo.completion_model_repo.one.return_value = model
-
-    flow_run_repo.allocate_next_attempt_no = AsyncMock(return_value=1)
-    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
-    flow_run_repo.list_retained_input_file_ids = AsyncMock(
-        side_effect=lambda **kwargs: list(
-            flow_run_repo.list_step_input_file_ids.return_value
-        )
-    )
-    flow_run_repo.create_or_get_attempt_started = AsyncMock(
-        side_effect=_create_or_get_attempt_started
-    )
-    flow_run_repo.save_step_result = AsyncMock(
-        side_effect=lambda _run_id, result, **_kwargs: result
-    )
-
-    async def _activate_step_attempt(**kwargs):
-        attempt_input = kwargs["attempt_input"]
-        return SimpleNamespace(
-            input_payload_json=(
-                attempt_input.to_payload() if attempt_input is not None else None
-            )
-        )
-
-    flow_run_repo.activate_step_attempt = AsyncMock(side_effect=_activate_step_attempt)
-    completion_service = AsyncMock()
-    file_repo = AsyncMock()
-    file_content_loader = AsyncMock()
-    file_service = create_autospec(FileService, instance=True)
-    file_service.repo = file_repo
-    file_repo.get_content_references.return_value = []
-
-    async def owned_infos(*, file_ids):
-        return [
-            SimpleNamespace(
-                id=file.id,
-                size=file.size,
-                name=getattr(file, "name", "source"),
-                file_type=getattr(file, "file_type", "text"),
-                mimetype=getattr(file, "mimetype", "text/plain"),
-            )
-            for file in file_service.get_files_by_ids.return_value
-            if file.id in file_ids
-        ]
-
-    file_service.get_owned_file_infos.side_effect = owned_infos
-    template_asset_repo = AsyncMock()
-    encryption_service = AsyncMock()
-    flow_run_terminalizer = SimpleNamespace()
-
-    async def _terminalize_run(**kwargs):
-        return SimpleNamespace(
-            run=SimpleNamespace(status=kwargs["target_status"]),
-            did_transition=True,
-            target_status=kwargs["target_status"],
-            source=kwargs["source"],
-            audit_outbox_id=uuid4(),
-        )
-
-    flow_run_terminalizer.terminalize_run = AsyncMock(side_effect=_terminalize_run)
-    executor = FlowRunExecutor(
-        # The worker opens this on a session of its own; here the executor's audit service serves.
-        read_audit_service=lambda: nullcontext(executor.audit_service),
-        runtime_actor=runtime_actor or FlowRunActor.from_user(user=user),
-        session=session,
-        flow_repo=flow_repo,
-        flow_run_repo=flow_run_repo,
-        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
-        flow_version_repo=flow_version_repo,
-        space_repo=space_repo,
-        completion_service=completion_service,
-        file_repo=file_repo,
-        file_content_loader=file_content_loader,
-        file_service=file_service,
-        template_asset_repo=template_asset_repo,
-        encryption_service=encryption_service,
-        flow_run_terminalizer=flow_run_terminalizer,
-        max_inline_text_bytes=1024 * 1024,
-        input_limits=FlowInputLimits(
-            file_max_size_bytes=100_000_000, audio_max_size_bytes=100_000_000
-        ),
-    )
-    # What execute_claimed derives from the pinned definition before any step.
-    executor.generated_file_names = GeneratedFileNames.for_run(
-        flow_name="Nämndmöte",
-        steps=(),
-        run_created_at=datetime(2026, 9, 23, 12, tzinfo=timezone.utc),
-    )
-    return executor, flow_repo, flow_run_repo, flow_version_repo
 
 
 def test_executor_keeps_service_principal_actor_and_canonical_file_service(user):
@@ -4108,6 +3836,8 @@ async def test_execute_terminalizes_review_open_invariant_errors(
 
 @pytest.mark.asyncio
 async def test_execute_appends_completed_handoff_and_continues_with_next_step(user):
+    from eneo.flows.domain.runtime import project_completed_result
+
     executor, _, flow_run_repo, flow_version_repo = _build_executor(user)
     queued_run = _run(status=FlowRunStatus.QUEUED, user=user)
     running_run = queued_run.model_copy(update={"status": FlowRunStatus.RUNNING})
@@ -4123,10 +3853,26 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
     ).model_copy(
         update={
             "status": FlowStepResultStatus.COMPLETED,
+            "current_attempt_no": 1,
+            "input_payload_json": {
+                "text": "step-1 input " * 512,
+                "source_text": "step-1 source " * 512,
+                "runtime_input": {"text": "runtime"},
+            },
+            "effective_prompt": "step-1 prompt " * 256,
             "output_payload_json": {"text": "from-step-1"},
         },
         deep=True,
     )
+    # Each read is a fresh row, as the database's are.
+    handoff_reads: list[weakref.ref[FlowStepResult]] = []
+
+    async def _get_step_result(**_kwargs):
+        row = existing_completed.model_copy(deep=True)
+        handoff_reads.append(weakref.ref(row))
+        return row
+
+    handoff_retained_during_step_2: list[bool] = []
     claimed_second = _claimed_step_result(
         run_id=queued_run.id,
         flow_id=queued_run.flow_id,
@@ -4146,7 +3892,7 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
     flow_run_repo.get = _run_get_mock(running_run, running_run)
     flow_run_repo.mark_running_if_claimable = AsyncMock(return_value=True)
     flow_run_repo.claim_step_result = AsyncMock(side_effect=[None, claimed_second])
-    flow_run_repo.get_step_result = AsyncMock(return_value=existing_completed)
+    flow_run_repo.get_step_result = AsyncMock(side_effect=_get_step_result)
     flow_run_repo.finish_attempt = AsyncMock()
     flow_run_repo.list_step_results = AsyncMock(return_value=[])
     _stub_final_reads(flow_run_repo, completed_second)
@@ -4179,8 +3925,15 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
         )
     )
     executor._flow_is_active = AsyncMock(return_value=True)
-    executor._execute_step = AsyncMock(
-        return_value=_step_result(
+
+    async def _execute_second_step(**_kwargs):
+        # Step 2 runs while the handed-off row's projection is what the run
+        # holds of step 1: the row read for the handoff is gone.
+        gc.collect()
+        handoff_retained_during_step_2.append(
+            any(read() is not None for read in handoff_reads)
+        )
+        return _step_result(
             StepExecutionOutput(
                 input_text="from-step-1",
                 source_text="from-step-1",
@@ -4196,7 +3949,8 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
                 model_parameters_json={},
             )
         )
-    )
+
+    executor._execute_step = AsyncMock(side_effect=_execute_second_step)
 
     result = await executor.execute(
         run_id=queued_run.id,
@@ -4214,10 +3968,13 @@ async def test_execute_appends_completed_handoff_and_continues_with_next_step(us
         == step_id_2
     )
     executor._execute_step.assert_awaited_once()
-    assert (
-        executor._execute_step.await_args.kwargs["state"].completed_by_order[1]
-        == existing_completed
-    )
+    assert len(handoff_reads) == 1
+    assert handoff_retained_during_step_2 == [False]
+    held = executor._execute_step.await_args.kwargs["state"].completed_by_order[1]
+    assert held == project_completed_result(existing_completed)
+    assert held.output_payload_json == {"text": "from-step-1"}
+    assert held.input_payload_json == {"runtime_input": {"text": "runtime"}}
+    assert held.effective_prompt is None
 
 
 @pytest.mark.asyncio

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-from typing import Any, cast
+from collections.abc import Iterable, Sequence
+from typing import Any, Protocol, cast
 
 from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptMappedAdmission,
@@ -15,7 +15,7 @@ from eneo.flows.domain.rag_evidence import (
     recompute_mapped_aggregates,
 )
 from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
-from eneo.flows.domain.runtime import StepDiagnostic, StepExecutionOutput
+from eneo.flows.domain.runtime import StepDiagnostic
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.runtime.step_failure_evidence import (
     attach_failure_evidence,
@@ -61,8 +61,15 @@ def mapped_admission_payload(
     )
 
 
+class MappedCallDiagnostics(Protocol):
+    """A completed mapped call, or the record a handler keeps of one."""
+
+    @property
+    def diagnostics(self) -> Sequence[StepDiagnostic]: ...
+
+
 def mapped_output_diagnostics(
-    outputs: Iterable[StepExecutionOutput],
+    outputs: Iterable[MappedCallDiagnostics],
 ) -> tuple[StepDiagnostic, ...]:
     return tuple(diagnostic for output in outputs for diagnostic in output.diagnostics)
 

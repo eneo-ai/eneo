@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections import deque
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from typing import Any, cast
@@ -24,6 +25,7 @@ from eneo.flows.domain.runtime import (
     StepExecutionOutput,
     StepInputValue,
 )
+from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
 from eneo.flows.domain.step_item_map import build_step_item_map_config
 from eneo.flows.domain.step_mapped_execution import single_mapped_array_key
 from eneo.flows.enums import FlowStepPhase
@@ -80,13 +82,42 @@ PER_ITEM_METADATA_PREVIEW_CHARS = 2000
 
 @dataclass(frozen=True)
 class PerItemMapCall:
+    """What assembly reads of one completed item call.
+
+    Kept instead of the call's output, so a mapped step holds each item's
+    structured result until assembly, not its completion text, prompt and
+    parameters.
+    """
+
     item_number: int
     input_array_key: str
     source_label: str | None
     source_file_id: str | None
-    output: StepExecutionOutput
-    deps: StepExecutionRuntimeDeps
     elapsed_ms: int
+    input_text_length: int
+    input_text_preview: str
+    structured_output: dict[str, Any]
+    diagnostics: tuple[StepDiagnostic, ...]
+    tool_calls_metadata: list[dict[str, Any]] | dict[str, Any] | None
+    rag_metadata: dict[str, Any] | None
+    num_tokens_input: int | None
+    num_tokens_output: int | None
+
+
+@dataclass(frozen=True)
+class PerItemAssemblyContext:
+    """What the assembled output takes from the step's first item call."""
+
+    input_source: str
+    used_question_binding: bool
+    effective_prompt: str
+    model_parameters_json: dict[str, Any]
+    requested_model: str | None
+    response_model: str | None
+    provider: str | None
+    finish_reason: str | None
+    contract_validation: dict[str, Any] | None
+    deps: StepExecutionRuntimeDeps
 
 
 async def execute_per_item_map(
@@ -209,14 +240,18 @@ async def execute_per_item_map(
         attempt_no,
         tuple(prepared for _, _, prepared in prepared_items),
     )
-    prepared_items = [
+    total_items = len(prepared_items)
+    # Every call is prepared and activated before the first one runs; once a
+    # call has run, nothing reads its preparation again.
+    pending_items = deque(
         (item_number, input_item, activated_step)
         for (item_number, input_item, _), activated_step in zip(
             prepared_items,
             activated_steps,
             strict=True,
         )
-    ]
+    )
+    del prepared_items, activated_steps
 
     mapped_evidence = MappedCallEvidence(
         policy=rag_evidence_policy,
@@ -224,26 +259,28 @@ async def execute_per_item_map(
         collection_key="items",
     )
     item_calls: list[PerItemMapCall] = []
+    assembly_context: PerItemAssemblyContext | None = None
     output_budget = StructuredOutputBudget(
         array_key=output_array_key,
-        ceiling_bytes=prepared_items[0][2].deps.max_inline_text_bytes,
-        total_items=len(prepared_items),
+        ceiling_bytes=pending_items[0][2].deps.max_inline_text_bytes,
+        total_items=total_items,
     )
     identity_fields = runtime_source_identity_fields_for_array_items(
         step.output_contract, output_array_key
     )
     try:
-        for item_number, input_item, prepared_step in prepared_items:
+        while pending_items:
+            item_number, input_item, prepared_step = pending_items.popleft()
             # The next item is external work: refuse it, with what completed,
             # once the attempt's budget is spent.
             record_step_phase(FlowStepPhase.MAPPED_ITEM)
             require_step_budget(
                 prepared_step.deps.deadline,
                 step_order=step.step_order,
-                phase=f"mapped item {item_number} of {len(prepared_items)}",
-                completed=f"{len(item_calls)} of {len(prepared_items)} items completed",
+                phase=f"mapped item {item_number} of {total_items}",
+                completed=f"{len(item_calls)} of {total_items} items completed",
             )
-            item_call = await _execute_one_item(
+            item_call, assembly_context = await _execute_one_item(
                 item_number=item_number,
                 input_array_key=input_array_key,
                 input_item=input_item,
@@ -251,10 +288,11 @@ async def execute_per_item_map(
                 run=run,
                 state=state,
                 prepared_step=prepared_step,
+                assembly_context=assembly_context,
             )
             # Bound this call before the next one runs, so the step never holds
             # more passage text than its budget allows.
-            mapped_evidence.admit(item_call.output.rag_metadata)
+            mapped_evidence.admit(item_call.rag_metadata)
             output_budget.admit(
                 _call_output_items(
                     item_call,
@@ -265,12 +303,16 @@ async def execute_per_item_map(
             )
             item_calls.append(item_call)
             record_step_progress(
-                f"{len(item_calls)} of {len(prepared_items)} items completed",
+                f"{len(item_calls)} of {total_items} items completed",
                 completed_items=len(item_calls),
-                total_items=len(prepared_items),
+                total_items=total_items,
             )
 
         record_step_phase(FlowStepPhase.FINALIZATION)
+        if assembly_context is None:
+            raise FlowRuntimeInvariantError(
+                "Per-item map assembly has no completed item call."
+            )
         return StepExecutionResult(
             output=await _assemble_per_item_output(
                 step=step,
@@ -278,6 +320,7 @@ async def execute_per_item_map(
                 input_array_key=input_array_key,
                 output_array_key=output_array_key,
                 item_calls=item_calls,
+                assembly_context=assembly_context,
                 mapped_rag_metadata=mapped_evidence.payload(),
             )
         )
@@ -303,7 +346,10 @@ async def _execute_one_item(
     run: FlowRun,
     state: RunExecutionState,
     prepared_step: PreparedAssistantStep,
-) -> PerItemMapCall:
+    assembly_context: PerItemAssemblyContext | None,
+) -> tuple[PerItemMapCall, PerItemAssemblyContext]:
+    """The call's record, and the assembly context: the given one, or this
+    call's when it is the step's first."""
     started = time.perf_counter()
     output = await complete_step_execution(
         step=step,
@@ -331,14 +377,36 @@ async def _execute_one_item(
         # travels with the error rather than dying with the local output.
         carry_call_evidence(exc, output.rag_metadata)
         raise
-    return PerItemMapCall(
-        item_number=item_number,
-        input_array_key=input_array_key,
-        source_label=_optional_string(input_item.get("source_label")),
-        source_file_id=_optional_string(input_item.get("source_file_id")),
-        output=output,
-        deps=prepared_step.deps,
-        elapsed_ms=elapsed_ms,
+    if assembly_context is None:
+        assembly_context = PerItemAssemblyContext(
+            input_source=output.input_source,
+            used_question_binding=output.used_question_binding,
+            effective_prompt=output.effective_prompt,
+            model_parameters_json=output.model_parameters_json,
+            requested_model=output.requested_model,
+            response_model=output.response_model,
+            provider=output.provider,
+            finish_reason=output.finish_reason,
+            contract_validation=output.contract_validation,
+            deps=prepared_step.deps,
+        )
+    return (
+        PerItemMapCall(
+            item_number=item_number,
+            input_array_key=input_array_key,
+            source_label=_optional_string(input_item.get("source_label")),
+            source_file_id=_optional_string(input_item.get("source_file_id")),
+            elapsed_ms=elapsed_ms,
+            input_text_length=len(output.input_text),
+            input_text_preview=output.input_text[:PER_ITEM_METADATA_PREVIEW_CHARS],
+            structured_output=cast(dict[str, Any], output.structured_output),
+            diagnostics=tuple(output.diagnostics),
+            tool_calls_metadata=output.tool_calls_metadata,
+            rag_metadata=output.rag_metadata,
+            num_tokens_input=output.num_tokens_input,
+            num_tokens_output=output.num_tokens_output,
+        ),
+        assembly_context,
     )
 
 
@@ -349,10 +417,10 @@ async def _assemble_per_item_output(
     input_array_key: str,
     output_array_key: str,
     item_calls: list[PerItemMapCall],
+    assembly_context: PerItemAssemblyContext,
     mapped_rag_metadata: dict[str, Any] | None,
 ) -> StepExecutionOutput:
-    first_output = item_calls[0].output
-    first_deps = item_calls[0].deps
+    first_deps = assembly_context.deps
     output_items = [
         item
         for call in sorted(item_calls, key=lambda value: value.item_number)
@@ -377,8 +445,8 @@ async def _assemble_per_item_output(
     input_payload_for_result: dict[str, Any] = {
         "text": input_text,
         "source_text": "",
-        "input_source": first_output.input_source,
-        "used_question_binding": first_output.used_question_binding,
+        "input_source": assembly_context.input_source,
+        "used_question_binding": assembly_context.used_question_binding,
         "runtime_input": item_map_metadata,
     }
     try:
@@ -397,7 +465,7 @@ async def _assemble_per_item_output(
         raise attach_typed_failure_context(
             exc,
             input_payload_for_result=input_payload_for_result,
-            effective_prompt=first_output.effective_prompt,
+            effective_prompt=assembly_context.effective_prompt,
         ) from exc
     persisted_text, generated_file_ids = await first_deps.apply_output_cap(
         text=full_text,
@@ -414,7 +482,7 @@ async def _assemble_per_item_output(
             ),
             severity="info",
         ),
-        *mapped_output_diagnostics(call.output for call in item_calls),
+        *mapped_output_diagnostics(item_calls),
         *typed_output.diagnostics,
     ]
     final_structured_output: dict[str, Any] | list[Any] | None = (
@@ -425,30 +493,30 @@ async def _assemble_per_item_output(
     return StepExecutionOutput(
         input_text=input_text,
         source_text="",
-        input_source=first_output.input_source,
-        used_question_binding=first_output.used_question_binding,
+        input_source=assembly_context.input_source,
+        used_question_binding=assembly_context.used_question_binding,
         full_text=full_text,
         persisted_text=persisted_text,
         generated_file_ids=generated_file_ids,
         tool_calls_metadata=_item_map_tool_metadata(item_calls),
         num_tokens_input=sum_complete_token_counts(
-            call.output.num_tokens_input for call in item_calls
+            call.num_tokens_input for call in item_calls
         ),
         num_tokens_output=sum_complete_token_counts(
-            call.output.num_tokens_output for call in item_calls
+            call.num_tokens_output for call in item_calls
         ),
-        effective_prompt=first_output.effective_prompt,
+        effective_prompt=assembly_context.effective_prompt,
         model_parameters_json={
-            **first_output.model_parameters_json,
+            **assembly_context.model_parameters_json,
             ITEM_MAP_EXECUTION_MODE_KEY: ITEM_MAP_EXECUTION_MODE,
             "per_item_call_count": len(item_calls),
         },
-        requested_model=first_output.requested_model,
-        response_model=first_output.response_model,
-        provider=first_output.provider,
-        finish_reason=first_output.finish_reason,
+        requested_model=assembly_context.requested_model,
+        response_model=assembly_context.response_model,
+        provider=assembly_context.provider,
+        finish_reason=assembly_context.finish_reason,
         provider_response_id=None,
-        contract_validation=first_output.contract_validation,
+        contract_validation=assembly_context.contract_validation,
         structured_output=final_structured_output,
         diagnostics=diagnostics,
         artifacts=typed_output.artifacts,
@@ -572,8 +640,7 @@ def _call_output_items(
     output_array_key: str,
     identity_fields: frozenset[str],
 ) -> list[dict[str, Any]]:
-    structured_output = cast(dict[str, Any], call.output.structured_output)
-    raw_items = structured_output.get(output_array_key)
+    raw_items = call.structured_output.get(output_array_key)
     if not isinstance(raw_items, list):
         raise TypedIOValidationException(
             f"Step output for item {call.item_number} must contain {output_array_key}[].",
@@ -616,23 +683,22 @@ def _item_map_metadata(
 
 
 def _item_call_metadata(call: PerItemMapCall) -> dict[str, Any]:
-    input_text = call.output.input_text
     return {
         "item_number": call.item_number,
         "source_label": call.source_label,
         "source_file_id": call.source_file_id,
         "elapsed_ms": call.elapsed_ms,
-        "input_text_length": len(input_text),
-        "input_text_preview": input_text[:PER_ITEM_METADATA_PREVIEW_CHARS],
-        "num_tokens_input": call.output.num_tokens_input,
-        "num_tokens_output": call.output.num_tokens_output,
+        "input_text_length": call.input_text_length,
+        "input_text_preview": call.input_text_preview,
+        "num_tokens_input": call.num_tokens_input,
+        "num_tokens_output": call.num_tokens_output,
         "diagnostics": [
             {
                 "code": diagnostic.code,
                 "message": diagnostic.message,
                 "severity": diagnostic.severity,
             }
-            for diagnostic in call.output.diagnostics
+            for diagnostic in call.diagnostics
         ],
     }
 
@@ -655,7 +721,7 @@ def _item_map_tool_metadata(
                 "item_number": call.item_number,
                 "source_label": call.source_label,
                 "source_file_id": call.source_file_id,
-                "tool_calls": call.output.tool_calls_metadata,
+                "tool_calls": call.tool_calls_metadata,
             }
             for call in item_calls
         ],

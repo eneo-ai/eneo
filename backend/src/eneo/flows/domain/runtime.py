@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, TypeAlias
+from typing import TYPE_CHECKING, Any, Final, Literal, TypeAlias
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowStepResult, FlowStepRetrievalPolicy
@@ -257,8 +257,33 @@ class RunExecutionState:
         return "".join(segments)
 
     def append_completed(self, result: FlowStepResult) -> None:
+        result = project_completed_result(result)
         self.completed_by_order[result.step_order] = result
         self.prior_results.append(result)
+
+
+# The copies of a step's input text. Later steps read a completed step's
+# output, its identity and its input's metadata (runtime_input, rag,
+# transcription), never these nor its prompt; every other key stays.
+_UNREAD_COMPLETED_INPUT_KEYS: Final = frozenset({"text", "source_text"})
+
+
+def project_completed_result(result: FlowStepResult) -> FlowStepResult:
+    """A completed step result as run state holds it, without the input copies
+    and prompt no later step reads.
+
+    A shallow copy: the persisted row, which review, regeneration and retry
+    read again from the repository, is left as it is.
+    """
+    payload = result.input_payload_json
+    update: dict[str, Any] = {"effective_prompt": None}
+    if isinstance(payload, dict):
+        update["input_payload_json"] = {
+            key: value
+            for key, value in payload.items()
+            if key not in _UNREAD_COMPLETED_INPUT_KEYS
+        }
+    return result.model_copy(update=update)
 
 
 def format_all_previous_step_segment(result: FlowStepResult) -> str:
