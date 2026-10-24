@@ -263,9 +263,13 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
   (start at `h3`).
 - Follow new tokens with scrolling only while the user is at the bottom; never
   move focus into new content. "Scroll to latest" is a named button.
-- The composer has a persistent translated accessible name, and the keyboard
-  hint (Enter sends, Shift+Enter adds a line) is visible or in its
-  description.
+- The composer has a persistent translated accessible name that starts with
+  the words of its placeholder ("Fråga {namn}"). Return adds a line; ⌘ or
+  Ctrl+Return and Send send, so a half-written question is never sent by
+  accident. The hint is in the field's description, and the shortcut shows
+  beside Send where there is a mouse or trackpad. Send is never disabled: an
+  empty draft or a full context is explained at the field (`aria-describedby`,
+  `aria-invalid`), announced with `useAnnounce`, and focus stays in the field.
 
 ### 11. Images and icons (1.1.1, 4.1.2)
 

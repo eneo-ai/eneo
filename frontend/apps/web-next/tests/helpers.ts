@@ -9,9 +9,9 @@ export function uniqueName(prefix: string) {
   return `${prefix} ${Date.now()} ${counter}`;
 }
 
-/** The chat composer's text field ("Meddelande till <assistent>"), in either layout. */
+/** The chat composer's text field ("Fråga <assistent>"), in either layout. */
 export function chatComposer(page: Page) {
-  return page.getByRole("textbox", { name: /^(Meddelande till|Message to) / });
+  return page.getByRole("textbox", { name: /^(Fråga|Ask) / });
 }
 
 export async function askChatQuestion(page: Page, question: string) {

@@ -118,7 +118,7 @@ describe("ChatView start state", () => {
       screen.getByRole("heading", { level: 1, name: /^God (morgon|dag|kväll), Anna$/ })
     ).toBeTruthy();
 
-    const textarea = screen.getByRole("textbox", { name: "Meddelande till Personlig assistent" });
+    const textarea = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
     fireEvent.click(screen.getByRole("button", { name: /Gör en plan/ }));
     expect((textarea as HTMLTextAreaElement).value).toBe("Gör en konkret plan för: ");
     expect(document.activeElement).toBe(textarea);

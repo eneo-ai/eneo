@@ -152,7 +152,7 @@ function Harness({
 }
 
 function ask(question: string) {
-  const textarea = screen.getByRole("textbox", { name: /Meddelande till/ });
+  const textarea = screen.getByRole("textbox", { name: /^Fråga / });
   fireEvent.change(textarea, { target: { value: question } });
   fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
 }
@@ -277,7 +277,7 @@ describe("ChatView docked composer", () => {
     const scroller = log.closest<HTMLElement>('[style*="scroll-padding-bottom"]');
     expect(scroller?.style.scrollPaddingBottom).toBe("28px");
 
-    const textarea = screen.getByRole("textbox", { name: /Meddelande till/ });
+    const textarea = screen.getByRole("textbox", { name: /^Fråga / });
     const dock = observedElements().find((element) => element.contains(textarea));
     expect(dock).toBeDefined();
     act(() => reportResize(dock!, { height: 150 }));
@@ -333,9 +333,9 @@ describe("ChatView when generation fails", () => {
     expect(within(list).getByText("Tjänsten svarar inte")).toBeTruthy();
     // The failed first question returns to the composer instead of vanishing.
     await waitFor(() =>
-      expect(
-        (screen.getByRole("textbox", { name: /Meddelande till/ }) as HTMLTextAreaElement).value
-      ).toBe("Vilken gräns gäller?")
+      expect((screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement).value).toBe(
+        "Vilken gräns gäller?"
+      )
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
@@ -460,9 +460,9 @@ describe("ChatView when generation fails", () => {
 
     // Back to the start state with the draft and its attachment in the composer.
     await waitFor(() =>
-      expect(
-        (screen.getByRole("textbox", { name: /Meddelande till/ }) as HTMLTextAreaElement).value
-      ).toBe("Sammanfatta policyn")
+      expect((screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement).value).toBe(
+        "Sammanfatta policyn"
+      )
     );
     expect(screen.getByRole("button", { name: "Ta bort Policy.pdf" })).toBeTruthy();
     expect(screen.queryByText(/Laddar upp bilagor/)).toBeNull();

@@ -718,8 +718,8 @@ function ConversationView({
     : attachments;
 
   // Attachments still uploading do not block: the question waits for them in
-  // the conversation.
-  const canSubmit = input.trim().length > 0 && !usage.willExceedContext;
+  // the conversation. An empty draft is the composer's to explain.
+  const sendBlocked = usage.willExceedContext ? t("context_usage_will_exceed_estimate") : null;
   const quote = panel.quote;
   const composerQuote = quote
     ? { text: quote.text, source: quote.fileName, onRemove: () => panel.clearQuote() }
@@ -798,12 +798,12 @@ function ConversationView({
     value: input,
     onChange: setInput,
     onSubmit: () => sendQuestion(input.trim()),
-    canSubmit,
+    sendBlocked,
     busy: sending,
     // A stop while the question still waits for its uploads takes it back.
     onStop: () => (pendingAbort.current ? pendingAbort.current.abort() : void stop()),
     label: composerLabel,
-    placeholder: t("chat_composer_placeholder"),
+    placeholder: composerLabel,
     attachments: composerAttachments,
     onOpenFileDialog: openAttachmentDialog,
     knowledge: partner.knowledge,

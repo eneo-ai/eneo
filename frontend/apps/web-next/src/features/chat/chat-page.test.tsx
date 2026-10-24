@@ -173,15 +173,15 @@ function renderPage(sessionId: string | null, pagePartner: ChatPartner = partner
 }
 
 function composer() {
-  return screen.getByRole("textbox", { name: /Meddelande till/ }) as HTMLTextAreaElement;
+  return screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
 }
 
-/** Types a question and presses Enter in the composer, as a keyboard user does. */
+/** Types a question and sends it with Ctrl+Return in the composer, as a keyboard user does. */
 function askWithKeyboard(question: string) {
   const textarea = composer();
   textarea.focus();
   fireEvent.change(textarea, { target: { value: question } });
-  fireEvent.keyDown(textarea, { key: "Enter" });
+  fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
 }
 
 /** Streams a complete answer for a question that is waiting for one. */
