@@ -220,3 +220,109 @@ async def test_classification_dry_run_lists_a_linked_model_below_it_as_affected(
     result = await service.security_classification_impact_analysis(uuid4(), uuid4())
 
     assert {m.id for m in result.affected_completion_models} == {at_level.id, below.id}
+
+
+class _ProviderSession:
+    """Answers capability-provider SELECTs from in-memory providers and
+    counts them; no tenant tool overlay."""
+
+    def __init__(self, providers):
+        self.providers = providers
+        self.provider_selects = 0
+
+    async def scalars(self, statement):
+        from unittest.mock import MagicMock
+
+        self.provider_selects += 1
+        compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
+        selected = [p for p in self.providers if f"'{p.purpose}'" in compiled]
+        return MagicMock(all=lambda: selected)
+
+    async def execute(self, statement):
+        from unittest.mock import MagicMock
+
+        return MagicMock(all=lambda: [])
+
+
+def _classification(level: int):
+    from eneo.security_classifications.domain.entities.security_classification import (
+        SecurityClassification,
+    )
+
+    return SecurityClassification(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        name=f"klass {level}",
+        security_level=level,
+        security_enabled=True,
+    )
+
+
+def _provider(purpose: str, level: int | None) -> MCPServer:
+    server = _server(purpose)
+    server.is_enabled = True
+    server.security_classification = (
+        _classification(level) if level is not None else None
+    )
+    return server
+
+
+def _marker_service(monkeypatch, providers) -> tuple[SpaceService, _ProviderSession]:
+    from types import SimpleNamespace
+
+    from eneo.mcp_servers.application import capability_resolver
+
+    monkeypatch.setattr(
+        capability_resolver.MCPServerMapper, "to_entity", lambda record: record
+    )
+    session = _ProviderSession(providers)
+    service = _service()
+    service.repo = SimpleNamespace(session=session)
+    service.user = SimpleNamespace(tenant_id=uuid4())
+    return service, session
+
+
+async def test_marker_is_rejected_when_no_provider_of_its_purpose_meets_the_space(
+    monkeypatch,
+):
+    # The image provider meets the space; it must not vouch for web search.
+    service, _ = _marker_service(
+        monkeypatch,
+        [_provider("web_search", 0), _provider("image_generation", 2)],
+    )
+
+    with pytest.raises(BadRequestException, match="Security classification"):
+        await service._validate_capability_markers(
+            [_server("web_search"), _server("image_generation")], _classification(1)
+        )
+
+
+async def test_markers_are_checked_against_one_provider_load(monkeypatch):
+    service, session = _marker_service(
+        monkeypatch,
+        [
+            _provider("web_search", 0),
+            _provider("web_search", 1),
+            _provider("image_generation", 2),
+        ],
+    )
+
+    await service._validate_capability_markers(
+        [
+            _server("general"),
+            _server("web_search"),
+            _server("image_generation"),
+            _server("charts"),
+        ],
+        _classification(1),
+    )
+
+    assert session.provider_selects == 1
+
+
+async def test_markers_without_capabilities_load_no_providers(monkeypatch):
+    service, session = _marker_service(monkeypatch, [_provider("web_search", 0)])
+
+    await service._validate_capability_markers([_server("general")], _classification(1))
+
+    assert session.provider_selects == 0

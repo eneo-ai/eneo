@@ -1425,11 +1425,16 @@ class SpaceRepository:
             unloaded_hidden_assistant_ids=unloaded_hidden_assistant_ids,
         )
         from eneo.mcp_servers.application.capability_resolver import (
-            capability_availability,
+            active_capability_providers,
+            availability_from_providers,
         )
 
-        space.available_capabilities = await capability_availability(
-            self.session, self.tenant_id, space.security_classification
+        # One provider load serves the tenant-wide and the user-scoped view.
+        capability_providers = await active_capability_providers(
+            self.session, self.tenant_id
+        )
+        space.available_capabilities = availability_from_providers(
+            capability_providers, space.security_classification
         )
         if space.is_personal():
             space.enabled_capabilities = [
@@ -1447,9 +1452,8 @@ class SpaceRepository:
             # A user-scoped repository narrows availability to the user's
             # groups and permissions; a tenant-only repository (workers) reads
             # the tenant-wide availability.
-            personal_availability = await capability_availability(
-                self.session,
-                self.tenant_id,
+            personal_availability = availability_from_providers(
+                capability_providers,
                 space.security_classification,
                 user_group_ids=(
                     self.user.user_groups_ids if self.user is not None else None

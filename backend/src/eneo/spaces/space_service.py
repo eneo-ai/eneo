@@ -335,18 +335,22 @@ class SpaceService:
         if space_security_classification is None:
             return
         from eneo.mcp_servers.application.capability_resolver import (
-            get_active_capability_servers,
+            active_capability_providers,
             meets_security_classification,
         )
 
-        for purpose in {
+        purposes = {
             server.purpose
             for server in mcp_servers
             if is_capability_purpose(server.purpose)
-        }:
-            providers = await get_active_capability_servers(
-                self.repo.session, self.user.tenant_id, purpose
-            )
+        }
+        if not purposes:
+            return
+        all_providers = await active_capability_providers(
+            self.repo.session, self.user.tenant_id, purposes
+        )
+        for purpose in purposes:
+            providers = [p for p in all_providers if p.purpose == purpose]
             if providers and not any(
                 meets_security_classification(provider, space_security_classification)
                 for provider in providers
