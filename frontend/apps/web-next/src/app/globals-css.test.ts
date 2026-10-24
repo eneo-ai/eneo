@@ -256,6 +256,25 @@ describe("globals.css", () => {
     expect(rules.get("(pointer: coarse) ::after")).toMatchObject({ inset: "-10px" });
   });
 
+  it("makes an Astryx list row with a link one target, its own controls above the link", () => {
+    const rules = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkRules((rule: Rule) => {
+      if (!rule.selector.includes(".astryx-item")) return;
+      const decls: Record<string, string> = {};
+      rule.walkDecls((decl) => {
+        decls[decl.prop] = decl.value;
+      });
+      rules.set(rule.selector, decls);
+    });
+    expect(rules.get(".astryx-item > a::after")).toMatchObject({
+      content: '""',
+      position: "absolute",
+      inset: "0"
+    });
+    const controls = [...rules].find(([selector]) => selector.includes(":has(> a)"));
+    expect(controls?.[1]).toMatchObject({ position: "relative", "z-index": "1" });
+  });
+
   it("keeps what an Astryx table scrolls inside its scroll box", () => {
     let position: string | undefined;
     postcss.parse(css).walkRules(".astryx-table-scroll-wrapper", (rule: Rule) => {

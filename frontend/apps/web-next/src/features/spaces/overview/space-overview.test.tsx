@@ -256,6 +256,16 @@ describe("SpaceOverview on a phone: Hantera ytan (decision 24)", () => {
     expect(rows().map(([label]) => label)).toEqual(["Medlemmar (0)", "Tjänster"]);
   });
 
+  it("lists the newest assistants as rows, then the create card", () => {
+    setViewport("phone");
+    show(busySpace());
+    const assistants = screen.getByRole("region", { name: "Assistenter" });
+    const rows = within(within(assistants).getAllByRole("list")[0]!).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]!).getByRole("link", { name: /^Avtalsgranskaren/ })).toBeTruthy();
+    expect(within(assistants).getByRole("button", { name: "Skapa assistent" })).toBeTruthy();
+  });
+
   it("is not there on a tablet, which has a tab for each", () => {
     setViewport("tablet-portrait");
     show(makeSpace());

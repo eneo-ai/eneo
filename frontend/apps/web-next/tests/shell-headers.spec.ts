@@ -108,7 +108,9 @@ test("a shared space is pushed on a phone; the personal and organisation spaces 
   });
   expect(strip).toBeLessThanOrEqual(1);
   const manage = page.getByRole("region", { name: /^(Hantera ytan|Manage space)$/ });
-  await manage.getByRole("link", { name: /^(Medlemmar|Members)/ }).click();
+  // The whole row is the link (globals.css 12b): its icon, outside the label, opens it.
+  const row = manage.locator(".astryx-item").filter({ hasText: /^(Medlemmar|Members)/ });
+  await row.click({ position: { x: 16, y: 28 } });
   await expect(page).toHaveURL(new RegExp(`${space}/members$`));
   await expect(
     page.getByRole("link", { name: new RegExp(`^(Tillbaka till|Back to) ${name}$`) })

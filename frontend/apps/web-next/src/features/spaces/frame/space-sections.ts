@@ -111,13 +111,6 @@ export function spaceLandingHref(sections: SpaceSection[], routeId: SpaceRouteId
   return sections[0]?.href ?? `/spaces/${routeId}/overview`;
 }
 
-/**
- * A phone (decision 1: below 768 px, Tailwind `md`). A space there is a
- * pushed screen with content tabs only (decision 24); tablets keep the header
- * with every tab.
- */
-export const SPACE_PHONE_QUERY = "(width < 48rem)";
-
 /** What a phone keeps as tabs: the space's content. */
 const CONTENT_SECTION_IDS: readonly SpaceSectionId[] = [
   "overview",

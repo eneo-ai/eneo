@@ -274,6 +274,11 @@ the default name on a backend name collision (9017).
   decision 14: the conversation keeps 480 px), not from a media query; the
   chat page owns that row and the history gives way to a panel that opens
   where both do not fit. Widths in that rule are px, set inline.
+- **Collections of resources** (spaces, assistants, apps, services, the
+  catalog) render through `ResourceCollection` (`resource-tile.tsx`): list
+  rows on a phone (`PHONE_QUERY`), cards from 768 px in a grid that fits as
+  many columns as the page has room for. A list row with a link is one
+  target (globals.css 12b); put controls in its end slot.
 - **Toasts**: only through `src/lib/toast.ts` (`no-restricted-imports` blocks
   `sonner` elsewhere). Errors and warnings don't time out; every toast has a
   close button; success and info close after 6 s. Sonner's stylesheet is

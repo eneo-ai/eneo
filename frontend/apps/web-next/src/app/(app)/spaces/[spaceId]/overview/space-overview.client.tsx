@@ -1,11 +1,10 @@
 "use client";
 
-import { SPACE_PHONE_QUERY } from "@/features/spaces/frame/space-sections";
 import { OverviewAssistants } from "@/features/spaces/overview/overview-assistants";
 import { OverviewKnowledge } from "@/features/spaces/overview/overview-knowledge";
 import { OverviewManage } from "@/features/spaces/overview/overview-manage";
 import { useSpace } from "@/features/spaces/use-space";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 
 /**
  * The space overview: things to act on instead of count tiles. The newest
@@ -18,7 +17,7 @@ export function SpaceOverview() {
   const { space, can } = useSpace();
   const showAssistants = !space.organization && can("read", "assistant");
   const showKnowledge = can("read", "collection") || can("read", "website");
-  const phone = useMediaMatch(SPACE_PHONE_QUERY);
+  const phone = useMediaMatch(PHONE_QUERY);
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-7">

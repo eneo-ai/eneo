@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
 import { useAppContext } from "@/components/providers/app-context";
+import { ResourceCollection } from "@/components/composites/resource-tile";
 import { CreateChatAppMenu } from "@/features/assistants/create-menu";
 import { ChatAppTile } from "@/features/assistants/tile";
 import { useSpace } from "../use-space";
@@ -79,18 +80,14 @@ export function OverviewAssistants() {
           actions={canCreate ? <CreateChatAppMenu /> : undefined}
         />
       ) : (
-        <ul className="grid gap-3 @lg:grid-cols-2 @xl:grid-cols-3">
+        <ResourceCollection
+          gridClassName="grid gap-3 @lg:grid-cols-2 @xl:grid-cols-3"
+          trailing={canCreate ? <NewAssistantCard /> : undefined}
+        >
           {shown.map((item) => (
-            <li key={item.id} className="min-w-0">
-              <ChatAppTile item={item} showStatus={showStatus} showActions={false} />
-            </li>
+            <ChatAppTile key={item.id} item={item} showStatus={showStatus} showActions={false} />
           ))}
-          {canCreate ? (
-            <li className="min-w-0">
-              <NewAssistantCard />
-            </li>
-          ) : null}
-        </ul>
+        </ResourceCollection>
       )}
     </OverviewSection>
   );

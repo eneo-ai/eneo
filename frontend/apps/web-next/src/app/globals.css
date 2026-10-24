@@ -533,6 +533,26 @@
 }
 
 /*
+ * 12b. A list row with a link (Astryx ListItem `href`: collections on a phone,
+ *     "Hantera ytan") is one target (decision 9). Astryx links only the label
+ *     column; the link's ::after covers the row (Item is the positioned
+ *     parent), and the row's own controls (a "…" menu) stay above it.
+ */
+@layer components {
+  .astryx-item > a::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+  }
+  .astryx-item:has(> a)
+    :is(a, button, input, select, textarea, [role="button"]):not(.astryx-item > a) {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+/*
  * 13. The document editor: a generated Markdown document in TipTap, in the
  *    chat side panel. Answers are styled by Streamdown's own components; the
  *    editor paints ProseMirror's plain elements, so the document's typography

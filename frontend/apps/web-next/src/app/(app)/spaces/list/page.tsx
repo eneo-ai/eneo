@@ -14,7 +14,7 @@ export default async function SpacesListPage() {
   await queryClient.query(spacesListQueryOptions(eneoApi()));
 
   return (
-    <div className="flex w-full flex-col gap-6 p-6">
+    <div className="flex w-full flex-col gap-6 p-4 md:p-6">
       <HydrationBoundary state={dehydrate(queryClient)}>
         <SpacesList title={t("spaces")} />
       </HydrationBoundary>

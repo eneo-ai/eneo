@@ -1,6 +1,12 @@
 import { useCallback, useSyncExternalStore } from "react";
 
 /**
+ * A phone (decision 1: below 768 px, Tailwind `md`): a space is a pushed
+ * screen with content tabs, collections are list rows.
+ */
+export const PHONE_QUERY = "(width < 48rem)";
+
+/**
  * Whether a media query matches, and `null` while that cannot be known: on
  * the server and during hydration. For markup that CSS already lays out per
  * width from the first paint (both variants rendered, the wrong one hidden):

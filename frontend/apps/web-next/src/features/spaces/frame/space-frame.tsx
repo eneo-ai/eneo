@@ -1,10 +1,10 @@
 "use client";
 
 import { useSelectedLayoutSegments } from "next/navigation";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { SpaceHeader } from "./space-header";
 import { SpacePhoneHeader } from "./space-phone-header";
-import { SPACE_PHONE_QUERY, spaceRoute } from "./space-sections";
+import { spaceRoute } from "./space-sections";
 
 /**
  * Chrome around every route of one space. The chat renders full-bleed (it has
@@ -29,7 +29,7 @@ import { SPACE_PHONE_QUERY, spaceRoute } from "./space-sections";
 export function SpaceFrame({ children }: { children: React.ReactNode }) {
   const segments = useSelectedLayoutSegments();
   const route = spaceRoute(segments);
-  const phone = useMediaMatch(SPACE_PHONE_QUERY);
+  const phone = useMediaMatch(PHONE_QUERY);
 
   if (route.kind === "chat") {
     return <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>;
