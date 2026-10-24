@@ -125,6 +125,42 @@ describe("globals.css", () => {
     expect(inputs?.[1]).toMatchObject({ "min-inline-size": "44px", "min-block-size": "44px" });
   });
 
+  it("keeps phones and tablets steady: no pull-to-refresh, no blur, the theme's drawer timing, safe areas", () => {
+    // selector → declarations of every rule in @layer components (it beats
+    // Astryx's own styles in astryx-base whatever their specificity).
+    const components = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkAtRules("layer", (layer: AtRule) => {
+      if (layer.params !== "components") return;
+      layer.walkRules((rule: Rule) => {
+        const selector = rule.selector.replace(/\s+/g, " ");
+        const declarations = components.get(selector) ?? {};
+        rule.walkDecls((decl) => {
+          declarations[decl.prop] = decl.value;
+        });
+        components.set(selector, declarations);
+      });
+    });
+
+    // Pulling down never reloads the page (and drops a draft or a streaming
+    // answer); main#main-content, the one scroller, keeps its bounce to itself.
+    expect(components.get("html, body")).toMatchObject({ "overscroll-behavior": "none" });
+    expect(components.get("#main-content")).toMatchObject({ "overscroll-behavior-y": "contain" });
+    // The scrim alone separates the drawer and dialogs from the page.
+    expect(components.get(".astryx-mobile-nav::backdrop, .astryx-dialog::backdrop")).toMatchObject({
+      "backdrop-filter": "none"
+    });
+    // The drawer moves at the theme's open duration (225 ms), not 300 ms.
+    expect(components.get(".astryx-mobile-nav")).toMatchObject({
+      "--duration-medium": "var(--duration-medium-min)"
+    });
+    // Its panel keeps its content clear of the notch and the home indicator.
+    expect(components.get(".astryx-mobile-nav > div:first-child")).toMatchObject({
+      "padding-top": "env(safe-area-inset-top, 0px)",
+      "padding-bottom": "env(safe-area-inset-bottom, 0px)",
+      "padding-inline-start": "env(safe-area-inset-left, 0px)"
+    });
+  });
+
   it("marks what is selected, current or highlighted with Highlight in forced colours", () => {
     // selector → declarations of every rule under an unlayered
     // @media (forced-colors: active): a layered rule would lose to Tailwind.

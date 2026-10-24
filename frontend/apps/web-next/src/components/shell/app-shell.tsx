@@ -128,7 +128,12 @@ export function AppShellFrame({
   return (
     <ShellContext value={shell}>
       <AppShellMobileContext value={mobileNav}>
-        <div className="bg-ax-body flex h-svh flex-col md:flex-row md:gap-2 md:p-2">
+        {/* The page runs under the notch and the home indicator
+            (viewport-fit=cover): the frame keeps the top and the sides clear,
+            main#main-content the bottom. On phones the surface fills the
+            frame, so the strip under the status bar continues the top bar;
+            from md the page panel floats on the body colour. */}
+        <div className="bg-ax-surface md:bg-ax-body flex h-svh flex-col pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pl-[env(safe-area-inset-left,0px)] md:flex-row md:gap-2 md:pt-[max(0.5rem,env(safe-area-inset-top,0px))] md:pr-[max(0.5rem,env(safe-area-inset-right,0px))] md:pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] md:pl-[max(0.5rem,env(safe-area-inset-left,0px))]">
           <a
             href="#main-content"
             className="focus:bg-ax-surface focus:text-ax-text focus:rounded-ax-element focus:border-ax-border-strong focus:shadow-ax-med focus-visible:outline-ring sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:border focus:px-3 focus:py-2 focus-visible:outline-2 focus-visible:outline-offset-2"
@@ -147,7 +152,7 @@ export function AppShellFrame({
           <main
             id="main-content"
             tabIndex={-1}
-            className="bg-ax-surface md:rounded-ax-page md:shadow-ax-low relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto focus:outline-none"
+            className="bg-ax-surface md:rounded-ax-page md:shadow-ax-low relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pb-[env(safe-area-inset-bottom,0px)] focus:outline-none md:pb-0"
           >
             {children}
           </main>

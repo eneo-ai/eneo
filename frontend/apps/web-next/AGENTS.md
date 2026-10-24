@@ -252,6 +252,15 @@ the default name on a backend name collision (9017).
   `useOwnMobileHeader()` so the shell hides its top bar while it is mounted, and
   opens the drawer with `window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))`
   (`src/components/shell/routes.ts`).
+- **Phones and tablets**: the root layout's `viewport` runs the page edge to
+  edge (`viewportFit: "cover"`), lets the Android keyboard resize the layout
+  (`interactiveWidget: "resizes-content"`) and colours the status bar with the
+  surface token (`ThemeColor` follows an explicit Tema). Each safe-area inset
+  has one owner: the shell frame pads the top and sides, `main#main-content`
+  the bottom, the drawer's panel pads itself (`globals.css` section 14), and
+  Astryx Dialog, Popover and BottomSheet pad themselves. Don't add
+  `env(safe-area-inset-*)` inside the page. The page never pulls to refresh
+  (`overscroll-behavior`), and the drawer and dialogs have no backdrop blur.
 - **Toasts**: only through `src/lib/toast.ts` (`no-restricted-imports` blocks
   `sonner` elsewhere). Errors and warnings don't time out; every toast has a
   close button; success and info close after 6 s. Sonner's stylesheet is

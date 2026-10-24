@@ -758,3 +758,42 @@
     color: var(--color-text-teal);
   }
 }
+
+/*
+ * 14. Phones and tablets: the page holds still and sits clear of the hardware.
+ *    - Pulling down at the top of the page would reload it (Android Chrome) or
+ *      drag the whole shell (iOS Safari), losing a draft or a streaming answer.
+ *      main#main-content is the one scroller and keeps its own bounce.
+ *    - The scrim alone separates the drawer and dialogs from the page: no
+ *      blur behind them (Astryx blurs their ::backdrop by 2 px).
+ *    - The drawer opens and closes at the theme's open duration (225 ms)
+ *      instead of 300 ms. The custom property is set on the whole drawer, the
+ *      dialog included, because MobileNav times its close from the dialog's
+ *      computed transition duration; the ::backdrop inherits it.
+ *    - With viewport-fit=cover (app/layout.tsx) the page runs under the notch
+ *      and the home indicator. Astryx's Dialog, Popover and BottomSheet pad
+ *      themselves; its MobileNav does not, so its panel (the dialog's first
+ *      child) pads here. The shell frame pads the top and sides of the page
+ *      and main#main-content its bottom (components/shell/app-shell.tsx).
+ */
+@layer components {
+  html,
+  body {
+    overscroll-behavior: none;
+  }
+  #main-content {
+    overscroll-behavior-y: contain;
+  }
+  .astryx-mobile-nav::backdrop,
+  .astryx-dialog::backdrop {
+    backdrop-filter: none;
+  }
+  .astryx-mobile-nav {
+    --duration-medium: var(--duration-medium-min);
+  }
+  .astryx-mobile-nav > div:first-child {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-inline-start: env(safe-area-inset-left, 0px);
+  }
+}

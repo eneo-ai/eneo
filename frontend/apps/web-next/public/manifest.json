@@ -5,7 +5,8 @@
   "display": "standalone",
   "start_url": "/dashboard",
   "scope": "/",
-  "theme_color": "#1E40AF",
+  "theme_color": "#FFFFFF",
+  "background_color": "#FFFFFF",
   "icons": [
     {
       "src": "/eneo_pwa_logo.png",
