@@ -14,7 +14,7 @@ import { toastApiError } from "@/lib/api/toast";
 import { MoveResourceDialog } from "@/features/knowledge/move-dialog";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
-import type { AssistantSparse, GroupChatSparse } from "./assistants";
+import type { AssistantSparse } from "./assistants";
 import { PublishDialog } from "./publish-dialog";
 
 function useSpaceInvalidation() {
@@ -170,77 +170,6 @@ export function AssistantActions({ assistant }: { assistant: AssistantSparse }) 
   );
 }
 
-export function GroupChatActions({ groupChat }: { groupChat: GroupChatSparse }) {
-  const t = useTranslations();
-  const router = useRouter();
-  const { routeId } = useSpace();
-  const invalidate = useSpaceInvalidation();
-  const [showPublish, setShowPublish] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
-
-  const permissions = groupChat.permissions ?? [];
-
-  const publish = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/group-chats/{id}/publish/", {
-          params: { path: { id: groupChat.id }, query: { published: !groupChat.published } }
-        })
-      ),
-    onSuccess: () => {
-      void invalidate();
-      setShowPublish(false);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const deleteGroupChat = useRemovalMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.DELETE("/api/v1/group-chats/{id}/", { params: { path: { id: groupChat.id } } })
-      ),
-    refresh: invalidate,
-    onRemoved: () => setShowDelete(false)
-  });
-
-  if (!permissions.some((permission) => ["edit", "publish", "delete"].includes(permission))) {
-    return null;
-  }
-
-  return (
-    <>
-      <MoreMenu
-        label={t("space_more_actions_for", { name: groupChat.name })}
-        alignment="end"
-        items={chatAppMenuItems(t, permissions, {
-          published: groupChat.published,
-          onEdit: () => router.push(`/spaces/${routeId}/group-chats/${groupChat.id}/edit`),
-          onPublish: () => setShowPublish(true),
-          onDelete: () => setShowDelete(true)
-        })}
-      />
-      <PublishDialog
-        open={showPublish}
-        onOpenChange={setShowPublish}
-        name={groupChat.name}
-        published={groupChat.published}
-        pending={publish.isPending}
-        onConfirm={() => publish.mutate()}
-      />
-      <ConfirmDialogControlled
-        open={showDelete}
-        onOpenChange={setShowDelete}
-        title={t("delete_group_chat")}
-        description={t("confirm_delete_group_chat", { groupChatName: groupChat.name })}
-        confirmLabel={deleteGroupChat.isPending ? t("deleting") : t("delete")}
-        pending={deleteGroupChat.isPending}
-        onConfirm={() => deleteGroupChat.mutate()}
-      />
-    </>
-  );
-}
-
-export function ChatAppActions({ item }: { item: AssistantSparse | GroupChatSparse }) {
-  if (item.type === "group-chat") return <GroupChatActions groupChat={item} />;
+export function ChatAppActions({ item }: { item: AssistantSparse }) {
   return <AssistantActions assistant={item} />;
 }

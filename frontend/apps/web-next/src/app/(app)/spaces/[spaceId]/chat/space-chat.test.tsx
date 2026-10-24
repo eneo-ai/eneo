@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { router } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
 import { SpaceChat } from "./space-chat.client";
 
@@ -89,6 +90,19 @@ describe("SpaceChat", () => {
     renderRoute("/spaces/space-1/chat?type=assistant&id=assistant-9");
     expect(await screen.findByText("Det gick inte att öppna chatten")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Försök igen" })).toBeTruthy();
+  });
+
+  it("opens a saved group-chat link as the assistant with that id", async () => {
+    // A retired group chat became an assistant with the same id.
+    renderRoute("/spaces/space-1/chat?type=group-chat&id=assistant-9&session_id=s-1");
+    await waitFor(() =>
+      expect(api.GET).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
+        params: { path: { id: "assistant-9" } }
+      })
+    );
+    expect(router.replace).toHaveBeenCalledWith(
+      "/spaces/space-1/chat?type=assistant&id=assistant-9&session_id=s-1"
+    );
   });
 
   it("says so without a retry when the space has no assistant to chat with", () => {

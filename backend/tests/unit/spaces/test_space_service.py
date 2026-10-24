@@ -67,7 +67,6 @@ async def test_classification_dry_run_reports_unavailable_capability_without_rem
         mcp_servers=[],
         assistants=[assistant],
         default_assistant=None,
-        group_chats=[],
         apps=[],
         services=[],
         update=Mock(),
@@ -101,7 +100,7 @@ async def test_classification_dry_run_reports_unavailable_capability_without_rem
     space.update.assert_not_called()
 
 
-async def test_impact_preview_keeps_every_resource_list_and_accounts_for_default_seats():
+async def test_impact_preview_keeps_every_resource_list():
     from types import SimpleNamespace
     from unittest.mock import AsyncMock, Mock
 
@@ -119,13 +118,11 @@ async def test_impact_preview_keeps_every_resource_list_and_accounts_for_default
         enabled_capabilities=[],
         embedding_model_id=None,
     )
-    chat = SimpleNamespace(id=uuid4(), get_assistants=lambda: [default])
     app = SimpleNamespace(id=uuid4(), completion_model=unsafe, transcription_model=None)
     service_item = SimpleNamespace(id=uuid4(), completion_model=safe, groups=[])
     space = SimpleNamespace(
         default_assistant=default,
         assistants=[assistant],
-        group_chats=[chat],
         apps=[app],
         services=[service_item],
         completion_models=[unsafe, safe],
@@ -152,7 +149,6 @@ async def test_impact_preview_keeps_every_resource_list_and_accounts_for_default
         )
     )
     result = await service.security_classification_impact_analysis(uuid4(), uuid4())
-    assert result.affected_group_chat_ids == frozenset({chat.id})
     assert result.affected_app_ids == frozenset({app.id})
     assert result.affected_service_ids == frozenset()
     assert space.security_classification is None

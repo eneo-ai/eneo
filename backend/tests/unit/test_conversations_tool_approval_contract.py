@@ -73,9 +73,7 @@ def _make_context(user, assistant_id=None) -> ToolApprovalContext:
 
 @pytest.mark.asyncio
 async def test_tool_result_rechecks_current_session_access():
-    session = SimpleNamespace(
-        id=uuid4(), group_chat_id=None, assistant=SimpleNamespace()
-    )
+    session = SimpleNamespace(id=uuid4(), assistant=SimpleNamespace())
     session_service = AsyncMock()
     session_service.get_session_by_uuid.return_value = session
     session_service.get_tool_call_result.return_value = ToolCallInfo(
@@ -112,9 +110,7 @@ async def test_tool_result_rechecks_current_session_access():
 
 @pytest.mark.asyncio
 async def test_tool_result_is_not_read_when_current_access_is_revoked():
-    session = SimpleNamespace(
-        id=uuid4(), group_chat_id=None, assistant=SimpleNamespace()
-    )
+    session = SimpleNamespace(id=uuid4(), assistant=SimpleNamespace())
     session_service = AsyncMock()
     session_service.get_session_by_uuid.return_value = session
     container = SimpleNamespace(session_service=lambda: session_service)
@@ -562,9 +558,7 @@ def test_legacy_assistant_ask_ignores_require_tool_approval_extra_field():
 async def _call_from_view(*, outcome):
     """Drive the view tool-call endpoint with the service's outcome patched in."""
     container, user, audit_service = _make_container()
-    session = SimpleNamespace(
-        id=uuid4(), name="Weather", group_chat_id=None, assistant=SimpleNamespace()
-    )
+    session = SimpleNamespace(id=uuid4(), name="Weather", assistant=SimpleNamespace())
     session_service = AsyncMock()
     session_service.get_session_by_uuid.return_value = session
     container.session_service = lambda: session_service
@@ -636,9 +630,7 @@ async def test_refused_view_tool_call_is_audited_as_a_failure():
 
 async def test_document_export_is_audited_and_returned_as_a_download():
     container, user, audit_service = _make_container()
-    session = SimpleNamespace(
-        id=uuid4(), name="Plan", group_chat_id=None, assistant=SimpleNamespace()
-    )
+    session = SimpleNamespace(id=uuid4(), name="Plan", assistant=SimpleNamespace())
     session_service = AsyncMock()
     session_service.get_session_by_uuid.return_value = session
     container.session_service = lambda: session_service
@@ -681,9 +673,7 @@ async def test_document_export_is_audited_and_returned_as_a_download():
 
 async def test_document_export_without_a_provider_is_a_conflict_audited_as_a_failure():
     container, user, audit_service = _make_container()
-    session = SimpleNamespace(
-        id=uuid4(), name="Plan", group_chat_id=None, assistant=SimpleNamespace()
-    )
+    session = SimpleNamespace(id=uuid4(), name="Plan", assistant=SimpleNamespace())
     session_service = AsyncMock()
     session_service.get_session_by_uuid.return_value = session
     container.session_service = lambda: session_service
@@ -721,9 +711,7 @@ async def test_document_export_without_a_provider_is_a_conflict_audited_as_a_fai
 
 async def test_link_signed_again_for_a_view_is_audited_as_a_mint():
     container, user, audit_service = _make_container()
-    session = SimpleNamespace(
-        id=uuid4(), name="Costs", group_chat_id=None, assistant=SimpleNamespace()
-    )
+    session = SimpleNamespace(id=uuid4(), name="Costs", assistant=SimpleNamespace())
     session_service = AsyncMock()
     session_service.get_session_by_uuid.return_value = session
     container.session_service = lambda: session_service

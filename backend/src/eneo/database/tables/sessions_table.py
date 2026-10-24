@@ -7,7 +7,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.base_class import BasePublic
-from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.service_table import Services
 from eneo.database.tables.users_table import Users
 
@@ -36,16 +35,12 @@ class Sessions(BasePublic):
     service_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Services.id, ondelete="CASCADE")
     )
-    group_chat_id: Mapped[Optional[UUID]] = mapped_column(
-        ForeignKey(GroupChatsTable.id, ondelete="CASCADE")
-    )
 
     # Relationships
     questions: Mapped[list["Questions"]] = relationship(order_by="Questions.created_at")
     assistant: Mapped[Optional[Assistants]] = relationship(
         foreign_keys="Sessions.assistant_id", viewonly=True
     )
-    group_chat: Mapped[Optional[GroupChatsTable]] = relationship(viewonly=True)
 
     __table_args__ = (
         Index("ix_sessions_created_id", "created_at", "id"),

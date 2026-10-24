@@ -80,7 +80,7 @@ def turn(monkeypatch: pytest.MonkeyPatch) -> TurnFixture:
                 updated_at=now,
                 tenant_id=tenant_id,
                 name="Builder",
-                permissions=[Permission.ASSISTANTS, Permission.GROUP_CHATS],
+                permissions=[Permission.ASSISTANTS],
             )
         ],
     )

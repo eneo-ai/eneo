@@ -17,29 +17,45 @@ from eneo.skills.domain.skill import SkillActivationEvidenceV1
 class _ConversationTarget(BaseModel):
     """Shared targeting fields for chat-style requests.
 
-    Exactly one of `session_id`, `assistant_id`, or `group_chat_id` must be
-    present. Centralized here so the validator stays in one place — adding a
-    new target type later is a single edit.
+    Exactly one of `session_id` or `assistant_id` must be present. Centralized
+    here so the validator stays in one place — adding a new target type later
+    is a single edit.
     """
 
     session_id: Optional[UUID] = None
     assistant_id: Optional[UUID] = None
-    group_chat_id: Optional[UUID] = None
+    group_chat_id: Optional[UUID] = Field(
+        default=None,
+        deprecated=True,
+        description=(
+            "Deprecated: group chats were replaced by assistants with "
+            "specialists. The group became an assistant with the same id; use "
+            "assistant_id. Requests that set this field are answered with 410."
+        ),
+    )
+
+    @property
+    def retired_group_chat_id(self) -> Optional[UUID]:
+        """The deprecated target, read without pydantic's deprecation warning.
+
+        Attribute access on a deprecated field warns on every read; the test
+        suite treats warnings as errors and the router reads this per request.
+        """
+        return self.__dict__.get("group_chat_id")
 
     @model_validator(mode="after")
     def _validate_exactly_one_target(self) -> "_ConversationTarget":
+        if self.retired_group_chat_id is not None:
+            # The router answers 410 group_chats_retired; a 422 here would hide it.
+            return self
         ids = [
-            value
-            for value in (self.session_id, self.assistant_id, self.group_chat_id)
-            if value is not None
+            value for value in (self.session_id, self.assistant_id) if value is not None
         ]
         if len(ids) == 0:
-            raise ValueError(
-                "Provide exactly one of session_id, assistant_id, or group_chat_id."
-            )
+            raise ValueError("Provide exactly one of session_id or assistant_id.")
         if len(ids) > 1:
             raise ValueError(
-                "Provide exactly one of session_id, assistant_id, or group_chat_id, not multiple."
+                "Provide exactly one of session_id or assistant_id, not multiple."
             )
         return self
 
@@ -144,15 +160,10 @@ class PreflightResponse(BaseModel):
 
 class ConversationRequest(_ConversationTarget):
     """
-    A unified model for asking questions to either assistants or group chats.
+    A unified model for asking questions to assistants.
 
-    Either session_id, assistant_id, or group_chat_id must be provided.
+    Either session_id or assistant_id must be provided.
     If session_id is provided, the conversation will continue with the existing session.
-
-    For group chats:
-    - If tools.assistants contains an assistant, that specific assistant will be targeted
-      (requires the group chat to have allow_mentions=True).
-    - If no assistant is targeted, the most appropriate assistant will be selected.
     """
 
     question: str
@@ -191,9 +202,9 @@ class ChatTurnDiagnostics(BaseModel):
 
 
 class RecentConversationPartner(BaseModel):
-    """The assistant or group chat a recent conversation is held with."""
+    """The assistant a recent conversation is held with."""
 
-    type: Literal["assistant", "default-assistant", "group-chat"] = Field(
+    type: Literal["assistant", "default-assistant"] = Field(
         description=(
             "`default-assistant` is the space's own assistant; in the personal "
             "space that is the personal chat."

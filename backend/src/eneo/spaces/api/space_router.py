@@ -22,7 +22,6 @@ from eneo.authentication.endpoint_access import (
     endpoint_access,
 )
 from eneo.collections.presentation.collection_models import CollectionPublic
-from eneo.group_chat.presentation.models import GroupChatCreate, GroupChatPublic
 from eneo.info_blobs.info_blob_repo import IntegrationDocumentSort
 from eneo.integration.application.integration_documents import (
     SortOrder,
@@ -62,6 +61,9 @@ from eneo.roles.permissions import Permission
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+from eneo.server.retired_group_chats_router import (
+    RETIRED_DETAIL as RETIRED_GROUP_CHATS_DETAIL,
+)
 from eneo.spaces.api.space_models import (
     AddSpaceGroupMemberRequest,
     AddSpaceMemberRequest,
@@ -599,11 +601,13 @@ async def create_space_assistant(
 
 @router.post(
     "/{id}/applications/group-chats/",
-    response_model=GroupChatPublic,
-    description="Creates a group chat.",
-    response_description="Successful Response.",
-    status_code=201,
-    responses=responses.get_responses([400, 403, 404]),
+    response_model=None,
+    responses={410: {"description": "Group chats are retired."}},
+    description=(
+        "Retired: group chats became assistants with specialists. Always 410. "
+        "Create an assistant and add its specialists instead."
+    ),
+    deprecated=True,
     dependencies=[Depends(forbid_org_space)],
 )
 @endpoint_access(
@@ -613,38 +617,9 @@ async def create_space_assistant(
 )
 async def create_group_chat(
     id: UUID,
-    group_chat_in: GroupChatCreate,
     container: Annotated[Container, Depends(get_container(with_user=True))],
-    _user_for_creation: None = Depends(require_user_for_creation),
 ):
-    service = container.group_chat_service()
-    assembler = container.group_chat_assembler()
-    user = container.user()
-
-    # Create group chat
-    group_chat = await service.create_group_chat(space_id=id, name=group_chat_in.name)
-
-    # Get space for context (graceful degradation if space fetch fails)
-    space = None
-    try:
-        space_service = container.space_service()
-        space = await space_service.get_space(id)
-    except Exception:
-        pass
-
-    # Audit logging
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=user.tenant_id,
-        user=user,
-        action=ActionType.GROUP_CHAT_CREATED,
-        entity_type=EntityType.GROUP_CHAT,
-        entity_id=group_chat.id,
-        description=f"Created group chat '{group_chat.name}' in space '{space.name if space else 'unknown'}'",
-        metadata=AuditMetadata.standard(actor=user, target=group_chat, space=space),
-    )
-
-    return assembler.from_domain_to_model(group_chat=group_chat)
+    raise HTTPException(status_code=410, detail=RETIRED_GROUP_CHATS_DETAIL)
 
 
 @router.post(

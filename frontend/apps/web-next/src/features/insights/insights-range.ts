@@ -55,10 +55,8 @@ export function insightRangeParams(range: InsightRange): {
 }
 
 /** Which partner the insight endpoints are asked about. */
-export function insightPartnerQuery(partner: Pick<ChatPartner, "type" | "id">): {
-  assistant_id?: string;
-  group_chat_id?: string;
+export function insightPartnerQuery(partner: Pick<ChatPartner, "id">): {
+  assistant_id: string;
 } {
-  if (partner.type === "group-chat") return { group_chat_id: partner.id };
   return { assistant_id: partner.id };
 }

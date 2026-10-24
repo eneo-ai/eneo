@@ -31,9 +31,6 @@ from eneo.database.tables.assistant_table import (
 from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.capabilities_table import SpaceCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
-from eneo.database.tables.group_chats_table import (
-    GroupChatsTable,
-)
 from eneo.database.tables.groups_spaces_table import GroupsSpaces
 from eneo.database.tables.info_blobs_table import InfoBlobs, active_info_blob_version
 from eneo.database.tables.integration_knowledge_spaces_table import (
@@ -897,20 +894,6 @@ class SpaceRepository:
 
         return services_db
 
-    async def _get_group_chats(self, space_id: UUID) -> Sequence[GroupChatsTable]:
-        # Fetch all group chats for the space
-        stmt = (
-            sa.select(GroupChatsTable)
-            .execution_options(populate_existing=True)
-            .where(GroupChatsTable.space_id == space_id)
-            .options(selectinload(GroupChatsTable.group_chat_assistants))
-        )
-
-        group_chat_records = await self.session.execute(stmt)
-        group_chats_db = group_chat_records.scalars().all()
-
-        return group_chats_db
-
     def _decrypt_website_auth(
         self, website_record: WebsitesTable
     ) -> "Optional[HttpAuthCredentials]":
@@ -1218,7 +1201,6 @@ class SpaceRepository:
             assistants=assistants,
             apps=apps,
         )
-        group_chats = await self._get_group_chats(space_id=entry_in_db.id)
         services = await self._get_services(space_id=entry_in_db.id)
 
         space = self.factory.create_space_from_db(
@@ -1232,7 +1214,6 @@ class SpaceRepository:
             mcp_servers=mcp_servers,
             assistants_in_db=assistants,
             assistant_attachments=assistant_attachments,
-            group_chats_in_db=group_chats,
             apps_in_db=apps,
             app_attachments=app_attachments,
             services_in_db=services,
@@ -1417,11 +1398,6 @@ class SpaceRepository:
                 .order_by(Assistants.created_at)
             )
         ).all()
-        group_chats = (
-            await self.session.scalars(
-                sa.select(GroupChatsTable).where(GroupChatsTable.space_id == id)
-            )
-        ).all()
         apps = (
             await self.session.scalars(
                 sa.select(Apps).where(Apps.space_id == id).order_by(Apps.created_at)
@@ -1439,7 +1415,6 @@ class SpaceRepository:
             member_roles=member_roles,
             group_member_roles=group_member_roles,
             assistants_in_db=assistants,
-            group_chats_in_db=group_chats,
             apps_in_db=apps,
             services_in_db=services,
             completion_models=completion_models,
@@ -1502,13 +1477,11 @@ class SpaceRepository:
                     assistants=assistants,
                     apps=apps,
                 )
-                group_chats = await self._get_group_chats(space_id=record.id)
             else:
                 assistants: Sequence[Assistants] = []
                 apps: Sequence[Apps] = []
                 assistant_attachments: dict[UUID, list[File]] = {}
                 app_attachments: dict[UUID, list[File]] = {}
-                group_chats: Sequence[GroupChatsTable] = []
 
             spaces.append(
                 self.factory.create_space_from_db(
@@ -1518,7 +1491,6 @@ class SpaceRepository:
                     assistant_attachments=assistant_attachments,
                     apps_in_db=apps,
                     app_attachments=app_attachments,
-                    group_chats_in_db=group_chats,
                 )
             )
 
@@ -1561,19 +1533,6 @@ class SpaceRepository:
         )
 
         space = await self._get_from_query(query)
-
-        if space is None:
-            raise NotFoundException()
-
-        return space
-
-    async def get_space_by_group_chat(self, group_chat_id: UUID) -> Space:
-        query = self._in_caller_tenant(
-            sa.select(Spaces)
-            .join(GroupChatsTable)
-            .where(GroupChatsTable.id == group_chat_id)
-        )
-        space = await self._get_from_query(query=query)
 
         if space is None:
             raise NotFoundException()
@@ -1926,11 +1885,7 @@ class SpaceRepository:
         if session.assistant_id is not None:
             return await self.get_space_by_assistant(assistant_id=session.assistant_id)
 
-        # find space through group chat
-        if session.group_chat_id is not None:
-            return await self.get_space_by_group_chat(
-                group_chat_id=session.group_chat_id
-            )
+        return None
 
     async def _get_integration_knowledge_union(
         self, space_ids: list[UUID], *, with_document_counts: bool = False

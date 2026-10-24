@@ -2,13 +2,44 @@
   "$schema": "./releases.schema.json",
   "releases": [
     {
+      "version": "2.4.0",
+      "entries": [
+        {
+          "id": "assistant-specialists",
+          "type": "new",
+          "area": "assistants",
+          "title": {
+            "en": "Assistants that consult specialists",
+            "sv": "Assistenter som rådfrågar specialister"
+          },
+          "body": {
+            "en": "An assistant can now consult other assistants in its space before it answers. Add them under Specialists in the assistant's settings and describe what each one should be asked about. The assistant asks them focused questions, can follow up, and writes one combined answer. Expand View steps under the answer to see each question, the specialist's reply, its sources and the tools it used. Consulting needs a model that supports tools.",
+            "sv": "En assistent kan nu rådfråga andra assistenter i sin yta innan den svarar. Lägg till dem under Specialister i assistentens inställningar och beskriv vad var och en ska frågas om. Assistenten ställer avgränsade frågor till dem, kan ställa följdfrågor och skriver ett samlat svar. Expandera Visa steg under svaret för att se varje fråga, specialistens svar, dess källor och verktyg. Att rådfråga kräver en modell med verktygsstöd."
+          }
+        },
+        {
+          "id": "group-chats-became-assistants",
+          "type": "improved",
+          "area": "spaces",
+          "title": {
+            "en": "Group chats are now assistants",
+            "sv": "Gruppchattar är nu assistenter"
+          },
+          "body": {
+            "en": "Each group chat became an assistant with the same name and its members as specialists, so conversations and insights carried over. Open the former group in the assistant list, give it instructions for the combined answer, and check its model and specialists. Mentions and response labels are gone; the steps under each answer show who said what.",
+            "sv": "Varje gruppchatt blev en assistent med samma namn och medlemmarna som specialister, så konversationer och insikter följde med. Öppna den tidigare gruppen i assistentlistan, ge den instruktioner för det samlade svaret och kontrollera modell och specialister. Omnämnanden och svarsetiketter är borta; stegen under varje svar visar vem som sa vad."
+          }
+        }
+      ]
+    },
+    {
       "version": "2.3.0",
       "entries": [
         {
           "id": "file-creation-progress",
           "permissions": {
             "allOf": ["file_creation"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -26,7 +57,7 @@
           "id": "file-analysis-trace",
           "permissions": {
             "allOf": ["file_analysis"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -44,7 +75,7 @@
           "id": "compute-and-charts",
           "permissions": {
             "allOf": ["compute", "charts"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -61,7 +92,7 @@
         {
           "id": "conversation-uploads",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -414,7 +445,7 @@
         {
           "id": "knowledge-on-demand",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -431,7 +462,7 @@
           "id": "image-variations",
           "permissions": {
             "allOf": ["image_generation"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -447,7 +478,7 @@
         {
           "id": "copy-rich-text",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -503,7 +534,7 @@
         {
           "id": "model-details",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -519,7 +550,7 @@
         {
           "id": "chat-polish",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -535,7 +566,7 @@
         {
           "id": "attachments",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -567,7 +598,7 @@
         {
           "id": "open-shared-sources",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "fixed",
           "area": "knowledge",
@@ -813,7 +844,7 @@
         {
           "id": "rename-conversations",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -829,7 +860,7 @@
         {
           "id": "aborted-answers-saved",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -845,7 +876,7 @@
         {
           "id": "provider-outage-message",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -861,7 +892,7 @@
         {
           "id": "webp-avif-uploads",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "fixed",
           "area": "chat",

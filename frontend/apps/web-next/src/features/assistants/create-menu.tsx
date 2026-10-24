@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bot, ChevronDown, LayoutTemplate, Users } from "lucide-react";
+import { Bot, ChevronDown, LayoutTemplate } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { useState } from "react";
@@ -26,9 +26,9 @@ import { TemplateGalleryDialog } from "@/features/templates/template-gallery-dia
  * Split button: the primary action creates a blank assistant at once, named
  * "Ny assistent" (numbered on a collision), and opens its editor, which
  * focuses the name. No name dialog in between: the editor's first field is
- * that same name. The chevron menu also offers a group chat, created the same
- * way, and — when the tenant has templates enabled — creation from a template
- * gallery (passes from_template), which still asks for the template and name.
+ * that same name. The chevron menu also offers — when the tenant has templates
+ * enabled — creation from a template gallery (passes from_template), which
+ * still asks for the template and name.
  */
 export function CreateChatAppMenu() {
   const t = useTranslations();
@@ -68,31 +68,10 @@ export function CreateChatAppMenu() {
     onError: (error) => toastApiError(error, t)
   });
 
-  const createGroupChat = useMutation({
-    mutationFn: (name: string) =>
-      createWithUniqueName(name, (candidate) =>
-        unwrap(
-          browserApi.POST("/api/v1/spaces/{id}/applications/group-chats/", {
-            params: { path: { id: space.id } },
-            body: { name: candidate }
-          })
-        )
-      ),
-    onSuccess: (groupChat) => {
-      invalidate();
-      markJustCreated("group-chat", groupChat.id);
-      router.push(`/spaces/${routeId}/group-chats/${groupChat.id}/edit`);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
   // Busy, the buttons stay enabled so they keep focus; a second press is ignored.
-  const pending = createAssistant.isPending || createGroupChat.isPending;
+  const pending = createAssistant.isPending;
   const createBlankAssistant = () => {
     if (!pending) createAssistant.mutate({ name: t("new_assistant_default_name") });
-  };
-  const createBlankGroupChat = () => {
-    if (!pending) createGroupChat.mutate(t("new_group_chat_default_name"));
   };
 
   return (
@@ -124,9 +103,6 @@ export function CreateChatAppMenu() {
                 <LayoutTemplate className="size-4" /> {t("start_with_template")}
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem onSelect={createBlankGroupChat}>
-              <Users className="size-4" /> {t("create_new_group_chat")}
-            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

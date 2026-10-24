@@ -131,7 +131,6 @@ function HistoryPanel({
     if (focusHeadingOnMount) headingRef.current?.focus();
   }, [focusHeadingOnMount]);
 
-  const isGroupChat = partner.type === "group-chat";
   const history = useInfiniteQuery({
     ...cursorPagination,
     queryKey: historyQueryKey(partner),
@@ -140,8 +139,7 @@ function HistoryPanel({
         browserApi.GET("/api/v1/conversations/", {
           params: {
             query: {
-              assistant_id: isGroupChat ? undefined : partner.id,
-              group_chat_id: isGroupChat ? partner.id : undefined,
+              assistant_id: partner.id,
               limit: PAGE_SIZE,
               cursor: pageParam
             }

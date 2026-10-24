@@ -4128,7 +4128,6 @@ class AssistantService:
         self,
         question: str,
         assistant_id: "UUID",
-        group_chat_id: Optional["UUID"] = None,
         session_id: "UUID | None" = None,
         file_ids: list["UUID"] | None = None,
         stream: bool = False,
@@ -4202,53 +4201,28 @@ class AssistantService:
         is_new_session = session_id is None
         if not is_new_session:
             assert session_id is not None
-            if group_chat_id is not None:
-                session = await self.session_service.get_session_by_uuid(
-                    id=session_id, group_chat_id=group_chat_id
-                )
-            else:
-                session = await self.session_service.get_session_by_uuid(
-                    id=session_id, assistant_id=assistant_id
-                )
+            session = await self.session_service.get_session_by_uuid(
+                id=session_id, assistant_id=assistant_id
+            )
         else:
             # Set the name as the question or the filenames
             name = question
             if not name and files:
                 name = " ".join(file.name for file in files)
-            if group_chat_id is not None:
-                (
-                    session,
-                    question_id,
-                    question_created_at,
-                ) = await self.session_service.create_session_with_question_placeholder(
-                    name=name,
-                    question=question,
-                    files=files,
-                    question_assistant_id=assistant_to_ask.id,
-                    group_chat_id=group_chat_id,
-                    completion_model=cast(
-                        "AICompletionModel", effective_completion_model
-                    ),
-                    skill_provenance=skill_composition.provenance or None,
-                    skill_activation=skill_activation,
-                )
-            else:
-                (
-                    session,
-                    question_id,
-                    question_created_at,
-                ) = await self.session_service.create_session_with_question_placeholder(
-                    name=name,
-                    question=question,
-                    files=files,
-                    session_assistant_id=active_assistant.id,
-                    question_assistant_id=assistant_to_ask.id,
-                    completion_model=cast(
-                        "AICompletionModel", effective_completion_model
-                    ),
-                    skill_provenance=skill_composition.provenance or None,
-                    skill_activation=skill_activation,
-                )
+            (
+                session,
+                question_id,
+                question_created_at,
+            ) = await self.session_service.create_session_with_question_placeholder(
+                name=name,
+                question=question,
+                files=files,
+                session_assistant_id=active_assistant.id,
+                question_assistant_id=assistant_to_ask.id,
+                completion_model=cast("AICompletionModel", effective_completion_model),
+                skill_provenance=skill_composition.provenance or None,
+                skill_activation=skill_activation,
+            )
 
         assert session is not None
         for _question in session.questions:

@@ -39,7 +39,6 @@ if TYPE_CHECKING:
     )
     from eneo.files.file_models import File
     from eneo.files.file_service import FileService
-    from eneo.group_chat.application.group_chat_service import GroupChatService
     from eneo.sessions.session import SessionInDB
     from eneo.sessions.session_service import SessionService
     from eneo.spaces.space_service import SpaceService
@@ -56,14 +55,13 @@ def _litellm_token_counter_name(model: "CompletionModel") -> str:
 
 class ConversationService:
     """
-    Service for handling conversations with assistants and group chats.
-    This service abstracts the routing logic between different conversation types.
+    Service for handling conversations with assistants.
+    This service abstracts the routing logic between new and continued conversations.
     """
 
     def __init__(
         self,
         assistant_service: "AssistantService",
-        group_chat_service: "GroupChatService",
         session_service: "SessionService",
         completion_service: "CompletionService",
         space_service: "SpaceService",
@@ -71,7 +69,6 @@ class ConversationService:
     ) -> None:
         super().__init__()
         self.assistant_service = assistant_service
-        self.group_chat_service = group_chat_service
         self.session_service = session_service
         self.completion_service = completion_service
         self.space_service = space_service
@@ -82,7 +79,6 @@ class ConversationService:
         question: str,
         session_id: Optional["UUID"] = None,
         assistant_id: Optional["UUID"] = None,
-        group_chat_id: Optional["UUID"] = None,
         file_ids: "list[UUID] | None" = None,
         stream: bool = False,
         tool_assistant_id: Optional["UUID"] = None,
@@ -98,7 +94,6 @@ class ConversationService:
             question: The question to ask
             session_id: The existing session ID to continue a conversation, if any
             assistant_id: The assistant ID to start a new conversation with, if no session_id
-            group_chat_id: The group chat ID to start a new conversation with, if no session_id
             file_ids: List of file IDs to attach to the question
             stream: Whether to stream the response
             tool_assistant_id: Optional ID of a specific assistant to target (for tools.assistants)
@@ -108,7 +103,7 @@ class ConversationService:
             The response from the appropriate service
 
         Raises:
-            ValueError: If neither session_id, assistant_id, nor group_chat_id is provided
+            ValueError: If neither session_id nor assistant_id is provided
         """
         if not file_ids:
             file_ids = []
@@ -118,54 +113,23 @@ class ConversationService:
             # get session information to determine where it belongs
             session = await self.session_service.get_session_by_uuid(session_id)
             assert session is not None
-
-            if session.group_chat_id:
-                # this is a group chat conversation
-                return await self.group_chat_service.ask_group_chat(  # type: ignore[return-value]
-                    question=question,
-                    group_chat_id=session.group_chat_id,
-                    require_tool_approval=require_tool_approval,
-                    disabled_mcp_server_ids=disabled_mcp_server_ids,
-                    disabled_capabilities=disabled_capabilities,
-                    file_ids=file_ids,
-                    stream=stream,
-                    session_id=session_id,
-                    tool_assistant_id=tool_assistant_id,
-                    version=version,
-                )
-            else:
-                # this is an assistant conversation
-                assert session.assistant is not None
-                return await self.assistant_service.ask(  # type: ignore[return-value]
-                    question=question,
-                    assistant_id=session.assistant.id,
-                    file_ids=file_ids,
-                    stream=stream,
-                    session_id=session_id,
-                    tool_assistant_id=tool_assistant_id,
-                    version=version,
-                    require_tool_approval=require_tool_approval,
-                    disabled_mcp_server_ids=disabled_mcp_server_ids,
-                    disabled_capabilities=disabled_capabilities,
-                )
+            assert session.assistant is not None
+            return await self.assistant_service.ask(  # type: ignore[return-value]
+                question=question,
+                assistant_id=session.assistant.id,
+                file_ids=file_ids,
+                stream=stream,
+                session_id=session_id,
+                tool_assistant_id=tool_assistant_id,
+                version=version,
+                require_tool_approval=require_tool_approval,
+                disabled_mcp_server_ids=disabled_mcp_server_ids,
+                disabled_capabilities=disabled_capabilities,
+            )
 
         # case 2: starting a new conversation
         else:
-            if group_chat_id:
-                # starting a new group chat conversation
-                return await self.group_chat_service.ask_group_chat(  # type: ignore[return-value]
-                    question=question,
-                    group_chat_id=group_chat_id,
-                    require_tool_approval=require_tool_approval,
-                    disabled_mcp_server_ids=disabled_mcp_server_ids,
-                    disabled_capabilities=disabled_capabilities,
-                    file_ids=file_ids,
-                    stream=stream,
-                    session_id=None,  # explicitly None for new conversation
-                    tool_assistant_id=tool_assistant_id,
-                    version=version,
-                )
-            elif assistant_id:
+            if assistant_id:
                 # starting a new assistant conversation
                 return await self.assistant_service.ask(  # type: ignore[return-value]
                     question=question,
@@ -181,9 +145,7 @@ class ConversationService:
                 )
             else:
                 # should never happen due to model validation, but just to be safe
-                raise ValueError(
-                    "Either session_id, assistant_id, or group_chat_id must be provided"
-                )
+                raise ValueError("Either session_id or assistant_id must be provided")
 
     async def preflight_tokens(
         self,
@@ -191,7 +153,6 @@ class ConversationService:
         file_ids: "list[UUID]",
         session_id: Optional["UUID"] = None,
         assistant_id: Optional["UUID"] = None,
-        group_chat_id: Optional["UUID"] = None,
         tool_assistant_id: Optional["UUID"] = None,
         assistant_prompt: str | None = None,
         attachments: "list[tuple[UUID, bool]] | None" = None,
@@ -211,7 +172,6 @@ class ConversationService:
             question=question,
             session_id=session_id,
             assistant_id=assistant_id,
-            group_chat_id=group_chat_id,
             tool_assistant_id=tool_assistant_id,
         )
         model_name = _litellm_token_counter_name(model)
@@ -256,10 +216,10 @@ class ConversationService:
         skill_context_tokens = 0
         # The persistent baseline only makes sense for a bare assistant target
         # (the config page and a brand-new conversation). For an existing session
-        # or group chat the prompt + attachments are already inside the history
-        # the client tracks separately, so leave them at 0 and keep the hot chat
-        # path cost identical to before.
-        if assistant_id is not None and session_id is None and group_chat_id is None:
+        # the prompt + attachments are already inside the history the client
+        # tracks separately, so leave them at 0 and keep the hot chat path cost
+        # identical to before.
+        if assistant_id is not None and session_id is None:
             baseline = await self.assistant_service.get_preflight_baseline(
                 assistant_id,
                 prompt_override=assistant_prompt,
@@ -366,54 +326,35 @@ class ConversationService:
         question: str,
         session_id: Optional["UUID"],
         assistant_id: Optional["UUID"],
-        group_chat_id: Optional["UUID"],
         tool_assistant_id: Optional["UUID"] = None,
     ) -> "tuple[CompletionModel, int, bool]":
         """Resolve the completion model the next chat request would target.
 
         Mirrors ask_conversation routing rules so the preflight count uses the
-        same tokenizer the actual request will. Group chat auto-routing is
-        selected by an LLM at send time, so preflight uses the smallest context
-        window among the candidate assistants as a conservative projection.
+        same tokenizer the actual request will. The second value is the token
+        cost of any routing step that precedes the request (currently none).
 
         Also returns the resolved assistant's ``inline_file_text`` so preflight
-        can drop URL-only file text from the count. Group chat picks an assistant
-        at send time, so it conservatively reports True (keep counting).
+        can drop URL-only file text from the count.
 
         Raises BadRequestException for the same configurations that would fail
-        on actual send (no assistants in group chat, no completion model set).
+        on actual send (no completion model set).
         """
-        inline_file_text = True
+        del question, tool_assistant_id  # routing has no pre-request cost
+        selector_tokens = 0
         if session_id:
             session = await self.session_service.get_session_by_uuid(session_id)
             assert session is not None
-            if session.group_chat_id:
-                model, selector_tokens = await self._group_chat_preflight_model(
-                    session.group_chat_id,
-                    question=question,
-                    tool_assistant_id=tool_assistant_id,
-                )
-            else:
-                assert session.assistant is not None
-                model, inline_file_text = await self._assistant_preflight_settings(
-                    session.assistant.id
-                )
-                selector_tokens = 0
+            assert session.assistant is not None
+            model, inline_file_text = await self._assistant_preflight_settings(
+                session.assistant.id
+            )
         elif assistant_id:
             model, inline_file_text = await self._assistant_preflight_settings(
                 assistant_id
             )
-            selector_tokens = 0
-        elif group_chat_id:
-            model, selector_tokens = await self._group_chat_preflight_model(
-                group_chat_id,
-                question=question,
-                tool_assistant_id=tool_assistant_id,
-            )
         else:
-            raise BadRequestException(
-                "Provide session_id, assistant_id, or group_chat_id."
-            )
+            raise BadRequestException("Provide session_id or assistant_id.")
 
         if model is None:
             raise BadRequestException(
@@ -447,52 +388,6 @@ class ConversationService:
         if model is not None:
             inline_file_text = inline_file_text_for_model(inline_file_text, model)
         return model, inline_file_text
-
-    async def _group_chat_preflight_model(
-        self,
-        group_chat_id: "UUID",
-        question: str,
-        tool_assistant_id: Optional["UUID"] = None,
-    ) -> "tuple[CompletionModel | None, int]":
-        group_chat = await self.group_chat_service.get_group_chat(group_chat_id)
-        if not group_chat.assistants:
-            raise BadRequestException("No assistants in the group chat")
-
-        if tool_assistant_id is not None:
-            if not group_chat.allow_mentions:
-                raise BadRequestException(
-                    "This group chat does not allow targeting specific assistants"
-                )
-            selected = group_chat.get_assistant_by_id(tool_assistant_id)
-            if selected is None:
-                raise BadRequestException(
-                    "The specified assistant is not part of this group chat"
-                )
-            return selected.assistant.completion_model, 0
-
-        models = [
-            group_chat_assistant.assistant.completion_model
-            for group_chat_assistant in group_chat.assistants
-            if group_chat_assistant.assistant.completion_model is not None
-        ]
-        if not models:
-            return None, 0
-        if len(group_chat.assistants) <= 1:
-            return models[0], 0
-
-        selector_model = await self.group_chat_service.find_suitable_completion_model(
-            group_chat.assistants
-        )
-        if selector_model is None:
-            return min(models, key=lambda model: model.token_limit), 0
-
-        selection_prompt = self.group_chat_service.create_assistant_selection_prompt(
-            question, group_chat.assistants
-        )
-        selector_tokens = count_tokens(
-            selection_prompt, _litellm_token_counter_name(selector_model)
-        )
-        return min(models, key=lambda model: model.token_limit), selector_tokens
 
     async def set_title_of_conversation(
         self, session_id: "UUID"

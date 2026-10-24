@@ -32,10 +32,6 @@ from eneo.database.tables.capabilities_table import (
 )
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.document_templates_table import AssistantDocumentTemplates
-from eneo.database.tables.group_chats_table import (
-    GroupChatsAssistantsMapping,
-    GroupChatsTable,
-)
 from eneo.database.tables.groups_spaces_table import GroupsSpaces
 from eneo.database.tables.mcp_server_table import (
     MCPServerTools,
@@ -56,7 +52,6 @@ from eneo.database.tables.spaces_table import (
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites
 from eneo.document_templates.domain import DocumentTemplateChoice
-from eneo.group_chat.infrastructure.group_chat_repo import GroupChatRepository
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.spaces.space_repo import SpaceRepository
@@ -91,8 +86,6 @@ def persisted():
         AssistantSpecialists,
         AssistantCapabilities,
         AssistantDocumentTemplates,
-        GroupChatsTable,
-        GroupChatsAssistantsMapping,
         Apps,
         Services,
         CollectionsTable,
@@ -143,7 +136,7 @@ def persisted():
                 id=space_id, name="Original", tenant_id=tenant_id
             )
         )
-        assistant_id, corrupt_id, chat_id = uuid4(), uuid4(), uuid4()
+        assistant_id, corrupt_id = uuid4(), uuid4()
         for key, options in [
             (assistant_id, {"temperature": 0.4, "top_p": 0.8}),
             (corrupt_id, {"temperature": "hot"}),
@@ -158,17 +151,6 @@ def persisted():
                     is_default=False,
                     logging_enabled=True,
                     published=False,
-                )
-            )
-        connection.execute(
-            sa.insert(tables[GroupChatsTable]).values(
-                id=chat_id, space_id=space_id, user_id=user_id, name="Chat"
-            )
-        )
-        for key in [assistant_id, corrupt_id]:
-            connection.execute(
-                sa.insert(tables[GroupChatsAssistantsMapping]).values(
-                    group_chat_id=chat_id, assistant_id=key, user_description="Keep"
                 )
             )
         space_repo = SpaceRepository(
@@ -209,32 +191,11 @@ def persisted():
             user_id=user_id,
             assistant_id=assistant_id,
             corrupt_id=corrupt_id,
-            chat_id=chat_id,
             space_repo=space_repo,
             assistant_repo=assistant_repo,
-            chat_repo=GroupChatRepository(session),
             statements=statements,
         )
     engine.dispose()
-
-
-async def test_reloading_chat_after_write_refreshes_a_retained_orm_identity(persisted):
-    from sqlalchemy.orm import Session
-
-    # Keep the ORM row alive: a fresh projection must not depend on garbage
-    # collection clearing the identity map between operations.
-    with Session(bind=persisted.connection) as sync_session:
-        session = AsyncMock()
-        session.execute.side_effect = sync_session.execute
-        persisted.space_repo.session = session
-        old_rows = await persisted.space_repo._get_group_chats(persisted.space_id)
-        assert len(old_rows[0].group_chat_assistants) == 2
-        await persisted.chat_repo.update(
-            persisted.chat_id, persisted.space_id, members={}
-        )
-        new_rows = await persisted.space_repo._get_group_chats(persisted.space_id)
-        assert new_rows[0] is old_rows[0]
-        assert new_rows[0].group_chat_assistants == []
 
 
 def snapshot(db, *, exclude=()):
@@ -501,45 +462,11 @@ async def test_assistant_rename_preserves_raw_options_and_invalid_siblings(persi
     assert values[persisted.corrupt_id] == {"temperature": "hot"}
 
 
-async def test_explicit_assistant_delete_preserves_invalid_sibling_and_its_seat(
-    persisted,
-):
+async def test_explicit_assistant_delete_preserves_invalid_sibling(persisted):
     await persisted.assistant_repo.delete(persisted.assistant_id, persisted.space_id)
     assert list(persisted.connection.scalars(sa.select(Assistants.id))) == [
         persisted.corrupt_id
     ]
-    assert list(
-        persisted.connection.scalars(
-            sa.select(GroupChatsAssistantsMapping.assistant_id)
-        )
-    ) == [persisted.corrupt_id]
-
-
-async def test_chat_rename_preserves_hidden_seats_but_explicit_empty_clears_them(
-    persisted,
-):
-    seats = persisted.connection.execute(
-        sa.select(persisted.tables[GroupChatsAssistantsMapping])
-    ).all()
-    await persisted.chat_repo.update(
-        persisted.chat_id, persisted.space_id, name="Renamed"
-    )
-    assert (
-        persisted.connection.execute(
-            sa.select(persisted.tables[GroupChatsAssistantsMapping])
-        ).all()
-        == seats
-    )
-    await persisted.chat_repo.update(persisted.chat_id, persisted.space_id, members={})
-    assert (
-        list(
-            persisted.connection.scalars(
-                sa.select(GroupChatsAssistantsMapping.assistant_id)
-            )
-        )
-        == []
-    )
-    assert len(list(persisted.connection.scalars(sa.select(Assistants.id)))) == 2
 
 
 async def test_foreign_space_cannot_change_an_assistant(persisted):
@@ -918,13 +845,11 @@ async def test_assistant_move_preserves_history_and_destination_links(persisted)
             num_tokens_answer=1,
         )
     )
-    before = snapshot(persisted, exclude=(Assistants, GroupChatsAssistantsMapping))
+    before = snapshot(persisted, exclude=(Assistants,))
     await persisted.assistant_repo.move(
         persisted.assistant_id, persisted.space_id, target
     )
-    assert (
-        snapshot(persisted, exclude=(Assistants, GroupChatsAssistantsMapping)) == before
-    )
+    assert snapshot(persisted, exclude=(Assistants,)) == before
     assert (
         persisted.connection.scalar(
             sa.select(Assistants.space_id).where(
@@ -933,8 +858,3 @@ async def test_assistant_move_preserves_history_and_destination_links(persisted)
         )
         == target
     )
-    assert list(
-        persisted.connection.scalars(
-            sa.select(GroupChatsAssistantsMapping.assistant_id)
-        )
-    ) == [persisted.corrupt_id]

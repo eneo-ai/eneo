@@ -5,13 +5,13 @@ import { spaceChatItems } from "./assistants";
 const space = makeSpace({
   assistants: [
     { id: "a1", type: "assistant", name: "Ärendehjälpen" },
-    { id: "a2", type: "assistant", name: "Budget" }
-  ],
-  groupChats: [{ id: "g1", type: "group-chat", name: "Avtalsgruppen" }]
+    { id: "a2", type: "assistant", name: "Budget" },
+    { id: "a3", type: "assistant", name: "Avtalsgruppen" }
+  ]
 });
 
 describe("spaceChatItems", () => {
-  it("merges assistants and group chats, sorted with the collator it is given", () => {
+  it("sorts the assistants with the collator it is given", () => {
     const english = spaceChatItems(space, new Intl.Collator("en").compare);
     expect(english.map((item) => item.name)).toEqual(["Ärendehjälpen", "Avtalsgruppen", "Budget"]);
   });

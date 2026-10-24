@@ -35,7 +35,7 @@ describe("invalidateConversationLists", () => {
   it("refreshes the partner's history and the recent list, nothing else", async () => {
     const queryClient = makeQueryClient();
     const history = ["conversations", "assistant", "a1"];
-    const otherHistory = ["conversations", "group-chat", "g1"];
+    const otherHistory = ["conversations", "assistant", "a2"];
     const recent = recentConversationsQueryOptions(browserApi).queryKey;
     const detail = ["conversations", "detail", "c1"];
     for (const key of [history, otherHistory, recent, detail]) {
