@@ -2,7 +2,10 @@ import type { components } from "@eneo/eneo-js";
 
 export type SkillActivationReference = components["schemas"]["SkillActivationReference"];
 export type SkillActivationRejection = components["schemas"]["SkillActivationRejection"];
-export type SkillActivationEvidence = components["schemas"]["SkillActivationEvidenceV1"];
+// V2 adds the personal chat's own-Skill layer; every other field is shared.
+export type SkillActivationEvidence =
+  | components["schemas"]["SkillActivationEvidenceV1"]
+  | components["schemas"]["SkillActivationEvidenceV2"];
 
 export type SkillActivationOutcome = "accepted" | "repeated" | "blocked" | "rejected";
 

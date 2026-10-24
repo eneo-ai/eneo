@@ -68,6 +68,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreProbeUnavailable,
 )
 from eneo.skills.domain.skill import (
+    PersonalSkillLayerRejectedError,
     PublishedSkillDeletionError,
     SkillBlockedForBindingError,
     SkillExecutionBlockConflictError,
@@ -349,6 +350,11 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "This execution block changed after you reviewed it. "
         "Reload the Skill before unblocking.",
         ErrorCodes.SKILL_EXECUTION_BLOCK_CONFLICT,
+    ),
+    PersonalSkillLayerRejectedError: (
+        400,
+        None,
+        ErrorCodes.PERSONAL_SKILLS_REJECTED,
     ),
     SkillRuntimePolicyChangedError: (
         409,
